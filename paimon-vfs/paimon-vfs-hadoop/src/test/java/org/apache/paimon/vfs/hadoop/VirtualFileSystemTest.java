@@ -137,6 +137,7 @@ public abstract class VirtualFileSystemTest {
         FileStatus fileStatus = vfs.getFileStatus(vfsPath);
         Assert.assertEquals(vfsPath.toString(), fileStatus.getPath().toString());
         Assert.assertTrue(fileStatus.isDirectory());
+        Assert.assertEquals(0, fileStatus.getBlockSize());
 
         // Mkdir in non-existing table
         tableName = "object_table2";
@@ -195,6 +196,7 @@ public abstract class VirtualFileSystemTest {
         Assert.assertEquals(vfsPath.toString(), fileStatus.getPath().toString());
         Assert.assertTrue(fileStatus.isFile());
         Assert.assertEquals(5, fileStatus.getLen());
+        Assert.assertEquals(128 * 1024 * 1024L, fileStatus.getBlockSize());
 
         FSDataInputStream in = vfs.open(vfsPath);
         byte[] buffer = new byte[5];

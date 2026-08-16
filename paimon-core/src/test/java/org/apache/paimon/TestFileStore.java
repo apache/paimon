@@ -26,7 +26,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
-import org.apache.paimon.io.IndexIncrement;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.FileSource;
@@ -134,7 +134,6 @@ public class TestFileStore extends KeyValueFileStore {
                 options,
                 partitionType,
                 keyType,
-                keyType,
                 valueType,
                 keyValueFieldsExtractor,
                 mfFactory,
@@ -205,14 +204,6 @@ public class TestFileStore extends KeyValueFileStore {
         return impl;
     }
 
-    public List<Snapshot> commitData(
-            List<KeyValue> kvs,
-            Function<KeyValue, BinaryRow> partitionCalculator,
-            Function<KeyValue, Integer> bucketCalculator)
-            throws Exception {
-        return commitData(kvs, partitionCalculator, bucketCalculator, new HashMap<>());
-    }
-
     public List<Snapshot> commitDataWatermark(
             List<KeyValue> kvs, Function<KeyValue, BinaryRow> partitionCalculator, Long watermark)
             throws Exception {
@@ -230,8 +221,7 @@ public class TestFileStore extends KeyValueFileStore {
     public List<Snapshot> commitData(
             List<KeyValue> kvs,
             Function<KeyValue, BinaryRow> partitionCalculator,
-            Function<KeyValue, Integer> bucketCalculator,
-            Map<Integer, Long> logOffsets)
+            Function<KeyValue, Integer> bucketCalculator)
             throws Exception {
         return commitDataImpl(
                 kvs,
@@ -241,11 +231,7 @@ public class TestFileStore extends KeyValueFileStore {
                 null,
                 null,
                 Collections.emptyList(),
-                (commit, committable) -> {
-                    logOffsets.forEach(
-                            (bucket, offset) -> committable.addLogOffset(bucket, offset, false));
-                    commit.commit(committable, false);
-                });
+                (commit, committable) -> commit.commit(committable, false));
     }
 
     public List<Snapshot> overwriteData(
@@ -262,8 +248,7 @@ public class TestFileStore extends KeyValueFileStore {
                 null,
                 null,
                 Collections.emptyList(),
-                (commit, committable) ->
-                        commit.overwrite(partition, committable, Collections.emptyMap()));
+                (commit, committable) -> commit.overwritePartition(partition, committable));
     }
 
     public Snapshot dropPartitions(List<Map<String, String>> partitions) {
@@ -346,14 +331,15 @@ public class TestFileStore extends KeyValueFileStore {
                     entryWithPartition.getValue().entrySet()) {
                 CommitIncrement increment =
                         entryWithBucket.getValue().prepareCommit(ignorePreviousFiles);
+                DataIncrement dataIncrement = increment.newFilesIncrement();
+                dataIncrement.newIndexFiles().addAll(indexFiles);
                 committable.addFileCommittable(
                         new CommitMessageImpl(
                                 entryWithPartition.getKey(),
                                 entryWithBucket.getKey(),
                                 options().bucket(),
-                                increment.newFilesIncrement(),
-                                increment.compactIncrement(),
-                                new IndexIncrement(indexFiles)));
+                                dataIncrement,
+                                increment.compactIncrement()));
             }
         }
 
@@ -729,7 +715,8 @@ public class TestFileStore extends KeyValueFileStore {
 
         // delta file
         if (options.changelogProducer() == CoreOptions.ChangelogProducer.NONE) {
-            // TODO why we need to keep base manifests?
+            // See FileDeletionBase#cleanUnusedManifests
+            // about why we need to keep base manifest
             result.add(pathFactory.toManifestListPath(changelog.baseManifestList()));
             manifestList
                     .readDataManifests(changelog)
@@ -832,7 +819,6 @@ public class TestFileStore extends KeyValueFileStore {
                     MemorySize.parse((ThreadLocalRandom.current().nextInt(16) + 1) + "kb"));
 
             conf.set(CoreOptions.FILE_FORMAT, format);
-            conf.set(CoreOptions.MANIFEST_FORMAT, format);
             conf.set(CoreOptions.PATH, root);
             conf.set(CoreOptions.BUCKET, numBuckets);
 

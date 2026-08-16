@@ -23,10 +23,12 @@ import org.apache.paimon.rest.auth.BearTokenAuthProvider;
 import org.apache.paimon.rest.auth.RESTAuthFunction;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.BadRequestException;
+import org.apache.paimon.rest.exceptions.RESTException;
 import org.apache.paimon.rest.responses.ErrorResponse;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
+import okhttp3.mockwebserver.RecordedRequest;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -37,10 +39,12 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Test for {@link HttpClient}. */
@@ -126,6 +130,51 @@ public class HttpClientTest {
         assertThrows(
                 BadRequestException.class,
                 () -> httpClient.get(MOCK_PATH, MockRESTData.class, restAuthFunction));
+    }
+
+    @Test
+    public void testErrorResponseMessageIsRedacted() throws Exception {
+        // A parsed ErrorResponse whose message carries a secret must not leak it.
+        String secret = "SUPERSECRETVALUE9999";
+        String body =
+                server.createResponseBody(
+                        new ErrorResponse(
+                                ErrorResponse.RESOURCE_TYPE_DATABASE,
+                                "test",
+                                "token=" + secret,
+                                400));
+        server.enqueueResponse(body, 400);
+        BadRequestException e =
+                assertThrows(
+                        BadRequestException.class,
+                        () -> httpClient.get(MOCK_PATH, MockRESTData.class, restAuthFunction));
+        assertFalse(e.getMessage().contains(secret));
+    }
+
+    @Test
+    public void testUnparseableErrorBodyIsNotEchoed() {
+        // A non-JSON error body cannot be reliably sanitized, so it must not be echoed at all.
+        String secret = "SUPERSECRETVALUE9999";
+        server.enqueueResponse("token=" + secret + " <<not json>>", 400);
+        BadRequestException e =
+                assertThrows(
+                        BadRequestException.class,
+                        () -> httpClient.get(MOCK_PATH, MockRESTData.class, restAuthFunction));
+        assertFalse(e.getMessage().contains(secret));
+    }
+
+    @Test
+    public void testSuccessResponseParseFailureDoesNotLeakBody() {
+        // A 2xx body that fails to deserialize (e.g. a token response) must not surface the
+        // raw body or Jackson's source snippet.
+        String secret = "SUPERSECRETVALUE9999";
+        String body = "{\"data\": \"token=" + secret + "\" INVALID_JSON}";
+        server.enqueueResponse(body, 200);
+        RESTException e =
+                assertThrows(
+                        RESTException.class,
+                        () -> httpClient.get(MOCK_PATH, MockRESTData.class, restAuthFunction));
+        assertFalse(e.getMessage().contains(secret));
     }
 
     @Test
@@ -222,5 +271,89 @@ public class HttpClientTest {
                                         (existing, replacement) -> existing // handle duplicates
                                         ));
         return parameters;
+    }
+
+    @Test
+    public void testGetWithUnparsableJsonErrorResponse() {
+        // A JSON body that parses to an ErrorResponse with no message must NOT be echoed (it may
+        // carry secrets); it is reported as an empty message, not "unparseable".
+        String jsonWithUppercaseFields =
+                "{\"Message\":\"Your request is denied as lack of ssl protect.\","
+                        + "\"Code\":\"InvalidProtocol.NeedSsl\"}";
+        server.enqueueResponse(jsonWithUppercaseFields, 403);
+
+        try {
+            httpClient.get(MOCK_PATH, MockRESTData.class, restAuthFunction);
+            Assertions.fail("Expected exception to be thrown");
+        } catch (Exception e) {
+            Assertions.assertFalse(
+                    e.getMessage().contains("Your request is denied as lack of ssl protect")
+                            || e.getMessage().contains(jsonWithUppercaseFields),
+                    "Raw response body must not be echoed");
+            Assertions.assertTrue(
+                    e.getMessage().contains("Empty error message"),
+                    "Parsed-but-empty message must not be labelled unparseable");
+        }
+    }
+
+    @Test
+    public void testPostWithNonJsonErrorResponse() {
+        // A non-JSON (plain text) error body must NOT be echoed; only a generic message remains.
+        String plainTextResponse = "Internal Server Error: Database connection failed";
+        server.enqueueResponse(plainTextResponse, 500);
+
+        try {
+            httpClient.post(MOCK_PATH, mockResponseData, MockRESTData.class, restAuthFunction);
+            Assertions.fail("Expected exception to be thrown");
+        } catch (Exception e) {
+            Assertions.assertFalse(
+                    e.getMessage().contains(plainTextResponse)
+                            || e.getMessage().contains("Database connection failed"),
+                    "Raw response body must not be echoed");
+            Assertions.assertTrue(
+                    e.getMessage().contains("500"), "Message should carry the HTTP status");
+        }
+    }
+
+    @Test
+    public void testGetWithMalformedUrlDoesNotLeakCredentials() {
+        // Malformed URL throws in the constructor before exec(); the raw URL must not leak.
+        String secret = "QUERY_SECRET";
+        IllegalArgumentException e =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () ->
+                                httpClient.get(
+                                        "/x?sig=" + secret + " bad",
+                                        MockRESTData.class,
+                                        restAuthFunction));
+        assertFalse(e.getMessage().contains(secret));
+    }
+
+    @Test
+    public void testPostWithMalformedUrlDoesNotLeakCredentials() {
+        String secret = "QUERY_SECRET";
+        IllegalArgumentException e =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () ->
+                                httpClient.post(
+                                        "/x?sig=" + secret + " bad",
+                                        mockResponseData,
+                                        MockRESTData.class,
+                                        restAuthFunction));
+        assertFalse(e.getMessage().contains(secret));
+    }
+
+    @Test
+    public void testPostSetsJsonContentType() throws Exception {
+        server.enqueueResponse(mockResponseDataStr, 200);
+        httpClient.post(MOCK_PATH, mockResponseData, MockRESTData.class, restAuthFunction);
+        RecordedRequest request = server.takeRequest(10, TimeUnit.SECONDS);
+        String contentType = request.getHeader("Content-Type");
+        Assertions.assertNotNull(contentType, "POST request must carry a Content-Type header");
+        Assertions.assertTrue(
+                contentType.contains("application/json"),
+                "POST body must be sent as application/json, but was: " + contentType);
     }
 }

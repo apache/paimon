@@ -19,6 +19,8 @@
 package org.apache.paimon.format.avro;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BinaryVector;
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
@@ -27,10 +29,13 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.UriReader;
 
 import org.apache.avro.AvroRuntimeException;
 import org.apache.avro.Schema;
+import org.apache.avro.io.BinaryDecoder;
 import org.apache.avro.io.Decoder;
 import org.apache.avro.util.Utf8;
 import org.jetbrains.annotations.NotNull;
@@ -48,6 +53,16 @@ import java.util.Map;
 
 /** Factory to create {@link FieldReader}. */
 public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
+
+    @Nullable private final UriReader uriReader;
+
+    public FieldReaderFactory() {
+        this(null);
+    }
+
+    public FieldReaderFactory(@Nullable UriReader uriReader) {
+        this.uriReader = uriReader;
+    }
 
     private static final FieldReader STRING_READER = new StringReader();
 
@@ -70,6 +85,16 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
     private static final FieldReader TIMESTAMP_MILLS_READER = new TimestampMillsReader();
 
     private static final FieldReader TIMESTAMP_MICROS_READER = new TimestampMicrosReader();
+
+    @Override
+    public FieldReader primitive(Schema primitive, DataType type) {
+        if (primitive.getType() == Schema.Type.BYTES
+                && type != null
+                && type.getTypeRoot() == DataTypeRoot.BLOB) {
+            return new BlobBytesReader(uriReader);
+        }
+        return AvroSchemaVisitor.super.primitive(primitive, type);
+    }
 
     @Override
     public FieldReader visitUnion(Schema schema, @Nullable DataType type) {
@@ -143,6 +168,12 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
     }
 
     @Override
+    public FieldReader visitArrayVector(Schema schema, @Nullable DataType elementType) {
+        FieldReader elementReader = visit(schema.getElementType(), elementType);
+        return new ArrayVectorReader(elementReader, elementType);
+    }
+
+    @Override
     public FieldReader visitArrayMap(Schema schema, DataType keyType, DataType valueType) {
         RowReader entryReader =
                 new RowReader(
@@ -157,7 +188,15 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
     @Override
     public FieldReader visitMap(Schema schema, @Nullable DataType valueType) {
         FieldReader valueReader = visit(schema.getValueType(), valueType);
-        return new MapReader(valueReader);
+        MapReader mapReader = new MapReader(valueReader);
+
+        if (valueType != null) {
+            if (valueType.getTypeRoot() == DataTypeRoot.CHAR
+                    || valueType.getTypeRoot() == DataTypeRoot.VARCHAR) {
+                return new StringMapReader(valueType.isNullable(), mapReader);
+            }
+        }
+        return mapReader;
     }
 
     @Override
@@ -212,6 +251,30 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
         @Override
         public Object read(Decoder decoder, Object reuse) throws IOException {
             return decoder.readBytes(null).array();
+        }
+
+        @Override
+        public void skip(Decoder decoder) throws IOException {
+            decoder.skipBytes();
+        }
+    }
+
+    private static class BlobBytesReader implements FieldReader {
+
+        private final UriReader uriReader;
+
+        private BlobBytesReader(UriReader uriReader) {
+            if (uriReader == null) {
+                throw new IllegalArgumentException(
+                        "UriReader must not be null for BlobBytesReader.");
+            }
+            this.uriReader = uriReader;
+        }
+
+        @Override
+        public Object read(Decoder decoder, Object reuse) throws IOException {
+            byte[] bytes = decoder.readBytes(null).array();
+            return Blob.fromBytesWithReader(bytes, uriReader, null, false);
         }
 
         @Override
@@ -403,6 +466,22 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
         }
     }
 
+    private static class ArrayVectorReader extends ArrayReader {
+
+        private final DataType elementType;
+
+        private ArrayVectorReader(FieldReader elementReader, DataType elementType) {
+            super(elementReader);
+            this.elementType = elementType;
+        }
+
+        @Override
+        public Object read(Decoder decoder, Object reuse) throws IOException {
+            GenericArray array = (GenericArray) super.read(decoder, reuse);
+            return BinaryVector.fromInternalArray(array, elementType);
+        }
+    }
+
     private static class ArrayMapReader implements FieldReader {
 
         private final RowReader entryReader;
@@ -443,7 +522,15 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
         }
 
         @Override
-        public void skip(Decoder decoder) throws IOException {}
+        public void skip(Decoder decoder) throws IOException {
+            long chunkLength = decoder.readMapStart();
+            while (chunkLength > 0) {
+                for (int i = 0; i < chunkLength; i += 1) {
+                    entryReader.skip(decoder);
+                }
+                chunkLength = decoder.mapNext();
+            }
+        }
     }
 
     private static class MapReader implements FieldReader {
@@ -462,13 +549,11 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
             reusedValueList.clear();
 
             long chunkLength = decoder.readMapStart();
-
             while (chunkLength > 0) {
                 for (int i = 0; i < chunkLength; i += 1) {
                     reusedKeyList.add(STRING_READER.read(decoder, null));
                     reusedValueList.add(valueReader.read(decoder, null));
                 }
-
                 chunkLength = decoder.mapNext();
             }
 
@@ -485,13 +570,43 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
         @Override
         public void skip(Decoder decoder) throws IOException {
             long chunkLength = decoder.readMapStart();
-
             while (chunkLength > 0) {
                 for (int i = 0; i < chunkLength; i += 1) {
                     STRING_READER.skip(decoder);
                     valueReader.skip(decoder);
                 }
+                chunkLength = decoder.mapNext();
+            }
+        }
+    }
 
+    private static class StringMapReader implements FieldReader {
+
+        private final boolean valueNullable;
+        private final MapReader fallbackReader;
+
+        public StringMapReader(boolean valueNullable, MapReader fallbackReader) {
+            this.valueNullable = valueNullable;
+            this.fallbackReader = fallbackReader;
+        }
+
+        @Override
+        public Object read(Decoder decoder, Object reuse) throws IOException {
+            if (decoder instanceof BinaryDecoder) {
+                return AvroBytesStringMap.create((BinaryDecoder) decoder, valueNullable);
+            } else {
+                return fallbackReader.read(decoder, reuse);
+            }
+        }
+
+        @Override
+        public void skip(Decoder decoder) throws IOException {
+            long chunkLength = decoder.readMapStart();
+            while (chunkLength > 0) {
+                for (int i = 0; i < chunkLength; i += 1) {
+                    STRING_READER.skip(decoder);
+                    STRING_READER.skip(decoder);
+                }
                 chunkLength = decoder.mapNext();
             }
         }
@@ -547,17 +662,21 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
                 row = new GenericRow(mapping.length);
             }
 
-            Object[] values = new Object[fieldReaders.length];
             for (int i = 0; i < fieldReaders.length; i += 1) {
-                if (mappingBack[i] >= 0) {
-                    values[i] = fieldReaders[i].read(decoder, row.getField(mappingBack[i]));
+                int outputPosition = mappingBack[i];
+                if (outputPosition >= 0) {
+                    row.setField(
+                            outputPosition,
+                            fieldReaders[i].read(decoder, row.getField(outputPosition)));
                 } else {
                     fieldReaders[i].skip(decoder);
                 }
             }
 
             for (int i = 0; i < mapping.length; i++) {
-                row.setField(i, mapping[i] >= 0 ? values[mapping[i]] : null);
+                if (mapping[i] < 0) {
+                    row.setField(i, null);
+                }
             }
 
             return row;

@@ -58,7 +58,6 @@ public class ExpirePartitionsActionFactory implements ActionFactory {
                         + "--warehouse <warehouse_path> \\\n"
                         + "--database <database_name> \\\n"
                         + "--table <table_name> \\\n"
-                        + "--tag_name <tag_name> \\\n"
                         + "--expiration_time <expiration_time> \\\n"
                         + "--timestamp_formatter <timestamp_formatter> \\\n"
                         + "[--timestamp_pattern <timestamp_pattern>] \\\n"

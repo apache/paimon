@@ -516,8 +516,9 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         // first table
         data = new HashMap<>();
         data.put("pt", "1");
-        data.put("k", "123456789876543211");
+        data.put("k", "2");
         data.put("v", "varchar");
+        data.put("v2", "hello");
         expected =
                 CdcMultiplexRecord.fromCdcRecord(
                         databaseName,
@@ -528,7 +529,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         assertThat(actual).isNull();
 
         schemaManager = new SchemaManager(table1.fileIO(), table1.location());
-        schemaManager.commitChanges(SchemaChange.updateColumnType("k", DataTypes.BIGINT()));
+        schemaManager.commitChanges(SchemaChange.addColumn("v2", DataTypes.STRING()));
         actual = runner.take();
         assertThat(actual).isEqualTo(expected);
 

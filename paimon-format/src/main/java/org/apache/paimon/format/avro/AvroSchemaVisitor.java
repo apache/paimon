@@ -23,7 +23,9 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VectorType;
 
 import org.apache.avro.LogicalType;
 import org.apache.avro.LogicalTypes;
@@ -50,9 +52,17 @@ public interface AvroSchemaVisitor<T> {
                 return visitUnion(schema, type);
 
             case ARRAY:
-                if (type instanceof MapType) {
-                    MapType mapType = (MapType) type;
-                    return visitArrayMap(schema, mapType.getKeyType(), mapType.getValueType());
+                if (type instanceof MapType || type instanceof MultisetType) {
+                    // A multiset is encoded as a map from element to its multiplicity, so it uses
+                    // the same array-of-record encoding as a map with a non-string key. Reuse the
+                    // converter's key/value extraction so that schema creation and schema visiting
+                    // always agree on that encoding.
+                    return visitArrayMap(
+                            schema,
+                            AvroSchemaConverter.extractKeyTypeToAvroMap(type),
+                            AvroSchemaConverter.extractValueTypeToAvroMap(type));
+                } else if (type instanceof VectorType) {
+                    return visitArrayVector(schema, ((VectorType) type).getElementType());
                 } else {
                     return visitArray(
                             schema, type == null ? null : ((ArrayType) type).getElementType());
@@ -154,6 +164,8 @@ public interface AvroSchemaVisitor<T> {
     T visitDecimal(Integer precision, Integer scale);
 
     T visitArray(Schema schema, DataType elementType);
+
+    T visitArrayVector(Schema schema, DataType elementType);
 
     T visitArrayMap(Schema schema, DataType keyType, DataType valueType);
 

@@ -35,6 +35,7 @@ import org.junit.jupiter.api.Test;
 import java.time.LocalDateTime;
 import java.util.List;
 
+import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_SCAN_MODE;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP;
 import static org.apache.paimon.SnapshotTest.newSnapshotManager;
 import static org.apache.paimon.io.DataFileTestUtils.row;
@@ -44,6 +45,37 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link CoreOptions#INCREMENTAL_BETWEEN_TIMESTAMP}. */
 public class IncrementalTimeStampTableTest extends TableTestBase {
+
+    @Test
+    public void testDiffFromBeforeFirstSnapshot() throws Exception {
+        Identifier identifier = identifier("T");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("k", DataTypes.INT())
+                        .column("v", DataTypes.INT())
+                        .build();
+        catalog.createTable(identifier, schema, true);
+        Table table = catalog.getTable(identifier);
+
+        write(table, GenericRow.of(1, 1));
+        write(table, GenericRow.of(2, 2));
+
+        SnapshotManager snapshotManager =
+                newSnapshotManager(
+                        LocalFileIO.create(),
+                        new Path(String.format("%s/%s.db/%s", warehouse, database, "T")));
+        long startTimestamp = snapshotManager.snapshot(1).timeMillis() - 1;
+        long endTimestamp = snapshotManager.snapshot(2).timeMillis();
+
+        assertThat(
+                        read(
+                                table,
+                                Pair.of(
+                                        INCREMENTAL_BETWEEN_TIMESTAMP,
+                                        String.format("%s,%s", startTimestamp, endTimestamp)),
+                                Pair.of(INCREMENTAL_BETWEEN_SCAN_MODE, "diff")))
+                .containsExactlyInAnyOrder(GenericRow.of(1, 1), GenericRow.of(2, 2));
+    }
 
     @Test
     public void testPrimaryKeyTable() throws Exception {

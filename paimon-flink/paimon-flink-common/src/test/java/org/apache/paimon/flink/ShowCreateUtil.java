@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink;
 
-import org.apache.paimon.shade.org.apache.commons.lang3.StringUtils;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.catalog.CatalogBaseTable;

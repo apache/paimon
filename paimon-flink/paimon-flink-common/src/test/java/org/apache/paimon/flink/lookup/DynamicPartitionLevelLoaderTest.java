@@ -23,7 +23,6 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.lookup.rocksdb.RocksDBOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -199,13 +198,29 @@ public class DynamicPartitionLevelLoaderTest {
         commit.close();
     }
 
+    @Test
+    public void testScanPartitionsOnNonPartitionedTable() throws Exception {
+        table =
+                createFileStoreTable(
+                        Collections.emptyList(), Collections.emptyList(), Collections.emptyMap());
+
+        Map<String, String> customOptions = new HashMap<>();
+        customOptions.put(FlinkConnectorOptions.SCAN_PARTITIONS.key(), "max_pt()");
+        table = table.copy(customOptions);
+
+        assertThatCode(() -> PartitionLoader.of(table))
+                .hasMessage(
+                        FlinkConnectorOptions.SCAN_PARTITIONS.key()
+                                + " is not supported for non-partitioned table.");
+    }
+
     private FileStoreTable createFileStoreTable(
             List<String> partitionKeys, List<String> primaryKeys, Map<String, String> customOptions)
             throws Exception {
         SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
         Options conf = new Options(customOptions);
         conf.set(CoreOptions.BUCKET, 2);
-        conf.set(RocksDBOptions.LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL, Duration.ofSeconds(1));
+        conf.set(CoreOptions.LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL, Duration.ofSeconds(1));
         if (primaryKeys.isEmpty()) {
             conf.set(CoreOptions.BUCKET_KEY.key(), "k");
         }

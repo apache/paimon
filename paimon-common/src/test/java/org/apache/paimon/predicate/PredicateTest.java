@@ -22,6 +22,9 @@ import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.types.CharType;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.DoubleType;
+import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
@@ -31,6 +34,7 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.data.BinaryString.fromString;
 import static org.apache.paimon.predicate.SimpleColStatsTestUtils.test;
@@ -58,6 +62,26 @@ public class PredicateTest {
                 .isEqualTo(false);
 
         assertThat(predicate.negate().orElse(null)).isEqualTo(builder.notEqual(0, 5));
+    }
+
+    @Test
+    public void testBinaryUnsignedComparison() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(DataTypes.BYTES()));
+
+        Predicate greaterThan = builder.greaterThan(0, new byte[] {(byte) 0x7F});
+        assertThat(greaterThan.test(GenericRow.of((Object) new byte[] {(byte) 0x80}))).isTrue();
+        assertThat(greaterThan.test(GenericRow.of((Object) new byte[] {(byte) 0x7E}))).isFalse();
+
+        Predicate greaterThanLow = builder.greaterThan(0, new byte[] {(byte) 0x01});
+        assertThat(greaterThanLow.test(GenericRow.of((Object) new byte[] {(byte) 0xFF}))).isTrue();
+
+        Predicate lessThan = builder.lessThan(0, new byte[] {(byte) 0x80});
+        assertThat(lessThan.test(GenericRow.of((Object) new byte[] {(byte) 0x01}))).isTrue();
+        assertThat(lessThan.test(GenericRow.of((Object) new byte[] {(byte) 0xFF}))).isFalse();
+
+        Predicate between = builder.between(0, new byte[] {(byte) 0x70}, new byte[] {(byte) 0x90});
+        assertThat(between.test(GenericRow.of((Object) new byte[] {(byte) 0x80}))).isTrue();
+        assertThat(between.test(GenericRow.of((Object) new byte[] {(byte) 0x60}))).isFalse();
     }
 
     @Test
@@ -294,6 +318,32 @@ public class PredicateTest {
     }
 
     @Test
+    public void testIsNaNDouble() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new DoubleType()));
+        Predicate predicate = builder.isNaN(0);
+
+        assertThat(predicate.test(GenericRow.of(Double.NaN))).isEqualTo(true);
+        assertThat(predicate.test(GenericRow.of(1.5))).isEqualTo(false);
+        assertThat(predicate.test(GenericRow.of(Double.POSITIVE_INFINITY))).isEqualTo(false);
+        assertThat(predicate.test(GenericRow.of((Object) null))).isEqualTo(false);
+
+        assertThat(test(predicate, 3, new SimpleColStats[] {new SimpleColStats(0.0, 1.0, 0L)}))
+                .isEqualTo(true);
+
+        assertThat(predicate.negate()).isEmpty();
+    }
+
+    @Test
+    public void testIsNaNFloat() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new FloatType()));
+        Predicate predicate = builder.isNaN(0);
+
+        assertThat(predicate.test(GenericRow.of(Float.NaN))).isEqualTo(true);
+        assertThat(predicate.test(GenericRow.of(1.5f))).isEqualTo(false);
+        assertThat(predicate.test(GenericRow.of((Object) null))).isEqualTo(false);
+    }
+
+    @Test
     public void testIn() {
         PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
         Predicate predicate = builder.in(0, Arrays.asList(1, 3));
@@ -522,6 +572,56 @@ public class PredicateTest {
     }
 
     @Test
+    public void executeLike() {
+        // test eval
+        assertThat(executeLike("abc", "a.c")).isEqualTo(false);
+        assertThat(executeLike("a.c", "a.c")).isEqualTo(true);
+        assertThat(executeLike("abcd", "a.*d")).isEqualTo(false);
+        assertThat(executeLike("abcde", "%c.e")).isEqualTo(false);
+        assertThat(executeLike("a-c", "a\\_c")).isEqualTo(false);
+        assertThat(executeLike("a_c", "a\\_c")).isEqualTo(true);
+        assertThat(Arrays.asList(executeLike("a%", "a\\%"), executeLike("a\\anything", "a\\%")))
+                .containsExactly(true, false);
+        assertThat(executeLike("startX", "start%")).isEqualTo(true);
+        assertThat(executeLike("not_startX", "start%")).isEqualTo(false);
+        assertThat(executeLike("xxmiddleyy", "%middle%")).isEqualTo(true);
+        assertThat(executeLike("xxmidxdleyy", "%middle%")).isEqualTo(false);
+        assertThat(executeLike("xxend", "%end")).isEqualTo(true);
+        assertThat(executeLike("xxendyy", "%end")).isEqualTo(false);
+        assertThat(executeLike("equal", "equal")).isEqualTo(true);
+        assertThat(executeLike("equalxx", "equal")).isEqualTo(false);
+        assertThat(executeLike("startxx", "st_rt%")).isEqualTo(true);
+        assertThat(executeLike("stbrtxx", "st_rt%")).isEqualTo(true);
+        assertThat(executeLike("xxstbrtxx", "st_rt%")).isEqualTo(false);
+        assertThat(executeLike("abchahadefxx", "abc%def%")).isEqualTo(true);
+        assertThat(executeLike("abchahadafxx", "abc%def%")).isEqualTo(false);
+
+        // test instance
+        assertThat(getLikeFunc("equal")).isEqualTo(Equal.INSTANCE);
+        assertThat(getLikeFunc("start%")).isEqualTo(StartsWith.INSTANCE);
+        assertThat(getLikeFunc("%end")).isEqualTo(EndsWith.INSTANCE);
+        assertThat(getLikeFunc("%middle%")).isEqualTo(Contains.INSTANCE);
+        assertThat(getLikeFunc("a_c")).isEqualTo(Like.INSTANCE);
+    }
+
+    private boolean executeLike(String s, String pattern) {
+        ThreadLocalRandom rnd = ThreadLocalRandom.current();
+        if (rnd.nextBoolean()) {
+            PredicateBuilder builder = new PredicateBuilder(RowType.of(new VarCharType()));
+            Predicate predicate = builder.like(0, fromString(pattern));
+            return predicate.test(GenericRow.of(fromString(s)));
+        } else {
+            return Like.INSTANCE.test(DataTypes.STRING(), fromString(s), fromString(pattern));
+        }
+    }
+
+    private LeafFunction getLikeFunc(String pattern) {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new VarCharType()));
+        Predicate predicate = builder.like(0, fromString(pattern));
+        return ((LeafPredicate) predicate).function();
+    }
+
+    @Test
     public void testAnd() {
         PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType(), new IntType()));
         Predicate predicate = PredicateBuilder.and(builder.equal(0, 3), builder.equal(1, 5));
@@ -638,13 +738,13 @@ public class PredicateTest {
         Predicate p6 = builder6.in(0, Arrays.asList(1, null, 3, 4));
         assertThat(p6.toString())
                 .isEqualTo(
-                        "Or([Or([Or([Equal(f0, 1), Equal(f0, null)]), Equal(f0, 3)]), Equal(f0, 4)])");
+                        "Or([Or([Equal(f0, 1), Equal(f0, null)]), Or([Equal(f0, 3), Equal(f0, 4)])])");
 
         PredicateBuilder builder7 = new PredicateBuilder(RowType.of(new IntType()));
         Predicate p7 = builder7.notIn(0, Arrays.asList(1, null, 3, 4));
         assertThat(p7.toString())
                 .isEqualTo(
-                        "And([And([And([NotEqual(f0, 1), NotEqual(f0, null)]), NotEqual(f0, 3)]), NotEqual(f0, 4)])");
+                        "And([And([NotEqual(f0, 1), NotEqual(f0, null)]), And([NotEqual(f0, 3), NotEqual(f0, 4)])])");
 
         PredicateBuilder builder8 = new PredicateBuilder(RowType.of(new IntType()));
         List<Object> literals = new ArrayList<>();
@@ -661,5 +761,18 @@ public class PredicateTest {
         assertThat(p9.toString())
                 .isEqualTo(
                         "NotIn(f0, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21])");
+    }
+
+    @Test
+    public void testPredicateToStringWithManyFields() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        List<Object> literals = new ArrayList<>();
+        for (int i = 1; i <= 100; i++) {
+            literals.add(i);
+        }
+        Predicate p = builder.in(0, literals);
+        assertThat(p.toString())
+                .isEqualTo(
+                        "In(f0, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, ... 76 more fields])");
     }
 }

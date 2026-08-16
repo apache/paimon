@@ -19,87 +19,110 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.CoreOptions
-import org.apache.paimon.data.BinaryRow
-import org.apache.paimon.spark.DataEvolutionSparkTableWrite
-import org.apache.paimon.spark.commands.DataEvolutionPaimonWriter.{deserializeCommitMessage, dynamicOp}
-import org.apache.paimon.spark.write.WriteHelper
+import org.apache.paimon.format.blob.BlobFileFormat.isBlobFile
+import org.apache.paimon.spark.write.{DataEvolutionTableDataWrite, WriteHelper, WriteTaskResult}
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink._
+import org.apache.paimon.table.source.DataSplit
+import org.apache.paimon.types.BlobType
+import org.apache.paimon.types.VectorType.isVectorStoreFile
+import org.apache.paimon.utils.SerializationUtils
 
 import org.apache.spark.sql._
-
-import java.io.IOException
-import java.util.Collections
+import org.apache.spark.sql.catalyst.analysis.SimpleAnalyzer.resolver
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 
-case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable) extends WriteHelper {
+case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable, dataSplits: Seq[DataSplit])
+  extends WriteHelper {
 
-  private lazy val firstRowIdToPartitionMap: mutable.HashMap[Long, Tuple2[BinaryRow, Long]] =
-    initPartitionMap()
-  override val table: FileStoreTable = paimonTable.copy(dynamicOp)
-
-  @transient private lazy val serializer = new CommitMessageSerializer
-
-  private def initPartitionMap(): mutable.HashMap[Long, Tuple2[BinaryRow, Long]] = {
-    val firstRowIdToPartitionMap = new mutable.HashMap[Long, Tuple2[BinaryRow, Long]]
-    table
-      .store()
-      .newScan()
-      .readFileIterator()
-      .forEachRemaining(
-        k =>
-          firstRowIdToPartitionMap
-            .put(k.file().firstRowId(), Tuple2.apply(k.partition(), k.file().rowCount())))
-    firstRowIdToPartitionMap
+  // File rolling will never be performed: disable both size and row rolling.
+  override val table: FileStoreTable = {
+    val writeOptions = Map(
+      CoreOptions.TARGET_FILE_SIZE.key() -> "99999 G",
+      CoreOptions.TARGET_FILE_ROW_NUM.key() -> Long.MaxValue.toString)
+    paimonTable.copy(writeOptions.asJava)
   }
 
-  def writePartialFields(data: DataFrame, columnNames: Seq[String]): Seq[CommitMessage] = {
+  def writePartialFields(
+      data: DataFrame,
+      columnNames: Seq[String],
+      rawBlobPlaceholderMarkerColumns: Map[String, String] = Map.empty): Seq[CommitMessage] = {
     val sparkSession = data.sparkSession
+    val uriReaderFactory = uriReaderFactoryForBlobDescriptor
     import sparkSession.implicits._
-    assert(data.columns.length == columnNames.size + 2)
+    assert(data.columns.length == columnNames.size + 2 + rawBlobPlaceholderMarkerColumns.size)
     val writeType = table.rowType().project(columnNames.asJava)
+
+    val options = new CoreOptions(table.schema().options())
+    val blobInlineFields = options.blobInlineField().asScala.toSeq
+    // Maps from blob field index to corresponding marker column index
+    val rawBlobPlaceholderMarkerIndexes = writeType.getFields.asScala.flatMap {
+      field =>
+        if (
+          BlobType.isBlobFileField(field.`type`()) &&
+          !blobInlineFields.exists(inlineField => resolver(inlineField, field.name()))
+        ) {
+          val markerColumn = rawBlobPlaceholderMarkerColumns.getOrElse(
+            field.name(),
+            throw new UnsupportedOperationException(
+              "DataEvolution raw-data BLOB partial writes require an internal placeholder marker " +
+                s"for column ${field.name()}.")
+          )
+          Some(writeType.getFieldIndex(field.name()) -> data.schema.fieldIndex(markerColumn))
+        } else {
+          None
+        }
+    }.toMap
+    val unusedMarkerColumns =
+      rawBlobPlaceholderMarkerColumns.keySet -- rawBlobPlaceholderMarkerIndexes.keys.map(
+        index => writeType.getFields.get(index).name())
+    if (unusedMarkerColumns.nonEmpty) {
+      throw new IllegalArgumentException(
+        "Raw BLOB placeholder markers do not match partial write columns: " +
+          unusedMarkerColumns.toSeq.sorted.mkString(", "))
+    }
+
+    val firstRowIdToPartitionMap = new mutable.HashMap[Long, (Array[Byte], Long)]
+    dataSplits.foreach(
+      split =>
+        split
+          .dataFiles()
+          .asScala
+          .filter(file => !isBlobFile(file.fileName()) && !isVectorStoreFile(file.fileName()))
+          .foreach(
+            file =>
+              firstRowIdToPartitionMap
+                .put(
+                  file.firstRowId(),
+                  // BinaryRow stores data in transient memory segments and relies on Java
+                  // serialization hooks to restore them. Store bytes in Spark closures and
+                  // broadcasts so Kryo does not serialize BinaryRow internals directly.
+                  (SerializationUtils.serializeBinaryRow(split.partition()), file.rowCount())
+                )))
+    val firstRowIdToPartitionMapBroadcast =
+      sparkSession.sparkContext.broadcast(firstRowIdToPartitionMap)
+    val writeBuilder = table.newBatchWriteBuilder()
 
     val written =
       data.mapPartitions {
         iter =>
           {
-            val write = DataEvolutionSparkTableWrite(
-              table.newBatchWriteBuilder(),
+            val write = DataEvolutionTableDataWrite(
+              writeBuilder,
               writeType,
-              firstRowIdToPartitionMap)
+              firstRowIdToPartitionMapBroadcast.value,
+              uriReaderFactory,
+              rawBlobPlaceholderMarkerIndexes)
             try {
               iter.foreach(row => write.write(row))
-              write.finish()
+              Iterator.apply(write.commit)
             } finally {
               write.close()
             }
           }
       }
-
-    written
-      .collect()
-      .map(deserializeCommitMessage(serializer, _))
-      .toSeq
-  }
-}
-
-object DataEvolutionPaimonWriter {
-  final private val dynamicOp =
-    Collections.singletonMap(CoreOptions.TARGET_FILE_SIZE.key(), "99999 G")
-  def apply(table: FileStoreTable): DataEvolutionPaimonWriter = {
-    new DataEvolutionPaimonWriter(table)
-  }
-
-  private def deserializeCommitMessage(
-      serializer: CommitMessageSerializer,
-      bytes: Array[Byte]): CommitMessage = {
-    try {
-      serializer.deserialize(serializer.getVersion, bytes)
-    } catch {
-      case e: IOException =>
-        throw new RuntimeException("Failed to deserialize CommitMessage's object", e)
-    }
+    WriteTaskResult.merge(written.collect())
   }
 }

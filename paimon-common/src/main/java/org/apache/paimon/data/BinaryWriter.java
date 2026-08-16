@@ -22,6 +22,7 @@ import org.apache.paimon.data.serializer.InternalArraySerializer;
 import org.apache.paimon.data.serializer.InternalMapSerializer;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.serializer.InternalSerializers;
+import org.apache.paimon.data.serializer.InternalVectorSerializer;
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.DataType;
@@ -62,7 +63,7 @@ public interface BinaryWriter {
 
     void writeString(int pos, BinaryString value);
 
-    void writeBinary(int pos, byte[] bytes);
+    void writeBinary(int pos, byte[] bytes, int offset, int length);
 
     void writeDecimal(int pos, Decimal value, int precision);
 
@@ -70,7 +71,11 @@ public interface BinaryWriter {
 
     void writeVariant(int pos, Variant variant);
 
+    void writeBlob(int pos, Blob blob);
+
     void writeArray(int pos, InternalArray value, InternalArraySerializer serializer);
+
+    void writeVector(int pos, InternalVector value, InternalVectorSerializer serializer);
 
     void writeMap(int pos, InternalMap value, InternalMapSerializer serializer);
 
@@ -131,6 +136,9 @@ public interface BinaryWriter {
             case ARRAY:
                 writer.writeArray(pos, (InternalArray) o, (InternalArraySerializer) serializer);
                 break;
+            case VECTOR:
+                writer.writeVector(pos, (InternalVector) o, (InternalVectorSerializer) serializer);
+                break;
             case MAP:
             case MULTISET:
                 writer.writeMap(pos, (InternalMap) o, (InternalMapSerializer) serializer);
@@ -140,10 +148,14 @@ public interface BinaryWriter {
                 break;
             case BINARY:
             case VARBINARY:
-                writer.writeBinary(pos, (byte[]) o);
+                byte[] bytes = (byte[]) o;
+                writer.writeBinary(pos, bytes, 0, bytes.length);
                 break;
             case VARIANT:
                 writer.writeVariant(pos, (Variant) o);
+                break;
+            case BLOB:
+                writer.writeBlob(pos, (Blob) o);
                 break;
             default:
                 throw new UnsupportedOperationException("Not support type: " + type);
@@ -169,7 +181,10 @@ public interface BinaryWriter {
                 return (writer, pos, value) -> writer.writeBoolean(pos, (boolean) value);
             case BINARY:
             case VARBINARY:
-                return (writer, pos, value) -> writer.writeBinary(pos, (byte[]) value);
+                return (writer, pos, value) -> {
+                    byte[] bytes = (byte[]) value;
+                    writer.writeBinary(pos, bytes, 0, bytes.length);
+                };
             case DECIMAL:
                 final int decimalPrecision = getPrecision(elementType);
                 return (writer, pos, value) ->
@@ -201,6 +216,14 @@ public interface BinaryWriter {
                                 pos,
                                 (InternalArray) value,
                                 (InternalArraySerializer) arraySerializer);
+            case VECTOR:
+                final Serializer<?> vectorSerializer =
+                        serializer == null ? InternalSerializers.create(elementType) : serializer;
+                return (writer, pos, value) ->
+                        writer.writeVector(
+                                pos,
+                                (InternalVector) value,
+                                (InternalVectorSerializer) vectorSerializer);
             case MULTISET:
             case MAP:
                 final Serializer<?> mapSerializer =
@@ -216,6 +239,8 @@ public interface BinaryWriter {
                                 pos, (InternalRow) value, (InternalRowSerializer) rowSerializer);
             case VARIANT:
                 return (writer, pos, value) -> writer.writeVariant(pos, (Variant) value);
+            case BLOB:
+                return (writer, pos, value) -> writer.writeBlob(pos, (Blob) value);
             default:
                 String msg =
                         String.format(

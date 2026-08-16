@@ -20,11 +20,11 @@ package org.apache.paimon.flink.sink.listener;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.sink.Committer;
+import org.apache.paimon.flink.sink.state.OperatorBackendStateStore;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileTestUtils;
 import org.apache.paimon.io.DataIncrement;
-import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 
@@ -44,7 +44,7 @@ class ListenerTestUtils {
                 null,
                 streamingCheckpointEnabled,
                 isRestored,
-                new MockOperatorStateStore(),
+                new OperatorBackendStateStore(new MockOperatorStateStore()),
                 1,
                 1);
     }
@@ -67,8 +67,7 @@ class ListenerTestUtils {
                             0,
                             1,
                             new DataIncrement(emptyList(), emptyList(), emptyList()),
-                            new CompactIncrement(singletonList(file), emptyList(), emptyList()),
-                            new IndexIncrement(emptyList()));
+                            new CompactIncrement(singletonList(file), emptyList(), emptyList()));
         } else {
             compactMessage =
                     new CommitMessageImpl(
@@ -76,8 +75,7 @@ class ListenerTestUtils {
                             0,
                             1,
                             new DataIncrement(singletonList(file), emptyList(), emptyList()),
-                            new CompactIncrement(emptyList(), emptyList(), emptyList()),
-                            new IndexIncrement(emptyList()));
+                            new CompactIncrement(emptyList(), emptyList(), emptyList()));
         }
         committable.addFileCommittable(compactMessage);
         if (partitionMarkDoneRecoverFromState) {

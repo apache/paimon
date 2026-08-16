@@ -111,6 +111,16 @@ public class ParallelExecution<T, E> implements Closeable {
 
     private void asyncRead(
             Supplier<Pair<RecordReader<T>, E>> readerSupplier, Serializer<T> serializer) {
+        try {
+            asyncReadImpl(readerSupplier, serializer);
+        } catch (Throwable e) {
+            this.exception.set(e);
+        }
+    }
+
+    private void asyncReadImpl(
+            Supplier<Pair<RecordReader<T>, E>> readerSupplier, Serializer<T> serializer)
+            throws Exception {
         Pair<RecordReader<T>, E> pair = readerSupplier.get();
         try (CloseableIterator<T> iterator = pair.getLeft().toCloseableIterator()) {
             int count = 0;
@@ -148,8 +158,6 @@ public class ParallelExecution<T, E> implements Closeable {
             }
 
             latch.countDown();
-        } catch (Throwable e) {
-            this.exception.set(e);
         }
     }
 
@@ -165,7 +173,19 @@ public class ParallelExecution<T, E> implements Closeable {
 
     @Override
     public void close() throws IOException {
-        this.executorService.shutdownNow();
+        if (latch.getCount() == 0) {
+            this.executorService.shutdown();
+        } else {
+            this.executorService.shutdownNow();
+        }
+        try {
+            if (!this.executorService.awaitTermination(1, TimeUnit.MINUTES)) {
+                throw new IOException("Timed out while closing parallel execution.");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while closing parallel execution.", e);
+        }
     }
 
     private ParallelBatch<T, E> iterator(MemorySegment page, int numRecords, E extraMessage) {

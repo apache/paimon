@@ -32,7 +32,6 @@ import org.apache.paimon.mergetree.localmerge.HashMapLocalMerger;
 import org.apache.paimon.mergetree.localmerge.LocalMerger;
 import org.apache.paimon.mergetree.localmerge.SortBufferLocalMerger;
 import org.apache.paimon.options.MemorySize;
-import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.PrimaryKeyTableUtils;
 import org.apache.paimon.table.sink.RowKindGenerator;
@@ -41,6 +40,7 @@ import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.KeyComparatorSupplier;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.RowKindFilter;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
 
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
@@ -56,9 +56,9 @@ import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
-import java.util.List;
+import javax.annotation.Nullable;
 
-import static org.apache.paimon.table.PrimaryKeyTableUtils.addKeyNamePrefix;
+import java.util.List;
 
 /**
  * {@link AbstractStreamOperator} which buffer input record and apply merge function when the buffer
@@ -70,7 +70,7 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
     private static final long serialVersionUID = 1L;
 
     private final TableSchema schema;
-    private final boolean ignoreDelete;
+    private final @Nullable RowKindFilter rowKindFilter;
 
     private transient Projection keyProjection;
 
@@ -87,7 +87,7 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
                 schema.primaryKeys().size() > 0,
                 "LocalMergeOperator currently only support tables with primary keys");
         this.schema = schema;
-        this.ignoreDelete = CoreOptions.fromMap(schema.options()).ignoreDelete();
+        this.rowKindFilter = RowKindFilter.of(CoreOptions.fromMap(schema.options()));
         setup(parameters.getContainingTask(), parameters.getStreamConfig(), parameters.getOutput());
     }
 
@@ -103,24 +103,7 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
 
         rowKindGenerator = RowKindGenerator.create(schema, options);
         MergeFunction<KeyValue> mergeFunction =
-                PrimaryKeyTableUtils.createMergeFunctionFactory(
-                                schema,
-                                new KeyValueFieldsExtractor() {
-                                    private static final long serialVersionUID = 1L;
-
-                                    // At local merge operator, the key extractor should include
-                                    // partition fields.
-                                    @Override
-                                    public List<DataField> keyFields(TableSchema schema) {
-                                        return addKeyNamePrefix(schema.primaryKeysFields());
-                                    }
-
-                                    @Override
-                                    public List<DataField> valueFields(TableSchema schema) {
-                                        return schema.fields();
-                                    }
-                                })
-                        .create();
+                PrimaryKeyTableUtils.createMergeFunctionFactory(schema).create();
 
         boolean canHashMerger = true;
         for (DataField field : valueType.getFields()) {
@@ -170,7 +153,7 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
         InternalRow row = record.getValue();
 
         RowKind rowKind = RowKindGenerator.getRowKind(rowKindGenerator, row);
-        if (ignoreDelete && rowKind.isRetract()) {
+        if (rowKindFilter != null && !rowKindFilter.test(rowKind)) {
             return;
         }
 
@@ -218,7 +201,7 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
     }
 
     private void flushBuffer() throws Exception {
-        if (merger.size() == 0) {
+        if (merger.isEmpty()) {
             return;
         }
 

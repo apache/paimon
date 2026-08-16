@@ -18,9 +18,12 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.TableType;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.types.DataTypes;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
@@ -28,6 +31,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link FileSystemCatalog}. */
@@ -36,8 +40,9 @@ public class FileSystemCatalogTest extends CatalogTestBase {
     @BeforeEach
     public void setUp() throws Exception {
         super.setUp();
-        Options catalogOptions = new Options();
-        catalog = new FileSystemCatalog(fileIO, new Path(warehouse), catalogOptions);
+        catalog =
+                new FileSystemCatalog(
+                        fileIO, new Path(warehouse), CatalogContext.create(new Options()));
     }
 
     @Test
@@ -65,6 +70,47 @@ public class FileSystemCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    public void testValidateFormatTableDefaultOptions() throws Exception {
+        String database = "format_table_default_validation_db";
+        catalog.createDatabase(database, false);
+        Identifier existing = Identifier.create(database, "existing_table");
+        catalog.createTable(
+                existing, Schema.newBuilder().column("id", DataTypes.INT()).build(), false);
+        ((AbstractCatalog) DelegateCatalog.rootCatalog(catalog))
+                .tableDefaultOptions.put(CoreOptions.TARGET_FILE_ROW_NUM.key(), "0");
+        Schema createSchema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .option(CoreOptions.TYPE.key(), TableType.FORMAT_TABLE.toString())
+                        .build();
+
+        assertThatThrownBy(
+                        () ->
+                                catalog.createTable(
+                                        Identifier.create(database, "format_table"),
+                                        createSchema,
+                                        false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("target-file-row-num should be at least 1.");
+
+        Schema tableReplaceSchema = Schema.newBuilder().column("id", DataTypes.INT()).build();
+        assertThatThrownBy(() -> catalog.replaceTable(existing, tableReplaceSchema, false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("target-file-row-num should be at least 1.");
+        assertThat(catalog.getTable(existing)).isNotNull();
+
+        Schema replaceSchema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .option(CoreOptions.TYPE.key(), TableType.FORMAT_TABLE.toString())
+                        .build();
+        assertThatThrownBy(() -> catalog.replaceTable(existing, replaceSchema, false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("target-file-row-num should be at least 1.");
+        assertThat(catalog.getTable(existing)).isNotNull();
+    }
+
+    @Test
     public void testAlterDatabase() throws Exception {
         String databaseName = "test_alter_db";
         catalog.createDatabase(databaseName, false);
@@ -75,5 +121,34 @@ public class FileSystemCatalogTest extends CatalogTestBase {
                                         Lists.newArrayList(PropertyChange.removeProperty("a")),
                                         false))
                 .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    public void testPartitionsFromCatalogAreRejectedOutsideRestCatalog() throws Exception {
+        String database = "rest_partition_source_db";
+        Identifier identifier = Identifier.create(database, "rest_partition_source_table");
+        catalog.createDatabase(database, false);
+        // Write the schema file directly to simulate a format table carrying the REST-only
+        // partition source in a filesystem catalog.
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .option(CoreOptions.TYPE.key(), TableType.FORMAT_TABLE.toString())
+                        .option(CoreOptions.FILE_FORMAT.key(), "parquet")
+                        .option(CoreOptions.METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .build();
+        Path tablePath =
+                ((FileSystemCatalog) DelegateCatalog.rootCatalog(catalog))
+                        .getTableLocation(identifier);
+        new SchemaManager(fileIO, tablePath).createTable(schema);
+
+        // The option names one thing only, so a catalog that cannot serve it says so rather than
+        // reading the table's partitions from somewhere the option did not ask for.
+        assertThatThrownBy(() -> catalog.getTable(identifier))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(CoreOptions.METASTORE_PARTITIONED_TABLE.key())
+                .hasMessageContaining("REST catalog");
     }
 }

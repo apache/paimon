@@ -1,19 +1,19 @@
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#    http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing,
-#  software distributed under the License is distributed on an
-#  "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-#  KIND, either express or implied.  See the License for the
-#  specific language governing permissions and limitations
-#  under the License.
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 import re
 import threading
@@ -23,6 +23,16 @@ from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
 import pyarrow
+from pyarrow import types
+
+# Field ids at or above this value are reserved for system fields (sequence
+# number, value kind, row id, ...). User field ids stay strictly below it, so
+# the highest-user-field-id computation can ignore anything from here up.
+SYSTEM_FIELD_ID_START = 2147483647 // 2
+
+
+def is_system_field_id(field_id: int) -> bool:
+    return field_id >= SYSTEM_FIELD_ID_START
 
 
 class AtomicInteger:
@@ -72,6 +82,16 @@ class AtomicType(DataType):
         super().__init__(nullable)
         self.type = type
 
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if not isinstance(other, AtomicType):
+            return False
+        return self.type == other.type and self.nullable == other.nullable
+
+    def __hash__(self):
+        return hash((self.type, self.nullable))
+
     def to_dict(self) -> str:
         if not self.nullable:
             return self.type + " NOT NULL"
@@ -83,7 +103,7 @@ class AtomicType(DataType):
 
     def __str__(self) -> str:
         null_suffix = "" if self.nullable else " NOT NULL"
-        return f"{self.type}{null_suffix}"
+        return "{}{}".format(self.type, null_suffix)
 
 
 @dataclass
@@ -93,6 +113,16 @@ class ArrayType(DataType):
     def __init__(self, nullable: bool, element_type: DataType):
         super().__init__(nullable)
         self.element = element_type
+
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if not isinstance(other, ArrayType):
+            return False
+        return self.element == other.element and self.nullable == other.nullable
+
+    def __hash__(self):
+        return hash((self.element, self.nullable))
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -107,7 +137,67 @@ class ArrayType(DataType):
 
     def __str__(self) -> str:
         null_suffix = "" if self.nullable else " NOT NULL"
-        return f"ARRAY<{self.element}>{null_suffix}"
+        return "ARRAY<{}>{}".format(self.element, null_suffix)
+
+
+@dataclass
+class VectorType(DataType):
+    element: DataType
+    length: int
+
+    VALID_ELEMENT_TYPES = {
+        "BOOLEAN",
+        "TINYINT",
+        "SMALLINT",
+        "INT",
+        "INTEGER",
+        "BIGINT",
+        "FLOAT",
+        "DOUBLE",
+    }
+
+    def __init__(self, nullable: bool, element_type: DataType, length: int):
+        super().__init__(nullable)
+        if length < 1:
+            raise ValueError("Vector length must be greater than or equal to 1.")
+        if not self.is_valid_element_type(element_type):
+            raise ValueError("Invalid element type for vector: {}".format(element_type))
+        self.element = element_type
+        self.length = length
+
+    @classmethod
+    def is_valid_element_type(cls, element_type: DataType) -> bool:
+        if not isinstance(element_type, AtomicType):
+            return False
+        return element_type.type.upper() in cls.VALID_ELEMENT_TYPES
+
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if not isinstance(other, VectorType):
+            return False
+        return (self.element == other.element
+                and self.length == other.length
+                and self.nullable == other.nullable)
+
+    def __hash__(self):
+        return hash((self.element, self.length, self.nullable))
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "type": "VECTOR" + (" NOT NULL" if not self.nullable else ""),
+            "element": self.element.to_dict() if self.element else None,
+            "length": self.length,
+            "nullable": self.nullable
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "VectorType":
+        return DataTypeParser.parse_data_type(data)
+
+    def __str__(self) -> str:
+        null_suffix = "" if self.nullable else " NOT NULL"
+        return "VECTOR<{}, {}>{}".format(self.element, self.length, null_suffix)
 
 
 @dataclass
@@ -118,9 +208,20 @@ class MultisetType(DataType):
         super().__init__(nullable)
         self.element = element_type
 
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if not isinstance(other, MultisetType):
+            return False
+        return self.element == other.element and self.nullable == other.nullable
+
+    def __hash__(self):
+        return hash((self.element, self.nullable))
+
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "type": f"MULTISET{'<' + str(self.element) + '>' if self.element else ''}",
+            "type": "MULTISET{}{}".format('<' + str(self.element) + '>' if self.element else '',
+                                          " NOT NULL" if not self.nullable else ""),
             "element": self.element.to_dict() if self.element else None,
             "nullable": self.nullable,
         }
@@ -131,7 +232,7 @@ class MultisetType(DataType):
 
     def __str__(self) -> str:
         null_suffix = "" if self.nullable else " NOT NULL"
-        return f"MULTISET<{self.element}>{null_suffix}"
+        return "MULTISET<{}>{}".format(self.element, null_suffix)
 
 
 @dataclass
@@ -148,9 +249,21 @@ class MapType(DataType):
         self.key = key_type
         self.value = value_type
 
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if not isinstance(other, MapType):
+            return False
+        return (self.key == other.key
+                and self.value == other.value
+                and self.nullable == other.nullable)
+
+    def __hash__(self):
+        return hash((self.key, self.value, self.nullable))
+
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "type": f"MAP<{self.key}, {self.value}>",
+            "type": "MAP<{}, {}>".format(self.key, self.value),
             "key": self.key.to_dict() if self.key else None,
             "value": self.value.to_dict() if self.value else None,
             "nullable": self.nullable,
@@ -162,7 +275,31 @@ class MapType(DataType):
 
     def __str__(self) -> str:
         null_suffix = "" if self.nullable else " NOT NULL"
-        return f"MAP<{self.key}, {self.value}>{null_suffix}"
+        return "MAP<{}, {}>{}".format(self.key, self.value, null_suffix)
+
+
+def is_blob_type(data_type: DataType) -> bool:
+    return isinstance(data_type, AtomicType) and data_type.type.upper() == 'BLOB'
+
+
+def is_array_blob_type(data_type: DataType) -> bool:
+    return isinstance(data_type, ArrayType) and is_blob_type(data_type.element)
+
+
+def is_map_blob_type(data_type: DataType) -> bool:
+    return isinstance(data_type, MapType) and is_blob_type(data_type.value)
+
+
+def is_blob_file_type(data_type: DataType) -> bool:
+    return (
+        is_blob_type(data_type)
+        or is_array_blob_type(data_type)
+        or is_map_blob_type(data_type)
+    )
+
+
+def is_blob_file_field(field: 'DataField') -> bool:
+    return is_blob_file_type(field.type)
 
 
 @dataclass
@@ -197,6 +334,21 @@ class DataField:
     def from_dict(cls, data: Dict[str, Any]) -> "DataField":
         return DataTypeParser.parse_data_field(data)
 
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if not isinstance(other, DataField):
+            return False
+        return (self.id == other.id
+                and self.name == other.name
+                and self.type == other.type
+                and self.description == other.description
+                and self.default_value == other.default_value)
+
+    def __hash__(self):
+        return hash((self.id, self.name, self.type,
+                     self.description, self.default_value))
+
     def to_dict(self) -> Dict[str, Any]:
         result = {
             self.FIELD_ID: self.id,
@@ -221,6 +373,16 @@ class RowType(DataType):
         super().__init__(nullable)
         self.fields = fields or []
 
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if not isinstance(other, RowType):
+            return False
+        return self.fields == other.fields and self.nullable == other.nullable
+
+    def __hash__(self):
+        return hash((tuple(self.fields), self.nullable))
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "type": "ROW" + ("" if self.nullable else " NOT NULL"),
@@ -233,9 +395,85 @@ class RowType(DataType):
         return DataTypeParser.parse_data_type(data)
 
     def __str__(self) -> str:
-        field_strs = [f"{field.name}: {field.type}" for field in self.fields]
+        field_strs = []
+        for field in self.fields:
+            description = " COMMENT {}".format(field.description) if field.description else ""
+            field_strs.append("{}: {}{}".format(field.name, field.type, description))
         null_suffix = "" if self.nullable else " NOT NULL"
-        return f"ROW<{', '.join(field_strs)}>{null_suffix}"
+        return "ROW<{}>{}".format(', '.join(field_strs), null_suffix)
+
+    def get_field_index(self, field_name: str) -> int:
+        for index, field in enumerate(self.fields):
+            if field.name == field_name:
+                return index
+        raise ValueError("Field {} not found in {}".format(field_name, self))
+
+
+def reassign_field_id(data_type: DataType, field_id: "AtomicInteger") -> DataType:
+    """Return a copy of *data_type* with every nested field id reassigned from
+    *field_id*, depth-first with children allocated before their parent field.
+
+    Mirrors the canonical id-reassignment used when a column (possibly carrying
+    a nested ROW/ARRAY/MAP) is added, so nested subfields get globally-unique
+    ids drawn from the schema's running counter rather than struct-local ones.
+    """
+    if isinstance(data_type, RowType):
+        new_fields = []
+        for field in data_type.fields:
+            # Visit the nested type first, then allocate this field's id, so the
+            # ordering matches the rest of the engine ecosystem.
+            new_type = reassign_field_id(field.type, field_id)
+            new_id = field_id.increment_and_get()
+            new_fields.append(DataField(
+                new_id, field.name, new_type, field.description, field.default_value))
+        return RowType(data_type.nullable, new_fields)
+    if isinstance(data_type, ArrayType):
+        return ArrayType(data_type.nullable, reassign_field_id(data_type.element, field_id))
+    if isinstance(data_type, VectorType):
+        return VectorType(
+            data_type.nullable, reassign_field_id(data_type.element, field_id), data_type.length)
+    if isinstance(data_type, MultisetType):
+        return MultisetType(data_type.nullable, reassign_field_id(data_type.element, field_id))
+    if isinstance(data_type, MapType):
+        new_key = reassign_field_id(data_type.key, field_id)
+        new_value = reassign_field_id(data_type.value, field_id)
+        return MapType(data_type.nullable, new_key, new_value)
+    return data_type
+
+
+def collect_field_ids(data_type: DataType, field_ids: set):
+    """Collect all (nested) field ids reachable from *data_type* into *field_ids*,
+    raising on a duplicate id (a broken schema)."""
+    if isinstance(data_type, RowType):
+        for field in data_type.fields:
+            if field.id in field_ids:
+                raise ValueError(
+                    "Broken schema, field id {} is duplicated.".format(field.id))
+            field_ids.add(field.id)
+            collect_field_ids(field.type, field_ids)
+    elif isinstance(data_type, (ArrayType, VectorType, MultisetType)):
+        collect_field_ids(data_type.element, field_ids)
+    elif isinstance(data_type, MapType):
+        collect_field_ids(data_type.key, field_ids)
+        collect_field_ids(data_type.value, field_ids)
+
+
+def current_highest_field_id(fields: List[DataField]) -> int:
+    """Highest user field id across *fields*, recursing into nested ROW/ARRAY/MAP.
+
+    System field ids are excluded. Returns -1 for an empty/system-only schema.
+    The result is persisted as ``highestFieldId``; later schema changes seed
+    their id counter from the stored value (not from the live fields, since a
+    dropped field may have carried a higher id than any survivor).
+    """
+    field_ids = set()
+    for field in fields:
+        if field.id in field_ids:
+            raise ValueError("Broken schema, field id {} is duplicated.".format(field.id))
+        field_ids.add(field.id)
+        collect_field_ids(field.type, field_ids)
+    user_ids = [fid for fid in field_ids if not is_system_field_id(fid)]
+    return max(user_ids) if user_ids else -1
 
 
 class Keyword(Enum):
@@ -246,6 +484,7 @@ class Keyword(Enum):
     BINARY = "BINARY"
     VARBINARY = "VARBINARY"
     BYTES = "BYTES"
+    BLOB = "BLOB"
     DECIMAL = "DECIMAL"
     NUMERIC = "NUMERIC"
     DEC = "DEC"
@@ -275,20 +514,32 @@ class DataTypeParser:
 
     @staticmethod
     def parse_atomic_type_sql_string(type_string: str) -> DataType:
+        nullable = DataTypeParser.parse_nullability(type_string)
         type_upper = type_string.upper().strip()
+        # Strip the trailing nullability suffix so it is stored only in
+        # ``nullable``, not baked into the atomic type string. The space-split
+        # branch below drops it for plain types ("BIGINT NOT NULL"), but a
+        # parameterized type ("DECIMAL(12, 2) NOT NULL", "VARCHAR(10) NOT NULL")
+        # takes the paren branch and would otherwise keep the suffix in
+        # ``AtomicType.type`` -- doubling it on the next ``to_dict()``.
+        for suffix in (" NOT NULL", " NULL"):
+            if type_upper.endswith(suffix):
+                type_upper = type_upper[: -len(suffix)].rstrip()
+                break
 
         if "(" in type_upper:
             base_type = type_upper.split("(")[0]
+        elif " " in type_upper:
+            base_type = type_upper.split(" ")[0]
+            type_upper = base_type
         else:
             base_type = type_upper
 
         try:
             Keyword(base_type)
-            return AtomicType(
-                type_string, DataTypeParser.parse_nullability(type_string)
-            )
+            return AtomicType(type_upper, nullable)
         except ValueError:
-            raise Exception(f"Unknown type: {base_type}")
+            raise Exception("Unknown type: {}".format(base_type))
 
     @staticmethod
     def parse_data_type(
@@ -300,7 +551,7 @@ class DataTypeParser:
 
         if isinstance(json_data, dict):
             if "type" not in json_data:
-                raise ValueError(f"Missing 'type' field in JSON: {json_data}")
+                raise ValueError("Missing 'type' field in JSON: {}".format(json_data))
 
             type_string = json_data["type"]
 
@@ -310,6 +561,14 @@ class DataTypeParser:
                 )
                 nullable = "NOT NULL" not in type_string
                 return ArrayType(nullable, element)
+
+            elif type_string.startswith("VECTOR"):
+                element = DataTypeParser.parse_data_type(
+                    json_data.get("element"), field_id
+                )
+                length = int(json_data.get("length"))
+                nullable = "NOT NULL" not in type_string
+                return VectorType(nullable, element, length)
 
             elif type_string.startswith("MULTISET"):
                 element = DataTypeParser.parse_data_type(
@@ -323,7 +582,9 @@ class DataTypeParser:
                     json_data.get("key"), field_id)
                 value = DataTypeParser.parse_data_type(
                     json_data.get("value"), field_id)
-                nullable = "NOT NULL" not in type_string
+                nullable = json_data.get("nullable")
+                if nullable is None:
+                    nullable = not type_string.rstrip().endswith(" NOT NULL")
                 return MapType(nullable, key, value)
 
             elif type_string.startswith("ROW"):
@@ -339,17 +600,13 @@ class DataTypeParser:
             else:
                 return DataTypeParser.parse_atomic_type_sql_string(type_string)
 
-        raise ValueError(f"Cannot parse data type: {json_data}")
+        raise ValueError("Cannot parse data type: {}".format(json_data))
 
     @staticmethod
     def parse_data_field(
             json_data: Dict[str, Any], field_id: Optional[AtomicInteger] = None
     ) -> DataField:
-
-        if (
-                DataField.FIELD_ID in json_data
-                and json_data[DataField.FIELD_ID] is not None
-        ):
+        if DataField.FIELD_ID in json_data and json_data[DataField.FIELD_ID] is not None:
             if field_id is not None and field_id.get() != -1:
                 raise ValueError("Partial field id is not allowed.")
             field_id_value = int(json_data["id"])
@@ -382,17 +639,34 @@ class DataTypeParser:
         )
 
 
+def is_variant_struct(pa_type: pyarrow.StructType) -> bool:
+    """Return True if *pa_type* is the shredded VARIANT struct encoding.
+
+    Matches ``struct<value: binary NOT NULL, metadata: binary NOT NULL>``.
+    """
+    if pa_type.num_fields != 2:
+        return False
+    names = {pa_type[i].name for i in range(pa_type.num_fields)}
+    if names != {'value', 'metadata'}:
+        return False
+    return all(
+        pyarrow.types.is_binary(pa_type[n].type) and not pa_type[n].nullable
+        for n in ('value', 'metadata')
+    )
+
+
 class PyarrowFieldParser:
 
     @staticmethod
     def from_paimon_type(data_type: DataType) -> pyarrow.DataType:
+        # Based on Paimon DataTypes Doc: https://paimon.apache.org/docs/master/concepts/data-types/
         if isinstance(data_type, AtomicType):
             type_name = data_type.type.upper()
             if type_name == 'TINYINT':
                 return pyarrow.int8()
             elif type_name == 'SMALLINT':
                 return pyarrow.int16()
-            elif type_name == 'INT':
+            elif type_name in ('INT', 'INTEGER'):
                 return pyarrow.int32()
             elif type_name == 'BIGINT':
                 return pyarrow.int64()
@@ -402,31 +676,78 @@ class PyarrowFieldParser:
                 return pyarrow.float64()
             elif type_name == 'BOOLEAN':
                 return pyarrow.bool_()
-            elif type_name == 'STRING':
+            elif type_name == 'STRING' or type_name.startswith('CHAR') or type_name.startswith('VARCHAR'):
                 return pyarrow.string()
-            elif type_name == 'BINARY':
+            elif type_name == 'BYTES' or type_name.startswith('VARBINARY') or type_name.startswith('BINARY'):
                 return pyarrow.binary()
+            elif type_name == 'BLOB':
+                return pyarrow.large_binary()
+            elif type_name == 'VARIANT':
+                return pyarrow.struct([
+                    pyarrow.field('value', pyarrow.binary(), nullable=False),
+                    pyarrow.field('metadata', pyarrow.binary(), nullable=False),
+                ])
+            elif type_name.startswith('DECIMAL'):
+                if type_name == 'DECIMAL':
+                    return pyarrow.decimal128(10, 0)  # default to 10, 0
+                match_ps = re.fullmatch(r'DECIMAL\((\d+),\s*(\d+)\)', type_name)
+                if match_ps:
+                    precision, scale = map(int, match_ps.groups())
+                    return pyarrow.decimal128(precision, scale)
+                match_p = re.fullmatch(r'DECIMAL\((\d+)\)', type_name)
+                if match_p:
+                    precision = int(match_p.group(1))
+                    return pyarrow.decimal128(precision, 0)
+            if type_name.startswith('TIMESTAMP'):
+                is_ltz = type_name.startswith('TIMESTAMP_LTZ') or 'WITH LOCAL TIME ZONE' in type_name
+                tz = 'UTC' if is_ltz else None
+
+                match = re.fullmatch(r'TIMESTAMP(?:_LTZ)?\((\d+)\)(?: WITH LOCAL TIME ZONE)?', type_name)
+                if match:
+                    precision = int(match.group(1))
+                    if precision == 0:
+                        return pyarrow.timestamp('s', tz=tz)
+                    elif 1 <= precision <= 3:
+                        return pyarrow.timestamp('ms', tz=tz)
+                    elif 4 <= precision <= 6:
+                        return pyarrow.timestamp('us', tz=tz)
+                    elif 7 <= precision <= 9:
+                        return pyarrow.timestamp('ns', tz=tz)
+
+                return pyarrow.timestamp('us', tz=tz)  # default to 6
             elif type_name == 'DATE':
                 return pyarrow.date32()
-            elif type_name == 'TIMESTAMP':
-                return pyarrow.timestamp('ms')
-            elif type_name.startswith('DECIMAL'):
-                match = re.match(r'DECIMAL\((\d+),\s*(\d+)\)', type_name)
-                if match:
-                    precision, scale = map(int, match.groups())
-                    return pyarrow.decimal128(precision, scale)
-                else:
-                    return pyarrow.decimal128(38, 18)
-            else:
-                raise ValueError(f"Unsupported data type: {type_name}")
+            if type_name.startswith('TIME'):
+                return pyarrow.time32('ms')
         elif isinstance(data_type, ArrayType):
-            return pyarrow.list_(PyarrowFieldParser.from_paimon_type(data_type.element))
+            element_type = PyarrowFieldParser.from_paimon_type(data_type.element)
+            return pyarrow.list_(
+                pyarrow.field(
+                    "item",
+                    element_type,
+                    nullable=data_type.element.nullable,
+                )
+            )
+        elif isinstance(data_type, VectorType):
+            return pyarrow.list_(PyarrowFieldParser.from_paimon_type(data_type.element), data_type.length)
         elif isinstance(data_type, MapType):
             key_type = PyarrowFieldParser.from_paimon_type(data_type.key)
             value_type = PyarrowFieldParser.from_paimon_type(data_type.value)
-            return pyarrow.map_(key_type, value_type)
-        else:
-            raise ValueError(f"Unsupported data type: {data_type}")
+            return pyarrow.map_(
+                pyarrow.field("key", key_type, nullable=False),
+                pyarrow.field(
+                    "value",
+                    value_type,
+                    nullable=data_type.value.nullable,
+                ),
+            )
+        elif isinstance(data_type, RowType):
+            pa_fields = []
+            for field in data_type.fields:
+                pa_field_type = PyarrowFieldParser.from_paimon_type(field.type)
+                pa_fields.append(pyarrow.field(field.name, pa_field_type, nullable=field.type.nullable))
+            return pyarrow.struct(pa_fields)
+        raise ValueError("Unsupported data type: {}".format(data_type))
 
     @staticmethod
     def from_paimon_field(data_field: DataField) -> pyarrow.Field:
@@ -445,48 +766,76 @@ class PyarrowFieldParser:
 
     @staticmethod
     def to_paimon_type(pa_type: pyarrow.DataType, nullable: bool) -> DataType:
-        type_name = str(pa_type)
-        if type_name == "int8":
+        # Based on Arrow DataTypes Doc: https://arrow.apache.org/docs/python/api/datatypes.html
+        # All safe mappings are already implemented, adding new mappings requires rigorous evaluation
+        # to avoid potential data loss
+        type_name = None
+        if types.is_int8(pa_type):
             type_name = 'TINYINT'
-        elif type_name == "int16":
+        elif types.is_int16(pa_type):
             type_name = 'SMALLINT'
-        elif type_name == "int32":
+        elif types.is_int32(pa_type):
             type_name = 'INT'
-        elif type_name == "int64":
+        elif types.is_int64(pa_type):
             type_name = 'BIGINT'
-        elif type_name.startswith('float'):
+        elif types.is_float32(pa_type):
             type_name = 'FLOAT'
-        elif type_name.startswith('double'):
+        elif types.is_float64(pa_type):
             type_name = 'DOUBLE'
-        elif type_name.startswith('bool'):
+        elif types.is_boolean(pa_type):
             type_name = 'BOOLEAN'
-        elif type_name.startswith('string'):
+        elif types.is_string(pa_type):
             type_name = 'STRING'
-        elif type_name.startswith('binary'):
-            type_name = 'BINARY'
-        elif type_name.startswith('date'):
-            type_name = 'DATE'
-        elif type_name.startswith('timestamp'):
-            type_name = 'TIMESTAMP'
-        elif type_name.startswith('decimal'):
-            match = re.match(r'decimal\((\d+),\s*(\d+)\)', type_name)
-            if match:
-                precision, scale = map(int, match.groups())
-                type_name = f'DECIMAL({precision},{scale})'
+        elif types.is_fixed_size_binary(pa_type):
+            type_name = f'BINARY({pa_type.byte_width})'
+        elif types.is_binary(pa_type):
+            type_name = 'BYTES'
+        elif types.is_large_binary(pa_type):
+            type_name = 'BLOB'
+        elif types.is_decimal(pa_type):
+            type_name = f'DECIMAL({pa_type.precision}, {pa_type.scale})'
+        elif types.is_timestamp(pa_type):
+            precision_mapping = {'s': 0, 'ms': 3, 'us': 6, 'ns': 9}
+            if pa_type.tz is None:
+                type_name = f'TIMESTAMP({precision_mapping[pa_type.unit]})'
             else:
-                type_name = 'DECIMAL(38,18)'
-        elif type_name.startswith('list'):
+                type_name = f'TIMESTAMP_LTZ({precision_mapping[pa_type.unit]})'
+        elif types.is_date32(pa_type):
+            type_name = 'DATE'
+        elif types.is_time(pa_type):
+            type_name = 'TIME(0)'
+        elif types.is_fixed_size_list(pa_type):
+            pa_type: pyarrow.FixedSizeListType
+            element_type = PyarrowFieldParser.to_paimon_type(pa_type.value_type, pa_type.value_field.nullable)
+            return VectorType(nullable, element_type, pa_type.list_size)
+        elif types.is_list(pa_type) or types.is_large_list(pa_type):
             pa_type: pyarrow.ListType
-            element_type = PyarrowFieldParser.to_paimon_type(pa_type.value_type, nullable)
+            element_type = PyarrowFieldParser.to_paimon_type(
+                pa_type.value_type, pa_type.value_field.nullable)
             return ArrayType(nullable, element_type)
-        elif type_name.startswith('map'):
+        elif types.is_map(pa_type):
             pa_type: pyarrow.MapType
-            key_type = PyarrowFieldParser.to_paimon_type(pa_type.key_type, nullable)
-            value_type = PyarrowFieldParser.to_paimon_type(pa_type.item_type, nullable)
+            key_type = PyarrowFieldParser.to_paimon_type(
+                pa_type.key_type, pa_type.key_field.nullable)
+            value_type = PyarrowFieldParser.to_paimon_type(
+                pa_type.item_type, pa_type.item_field.nullable)
             return MapType(nullable, key_type, value_type)
-        else:
-            raise ValueError(f"Unknown type: {type_name}")
-        return AtomicType(type_name)
+        elif types.is_struct(pa_type) and is_variant_struct(pa_type):
+            return AtomicType('VARIANT', nullable)
+        elif types.is_struct(pa_type):
+            pa_type: pyarrow.StructType
+            fields = []
+            for i, pa_field in enumerate(pa_type):
+                field_type = PyarrowFieldParser.to_paimon_type(pa_field.type, pa_field.nullable)
+                fields.append(DataField(
+                    id=i,
+                    name=pa_field.name,
+                    type=field_type
+                ))
+            return RowType(nullable, fields)
+        if type_name is not None:
+            return AtomicType(type_name, nullable)
+        raise ValueError("Unsupported pyarrow type: {}".format(pa_type))
 
     @staticmethod
     def to_paimon_field(field_idx: int, pa_field: pyarrow.Field) -> DataField:
@@ -502,18 +851,29 @@ class PyarrowFieldParser:
 
     @staticmethod
     def to_paimon_schema(pa_schema: pyarrow.Schema) -> List[DataField]:
+        # Convert PyArrow schema to Paimon fields, assigning globally-unique ids:
+        # each top-level field takes the next id, then its (possibly nested) type
+        # has its subfield ids reassigned from the same running counter. A flat
+        # schema keeps the plain 0,1,2,... ids; nested subfields get ids that do
+        # not collide with top-level ones.
+        field_id = AtomicInteger(-1)
         fields = []
-        for i, pa_field in enumerate(pa_schema):
+        for pa_field in pa_schema:
             pa_field: pyarrow.Field
-            data_field = PyarrowFieldParser.to_paimon_field(i, pa_field)
-            fields.append(data_field)
+            top_id = field_id.increment_and_get()
+            data_type = PyarrowFieldParser.to_paimon_type(pa_field.type, pa_field.nullable)
+            data_type = reassign_field_id(data_type, field_id)
+            description = pa_field.metadata.get(b'description', b'').decode('utf-8') \
+                if pa_field.metadata and b'description' in pa_field.metadata else None
+            fields.append(DataField(top_id, pa_field.name, data_type, description))
         return fields
 
     @staticmethod
-    def to_avro_type(field_type: pyarrow.DataType, field_name: str) -> Union[str, Dict[str, Any]]:
+    def to_avro_type(field_type: pyarrow.DataType, field_name: str,
+                     parent_name: str = "record") -> Union[str, Dict[str, Any]]:
         if pyarrow.types.is_integer(field_type):
             if (pyarrow.types.is_signed_integer(field_type) and field_type.bit_width <= 32) or \
-               (pyarrow.types.is_unsigned_integer(field_type) and field_type.bit_width < 32):
+                    (pyarrow.types.is_unsigned_integer(field_type) and field_type.bit_width < 32):
                 return "int"
             else:
                 return "long"
@@ -536,33 +896,46 @@ class PyarrowFieldParser:
             }
         elif pyarrow.types.is_date(field_type):
             return {"type": "int", "logicalType": "date"}
+        elif pyarrow.types.is_time(field_type):
+            return {"type": "int", "logicalType": "time-millis"}
         elif pyarrow.types.is_timestamp(field_type):
             unit = field_type.unit
-            if unit == 'us':
-                return {"type": "long", "logicalType": "timestamp-micros"}
-            elif unit == 'ms':
-                return {"type": "long", "logicalType": "timestamp-millis"}
+            if field_type.tz is None:
+                if unit == 'ms':
+                    return {"type": "long", "logicalType": "timestamp-millis"}
+                elif unit == 'us':
+                    return {"type": "long", "logicalType": "timestamp-micros"}
+                else:
+                    raise ValueError(f"Avro does not support pyarrow timestamp with unit {unit}.")
             else:
-                return {"type": "long", "logicalType": "timestamp-micros"}
-        elif pyarrow.types.is_list(field_type) or pyarrow.types.is_large_list(field_type):
+                if unit == 'ms':
+                    return {"type": "long", "logicalType": "local-timestamp-millis"}
+                elif unit == 'us':
+                    return {"type": "long", "logicalType": "local-timestamp-micros"}
+                else:
+                    raise ValueError(f"Avro does not support pyarrow timestamp with unit {unit}.")
+        elif pyarrow.types.is_fixed_size_list(field_type) or \
+                pyarrow.types.is_list(field_type) or \
+                pyarrow.types.is_large_list(field_type):
             value_field = field_type.value_field
             return {
                 "type": "array",
-                "items": PyarrowFieldParser.to_avro_type(value_field.type, value_field.name)
+                "items": PyarrowFieldParser.to_avro_type(value_field.type, value_field.name, parent_name)
             }
         elif pyarrow.types.is_struct(field_type):
-            return PyarrowFieldParser.to_avro_schema(field_type, name=f"{field_name}_record")
+            nested_name = "{}_{}".format(parent_name, field_name)
+            return PyarrowFieldParser.to_avro_schema(field_type, name=nested_name)
 
-        raise ValueError(f"Unsupported pyarrow type for Avro conversion: {field_type}")
+        raise ValueError("Unsupported pyarrow type for Avro conversion: {}".format(field_type))
 
     @staticmethod
     def to_avro_schema(pyarrow_schema: Union[pyarrow.Schema, pyarrow.StructType],
-                       name: str = "Root",
-                       namespace: str = "pyarrow.avro"
+                       name: str = "record",
+                       namespace: str = "org.apache.paimon.avro.generated"
                        ) -> Dict[str, Any]:
         fields = []
         for field in pyarrow_schema:
-            avro_type = PyarrowFieldParser.to_avro_type(field.type, field.name)
+            avro_type = PyarrowFieldParser.to_avro_type(field.type, field.name, parent_name=name)
             if field.nullable:
                 avro_type = ["null", avro_type]
             fields.append({"name": field.name, "type": avro_type})

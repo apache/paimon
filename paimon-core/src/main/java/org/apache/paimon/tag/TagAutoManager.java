@@ -24,15 +24,18 @@ import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 
 /** A manager to create and expire tags. */
 public class TagAutoManager {
 
-    private final TagAutoCreation tagAutoCreation;
-    private final TagTimeExpire tagTimeExpire;
+    @Nullable private final TagAutoCreation tagAutoCreation;
+    @Nullable private final TagTimeExpire tagTimeExpire;
 
-    private TagAutoManager(TagAutoCreation tagAutoCreation, TagTimeExpire tagTimeExpire) {
+    private TagAutoManager(
+            @Nullable TagAutoCreation tagAutoCreation, @Nullable TagTimeExpire tagTimeExpire) {
         this.tagAutoCreation = tagAutoCreation;
         this.tagTimeExpire = tagTimeExpire;
     }
@@ -60,13 +63,17 @@ public class TagAutoManager {
                         ? null
                         : TagAutoCreation.create(
                                 options, snapshotManager, tagManager, tagDeletion, callbacks),
-                TagTimeExpire.create(snapshotManager, tagManager, tagDeletion, callbacks));
+                options.tagTimeExpireEnabled()
+                        ? TagTimeExpire.create(snapshotManager, tagManager, tagDeletion, callbacks)
+                        : null);
     }
 
+    @Nullable
     public TagAutoCreation getTagAutoCreation() {
         return tagAutoCreation;
     }
 
+    @Nullable
     public TagTimeExpire getTagTimeExpire() {
         return tagTimeExpire;
     }

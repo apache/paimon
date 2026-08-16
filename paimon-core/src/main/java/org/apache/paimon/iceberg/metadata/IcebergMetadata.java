@@ -319,6 +319,7 @@ public class IcebergMetadata {
                 defaultSortOrderId,
                 snapshots,
                 currentSnapshotId,
+                properties,
                 refs);
     }
 
@@ -347,6 +348,7 @@ public class IcebergMetadata {
                 && defaultSortOrderId == that.defaultSortOrderId
                 && Objects.equals(snapshots, that.snapshots)
                 && currentSnapshotId == that.currentSnapshotId
+                && Objects.equals(properties, that.properties)
                 && Objects.equals(refs, that.refs);
     }
 }

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.schema;
 
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.IsNotNull;
 import org.apache.paimon.predicate.IsNull;
 import org.apache.paimon.predicate.LeafPredicate;
@@ -97,7 +98,8 @@ public class SchemaEvolutionUtilTest {
 
         LeafPredicate child1 = (LeafPredicate) filters.get(0);
         assertThat(child1.function()).isEqualTo(IsNull.INSTANCE);
-        assertThat(child1.fieldName()).isEqualTo("b");
-        assertThat(child1.index()).isEqualTo(1);
+        FieldRef fieldRef = child1.fieldRefOptional().get();
+        assertThat(fieldRef.name()).isEqualTo("b");
+        assertThat(fieldRef.index()).isEqualTo(1);
     }
 }

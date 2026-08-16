@@ -72,7 +72,7 @@ public class AppendPreCommitCompactWorkerOperator extends AbstractStreamOperator
             checkArgument(
                     !coreOptions.dataEvolutionEnabled(),
                     "Data evolution enabled table should not invoke compact yet.");
-            this.write.withWriteType(SpecialFields.rowTypeWithRowLineage(table.rowType()));
+            this.write.withWriteType(SpecialFields.rowTypeWithRowTracking(table.rowType()));
         }
         this.pathFactory = table.store().pathFactory();
         this.fileIO = table.fileIO();
@@ -87,9 +87,7 @@ public class AppendPreCommitCompactWorkerOperator extends AbstractStreamOperator
         } else {
             long checkpointId = record.getValue().right().f0;
             CommitMessage message = doCompact(record.getValue().right().f1);
-            output.collect(
-                    new StreamRecord<>(
-                            new Committable(checkpointId, Committable.Kind.FILE, message)));
+            output.collect(new StreamRecord<>(new Committable(checkpointId, message)));
         }
     }
 

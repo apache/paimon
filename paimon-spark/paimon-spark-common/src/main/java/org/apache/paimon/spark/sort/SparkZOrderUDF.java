@@ -247,6 +247,9 @@ public class SparkZOrderUDF implements Serializable {
                 functions
                         .udf(
                                 (Boolean value) -> {
+                                    if (value == null) {
+                                        return PRIMITIVE_EMPTY;
+                                    }
                                     ByteBuffer buffer =
                                             inputBuffer(
                                                     position,
@@ -267,12 +270,16 @@ public class SparkZOrderUDF implements Serializable {
         UserDefinedFunction udf =
                 functions
                         .udf(
-                                (String value) ->
-                                        ZOrderByteUtils.stringToOrderedBytes(
-                                                        value,
-                                                        varTypeSize,
-                                                        inputBuffer(position, varTypeSize))
-                                                .array(),
+                                (String value) -> {
+                                    if (value == null) {
+                                        return new byte[varTypeSize];
+                                    }
+                                    return ZOrderByteUtils.stringToOrderedBytes(
+                                                    value,
+                                                    varTypeSize,
+                                                    inputBuffer(position, varTypeSize))
+                                            .array();
+                                },
                                 DataTypes.BinaryType)
                         .withName("STRING-LEXICAL-BYTES");
 
@@ -287,12 +294,16 @@ public class SparkZOrderUDF implements Serializable {
         UserDefinedFunction udf =
                 functions
                         .udf(
-                                (byte[] value) ->
-                                        ZOrderByteUtils.byteTruncateOrFill(
-                                                        value,
-                                                        varTypeSize,
-                                                        inputBuffer(position, varTypeSize))
-                                                .array(),
+                                (byte[] value) -> {
+                                    if (value == null) {
+                                        return new byte[varTypeSize];
+                                    }
+                                    return ZOrderByteUtils.byteTruncateOrFill(
+                                                    value,
+                                                    varTypeSize,
+                                                    inputBuffer(position, varTypeSize))
+                                            .array();
+                                },
                                 DataTypes.BinaryType)
                         .withName("BYTE-TRUNCATE");
 

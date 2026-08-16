@@ -18,13 +18,12 @@
 
 package org.apache.paimon.compact;
 
-import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
-import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
+import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.index.IndexFileMeta;
 
 import javax.annotation.Nullable;
 
-import java.util.List;
 import java.util.Optional;
 
 /** Deletion File from compaction. */
@@ -41,19 +40,13 @@ public interface CompactDeletionFile {
      * immediately, so when updateCompactResult, we need to merge old deletion files (just delete
      * them).
      */
-    static CompactDeletionFile generateFiles(DeletionVectorsMaintainer maintainer) {
-        List<IndexFileMeta> files = maintainer.writeDeletionVectorsIndex();
-        if (files.size() > 1) {
-            throw new IllegalStateException(
-                    "Should only generate one compact deletion file, this is a bug.");
-        }
-
-        return new GeneratedDeletionFile(
-                files.isEmpty() ? null : files.get(0), maintainer.indexFileHandler());
+    static CompactDeletionFile generateFiles(BucketedDvMaintainer maintainer) {
+        Optional<IndexFileMeta> file = maintainer.writeDeletionVectorsIndex();
+        return new GeneratedDeletionFile(file.orElse(null), maintainer.dvIndexFile());
     }
 
     /** For sync compaction, only create deletion files when prepareCommit. */
-    static CompactDeletionFile lazyGeneration(DeletionVectorsMaintainer maintainer) {
+    static CompactDeletionFile lazyGeneration(BucketedDvMaintainer maintainer) {
         return new LazyCompactDeletionFile(maintainer);
     }
 
@@ -61,14 +54,14 @@ public interface CompactDeletionFile {
     class GeneratedDeletionFile implements CompactDeletionFile {
 
         @Nullable private final IndexFileMeta deletionFile;
-        private final IndexFileHandler fileHandler;
+        private final DeletionVectorsIndexFile dvIndexFile;
 
         private boolean getInvoked = false;
 
         public GeneratedDeletionFile(
-                @Nullable IndexFileMeta deletionFile, IndexFileHandler fileHandler) {
+                @Nullable IndexFileMeta deletionFile, DeletionVectorsIndexFile dvIndexFile) {
             this.deletionFile = deletionFile;
-            this.fileHandler = fileHandler;
+            this.dvIndexFile = dvIndexFile;
         }
 
         @Override
@@ -99,7 +92,7 @@ public interface CompactDeletionFile {
         @Override
         public void clean() {
             if (deletionFile != null) {
-                fileHandler.deleteIndexFile(deletionFile);
+                dvIndexFile.delete(deletionFile);
             }
         }
     }
@@ -107,11 +100,11 @@ public interface CompactDeletionFile {
     /** A lazy generation implementation of {@link CompactDeletionFile}. */
     class LazyCompactDeletionFile implements CompactDeletionFile {
 
-        private final DeletionVectorsMaintainer maintainer;
+        private final BucketedDvMaintainer maintainer;
 
         private boolean generated = false;
 
-        public LazyCompactDeletionFile(DeletionVectorsMaintainer maintainer) {
+        public LazyCompactDeletionFile(BucketedDvMaintainer maintainer) {
             this.maintainer = maintainer;
         }
 

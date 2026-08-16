@@ -21,6 +21,7 @@ package org.apache.paimon.flink;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataField;
@@ -42,6 +43,7 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VectorType;
 
 import org.apache.flink.table.types.logical.LogicalType;
 
@@ -143,13 +145,26 @@ public class DataTypeToLogicalType implements DataTypeVisitor<LogicalType> {
 
     @Override
     public LogicalType visit(VariantType variantType) {
-        throw new UnsupportedOperationException("VariantType is not supported.");
+        return new org.apache.flink.table.types.logical.VariantType(variantType.isNullable());
+    }
+
+    @Override
+    public LogicalType visit(BlobType blobType) {
+        // TODO introduce blob type in Flink SQL?
+        return new org.apache.flink.table.types.logical.VarBinaryType(
+                org.apache.flink.table.types.logical.VarBinaryType.MAX_LENGTH);
     }
 
     @Override
     public LogicalType visit(ArrayType arrayType) {
         return new org.apache.flink.table.types.logical.ArrayType(
                 arrayType.isNullable(), arrayType.getElementType().accept(this));
+    }
+
+    @Override
+    public LogicalType visit(VectorType vectorType) {
+        return new org.apache.flink.table.types.logical.ArrayType(
+                vectorType.isNullable(), vectorType.getElementType().accept(this));
     }
 
     @Override

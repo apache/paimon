@@ -58,8 +58,8 @@ class PaimonSystemTableTest extends PaimonSparkTestBase {
     checkAnswer(spark.sql("select count(*) from `T$partitions`"), Row(5) :: Nil)
     checkAnswer(
       spark.sql("select partition from `T$partitions`"),
-      Row("{2024-10-09, 01}") :: Row("{2024-10-09, 02}") :: Row("{2024-10-10, 01}") :: Row(
-        "{2024-10-10, 12}") :: Row("{2024-10-10, 23}") :: Nil
+      Row("dt=2024-10-09/hh=01") :: Row("dt=2024-10-09/hh=02") :: Row("dt=2024-10-10/hh=01") :: Row(
+        "dt=2024-10-10/hh=12") :: Row("dt=2024-10-10/hh=23") :: Nil
     )
   }
 
@@ -93,7 +93,7 @@ class PaimonSystemTableTest extends PaimonSparkTestBase {
 
     checkAnswer(
       sql("SELECT partition FROM `T$partitions`"),
-      Seq(Row("{2024-10-10, 1}"), Row("{null, 1}")))
+      Seq(Row("p1=2024-10-10/p2=1"), Row("p1=__DEFAULT_PARTITION__/p2=1")))
 
     checkAnswer(
       sql("SELECT partition, bucket FROM `T$buckets`"),

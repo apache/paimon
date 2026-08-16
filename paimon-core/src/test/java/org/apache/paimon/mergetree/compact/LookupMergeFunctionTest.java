@@ -32,7 +32,9 @@ class LookupMergeFunctionTest {
     public void testKeepLowestHighLevel() {
         LookupMergeFunction function =
                 (LookupMergeFunction)
-                        LookupMergeFunction.wrap(DeduplicateMergeFunction.factory()).create();
+                        LookupMergeFunction.wrap(
+                                        DeduplicateMergeFunction.factory(), null, null, null)
+                                .create();
         function.reset();
         function.add(new KeyValue().replace(row(1), 1, INSERT, row(2)).setLevel(1));
         function.add(new KeyValue().replace(row(1), 1, INSERT, row(1)).setLevel(2));
@@ -45,7 +47,9 @@ class LookupMergeFunctionTest {
     public void testLevelNegative() {
         LookupMergeFunction function =
                 (LookupMergeFunction)
-                        LookupMergeFunction.wrap(DeduplicateMergeFunction.factory()).create();
+                        LookupMergeFunction.wrap(
+                                        DeduplicateMergeFunction.factory(), null, null, null)
+                                .create();
         function.reset();
         function.add(new KeyValue().replace(row(1), 1, INSERT, row(2)).setLevel(-1));
         function.add(new KeyValue().replace(row(1), 1, INSERT, row(1)).setLevel(-1));

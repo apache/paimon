@@ -46,15 +46,17 @@ public class IntFileUtils {
         };
     }
 
-    public static void writeInts(FileIO fileIO, Path path, IntIterator input) throws IOException {
+    public static int writeInts(FileIO fileIO, Path path, IntIterator input) throws IOException {
         try (FastBufferedOutputStream out =
                         new FastBufferedOutputStream(fileIO.newOutputStream(path, false));
                 IntIterator iterator = input) {
+            int count = 0;
             while (true) {
                 try {
                     writeInt(out, iterator.next());
+                    count++;
                 } catch (EOFException ignored) {
-                    break;
+                    return count;
                 }
             }
         }

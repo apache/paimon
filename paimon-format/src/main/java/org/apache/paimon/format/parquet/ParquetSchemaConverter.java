@@ -31,6 +31,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.Pair;
 
 import org.apache.parquet.schema.ConversionPatterns;
@@ -57,6 +58,39 @@ public class ParquetSchemaConverter {
     public static final String MAP_KEY_NAME = "key";
     public static final String MAP_VALUE_NAME = "value";
     public static final String LIST_ELEMENT_NAME = "element";
+
+    /**
+     * Whether {@code type} is an unsigned integer. Such a column stores a signed value whose bits
+     * have to be reinterpreted on read, and its statistics are ordered unsigned, so both the reader
+     * and the predicate pushdown have to treat it apart from an ordinary int.
+     */
+    public static boolean isUnsignedInt(PrimitiveType type) {
+        LogicalTypeAnnotation logicalType = type.getLogicalTypeAnnotation();
+        return logicalType instanceof LogicalTypeAnnotation.IntLogicalTypeAnnotation
+                && !((LogicalTypeAnnotation.IntLogicalTypeAnnotation) logicalType).isSigned();
+    }
+
+    /**
+     * Whether an INT32 or INT64 column's logical annotation can be represented as BIGINT. Unsigned
+     * INT32 fits in BIGINT, but unsigned INT64 and non-integer annotations do not. Other physical
+     * types are outside this annotation check.
+     */
+    public static boolean isBigIntLogicalTypeCompatible(PrimitiveType type) {
+        PrimitiveType.PrimitiveTypeName physicalType = type.getPrimitiveTypeName();
+        if (physicalType != INT32 && physicalType != INT64) {
+            return true;
+        }
+
+        LogicalTypeAnnotation logicalType = type.getLogicalTypeAnnotation();
+        if (logicalType == null) {
+            return true;
+        }
+        if (!(logicalType instanceof LogicalTypeAnnotation.IntLogicalTypeAnnotation)) {
+            return false;
+        }
+        return physicalType == INT32
+                || ((LogicalTypeAnnotation.IntLogicalTypeAnnotation) logicalType).isSigned();
+    }
 
     /** Convert paimon {@link RowType} to parquet {@link MessageType}. */
     public static MessageType convertToParquetMessageType(RowType rowType) {
@@ -90,6 +124,7 @@ public class ParquetSchemaConverter {
                         .withId(fieldId);
             case BINARY:
             case VARBINARY:
+            case BLOB:
                 return Types.primitive(PrimitiveType.PrimitiveTypeName.BINARY, repetition)
                         .named(name)
                         .withId(fieldId);
@@ -158,13 +193,13 @@ public class ParquetSchemaConverter {
                                 name, localZonedTimestampType.getPrecision(), repetition, true)
                         .withId(fieldId);
             case ARRAY:
-                ArrayType arrayType = (ArrayType) type;
+            case VECTOR:
+                DataType listElementType =
+                        type instanceof ArrayType
+                                ? ((ArrayType) type).getElementType()
+                                : ((VectorType) type).getElementType();
                 Type elementParquetType =
-                        convertToParquetType(
-                                        LIST_ELEMENT_NAME,
-                                        arrayType.getElementType(),
-                                        fieldId,
-                                        depth + 1)
+                        convertToParquetType(LIST_ELEMENT_NAME, listElementType, fieldId, depth + 1)
                                 .withId(SpecialFields.getArrayElementFieldId(fieldId, depth + 1));
                 return ConversionPatterns.listOfElements(repetition, name, elementParquetType)
                         .withId(fieldId);
@@ -213,20 +248,32 @@ public class ParquetSchemaConverter {
                         .withId(fieldId);
             case ROW:
                 RowType rowType = (RowType) type;
-                return new GroupType(repetition, name, convertToParquetTypes(rowType))
+                Types.GroupBuilder<GroupType> groupTypeBuilder = Types.buildGroup(repetition);
+                // TODO Use Variant until all engines are upgraded to the latest Parquet
+                // if (VariantMetadataUtils.isVariantRowType(rowType)) {
+                //     groupTypeBuilder.as(
+                //            LogicalTypeAnnotation.variantType(Variant.VARIANT_SPEC_VERSION));
+                // }
+                return groupTypeBuilder
+                        .addFields(convertToParquetTypes(rowType))
+                        .named(name)
                         .withId(fieldId);
             case VARIANT:
                 return Types.buildGroup(repetition)
+                        // TODO Use Variant until all engines are upgraded to the latest Parquet
+                        // .as(LogicalTypeAnnotation.variantType(Variant.VARIANT_SPEC_VERSION))
                         .addField(
                                 Types.primitive(
                                                 PrimitiveType.PrimitiveTypeName.BINARY,
                                                 Type.Repetition.REQUIRED)
-                                        .named(Variant.VALUE))
+                                        .named(Variant.VALUE)
+                                        .withId(0))
                         .addField(
                                 Types.primitive(
                                                 PrimitiveType.PrimitiveTypeName.BINARY,
                                                 Type.Repetition.REQUIRED)
-                                        .named(Variant.METADATA))
+                                        .named(Variant.METADATA)
+                                        .withId(1))
                         .named(name)
                         .withId(fieldId);
             default:
@@ -340,12 +387,16 @@ public class ParquetSchemaConverter {
                             instanceof LogicalTypeAnnotation.TimestampLogicalTypeAnnotation) {
                         LogicalTypeAnnotation.TimestampLogicalTypeAnnotation timestampType =
                                 (LogicalTypeAnnotation.TimestampLogicalTypeAnnotation) logicalType;
-                        int precision =
-                                timestampType
-                                                .getUnit()
-                                                .equals(LogicalTypeAnnotation.TimeUnit.MILLIS)
-                                        ? 3
-                                        : 6;
+                        int precision;
+                        if (timestampType.getUnit().equals(LogicalTypeAnnotation.TimeUnit.MILLIS)) {
+                            precision = 3;
+                        } else if (timestampType
+                                .getUnit()
+                                .equals(LogicalTypeAnnotation.TimeUnit.MICROS)) {
+                            precision = 6;
+                        } else {
+                            precision = 9;
+                        }
                         paimonDataType =
                                 timestampType.isAdjustedToUTC()
                                         ? new LocalZonedTimestampType(precision)
@@ -374,11 +425,9 @@ public class ParquetSchemaConverter {
         } else {
             GroupType groupType = parquetType.asGroupType();
             if (logicalType instanceof LogicalTypeAnnotation.ListLogicalTypeAnnotation) {
-                int level = groupType.getType(0) instanceof GroupType ? 3 : 2;
                 paimonDataType =
                         new ArrayType(
-                                convertToPaimonField(parquetListElementType(groupType, level))
-                                        .type());
+                                convertToPaimonField(parquetListElementType(groupType)).type());
             } else if (logicalType instanceof LogicalTypeAnnotation.MapLogicalTypeAnnotation) {
                 Pair<Type, Type> keyValueType = parquetMapKeyValueType(groupType);
                 paimonDataType =
@@ -403,7 +452,8 @@ public class ParquetSchemaConverter {
         return new DataField(parquetType.getId().intValue(), parquetType.getName(), paimonDataType);
     }
 
-    public static Type parquetListElementType(GroupType listType, int level) {
+    public static Type parquetListElementType(GroupType listType) {
+        int level = listType.getType(0) instanceof GroupType ? 3 : 2;
         if (level == 3) {
             // Level 3 representation of list type.
             // List type should only have one middle group type, which is repeated, and one element

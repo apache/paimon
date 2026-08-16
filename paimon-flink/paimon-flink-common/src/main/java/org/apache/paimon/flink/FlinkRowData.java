@@ -41,7 +41,7 @@ import static org.apache.paimon.flink.FlinkRowWrapper.fromFlinkRowKind;
 /** Convert to Flink row data. */
 public class FlinkRowData implements RowData {
 
-    private InternalRow row;
+    protected InternalRow row;
 
     public FlinkRowData(InternalRow row) {
         this.row = row;
@@ -152,11 +152,12 @@ public class FlinkRowData implements RowData {
         return new BinaryVariant(variant.value(), variant.metadata());
     }
 
-    private static class FlinkArrayData implements ArrayData {
+    /** {@link ArrayData} backed by an {@link InternalArray}. */
+    protected static class FlinkArrayData implements ArrayData {
 
         private final InternalArray array;
 
-        private FlinkArrayData(InternalArray array) {
+        protected FlinkArrayData(InternalArray array) {
             this.array = array;
         }
 

@@ -26,7 +26,7 @@ import java.util.Map;
 import java.util.Objects;
 
 /** Reset consumer action for Flink. */
-public class ResetConsumerAction extends TableActionBase {
+public class ResetConsumerAction extends TableActionBase implements LocalAction {
 
     private final String consumerId;
     private Long nextSnapshotId;
@@ -46,13 +46,9 @@ public class ResetConsumerAction extends TableActionBase {
     }
 
     @Override
-    public void run() throws Exception {
+    public void executeLocally() throws Exception {
         FileStoreTable dataTable = (FileStoreTable) table;
-        ConsumerManager consumerManager =
-                new ConsumerManager(
-                        dataTable.fileIO(),
-                        dataTable.location(),
-                        dataTable.snapshotManager().branch());
+        ConsumerManager consumerManager = dataTable.consumerManager();
         if (Objects.isNull(nextSnapshotId)) {
             consumerManager.deleteConsumer(consumerId);
         } else {

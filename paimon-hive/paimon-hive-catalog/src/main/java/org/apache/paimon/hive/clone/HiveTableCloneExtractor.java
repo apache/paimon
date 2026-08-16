@@ -26,6 +26,7 @@ import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.migrate.FileMetaUtils;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.types.RowType;
 
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
@@ -51,6 +52,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.FILE_COMPRESSION;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.hive.clone.HiveCloneUtils.HIDDEN_PATH_FILTER;
+import static org.apache.paimon.hive.clone.HiveCloneUtils.SUPPORT_CLONE_SPLITS;
 import static org.apache.paimon.hive.clone.HiveCloneUtils.parseFormat;
 
 /** A {@link HiveCloneExtractor} for hive tables. */
@@ -110,6 +112,12 @@ public class HiveTableCloneExtractor implements HiveCloneExtractor {
         }
 
         String format = parseFormat(table);
+        if (supportCloneSplits(format)) {
+            Map<String, String> cloneSplitsOptions = getOptionsWhenCloneSplits(table, format);
+            paimonOptions.putAll(cloneSplitsOptions);
+            return paimonOptions;
+        }
+
         paimonOptions.put(FILE_FORMAT.key(), format);
         Map<String, String> formatOptions = getIdentifierPrefixOptions(format, hiveTableOptions);
         Map<String, String> sdFormatOptions =
@@ -122,6 +130,16 @@ public class HiveTableCloneExtractor implements HiveCloneExtractor {
             paimonOptions.put(FILE_COMPRESSION.key(), compression);
         }
         return paimonOptions;
+    }
+
+    @Override
+    public boolean supportCloneSplits(String format) {
+        for (FormatTable.Format supportFormat : FormatTable.Format.values()) {
+            if (supportFormat.name().equalsIgnoreCase(format)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static List<HivePartitionFiles> listFromPureHiveTable(
@@ -214,6 +232,20 @@ public class HiveTableCloneExtractor implements HiveCloneExtractor {
                 result.put(prefix + key.substring(prefix.length()), options.get(key));
             }
         }
+        return result;
+    }
+
+    public static Map<String, String> getOptionsWhenCloneSplits(Table table, String format) {
+        Map<String, String> result = new HashMap<>();
+        if (FormatTable.Format.JSON.name().equalsIgnoreCase(format)) {
+            result.put(FILE_FORMAT.key(), FormatTable.Format.PARQUET.name().toLowerCase());
+        } else if (FormatTable.Format.CSV.name().equalsIgnoreCase(format)) {
+            result.put(FILE_FORMAT.key(), FormatTable.Format.PARQUET.name().toLowerCase());
+        } else {
+            result.put(FILE_FORMAT.key(), format);
+        }
+        // only for clone
+        result.put(SUPPORT_CLONE_SPLITS, "true");
         return result;
     }
 }

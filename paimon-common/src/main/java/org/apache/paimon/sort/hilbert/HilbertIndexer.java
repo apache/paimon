@@ -25,6 +25,7 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataField;
@@ -46,6 +47,7 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.ConvertBinaryUtil;
 
 import org.davidmoten.hilbert.HilbertCurve;
@@ -266,7 +268,17 @@ public class HilbertIndexer implements Serializable {
         }
 
         @Override
+        public HProcessFunction visit(BlobType blobType) {
+            throw new RuntimeException("Unsupported type");
+        }
+
+        @Override
         public HProcessFunction visit(ArrayType arrayType) {
+            throw new RuntimeException("Unsupported type");
+        }
+
+        @Override
+        public HProcessFunction visit(VectorType vectorType) {
             throw new RuntimeException("Unsupported type");
         }
 

@@ -28,6 +28,14 @@ import org.apache.paimon.flink.clone.files.CloneFilesFunction;
 import org.apache.paimon.flink.clone.files.DataFileInfo;
 import org.apache.paimon.flink.clone.files.ListCloneFilesFunction;
 import org.apache.paimon.flink.clone.files.ShuffleDataFileByTableComputer;
+import org.apache.paimon.flink.clone.schema.CloneHiveSchemaFunction;
+import org.apache.paimon.flink.clone.schema.CloneSchemaInfo;
+import org.apache.paimon.flink.clone.spits.CloneSplitInfo;
+import org.apache.paimon.flink.clone.spits.CloneSplitsFunction;
+import org.apache.paimon.flink.clone.spits.CommitMessageInfo;
+import org.apache.paimon.flink.clone.spits.CommitMessageTableOperator;
+import org.apache.paimon.flink.clone.spits.ListCloneSplitsFunction;
+import org.apache.paimon.flink.clone.spits.ShuffleCommitMessageByTableComputer;
 import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
 import org.apache.paimon.hive.HiveCatalog;
 import org.apache.paimon.utils.StringUtils;
@@ -147,7 +155,10 @@ public class CloneHiveTableUtils {
             int parallelism,
             @Nullable String whereSql,
             @Nullable List<String> includedTables,
-            @Nullable List<String> excludedTables)
+            @Nullable List<String> excludedTables,
+            @Nullable String preferFileFormat,
+            boolean metaOnly,
+            boolean cloneIfExists)
             throws Exception {
         // list source tables
         DataStream<Tuple2<Identifier, Identifier>> source =
@@ -165,9 +176,81 @@ public class CloneHiveTableUtils {
                 FlinkStreamPartitioner.partition(
                         source, new ShuffleIdentifierByTableComputer(), parallelism);
 
-        // create target table, list files and group by <table, partition>
-        DataStream<CloneFileInfo> files =
+        // create target table, check support clone splits
+        DataStream<CloneSchemaInfo> schemaInfos =
                 partitionedSource
+                        .process(
+                                new CloneHiveSchemaFunction(
+                                        sourceCatalogConfig,
+                                        targetCatalogConfig,
+                                        preferFileFormat,
+                                        cloneIfExists))
+                        .name("Clone Schema")
+                        .setParallelism(parallelism);
+
+        // if metaOnly is true, only clone schema and skip data cloning
+        if (metaOnly) {
+            schemaInfos.sinkTo(new DiscardingSink<>()).name("end").setParallelism(1);
+            return;
+        }
+
+        buildForCloneSplits(
+                sourceCatalogConfig, targetCatalogConfig, parallelism, whereSql, schemaInfos);
+
+        buildForCloneFile(
+                sourceCatalogConfig, targetCatalogConfig, parallelism, whereSql, schemaInfos);
+    }
+
+    public static void buildForCloneSplits(
+            Map<String, String> sourceCatalogConfig,
+            Map<String, String> targetCatalogConfig,
+            int parallelism,
+            @Nullable String whereSql,
+            DataStream<CloneSchemaInfo> schemaInfos) {
+
+        // list splits
+        DataStream<CloneSplitInfo> splits =
+                schemaInfos
+                        .filter(cloneSchemaInfo -> cloneSchemaInfo.supportCloneSplits())
+                        .rebalance()
+                        .process(
+                                new ListCloneSplitsFunction(
+                                        sourceCatalogConfig, targetCatalogConfig, whereSql))
+                        .name("List Splits")
+                        .setParallelism(parallelism);
+
+        // copy splits and commit
+        DataStream<CommitMessageInfo> commitMessage =
+                splits.rebalance()
+                        .process(new CloneSplitsFunction(sourceCatalogConfig, targetCatalogConfig))
+                        .name("Copy Splits")
+                        .setParallelism(parallelism);
+
+        DataStream<CommitMessageInfo> partitionedCommitMessage =
+                FlinkStreamPartitioner.partition(
+                        commitMessage, new ShuffleCommitMessageByTableComputer(), parallelism);
+
+        DataStream<Long> committed =
+                partitionedCommitMessage
+                        .transform(
+                                "Commit Table Splits",
+                                BasicTypeInfo.LONG_TYPE_INFO,
+                                new CommitMessageTableOperator(targetCatalogConfig))
+                        .setParallelism(parallelism);
+        committed.sinkTo(new DiscardingSink<>()).name("end").setParallelism(1);
+    }
+
+    public static void buildForCloneFile(
+            Map<String, String> sourceCatalogConfig,
+            Map<String, String> targetCatalogConfig,
+            int parallelism,
+            @Nullable String whereSql,
+            DataStream<CloneSchemaInfo> schemaInfos) {
+        // list files and group by <table, partition>
+        DataStream<CloneFileInfo> files =
+                schemaInfos
+                        .filter(cloneSchemaInfo -> !cloneSchemaInfo.supportCloneSplits())
+                        .rebalance()
                         .process(
                                 new ListCloneFilesFunction(
                                         sourceCatalogConfig, targetCatalogConfig, whereSql))
@@ -188,7 +271,7 @@ public class CloneHiveTableUtils {
         DataStream<Long> committed =
                 partitionedDataFile
                         .transform(
-                                "Commit table",
+                                "Commit Table Files",
                                 BasicTypeInfo.LONG_TYPE_INFO,
                                 new CloneFilesCommitOperator(targetCatalogConfig))
                         .setParallelism(parallelism);

@@ -20,11 +20,14 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.RemoteIterator;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
@@ -35,17 +38,23 @@ import org.apache.paimon.utils.ThreadUtils;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Scheduler;
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.time.Duration;
+import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.apache.paimon.options.CatalogOptions.FILE_IO_ALLOW_CACHE;
 import static org.apache.paimon.rest.RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
+import static org.apache.paimon.rest.RESTCatalogOptions.DLF_OSS_ENDPOINT;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENABLED;
 
 /** A {@link FileIO} to support getting token from REST Server. */
 public class RESTTokenFileIO implements FileIO {
@@ -60,8 +69,8 @@ public class RESTTokenFileIO implements FileIO {
 
     private static final Cache<RESTToken, FileIO> FILE_IO_CACHE =
             Caffeine.newBuilder()
-                    .expireAfterAccess(30, TimeUnit.MINUTES)
                     .maximumSize(1000)
+                    .expireAfterAccess(10, TimeUnit.HOURS)
                     .removalListener(
                             (ignored, value, cause) -> IOUtils.closeQuietly((FileIO) value))
                     .scheduler(
@@ -109,6 +118,12 @@ public class RESTTokenFileIO implements FileIO {
     }
 
     @Override
+    public TwoPhaseOutputStream newTwoPhaseOutputStream(Path path, boolean overwrite)
+            throws IOException {
+        return fileIO().newTwoPhaseOutputStream(path, overwrite);
+    }
+
+    @Override
     public FileStatus getFileStatus(Path path) throws IOException {
         return fileIO().getFileStatus(path);
     }
@@ -116,6 +131,13 @@ public class RESTTokenFileIO implements FileIO {
     @Override
     public FileStatus[] listStatus(Path path) throws IOException {
         return fileIO().listStatus(path);
+    }
+
+    @Override
+    public RemoteIterator<FileStatus> listFilesIterative(Path path, boolean recursive)
+            throws IOException {
+        // the interface default would hide the inner FileIO's iterative listing override
+        return fileIO().listFilesIterative(path, recursive);
     }
 
     @Override
@@ -136,6 +158,22 @@ public class RESTTokenFileIO implements FileIO {
     @Override
     public boolean rename(Path src, Path dst) throws IOException {
         return fileIO().rename(src, dst);
+    }
+
+    @Override
+    public boolean tryToWriteAtomic(Path path, String content) throws IOException {
+        // the interface default (temp file + rename) would bypass the inner FileIO's atomic
+        // override
+        return fileIO().tryToWriteAtomic(path, content);
+    }
+
+    @Override
+    public String createBlobPresignedUrl(
+            Path tableRoot, BlobDescriptor descriptor, Duration validity) throws IOException {
+        if (!path.equals(tableRoot)) {
+            throw new IOException("Table root does not match RESTTokenFileIO bound table root.");
+        }
+        return fileIO().createBlobPresignedUrl(tableRoot, descriptor, validity);
     }
 
     @Override
@@ -162,8 +200,7 @@ public class RESTTokenFileIO implements FileIO {
             }
 
             Options options = catalogContext.options();
-            // the original options are not overwritten
-            options = new Options(RESTUtil.merge(token.token(), options.toMap()));
+            options = new Options(RESTUtil.merge(options.toMap(), token.token()));
             options.set(FILE_IO_ALLOW_CACHE, false);
             CatalogContext context =
                     CatalogContext.create(
@@ -202,13 +239,39 @@ public class RESTTokenFileIO implements FileIO {
         if (apiInstance == null) {
             apiInstance = new RESTApi(catalogContext.options(), false);
         }
-        GetTableTokenResponse response = apiInstance.loadTableToken(identifier);
+        Identifier tableIdentifier = identifier;
+        if (identifier.isSystemTable()) {
+            tableIdentifier =
+                    new Identifier(
+                            identifier.getDatabaseName(),
+                            identifier.getTableName(),
+                            identifier.getBranchName());
+        }
+        GetTableTokenResponse response = apiInstance.loadTableToken(tableIdentifier);
         LOG.info(
                 "end refresh data token for identifier [{}] expiresAtMillis [{}]",
                 identifier,
                 response.getExpiresAtMillis());
 
-        token = new RESTToken(response.getToken(), response.getExpiresAtMillis());
+        token =
+                new RESTToken(
+                        mergeTokenWithCatalogOptions(response.getToken()),
+                        response.getExpiresAtMillis());
+    }
+
+    private Map<String, String> mergeTokenWithCatalogOptions(Map<String, String> token) {
+        Map<String, String> newToken = Maps.newLinkedHashMap(token);
+        Options catalogOptions = catalogContext.options();
+        // DLF OSS endpoint should override the standard OSS endpoint.
+        String dlfOssEndpoint = catalogOptions.get(DLF_OSS_ENDPOINT.key());
+        if (dlfOssEndpoint != null && !dlfOssEndpoint.isEmpty()) {
+            newToken.put("fs.oss.endpoint", dlfOssEndpoint);
+        }
+        if (catalogOptions.contains(IO_CACHE_ENABLED)) {
+            newToken.put(
+                    IO_CACHE_ENABLED.key(), String.valueOf(catalogOptions.get(IO_CACHE_ENABLED)));
+        }
+        return ImmutableMap.copyOf(newToken);
     }
 
     /**

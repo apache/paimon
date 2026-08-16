@@ -59,6 +59,11 @@ public class SortBufferLocalMerger implements LocalMerger {
     }
 
     @Override
+    public boolean isEmpty() {
+        return sortBuffer.isEmpty();
+    }
+
+    @Override
     public void forEach(Consumer<InternalRow> consumer) throws IOException {
         sortBuffer.forEach(
                 keyComparator,

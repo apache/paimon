@@ -33,7 +33,9 @@ import org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction;
 import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.sort.BinaryInMemorySortBuffer;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ReusingKeyValue;
@@ -45,7 +47,6 @@ import org.junit.jupiter.api.Test;
 
 import java.io.EOFException;
 import java.io.IOException;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
@@ -126,6 +127,25 @@ public abstract class SortBufferWriteBufferTestBase {
                     expected.poll().assertEquals(kv);
                 });
         assertThat(expected).isEmpty();
+    }
+
+    @Test
+    public void testCreateReader() throws Exception {
+        List<ReusingTestData> input = ReusingTestData.generateData(100, addOnly());
+        Queue<ReusingTestData> expected = new LinkedList<>(getExpected(input));
+        prepareTable(input);
+
+        try (RecordReaderIterator<KeyValue> reader =
+                new RecordReaderIterator<>(
+                        table.createReader(KEY_COMPARATOR, createMergeFunction()))) {
+            while (reader.hasNext()) {
+                assertThat(expected.isEmpty()).isFalse();
+                expected.poll().assertEquals(reader.next());
+            }
+        }
+
+        assertThat(expected).isEmpty();
+        assertThat(table.isEmpty()).isTrue();
     }
 
     private void prepareTable(List<ReusingTestData> input) throws IOException {
@@ -225,8 +245,13 @@ public abstract class SortBufferWriteBufferTestBase {
             options.set(CoreOptions.AGGREGATION_REMOVE_RECORD_ON_DELETE, removeRecordOnDelete);
             return AggregateMergeFunction.factory(
                             options,
-                            Arrays.asList("f0", "f1"),
-                            Arrays.asList(DataTypes.INT().notNull(), DataTypes.BIGINT()),
+                            RowType.builder()
+                                    .fields(
+                                            new DataType[] {
+                                                DataTypes.INT().notNull(), DataTypes.BIGINT()
+                                            },
+                                            new String[] {"f0", "f1"})
+                                    .build(),
                             Collections.singletonList("f0"))
                     .create();
         }
@@ -263,10 +288,15 @@ public abstract class SortBufferWriteBufferTestBase {
             MergeFunctionFactory<KeyValue> aggMergeFunction =
                     AggregateMergeFunction.factory(
                             options,
-                            Arrays.asList("f0", "f1"),
-                            Arrays.asList(DataTypes.INT().notNull(), DataTypes.BIGINT()),
+                            RowType.builder()
+                                    .fields(
+                                            new DataType[] {
+                                                DataTypes.INT().notNull(), DataTypes.BIGINT()
+                                            },
+                                            new String[] {"f0", "f1"})
+                                    .build(),
                             Collections.singletonList("f0"));
-            return LookupMergeFunction.wrap(aggMergeFunction).create();
+            return LookupMergeFunction.wrap(aggMergeFunction, null, null, null).create();
         }
     }
 

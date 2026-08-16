@@ -23,6 +23,7 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.columnar.BytesColumnVector.Bytes;
 import org.apache.paimon.data.variant.GenericVariant;
@@ -121,7 +122,16 @@ public class VectorizedColumnBatch implements Serializable {
     }
 
     public InternalArray getArray(int rowId, int colId) {
-        return ((ArrayColumnVector) columns[colId]).getArray(rowId);
+        ColumnVector column = columns[colId];
+        if (column instanceof VecColumnVector) {
+            // A VECTOR is exposed as ARRAY; a vector is an array.
+            return ((VecColumnVector) column).getVector(rowId);
+        }
+        return ((ArrayColumnVector) column).getArray(rowId);
+    }
+
+    public InternalVector getVector(int rowId, int colId) {
+        return ((VecColumnVector) columns[colId]).getVector(rowId);
     }
 
     public InternalRow getRow(int rowId, int colId) {

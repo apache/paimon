@@ -24,6 +24,7 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VectorType;
 
 import static org.apache.paimon.types.DataTypeChecks.getFieldTypes;
 import static org.apache.paimon.types.DataTypeChecks.getPrecision;
@@ -75,6 +76,10 @@ public final class InternalSerializers {
                 return new TimestampSerializer(getPrecision(type));
             case ARRAY:
                 return new InternalArraySerializer(((ArrayType) type).getElementType());
+            case VECTOR:
+                VectorType vectorType = (VectorType) type;
+                return new InternalVectorSerializer(
+                        vectorType.getElementType(), vectorType.getLength());
             case MULTISET:
                 return new InternalMapSerializer(
                         ((MultisetType) type).getElementType(), new IntType(false));
@@ -85,6 +90,8 @@ public final class InternalSerializers {
                 return new InternalRowSerializer(getFieldTypes(type).toArray(new DataType[0]));
             case VARIANT:
                 return VariantSerializer.INSTANCE;
+            case BLOB:
+                return BlobSerializer.INSTANCE;
             default:
                 throw new UnsupportedOperationException(
                         "Unsupported type '" + type + "' to get internal serializer");

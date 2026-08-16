@@ -21,11 +21,11 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.Lock;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.FileStoreTable;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,8 +49,8 @@ public class FileSystemCatalog extends AbstractCatalog {
         this.warehouse = warehouse;
     }
 
-    public FileSystemCatalog(FileIO fileIO, Path warehouse, Options options) {
-        super(fileIO, options);
+    public FileSystemCatalog(FileIO fileIO, Path warehouse, CatalogContext context) {
+        super(fileIO, context);
         this.warehouse = warehouse;
     }
 
@@ -180,6 +180,19 @@ public class FileSystemCatalog extends AbstractCatalog {
         }
     }
 
+    @Override
+    protected void replaceTableImpl(
+            Identifier identifier, FileStoreTable existingTable, Schema newSchema) {
+        truncateTable(existingTable);
+        try {
+            runWithLock(identifier, () -> appendNewSchema(existingTable, newSchema));
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     protected static <T> T uncheck(Callable<T> callable) {
         try {
             return callable.call();
@@ -198,11 +211,11 @@ public class FileSystemCatalog extends AbstractCatalog {
 
     @Override
     public CatalogLoader catalogLoader() {
-        return new FileSystemCatalogLoader(fileIO, warehouse, catalogOptions);
+        return new FileSystemCatalogLoader(fileIO, warehouse, context);
     }
 
     @Override
     public boolean caseSensitive() {
-        return catalogOptions.getOptional(CASE_SENSITIVE).orElse(true);
+        return context.options().getOptional(CASE_SENSITIVE).orElse(true);
     }
 }

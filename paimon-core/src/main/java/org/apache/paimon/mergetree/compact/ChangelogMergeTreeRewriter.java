@@ -186,6 +186,8 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
             notifyRewriteCompactBefore(before);
         }
 
+        after = notifyRewriteCompactAfter(after);
+
         List<DataFileMeta> changelogFiles =
                 changelogFileWriter != null
                         ? changelogFileWriter.result()

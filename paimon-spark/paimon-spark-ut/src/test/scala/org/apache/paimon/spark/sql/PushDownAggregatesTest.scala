@@ -230,11 +230,46 @@ class PushDownAggregatesTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
           spark.sql("INSERT INTO T VALUES(1, 'x_1')")
           if (deletionVectorsEnabled) {
             runAndCheckAggregate("SELECT COUNT(*) FROM T", Row(3) :: Nil, 0)
+            // should not push down min max for primary key table
+            runAndCheckAggregate("SELECT MIN(c1) FROM T", Row(1) :: Nil, 2)
           } else {
             runAndCheckAggregate("SELECT COUNT(*) FROM T", Row(3) :: Nil, 2)
           }
         }
       })
+  }
+
+  test("Count with deletion-vector merge-on-read and level-0 files") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, value STRING)
+            |TBLPROPERTIES (
+            | 'primary-key' = 'id',
+            | 'bucket' = '1',
+            | 'deletion-vectors.enabled' = 'true',
+            | 'deletion-vectors.merge-on-read' = 'true',
+            | 'write-only' = 'true'
+            |)
+            |""".stripMargin)
+
+      sql("INSERT INTO T VALUES (1, 'a'), (2, 'b'), (3, 'c')")
+      checkAnswer(sql("SELECT COUNT(*), MIN(level), MAX(level) FROM `T$files`"), Row(1, 0, 0))
+      // A single non-overlapping L0 file has an exact row count.
+      runAndCheckAggregate("SELECT COUNT(*) FROM T", Row(3) :: Nil, 0)
+
+      sql("DELETE FROM T WHERE id = 2")
+      checkAnswer(sql("SELECT COUNT(*), MIN(level), MAX(level) FROM `T$files`"), Row(2, 0, 0))
+      // The L0 delete record overlaps with the original file and requires MOR.
+      runAndCheckAggregate("SELECT COUNT(*) FROM T", Row(2) :: Nil, 2)
+
+      sql("INSERT INTO T VALUES (1, 'updated'), (4, 'd')")
+      checkAnswer(sql("SELECT COUNT(*), MIN(level), MAX(level) FROM `T$files`"), Row(3, 0, 0))
+      checkAnswer(
+        sql("SELECT * FROM T ORDER BY id"),
+        Row(1, "updated") :: Row(3, "c") :: Row(4, "d") :: Nil)
+      // Overlapping L0 files require MOR again, so Spark executes the aggregate.
+      runAndCheckAggregate("SELECT COUNT(*) FROM T", Row(3) :: Nil, 2)
+    }
   }
 
   test("Push down aggregate - table with deletion vector") {
@@ -264,5 +299,64 @@ class PushDownAggregatesTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
             }
           })
       })
+  }
+
+  test("Push down aggregate - non-primary-key DV table with tight bounds") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT)
+            |TBLPROPERTIES (
+            | 'deletion-vectors.enabled' = 'true',
+            | 'bucket-key' = 'id',
+            | 'bucket' = '1'
+            |)
+            |""".stripMargin)
+      sql("INSERT INTO T SELECT id FROM range (0, 5000)")
+      // No deleted rows, so split stats can answer MIN/MAX.
+      runAndCheckAggregate("SELECT COUNT(*), MIN(id), MAX(id) FROM T", Row(5000, 0, 4999) :: Nil, 0)
+      sql("DELETE FROM T WHERE id > 100 AND id <= 400")
+      // Deleted rows make file stats wide, so Spark keeps MIN/MAX aggregation.
+      runAndCheckAggregate("SELECT MIN(id), MAX(id) FROM T", Row(0, 4999) :: Nil, 2)
+    }
+  }
+
+  test("Push down aggregate: group by partial partition of a multi partition table") {
+    sql(s"""
+           |CREATE TABLE T (
+           |c1 STRING,
+           |c2 STRING,
+           |c3 STRING,
+           |c4 STRING,
+           |c5 DATE)
+           |PARTITIONED BY (c5, c1)
+           |TBLPROPERTIES ('primary-key' = 'c5, c1, c3')
+           |""".stripMargin)
+
+    sql("INSERT INTO T VALUES ('t1', 'k1', 'v1', 'r1', '2025-01-01')")
+    checkAnswer(
+      sql("SELECT COUNT(*) FROM T GROUP BY c1"),
+      Seq(Row(1))
+    )
+    checkAnswer(
+      sql("SELECT c1, COUNT(*) FROM T GROUP BY c1"),
+      Seq(Row("t1", 1))
+    )
+    checkAnswer(
+      sql("SELECT COUNT(*), c1 FROM T GROUP BY c1"),
+      Seq(Row(1, "t1"))
+    )
+  }
+
+  // https://github.com/apache/paimon/issues/6610
+  test("Push down aggregate: aggregate a column in one partition is all null and another is not") {
+    withTable("T") {
+      spark.sql("CREATE TABLE T (c1 INT, c2 LONG) PARTITIONED BY(day STRING)")
+
+      spark.sql("INSERT INTO T VALUES (1, 2, '2025-11-10')")
+      spark.sql("INSERT INTO T VALUES (null, 2, '2025-11-11')")
+
+      runAndCheckAggregate("SELECT MIN(c1) FROM T", Row(1) :: Nil, 0)
+      runAndCheckAggregate("SELECT MAX(c1) FROM T", Row(1) :: Nil, 0)
+    }
   }
 }

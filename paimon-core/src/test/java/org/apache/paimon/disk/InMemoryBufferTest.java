@@ -198,7 +198,6 @@ public class InMemoryBufferTest {
 
         @Override
         public void flushMemory() {
-            inMemoryBuffer.complete();
             // emulate real-world flushing data to disk, we need to call newIterator method
             inMemoryBuffer.newIterator();
             inMemoryBuffer.reset();

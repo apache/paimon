@@ -37,6 +37,14 @@ public class ArrowPerRowBatchConverter extends ArrowBatchConverter {
     }
 
     @Override
+    public ArrowPerRowBatchConverter copy(VectorSchemaRoot root, ArrowFieldWriter[] fieldWriters) {
+        ArrowPerRowBatchConverter newConverter = new ArrowPerRowBatchConverter(root, fieldWriters);
+        newConverter.iterator = this.iterator;
+        newConverter.currentRow = this.currentRow;
+        return newConverter;
+    }
+
+    @Override
     public void doWrite(int maxBatchRows) {
         int rowIndex = 0;
         while (currentRow != null && rowIndex < maxBatchRows) {

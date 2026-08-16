@@ -102,7 +102,11 @@ public enum DataTypeRoot {
 
     VARIANT(DataTypeFamily.PREDEFINED),
 
+    BLOB(DataTypeFamily.PREDEFINED),
+
     ARRAY(DataTypeFamily.CONSTRUCTED, DataTypeFamily.COLLECTION),
+
+    VECTOR(DataTypeFamily.CONSTRUCTED, DataTypeFamily.COLLECTION),
 
     MULTISET(DataTypeFamily.CONSTRUCTED, DataTypeFamily.COLLECTION),
 

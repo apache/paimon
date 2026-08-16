@@ -19,8 +19,12 @@
 package org.apache.paimon.data.serializer;
 
 import org.apache.paimon.io.DataInputView;
+import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputView;
+import org.apache.paimon.io.DataOutputViewStreamWrapper;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.Serializable;
 
@@ -65,6 +69,31 @@ public interface Serializer<T> extends Serializable {
      *     it reads.
      */
     T deserialize(DataInputView source) throws IOException;
+
+    /**
+     * Serializes the given record to byte array.
+     *
+     * @param record The record to serialize.
+     * @return The serialized element.
+     */
+    default byte[] serializeToBytes(T record) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        DataOutputViewStreamWrapper view = new DataOutputViewStreamWrapper(out);
+        serialize(record, view);
+        return out.toByteArray();
+    }
+
+    /**
+     * De-serializes a record from byte array.
+     *
+     * @param bytes The byte array to de-serialize.
+     * @return The deserialized element.
+     */
+    default T deserializeFromBytes(byte[] bytes) throws IOException {
+        ByteArrayInputStream in = new ByteArrayInputStream(bytes);
+        DataInputViewStreamWrapper view = new DataInputViewStreamWrapper(in);
+        return deserialize(view);
+    }
 
     /**
      * Serializes the given record to string.

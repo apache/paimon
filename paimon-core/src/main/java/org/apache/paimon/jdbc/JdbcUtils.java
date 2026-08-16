@@ -18,6 +18,7 @@
 
 package org.apache.paimon.jdbc;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.options.Options;
 
@@ -40,6 +41,27 @@ import java.util.stream.Stream;
 /** Util for jdbc catalog. */
 public class JdbcUtils {
     private static final Logger LOG = LoggerFactory.getLogger(JdbcUtils.class);
+    private static final String UNIQUE_CONSTRAINT_VIOLATION_STATE = "23505";
+
+    enum JdbcViewConflictKind {
+        ALREADY_EXISTS,
+        NOT_EXISTS
+    }
+
+    /** Internal exception for JDBC view conflict (unique constraint violation or not-found). */
+    static class JdbcViewConflictException extends RuntimeException {
+        private final JdbcViewConflictKind kind;
+
+        JdbcViewConflictException(JdbcViewConflictKind kind, String message) {
+            super(message);
+            this.kind = kind;
+        }
+
+        JdbcViewConflictKind kind() {
+            return kind;
+        }
+    }
+
     public static final String CATALOG_TABLE_NAME = "paimon_tables";
     public static final String CATALOG_KEY = "catalog_key";
     public static final String TABLE_DATABASE = "database_name";
@@ -231,11 +253,268 @@ public class JdbcUtils {
                     + CATALOG_KEY
                     + " = ?";
 
+    // Table Properties
+    static final String TABLE_PROPERTIES_TABLE_NAME = "paimon_table_properties";
+    static final String TABLE_PROPERTY_KEY = "property_key";
+    static final String TABLE_PROPERTY_VALUE = "property_value";
+
+    static final String CREATE_TABLE_PROPERTIES_TABLE =
+            "CREATE TABLE "
+                    + TABLE_PROPERTIES_TABLE_NAME
+                    + "("
+                    + CATALOG_KEY
+                    + " VARCHAR(255) NOT NULL,"
+                    + TABLE_DATABASE
+                    + " VARCHAR(255) NOT NULL,"
+                    + TABLE_NAME
+                    + " VARCHAR(255) NOT NULL,"
+                    + TABLE_PROPERTY_KEY
+                    + " VARCHAR(255) NOT NULL,"
+                    + TABLE_PROPERTY_VALUE
+                    + " VARCHAR(1000),"
+                    + "PRIMARY KEY ("
+                    + CATALOG_KEY
+                    + ", "
+                    + TABLE_DATABASE
+                    + ", "
+                    + TABLE_NAME
+                    + ", "
+                    + TABLE_PROPERTY_KEY
+                    + ")"
+                    + ")";
+
+    static final String INSERT_TABLE_PROPERTIES_SQL =
+            "INSERT INTO "
+                    + TABLE_PROPERTIES_TABLE_NAME
+                    + " ("
+                    + CATALOG_KEY
+                    + ", "
+                    + TABLE_DATABASE
+                    + ", "
+                    + TABLE_NAME
+                    + ", "
+                    + TABLE_PROPERTY_KEY
+                    + ", "
+                    + TABLE_PROPERTY_VALUE
+                    + ") VALUES ";
+    static final String INSERT_TABLE_PROPERTIES_VALUES_BASE = "(?,?,?,?,?)";
+
+    static final String DELETE_ALL_TABLE_PROPERTIES_SQL =
+            "DELETE FROM "
+                    + TABLE_PROPERTIES_TABLE_NAME
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ? AND "
+                    + TABLE_DATABASE
+                    + " = ? AND "
+                    + TABLE_NAME
+                    + " = ?";
+
+    static final String DELETE_ALL_TABLE_PROPERTIES_FOR_DB_SQL =
+            "DELETE FROM "
+                    + TABLE_PROPERTIES_TABLE_NAME
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ? AND "
+                    + TABLE_DATABASE
+                    + " = ?";
+
+    static final String RENAME_TABLE_PROPERTIES_SQL =
+            "UPDATE "
+                    + TABLE_PROPERTIES_TABLE_NAME
+                    + " SET "
+                    + TABLE_DATABASE
+                    + " = ? , "
+                    + TABLE_NAME
+                    + " = ? "
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ? AND "
+                    + TABLE_DATABASE
+                    + " = ? AND "
+                    + TABLE_NAME
+                    + " = ? ";
+
+    static final String GET_ALL_TABLE_PROPERTIES_SQL =
+            "SELECT * "
+                    + " FROM "
+                    + TABLE_PROPERTIES_TABLE_NAME
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ? AND "
+                    + TABLE_DATABASE
+                    + " = ? AND "
+                    + TABLE_NAME
+                    + " = ? ";
+
     // Distributed locks table
     static final String DISTRIBUTED_LOCKS_TABLE_NAME = "paimon_distributed_locks";
     static final String LOCK_ID = "lock_id";
     static final String ACQUIRED_AT = "acquired_at";
     static final String EXPIRE_TIME = "expire_time_seconds";
+
+    // View table
+    public static final String VIEW_TABLE_NAME = "paimon_views";
+    public static final String VIEW_DATABASE = "database_name";
+    public static final String VIEW_NAME = "view_name";
+    public static final String VIEW_SCHEMA = "view_schema";
+
+    static final String CREATE_VIEW_TABLE =
+            "CREATE TABLE "
+                    + VIEW_TABLE_NAME
+                    + "("
+                    + CATALOG_KEY
+                    + " VARCHAR(255) NOT NULL,"
+                    + VIEW_DATABASE
+                    + " VARCHAR(255) NOT NULL,"
+                    + VIEW_NAME
+                    + " VARCHAR(255) NOT NULL,"
+                    + VIEW_SCHEMA
+                    + " TEXT NOT NULL,"
+                    + " PRIMARY KEY ("
+                    + CATALOG_KEY
+                    + ", "
+                    + VIEW_DATABASE
+                    + ", "
+                    + VIEW_NAME
+                    + ")"
+                    + ")";
+
+    static final String GET_VIEW_SQL =
+            "SELECT * FROM "
+                    + VIEW_TABLE_NAME
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ? AND "
+                    + VIEW_DATABASE
+                    + " = ? AND "
+                    + VIEW_NAME
+                    + " = ? ";
+
+    static final String GET_VIEW_DATABASE_SQL =
+            "SELECT "
+                    + VIEW_DATABASE
+                    + " FROM "
+                    + VIEW_TABLE_NAME
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ? AND "
+                    + VIEW_DATABASE
+                    + " = ? LIMIT 1";
+
+    static final String LIST_VIEWS_SQL =
+            "SELECT * FROM "
+                    + VIEW_TABLE_NAME
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ? AND "
+                    + VIEW_DATABASE
+                    + " = ?";
+
+    // Ordered view listing with an exclusive cursor (view_name > ?). A {@code LIMIT n} clause is
+    // appended by the caller when paging is requested.
+    static final String LIST_VIEWS_PAGED_SQL =
+            "SELECT "
+                    + VIEW_NAME
+                    + " FROM "
+                    + VIEW_TABLE_NAME
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ? AND "
+                    + VIEW_DATABASE
+                    + " = ? AND "
+                    + VIEW_NAME
+                    + " > ? ORDER BY "
+                    + VIEW_NAME;
+
+    static final String LIST_VIEWS_PAGED_WITH_PATTERN_SQL =
+            "SELECT "
+                    + VIEW_NAME
+                    + " FROM "
+                    + VIEW_TABLE_NAME
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ? AND "
+                    + VIEW_DATABASE
+                    + " = ? AND "
+                    + VIEW_NAME
+                    + " LIKE ? AND "
+                    + VIEW_NAME
+                    + " > ? ORDER BY "
+                    + VIEW_NAME;
+
+    static final String INSERT_VIEW_SQL =
+            "INSERT INTO "
+                    + VIEW_TABLE_NAME
+                    + " ("
+                    + CATALOG_KEY
+                    + ", "
+                    + VIEW_DATABASE
+                    + ", "
+                    + VIEW_NAME
+                    + ", "
+                    + VIEW_SCHEMA
+                    + ") "
+                    + " VALUES (?,?,?,?)";
+
+    static final String DROP_VIEW_SQL =
+            "DELETE FROM "
+                    + VIEW_TABLE_NAME
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ? AND "
+                    + VIEW_DATABASE
+                    + " = ? AND "
+                    + VIEW_NAME
+                    + " = ? ";
+
+    static final String DELETE_VIEWS_SQL =
+            "DELETE FROM  "
+                    + VIEW_TABLE_NAME
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ? AND "
+                    + VIEW_DATABASE
+                    + " = ?";
+
+    static final String RENAME_VIEW_SQL =
+            "UPDATE "
+                    + VIEW_TABLE_NAME
+                    + " SET "
+                    + VIEW_DATABASE
+                    + " = ? , "
+                    + VIEW_NAME
+                    + " = ? "
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ? AND "
+                    + VIEW_DATABASE
+                    + " = ? AND "
+                    + VIEW_NAME
+                    + " = ? ";
+
+    static final String UPDATE_VIEW_SQL =
+            "UPDATE "
+                    + VIEW_TABLE_NAME
+                    + " SET "
+                    + VIEW_SCHEMA
+                    + " = ? "
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ? AND "
+                    + VIEW_DATABASE
+                    + " = ? AND "
+                    + VIEW_NAME
+                    + " = ? ";
+
+    static final String LIST_ALL_VIEW_DATABASES_SQL =
+            "SELECT DISTINCT "
+                    + VIEW_DATABASE
+                    + " FROM "
+                    + VIEW_TABLE_NAME
+                    + " WHERE "
+                    + CATALOG_KEY
+                    + " = ?";
 
     public static Properties extractJdbcConfiguration(
             Map<String, String> properties, String prefix) {
@@ -278,9 +557,7 @@ public class JdbcUtils {
         int updatedRecords =
                 execute(
                         err -> {
-                            if (err instanceof SQLIntegrityConstraintViolationException
-                                    || (err.getMessage() != null
-                                            && err.getMessage().contains("constraint failed"))) {
+                            if (isUniqueConstraintViolation(err)) {
                                 throw new RuntimeException(
                                         String.format("Table already exists: %s", toTable));
                             }
@@ -312,6 +589,9 @@ public class JdbcUtils {
         }
 
         if (exists(connections, JdbcUtils.GET_DATABASE_PROPERTIES_SQL, storeKey, databaseName)) {
+            return true;
+        }
+        if (exists(connections, JdbcUtils.GET_VIEW_DATABASE_SQL, storeKey, databaseName)) {
             return true;
         }
         return false;
@@ -373,7 +653,32 @@ public class JdbcUtils {
             sqlErrorHandler.accept(e);
             throw new RuntimeException(String.format("Failed to execute: %s", sql), e);
         } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
             throw new RuntimeException("Interrupted in SQL command", e);
+        }
+    }
+
+    public static boolean insertTable(
+            JdbcClientPool connections, String catalogKey, String databaseName, String tableName) {
+        try {
+            int insertRecord =
+                    connections.run(
+                            conn -> {
+                                try (PreparedStatement sql =
+                                        conn.prepareStatement(
+                                                JdbcUtils.DO_COMMIT_CREATE_TABLE_SQL)) {
+                                    sql.setString(1, catalogKey);
+                                    sql.setString(2, databaseName);
+                                    sql.setString(3, tableName);
+                                    return sql.executeUpdate();
+                                }
+                            });
+            return insertRecord == 1;
+        } catch (SQLException | InterruptedException e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            throw new RuntimeException("Failed to insert table: " + tableName, e);
         }
     }
 
@@ -402,6 +707,52 @@ public class JdbcUtils {
                 String.format(
                         "Failed to insert: %d of %d succeeded",
                         insertedRecords, properties.size()));
+    }
+
+    public static boolean insertTableProperties(
+            JdbcClientPool connections,
+            String storeKey,
+            String databaseName,
+            String tableName,
+            Map<String, String> properties) {
+        if (properties.isEmpty()) {
+            return true;
+        }
+        String[] args =
+                properties.entrySet().stream()
+                        .flatMap(
+                                entry ->
+                                        Stream.of(
+                                                storeKey,
+                                                databaseName,
+                                                tableName,
+                                                entry.getKey(),
+                                                entry.getValue()))
+                        .toArray(String[]::new);
+
+        int insertedRecords =
+                execute(
+                        connections,
+                        JdbcUtils.insertTablePropertiesStatement(properties.size()),
+                        args);
+        if (insertedRecords == properties.size()) {
+            return true;
+        }
+        throw new IllegalStateException(
+                String.format(
+                        "Failed to insert: %d of %d succeeded",
+                        insertedRecords, properties.size()));
+    }
+
+    private static String insertTablePropertiesStatement(int size) {
+        StringBuilder sqlStatement = new StringBuilder(JdbcUtils.INSERT_TABLE_PROPERTIES_SQL);
+        for (int i = 0; i < size; i++) {
+            if (i != 0) {
+                sqlStatement.append(", ");
+            }
+            sqlStatement.append(JdbcUtils.INSERT_TABLE_PROPERTIES_VALUES_BASE);
+        }
+        return sqlStatement.toString();
     }
 
     private static String insertPropertiesStatement(int size) {
@@ -516,5 +867,132 @@ public class JdbcUtils {
         sqlStatement.append("(").append(values).append(")");
 
         return sqlStatement.toString();
+    }
+
+    /** Check if view exists. */
+    public static boolean viewExists(
+            JdbcClientPool connections, String storeKey, String databaseName, String viewName) {
+        return exists(connections, JdbcUtils.GET_VIEW_SQL, storeKey, databaseName, viewName);
+    }
+
+    /** Get view schema JSON. */
+    public static String getViewSchema(
+            JdbcClientPool connections, String storeKey, String databaseName, String viewName)
+            throws SQLException, InterruptedException {
+        return connections.run(
+                conn -> {
+                    try (PreparedStatement sql = conn.prepareStatement(JdbcUtils.GET_VIEW_SQL)) {
+                        sql.setString(1, storeKey);
+                        sql.setString(2, databaseName);
+                        sql.setString(3, viewName);
+                        try (ResultSet rs = sql.executeQuery()) {
+                            if (rs.next()) {
+                                return rs.getString(VIEW_SCHEMA);
+                            }
+                        }
+                        return null;
+                    }
+                });
+    }
+
+    /** Insert view. */
+    public static void insertView(
+            JdbcClientPool connections,
+            String storeKey,
+            String databaseName,
+            String viewName,
+            String viewSchemaJson) {
+        int insertedRecords =
+                execute(
+                        err -> {
+                            if (isUniqueConstraintViolation(err)) {
+                                throw new JdbcViewConflictException(
+                                        JdbcViewConflictKind.ALREADY_EXISTS,
+                                        String.format(
+                                                "View already exists: %s.%s",
+                                                databaseName, viewName));
+                            }
+                        },
+                        connections,
+                        JdbcUtils.INSERT_VIEW_SQL,
+                        storeKey,
+                        databaseName,
+                        viewName,
+                        viewSchemaJson);
+
+        if (insertedRecords != 1) {
+            throw new RuntimeException(
+                    String.format(
+                            "Failed to insert view %s.%s: affected %d rows",
+                            databaseName, viewName, insertedRecords));
+        }
+    }
+
+    /** Update view. */
+    public static void updateView(
+            JdbcClientPool connections,
+            String storeKey,
+            String databaseName,
+            String viewName,
+            String viewSchemaJson) {
+        int updatedRecords =
+                execute(
+                        connections,
+                        JdbcUtils.UPDATE_VIEW_SQL,
+                        viewSchemaJson,
+                        storeKey,
+                        databaseName,
+                        viewName);
+
+        if (updatedRecords == 0) {
+            throw new JdbcViewConflictException(
+                    JdbcViewConflictKind.NOT_EXISTS,
+                    String.format("View does not exist: %s.%s", databaseName, viewName));
+        } else if (updatedRecords != 1) {
+            LOG.warn(
+                    "Update operation affected {} rows: the view table's primary key assumption has been violated",
+                    updatedRecords);
+        }
+    }
+
+    /** Rename view. */
+    public static void renameView(
+            JdbcClientPool connections, String storeKey, Identifier fromView, Identifier toView) {
+        int updatedRecords =
+                execute(
+                        err -> {
+                            if (isUniqueConstraintViolation(err)) {
+                                throw new JdbcViewConflictException(
+                                        JdbcViewConflictKind.ALREADY_EXISTS,
+                                        String.format("View already exists: %s", toView));
+                            }
+                        },
+                        connections,
+                        JdbcUtils.RENAME_VIEW_SQL,
+                        toView.getDatabaseName(),
+                        toView.getObjectName(),
+                        storeKey,
+                        fromView.getDatabaseName(),
+                        fromView.getObjectName());
+
+        if (updatedRecords == 1) {
+            LOG.info("Renamed view from {}, to {}", fromView, toView);
+        } else if (updatedRecords == 0) {
+            throw new JdbcViewConflictException(
+                    JdbcViewConflictKind.NOT_EXISTS,
+                    String.format("View does not exist: %s", fromView));
+        } else {
+            LOG.warn(
+                    "Rename operation affected {} rows: the view table's primary key assumption has been violated",
+                    updatedRecords);
+        }
+    }
+
+    @VisibleForTesting
+    static boolean isUniqueConstraintViolation(SQLException err) {
+        String message = err.getMessage();
+        return err instanceof SQLIntegrityConstraintViolationException
+                || UNIQUE_CONSTRAINT_VIOLATION_STATE.equals(err.getSQLState())
+                || (message != null && message.contains("constraint failed"));
     }
 }

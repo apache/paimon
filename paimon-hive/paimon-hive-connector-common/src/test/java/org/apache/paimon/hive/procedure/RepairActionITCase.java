@@ -29,7 +29,8 @@ import org.apache.flink.types.Row;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.HashMap;
 import java.util.List;
@@ -42,11 +43,12 @@ public class RepairActionITCase extends ActionITCaseBase {
 
     private static final TestHiveMetastore TEST_HIVE_METASTORE = new TestHiveMetastore();
 
-    private static final int PORT = 9082;
+    private static int port;
 
     @BeforeEach
     public void beforeEach() {
-        TEST_HIVE_METASTORE.start(PORT);
+        TEST_HIVE_METASTORE.start(0);
+        port = TEST_HIVE_METASTORE.getPort();
     }
 
     @AfterEach
@@ -54,12 +56,13 @@ public class RepairActionITCase extends ActionITCaseBase {
         TEST_HIVE_METASTORE.stop();
     }
 
-    @Test
-    public void testRepairTableAction() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testRepairTableAction(boolean forceStartFlinkJob) throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql(
                 "CREATE CATALOG PAIMON WITH ('type'='paimon', 'metastore' = 'hive', 'uri' = 'thrift://localhost:"
-                        + PORT
+                        + port
                         + "' , 'warehouse' = '"
                         + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname)
                         + "')");
@@ -82,10 +85,11 @@ public class RepairActionITCase extends ActionITCaseBase {
         tEnv.executeSql("INSERT INTO t_repair_hive VALUES(1, 'login', '2020-01-02', '09')").await();
         Map<String, String> catalogConf = new HashMap<>();
         catalogConf.put("metastore", "hive");
-        catalogConf.put("uri", "thrift://localhost:" + PORT);
+        catalogConf.put("uri", "thrift://localhost:" + port);
         catalogConf.put(
                 "warehouse", System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname));
         RepairAction repairAction = new RepairAction("test_db.t_repair_hive", catalogConf);
+        repairAction.forceStartFlinkJob(forceStartFlinkJob);
         repairAction.run();
 
         List<Row> ret =

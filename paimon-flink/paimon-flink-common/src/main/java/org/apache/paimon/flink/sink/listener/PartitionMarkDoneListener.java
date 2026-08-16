@@ -22,9 +22,11 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.FlinkConnectorOptions.PartitionMarkDoneActionMode;
+import org.apache.paimon.flink.sink.state.StateStore;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.actions.PartitionMarkDoneAction;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
@@ -32,7 +34,6 @@ import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.PartitionPathUtils;
 
-import org.apache.flink.api.common.state.OperatorStateStore;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -65,7 +66,7 @@ public class PartitionMarkDoneListener implements CommitListener {
             ClassLoader cl,
             boolean isStreaming,
             boolean isRestored,
-            OperatorStateStore stateStore,
+            StateStore stateStore,
             FileStoreTable table)
             throws Exception {
         CoreOptions coreOptions = table.coreOptions();
@@ -88,12 +89,18 @@ public class PartitionMarkDoneListener implements CommitListener {
         List<PartitionMarkDoneAction> actions =
                 PartitionMarkDoneAction.createActions(cl, table, coreOptions);
 
-        // if batch read skip level 0 files, we should wait compaction to mark done
-        // otherwise, some data may not be readable, and there might be data delays
-        boolean waitCompaction =
-                !table.primaryKeys().isEmpty()
-                        && (coreOptions.deletionVectorsEnabled()
-                                || coreOptions.mergeEngine() == MergeEngine.FIRST_ROW);
+        boolean waitCompaction = false;
+        if (!table.primaryKeys().isEmpty()) {
+            // some situation should wait compaction to mark done, otherwise, some data may not be
+            // readable, and there might be data delays
+            if (coreOptions.deletionVectorsEnabled()) {
+                waitCompaction = true;
+            } else if (coreOptions.mergeEngine() == MergeEngine.FIRST_ROW) {
+                waitCompaction = true;
+            } else if (table.bucketMode() == BucketMode.POSTPONE_MODE) {
+                waitCompaction = true;
+            }
+        }
 
         return Optional.of(
                 new PartitionMarkDoneListener(
@@ -147,9 +154,7 @@ public class PartitionMarkDoneListener implements CommitListener {
         for (ManifestCommittable committable : committables) {
             for (CommitMessage commitMessage : committable.fileCommittables()) {
                 CommitMessageImpl message = (CommitMessageImpl) commitMessage;
-                if (waitCompaction
-                        || !message.indexIncrement().isEmpty()
-                        || !message.newFilesIncrement().isEmpty()) {
+                if (waitCompaction || !message.newFilesIncrement().isEmpty()) {
                     partitions.add(message.partition());
                 }
             }
@@ -199,9 +204,7 @@ public class PartitionMarkDoneListener implements CommitListener {
             if (watermark != null) {
                 for (CommitMessage commitMessage : committable.fileCommittables()) {
                     CommitMessageImpl message = (CommitMessageImpl) commitMessage;
-                    if (waitCompaction
-                            || !message.indexIncrement().isEmpty()
-                            || !message.newFilesIncrement().isEmpty()) {
+                    if (waitCompaction || !message.newFilesIncrement().isEmpty()) {
                         partitionWatermarks.compute(
                                 message.partition(),
                                 (partition, old) ->

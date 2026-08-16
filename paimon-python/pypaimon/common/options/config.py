@@ -1,0 +1,225 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+from pypaimon.common.memory_size import MemorySize
+from pypaimon.common.options.config_options import ConfigOptions
+
+
+class OssOptions:
+    OSS_IMPL = ConfigOptions.key("fs.oss.impl").string_type().default_value("jindo").with_description(
+        "OSS filesystem implementation: legacy or jindo")
+    OSS_ACCESS_KEY_ID = ConfigOptions.key("fs.oss.accessKeyId").string_type().no_default_value().with_description(
+        "OSS access key ID")
+    OSS_ACCESS_KEY_SECRET = ConfigOptions.key(
+        "fs.oss.accessKeySecret").string_type().no_default_value().with_description("OSS access key secret")
+    OSS_SECURITY_TOKEN = ConfigOptions.key("fs.oss.securityToken").string_type().no_default_value().with_description(
+        "OSS security token")
+    OSS_ENDPOINT = ConfigOptions.key("fs.oss.endpoint").string_type().no_default_value().with_description(
+        "OSS endpoint")
+    OSS_REGION = ConfigOptions.key("fs.oss.region").string_type().no_default_value().with_description("OSS region")
+
+
+class S3Options:
+    S3_ACCESS_KEY_ID = ConfigOptions.key("fs.s3.accessKeyId").string_type().no_default_value().with_description(
+        "S3 access key ID")
+    S3_ACCESS_KEY_SECRET = ConfigOptions.key("fs.s3.accessKeySecret").string_type().no_default_value().with_description(
+        "S3 access key secret")
+    S3_SECURITY_TOKEN = ConfigOptions.key("fs.s3.securityToken").string_type().no_default_value().with_description(
+        "S3 security token")
+    S3_ENDPOINT = ConfigOptions.key("fs.s3.endpoint").string_type().no_default_value().with_description("S3 endpoint")
+    S3_REGION = ConfigOptions.key("fs.s3.region").string_type().no_default_value().with_description("S3 region")
+
+
+class GcsOptions:
+    GCS_ACCESS_TOKEN = (
+        ConfigOptions.key("gcs.access-token").string_type().no_default_value()
+        .with_description(
+            "GCS access token. If not set, ADC (Application Default Credentials) is used "
+            "automatically."))
+    GCS_ACCESS_TOKEN_EXPIRATION = (
+        ConfigOptions.key("gcs.access-token.expiration").string_type().no_default_value()
+        .with_description(
+            "ISO 8601 expiration datetime for the GCS access token. "
+            "Required when gcs.access-token is set."))
+    GCS_PROJECT_ID = (
+        ConfigOptions.key("gcs.project-id").string_type().no_default_value()
+        .with_description("GCP project ID for GCS requests."))
+
+
+class JdbcCatalogOptions:
+    CATALOG_KEY = ConfigOptions.key("catalog-key").string_type().default_value("jdbc").with_description(
+        "Custom JDBC catalog store key.")
+
+
+class PVFSOptions:
+    CACHE_ENABLED = ConfigOptions.key("cache-enabled").boolean_type().default_value("true").with_description(
+        "Enable cache")
+    TABLE_CACHE_TTL = ConfigOptions.key("cache.expire-after-write").int_type().default_value(1800).with_description(
+        "Table cache TTL")
+    DEFAULT_TABLE_CACHE_TTL = 1800
+    DEFAULT_CACHE_SIZE = 2 ** 31 - 1
+
+
+class CatalogOptions:
+    URI = ConfigOptions.key("uri").string_type().no_default_value().with_description("Catalog URI")
+    METASTORE = ConfigOptions.key("metastore").string_type().default_value("filesystem").with_description(
+        "Metastore type")
+    WAREHOUSE = ConfigOptions.key("warehouse").string_type().no_default_value().with_description("Warehouse path")
+    FILE_FORMAT_METADATA_CACHE_MAX_SIZE = (
+        ConfigOptions.key("file-format.metadata-cache.max-size")
+        .memory_type()
+        .default_value(MemorySize.of_mebi_bytes(50))
+        .with_description(
+            "Maximum estimated size of reusable PyArrow Dataset metadata "
+            "cached in the current process. Set to 0 to disable and clear "
+            "the cache."
+        )
+    )
+    TOKEN_PROVIDER = ConfigOptions.key("token.provider").string_type().no_default_value().with_description(
+        "Token provider")
+    TOKEN = ConfigOptions.key("token").string_type().no_default_value().with_description("Authentication token")
+    DATA_TOKEN_ENABLED = ConfigOptions.key("data-token.enabled").boolean_type().default_value(False).with_description(
+        "Enable data token")
+    DLF_REGION = ConfigOptions.key("dlf.region").string_type().no_default_value().with_description("DLF region")
+    DLF_ACCESS_KEY_ID = ConfigOptions.key("dlf.access-key-id").string_type().no_default_value().with_description(
+        "DLF access key ID")
+    DLF_ACCESS_KEY_SECRET = ConfigOptions.key(
+        "dlf.access-key-secret").string_type().no_default_value().with_description("DLF access key secret")
+    DLF_ACCESS_SECURITY_TOKEN = ConfigOptions.key(
+        "dlf.security-token").string_type().no_default_value().with_description("DLF security token")
+    DLF_TOKEN_PATH = ConfigOptions.key("dlf.token-path").string_type().no_default_value().with_description(
+        "DLF token file path")
+    DLF_OSS_ENDPOINT = ConfigOptions.key("dlf.oss-endpoint").string_type().no_default_value().with_description(
+        "DLF OSS endpoint")
+    DLF_TOKEN_LOADER = ConfigOptions.key("dlf.token-loader").string_type().no_default_value().with_description(
+        "DLF token loader")
+    DLF_TOKEN_ECS_ROLE_NAME = ConfigOptions.key(
+        "dlf.token-ecs-role-name").string_type().no_default_value().with_description("DLF ECS role name")
+    DLF_TOKEN_ECS_METADATA_URL = ConfigOptions.key(
+        "dlf.token-ecs-metadata-url").string_type().no_default_value().with_description("DLF ECS metadata URL")
+    DLF_SIGNING_ALGORITHM = ConfigOptions.key(
+        "dlf.signing-algorithm").string_type().default_value("default").with_description(
+        "DLF signing algorithm. Options: 'default' (for VPC endpoint), "
+        "'openapi' (for DlfNext/2026-01-18). "
+        "If not set, will be automatically selected based on endpoint host.")
+    PREFIX = ConfigOptions.key("prefix").string_type().no_default_value().with_description("Prefix")
+    HTTP_USER_AGENT_HEADER = ConfigOptions.key(
+        "header.HTTP_USER_AGENT").string_type().no_default_value().with_description("HTTP User Agent header")
+    SYNC_ALL_PROPERTIES = ConfigOptions.key("sync-all-properties").boolean_type().default_value(True).with_description(
+        "Sync all table properties to the catalog metastore")
+    RESOLVING_FILE_IO_ENABLED = (
+        ConfigOptions.key("resolving-file-io.enabled")
+        .boolean_type()
+        .default_value(False)
+        .with_description(
+            "Whether to enable resolving file IO. When enabled, Paimon dynamically "
+            "selects the appropriate FileIO based on the URI scheme of the given path, "
+            "allowing read/write to external storage paths such as OSS or S3."
+        )
+    )
+    BLOB_FILE_IO_DEFAULT_CACHE_SIZE = 2 ** 31 - 1
+
+
+class HdfsOptions:
+    HDFS_CLIENT_IMPL = (
+        ConfigOptions.key("hdfs.client.impl")
+        .string_type()
+        .default_value("native")
+        .with_description(
+            "HDFS FileIO backend. Supported values: 'native' (default, uses "
+            "hdfs-native protocol client, no Hadoop install required), "
+            "'pyarrow' (legacy, requires HADOOP_HOME / libhdfs / JVM)."
+        )
+    )
+    HDFS_CLIENT_FALLBACK_TO_PYARROW = (
+        ConfigOptions.key("hdfs.client.fallback-to-pyarrow")
+        .boolean_type()
+        .default_value(True)
+        .with_description(
+            "When the native backend fails to initialise (e.g. missing wheel "
+            "or unsupported platform), fall back to the pyarrow backend "
+            "instead of raising."
+        )
+    )
+    HDFS_CONF_DIR = (
+        ConfigOptions.key("hdfs.conf-dir")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "Directory containing core-site.xml / hdfs-site.xml that the "
+            "native client should load. Defaults to $HADOOP_CONF_DIR."
+        )
+    )
+
+    HDFS_CONFIG_PREFIX = "hdfs.config."
+    HDFS_NATIVE_CONFIG_KEY_PREFIXES = ("dfs.", "fs.", "hadoop.", "ipc.", "io.")
+
+
+class SecurityOptions:
+    KERBEROS_PRINCIPAL = (
+        ConfigOptions.key("security.kerberos.login.principal")
+        .string_type()
+        .no_default_value()
+        .with_description("Kerberos principal name associated with the keytab")
+    )
+    KERBEROS_KEYTAB = (
+        ConfigOptions.key("security.kerberos.login.keytab")
+        .string_type()
+        .no_default_value()
+        .with_description("Absolute path to a Kerberos keytab file that contains the user credentials")
+    )
+    KERBEROS_USE_TICKET_CACHE = (
+        ConfigOptions.key("security.kerberos.login.use-ticket-cache")
+        .boolean_type()
+        .default_value(True)
+        .with_description("Whether to read from the Kerberos ticket cache")
+    )
+
+
+class FuseOptions:
+    """FUSE configuration options."""
+
+    FUSE_ENABLED = (
+        ConfigOptions.key("fuse.enabled")
+        .boolean_type()
+        .default_value(False)
+        .with_description("Whether to enable FUSE local path mapping")
+    )
+
+    FUSE_ROOT = (
+        ConfigOptions.key("fuse.root")
+        .string_type()
+        .no_default_value()
+        .with_description("FUSE mounted local root path, e.g., /mnt/fuse/warehouse")
+    )
+
+    FUSE_VALIDATION_MODE = (
+        ConfigOptions.key("fuse.validation-mode")
+        .string_type()
+        .default_value("strict")
+        .with_description("Validation mode: strict, warn, or none")
+    )
+
+    FUSE_MODE = (
+        ConfigOptions.key("fuse.mode")
+        .string_type()
+        .default_value("pvfs")
+        .with_description(
+            "FUSE path mode: 'pvfs' uses database/table logical names, "
+            "'raw' uses URI path segments directly"
+        )
+    )

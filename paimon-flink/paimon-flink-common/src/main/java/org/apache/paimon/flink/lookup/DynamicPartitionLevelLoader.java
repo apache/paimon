@@ -20,7 +20,8 @@ package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 
@@ -33,6 +34,8 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+
+import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
 
 /** Dynamic partition loader which can specify the partition level to load for lookup. */
 public class DynamicPartitionLevelLoader extends DynamicPartitionLoader {
@@ -47,14 +50,12 @@ public class DynamicPartitionLevelLoader extends DynamicPartitionLoader {
     private final String defaultPartitionName;
 
     DynamicPartitionLevelLoader(
-            FileStoreTable table,
-            Duration refreshInterval,
-            Map<String, String> partitionLoadConfig) {
+            Table table, Duration refreshInterval, Map<String, String> partitionLoadConfig) {
         super(table, refreshInterval);
         maxPartitionLoadLevel =
                 getMaxPartitionLoadLevel(partitionLoadConfig, table.partitionKeys());
         fieldGetters = createPartitionFieldGetters();
-        defaultPartitionName = table.coreOptions().partitionDefaultName();
+        defaultPartitionName = Options.fromMap(table.options()).get(PARTITION_DEFAULT_NAME);
 
         LOG.info(
                 "Init DynamicPartitionLevelLoader(table={}),maxPartitionLoadLevel is {}",
@@ -63,7 +64,7 @@ public class DynamicPartitionLevelLoader extends DynamicPartitionLoader {
     }
 
     @Override
-    protected List<BinaryRow> getMaxPartitions() {
+    public List<BinaryRow> getMaxPartitions() {
         List<BinaryRow> newPartitions =
                 table.newReadBuilder().newScan().listPartitions().stream()
                         .sorted(comparator.reversed())

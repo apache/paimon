@@ -32,7 +32,7 @@ import java.io.IOException;
 import java.util.Map;
 import java.util.function.Supplier;
 
-import static org.apache.paimon.format.lance.LanceUtils.toLanceSpecified;
+import static org.apache.paimon.format.lance.LanceUtils.toLanceSpecifiedForWriter;
 
 /** A factory to create Lance {@link FormatWriter}. */
 public class LanceWriterFactory implements FormatWriterFactory, SupportsDirectWrite {
@@ -52,7 +52,7 @@ public class LanceWriterFactory implements FormatWriterFactory, SupportsDirectWr
 
     @Override
     public FormatWriter create(FileIO fileIO, Path path, String compression) throws IOException {
-        Pair<Path, Map<String, String>> lanceSpecified = toLanceSpecified(fileIO, path);
+        Pair<Path, Map<String, String>> lanceSpecified = toLanceSpecifiedForWriter(fileIO, path);
         LanceWriter lanceWriter =
                 new LanceWriter(lanceSpecified.getLeft().toString(), lanceSpecified.getRight());
         return new LanceRecordsWriter(

@@ -47,6 +47,19 @@ public class ArrowVectorizedBatchConverter extends ArrowBatchConverter {
     }
 
     @Override
+    public ArrowVectorizedBatchConverter copy(
+            VectorSchemaRoot root, ArrowFieldWriter[] fieldWriters) {
+        ArrowVectorizedBatchConverter newConverter =
+                new ArrowVectorizedBatchConverter(root, fieldWriters);
+        newConverter.iterator = this.iterator;
+        newConverter.batch = this.batch;
+        newConverter.pickedInColumn = this.pickedInColumn;
+        newConverter.totalNumRows = this.totalNumRows;
+        newConverter.startIndex = this.startIndex;
+        return newConverter;
+    }
+
+    @Override
     public void doWrite(int maxBatchRows) {
         int batchRows = Math.min(maxBatchRows, totalNumRows - startIndex);
         ColumnVector[] columns = batch.columns;

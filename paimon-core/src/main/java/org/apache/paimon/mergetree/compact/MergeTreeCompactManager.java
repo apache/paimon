@@ -26,7 +26,7 @@ import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.compact.CompactTask;
 import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
+import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.RecordLevelExpire;
 import org.apache.paimon.mergetree.LevelSortedRun;
@@ -41,6 +41,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -63,10 +64,12 @@ public class MergeTreeCompactManager extends CompactFutureManager {
     private final CompactRewriter rewriter;
 
     @Nullable private final CompactionMetrics.Reporter metricsReporter;
-    @Nullable private final DeletionVectorsMaintainer dvMaintainer;
+    @Nullable private final BucketedDvMaintainer dvMaintainer;
     private final boolean lazyGenDeletionFile;
     private final boolean needLookup;
     private final boolean forceRewriteAllFiles;
+    private final boolean forceKeepDelete;
+    private final String bucketInfo;
 
     @Nullable private final RecordLevelExpire recordLevelExpire;
 
@@ -79,11 +82,13 @@ public class MergeTreeCompactManager extends CompactFutureManager {
             int numSortedRunStopTrigger,
             CompactRewriter rewriter,
             @Nullable CompactionMetrics.Reporter metricsReporter,
-            @Nullable DeletionVectorsMaintainer dvMaintainer,
+            @Nullable BucketedDvMaintainer dvMaintainer,
             boolean lazyGenDeletionFile,
             boolean needLookup,
             @Nullable RecordLevelExpire recordLevelExpire,
-            boolean forceRewriteAllFiles) {
+            boolean forceRewriteAllFiles,
+            boolean forceKeepDelete,
+            String bucketInfo) {
         this.executor = executor;
         this.levels = levels;
         this.strategy = strategy;
@@ -97,6 +102,8 @@ public class MergeTreeCompactManager extends CompactFutureManager {
         this.recordLevelExpire = recordLevelExpire;
         this.needLookup = needLookup;
         this.forceRewriteAllFiles = forceRewriteAllFiles;
+        this.forceKeepDelete = forceKeepDelete;
+        this.bucketInfo = bucketInfo;
 
         MetricUtils.safeCall(this::reportMetrics, LOG);
     }
@@ -114,7 +121,9 @@ public class MergeTreeCompactManager extends CompactFutureManager {
 
     @Override
     public void addNewFile(DataFileMeta file) {
-        levels.addLevel0File(file);
+        // if overwrite an empty partition, the snapshot will be changed to APPEND, then its files
+        // might be upgraded to high level, thus we should use #update
+        levels.update(Collections.emptyList(), Collections.singletonList(file));
         MetricUtils.safeCall(this::reportMetrics, LOG);
     }
 
@@ -171,7 +180,8 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                      * See CompactStrategy.pick.
                      */
                     boolean dropDelete =
-                            unit.outputLevel() != 0
+                            !forceKeepDelete
+                                    && unit.outputLevel() != 0
                                     && (unit.outputLevel() >= levels.nonEmptyHighestLevel()
                                             || dvMaintainer != null);
 
@@ -209,7 +219,14 @@ public class MergeTreeCompactManager extends CompactFutureManager {
 
         CompactTask task;
         if (unit.fileRewrite()) {
-            task = new FileRewriteCompactTask(rewriter, unit, dropDelete, metricsReporter);
+            task =
+                    new FileRewriteCompactTask(
+                            rewriter,
+                            unit,
+                            dropDelete,
+                            metricsReporter,
+                            compactDfSupplier,
+                            bucketInfo);
         } else {
             task =
                     new MergeTreeCompactTask(
@@ -222,7 +239,8 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                             metricsReporter,
                             compactDfSupplier,
                             recordLevelExpire,
-                            forceRewriteAllFiles);
+                            forceRewriteAllFiles,
+                            bucketInfo);
         }
 
         if (LOG.isDebugEnabled()) {

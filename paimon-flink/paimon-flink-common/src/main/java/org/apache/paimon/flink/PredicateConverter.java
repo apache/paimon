@@ -38,7 +38,9 @@ import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.LogicalTypeFamily;
 import org.apache.flink.table.types.logical.RowType;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -76,9 +78,9 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
         List<Expression> children = call.getChildren();
 
         if (func == BuiltInFunctionDefinitions.AND) {
-            return PredicateBuilder.and(children.get(0).accept(this), children.get(1).accept(this));
+            return PredicateBuilder.and(flattenAndConvert(children, func));
         } else if (func == BuiltInFunctionDefinitions.OR) {
-            return PredicateBuilder.or(children.get(0).accept(this), children.get(1).accept(this));
+            return PredicateBuilder.or(flattenAndConvert(children, func));
         } else if (func == BuiltInFunctionDefinitions.EQUALS) {
             return visitBiFunction(children, builder::equal, builder::equal);
         } else if (func == BuiltInFunctionDefinitions.NOT_EQUALS) {
@@ -199,6 +201,41 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
         // TODO is_xxx, between_xxx, similar, in, not_in, not?
 
         throw new UnsupportedExpression();
+    }
+
+    /**
+     * Iteratively flattens a nested AND/OR expression tree into a flat list of child predicates,
+     * avoiding stack overflow caused by recursive {@code accept} calls on deeply nested trees (e.g.
+     * when Flink expands a large IN clause into nested OR expressions).
+     *
+     * @param children the children of the top-level AND/OR {@link CallExpression}
+     * @param targetFunc the function definition to flatten ({@code AND} or {@code OR})
+     * @return a flat list of converted child predicates in original order
+     */
+    private List<Predicate> flattenAndConvert(
+            List<Expression> children, FunctionDefinition targetFunc) {
+        List<Predicate> result = new ArrayList<>();
+        Deque<Expression> stack = new ArrayDeque<>();
+        for (int i = children.size() - 1; i >= 0; i--) {
+            stack.push(children.get(i));
+        }
+        while (!stack.isEmpty()) {
+            Expression expr = stack.pop();
+            if (expr instanceof CallExpression) {
+                CallExpression ce = (CallExpression) expr;
+                if (ce.getFunctionDefinition() == targetFunc) {
+                    List<Expression> ceChildren = ce.getChildren();
+                    for (int i = ceChildren.size() - 1; i >= 0; i--) {
+                        stack.push(ceChildren.get(i));
+                    }
+                } else {
+                    result.add(ce.accept(this));
+                }
+            } else {
+                result.add(expr.accept(this));
+            }
+        }
+        return result;
     }
 
     private Predicate visitBiFunction(

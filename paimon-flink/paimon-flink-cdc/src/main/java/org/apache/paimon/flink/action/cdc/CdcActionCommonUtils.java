@@ -36,6 +36,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
@@ -68,6 +69,7 @@ public class CdcActionCommonUtils {
     public static final String PRIMARY_KEYS = "primary_keys";
     public static final String COMPUTED_COLUMN = "computed_column";
     public static final String METADATA_COLUMN = "metadata_column";
+    public static final String METADATA_COLUMN_PREFIX = "metadata_column_prefix";
     public static final String MULTIPLE_TABLE_PARTITION_KEYS = "multiple_table_partition_keys";
     public static final String EAGER_INIT = "eager_init";
     public static final String SYNC_PKEYS_FROM_SOURCE_SCHEMA =
@@ -94,14 +96,19 @@ public class CdcActionCommonUtils {
                 return false;
             }
             DataType type = paimonSchema.fields().get(idx).type();
-            if (UpdatedDataFieldsProcessFunction.canConvert(
-                            field.type(), type, TypeMapping.defaultMapping())
-                    != UpdatedDataFieldsProcessFunction.ConvertAction.CONVERT) {
+            UpdatedDataFieldsProcessFunction.ConvertAction sourceToPaimon =
+                    UpdatedDataFieldsProcessFunction.canConvert(
+                            field.type(), type, TypeMapping.defaultMapping());
+            UpdatedDataFieldsProcessFunction.ConvertAction paimonToSource =
+                    UpdatedDataFieldsProcessFunction.canConvert(
+                            type, field.type(), TypeMapping.defaultMapping());
+            if (sourceToPaimon != UpdatedDataFieldsProcessFunction.ConvertAction.CONVERT
+                    && paimonToSource != UpdatedDataFieldsProcessFunction.ConvertAction.CONVERT) {
                 LOG.info(
-                        "Cannot convert field '{}' from source table type '{}' to Paimon type '{}'.",
+                        "Cannot convert field '{}': Paimon type '{}' and source table type '{}' are incompatible.",
                         field.name(),
-                        field.type(),
-                        type);
+                        type,
+                        field.type());
                 return false;
             }
         }
@@ -301,19 +308,19 @@ public class CdcActionCommonUtils {
         // be excluded by excluding pattern at the same time
         String includingPattern =
                 String.format("(%s)\\.(%s)", databasePattern, includingTablePattern);
-
+        LOG.info("Combined mode including pattern is {}", includingPattern);
         if (excludedTables.isEmpty()) {
             return includingPattern;
         }
 
+        // Use Pattern.quote to escape special regex characters (e.g., '$' in mysql table name)
+        // in database and table names, ensuring exact literal matching in the regex.
         String excludingPattern =
                 excludedTables.stream()
-                        .map(
-                                t ->
-                                        String.format(
-                                                "(^%s$)",
-                                                t.getDatabaseName() + "\\." + t.getObjectName()))
+                        .map(Identifier::getFullName)
+                        .map(n -> String.format("(^%s$)", Pattern.quote(n)))
                         .collect(Collectors.joining("|"));
+        LOG.info("Combined mode excluding pattern is {}", excludingPattern);
         excludingPattern = "?!" + excludingPattern;
         return String.format("(%s)(%s)", excludingPattern, includingPattern);
     }

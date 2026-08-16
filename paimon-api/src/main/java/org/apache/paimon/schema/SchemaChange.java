@@ -78,6 +78,9 @@ import java.util.Objects;
     @JsonSubTypes.Type(
             value = SchemaChange.UpdateColumnPosition.class,
             name = SchemaChange.Actions.UPDATE_COLUMN_POSITION_ACTION),
+    @JsonSubTypes.Type(
+            value = SchemaChange.DropPrimaryKey.class,
+            name = SchemaChange.Actions.DROP_PRIMARY_KEY_ACTION),
 })
 public interface SchemaChange extends Serializable {
 
@@ -162,6 +165,10 @@ public interface SchemaChange extends Serializable {
 
     static SchemaChange updateColumnPosition(Move move) {
         return new UpdateColumnPosition(move);
+    }
+
+    static SchemaChange dropPrimaryKey() {
+        return new DropPrimaryKey();
     }
 
     /** A SchemaChange to set a table option. */
@@ -363,7 +370,7 @@ public interface SchemaChange extends Serializable {
         @Override
         public int hashCode() {
             int result = Objects.hash(dataType, description);
-            result = 31 * result + Objects.hashCode(fieldNames);
+            result = 31 * result + Arrays.hashCode(fieldNames);
             result = 31 * result + Objects.hashCode(move);
             return result;
         }
@@ -418,7 +425,7 @@ public interface SchemaChange extends Serializable {
         @Override
         public int hashCode() {
             int result = Objects.hash(newName);
-            result = 31 * result + Objects.hashCode(fieldNames);
+            result = 31 * result + Arrays.hashCode(fieldNames);
             return result;
         }
     }
@@ -458,7 +465,7 @@ public interface SchemaChange extends Serializable {
 
         @Override
         public int hashCode() {
-            return Objects.hashCode(fieldNames);
+            return Arrays.hashCode(fieldNames);
         }
     }
 
@@ -521,7 +528,7 @@ public interface SchemaChange extends Serializable {
         @Override
         public int hashCode() {
             int result = Objects.hash(newDataType);
-            result = 31 * result + Objects.hashCode(fieldNames);
+            result = 31 * result + Arrays.hashCode(fieldNames);
             return result;
         }
     }
@@ -805,8 +812,27 @@ public interface SchemaChange extends Serializable {
         @Override
         public int hashCode() {
             int result = Objects.hash(newDefaultValue);
-            result = 31 * result + Objects.hashCode(fieldNames);
+            result = 31 * result + Arrays.hashCode(fieldNames);
             return result;
+        }
+    }
+
+    /** A SchemaChange to drop primary key. */
+    final class DropPrimaryKey implements SchemaChange {
+
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            return o != null && getClass() == o.getClass();
+        }
+
+        @Override
+        public int hashCode() {
+            return getClass().hashCode();
         }
     }
 
@@ -824,6 +850,7 @@ public interface SchemaChange extends Serializable {
         public static final String UPDATE_COLUMN_COMMENT_ACTION = "updateColumnComment";
         public static final String UPDATE_COLUMN_DEFAULT_VALUE_ACTION = "updateColumnDefaultValue";
         public static final String UPDATE_COLUMN_POSITION_ACTION = "updateColumnPosition";
+        public static final String DROP_PRIMARY_KEY_ACTION = "dropPrimaryKey";
 
         private Actions() {}
     }

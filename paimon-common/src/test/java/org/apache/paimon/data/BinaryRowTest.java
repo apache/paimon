@@ -23,6 +23,7 @@ import org.apache.paimon.data.serializer.InternalArraySerializer;
 import org.apache.paimon.data.serializer.InternalMapSerializer;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.serializer.InternalSerializers;
+import org.apache.paimon.data.serializer.InternalVectorSerializer;
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.memory.MemorySegment;
@@ -450,16 +451,18 @@ public class BinaryRowTest {
 
     @Test
     public void testBinary() {
-        BinaryRow row = new BinaryRow(2);
+        BinaryRow row = new BinaryRow(3);
         BinaryRowWriter writer = new BinaryRowWriter(row);
         byte[] bytes1 = new byte[] {1, -1, 5};
         byte[] bytes2 = new byte[] {1, -1, 5, 5, 1, 5, 1, 5};
-        writer.writeBinary(0, bytes1);
-        writer.writeBinary(1, bytes2);
+        writer.writeBinary(0, bytes1, 0, bytes1.length);
+        writer.writeBinary(1, bytes2, 0, bytes2.length);
+        writer.writeBinary(2, bytes2, 2, 4);
         writer.complete();
 
         assertThat(row.getBinary(0)).isEqualTo(bytes1);
         assertThat(row.getBinary(1)).isEqualTo(bytes2);
+        assertThat(row.getBinary(2)).isEqualTo(Arrays.copyOfRange(bytes2, 2, 6));
     }
 
     @Test
@@ -514,6 +517,44 @@ public class BinaryRowTest {
         assertThat(array2.getInt(0)).isEqualTo(6);
         assertThat(array2.isNullAt(1)).isTrue();
         assertThat(array2.getInt(2)).isEqualTo(666);
+    }
+
+    @Test
+    public void testBinaryVector() {
+        // 1. vector test
+        final Random rnd = new Random(System.currentTimeMillis());
+        float[] vectorValues = new float[rnd.nextInt(128) + 1];
+        {
+            byte[] bytes = new byte[vectorValues.length];
+            rnd.nextBytes(bytes);
+            for (int i = 0; i < vectorValues.length; i++) {
+                vectorValues[i] = bytes[i];
+            }
+        }
+        BinaryVector vector = BinaryVector.fromPrimitiveArray(vectorValues);
+
+        assertThat(vectorValues.length).isEqualTo(vector.size());
+        int[] checkIndexList = {0, rnd.nextInt(vectorValues.length), vectorValues.length - 1};
+        for (int checkIndex : checkIndexList) {
+            assertThat(vectorValues[checkIndex]).isEqualTo(vector.getFloat(checkIndex));
+        }
+
+        // 2. test write vector to binary row
+        BinaryRow row = new BinaryRow(1);
+        BinaryRowWriter rowWriter = new BinaryRowWriter(row);
+        InternalVectorSerializer serializer =
+                new InternalVectorSerializer(DataTypes.FLOAT(), vector.size());
+        rowWriter.writeVector(0, vector, serializer);
+        rowWriter.complete();
+
+        InternalVector vector2 = row.getVector(0);
+        assertThat(vector2.size()).isEqualTo(vector.size());
+        assertThat(vector2.toFloatArray()).isEqualTo(vector.toFloatArray());
+        assertThat(
+                        DataFormatTestUtil.toStringNoRowKind(
+                                row,
+                                RowType.of(DataTypes.VECTOR(vector.size(), DataTypes.FLOAT()))))
+                .isEqualTo(Arrays.toString(vector.toFloatArray()));
     }
 
     @Test
@@ -601,7 +642,7 @@ public class BinaryRowTest {
         Random random = new Random();
         byte[] bytes = new byte[1024];
         random.nextBytes(bytes);
-        writer.writeBinary(0, bytes);
+        writer.writeBinary(0, bytes, 0, bytes.length);
         writer.complete();
 
         MemorySegment[] memorySegments = new MemorySegment[segTotalNumber];
@@ -678,7 +719,7 @@ public class BinaryRowTest {
 
         writer.reset();
         random.nextBytes(bytes);
-        writer.writeBinary(0, bytes);
+        writer.writeBinary(0, bytes, 0, bytes.length);
         writer.reset();
         writer.writeString(0, fromString("wahahah"));
         writer.complete();
@@ -686,7 +727,7 @@ public class BinaryRowTest {
 
         writer.reset();
         random.nextBytes(bytes);
-        writer.writeBinary(0, bytes);
+        writer.writeBinary(0, bytes, 0, bytes.length);
         writer.reset();
         writer.writeString(0, fromString("wahahah"));
         writer.complete();
@@ -959,5 +1000,20 @@ public class BinaryRowTest {
         assertThat(array2.getVariant(0).toJson()).isEqualTo("{\"age\":27,\"city\":\"Beijing\"}");
         assertThat(array2.isNullAt(1)).isTrue();
         assertThat(array2.getVariant(2).toJson()).isEqualTo("{\"age\":27,\"city\":\"Hangzhou\"}");
+    }
+
+    @Test
+    public void testBlob() {
+        BinaryRow row = new BinaryRow(2);
+        BinaryRowWriter writer = new BinaryRowWriter(row);
+
+        writer.writeBlob(0, new BlobData(new byte[] {1, 3, 1}));
+        writer.setNullAt(1);
+        writer.complete();
+
+        Blob blob0 = row.getBlob(0);
+        assertThat(blob0).isInstanceOf(BlobData.class);
+        assertThat(blob0.toData()).isEqualTo(new byte[] {1, 3, 1});
+        assertThat(row.isNullAt(1)).isTrue();
     }
 }

@@ -133,8 +133,9 @@ public interface MongoVersionStrategy {
         Map<String, String> parsedRow = new HashMap<>();
 
         for (int i = 0; i < parseNames.length; i++) {
-            String evaluate = JsonPath.read(record, parseNames[i]);
-            parsedRow.put(columnNames[i], Optional.ofNullable(evaluate).orElse("{}"));
+            Object evaluate = JsonPath.read(record, parseNames[i]);
+            String stringValue = evaluate != null ? evaluate.toString() : null;
+            parsedRow.put(columnNames[i], Optional.ofNullable(stringValue).orElse("{}"));
         }
 
         return processParsedData(parsedRow, schemaBuilder, computedColumns);

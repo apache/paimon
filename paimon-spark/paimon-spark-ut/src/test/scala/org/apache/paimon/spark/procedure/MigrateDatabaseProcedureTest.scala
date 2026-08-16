@@ -72,8 +72,7 @@ class MigrateDatabaseProcedureTest extends PaimonHiveTestBase {
 
   Seq("parquet", "orc", "avro").foreach(
     format => {
-      test(
-        s"Paimon migrate database procedure: migrate $format database with setting parallelism") {
+      test(s"Paimon migrate database procedure: migrate $format database with setting parallelism") {
         withTable(s"hive_tbl_01$random", s"hive_tbl_02$random") {
           // create hive table
           spark.sql(s"""

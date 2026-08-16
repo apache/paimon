@@ -19,7 +19,6 @@
 package org.apache.paimon.mergetree.compact.aggregate.factory;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.FieldPrimaryKeyAgg;
 import org.apache.paimon.types.DataType;
 
@@ -29,7 +28,7 @@ public class FieldPrimaryKeyAggFactory implements FieldAggregatorFactory {
     public static final String NAME = "primary-key";
 
     @Override
-    public FieldAggregator create(DataType fieldType, CoreOptions options, String field) {
+    public FieldPrimaryKeyAgg create(DataType fieldType, CoreOptions options, String field) {
         return new FieldPrimaryKeyAgg(identifier(), fieldType);
     }
 

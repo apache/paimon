@@ -28,13 +28,14 @@ import org.apache.paimon.flink.source.SimpleSourceSplit;
 import org.apache.paimon.flink.source.operator.ReadOperator;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.postpone.PostponeBucketFileStoreWrite;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.connector.source.Boundedness;
@@ -55,8 +56,6 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Source for compacting postpone bucket tables. This source scans all files from {@code bucket =
@@ -68,11 +67,23 @@ public class PostponeBucketCompactSplitSource extends AbstractNonCoordinatedSour
 
     private final FileStoreTable table;
     private final Map<String, String> partitionSpec;
+    @Nullable private final Long snapshotId;
 
     public PostponeBucketCompactSplitSource(
             FileStoreTable table, Map<String, String> partitionSpec) {
+        this(table, partitionSpec, null);
+    }
+
+    public PostponeBucketCompactSplitSource(
+            FileStoreTable table, Map<String, String> partitionSpec, long snapshotId) {
+        this(table, partitionSpec, Long.valueOf(snapshotId));
+    }
+
+    private PostponeBucketCompactSplitSource(
+            FileStoreTable table, Map<String, String> partitionSpec, @Nullable Long snapshotId) {
         this.table = table;
         this.partitionSpec = partitionSpec;
+        this.snapshotId = snapshotId;
     }
 
     @Override
@@ -90,8 +101,12 @@ public class PostponeBucketCompactSplitSource extends AbstractNonCoordinatedSour
 
         @Override
         public InputStatus pollNext(ReaderOutput<Split> output) throws Exception {
+            SnapshotReader snapshotReader = table.newSnapshotReader();
+            if (snapshotId != null) {
+                snapshotReader.withSnapshot(snapshotId);
+            }
             List<Split> splits =
-                    table.newSnapshotReader()
+                    snapshotReader
                             .withPartitionFilter(partitionSpec)
                             .withBucket(BucketMode.POSTPONE_BUCKET)
                             .read()
@@ -125,9 +140,32 @@ public class PostponeBucketCompactSplitSource extends AbstractNonCoordinatedSour
             FileStoreTable table,
             Map<String, String> partitionSpec,
             @Nullable Integer parallelism) {
+        return buildSource(env, table, partitionSpec, null, parallelism);
+    }
+
+    public static Pair<DataStream<RowData>, DataStream<Committable>> buildSource(
+            StreamExecutionEnvironment env,
+            FileStoreTable table,
+            Map<String, String> partitionSpec,
+            long snapshotId,
+            @Nullable Integer parallelism) {
+        return buildSource(env, table, partitionSpec, Long.valueOf(snapshotId), parallelism);
+    }
+
+    private static Pair<DataStream<RowData>, DataStream<Committable>> buildSource(
+            StreamExecutionEnvironment env,
+            FileStoreTable table,
+            Map<String, String> partitionSpec,
+            @Nullable Long snapshotId,
+            @Nullable Integer parallelism) {
+        PostponeBucketCompactSplitSource splitSource =
+                snapshotId == null
+                        ? new PostponeBucketCompactSplitSource(table, partitionSpec)
+                        : new PostponeBucketCompactSplitSource(
+                                table, partitionSpec, snapshotId.longValue());
         DataStream<Split> source =
                 env.fromSource(
-                                new PostponeBucketCompactSplitSource(table, partitionSpec),
+                                splitSource,
                                 WatermarkStrategy.noWatermarks(),
                                 String.format(
                                         "Compact split generator: %s - %s",
@@ -163,27 +201,19 @@ public class PostponeBucketCompactSplitSource extends AbstractNonCoordinatedSour
     private static class SplitChannelComputer implements ChannelComputer<Split> {
 
         private transient int numChannels;
-        private transient Pattern pattern;
 
         @Override
         public void setup(int numChannels) {
             this.numChannels = numChannels;
-            // see PostponeBucketTableWriteOperator
-            this.pattern = Pattern.compile("-s-(\\d+?)-");
         }
 
         @Override
         public int channel(Split record) {
             DataSplit dataSplit = (DataSplit) record;
-            String fileName = dataSplit.dataFiles().get(0).fileName();
-
-            Matcher matcher = pattern.matcher(fileName);
-            Preconditions.checkState(
-                    matcher.find(),
-                    "Data file name %s does not match the pattern. This is unexpected.",
-                    fileName);
-            return ChannelComputer.select(
-                    dataSplit.partition(), Integer.parseInt(matcher.group(1)), numChannels);
+            int bucketId =
+                    PostponeBucketFileStoreWrite.getWriteId(dataSplit.dataFiles().get(0).fileName())
+                            % numChannels;
+            return ChannelComputer.select(dataSplit.partition(), bucketId, numChannels);
         }
     }
 }

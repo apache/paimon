@@ -18,9 +18,11 @@
 
 package org.apache.paimon.flink.sink.coordinator;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.sink.TableWriteOperator;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.SegmentsCache;
 
@@ -31,11 +33,14 @@ import org.apache.flink.runtime.operators.coordination.CoordinationResponse;
 import org.apache.flink.runtime.operators.coordination.OperatorCoordinator;
 import org.apache.flink.runtime.operators.coordination.OperatorEvent;
 
+import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ThreadPoolExecutor;
 
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_WRITER_COORDINATOR_CACHE_EXPIRE_AFTER_ACCESS;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_WRITER_COORDINATOR_CACHE_MEMORY;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_WRITER_COORDINATOR_CACHE_SOFT_VALUES;
 import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
 
 /**
@@ -56,11 +61,26 @@ public class WriteOperatorCoordinator implements OperatorCoordinator, Coordinati
     @Override
     public void start() throws Exception {
         executor = createCachedThreadPool(1, "WriteCoordinator");
-        MemorySize cacheMemory =
-                table.coreOptions().toConfiguration().get(SINK_WRITER_COORDINATOR_CACHE_MEMORY);
-        SegmentsCache<Path> manifestCache = SegmentsCache.create(cacheMemory, Long.MAX_VALUE);
-        table.setManifestCache(manifestCache);
+        table.setManifestCache(buildManifestCache(table.coreOptions().toConfiguration()));
         coordinator = new TableWriteCoordinator(table);
+    }
+
+    /**
+     * Build the writer coordinator manifest cache from the given options. The idle TTL is disabled
+     * unless {@code sink.writer-coordinator.cache-expire-after-access} is set; the cache stays
+     * bounded by weight up to {@code sink.writer-coordinator.cache-memory} either way.
+     */
+    static SegmentsCache<Path> buildManifestCache(Options tableOptions) {
+        MemorySize cacheMemory = tableOptions.get(SINK_WRITER_COORDINATOR_CACHE_MEMORY);
+        Duration cacheExpireAfterAccess =
+                tableOptions.get(SINK_WRITER_COORDINATOR_CACHE_EXPIRE_AFTER_ACCESS);
+        boolean cacheSoftValues = tableOptions.get(SINK_WRITER_COORDINATOR_CACHE_SOFT_VALUES);
+        return SegmentsCache.create(
+                (int) CoreOptions.PAGE_SIZE.defaultValue().getBytes(),
+                cacheMemory,
+                Long.MAX_VALUE,
+                cacheExpireAfterAccess,
+                cacheSoftValues);
     }
 
     @Override

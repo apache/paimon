@@ -71,6 +71,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalLong;
 
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 
@@ -106,7 +107,10 @@ public class SnapshotsTable implements ReadonlyTable {
                             new DataField(9, "total_record_count", new BigIntType(true)),
                             new DataField(10, "delta_record_count", new BigIntType(true)),
                             new DataField(11, "changelog_record_count", new BigIntType(true)),
-                            new DataField(12, "watermark", new BigIntType(true))));
+                            new DataField(12, "watermark", new BigIntType(true)),
+                            new DataField(13, "next_row_id", new BigIntType(true)),
+                            new DataField(
+                                    14, "operation", SerializationUtils.newStringType(true))));
 
     private final FileIO fileIO;
     private final Path location;
@@ -193,6 +197,11 @@ public class SnapshotsTable implements ReadonlyTable {
         @Override
         public int hashCode() {
             return Objects.hash(location);
+        }
+
+        @Override
+        public OptionalLong mergedRowCount() {
+            return OptionalLong.empty();
         }
     }
 
@@ -331,7 +340,11 @@ public class SnapshotsTable implements ReadonlyTable {
                     snapshot.totalRecordCount(),
                     snapshot.deltaRecordCount(),
                     snapshot.changelogRecordCount(),
-                    snapshot.watermark());
+                    snapshot.watermark(),
+                    snapshot.nextRowId(),
+                    snapshot.operation() == null
+                            ? null
+                            : BinaryString.fromString(snapshot.operation().toString()));
         }
     }
 }

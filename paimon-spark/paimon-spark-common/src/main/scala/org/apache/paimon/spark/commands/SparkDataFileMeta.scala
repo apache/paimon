@@ -27,17 +27,19 @@ import org.apache.paimon.utils.FileStorePathFactory
 import scala.collection.JavaConverters._
 
 case class SparkDataFileMeta(
+    bucketPath: String,
     partition: BinaryRow,
     bucket: Int,
     totalBuckets: Int,
     dataFileMeta: DataFileMeta,
     deletionFile: Option[DeletionFile] = None) {
 
-  def relativePath(fileStorePathFactory: FileStorePathFactory): String = {
-    fileStorePathFactory
-      .relativeBucketPath(partition, bucket)
-      .toUri
-      .toString + "/" + dataFileMeta.fileName()
+  def filePath(): String = {
+    if (dataFileMeta.externalPath().isPresent) {
+      dataFileMeta.externalPath().get()
+    } else {
+      bucketPath + "/" + dataFileMeta.fileName()
+    }
   }
 }
 
@@ -52,6 +54,7 @@ object SparkDataFileMeta {
     dataSplit.dataFiles().asScala.map {
       file =>
         SparkDataFileMeta(
+          dataSplit.bucketPath(),
           dataSplit.partition,
           dataSplit.bucket,
           totalBuckets,
@@ -68,9 +71,8 @@ object SparkDataFileMeta {
       .groupBy(file => (file.partition, file.bucket))
       .map {
         case ((partition, bucket), files) =>
-          val (dataFiles, deletionFiles) = files.map {
-            file => (file.dataFileMeta, file.deletionFile.orNull)
-          }.unzip
+          val (dataFiles, deletionFiles) =
+            files.map(file => (file.dataFileMeta, file.deletionFile.orNull)).unzip
           new DataSplit.Builder()
             .withPartition(partition)
             .withBucket(bucket)

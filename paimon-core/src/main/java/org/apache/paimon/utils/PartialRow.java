@@ -19,10 +19,12 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.RowKind;
@@ -129,8 +131,18 @@ public class PartialRow implements InternalRow {
     }
 
     @Override
+    public Blob getBlob(int pos) {
+        return row.getBlob(pos);
+    }
+
+    @Override
     public InternalArray getArray(int pos) {
         return row.getArray(pos);
+    }
+
+    @Override
+    public InternalVector getVector(int pos) {
+        return row.getVector(pos);
     }
 
     @Override

@@ -18,23 +18,21 @@
 
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW
+import org.apache.paimon.Snapshot
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.schema.SparkSystemColumns.ROW_KIND_COL
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.PrimaryKeyTableUtils.validatePKUpsertDeletable
 import org.apache.paimon.table.sink.CommitMessage
 import org.apache.paimon.types.RowKind
-import org.apache.paimon.utils.InternalRowPartitionComputer
 
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils.createDataset
-import org.apache.spark.sql.catalyst.expressions.{And, Expression, Not}
-import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
+import org.apache.spark.sql.catalyst.expressions.{EqualNullSafe, Expression, Literal, Not}
 import org.apache.spark.sql.catalyst.plans.logical.{Filter, SupportsSubquery}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.lit
-
-import scala.collection.JavaConverters._
 
 case class DeleteFromPaimonTableCommand(
     relation: DataSourceV2Relation,
@@ -45,61 +43,12 @@ case class DeleteFromPaimonTableCommand(
   with SupportsSubquery {
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
-
-    val commit = table.newBatchWriteBuilder().newCommit()
-    if (condition == null || condition == TrueLiteral) {
-      commit.truncateTable()
+    val commitMessages = if (usePKUpsertDelete()) {
+      performPrimaryKeyDelete(sparkSession)
     } else {
-      val (partitionCondition, otherCondition) = splitPruePartitionAndOtherPredicates(
-        condition,
-        table.partitionKeys().asScala.toSeq,
-        sparkSession.sessionState.conf.resolver)
-
-      val partitionPredicate = if (partitionCondition.isEmpty) {
-        None
-      } else {
-        try {
-          convertConditionToPaimonPredicate(
-            partitionCondition.reduce(And),
-            relation.output,
-            table.schema.logicalPartitionType())
-        } catch {
-          case _: Throwable =>
-            None
-        }
-      }
-
-      if (
-        otherCondition.isEmpty && partitionPredicate.nonEmpty && !table
-          .coreOptions()
-          .deleteForceProduceChangelog()
-      ) {
-        val matchedPartitions =
-          table.newSnapshotReader().withPartitionFilter(partitionPredicate.get).partitions().asScala
-        val rowDataPartitionComputer = new InternalRowPartitionComputer(
-          table.coreOptions().partitionDefaultName(),
-          table.schema().logicalPartitionType(),
-          table.partitionKeys.asScala.toArray,
-          table.coreOptions().legacyPartitionName()
-        )
-        val dropPartitions = matchedPartitions.map {
-          partition => rowDataPartitionComputer.generatePartValues(partition).asScala.asJava
-        }
-        if (dropPartitions.nonEmpty) {
-          commit.truncatePartitions(dropPartitions.asJava)
-        } else {
-          writer.commit(Seq.empty)
-        }
-      } else {
-        val commitMessages = if (usePKUpsertDelete()) {
-          performPrimaryKeyDelete(sparkSession)
-        } else {
-          performNonPrimaryKeyDelete(sparkSession)
-        }
-        writer.commit(commitMessages)
-      }
+      performNonPrimaryKeyDelete(sparkSession)
     }
-
+    writer.commit(commitMessages, Snapshot.Operation.DELETE)
     Seq.empty[Row]
   }
 
@@ -119,6 +68,7 @@ case class DeleteFromPaimonTableCommand(
   }
 
   private def performNonPrimaryKeyDelete(sparkSession: SparkSession): Seq[CommitMessage] = {
+    val readSnapshot = table.snapshotManager().latestSnapshot()
     // Step1: the candidate data splits which are filtered by Paimon Predicate.
     val candidateDataSplits = findCandidateDataSplits(condition, relation.output)
     val dataFilePathToMeta = candidateFileMap(candidateDataSplits)
@@ -130,10 +80,11 @@ case class DeleteFromPaimonTableCommand(
         dataFilePathToMeta,
         condition,
         relation,
-        sparkSession)
+        sparkSession,
+        coreOptions.dataEvolutionEnabled())
 
       // Step3: update the touched deletion vectors and index files
-      writer.persistDeletionVectors(deletionVectors)
+      writer.persistDeletionVectors(deletionVectors, readSnapshot)
     } else {
       // Step2: extract out the exactly files, which must have at least one record to be updated.
       val touchedFilePaths =
@@ -144,14 +95,23 @@ case class DeleteFromPaimonTableCommand(
         extractFilesAndCreateNewScan(touchedFilePaths, dataFilePathToMeta, relation)
 
       // Step4: build a dataframe that contains the unchanged data, and write out them.
-      val toRewriteScanRelation = Filter(Not(condition), newRelation)
+      // Use Not(EqualNullSafe(condition, true)) instead of Not(condition) to correctly
+      // handle NULL values. Not(NULL) evaluates to NULL (filtered out), which would
+      // incorrectly delete rows where the condition column is NULL.
+      val toRewriteScanRelation =
+        Filter(Not(EqualNullSafe(condition, Literal.TrueLiteral)), newRelation)
       var data = createDataset(sparkSession, toRewriteScanRelation)
       if (coreOptions.rowTrackingEnabled()) {
-        data = selectWithRowLineage(data)
+        data = selectWithRowTracking(data)
       }
 
-      // only write new files, should have no compaction
-      val addCommitMessage = writer.writeOnly().withRowLineage().write(data)
+      val rewriteWriter =
+        if (coreOptions.mergeEngine() == FIRST_ROW) {
+          writer.withIgnorePreviousFiles()
+        } else {
+          writer.writeOnly()
+        }
+      val addCommitMessage = rewriteWriter.withRowTracking().write(data)
 
       // Step5: convert the deleted files that need to be written to commit message.
       val deletedCommitMessage = buildDeletedCommitMessage(touchedFiles)

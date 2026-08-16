@@ -23,6 +23,7 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.StringUtils;
 
 import java.util.Arrays;
@@ -48,16 +49,7 @@ public class DataFormatTestUtil {
                 if (field instanceof byte[]) {
                     build.append(Arrays.toString((byte[]) field));
                 } else if (field instanceof InternalArray) {
-                    InternalArray internalArray = (InternalArray) field;
-                    ArrayType arrayType = (ArrayType) type.getTypeAt(i);
-                    InternalArray.ElementGetter elementGetter =
-                            InternalArray.createElementGetter(arrayType.getElementType());
-                    String[] result = new String[internalArray.size()];
-                    for (int j = 0; j < internalArray.size(); j++) {
-                        Object object = elementGetter.getElementOrNull(internalArray, j);
-                        result[j] = null == object ? null : object.toString();
-                    }
-                    build.append(Arrays.toString(result));
+                    build.append(getArrayLikeString((InternalArray) field, type.getTypeAt(i)));
                 } else {
                     build.append(field);
                 }
@@ -90,19 +82,7 @@ public class DataFormatTestUtil {
         if (field instanceof byte[]) {
             return Arrays.toString((byte[]) field);
         } else if (field instanceof InternalArray) {
-            InternalArray internalArray = (InternalArray) field;
-            ArrayType arrayType = (ArrayType) type;
-            InternalArray.ElementGetter elementGetter =
-                    InternalArray.createElementGetter(arrayType.getElementType());
-            String[] result = new String[internalArray.size()];
-            for (int j = 0; j < internalArray.size(); j++) {
-                Object object = elementGetter.getElementOrNull(internalArray, j);
-                result[j] =
-                        null == object
-                                ? null
-                                : getDataFieldString(object, arrayType.getElementType());
-            }
-            return Arrays.toString(result);
+            return getArrayLikeString((InternalArray) field, type);
         } else if (field instanceof InternalRow) {
             return String.format("(%s)", toStringWithRowKind((InternalRow) field, (RowType) type));
         } else if (field instanceof InternalMap) {
@@ -137,6 +117,24 @@ public class DataFormatTestUtil {
         } else {
             return field.toString();
         }
+    }
+
+    private static String getArrayLikeString(InternalArray internalArray, DataType type) {
+        DataType elementType;
+        if (type instanceof VectorType) {
+            elementType = ((VectorType) type).getElementType();
+        } else if (type instanceof ArrayType) {
+            elementType = ((ArrayType) type).getElementType();
+        } else {
+            throw new IllegalArgumentException("Unsupported type for array data: " + type);
+        }
+        InternalArray.ElementGetter elementGetter = InternalArray.createElementGetter(elementType);
+        String[] result = new String[internalArray.size()];
+        for (int j = 0; j < internalArray.size(); j++) {
+            Object object = elementGetter.getElementOrNull(internalArray, j);
+            result[j] = null == object ? null : getDataFieldString(object, elementType);
+        }
+        return Arrays.toString(result);
     }
 
     /** Stringify the given {@link InternalRow}. */

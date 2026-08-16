@@ -82,12 +82,7 @@ public class AppendPreCommitCompactCoordinatorOperator
     public void processElement(StreamRecord<Committable> record) throws Exception {
         Committable committable = record.getValue();
         checkpointId = Math.max(checkpointId, committable.checkpointId());
-        if (committable.kind() != Committable.Kind.FILE) {
-            output.collect(new StreamRecord<>(Either.Left(committable)));
-            return;
-        }
-
-        CommitMessageImpl message = (CommitMessageImpl) committable.wrappedCommittable();
+        CommitMessageImpl message = (CommitMessageImpl) committable.commitMessage();
         if (message.newFilesIncrement().newFiles().isEmpty()) {
             output.collect(new StreamRecord<>(Either.Left(committable)));
             return;
@@ -128,12 +123,12 @@ public class AppendPreCommitCompactCoordinatorOperator
                         new DataIncrement(
                                 skippedFiles,
                                 message.newFilesIncrement().deletedFiles(),
-                                message.newFilesIncrement().changelogFiles()),
-                        message.compactIncrement(),
-                        message.indexIncrement());
+                                message.newFilesIncrement().changelogFiles(),
+                                message.newFilesIncrement().newIndexFiles(),
+                                message.newFilesIncrement().deletedIndexFiles()),
+                        message.compactIncrement());
         if (!newMessage.isEmpty()) {
-            Committable newCommittable =
-                    new Committable(committable.checkpointId(), Committable.Kind.FILE, newMessage);
+            Committable newCommittable = new Committable(committable.checkpointId(), newMessage);
             output.collect(new StreamRecord<>(Either.Left(newCommittable)));
         }
     }
@@ -170,10 +165,7 @@ public class AppendPreCommitCompactCoordinatorOperator
                                         Collections.emptyList()),
                                 CompactIncrement.emptyIncrement());
                 output.collect(
-                        new StreamRecord<>(
-                                Either.Left(
-                                        new Committable(
-                                                checkpointId, Committable.Kind.FILE, message))));
+                        new StreamRecord<>(Either.Left(new Committable(checkpointId, message))));
             }
         }
     }

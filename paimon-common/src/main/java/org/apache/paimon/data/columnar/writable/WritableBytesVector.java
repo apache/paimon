@@ -29,6 +29,8 @@ public interface WritableBytesVector extends WritableColumnVector, BytesColumnVe
      */
     void putByteArray(int rowId, byte[] value, int offset, int length);
 
+    void appendByteArray(byte[] value, int offset, int length);
+
     /** Fill the column vector with the provided value. */
     void fill(byte[] value);
 }

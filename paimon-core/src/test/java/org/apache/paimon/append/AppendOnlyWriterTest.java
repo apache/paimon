@@ -19,18 +19,28 @@
 package org.apache.paimon.append;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.compact.NoopCompactManager;
 import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BinaryVector;
+import org.apache.paimon.data.BlobData;
+import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.shredding.MapSharedShreddingFieldMeta;
+import org.apache.paimon.data.shredding.MapSharedShreddingUtils;
 import org.apache.paimon.disk.ChannelWithMeta;
 import org.apache.paimon.disk.ExternalBuffer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.RowBuffer;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.SimpleColStats;
+import org.apache.paimon.format.SupportsFieldMetadata;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
@@ -38,12 +48,21 @@ import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemoryPoolFactory;
+import org.apache.paimon.operation.BaseAppendFileStoreWrite;
+import org.apache.paimon.operation.BlobFileContext;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStatsConverter;
+import org.apache.paimon.table.AppendOnlyFileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.ExecutorThreadFactory;
@@ -55,6 +74,10 @@ import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+
+import javax.annotation.Nullable;
 
 import java.io.File;
 import java.io.IOException;
@@ -63,9 +86,13 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
@@ -142,6 +169,48 @@ public class AppendOnlyWriterTest {
         assertThat(meta.level()).isEqualTo(DataFileMeta.DUMMY_LEVEL);
         assertThat(meta.fileName().substring(meta.fileName().lastIndexOf(".") + 1))
                 .isEqualTo(CoreOptions.FILE_FORMAT_AVRO);
+    }
+
+    @Test
+    public void testBinaryColumnStatsRoundTrip() throws Exception {
+        RowType binarySchema =
+                RowType.builder()
+                        .fields(
+                                new DataType[] {new IntType(), new VarBinaryType()},
+                                new String[] {"id", "data"})
+                        .build();
+        Map<String, String> options = new HashMap<>();
+        options.put("metadata.stats-mode", "full");
+
+        AppendOnlyWriter writer =
+                createWriterBase(
+                                1024 * 1024L,
+                                null,
+                                binarySchema,
+                                false,
+                                true,
+                                true,
+                                true,
+                                Collections.emptyList(),
+                                compactBefore -> Collections.emptyList(),
+                                options)
+                        .getKey();
+
+        writer.write(GenericRow.of(1, new byte[] {1, 2, 3}));
+        writer.write(GenericRow.of(2, new byte[] {(byte) 200}));
+        writer.write(GenericRow.of(3, new byte[] {0}));
+        CommitIncrement increment = writer.prepareCommit(true);
+        writer.close();
+
+        DataFileMeta meta = increment.newFilesIncrement().newFiles().get(0);
+        assertThat(LocalFileIO.create().exists(pathFactory.toPath(meta))).isTrue();
+
+        assertThat(meta.valueStats().minValues().isNullAt(1))
+                .as("binary column min must be present in file stats")
+                .isFalse();
+        assertThat(meta.valueStats().minValues().getBinary(1)).isEqualTo(new byte[] {0});
+        assertThat(meta.valueStats().maxValues().getBinary(1)).isEqualTo(new byte[] {(byte) 200});
+        assertThat(meta.valueStats().nullCounts().getLong(1)).isEqualTo(0L);
     }
 
     @Test
@@ -396,6 +465,261 @@ public class AppendOnlyWriterTest {
     }
 
     @Test
+    public void testNoSpillWhenMeetBlobType() throws Exception {
+        // Create a schema with BLOB type
+        RowType blobSchema =
+                RowType.builder()
+                        .fields(
+                                new DataType[] {new IntType(), new VarCharType(), new BlobType()},
+                                new String[] {"id", "name", "data"})
+                        .build();
+
+        AppendOnlyFileStoreTable table =
+                (AppendOnlyFileStoreTable)
+                        FileStoreTableFactory.create(
+                                LocalFileIO.create(),
+                                pathFactory.newPath(),
+                                TableSchema.create(
+                                        0,
+                                        new Schema(
+                                                blobSchema.getFields(),
+                                                Collections.singletonList("id"),
+                                                Collections.emptyList(),
+                                                new HashMap<String, String>() {
+                                                    {
+                                                        put(
+                                                                CoreOptions.DATA_EVOLUTION_ENABLED
+                                                                        .key(),
+                                                                "true");
+                                                        put(
+                                                                CoreOptions.ROW_TRACKING_ENABLED
+                                                                        .key(),
+                                                                "true");
+                                                    }
+                                                },
+                                                "")));
+        BaseAppendFileStoreWrite writer = table.store().newWrite("test");
+        writer.withIOManager(IOManager.create(tempDir.toString()));
+        writer.withMemoryPoolFactory(
+                new MemoryPoolFactory(new HeapMemorySegmentPool(16384L, 1024)));
+
+        char[] largeString = new char[990];
+        Arrays.fill(largeString, 'a');
+        byte[] largeBlobData = new byte[1024];
+        Arrays.fill(largeBlobData, (byte) 'b');
+
+        BinaryRow binaryRow = new BinaryRow(1);
+        BinaryRowWriter binaryRowWriter = new BinaryRowWriter(binaryRow);
+        for (int j = 0; j < 100; j++) {
+            binaryRowWriter.reset();
+            binaryRowWriter.writeInt(0, j);
+            binaryRowWriter.complete();
+            writer.write(
+                    binaryRow, 0, createBlobRow(j, String.valueOf(largeString), largeBlobData));
+        }
+
+        binaryRowWriter.reset();
+        binaryRowWriter.writeInt(0, 1000);
+        binaryRowWriter.complete();
+        AppendOnlyWriter appendOnlyWriter = (AppendOnlyWriter) writer.createWriter(binaryRow, 0);
+        RowBuffer buffer = appendOnlyWriter.getWriteBuffer();
+        assertThat(buffer).isNull();
+        writer.close();
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {CoreOptions.FILE_FORMAT_PARQUET, CoreOptions.FILE_FORMAT_ORC})
+    public void testWriteSharedShreddingWithFileIndex(String fileFormat) throws Exception {
+        RowType writeType = sharedShreddingTagsWriteType();
+        Options rawOptions = sharedShreddingOptions("tags", 3);
+        rawOptions.setString("file-index.bloom-filter.columns", "id");
+        SharedShreddingAppendContext context =
+                createSharedShreddingAppendContext(fileFormat, rawOptions);
+        AppendOnlyWriter writer =
+                createSharedShreddingAppendWriter(
+                        writeType, context, SCHEMA_ID, -1L, new FileIndexOptions(context.options));
+
+        writer.write(sharedShreddingRow(1, "a", 10L));
+        writer.write(sharedShreddingRow(2, "b", 20L));
+        CommitIncrement increment = writer.prepareCommit(true);
+        writer.close();
+
+        DataFileMeta file = assertSingleNewFile(increment);
+        assertThat(file.embeddedIndex() != null || !file.extraFiles().isEmpty()).isTrue();
+        assertThat(readSharedShreddingFieldMeta(context, file, "tags"))
+                .isEqualTo(
+                        sharedShreddingMeta(
+                                nameToId("a", 0, "b", 1),
+                                fieldToColumns(0, columns(0), 1, columns(0)),
+                                overflowFields(),
+                                3,
+                                1));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {CoreOptions.FILE_FORMAT_PARQUET, CoreOptions.FILE_FORMAT_ORC})
+    public void testSharedShreddingMapAllEmptyFirstFile(String fileFormat) throws Exception {
+        RowType writeType = sharedShreddingTagsWriteType();
+        Options rawOptions = sharedShreddingOptions("tags", 3);
+        SharedShreddingAppendContext context =
+                createSharedShreddingAppendContext(fileFormat, rawOptions);
+        AppendOnlyWriter writer = createSharedShreddingAppendWriter(writeType, context);
+
+        DataFileMeta file =
+                writeSharedShreddingFile(writer, sharedShreddingRow(1), sharedShreddingRow(2));
+        writer.close();
+
+        assertThat(readSharedShreddingFieldMeta(context, file, "tags"))
+                .isEqualTo(
+                        sharedShreddingMeta(nameToId(), fieldToColumns(), overflowFields(), 3, 0));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {CoreOptions.FILE_FORMAT_PARQUET, CoreOptions.FILE_FORMAT_ORC})
+    public void testSharedShreddingMapAllNullThenAllEmptyFiles(String fileFormat) throws Exception {
+        RowType writeType = sharedShreddingTagsWriteType();
+        Options rawOptions = sharedShreddingOptions("tags", 3);
+        SharedShreddingAppendContext context =
+                createSharedShreddingAppendContext(fileFormat, rawOptions);
+        AppendOnlyWriter writer = createSharedShreddingAppendWriter(writeType, context);
+
+        DataFileMeta nullFile =
+                writeSharedShreddingFile(
+                        writer,
+                        sharedShreddingLogicalRow(1, (Object) null),
+                        sharedShreddingLogicalRow(2, (Object) null));
+        DataFileMeta emptyFile =
+                writeSharedShreddingFile(writer, sharedShreddingRow(3), sharedShreddingRow(4));
+        DataFileMeta valuesFile =
+                writeSharedShreddingFile(
+                        writer,
+                        sharedShreddingRow(5, "a", null),
+                        sharedShreddingRow(6, "b", null),
+                        sharedShreddingRow(7, "c", 7L, "d", null));
+        writer.close();
+
+        assertThat(readSharedShreddingFieldMeta(context, nullFile, "tags"))
+                .isEqualTo(
+                        sharedShreddingMeta(nameToId(), fieldToColumns(), overflowFields(), 3, 0));
+        assertThat(readSharedShreddingFieldMeta(context, emptyFile, "tags"))
+                .isEqualTo(
+                        sharedShreddingMeta(nameToId(), fieldToColumns(), overflowFields(), 3, 0));
+        assertThat(readSharedShreddingFieldMeta(context, valuesFile, "tags"))
+                .isEqualTo(
+                        sharedShreddingMeta(
+                                nameToId("a", 0, "b", 1, "c", 2, "d", 3),
+                                fieldToColumns(
+                                        0, columns(0), 1, columns(0), 2, columns(0), 3, columns(1)),
+                                overflowFields(),
+                                3,
+                                2));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {CoreOptions.FILE_FORMAT_PARQUET, CoreOptions.FILE_FORMAT_ORC})
+    public void testSharedShreddingMapDataFileMetaInfo(String fileFormat) throws Exception {
+        RowType writeType = sharedShreddingTagsWriteType();
+        Options rawOptions = sharedShreddingOptions("tags", 3);
+        rawOptions.setString("metadata.stats-mode", "full");
+        SharedShreddingAppendContext context =
+                createSharedShreddingAppendContext(fileFormat, rawOptions);
+        AppendOnlyWriter writer = createSharedShreddingAppendWriter(writeType, context, 5L, 9L);
+
+        DataFileMeta file =
+                writeSharedShreddingFile(
+                        writer,
+                        sharedShreddingRow(1, "a", 10L, "b", 20L),
+                        sharedShreddingLogicalRow(2, (Object) null),
+                        sharedShreddingRow(3, "a", 40L, "b", 50L, "c", 60L));
+        writer.close();
+
+        assertThat(file.rowCount()).isEqualTo(3L);
+        assertThat(file.schemaId()).isEqualTo(5L);
+        assertThat(file.minSequenceNumber()).isEqualTo(10L);
+        assertThat(file.maxSequenceNumber()).isEqualTo(12L);
+        assertThat(file.level()).isEqualTo(DataFileMeta.DUMMY_LEVEL);
+        assertThat(file.minKey()).isEqualTo(EMPTY_ROW);
+        assertThat(file.maxKey()).isEqualTo(EMPTY_ROW);
+        assertThat(file.keyStats()).isEqualTo(EMPTY_STATS);
+        assertThat(file.valueStats().minValues().getInt(0)).isEqualTo(1);
+        assertThat(file.valueStats().maxValues().getInt(0)).isEqualTo(3);
+        assertThat(file.valueStats().nullCounts().getLong(0)).isEqualTo(0L);
+        assertThat(file.valueStats().minValues().isNullAt(1)).isTrue();
+        assertThat(file.valueStats().maxValues().isNullAt(1)).isTrue();
+        if (CoreOptions.FILE_FORMAT_ORC.equals(fileFormat)) {
+            assertThat(file.valueStats().nullCounts().getLong(1)).isEqualTo(1L);
+        } else {
+            assertThat(file.valueStats().nullCounts().isNullAt(1)).isTrue();
+        }
+        assertThat(file.fileSource()).hasValue(FileSource.APPEND);
+        assertThat(file.fileFormat()).isEqualTo(fileFormat);
+        assertThat(readSharedShreddingFieldMeta(context, file, "tags"))
+                .isEqualTo(
+                        sharedShreddingMeta(
+                                nameToId("a", 0, "b", 1, "c", 2),
+                                fieldToColumns(0, columns(0), 1, columns(1), 2, columns(2)),
+                                overflowFields(),
+                                3,
+                                3));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {CoreOptions.FILE_FORMAT_PARQUET, CoreOptions.FILE_FORMAT_ORC})
+    public void testSharedShreddingMapWithBlob(String fileFormat) throws Exception {
+        RowType writeType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "id", DataTypes.INT()),
+                        DataTypes.FIELD(
+                                1,
+                                "tags",
+                                DataTypes.MAP(DataTypes.STRING().notNull(), DataTypes.BIGINT())),
+                        DataTypes.FIELD(2, "payload", new BlobType()));
+        Options rawOptions = sharedShreddingOptions("tags", 3);
+        SharedShreddingAppendContext context =
+                createSharedShreddingAppendContext(fileFormat, rawOptions);
+        BlobFileContext blobContext =
+                BlobFileContext.create(writeType, new CoreOptions(rawOptions));
+        assertThat(blobContext).isNotNull();
+
+        AppendOnlyWriter writer =
+                createSharedShreddingAppendWriter(
+                        writeType, context, SCHEMA_ID, -1L, new FileIndexOptions(), blobContext);
+
+        writer.write(
+                sharedShreddingLogicalRow(1, map("a", 10L), new BlobData(new byte[] {1, 2, 3})));
+        CommitIncrement increment = writer.prepareCommit(true);
+        writer.close();
+
+        assertThat(increment.newFilesIncrement().newFiles()).hasSize(2);
+        DataFileMeta mainFile =
+                increment.newFilesIncrement().newFiles().stream()
+                        .filter(file -> fileFormat.equals(file.fileFormat()))
+                        .findFirst()
+                        .orElseThrow(AssertionError::new);
+        assertThat(readSharedShreddingFieldMeta(context, mainFile, "tags"))
+                .isEqualTo(
+                        sharedShreddingMeta(
+                                nameToId("a", 0),
+                                fieldToColumns(0, columns(0)),
+                                overflowFields(),
+                                3,
+                                1));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {CoreOptions.FILE_FORMAT_PARQUET, CoreOptions.FILE_FORMAT_ORC})
+    public void testSharedShreddingMapAllowsForceBufferSpill(String fileFormat) throws Exception {
+        RowType writeType = sharedShreddingTagsWriteType();
+        Options rawOptions = sharedShreddingOptions("tags", 3);
+        SharedShreddingAppendContext context =
+                createSharedShreddingAppendContext(fileFormat, rawOptions);
+        AppendOnlyWriter writer = createSharedShreddingAppendWriter(writeType, context);
+
+        Assertions.assertThatCode(writer::toBufferedWriter).doesNotThrowAnyException();
+        writer.close();
+    }
+
+    @Test
     public void testNoBuffer() throws Exception {
         AppendOnlyWriter writer = createEmptyWriter(Long.MAX_VALUE);
 
@@ -504,6 +828,61 @@ public class AppendOnlyWriterTest {
         writer.close();
     }
 
+    @Test
+    public void testVectorUsesRowDataWriterWithNoVectorFormat() throws Exception {
+        RowType vectorStoreSchema =
+                RowType.builder()
+                        .fields(
+                                new DataType[] {
+                                    new IntType(),
+                                    new VarCharType(),
+                                    DataTypes.VECTOR(3, DataTypes.FLOAT())
+                                },
+                                new String[] {"id", "name", "embed"})
+                        .build();
+        FileFormat format = null;
+        AppendOnlyWriter writer = createVectorStoreWriter(1024 * 1024L, format, vectorStoreSchema);
+        writer.write(rowWithVectors(1, "AAA", new float[] {1.0f, 2.0f, 3.0f}));
+        CommitIncrement increment = writer.prepareCommit(true);
+        writer.close();
+
+        assertThat(increment.newFilesIncrement().newFiles()).hasSize(1);
+        DataFileMeta meta = increment.newFilesIncrement().newFiles().get(0);
+        assertThat(meta.fileName()).doesNotContain(".vector");
+    }
+
+    @Test
+    public void testVectorUsesNewWriterWithSameVectorFormat() throws Exception {
+        RowType vectorStoreSchema =
+                RowType.builder()
+                        .fields(
+                                new DataType[] {
+                                    new IntType(),
+                                    new VarCharType(),
+                                    DataTypes.VECTOR(3, DataTypes.FLOAT())
+                                },
+                                new String[] {"id", "name", "embed"})
+                        .build();
+        FileFormat format = FileFormat.fromIdentifier(AVRO, new Options());
+        AppendOnlyWriter writer = createVectorStoreWriter(1024 * 1024L, format, vectorStoreSchema);
+        writer.write(rowWithVectors(1, "AAA", new float[] {1.0f, 2.0f, 3.0f}));
+        CommitIncrement increment = writer.prepareCommit(true);
+        writer.close();
+
+        assertThat(increment.newFilesIncrement().newFiles()).hasSize(2);
+        List<DataFileMeta> metaFiles = increment.newFilesIncrement().newFiles();
+        int countWithVector = 0, countWithoutVector = 0;
+        for (DataFileMeta meta : metaFiles) {
+            if (meta.fileName().contains(".vector")) {
+                ++countWithVector;
+            } else {
+                ++countWithoutVector;
+            }
+        }
+        assertThat(countWithVector).isEqualTo(1);
+        assertThat(countWithoutVector).isEqualTo(1);
+    }
+
     private SimpleColStats initStats(Integer min, Integer max, long nullCount) {
         return new SimpleColStats(min, max, nullCount);
     }
@@ -517,15 +896,250 @@ public class AppendOnlyWriterTest {
         return GenericRow.of(id, BinaryString.fromString(name), BinaryString.fromString(dt));
     }
 
+    private RowType sharedShreddingTagsWriteType() {
+        return DataTypes.ROW(
+                DataTypes.FIELD(0, "id", DataTypes.INT()),
+                DataTypes.FIELD(
+                        1,
+                        "tags",
+                        DataTypes.MAP(DataTypes.STRING().notNull(), DataTypes.BIGINT())));
+    }
+
+    private Options sharedShreddingOptions(Object... fieldToMaxColumns) {
+        Options options = new Options();
+        for (int i = 0; i < fieldToMaxColumns.length; i += 2) {
+            String fieldName = (String) fieldToMaxColumns[i];
+            options.setString("fields." + fieldName + ".map.storage-layout", "shared-shredding");
+            options.setString(
+                    "fields." + fieldName + ".map.shared-shredding.max-columns",
+                    String.valueOf(fieldToMaxColumns[i + 1]));
+            options.setString(
+                    "fields." + fieldName + ".map.shared-shredding.column-placement-policy",
+                    "plain");
+        }
+        options.setString("metadata.stats-mode", "none");
+        return options;
+    }
+
+    private InternalRow sharedShreddingRow(int id, Object... keyValues) {
+        return sharedShreddingLogicalRow(id, map(keyValues));
+    }
+
+    private InternalRow sharedShreddingLogicalRow(int id, Object... fields) {
+        GenericRow row = new GenericRow(fields.length + 1);
+        row.setField(0, id);
+        for (int i = 0; i < fields.length; i++) {
+            row.setField(i + 1, fields[i]);
+        }
+        return row;
+    }
+
+    private InternalMap map(Object... keyValues) {
+        Map<BinaryString, Object> map = new LinkedHashMap<>();
+        for (int i = 0; i < keyValues.length; i += 2) {
+            map.put(
+                    BinaryString.fromString((String) keyValues[i]),
+                    internalValue(keyValues[i + 1]));
+        }
+        return new GenericMap(map);
+    }
+
+    private Object internalValue(Object value) {
+        if (value instanceof String) {
+            return BinaryString.fromString((String) value);
+        }
+        return value;
+    }
+
+    private MapSharedShreddingFieldMeta sharedShreddingMeta(
+            Map<String, Integer> nameToId,
+            Map<Integer, List<Integer>> fieldToColumns,
+            Set<Integer> overflowFields,
+            int numColumns,
+            int maxRowWidth) {
+        return new MapSharedShreddingFieldMeta(
+                new TreeMap<>(nameToId),
+                new TreeMap<>(fieldToColumns),
+                new TreeSet<>(overflowFields),
+                numColumns,
+                maxRowWidth);
+    }
+
+    private Map<String, Integer> nameToId(Object... pairs) {
+        Map<String, Integer> result = new TreeMap<>();
+        for (int i = 0; i < pairs.length; i += 2) {
+            result.put((String) pairs[i], (Integer) pairs[i + 1]);
+        }
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<Integer, List<Integer>> fieldToColumns(Object... pairs) {
+        Map<Integer, List<Integer>> result = new TreeMap<>();
+        for (int i = 0; i < pairs.length; i += 2) {
+            result.put((Integer) pairs[i], (List<Integer>) pairs[i + 1]);
+        }
+        return result;
+    }
+
+    private List<Integer> columns(int... columns) {
+        List<Integer> result = new ArrayList<>();
+        for (int column : columns) {
+            result.add(column);
+        }
+        return result;
+    }
+
+    private Set<Integer> overflowFields(int... fieldIds) {
+        Set<Integer> result = new TreeSet<>();
+        for (int fieldId : fieldIds) {
+            result.add(fieldId);
+        }
+        return result;
+    }
+
+    private InternalRow rowWithVectors(int id, String name, float[]... vectors) {
+        GenericRow row = new GenericRow(vectors.length + 2);
+        row.setField(0, id);
+        row.setField(1, BinaryString.fromString(name));
+        for (int i = 0; i < vectors.length; ++i) {
+            row.setField(i + 2, BinaryVector.fromPrimitiveArray(vectors[i]));
+        }
+        return row;
+    }
+
     private DataFilePathFactory createPathFactory() {
+        return createPathFactory(CoreOptions.FILE_FORMAT_AVRO);
+    }
+
+    private DataFilePathFactory createPathFactory(String fileFormat) {
         return new DataFilePathFactory(
                 new Path(tempDir + "/dt=" + PART + "/bucket-0"),
-                CoreOptions.FILE_FORMAT_AVRO,
+                fileFormat,
                 CoreOptions.DATA_FILE_PREFIX.defaultValue(),
                 CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
                 CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                 CoreOptions.FILE_COMPRESSION.defaultValue(),
                 null);
+    }
+
+    private SharedShreddingAppendContext createSharedShreddingAppendContext(
+            String fileFormat, Options rawOptions) {
+        CoreOptions options = new CoreOptions(rawOptions);
+        DataFilePathFactory pathFactory = createPathFactory(fileFormat);
+        LocalFileIO fileIO = LocalFileIO.create();
+        return new SharedShreddingAppendContext(
+                options, pathFactory, fileIO, FileFormat.fromIdentifier(fileFormat, rawOptions));
+    }
+
+    private AppendOnlyWriter createSharedShreddingAppendWriter(
+            RowType writeType, SharedShreddingAppendContext context) {
+        return createSharedShreddingAppendWriter(writeType, context, SCHEMA_ID, -1L);
+    }
+
+    private AppendOnlyWriter createSharedShreddingAppendWriter(
+            RowType writeType,
+            SharedShreddingAppendContext context,
+            long schemaId,
+            long maxSequenceNumber) {
+        return createSharedShreddingAppendWriter(
+                writeType, context, schemaId, maxSequenceNumber, new FileIndexOptions());
+    }
+
+    private AppendOnlyWriter createSharedShreddingAppendWriter(
+            RowType writeType,
+            SharedShreddingAppendContext context,
+            long schemaId,
+            long maxSequenceNumber,
+            FileIndexOptions fileIndexOptions) {
+        return createSharedShreddingAppendWriter(
+                writeType, context, schemaId, maxSequenceNumber, fileIndexOptions, null);
+    }
+
+    private AppendOnlyWriter createSharedShreddingAppendWriter(
+            RowType writeType,
+            SharedShreddingAppendContext context,
+            long schemaId,
+            long maxSequenceNumber,
+            FileIndexOptions fileIndexOptions,
+            @Nullable BlobFileContext blobContext) {
+        return new AppendOnlyWriter(
+                context.fileIO,
+                null,
+                schemaId,
+                context.format,
+                null,
+                1024 * 1024L,
+                1024 * 1024L,
+                1024 * 1024L,
+                Long.MAX_VALUE,
+                writeType,
+                null,
+                maxSequenceNumber,
+                new NoopCompactManager(),
+                null,
+                false,
+                context.pathFactory,
+                null,
+                false,
+                false,
+                CoreOptions.FILE_COMPRESSION.defaultValue(),
+                CompressOptions.defaultOptions(),
+                new StatsCollectorFactories(context.options),
+                MemorySize.MAX_VALUE,
+                fileIndexOptions,
+                true,
+                false,
+                context.options.dataEvolutionEnabled(),
+                null,
+                blobContext);
+    }
+
+    private DataFileMeta writeSharedShreddingFile(AppendOnlyWriter writer, InternalRow... rows)
+            throws Exception {
+        for (InternalRow row : rows) {
+            writer.write(row);
+        }
+        return assertSingleNewFile(writer.prepareCommit(true));
+    }
+
+    private DataFileMeta assertSingleNewFile(CommitIncrement increment) {
+        assertThat(increment.newFilesIncrement().newFiles()).hasSize(1);
+        assertThat(increment.compactIncrement().isEmpty()).isTrue();
+        return increment.newFilesIncrement().newFiles().get(0);
+    }
+
+    private MapSharedShreddingFieldMeta readSharedShreddingFieldMeta(
+            SharedShreddingAppendContext context, DataFileMeta file, String fieldName)
+            throws IOException {
+        assertThat(context.format).isInstanceOf(SupportsFieldMetadata.class);
+        Map<String, Map<String, String>> fieldMetadata =
+                ((SupportsFieldMetadata) context.format)
+                        .readFieldMetadata(
+                                new FormatReaderContext(
+                                        context.fileIO,
+                                        context.pathFactory.toPath(file),
+                                        file.fileSize()));
+        return MapSharedShreddingUtils.deserializeMetadata(fieldMetadata.get(fieldName));
+    }
+
+    private static class SharedShreddingAppendContext {
+
+        private final CoreOptions options;
+        private final DataFilePathFactory pathFactory;
+        private final LocalFileIO fileIO;
+        private final FileFormat format;
+
+        private SharedShreddingAppendContext(
+                CoreOptions options,
+                DataFilePathFactory pathFactory,
+                LocalFileIO fileIO,
+                FileFormat format) {
+            this.options = options;
+            this.pathFactory = pathFactory;
+            this.fileIO = fileIO;
+            this.format = format;
+        }
     }
 
     private AppendOnlyWriter createEmptyWriter(long targetFileSize) {
@@ -594,6 +1208,56 @@ public class AppendOnlyWriterTest {
             boolean hasIoManager,
             List<DataFileMeta> scannedFiles,
             CountDownLatch latch) {
+        Map<String, String> options = new HashMap<>();
+        options.put("metadata.stats-mode", "truncate(16)");
+        return createWriterBase(
+                targetFileSize,
+                null,
+                AppendOnlyWriterTest.SCHEMA,
+                forceCompact,
+                useWriteBuffer,
+                spillable,
+                hasIoManager,
+                scannedFiles,
+                compactBefore -> {
+                    latch.await();
+                    return compactBefore.isEmpty()
+                            ? Collections.emptyList()
+                            : Collections.singletonList(generateCompactAfter(compactBefore));
+                },
+                options);
+    }
+
+    private AppendOnlyWriter createVectorStoreWriter(
+            long targetFileSize, FileFormat vectorFileFormat, RowType writeSchema) {
+        Map<String, String> options = new HashMap<>();
+        options.put("metadata.stats-mode", "truncate(16)");
+        options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        return createWriterBase(
+                        targetFileSize,
+                        vectorFileFormat,
+                        writeSchema,
+                        false,
+                        true,
+                        false,
+                        true,
+                        Collections.emptyList(),
+                        compactBefore -> Collections.emptyList(),
+                        options)
+                .getKey();
+    }
+
+    private Pair<AppendOnlyWriter, List<DataFileMeta>> createWriterBase(
+            long targetFileSize,
+            FileFormat vectorFileFormat,
+            RowType writeSchema,
+            boolean forceCompact,
+            boolean useWriteBuffer,
+            boolean spillable,
+            boolean hasIoManager,
+            List<DataFileMeta> scannedFiles,
+            BucketedAppendCompactManager.CompactRewriter rewriter,
+            Map<String, String> optionsMap) {
         FileFormat fileFormat = FileFormat.fromIdentifier(AVRO, new Options());
         LinkedList<DataFileMeta> toCompact = new LinkedList<>(scannedFiles);
         BucketedAppendCompactManager compactManager =
@@ -604,24 +1268,23 @@ public class AppendOnlyWriterTest {
                         null,
                         MIN_FILE_NUM,
                         targetFileSize,
+                        targetFileSize / 10 * 7,
                         false,
-                        compactBefore -> {
-                            latch.await();
-                            return compactBefore.isEmpty()
-                                    ? Collections.emptyList()
-                                    : Collections.singletonList(
-                                            generateCompactAfter(compactBefore));
-                        },
+                        rewriter,
                         null);
-        CoreOptions options = new CoreOptions(new HashMap<>());
+        CoreOptions options = new CoreOptions(optionsMap);
         AppendOnlyWriter writer =
                 new AppendOnlyWriter(
                         LocalFileIO.create(),
                         hasIoManager ? IOManager.create(tempDir.toString()) : null,
                         SCHEMA_ID,
                         fileFormat,
+                        vectorFileFormat,
                         targetFileSize,
-                        AppendOnlyWriterTest.SCHEMA,
+                        targetFileSize,
+                        targetFileSize,
+                        Long.MAX_VALUE,
+                        writeSchema,
                         null,
                         getMaxSequenceNumber(toCompact),
                         compactManager,
@@ -633,14 +1296,14 @@ public class AppendOnlyWriterTest {
                         spillable,
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         CompressOptions.defaultOptions(),
-                        StatsCollectorFactories.createStatsFactories(
-                                "truncate(16)",
-                                options,
-                                AppendOnlyWriterTest.SCHEMA.getFieldNames()),
+                        new StatsCollectorFactories(options),
                         MemorySize.MAX_VALUE,
                         new FileIndexOptions(),
                         true,
-                        false);
+                        false,
+                        options.dataEvolutionEnabled(),
+                        null,
+                        BlobFileContext.create(writeSchema, options));
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         return Pair.of(writer, compactManager.allFiles());
@@ -688,5 +1351,9 @@ public class AppendOnlyWriterTest {
                 null,
                 null,
                 null);
+    }
+
+    private InternalRow createBlobRow(int id, String name, byte[] blobData) {
+        return GenericRow.of(id, BinaryString.fromString(name), new BlobData(blobData));
     }
 }

@@ -18,18 +18,61 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypeJsonParser;
+import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /** This is a util class for converting string parameter to another format. */
 public class ParameterUtils {
+
+    private static final Pattern INTEGER_RANGE = Pattern.compile("([0-9]+)(?:\\s*-\\s*([0-9]+))?");
+
+    public static List<Integer> parseIntegerRanges(String values, int exclusiveUpperBound) {
+        Preconditions.checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(values), "Integer ranges must not be empty.");
+        Preconditions.checkArgument(
+                exclusiveUpperBound > 0, "Exclusive upper bound must be greater than 0.");
+        Set<Integer> result = new LinkedHashSet<>();
+        for (String token : values.split(",", -1)) {
+            String trimmedToken = token.trim();
+            Preconditions.checkArgument(
+                    !trimmedToken.isEmpty(), "Integer ranges must not contain an empty item.");
+            Matcher matcher = INTEGER_RANGE.matcher(trimmedToken);
+            Preconditions.checkArgument(
+                    matcher.matches(), "Invalid integer or range: '%s'.", trimmedToken);
+            long start = Long.parseLong(matcher.group(1));
+            long end = matcher.group(2) == null ? start : Long.parseLong(matcher.group(2));
+            Preconditions.checkArgument(
+                    start <= end,
+                    "Integer range start %s must not be greater than end %s.",
+                    start,
+                    end);
+            Preconditions.checkArgument(
+                    end < exclusiveUpperBound,
+                    "Integer or range '%s' is out of range [0, %s).",
+                    trimmedToken,
+                    exclusiveUpperBound);
+            for (long value = start; value <= end; value++) {
+                result.add((int) value);
+            }
+        }
+        return new ArrayList<>(result);
+    }
 
     public static List<Map<String, String>> getPartitions(String... partitionStrings) {
         List<Map<String, String>> partitions = new ArrayList<>();
@@ -37,6 +80,23 @@ public class ParameterUtils {
             partitions.add(parseCommaSeparatedKeyValues(partition));
         }
         return partitions;
+    }
+
+    @Nullable
+    public static Predicate toPartitionPredicate(
+            List<Map<String, String>> partitionList,
+            RowType partitionType,
+            String partitionDefaultName) {
+        if (partitionList == null || partitionList.isEmpty()) {
+            return null;
+        }
+        return PredicateBuilder.or(
+                partitionList.stream()
+                        .map(
+                                p ->
+                                        PredicateBuilder.partition(
+                                                p, partitionType, partitionDefaultName))
+                        .toArray(Predicate[]::new));
     }
 
     public static Map<String, String> parseCommaSeparatedKeyValues(String keyValues) {

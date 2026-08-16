@@ -107,10 +107,14 @@ function collect_checks() {
 function get_all_supported_checks() {
     _OLD_IFS=$IFS
     IFS=$'\n'
-    SUPPORT_CHECKS=()
+    SUPPORT_CHECKS=("license_check" "flake8_check" "pytest_torch_check" "pytest_check" "mixed_check") # control the calling sequence
     for fun in $(declare -F); do
         if [[ `regexp_match "$fun" "_check$"` = true ]]; then
-            SUPPORT_CHECKS+=("${fun:11}")
+            check_name="${fun:11}"
+            # Only add if not already in SUPPORT_CHECKS
+            if [[ ! `contains_element "${SUPPORT_CHECKS[*]}" "$check_name"` = true ]]; then
+                SUPPORT_CHECKS+=("$check_name")
+            fi
         fi
     done
     IFS=$_OLD_IFS
@@ -119,21 +123,41 @@ function get_all_supported_checks() {
 # exec all selected check stages
 function check_stage() {
     print_function "STAGE" "checks starting"
-    for fun in ${SUPPORT_CHECKS[@]}; do
+    for fun in "${SUPPORT_CHECKS[@]}"; do
         $fun
     done
     echo "All the checks are finished, the detailed information can be found in: $LOG_FILE"
 }
-
 
 ###############################################################All Checks Definitions###############################################################
 #########################
 # This part defines all check functions such as tox_check and flake8_check
 # We make a rule that all check functions are suffixed with _ check. e.g. tox_check, flake8_check
 #########################
+# License header check
+function license_check() {
+    print_function "STAGE" "license header checks"
+
+    set -o pipefail
+    (python "$CURRENT_DIR/dev/check_license_header.py") 2>&1 | tee -a $LOG_FILE
+
+    LICENSE_STATUS=$?
+    if [ $LICENSE_STATUS -ne 0 ]; then
+        print_function "STAGE" "license header checks... [FAILED]"
+        exit 1
+    else
+        print_function "STAGE" "license header checks... [SUCCESS]"
+    fi
+}
+
 # Flake8 check
 function flake8_check() {
-    local PYTHON_SOURCE="$(find . \( -path ./dev -o -path ./.tox -o -path ./.venv \) -prune -o -type f -name "*.py" -print )"
+    local PRUNE_PATHS="\( -path ./dev -o -path ./.tox -o -path ./.venv"
+    if python -c "import sys; sys.exit(0 if sys.version_info < (3, 10) else 1)" 2>/dev/null; then
+        PRUNE_PATHS="$PRUNE_PATHS -o -path ./pypaimon/daft -o -path ./pypaimon/tests/daft"
+    fi
+    PRUNE_PATHS="$PRUNE_PATHS \)"
+    local PYTHON_SOURCE="$(eval "find . $PRUNE_PATHS -prune -o -type f -name '*.py' -print")"
 
     print_function "STAGE" "flake8 checks"
     if [ ! -f "$FLAKE8_PATH" ]; then
@@ -162,16 +186,29 @@ function flake8_check() {
 
 # Pytest check
 function pytest_check() {
-
     print_function "STAGE" "pytest checks"
     if [ ! -f "$PYTEST_PATH" ]; then
         echo "For some unknown reasons, the pytest package is not complete."
     fi
 
+    # Get Python version
+    PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+    echo "Detected Python version: $PYTHON_VERSION"
+
+    # 3.6/3.7 run a curated core subset (their dep ceiling rules out the
+    # vector/index/multimodal/blob suites); 3.10+ run the full suite.
+    if [ "$PYTHON_VERSION" = "3.6" ] || [ "$PYTHON_VERSION" = "3.7" ]; then
+        TEST_DIR="pypaimon/tests/py36 pypaimon/tests/file_io_test.py"
+        echo "Running core test subset for Python $PYTHON_VERSION: $TEST_DIR"
+    else
+        TEST_DIR="pypaimon/tests pypaimon/acceptance --ignore=pypaimon/tests/py36 --ignore=pypaimon/tests/e2e --ignore=pypaimon/tests/torch_read_test.py"
+        echo "Running tests for Python $PYTHON_VERSION (excluding py36): $TEST_DIR"
+    fi
+
     # the return value of a pipeline is the status of the last command to exit
     # with a non-zero status or zero if no command exited with a non-zero status
     set -o pipefail
-    ($PYTEST_PATH) 2>&1 | tee -a $LOG_FILE
+    ($PYTEST_PATH $TEST_DIR) 2>&1 | tee -a $LOG_FILE
 
     PYCODESTYLE_STATUS=$?
     if [ $PYCODESTYLE_STATUS -ne 0 ]; then
@@ -180,6 +217,67 @@ function pytest_check() {
         exit 1;
     else
         print_function "STAGE" "pytest checks... [SUCCESS]"
+    fi
+}
+function pytest_torch_check() {
+    print_function "STAGE" "pytest torch checks"
+    if [ ! -f "$PYTEST_PATH" ]; then
+        echo "For some unknown reasons, the pytest package is not complete."
+    fi
+
+    # Get Python version
+    PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+    echo "Detected Python version: $PYTHON_VERSION"
+    TEST_DIR="pypaimon/tests/torch_read_test.py"
+    echo "Running tests for Python $PYTHON_VERSION: pypaimon/tests/torch_read_test.py"
+
+    # the return value of a pipeline is the status of the last command to exit
+    # with a non-zero status or zero if no command exited with a non-zero status
+    set -o pipefail
+    ($PYTEST_PATH $TEST_DIR) 2>&1 | tee -a $LOG_FILE
+
+    PYCODESTYLE_STATUS=$?
+    if [ $PYCODESTYLE_STATUS -ne 0 ]; then
+        print_function "STAGE" "pytest checks... [FAILED]"
+        # Stop the running script.
+        exit 1;
+    else
+        print_function "STAGE" "pytest checks... [SUCCESS]"
+    fi
+}
+# Mixed tests check - runs Java-Python interoperability tests
+function mixed_check() {
+    # Native-plan coverage is asserted only by the main pytest session.
+    unset PYPAIMON_TEST_NATIVE_PLAN
+
+    # Get Python version
+    PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+    echo "Detected Python version: $PYTHON_VERSION"
+    print_function "STAGE" "mixed tests checks"
+
+    # Path to the mixed tests script
+    MIXED_TESTS_SCRIPT="$CURRENT_DIR/dev/run_mixed_tests.sh"
+
+    if [ ! -f "$MIXED_TESTS_SCRIPT" ]; then
+        echo "Mixed tests script not found at: $MIXED_TESTS_SCRIPT"
+        print_function "STAGE" "mixed tests checks... [FAILED]"
+        exit 1
+    fi
+
+    # Make sure the script is executable
+    chmod +x "$MIXED_TESTS_SCRIPT"
+
+    # Run the mixed tests script
+    set -o pipefail
+    ($MIXED_TESTS_SCRIPT) 2>&1 | tee -a $LOG_FILE
+
+    MIXED_TESTS_STATUS=$?
+    if [ $MIXED_TESTS_STATUS -ne 0 ]; then
+        print_function "STAGE" "mixed tests checks... [FAILED]"
+        # Stop the running script.
+        exit 1;
+    else
+        print_function "STAGE" "mixed tests checks... [SUCCESS]"
     fi
 }
 ###############################################################All Checks Definitions###############################################################
@@ -224,15 +322,16 @@ INCLUDE_CHECKS=""
 USAGE="
 usage: $0 [options]
 -h          print this help message and exit
--e [tox,flake8,sphinx,mypy]
+-e [tox,flake8,sphinx,mypy,mixed]
             exclude checks which split by comma(,)
--i [tox,flake8,sphinx,mypy]
+-i [tox,flake8,sphinx,mypy,mixed]
             include checks which split by comma(,)
 -l          list all checks supported.
 Examples:
   ./lint-python.sh                 =>  exec all checks.
-  ./lint-python.sh -e tox,flake8   =>  exclude checks tox,flake8.
+  ./lint-python.sh -e flake8       =>  exclude checks flake8.
   ./lint-python.sh -i flake8       =>  include checks flake8.
+  ./lint-python.sh -i mixed        =>  include checks mixed.
   ./lint-python.sh -l              =>  list all checks supported.
 "
 while getopts "hfs:i:e:lr" arg; do
@@ -249,7 +348,7 @@ while getopts "hfs:i:e:lr" arg; do
             ;;
         l)
             printf "current supported checks includes:\n"
-            for fun in ${SUPPORT_CHECKS[@]}; do
+            for fun in "${SUPPORT_CHECKS[@]}"; do
                 echo ${fun%%_check*}
             done
             exit 2
@@ -263,6 +362,10 @@ done
 
 # collect checks according to the options
 collect_checks
+
+if python -c "import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)"; then
+    python -m pip install 'paimon-ftindex==0.1.0' || exit 1
+fi
+
 # run checks
 check_stage
-

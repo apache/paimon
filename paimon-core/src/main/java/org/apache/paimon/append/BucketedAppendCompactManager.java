@@ -24,7 +24,7 @@ import org.apache.paimon.compact.CompactDeletionFile;
 import org.apache.paimon.compact.CompactFutureManager;
 import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.compact.CompactTask;
-import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
+import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.operation.metrics.CompactionMetrics;
 import org.apache.paimon.operation.metrics.MetricUtils;
@@ -56,10 +56,11 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
     private static final int FULL_COMPACT_MIN_FILE = 3;
 
     private final ExecutorService executor;
-    private final DeletionVectorsMaintainer dvMaintainer;
+    private final BucketedDvMaintainer dvMaintainer;
     private final PriorityQueue<DataFileMeta> toCompact;
     private final int minFileNum;
     private final long targetFileSize;
+    private final long compactionFileSize;
     private final boolean forceRewriteAllFiles;
     private final CompactRewriter rewriter;
 
@@ -70,18 +71,20 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
     public BucketedAppendCompactManager(
             ExecutorService executor,
             List<DataFileMeta> restored,
-            @Nullable DeletionVectorsMaintainer dvMaintainer,
+            @Nullable BucketedDvMaintainer dvMaintainer,
             int minFileNum,
             long targetFileSize,
+            long compactionFileSize,
             boolean forceRewriteAllFiles,
             CompactRewriter rewriter,
             @Nullable CompactionMetrics.Reporter metricsReporter) {
         this.executor = executor;
         this.dvMaintainer = dvMaintainer;
-        this.toCompact = new PriorityQueue<>(fileComparator(false));
+        this.toCompact = new PriorityQueue<>(Comparator.comparing(DataFileMeta::minSequenceNumber));
         this.toCompact.addAll(restored);
         this.minFileNum = minFileNum;
         this.targetFileSize = targetFileSize;
+        this.compactionFileSize = compactionFileSize;
         this.forceRewriteAllFiles = forceRewriteAllFiles;
         this.rewriter = rewriter;
         this.metricsReporter = metricsReporter;
@@ -117,7 +120,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
                         new FullCompactTask(
                                 dvMaintainer,
                                 toCompact,
-                                targetFileSize,
+                                compactionFileSize,
                                 forceRewriteAllFiles,
                                 rewriter,
                                 metricsReporter));
@@ -188,7 +191,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
                 // if the last compacted file is still small,
                 // add it back to the head
                 DataFileMeta lastFile = compactResult.after().get(compactResult.after().size() - 1);
-                if (lastFile.fileSize() < targetFileSize) {
+                if (lastFile.fileSize() < compactionFileSize) {
                     toCompact.add(lastFile);
                 }
             }
@@ -214,7 +217,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
             fileNum++;
             if (fileNum >= minFileNum) {
                 return Optional.of(candidates);
-            } else if (totalFileSize >= targetFileSize) {
+            } else if (totalFileSize >= targetFileSize * 2) {
                 // let pointer shift one pos to right
                 DataFileMeta removed = candidates.pollFirst();
                 assert removed != null;
@@ -241,23 +244,23 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
     /** A {@link CompactTask} impl for full compaction of append-only table. */
     public static class FullCompactTask extends CompactTask {
 
-        private final DeletionVectorsMaintainer dvMaintainer;
+        private final BucketedDvMaintainer dvMaintainer;
         private final LinkedList<DataFileMeta> toCompact;
-        private final long targetFileSize;
+        private final long compactionFileSize;
         private final boolean forceRewriteAllFiles;
         private final CompactRewriter rewriter;
 
         public FullCompactTask(
-                DeletionVectorsMaintainer dvMaintainer,
+                BucketedDvMaintainer dvMaintainer,
                 Collection<DataFileMeta> inputs,
-                long targetFileSize,
+                long compactionFileSize,
                 boolean forceRewriteAllFiles,
                 CompactRewriter rewriter,
                 @Nullable CompactionMetrics.Reporter metricsReporter) {
-            super(metricsReporter);
+            super(metricsReporter, "");
             this.dvMaintainer = dvMaintainer;
             this.toCompact = new LinkedList<>(inputs);
-            this.targetFileSize = targetFileSize;
+            this.compactionFileSize = compactionFileSize;
             this.forceRewriteAllFiles = forceRewriteAllFiles;
             this.rewriter = rewriter;
         }
@@ -268,7 +271,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
             while (!forceRewriteAllFiles && !toCompact.isEmpty()) {
                 DataFileMeta file = toCompact.peekFirst();
                 // the data file with deletion file always need to be compacted.
-                if (file.fileSize() >= targetFileSize && !hasDeletionFile(file)) {
+                if (file.fileSize() >= compactionFileSize && !hasDeletionFile(file)) {
                     toCompact.poll();
                     continue;
                 }
@@ -284,7 +287,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
                 int big = 0;
                 int small = 0;
                 for (DataFileMeta file : toCompact) {
-                    if (file.fileSize() >= targetFileSize) {
+                    if (file.fileSize() >= compactionFileSize) {
                         big++;
                     } else {
                         small++;
@@ -314,16 +317,16 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
      */
     public static class AutoCompactTask extends CompactTask {
 
-        private final DeletionVectorsMaintainer dvMaintainer;
+        private final BucketedDvMaintainer dvMaintainer;
         private final List<DataFileMeta> toCompact;
         private final CompactRewriter rewriter;
 
         public AutoCompactTask(
-                DeletionVectorsMaintainer dvMaintainer,
+                BucketedDvMaintainer dvMaintainer,
                 List<DataFileMeta> toCompact,
                 CompactRewriter rewriter,
                 @Nullable CompactionMetrics.Reporter metricsReporter) {
-            super(metricsReporter);
+            super(metricsReporter, "");
             this.dvMaintainer = dvMaintainer;
             this.toCompact = toCompact;
             this.rewriter = rewriter;
@@ -336,7 +339,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
     }
 
     private static CompactResult compact(
-            @Nullable DeletionVectorsMaintainer dvMaintainer,
+            @Nullable BucketedDvMaintainer dvMaintainer,
             List<DataFileMeta> toCompact,
             CompactRewriter rewriter)
             throws Exception {
@@ -356,36 +359,5 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
     /** Compact rewriter for append-only table. */
     public interface CompactRewriter {
         List<DataFileMeta> rewrite(List<DataFileMeta> compactBefore) throws Exception;
-    }
-
-    /**
-     * New files may be created during the compaction process, then the results of the compaction
-     * may be put after the new files, and this order will be disrupted. We need to ensure this
-     * order, so we force the order by sequence.
-     */
-    public static Comparator<DataFileMeta> fileComparator(boolean ignoreOverlap) {
-        return (o1, o2) -> {
-            if (o1 == o2) {
-                return 0;
-            }
-
-            if (!ignoreOverlap && isOverlap(o1, o2)) {
-                LOG.warn(
-                        String.format(
-                                "There should no overlap in append files, but Range1(%s, %s), Range2(%s, %s),"
-                                        + " check if you have multiple write jobs.",
-                                o1.minSequenceNumber(),
-                                o1.maxSequenceNumber(),
-                                o2.minSequenceNumber(),
-                                o2.maxSequenceNumber()));
-            }
-
-            return Long.compare(o1.minSequenceNumber(), o2.minSequenceNumber());
-        };
-    }
-
-    private static boolean isOverlap(DataFileMeta o1, DataFileMeta o2) {
-        return o2.minSequenceNumber() <= o1.maxSequenceNumber()
-                && o2.maxSequenceNumber() >= o1.minSequenceNumber();
     }
 }

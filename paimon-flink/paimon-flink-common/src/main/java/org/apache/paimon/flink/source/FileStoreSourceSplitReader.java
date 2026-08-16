@@ -20,12 +20,15 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkRowData;
+import org.apache.paimon.flink.FlinkRowDataWithBlob;
 import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReader.RecordIterator;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.types.BlobType;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pool;
 
 import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
@@ -45,6 +48,7 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.Objects;
 import java.util.Queue;
@@ -73,19 +77,23 @@ public class FileStoreSourceSplitReader
     private boolean paused;
     private final AtomicBoolean wakeup;
     private final FileStoreSourceReaderMetrics metrics;
+    private final boolean blobAsDescriptor;
 
     public FileStoreSourceSplitReader(
             TableRead tableRead,
             @Nullable RecordLimiter limiter,
-            FileStoreSourceReaderMetrics metrics) {
+            FileStoreSourceReaderMetrics metrics,
+            @Nullable RowType readType,
+            boolean blobAsDescriptor) {
         this.tableRead = tableRead;
         this.limiter = limiter;
         this.splits = new LinkedList<>();
         this.pool = new Pool<>(1);
-        this.pool.add(new FileStoreRecordIterator());
+        this.pool.add(new FileStoreRecordIterator(readType));
         this.paused = false;
         this.metrics = metrics;
         this.wakeup = new AtomicBoolean(false);
+        this.blobAsDescriptor = blobAsDescriptor;
     }
 
     @Override
@@ -183,9 +191,19 @@ public class FileStoreSourceSplitReader
 
     @Override
     public void close() throws Exception {
-        if (currentReader != null) {
-            if (currentReader.lazyRecordReader != null) {
-                currentReader.lazyRecordReader.close();
+        try {
+            if (currentFirstBatch != null) {
+                try {
+                    currentFirstBatch.releaseBatch();
+                } finally {
+                    currentFirstBatch = null;
+                }
+            }
+        } finally {
+            if (currentReader != null) {
+                if (currentReader.lazyRecordReader != null) {
+                    currentReader.lazyRecordReader.close();
+                }
             }
         }
     }
@@ -260,6 +278,21 @@ public class FileStoreSourceSplitReader
 
         private final MutableRecordAndPosition<RowData> recordAndPosition =
                 new MutableRecordAndPosition<>();
+        private final Set<Integer> blobFields;
+
+        private FileStoreRecordIterator(@Nullable RowType rowType) {
+            this.blobFields = rowType == null ? Collections.emptySet() : blobFieldIndexes(rowType);
+        }
+
+        private Set<Integer> blobFieldIndexes(RowType rowType) {
+            Set<Integer> result = new HashSet<>();
+            for (int i = 0; i < rowType.getFieldCount(); i++) {
+                if (BlobType.isBlobFileField(rowType.getTypeAt(i))) {
+                    result.add(i);
+                }
+            }
+            return result;
+        }
 
         public FileStoreRecordIterator replace(RecordIterator<InternalRow> iterator) {
             this.iterator = iterator;
@@ -283,7 +316,10 @@ public class FileStoreSourceSplitReader
                 return null;
             }
 
-            recordAndPosition.setNext(new FlinkRowData(row));
+            recordAndPosition.setNext(
+                    blobFields.isEmpty()
+                            ? new FlinkRowData(row)
+                            : new FlinkRowDataWithBlob(row, blobFields, blobAsDescriptor));
             currentNumRead++;
             if (limiter != null) {
                 limiter.increment();
@@ -293,8 +329,11 @@ public class FileStoreSourceSplitReader
 
         @Override
         public void releaseBatch() {
-            this.iterator.releaseBatch();
-            pool.recycler().recycle(this);
+            try {
+                this.iterator.releaseBatch();
+            } finally {
+                pool.recycler().recycle(this);
+            }
         }
     }
 
@@ -321,7 +360,7 @@ public class FileStoreSourceSplitReader
      * An empty implementation of {@link RecordsWithSplitIds}. It is used to indicate that the
      * {@link FileStoreSourceSplitReader} is paused or wakeup.
      */
-    private static class EmptyRecordsWithSplitIds<T> implements RecordsWithSplitIds<T> {
+    public static class EmptyRecordsWithSplitIds<T> implements RecordsWithSplitIds<T> {
 
         @Nullable
         @Override

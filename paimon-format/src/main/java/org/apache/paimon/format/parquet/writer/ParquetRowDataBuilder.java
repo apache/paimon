@@ -19,17 +19,20 @@
 package org.apache.paimon.format.parquet.writer;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.parquet.VariantUtils;
+import org.apache.paimon.format.FormatMetadataUtils;
 import org.apache.paimon.types.RowType;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.api.WriteSupport;
+import org.apache.parquet.hadoop.api.WriteSupport.FinalizedWriteContext;
 import org.apache.parquet.io.OutputFile;
 import org.apache.parquet.io.api.RecordConsumer;
 import org.apache.parquet.schema.MessageType;
 
 import java.util.HashMap;
+import java.util.Map;
+import java.util.function.Supplier;
 
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.convertToParquetMessageType;
 
@@ -38,10 +41,18 @@ public class ParquetRowDataBuilder
         extends ParquetWriter.Builder<InternalRow, ParquetRowDataBuilder> {
 
     private final RowType rowType;
+    private Supplier<Map<String, byte[]>> metadataSupplier;
 
     public ParquetRowDataBuilder(OutputFile path, RowType rowType) {
         super(path);
         this.rowType = rowType;
+        this.metadataSupplier = HashMap::new;
+    }
+
+    public ParquetRowDataBuilder withMetadataSupplier(
+            Supplier<Map<String, byte[]>> metadataSupplier) {
+        this.metadataSupplier = metadataSupplier;
+        return this;
     }
 
     @Override
@@ -51,22 +62,14 @@ public class ParquetRowDataBuilder
 
     @Override
     protected WriteSupport<InternalRow> getWriteSupport(Configuration conf) {
-        return new ParquetWriteSupport(conf);
+        return new ParquetWriteSupport();
     }
 
     private class ParquetWriteSupport extends WriteSupport<InternalRow> {
 
-        private final Configuration conf;
-        private final MessageType schema;
+        private final MessageType schema = convertToParquetMessageType(rowType);
 
         private ParquetRowDataWriter writer;
-
-        private ParquetWriteSupport(Configuration conf) {
-            this.conf = conf;
-            this.schema =
-                    convertToParquetMessageType(
-                            VariantUtils.replaceWithShreddingType(conf, rowType));
-        }
 
         @Override
         public WriteContext init(Configuration configuration) {
@@ -75,12 +78,18 @@ public class ParquetRowDataBuilder
 
         @Override
         public void prepareForWrite(RecordConsumer recordConsumer) {
-            this.writer = new ParquetRowDataWriter(recordConsumer, rowType, schema, conf);
+            this.writer = new ParquetRowDataWriter(recordConsumer, rowType, schema);
         }
 
         @Override
         public void write(InternalRow record) {
             this.writer.write(record);
+        }
+
+        @Override
+        public FinalizedWriteContext finalizeWrite() {
+            return new FinalizedWriteContext(
+                    FormatMetadataUtils.encodeMetadata(metadataSupplier.get()));
         }
     }
 }

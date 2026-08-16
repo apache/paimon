@@ -19,14 +19,17 @@
 package org.apache.paimon.data.columnar;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.DataSetters;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.data.variant.Variant;
+import org.apache.paimon.fs.FileIO;
 
 import java.io.Serializable;
 import java.util.Arrays;
@@ -39,11 +42,16 @@ public final class ColumnarArray implements InternalArray, DataSetters, Serializ
     private final ColumnVector data;
     private final int offset;
     private final int numElements;
+    private FileIO fileIO;
 
     public ColumnarArray(ColumnVector data, int offset, int numElements) {
         this.data = data;
         this.offset = offset;
         this.numElements = numElements;
+    }
+
+    public void setFileIO(FileIO fileIO) {
+        this.fileIO = fileIO;
     }
 
     @Override
@@ -132,13 +140,35 @@ public final class ColumnarArray implements InternalArray, DataSetters, Serializ
     }
 
     @Override
+    public Blob getBlob(int pos) {
+        return Blob.fromBytes(getBinary(pos), null, fileIO, false);
+    }
+
+    @Override
     public InternalArray getArray(int pos) {
-        return ((ArrayColumnVector) data).getArray(offset + pos);
+        if (data instanceof VecColumnVector) {
+            // A nested VECTOR is exposed as ARRAY; a vector is an array.
+            return ((VecColumnVector) data).getVector(offset + pos);
+        }
+        InternalArray array = ((ArrayColumnVector) data).getArray(offset + pos);
+        if (array instanceof ColumnarArray) {
+            ((ColumnarArray) array).setFileIO(fileIO);
+        }
+        return array;
+    }
+
+    @Override
+    public InternalVector getVector(int pos) {
+        return ((VecColumnVector) data).getVector(offset + pos);
     }
 
     @Override
     public InternalMap getMap(int pos) {
-        return ((MapColumnVector) data).getMap(offset + pos);
+        InternalMap map = ((MapColumnVector) data).getMap(offset + pos);
+        if (map instanceof ColumnarMap) {
+            ((ColumnarMap) map).setFileIO(fileIO);
+        }
+        return map;
     }
 
     @Override

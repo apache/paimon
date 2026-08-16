@@ -19,7 +19,7 @@
 package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,8 +37,7 @@ public class DynamicPartitionNumberLoader extends DynamicPartitionLoader {
 
     private final int maxPartitionNum;
 
-    DynamicPartitionNumberLoader(
-            FileStoreTable table, Duration refreshInterval, int maxPartitionNum) {
+    DynamicPartitionNumberLoader(Table table, Duration refreshInterval, int maxPartitionNum) {
         super(table, refreshInterval);
         this.maxPartitionNum = maxPartitionNum;
         LOG.info(
@@ -47,7 +46,8 @@ public class DynamicPartitionNumberLoader extends DynamicPartitionLoader {
                 maxPartitionNum);
     }
 
-    protected List<BinaryRow> getMaxPartitions() {
+    @Override
+    public List<BinaryRow> getMaxPartitions() {
         List<BinaryRow> newPartitions =
                 table.newReadBuilder().newScan().listPartitions().stream()
                         .sorted(comparator.reversed())

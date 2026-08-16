@@ -167,7 +167,7 @@ public class DebeziumSchemaUtils {
         } else if (("bytes".equals(debeziumType) && className == null)) {
             // MySQL binary, varbinary, blob
             transformed = new String(Base64.getDecoder().decode(rawValue));
-        } else if ("bytes".equals(debeziumType) && decimalLogicalName().equals(className)) {
+        } else if ("bytes".equals(debeziumType) && className.endsWith(decimalLogicalName())) {
             // MySQL numeric, fixed, decimal
             try {
                 new BigDecimal(rawValue);

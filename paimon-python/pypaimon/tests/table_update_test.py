@@ -1,0 +1,1496 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+import os
+import random
+import string
+import threading
+import unittest
+from unittest import mock
+
+import pyarrow as pa
+import pytest
+
+from pypaimon.tests.data_evolution_test_helpers import (
+    BatchModeMixin,
+    DataEvolutionTestBase,
+    StreamModeMixin,
+)
+
+
+# ======================================================================
+# Shared base for batch & stream table-update tests
+# ======================================================================
+
+class _TableUpdateTestBase(DataEvolutionTestBase):
+    """Shared tests for ``TableUpdate.update_by_arrow_with_row_id``.
+
+    Concrete subclasses must inherit from :class:`unittest.TestCase` AND one
+    of :class:`_BatchModeMixin` / :class:`_StreamModeMixin`, which add the
+    operation-specific primitive ``_apply_update(tu, data, cid)`` on top of
+    the framework primitives provided by
+    :class:`DataEvolutionTestBase`/:class:`BatchModeMixin`/:class:`StreamModeMixin`.
+    """
+
+    # ------------------------------------------------------------------
+    # Operation-specific primitive (overridden by mixins)
+    # ------------------------------------------------------------------
+
+    def _apply_update(self, table_update, data, cid):
+        raise NotImplementedError
+
+    def _apply_update_by_predicate(
+            self, table_update, predicate, assignments, cid):
+        raise NotImplementedError
+
+    def _apply_delete_by_predicate(self, table_update, predicate, cid):
+        raise NotImplementedError
+
+    def _apply_delete_by_row_id(self, table_update, row_ids, cid):
+        raise NotImplementedError
+
+    # ------------------------------------------------------------------
+    # Helpers built on the primitives
+    # ------------------------------------------------------------------
+
+    def _create_seeded_table(self, partition_keys=None, options=None):
+        """Create the canonical 5-row / 2-file table used by most tests.
+
+        Layout (row_id → row):
+            0: (1, Alice,   25, NYC)
+            1: (2, Bob,     30, LA)
+            2: (3, Charlie, 35, Chicago)
+            3: (4, David,   40, Houston)
+            4: (5, Eve,     45, Phoenix)
+        """
+        table = self._create_table(
+            partition_keys=partition_keys,
+            options=options,
+        )
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1, 2],
+            'name': ['Alice', 'Bob'],
+            'age': [25, 30],
+            'city': ['NYC', 'LA'],
+        }, schema=self.pa_schema))
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [3, 4, 5],
+            'name': ['Charlie', 'David', 'Eve'],
+            'age': [35, 40, 45],
+            'city': ['Chicago', 'Houston', 'Phoenix'],
+        }, schema=self.pa_schema))
+        return table
+
+    def _create_global_indexed_table_for_predicate_update(self, extra_options=None):
+        options = dict(self.table_options)
+        options.update({
+            'global-index.enabled': 'true',
+            'bucket': '-1',
+            'file.format': 'parquet',
+        })
+        options.update(extra_options or {})
+        table = self._create_table(options=options)
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1, 2],
+            'name': ['old', 'indexed'],
+            'age': [10, 15],
+            'city': ['NYC', 'LA'],
+        }, schema=self.pa_schema))
+
+        self.assertEqual(
+            1,
+            table.create_global_index(
+                'name',
+                options={'sorted-index.records-per-range': '1000'},
+            ),
+        )
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [3, 4],
+            'name': ['new', 'other'],
+            'age': [20, 30],
+            'city': ['LA', 'SF'],
+        }, schema=self.pa_schema))
+        return table
+
+    def _do_update(self, table, data, columns):
+        """End-to-end ``update_by_arrow_with_row_id`` + commit. Returns the
+        commit messages so callers can inspect produced files."""
+        wb = self._make_write_builder(table)
+        tu = wb.new_update().with_update_type(columns)
+        cid = self._next_commit_id()
+        msgs = self._apply_update(tu, data, cid)
+        tc = wb.new_commit()
+        self._apply_commit(tc, msgs, cid)
+        tc.close()
+        return msgs
+
+    def _do_update_by_predicate(self, table, predicate, assignments):
+        wb = self._make_write_builder(table)
+        tu = wb.new_update()
+        cid = self._next_commit_id()
+        msgs = self._apply_update_by_predicate(
+            tu,
+            predicate,
+            assignments,
+            cid,
+        )
+        tc = wb.new_commit()
+        self._apply_commit(tc, msgs, cid)
+        tc.close()
+        return msgs
+
+    def _do_delete_by_predicate(self, table, predicate):
+        wb = self._make_write_builder(table)
+        tu = wb.new_update()
+        cid = self._next_commit_id()
+        msgs = self._apply_delete_by_predicate(tu, predicate, cid)
+        tc = wb.new_commit()
+        self._apply_commit(tc, msgs, cid)
+        tc.close()
+        return msgs
+
+    def _do_delete_by_row_id(self, table, row_ids):
+        wb = self._make_write_builder(table)
+        tu = wb.new_update()
+        cid = self._next_commit_id()
+        msgs = self._apply_delete_by_row_id(tu, row_ids, cid)
+        tc = wb.new_commit()
+        self._apply_commit(tc, msgs, cid)
+        tc.close()
+        return msgs
+
+    def _create_seeded_deletion_vector_table(self, partition_keys=None):
+        options = dict(self.table_options)
+        options['deletion-vectors.enabled'] = 'true'
+        table = self._create_seeded_table(
+            partition_keys=partition_keys,
+            options=options,
+        )
+        return table
+
+    # ==================================================================
+    # Shared tests (run under both batch and stream modes)
+    # ==================================================================
+
+    def test_update_existing_column(self):
+        """Update a single column across both files (row_ids unordered)."""
+        table = self._create_seeded_table()
+        self._do_update(table, pa.Table.from_pydict({
+            '_ROW_ID': [1, 0, 2, 3, 4],
+            'age': [31, 26, 36, 39, 42],
+        }), ['age'])
+        self.assertEqual(
+            [26, 31, 36, 39, 42],
+            self._read_all(table)['age'].to_pylist(),
+        )
+
+    @pytest.mark.python_plan
+    def test_update_by_predicate(self):
+        table = self._create_seeded_table()
+        wb = self._make_write_builder(table)
+        tu = wb.new_update()
+        pb = tu.new_predicate_builder()
+        predicate = pb.greater_or_equal('age', 35)
+
+        cid = self._next_commit_id()
+        msgs = self._apply_update_by_predicate(
+            tu,
+            predicate,
+            {'age': 99, 'city': 'Updated'},
+            cid,
+        )
+        tc = wb.new_commit()
+        self._apply_commit(tc, msgs, cid)
+        tc.close()
+
+        result = self._read_all(table)
+        self.assertEqual(
+            [25, 30, 99, 99, 99],
+            result['age'].to_pylist(),
+        )
+        self.assertEqual(
+            ['NYC', 'LA', 'Updated', 'Updated', 'Updated'],
+            result['city'].to_pylist(),
+        )
+        self.assertEqual(
+            ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
+            result['name'].to_pylist(),
+        )
+
+    def test_update_by_predicate_no_match_is_noop(self):
+        table = self._create_seeded_table()
+        pb = table.new_read_builder().new_predicate_builder()
+        msgs = self._do_update_by_predicate(
+            table,
+            pb.greater_than('age', 100),
+            {'age': 1},
+        )
+
+        self.assertEqual([], msgs)
+        self.assertEqual(
+            [25, 30, 35, 40, 45],
+            self._read_all(table)['age'].to_pylist(),
+        )
+
+    def test_update_by_predicate_accepts_array_chunked_and_scalar_values(self):
+        table = self._create_seeded_table()
+        pb = table.new_read_builder().new_predicate_builder()
+        self._do_update_by_predicate(
+            table,
+            pb.greater_or_equal('age', 35),
+            {
+                'age': pa.array([101, 102, 103], type=pa.int64()),
+                'city': pa.chunked_array([
+                    pa.array(['Chicago_v2']),
+                    pa.array(['Houston_v2', 'Phoenix_v2']),
+                ]),
+                'name': pa.scalar('patched'),
+            },
+        )
+
+        result = self._read_all(table)
+        rows = {
+            row_id: (name, age, city)
+            for row_id, name, age, city in zip(
+                result['id'].to_pylist(),
+                result['name'].to_pylist(),
+                result['age'].to_pylist(),
+                result['city'].to_pylist(),
+            )
+        }
+        self.assertEqual(
+            {
+                1: ('Alice', 25, 'NYC'),
+                2: ('Bob', 30, 'LA'),
+                3: ('patched', 101, 'Chicago_v2'),
+                4: ('patched', 102, 'Houston_v2'),
+                5: ('patched', 103, 'Phoenix_v2'),
+            },
+            rows,
+        )
+
+    def test_update_by_predicate_updates_all_rows_when_predicate_is_none(self):
+        table = self._create_seeded_table()
+        self._do_update_by_predicate(
+            table,
+            None,
+            {'age': pa.scalar(7, type=pa.int64()), 'city': None},
+        )
+
+        result = self._read_all(table)
+        self.assertEqual([7, 7, 7, 7, 7], result['age'].to_pylist())
+        self.assertEqual([None, None, None, None, None],
+                         result['city'].to_pylist())
+        self.assertEqual(
+            ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
+            result['name'].to_pylist(),
+        )
+
+    def test_update_by_predicate_rejects_assignment_array_length_mismatch(self):
+        table = self._create_seeded_table()
+        pb = table.new_read_builder().new_predicate_builder()
+        with self.assertRaises(ValueError) as ctx:
+            self._do_update_by_predicate(
+                table,
+                pb.greater_or_equal('age', 35),
+                {'age': pa.array([1, 2], type=pa.int32())},
+            )
+
+        self.assertIn('Assignment array length', str(ctx.exception))
+        self.assertEqual(
+            [25, 30, 35, 40, 45],
+            self._read_all(table)['age'].to_pylist(),
+        )
+
+    def test_update_by_predicate_rejects_uncastable_assignment(self):
+        table = self._create_seeded_table()
+        pb = table.new_read_builder().new_predicate_builder()
+        with self.assertRaises((pa.ArrowInvalid, pa.ArrowTypeError, ValueError)):
+            self._do_update_by_predicate(
+                table,
+                pb.equal('id', 1),
+                {'age': 'not-an-int'},
+            )
+
+        self.assertEqual(
+            [25, 30, 35, 40, 45],
+            self._read_all(table)['age'].to_pylist(),
+        )
+
+    def test_update_by_predicate_with_global_index_updates_unindexed_rows(self):
+        table = self._create_global_indexed_table_for_predicate_update({
+            'scalar-index.search-mode': 'fast',
+        })
+
+        pb = table.new_read_builder().new_predicate_builder()
+        self._do_update_by_predicate(
+            table,
+            pb.equal('name', 'new'),
+            {'age': 21},
+        )
+
+        result = self._read_all(table)
+        ages_by_id = dict(zip(
+            result['id'].to_pylist(),
+            result['age'].to_pylist(),
+        ))
+        self.assertEqual({1: 10, 2: 15, 3: 21, 4: 30}, ages_by_id)
+
+    def test_delete_by_predicate_with_global_index_deletes_unindexed_rows(self):
+        table = self._create_global_indexed_table_for_predicate_update({
+            'deletion-vectors.enabled': 'true',
+            'scalar-index.search-mode': 'fast',
+        })
+
+        pb = table.new_read_builder().new_predicate_builder()
+        self._do_delete_by_predicate(table, pb.equal('name', 'new'))
+
+        result = self._read_all(table).sort_by('id')
+        self.assertEqual([1, 2, 4], result['id'].to_pylist())
+
+    def test_update_by_predicate_with_global_index_falls_back_to_full_scan(self):
+        table = self._create_global_indexed_table_for_predicate_update()
+
+        pb = table.new_read_builder().new_predicate_builder()
+        self._do_update_by_predicate(
+            table,
+            pb.equal('city', 'LA'),
+            {'age': 88},
+        )
+
+        result = self._read_all(table)
+        ages_by_id = dict(zip(
+            result['id'].to_pylist(),
+            result['age'].to_pylist(),
+        ))
+        self.assertEqual({1: 10, 2: 88, 3: 88, 4: 30}, ages_by_id)
+
+    def test_update_by_predicate_with_global_index_handles_compound_predicate(self):
+        table = self._create_global_indexed_table_for_predicate_update()
+
+        pb = table.new_read_builder().new_predicate_builder()
+        predicate = pb.or_predicates([
+            pb.equal('name', 'old'),
+            pb.equal('city', 'SF'),
+        ])
+        self._do_update_by_predicate(table, predicate, {'age': 77})
+
+        result = self._read_all(table)
+        ages_by_id = dict(zip(
+            result['id'].to_pylist(),
+            result['age'].to_pylist(),
+        ))
+        self.assertEqual({1: 77, 2: 15, 3: 20, 4: 77}, ages_by_id)
+
+    def test_update_by_predicate_resolves_time_travel_scan_snapshot(self):
+        table = self._create_table()
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1],
+            'name': ['old'],
+            'age': [10],
+            'city': ['NYC'],
+        }, schema=self.pa_schema))
+        table.create_tag('before_new')
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [2],
+            'name': ['new'],
+            'age': [20],
+            'city': ['LA'],
+        }, schema=self.pa_schema))
+
+        travel_table = table.copy({'scan.tag-name': 'before_new'})
+        pb = travel_table.new_read_builder().new_predicate_builder()
+        msgs = self._do_update_by_predicate(
+            travel_table,
+            pb.equal('name', 'new'),
+            {'age': 21},
+        )
+
+        self.assertEqual([], msgs)
+        result = self._read_all(table)
+        ages_by_id = dict(zip(
+            result['id'].to_pylist(),
+            result['age'].to_pylist(),
+        ))
+        self.assertEqual({1: 10, 2: 20}, ages_by_id)
+
+    def test_update_by_predicate_resolves_scan_snapshot_id(self):
+        table = self._create_table()
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1],
+            'name': ['old'],
+            'age': [10],
+            'city': ['NYC'],
+        }, schema=self.pa_schema))
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [2],
+            'name': ['new'],
+            'age': [20],
+            'city': ['LA'],
+        }, schema=self.pa_schema))
+
+        travel_table = table.copy({'scan.snapshot-id': str(snapshot.id)})
+        pb = travel_table.new_read_builder().new_predicate_builder()
+        msgs = self._do_update_by_predicate(
+            travel_table,
+            pb.equal('name', 'new'),
+            {'age': 21},
+        )
+
+        self.assertEqual([], msgs)
+        result = self._read_all(table)
+        ages_by_id = dict(zip(
+            result['id'].to_pylist(),
+            result['age'].to_pylist(),
+        ))
+        self.assertEqual({1: 10, 2: 20}, ages_by_id)
+
+    def test_update_by_predicate_resets_explicit_scan_mode_after_travel(self):
+        table = self._create_table()
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1],
+            'name': ['old'],
+            'age': [10],
+            'city': ['NYC'],
+        }, schema=self.pa_schema))
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [2],
+            'name': ['new'],
+            'age': [20],
+            'city': ['LA'],
+        }, schema=self.pa_schema))
+
+        travel_table = table.copy({
+            'scan.mode': 'from-timestamp',
+            'scan.timestamp-millis': str(snapshot.time_millis),
+        })
+        pb = travel_table.new_read_builder().new_predicate_builder()
+        msgs = self._do_update_by_predicate(
+            travel_table,
+            pb.equal('name', 'new'),
+            {'age': 21},
+        )
+
+        self.assertEqual([], msgs)
+        result = self._read_all(table)
+        ages_by_id = dict(zip(
+            result['id'].to_pylist(),
+            result['age'].to_pylist(),
+        ))
+        self.assertEqual({1: 10, 2: 20}, ages_by_id)
+
+    def test_update_by_predicate_rejects_empty_assignments(self):
+        table = self._create_seeded_table()
+        pb = table.new_read_builder().new_predicate_builder()
+
+        with self.assertRaises(ValueError) as ctx:
+            self._do_update_by_predicate(
+                table,
+                pb.equal('id', 1),
+                {},
+            )
+        self.assertIn('assignments must not be empty', str(ctx.exception))
+
+    def test_update_by_predicate_rejects_unknown_column(self):
+        table = self._create_seeded_table()
+        pb = table.new_read_builder().new_predicate_builder()
+
+        with self.assertRaises(ValueError) as ctx:
+            self._do_update_by_predicate(
+                table,
+                pb.equal('id', 1),
+                {'unknown': 1},
+            )
+        self.assertIn('Column unknown is not in table schema',
+                      str(ctx.exception))
+
+    def test_update_by_predicate_rejects_partition_column(self):
+        table = self._create_table(partition_keys=['city'])
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1],
+            'name': ['Alice'],
+            'age': [25],
+            'city': ['NYC'],
+        }, schema=self.pa_schema))
+        pb = table.new_read_builder().new_predicate_builder()
+
+        with self.assertRaises(ValueError) as ctx:
+            self._do_update_by_predicate(
+                table,
+                pb.equal('id', 1),
+                {'city': 'LA'},
+            )
+        self.assertIn('partition column', str(ctx.exception))
+
+    def test_delete_by_predicate(self):
+        table = self._create_seeded_deletion_vector_table()
+        pb = table.new_read_builder().new_predicate_builder()
+
+        msgs = self._do_delete_by_predicate(
+            table,
+            pb.greater_or_equal('age', 35),
+        )
+
+        self.assertEqual(1, sum(len(m.index_adds) for m in msgs))
+        result = self._read_all(table).sort_by('id')
+        self.assertEqual([1, 2], result['id'].to_pylist())
+        self.assertEqual(['Alice', 'Bob'], result['name'].to_pylist())
+
+    def test_delete_by_predicate_requires_deletion_vectors(self):
+        table = self._create_seeded_table()
+        pb = table.new_read_builder().new_predicate_builder()
+
+        with self.assertRaises(ValueError) as ctx:
+            self._do_delete_by_predicate(table, pb.equal('id', 1))
+
+        self.assertIn('deletion-vectors.enabled', str(ctx.exception))
+
+    def test_delete_by_row_id(self):
+        table = self._create_seeded_deletion_vector_table()
+
+        msgs = self._do_delete_by_row_id(table, [0, 2, 4])
+
+        self.assertEqual(1, sum(len(m.index_adds) for m in msgs))
+        result = self._read_all(table).sort_by('id')
+        self.assertEqual([2, 4], result['id'].to_pylist())
+        self.assertEqual(['Bob', 'David'], result['name'].to_pylist())
+
+    def test_delete_by_row_id_requires_deletion_vectors(self):
+        table = self._create_seeded_table()
+
+        with self.assertRaises(ValueError) as ctx:
+            self._do_delete_by_row_id(table, [0])
+
+        self.assertIn('deletion-vectors.enabled', str(ctx.exception))
+
+    def test_concurrent_row_level_deletes_conflict_on_same_dv_file(self):
+        table = self._create_seeded_deletion_vector_table()
+        pb = table.new_read_builder().new_predicate_builder()
+
+        first_wb = self._make_write_builder(table)
+        first_update = first_wb.new_update()
+        first_cid = self._next_commit_id()
+        first_msgs = self._apply_delete_by_predicate(
+            first_update,
+            pb.equal('id', 1),
+            first_cid,
+        )
+
+        self._do_delete_by_predicate(table, pb.equal('id', 2))
+        result = self._read_all(table).sort_by('id')
+        self.assertEqual([1, 3, 4, 5], result['id'].to_pylist())
+
+        first_commit = first_wb.new_commit()
+        with self.assertRaises(RuntimeError) as ctx:
+            self._apply_commit(first_commit, first_msgs, first_cid)
+        first_commit.close()
+        self.assertIn('Deletion vector index conflict', str(ctx.exception))
+
+        result = self._read_all(table).sort_by('id')
+        self.assertEqual([1, 3, 4, 5], result['id'].to_pylist())
+
+    def test_row_level_delete_conflicts_when_target_file_removed(self):
+        table = self._create_seeded_deletion_vector_table(partition_keys=['city'])
+        pb = table.new_read_builder().new_predicate_builder()
+
+        first_wb = self._make_write_builder(table)
+        first_update = first_wb.new_update()
+        first_cid = self._next_commit_id()
+        first_msgs = self._apply_delete_by_predicate(
+            first_update,
+            pb.equal('id', 2),
+            first_cid,
+        )
+
+        overwrite_wb = table.new_batch_write_builder().overwrite({'city': 'LA'})
+        overwrite_write = overwrite_wb.new_write()
+        overwrite_commit = overwrite_wb.new_commit()
+        overwrite_write.write_arrow(pa.Table.from_pydict({
+            'id': [6],
+            'name': ['Frank'],
+            'age': [28],
+            'city': ['LA'],
+        }, schema=self.pa_schema))
+        overwrite_commit.commit(overwrite_write.prepare_commit())
+        overwrite_write.close()
+        overwrite_commit.close()
+
+        first_commit = first_wb.new_commit()
+        with self.assertRaises(RuntimeError) as ctx:
+            self._apply_commit(first_commit, first_msgs, first_cid)
+        first_commit.close()
+        self.assertIn('Deletion vector index conflict', str(ctx.exception))
+
+        result = self._read_all(table).sort_by('id')
+        self.assertEqual([1, 3, 4, 5, 6], result['id'].to_pylist())
+
+    def test_delete_by_partition_predicate_drops_partition_without_dv(self):
+        table = self._create_seeded_table(partition_keys=['city'])
+        pb = table.new_read_builder().new_predicate_builder()
+
+        msgs = self._do_delete_by_predicate(table, pb.equal('city', 'LA'))
+
+        self.assertGreater(sum(len(m.deleted_files) for m in msgs), 0)
+        self.assertEqual(0, sum(len(m.index_adds) for m in msgs))
+        result = self._read_all(table).sort_by('id')
+        self.assertEqual([1, 3, 4, 5], result['id'].to_pylist())
+        self.assertEqual(
+            ['NYC', 'Chicago', 'Houston', 'Phoenix'],
+            result['city'].to_pylist(),
+        )
+
+    def test_delete_by_partition_predicate_deletes_matching_indexes(self):
+        table = self._create_seeded_deletion_vector_table(partition_keys=['city'])
+        pb = table.new_read_builder().new_predicate_builder()
+
+        self._do_delete_by_predicate(table, pb.equal('id', 2))
+        msgs = self._do_delete_by_predicate(table, pb.equal('city', 'LA'))
+
+        self.assertGreater(sum(len(m.deleted_files) for m in msgs), 0)
+        self.assertGreater(sum(len(m.index_deletes) for m in msgs), 0)
+        result = self._read_all(table).sort_by('id')
+        self.assertEqual([1, 3, 4, 5], result['id'].to_pylist())
+        self.assertEqual(
+            ['NYC', 'Chicago', 'Houston', 'Phoenix'],
+            result['city'].to_pylist(),
+        )
+
+    def test_delete_by_partition_predicate_conflicts_when_partition_changes(self):
+        table = self._create_seeded_table(partition_keys=['city'])
+        wb = self._make_write_builder(table)
+        tu = wb.new_update()
+        pb = tu.new_predicate_builder()
+        cid = self._next_commit_id()
+        msgs = self._apply_delete_by_predicate(tu, pb.equal('city', 'LA'), cid)
+
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [6],
+            'name': ['Frank'],
+            'age': [28],
+            'city': ['LA'],
+        }, schema=self.pa_schema))
+
+        tc = wb.new_commit()
+        with self.assertRaises(RuntimeError) as ctx:
+            self._apply_commit(tc, msgs, cid)
+        tc.close()
+        self.assertIn('Overwrite conflict', str(ctx.exception))
+
+    def test_delete_by_mixed_partition_predicate_still_requires_dv(self):
+        table = self._create_seeded_table(partition_keys=['city'])
+        pb = table.new_read_builder().new_predicate_builder()
+        predicate = pb.and_predicates([
+            pb.equal('city', 'LA'),
+            pb.equal('age', 30),
+        ])
+
+        with self.assertRaises(ValueError) as ctx:
+            self._do_delete_by_predicate(table, predicate)
+
+        self.assertIn('deletion-vectors.enabled', str(ctx.exception))
+
+    def test_update_multiple_columns(self):
+        """Update ``age`` + ``city`` together; other columns are untouched."""
+        table = self._create_seeded_table()
+        self._do_update(table, pa.Table.from_pydict({
+            '_ROW_ID': [1, 0, 2, 3, 4],
+            'age': [31, 26, 36, 39, 42],
+            'city': ['Los Angeles', 'New York', 'Chicago', 'Phoenix', 'Houston'],
+        }), ['age', 'city'])
+
+        result = self._read_all(table)
+        self.assertEqual([26, 31, 36, 39, 42], result['age'].to_pylist())
+        self.assertEqual(
+            ['New York', 'Los Angeles', 'Chicago', 'Phoenix', 'Houston'],
+            result['city'].to_pylist(),
+        )
+
+    def test_update_columns_fall_back_to_data_when_unset(self):
+        table = self._create_seeded_table()
+
+        self._do_update(table, pa.Table.from_pydict({
+            '_ROW_ID': [0, 1, 2, 3, 4],
+            'id': [1, 2, 3, 4, 5],
+            'name': ['A', 'B', 'C', 'D', 'E'],
+            'age': [1, 2, 3, 4, 5],
+            'city': ['c0', 'c1', 'c2', 'c3', 'c4'],
+        }), ['id', 'name', 'age', 'city'])
+        result = self._read_all(table)
+        self.assertEqual(['A', 'B', 'C', 'D', 'E'], result['name'].to_pylist())
+        self.assertEqual([1, 2, 3, 4, 5], result['age'].to_pylist())
+        self.assertEqual(['c0', 'c1', 'c2', 'c3', 'c4'], result['city'].to_pylist())
+
+        wb = self._make_write_builder(table)
+        tu = wb.new_update()
+        cid = self._next_commit_id()
+        msgs = self._apply_update(tu, pa.Table.from_pydict({
+            '_ROW_ID': [0, 1],
+            'age': [99, 98],
+        }), cid)
+        tc = wb.new_commit()
+        self._apply_commit(tc, msgs, cid)
+        tc.close()
+        result = self._read_all(table)
+        self.assertEqual([99, 98, 3, 4, 5], result['age'].to_pylist())
+        self.assertEqual(['A', 'B', 'C', 'D', 'E'], result['name'].to_pylist())
+
+    def test_update_with_only_row_id_raises(self):
+        table = self._create_seeded_table()
+        wb = self._make_write_builder(table)
+        tu = wb.new_update()
+        cid = self._next_commit_id()
+        with self.assertRaises(ValueError):
+            self._apply_update(tu, pa.Table.from_pydict({
+                '_ROW_ID': [0, 1],
+            }), cid)
+
+    @pytest.mark.python_plan
+    def test_partitioned_table_update(self):
+        """Updates work on a partitioned table the same as a flat one."""
+        table = self._create_table(partition_keys=['city'])
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1, 2, 3, 4, 5],
+            'name': ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
+            'age': [25, 30, 35, 40, 45],
+            'city': ['NYC', 'NYC', 'LA', 'LA', 'Chicago'],
+        }, schema=self.pa_schema))
+
+        self._do_update(table, pa.Table.from_pydict({
+            '_ROW_ID': [1, 0, 2, 3, 4],
+            'age': [31, 26, 36, 41, 46],
+        }), ['age'])
+
+        self.assertEqual(
+            [26, 31, 36, 41, 46],
+            self._read_all(table)['age'].to_pylist(),
+        )
+
+    def test_update_preserves_other_columns(self):
+        """Updating ``age`` leaves all other columns untouched."""
+        table = self._create_seeded_table()
+        self._do_update(table, pa.Table.from_pydict({
+            '_ROW_ID': [1],
+            'age': [999],
+        }), ['age'])
+
+        result = self._read_all(table)
+        self.assertEqual([25, 999, 35, 40, 45], result['age'].to_pylist())
+        self.assertEqual(
+            ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
+            result['name'].to_pylist(),
+        )
+        self.assertEqual(
+            ['NYC', 'LA', 'Chicago', 'Houston', 'Phoenix'],
+            result['city'].to_pylist(),
+        )
+
+    def test_partial_row_updates(self):
+        """All partial-row patterns share one parameterised test."""
+        cases = [
+            # name, row_ids, ages, expected ages after update
+            ('single_first_file',  [0],       [100],            [100, 30,  35,  40, 45]),
+            ('single_second_file', [1],       [31],             [25,  31,  35,  40, 45]),
+            ('one_per_file',       [1, 2],    [200, 300],       [25,  200, 300, 40, 45]),
+            ('non_consecutive',    [0, 2, 4], [100, 300, 500],  [100, 30,  300, 40, 500]),
+        ]
+        for name, row_ids, ages, expected in cases:
+            with self.subTest(case=name):
+                table = self._create_seeded_table()
+                self._do_update(table, pa.Table.from_pydict({
+                    '_ROW_ID': row_ids,
+                    'age': ages,
+                }), ['age'])
+                self.assertEqual(
+                    expected,
+                    self._read_all(table)['age'].to_pylist(),
+                )
+
+    def test_multiple_sequential_single_column_updates(self):
+        """Two sequential updates on different single columns compose."""
+        table = self._create_seeded_table()
+        self._do_update(table, pa.Table.from_pydict({
+            '_ROW_ID': [1, 0, 2, 3, 4],
+            'age': [31, 26, 36, 41, 46],
+        }), ['age'])
+        self._do_update(table, pa.Table.from_pydict({
+            '_ROW_ID': [1, 0, 2, 3, 4],
+            'city': ['Los Angeles', 'New York', 'Chicago', 'Phoenix', 'Houston'],
+        }), ['city'])
+
+        result = self._read_all(table)
+        self.assertEqual([26, 31, 36, 41, 46], result['age'].to_pylist())
+        self.assertEqual(
+            ['New York', 'Los Angeles', 'Chicago', 'Phoenix', 'Houston'],
+            result['city'].to_pylist(),
+        )
+
+    def test_sequential_partial_updates(self):
+        """Sequential single-row updates accumulate correctly."""
+        table = self._create_seeded_table()
+        for row_id, age in [(0, 100), (2, 300), (4, 500)]:
+            self._do_update(table, pa.Table.from_pydict({
+                '_ROW_ID': [row_id],
+                'age': [age],
+            }), ['age'])
+        self.assertEqual(
+            [100, 30, 300, 40, 500],
+            self._read_all(table)['age'].to_pylist(),
+        )
+
+    def test_update_partial_rows_across_two_files(self):
+        """A single update modifies partial rows from both data files."""
+        table = self._create_table()
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1, 2, 3, 4, 5],
+            'name': ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
+            'age': [20, 25, 30, 35, 40],
+            'city': ['NYC', 'LA', 'Chicago', 'Houston', 'Phoenix'],
+        }, schema=self.pa_schema))
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [6, 7, 8, 9, 10],
+            'name': ['Frank', 'Grace', 'Henry', 'Ivy', 'Jack'],
+            'age': [45, 50, 55, 60, 65],
+            'city': ['Seattle', 'Boston', 'Denver', 'Miami', 'Atlanta'],
+        }, schema=self.pa_schema))
+
+        self._do_update(table, pa.Table.from_pydict({
+            '_ROW_ID': [1, 3, 6, 8],
+            'age': [100, 200, 300, 400],
+            'name': ['Updated_Bob', 'Updated_David', 'Updated_Grace', 'Updated_Ivy'],
+        }), ['age', 'name'])
+
+        result = self._read_all(table)
+        self.assertEqual(
+            [20, 100, 30, 200, 40, 45, 300, 55, 400, 65],
+            result['age'].to_pylist(),
+        )
+        self.assertEqual(
+            ['Alice', 'Updated_Bob', 'Charlie', 'Updated_David', 'Eve',
+             'Frank', 'Updated_Grace', 'Henry', 'Updated_Ivy', 'Jack'],
+            result['name'].to_pylist(),
+        )
+        # Untouched columns
+        self.assertEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+                         result['id'].to_pylist())
+        self.assertEqual(
+            ['NYC', 'LA', 'Chicago', 'Houston', 'Phoenix',
+             'Seattle', 'Boston', 'Denver', 'Miami', 'Atlanta'],
+            result['city'].to_pylist(),
+        )
+
+    def test_large_table_partial_column_updates(self):
+        """4-step update sequence on a 2000-row / 2-file table.
+
+        Covers: single-column / multi-column / both-files updates while
+        verifying that untouched columns stay intact.
+        """
+        num_row = 1000
+        table = self._create_table()
+
+        # 2 commits, num_row rows each
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': list(range(num_row)),
+            'name': [f'Name_{i}' for i in range(num_row)],
+            'age': [20 + i for i in range(num_row)],
+            'city': [f'City_{i}' for i in range(num_row)],
+        }, schema=self.pa_schema))
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': list(range(num_row, num_row * 2)),
+            'name': [f'Name_{i}' for i in range(num_row, num_row * 2)],
+            'age': [20 + num_row + i for i in range(num_row)],
+            'city': [f'City_{i}' for i in range(num_row, num_row * 2)],
+        }, schema=self.pa_schema))
+
+        expected_ids = list(range(num_row * 2))
+        expected_names = [f'Name_{i}' for i in range(num_row * 2)]
+        expected_ages = ([20 + i for i in range(num_row)]
+                         + [20 + num_row + i for i in range(num_row)])
+
+        # 1) update id col, 1 row
+        self._do_update(table, pa.Table.from_pydict({
+            '_ROW_ID': [5], 'id': [999],
+        }), ['id'])
+        expected_ids[5] = 999
+
+        # 2) update id+name cols, 2 rows
+        self._do_update(table, pa.Table.from_pydict({
+            '_ROW_ID': [3, 15],
+            'id': [888, 777],
+            'name': ['Updated_Name_3', 'Updated_Name_15'],
+        }), ['id', 'name'])
+        expected_ids[3], expected_ids[15] = 888, 777
+        expected_names[3] = 'Updated_Name_3'
+        expected_names[15] = 'Updated_Name_15'
+
+        # 3) update name col, 1 row
+        self._do_update(table, pa.Table.from_pydict({
+            '_ROW_ID': [12], 'name': ['NewName_12'],
+        }), ['name'])
+        expected_names[12] = 'NewName_12'
+
+        # 4) update age col, 4 rows across both files
+        self._do_update(table, pa.Table.from_pydict({
+            '_ROW_ID': [0, 5, 10, 15],
+            'age': [100, 105, 110, 115],
+        }), ['age'])
+        for r, a in [(0, 100), (5, 105), (10, 110), (15, 115)]:
+            expected_ages[r] = a
+
+        result = self._read_all(table)
+        self.assertEqual(expected_ids, result['id'].to_pylist())
+        self.assertEqual(expected_names, result['name'].to_pylist())
+        self.assertEqual(expected_ages, result['age'].to_pylist())
+        # city was never touched
+        self.assertEqual(
+            [f'City_{i}' for i in range(num_row * 2)],
+            result['city'].to_pylist(),
+        )
+
+    def test_update_with_large_file(self):
+        """Updates disable both size- and row-based rolling."""
+        from pypaimon.schema.schema_change import SetOption
+
+        N = 5000
+        schema = pa.schema([('id', pa.int64()), ('name', pa.string())])
+        opts = {
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'write-only': 'true',
+        }
+        table = self._create_table(pa_schema=schema, options=opts)
+        table_identifier = table.identifier
+
+        self._write_arrow(table, pa.table({
+            'id': list(range(N)),
+            'name': [''.join(random.choices(string.ascii_letters, k=200))
+                     for _ in range(N)],
+        }))
+
+        self.catalog.alter_table(
+            table_identifier, [
+                SetOption('target-file-size', '10kb'),
+                SetOption('target-file-row-num', '1'),
+            ]
+        )
+        table = self.catalog.get_table(table_identifier)
+
+        msgs = self._do_update(table, pa.table({
+            '_ROW_ID': pa.array(list(range(N)), type=pa.int64()),
+            'name': [''.join(random.choices(string.ascii_letters, k=200))
+                     for _ in range(N)],
+        }), ['name'])
+
+        all_files = [f for m in msgs for f in m.new_files]
+        self.assertEqual(1, len(all_files),
+                         "Update should produce exactly one file per group")
+        self.assertEqual(0, all_files[0].first_row_id)
+        self.assertEqual(N, all_files[0].row_count)
+
+    # ------------------------------------------------------------------
+    # Validation tests
+    # ------------------------------------------------------------------
+
+    def test_nonexistent_column_raises(self):
+        table = self._create_seeded_table()
+        bad = pa.Table.from_pydict({
+            '_ROW_ID': [0, 1, 2, 3, 4],
+            'nonexistent_column': [100, 200, 300, 400, 500],
+        })
+        with self.assertRaises(ValueError) as ctx:
+            wb = self._make_write_builder(table)
+            tu = wb.new_update().with_update_type(['nonexistent_column'])
+            self._apply_update(tu, bad, self._next_commit_id())
+        self.assertIn('not in table schema', str(ctx.exception))
+
+    def test_missing_row_id_column_raises(self):
+        table = self._create_seeded_table()
+        bad = pa.Table.from_pydict({'age': [26, 27, 28, 29, 30]})
+        with self.assertRaises(ValueError) as ctx:
+            wb = self._make_write_builder(table)
+            tu = wb.new_update().with_update_type(['age'])
+            self._apply_update(tu, bad, self._next_commit_id())
+        self.assertIn('_ROW_ID column', str(ctx.exception))
+
+    def test_invalid_row_id_raises(self):
+        """row_id outside valid row_id ranges raises."""
+        table = self._create_seeded_table()
+        cases = [
+            ('out_of_range_high', [0, 10], [26, 100]),
+            ('negative',          [-1, 0], [100, 26]),
+        ]
+        for name, row_ids, ages in cases:
+            with self.subTest(case=name):
+                wb = self._make_write_builder(table)
+                tu = wb.new_update().with_update_type(['age'])
+                bad = pa.Table.from_pydict({'_ROW_ID': row_ids, 'age': ages})
+                with self.assertRaises(ValueError) as ctx:
+                    self._apply_update(tu, bad, self._next_commit_id())
+                self.assertIn('does not belong to any valid range', str(ctx.exception))
+
+    def test_duplicate_row_id_raises(self):
+        table = self._create_seeded_table()
+        wb = self._make_write_builder(table)
+        tu = wb.new_update().with_update_type(['age'])
+        with self.assertRaises(ValueError) as ctx:
+            self._apply_update(
+                tu,
+                pa.Table.from_pydict({
+                    '_ROW_ID': [0, 0, 1],
+                    'age': [100, 200, 300],
+                }),
+                self._next_commit_id(),
+            )
+        self.assertIn('duplicate _ROW_ID', str(ctx.exception))
+
+    def test_update_deleted_row_id_raises(self):
+        """Updating a row_id that fell into a hole after truncate raises."""
+        partitioned_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('age', pa.int32()),
+            ('region', pa.string()),
+        ])
+        table = self._create_table(
+            pa_schema=partitioned_schema,
+            partition_keys=['region'],
+        )
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': pa.array([1, 2, 3], type=pa.int32()),
+            'name': ['A', 'B', 'C'],
+            'age': pa.array([10, 20, 30], type=pa.int32()),
+            'region': ['US', 'US', 'US'],
+        }, schema=partitioned_schema))
+
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': pa.array([4, 5], type=pa.int32()),
+            'name': ['D', 'E'],
+            'age': pa.array([40, 50], type=pa.int32()),
+            'region': ['EU', 'EU'],
+        }, schema=partitioned_schema))
+
+        wb = table.new_batch_write_builder()
+        tc = wb.new_commit()
+        tc.truncate_partitions([{'region': 'US'}])
+
+        wb = self._make_write_builder(table)
+        tu = wb.new_update().with_update_type(['age'])
+        with self.assertRaises(ValueError) as ctx:
+            self._apply_update(
+                tu,
+                pa.Table.from_pydict({'_ROW_ID': [0], 'age': [99]}),
+                self._next_commit_id(),
+            )
+        self.assertIn('does not belong to any valid range', str(ctx.exception))
+
+    # ------------------------------------------------------------------
+    # Concurrency tests
+    # ------------------------------------------------------------------
+
+    def _run_concurrent_updates(self, table, thread_specs, max_retries):
+        """Run a batch of concurrent updates with conflict-retry; return the
+        commit order (``thread_index`` of the winning commit appended last)."""
+        errors = []
+        completion_order = []
+        lock = threading.Lock()
+        retry_marker = (
+            "multiple 'MERGE INTO' operations have encountered conflicts"
+        )
+
+        def worker(idx, spec):
+            # Tag each thread's commits so the durable winner can be read back from the
+            # latest snapshot's commit_user (the order threads return in is not the commit order).
+            worker_table = table.copy({'commit.user-prefix': 'w%d' % idx})
+            for _ in range(max_retries):
+                try:
+                    self._do_update(worker_table, pa.Table.from_pydict({
+                        '_ROW_ID': spec['row_ids'],
+                        'age': spec['ages'],
+                    }), ['age'])
+                    with lock:
+                        completion_order.append(idx)
+                    return
+                except Exception as e:
+                    if retry_marker not in str(e):
+                        errors.append(f"Thread-{idx} unexpected error: {e}")
+                        return
+            errors.append(f"Thread-{idx} did not succeed in {max_retries} retries")
+
+        threads = [threading.Thread(target=worker, args=(i, s))
+                   for i, s in enumerate(thread_specs)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=120)
+
+        self.assertEqual([], errors)
+        self.assertEqual(len(thread_specs), len(completion_order),
+                         "Not all threads committed successfully")
+        return completion_order
+
+    def test_concurrent_updates_disjoint_rows(self):
+        """Disjoint per-thread updates all materialise into the final state."""
+        table = self._create_seeded_table()
+        specs = [
+            {'row_ids': [0, 1], 'ages': [100, 200]},
+            {'row_ids': [2, 3], 'ages': [300, 400]},
+            {'row_ids': [4],    'ages': [500]},
+        ]
+        self._run_concurrent_updates(table, specs, max_retries=20)
+        self.assertEqual(
+            [100, 200, 300, 400, 500],
+            self._read_all(table)['age'].to_pylist(),
+        )
+
+    def test_concurrent_updates_overlapping_rows_last_writer_wins(self):
+        """When threads compete on the same rows, the final commit wins."""
+        table = self._create_seeded_table()
+        specs = [
+            {'row_ids': [0, 1, 2], 'ages': [101, 201, 301]},
+            {'row_ids': [0, 1, 2], 'ages': [102, 202, 302]},
+            {'row_ids': [0, 1, 2], 'ages': [103, 203, 303]},
+        ]
+        self._run_concurrent_updates(table, specs, max_retries=30)
+        ages = self._read_all(table)['age'].to_pylist()
+        # The real winner is the thread whose commit produced the latest snapshot.
+        winner = int(table.snapshot_manager().get_latest_snapshot().commit_user[1:].split('_')[0])
+        self.assertEqual(specs[winner]['ages'], ages[:3])
+        self.assertEqual([40, 45], ages[3:])
+
+    def test_update_list_and_map_columns(self):
+        list_map_schema = pa.schema([
+            ('id', pa.int32()),
+            ('tags', pa.list_(pa.string())),
+            ('meta', pa.map_(pa.string(), pa.string())),
+        ])
+        table = self._create_table(pa_schema=list_map_schema)
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'tags': [['a', 'b'], ['c'], ['d', 'e']],
+            'meta': [[('k1', 'v1')], [('k2', 'v2')], [('k3', 'v3')]],
+        }, schema=list_map_schema))
+
+        rb = table.new_read_builder().with_projection(
+            ['id', '_ROW_ID'])
+        rid_result = rb.new_read().to_arrow(
+            rb.new_scan().plan().splits()).sort_by('id')
+        row_ids = rid_result['_ROW_ID'].to_pylist()
+
+        self._do_update(table, pa.Table.from_pydict({
+            '_ROW_ID': pa.array([row_ids[0], row_ids[2]],
+                                type=pa.int64()),
+            'tags': [['x', 'y'], ['z']],
+            'meta': [[('k1', 'new1')], [('k3', 'new3')]],
+        }), ['tags', 'meta'])
+
+        result = self._read_all(table).sort_by('id')
+        self.assertEqual(
+            [['x', 'y'], ['c'], ['z']],
+            result['tags'].to_pylist())
+        self.assertEqual(
+            [[('k1', 'new1')], [('k2', 'v2')], [('k3', 'new3')]],
+            result['meta'].to_pylist())
+
+        self._do_update(table, pa.Table.from_pydict({
+            '_ROW_ID': pa.array([row_ids[1]], type=pa.int64()),
+            'meta': [{'k2': 'dict_val'}],
+        }), ['meta'])
+        result2 = self._read_all(table).sort_by('id')
+        self.assertEqual(
+            [[('k1', 'new1')], [('k2', 'dict_val')], [('k3', 'new3')]],
+            result2['meta'].to_pylist())
+
+        with self.assertRaisesRegex(ValueError, "schema-less dict"):
+            self._do_update(table, pa.Table.from_pydict({
+                '_ROW_ID': pa.array([row_ids[0], row_ids[2]],
+                                    type=pa.int64()),
+                'meta': [{'a': '1'}, {'b': '2'}],
+            }), ['meta'])
+
+        self._do_update(table, pa.Table.from_pydict({
+            '_ROW_ID': pa.array([row_ids[0], row_ids[2]],
+                                type=pa.int64()),
+            'meta': pa.array(
+                [[('a', '1')], [('b', '2')]],
+                type=pa.map_(pa.string(), pa.string())),
+        }), ['meta'])
+        result3 = self._read_all(table).sort_by('id')
+        self.assertEqual(
+            [[('a', '1')], [('k2', 'dict_val')], [('b', '2')]],
+            result3['meta'].to_pylist())
+
+        with self.assertRaisesRegex(ValueError, "schema-less dict"):
+            self._do_update(table, pa.Table.from_pydict({
+                '_ROW_ID': pa.array([row_ids[0]], type=pa.int64()),
+                'meta': [{'a': None}],
+            }), ['meta'])
+
+        self._do_update(table, pa.Table.from_pydict({
+            '_ROW_ID': pa.array([row_ids[0]], type=pa.int64()),
+            'meta': [[('a', None)]],
+        }, schema=pa.schema([
+            ('_ROW_ID', pa.int64()),
+            ('meta', pa.map_(pa.string(), pa.string())),
+        ])), ['meta'])
+        result4 = self._read_all(table).sort_by('id')
+        self.assertEqual(
+            [[('a', None)], [('k2', 'dict_val')], [('b', '2')]],
+            result4['meta'].to_pylist())
+
+
+# ======================================================================
+# Mode-specific mixins (add the ``update_by_arrow_with_row_id`` primitive)
+# ======================================================================
+
+class _BatchModeMixin(BatchModeMixin):
+    def _apply_update(self, table_update, data, cid):
+        return table_update.update_by_arrow_with_row_id(data)
+
+    def _apply_update_by_predicate(
+            self, table_update, predicate, assignments, cid):
+        return table_update.update_by_predicate(predicate, assignments)
+
+    def _apply_delete_by_predicate(self, table_update, predicate, cid):
+        return table_update.delete_by_predicate(predicate)
+
+    def _apply_delete_by_row_id(self, table_update, row_ids, cid):
+        return table_update.delete_by_row_id(row_ids)
+
+
+class _StreamModeMixin(StreamModeMixin):
+    def _apply_update(self, table_update, data, cid):
+        return table_update.update_by_arrow_with_row_id(data, cid)
+
+    def _apply_update_by_predicate(
+            self, table_update, predicate, assignments, cid):
+        return table_update.update_by_predicate(
+            predicate,
+            assignments,
+            cid,
+        )
+
+    def _apply_delete_by_predicate(self, table_update, predicate, cid):
+        return table_update.delete_by_predicate(predicate, cid)
+
+    def _apply_delete_by_row_id(self, table_update, row_ids, cid):
+        return table_update.delete_by_row_id(row_ids, cid)
+
+
+# ======================================================================
+# Concrete test classes
+# ======================================================================
+
+class TableUpdateBatchTest(_BatchModeMixin, _TableUpdateTestBase, unittest.TestCase):
+    """All shared update tests under batch (``BatchWriteBuilder``) semantics."""
+
+    def test_update_by_row_id_aborts_files_after_prepare_commit_failure(self):
+        from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+
+        table_schema = pa.schema([
+            ('id', pa.int32()),
+            ('age', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        table = self._create_table(pa_schema=table_schema)
+        self._write_arrow(table, pa.Table.from_pydict({
+            'id': [1, 2],
+            'age': [10, 20],
+            'picture': [b'blob-1', b'blob-2'],
+        }, schema=table_schema))
+
+        rb = table.new_read_builder().with_projection(['id', '_ROW_ID'])
+        row_ids = rb.new_read().to_arrow(
+            rb.new_scan().plan().splits()).sort_by('id')['_ROW_ID']
+        before_files = self._list_table_files(table)
+
+        def fail_after_prepare_commit(
+                new_files, first_row_id, column_names, blob_columns):
+            raise RuntimeError("forced failure after prepare_commit")
+
+        wb = self._make_write_builder(table)
+        tu = wb.new_update().with_update_type(['age', 'picture'])
+        with mock.patch.object(
+                TableUpdateByRowId,
+                '_assign_update_file_metadata',
+                new=staticmethod(fail_after_prepare_commit)):
+            with self.assertRaisesRegex(
+                    RuntimeError, "forced failure after prepare_commit"):
+                self._apply_update(tu, pa.Table.from_pydict({
+                    '_ROW_ID': [row_ids[0].as_py()],
+                    'age': [99],
+                    'picture': [b'updated-blob'],
+                }, schema=pa.schema([
+                    ('_ROW_ID', pa.int64()),
+                    ('age', pa.int32()),
+                    ('picture', pa.large_binary()),
+                ])), self._next_commit_id())
+
+        self.assertEqual(before_files, self._list_table_files(table))
+
+    @staticmethod
+    def _list_table_files(table):
+        return {
+            os.path.relpath(os.path.join(root, name), table.table_path)
+            for root, _dirs, files in os.walk(table.table_path)
+            for name in files
+        }
+
+
+class TableUpdateStreamTest(_StreamModeMixin, _TableUpdateTestBase, unittest.TestCase):
+    """All shared update tests under stream (``StreamWriteBuilder``) semantics,
+    plus stream-only multi-commit scenarios that are impossible to express
+    under :class:`BatchTableCommit` (which forbids re-committing).
+    """
+
+    # ------------------------------------------------------------------
+    # Stream-only helpers
+    # ------------------------------------------------------------------
+
+    def _stream_commit_age_updates_by_row_id(self, tu, tc, commit_ids, row_age_pairs):
+        """Apply one ``age`` update per ``commit_id``; ``tu`` is already
+        ``with_update_type(['age'])``."""
+        for cid, (row_id, age) in zip(commit_ids, row_age_pairs):
+            msgs = tu.update_by_arrow_with_row_id(
+                pa.Table.from_pydict({'_ROW_ID': [row_id], 'age': [age]}),
+                cid,
+            )
+            tc.commit(msgs, cid)
+
+    # ------------------------------------------------------------------
+    # Stream-only tests
+    # ------------------------------------------------------------------
+
+    def test_stream_multi_commit_on_one_write_builder(self):
+        """A single ``StreamWriteBuilder`` drives many update+commit cycles
+        with reused ``tu`` and ``tc`` instances. Each commit produces its own
+        snapshot tagged with the caller-supplied ``commit_identifier`` under
+        a stable ``commit_user`` — the core contract distinguishing stream
+        from batch mode.
+
+        Parameterised over both contiguous and sparse identifier sequences
+        to catch any accidental coupling between ``commit_identifier`` and
+        ``snapshot_id`` ordering.
+        """
+        # (row_id, age) for each of the 3 commits — same triplet for both runs.
+        per_commit_rows = [(0, 100), (2, 300), (4, 500)]
+        expected_ages = [100, 30, 300, 40, 500]
+
+        for case_name, commit_ids in [
+            ('contiguous', [1, 2, 3]),
+            ('sparse',     [42, 100, 1000]),
+        ]:
+            with self.subTest(case=case_name):
+                table = self._create_seeded_table()
+                wb, tc, base_snapshot_id = self._stream_commit_session(table)
+                tu = wb.new_update().with_update_type(['age'])
+                self._stream_commit_age_updates_by_row_id(
+                    tu, tc, commit_ids, per_commit_rows,
+                )
+                tc.close()
+
+                result = self._read_all(table)
+                self.assertEqual(expected_ages, result['age'].to_pylist())
+                self.assertEqual([1, 2, 3, 4, 5], result['id'].to_pylist())
+                self.assertEqual(
+                    ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
+                    result['name'].to_pylist(),
+                )
+                self.assertEqual(
+                    ['NYC', 'LA', 'Chicago', 'Houston', 'Phoenix'],
+                    result['city'].to_pylist(),
+                )
+                self._assert_stream_builder_snapshots(
+                    table, wb, base_snapshot_id, commit_ids,
+                )
+
+    def test_stream_commit_instance_accepts_messages_from_different_updates(self):
+        """``StreamTableCommit`` may be committed many times, and each
+        commit may carry messages from a *different* ``StreamTableUpdate``
+        instance (different ``update_cols``). The one-shot restriction
+        that applies to :class:`BatchTableCommit` does not apply here.
+        """
+        table = self._create_seeded_table()
+        wb, tc, base_snapshot_id = self._stream_commit_session(table)
+
+        # First update: only 'age' projection, fresh tu.
+        tu1 = wb.new_update().with_update_type(['age'])
+        msgs1 = tu1.update_by_arrow_with_row_id(
+            pa.Table.from_pydict({'_ROW_ID': [0], 'age': [111]}), 1,
+        )
+        tc.commit(msgs1, 1)
+
+        # Second update: different 'city' projection, fresh tu, same tc.
+        tu2 = wb.new_update().with_update_type(['city'])
+        msgs2 = tu2.update_by_arrow_with_row_id(
+            pa.Table.from_pydict({'_ROW_ID': [0], 'city': ['Beijing']}), 2,
+        )
+        tc.commit(msgs2, 2)
+        tc.close()
+
+        result = self._read_all(table)
+        self.assertEqual([111, 30, 35, 40, 45], result['age'].to_pylist())
+        self.assertEqual(
+            ['Beijing', 'LA', 'Chicago', 'Houston', 'Phoenix'],
+            result['city'].to_pylist(),
+        )
+        self.assertEqual([1, 2, 3, 4, 5], result['id'].to_pylist())
+        self.assertEqual(
+            ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
+            result['name'].to_pylist(),
+        )
+        self._assert_stream_builder_snapshots(
+            table, wb, base_snapshot_id, [1, 2],
+        )
+
+    def test_stream_interleaved_write_and_update_on_same_builder(self):
+        """A single stream builder may perform an initial write followed by
+        an update on the same ``tc``, each tagged with its own
+        ``commit_identifier`` that propagates to its own snapshot.
+        """
+        table = self._create_table()
+        wb, tc, base_snapshot_id = self._stream_commit_session(table)
+        tw = wb.new_write()
+
+        tw.write_arrow(pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'name': ['A', 'B', 'C'],
+            'age': [10, 20, 30],
+            'city': ['X', 'Y', 'Z'],
+        }, schema=self.pa_schema))
+        tc.commit(tw.prepare_commit(1), 1)
+        tw.close()
+
+        tu = wb.new_update().with_update_type(['age'])
+        msgs = tu.update_by_arrow_with_row_id(
+            pa.Table.from_pydict({'_ROW_ID': [0, 2], 'age': [111, 333]}), 2,
+        )
+        tc.commit(msgs, 2)
+        tc.close()
+
+        result = self._read_all(table)
+        self.assertEqual([111, 20, 333], result['age'].to_pylist())
+        self.assertEqual([1, 2, 3], result['id'].to_pylist())
+        self.assertEqual(['A', 'B', 'C'], result['name'].to_pylist())
+        self.assertEqual(['X', 'Y', 'Z'], result['city'].to_pylist())
+        self._assert_stream_builder_snapshots(
+            table, wb, base_snapshot_id, [1, 2],
+        )
+
+
+if __name__ == '__main__':
+    unittest.main()

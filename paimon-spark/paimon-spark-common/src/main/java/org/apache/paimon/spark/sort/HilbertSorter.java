@@ -49,6 +49,14 @@ public class HilbertSorter extends TableSorter {
         return sortedDF.drop(H_COLUMN);
     }
 
+    @Override
+    public Dataset<Row> sortLocal(Dataset<Row> df) {
+        Column hilbertColumn = hilbertValue(df);
+        Dataset<Row> hilbertValueDF = df.withColumn(H_COLUMN, hilbertColumn);
+        Dataset<Row> sortedDF = hilbertValueDF.sortWithinPartitions(hilbertValueDF.col(H_COLUMN));
+        return sortedDF.drop(H_COLUMN);
+    }
+
     private Column hilbertValue(Dataset<Row> df) {
         SparkHilbertUDF hilbertUDF = new SparkHilbertUDF();
 

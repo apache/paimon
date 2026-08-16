@@ -1,0 +1,195 @@
+---
+title: "BTree Index"
+sidebar_position: 1
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# BTree Index
+
+BTree index builds a logical B-tree structure over SST files, enabling efficient point lookups and range queries on scalar columns.
+Use it for selective predicates on scalar columns such as identifiers, timestamps, categories with
+many distinct values, or other columns frequently used in `WHERE` clauses.
+
+Supported predicate shapes include:
+
+| Predicate | Example |
+|---|---|
+| Equality | `name = 'a200'` |
+| IN | `name IN ('a200', 'a300')` |
+| Range | `price >= 10 AND price < 100` |
+| Null checks | `name IS NOT NULL` |
+| AND / OR combinations | `name = 'a200' OR name = 'a300'` |
+
+`LIKE`, `startsWith`, `contains`, and `NOT IN` predicates may still need broader index file reads.
+Use `btree-index.fallback-scan-max-size` to cap fallback range and string scans by the total
+candidate index file size.
+For keyword-style text retrieval, use [Full-Text Index](./full-text) instead.
+
+## Build BTree Index
+
+<Tabs groupId="btree-build">
+
+<TabItem value="sql" label="SQL">
+
+```sql
+-- Create BTree index on 'name' column
+CALL sys.create_global_index(
+    table => 'db.my_table',
+    index_column => 'name',
+    index_type => 'btree'
+);
+```
+
+You can build only selected partitions:
+
+```sql
+CALL sys.create_global_index(
+    table => 'db.my_table',
+    index_column => 'name',
+    index_type => 'btree',
+    partitions => 'dt=2026-06-18;dt=2026-06-19'
+);
+```
+
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+table = catalog.get_table("db.my_table")
+
+# Create BTree index on 'name' column.
+added_files = table.create_global_index("name", index_type="btree")
+print(added_files)
+```
+
+The API returns the number of committed index files. You can pass BTree build
+options and restrict the build to selected partitions:
+
+```python
+added_files = table.create_global_index(
+    "name",
+    index_type="btree",
+    partitions=[{"dt": "2026-06-18"}, {"dt": "2026-06-19"}],
+    options={"sorted-index.records-per-range": "10000000"},
+)
+print(added_files)
+```
+
+</TabItem>
+
+</Tabs>
+
+## Drop BTree Index
+
+<Tabs groupId="btree-drop">
+
+<TabItem value="sql" label="SQL">
+
+```sql
+CALL sys.drop_global_index(
+    table => 'db.my_table',
+    index_column => 'name',
+    index_type => 'btree'
+);
+```
+
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+table = catalog.get_table("db.my_table")
+
+dropped_files = table.drop_global_index("name", index_type="btree")
+print(dropped_files)
+```
+
+You can also restrict the drop to selected partitions, or count matched files
+without committing:
+
+```python
+matched_files = table.drop_global_index(
+    "name",
+    index_type="btree",
+    partitions=[{"dt": "2026-06-18"}, {"dt": "2026-06-19"}],
+    dry_run=True,
+)
+print(matched_files)
+```
+
+</TabItem>
+
+</Tabs>
+
+## BTree Options
+
+| Option | Default | Description |
+|---|---|---|
+| `sorted-index.records-per-range` | `10000000` | Expected number of records per sorted global index file for BTree and Bitmap builds. |
+| `sorted-index.build.max-parallelism` | `4096` | Maximum Flink or Spark parallelism for building sorted global indexes. |
+| `btree-index.block-size` | `64 kb` | Block size used by BTree index files. |
+| `btree-index.cache-size` | `128 mb` | Cache size used by BTree index readers. |
+| `btree-index.fallback-scan-max-size` | `256 mb` | Maximum total size of candidate BTree global index files to allow fallback index scans. Set to `0 b` to disable fallback scans. |
+| `btree-index.compression` | `none` | Compression algorithm used by BTree index blocks. |
+
+The legacy `btree-index.records-per-range` and
+`btree-index.build.max-parallelism` keys are still recognized as fallback keys.
+
+## Query with BTree Index
+
+Once a BTree index is built, it is automatically used during scan when a filter predicate matches the indexed column.
+
+<Tabs groupId="btree-search">
+
+<TabItem value="sql" label="SQL">
+
+```sql
+SELECT * FROM my_table WHERE name IN ('a200', 'a300');
+```
+
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+from pypaimon.common.predicate_builder import PredicateBuilder
+
+table = catalog.get_table("db.my_table")
+
+read_builder = table.new_read_builder()
+read_builder = read_builder.with_filter(
+    PredicateBuilder(table.fields)
+    .is_in("name", ["a200", "a300"])
+)
+
+scan = read_builder.new_scan()
+read = read_builder.new_read()
+pa_table = read.to_arrow(scan.plan().splits())
+print(pa_table)
+```
+
+</TabItem>
+
+</Tabs>

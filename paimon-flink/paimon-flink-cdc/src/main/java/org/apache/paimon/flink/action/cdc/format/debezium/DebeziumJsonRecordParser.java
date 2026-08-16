@@ -119,6 +119,7 @@ public class DebeziumJsonRecordParser extends AbstractJsonRecordParser {
 
     @Override
     protected void setRoot(CdcSourceRecord record) {
+        super.setRoot(record); // Store current record for metadata access
         JsonNode node = (JsonNode) record.getValue();
 
         hasSchema = false;
@@ -212,6 +213,7 @@ public class DebeziumJsonRecordParser extends AbstractJsonRecordParser {
         }
 
         evalComputedColumns(resultMap, schemaBuilder);
+        evalMetadataColumns(resultMap, schemaBuilder);
 
         return resultMap;
     }

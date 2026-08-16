@@ -1,0 +1,168 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.utils;
+
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+
+import static org.apache.paimon.utils.PartitionPathUtils.mightMatch;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.entry;
+
+/** Tests for {@link PartitionPathUtils}. */
+class PartitionPathUtilsTest {
+
+    private final RowType partitionType =
+            RowType.builder()
+                    .field("year", DataTypes.INT())
+                    .field("month", DataTypes.INT())
+                    .build();
+    private final PredicateBuilder builder = new PredicateBuilder(partitionType);
+
+    @ParameterizedTest
+    @ValueSource(strings = {".", ".."})
+    void testValueOnlyDotSegmentIsRejected(String rawValue) {
+        LinkedHashMap<String, String> partitionSpec = new LinkedHashMap<>();
+        partitionSpec.put("pt", rawValue);
+
+        assertThatThrownBy(() -> PartitionPathUtils.generatePartitionPathUtil(partitionSpec, true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(rawValue);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {".", ".."})
+    void testKeyedDotValueKeepsCompatibleSafeLayout(String rawValue) {
+        LinkedHashMap<String, String> partitionSpec = new LinkedHashMap<>();
+        partitionSpec.put("pt", rawValue);
+
+        String partitionPath = PartitionPathUtils.generatePartitionPathUtil(partitionSpec, false);
+        Path resolvedPath = new Path(new Path("file:///warehouse/table"), partitionPath);
+
+        assertThat(partitionPath).isEqualTo("pt=" + rawValue + Path.SEPARATOR);
+        assertThat(PartitionPathUtils.extractPartitionSpecFromPath(resolvedPath))
+                .containsExactly(entry("pt", rawValue));
+    }
+
+    @Test
+    void testTrailingPartitionExtractionStopsAtTableBoundary() {
+        Path partitionPath = new Path("file:///warehouse/env=prod/table/dt=20260718/hh=10");
+
+        assertThat(
+                        PartitionPathUtils.extractPartitionSpecFromPath(
+                                partitionPath, Arrays.asList("dt", "hh")))
+                .containsExactly(entry("dt", "20260718"), entry("hh", "10"));
+        assertThat(
+                        PartitionPathUtils.extractPartitionSpecFromPath(
+                                new Path("file:///warehouse/dt=parent/table/wrong=20260718/hh=10"),
+                                Arrays.asList("dt", "hh")))
+                .isNull();
+    }
+
+    @Test
+    void testNullPredicate() {
+        assertThat(mightMatch(null, 0, 0, GenericRow.of(2024, 5))).isTrue();
+    }
+
+    @Test
+    void testBoundLeaf() {
+        Predicate p = builder.equal(0, 2024);
+        assertThat(mightMatch(p, 0, 0, GenericRow.of(2024, null))).isTrue();
+        assertThat(mightMatch(p, 0, 0, GenericRow.of(2023, null))).isFalse();
+    }
+
+    @Test
+    void testLeafBeyondMaxIdxIsPossiblyTrue() {
+        // month leaf (idx 1), but only year (idx 0) is bound -> cannot decide -> possibly true
+        Predicate p = builder.equal(1, 12);
+        assertThat(mightMatch(p, 0, 0, GenericRow.of(2024, null))).isTrue();
+    }
+
+    @Test
+    void testLeafBelowMinIdxIsPossiblyTrue() {
+        // year leaf (idx 0) belongs to the scan-path equality prefix (minIdx=1): treated as already
+        // satisfied and never read, even if values[0] does not match.
+        Predicate p = builder.equal(0, 2024);
+        assertThat(mightMatch(p, 1, 1, GenericRow.of(2023, 5))).isTrue();
+    }
+
+    @Test
+    void testOrShortCircuit() {
+        Predicate p = PredicateBuilder.or(builder.equal(0, 2024), builder.equal(0, 2025));
+        assertThat(mightMatch(p, 0, 0, GenericRow.of(2025, null))).isTrue();
+        assertThat(mightMatch(p, 0, 0, GenericRow.of(2023, null))).isFalse();
+    }
+
+    @Test
+    void testAndShortCircuit() {
+        Predicate p = PredicateBuilder.and(builder.equal(0, 2024), builder.equal(1, 6));
+        assertThat(mightMatch(p, 0, 1, GenericRow.of(2024, 6))).isTrue();
+        assertThat(mightMatch(p, 0, 1, GenericRow.of(2024, 7))).isFalse();
+        // month not yet known (maxIdx=0) -> And not provably false -> possibly true
+        assertThat(mightMatch(p, 0, 0, GenericRow.of(2024, null))).isTrue();
+        // year already false -> prune regardless of month
+        assertThat(mightMatch(p, 0, 0, GenericRow.of(2023, null))).isFalse();
+    }
+
+    @Test
+    void testNestedCrossFieldOr() {
+        // (year = 2024 AND month < 6) OR (year = 2025 AND month >= 6)
+        Predicate p =
+                PredicateBuilder.or(
+                        PredicateBuilder.and(builder.equal(0, 2024), builder.lessThan(1, 6)),
+                        PredicateBuilder.and(builder.equal(0, 2025), builder.greaterOrEqual(1, 6)));
+
+        // year level (only idx 0 bound): keep 2024 and 2025, prune others
+        assertThat(mightMatch(p, 0, 0, GenericRow.of(2024, null))).isTrue();
+        assertThat(mightMatch(p, 0, 0, GenericRow.of(2025, null))).isTrue();
+        assertThat(mightMatch(p, 0, 0, GenericRow.of(2023, null))).isFalse();
+
+        // month level (both bound): exact
+        assertThat(mightMatch(p, 0, 1, GenericRow.of(2024, 5))).isTrue();
+        assertThat(mightMatch(p, 0, 1, GenericRow.of(2024, 6))).isFalse();
+        assertThat(mightMatch(p, 0, 1, GenericRow.of(2025, 6))).isTrue();
+        assertThat(mightMatch(p, 0, 1, GenericRow.of(2025, 5))).isFalse();
+    }
+
+    @Test
+    void testIsHiddenName() {
+        for (String name :
+                new String[] {"File.txt", "file.txt", "123file.txt", "data", "a_b.log"}) {
+            assertThat(PartitionPathUtils.isHiddenName(name)).as(name).isFalse();
+        }
+        for (String name : new String[] {".hidden", "_file.txt", "_temporary", "__magic_job-1"}) {
+            assertThat(PartitionPathUtils.isHiddenName(name)).as(name).isTrue();
+        }
+        // A name that is absent or empty is not a hidden one.
+        assertThat(PartitionPathUtils.isHiddenName(null)).isFalse();
+        assertThat(PartitionPathUtils.isHiddenName("")).isFalse();
+    }
+}

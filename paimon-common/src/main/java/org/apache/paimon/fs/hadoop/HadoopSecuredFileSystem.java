@@ -21,6 +21,7 @@ package org.apache.paimon.fs.hadoop;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.security.HadoopModule;
 import org.apache.paimon.security.SecurityConfiguration;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataInputStream;
@@ -86,6 +87,41 @@ public class HadoopSecuredFileSystem extends FileSystem {
                                 replication,
                                 blockSize,
                                 progressable));
+    }
+
+    @Override
+    public FSDataOutputStream create(Path path, boolean overwrite) throws IOException {
+        return runSecuredWithIOException(() -> fileSystem.create(path, overwrite));
+    }
+
+    @Override
+    public FSDataOutputStream create(
+            Path path, boolean overwrite, int bufferSize, short replication, long blockSize)
+            throws IOException {
+        return runSecuredWithIOException(
+                () -> fileSystem.create(path, overwrite, bufferSize, replication, blockSize));
+    }
+
+    @Override
+    public short getDefaultReplication(Path f) {
+        return runSecured(() -> fileSystem.getDefaultReplication(f));
+    }
+
+    @Deprecated
+    @Override
+    public short getDefaultReplication() {
+        return runSecured(() -> fileSystem.getDefaultReplication());
+    }
+
+    @Override
+    public long getDefaultBlockSize(Path f) {
+        return runSecured(() -> fileSystem.getDefaultBlockSize(f));
+    }
+
+    @Deprecated
+    @Override
+    public long getDefaultBlockSize() {
+        return runSecured(() -> fileSystem.getDefaultBlockSize());
     }
 
     @Override
@@ -165,6 +201,14 @@ public class HadoopSecuredFileSystem extends FileSystem {
             throws IOException {
         SecurityConfiguration config = new SecurityConfiguration(options);
         if (config.isLegal()) {
+            if (StringUtils.isNullOrWhitespaceOnly(config.getKeytab())
+                    && StringUtils.isNullOrWhitespaceOnly(config.getPrincipal())) {
+                LOG.info(
+                        "No paimon Kerberos credentials configured "
+                                + "(security.kerberos.login.keytab/principal); "
+                                + "skip HadoopModule.install() to preserve externally-established UGI.");
+                return fileSystem;
+            }
             LOG.info("Hadoop security configuration is legal, use the secured FileSystem.");
             HadoopModule module = new HadoopModule(config, configuration);
             module.install();

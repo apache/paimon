@@ -1,0 +1,55 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# Single-NameNode HDFS cluster for integration testing the native HDFS backend.
+# Brings up one NameNode (RPC 8020) and one DataNode (data 9866).
+#
+# Run:
+#   docker compose -f pypaimon/tests/e2e/hdfs/docker-compose.yml up -d
+#   PYPAIMON_HDFS_E2E_URL=hdfs://localhost:8020 \
+#     python -m pytest pypaimon/tests/e2e/hdfs/hdfs_native_e2e_test.py -v
+#   docker compose -f pypaimon/tests/e2e/hdfs/docker-compose.yml down -v
+
+services:
+  namenode:
+    image: apache/hadoop:3.3.6
+    hostname: namenode
+    user: root
+    command: ["/bin/bash", "-c", "hdfs namenode -format -force -nonInteractive || true; hdfs namenode"]
+    environment:
+      HADOOP_HOME: /opt/hadoop
+      CORE-SITE.XML_fs.defaultFS: hdfs://namenode:8020
+      HDFS-SITE.XML_dfs.namenode.rpc-address: namenode:8020
+      HDFS-SITE.XML_dfs.replication: "1"
+      HDFS-SITE.XML_dfs.permissions.enabled: "false"
+    ports:
+      - "8020:8020"
+      - "9870:9870"
+
+  datanode:
+    image: apache/hadoop:3.3.6
+    user: root
+    command: ["hdfs", "datanode"]
+    environment:
+      HADOOP_HOME: /opt/hadoop
+      CORE-SITE.XML_fs.defaultFS: hdfs://namenode:8020
+      HDFS-SITE.XML_dfs.datanode.use.datanode.hostname: "false"
+      HDFS-SITE.XML_dfs.permissions.enabled: "false"
+    depends_on:
+      - namenode
+    ports:
+      - "9866:9866"

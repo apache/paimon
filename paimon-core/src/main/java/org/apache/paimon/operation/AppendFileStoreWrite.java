@@ -23,7 +23,7 @@ import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.compact.NoopCompactManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
+import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.types.RowType;
@@ -51,7 +51,6 @@ public class AppendFileStoreWrite extends BaseAppendFileStoreWrite {
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             CoreOptions options,
-            @Nullable DeletionVectorsMaintainer.Factory dvMaintainerFactory,
             String tableName) {
         super(
                 fileIO,
@@ -63,7 +62,7 @@ public class AppendFileStoreWrite extends BaseAppendFileStoreWrite {
                 snapshotManager,
                 scan,
                 options,
-                dvMaintainerFactory,
+                null,
                 tableName);
         super.withIgnorePreviousFiles(true);
     }
@@ -74,7 +73,7 @@ public class AppendFileStoreWrite extends BaseAppendFileStoreWrite {
             int bucket,
             List<DataFileMeta> restoredFiles,
             ExecutorService compactExecutor,
-            @Nullable DeletionVectorsMaintainer dvMaintainer) {
+            @Nullable BucketedDvMaintainer dvMaintainer) {
         return new NoopCompactManager();
     }
 

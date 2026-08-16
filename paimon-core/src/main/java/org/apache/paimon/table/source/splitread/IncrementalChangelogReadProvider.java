@@ -25,7 +25,8 @@ import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.ReverseReader;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.IncrementalSplit;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOFunction;
 import org.apache.paimon.utils.LazyField;
@@ -52,35 +53,38 @@ public class IncrementalChangelogReadProvider implements SplitReadProvider {
 
     private SplitRead<InternalRow> create(Supplier<MergeFileSplitRead> supplier) {
         final MergeFileSplitRead read = supplier.get().withReadKeyType(RowType.of());
-        IOFunction<DataSplit, RecordReader<InternalRow>> convertedFactory =
+        IOFunction<Split, RecordReader<InternalRow>> convertedFactory =
                 split -> {
+                    IncrementalSplit incrementalSplit = (IncrementalSplit) split;
                     RecordReader<KeyValue> reader =
                             ConcatRecordReader.create(
                                     () ->
                                             new ReverseReader(
                                                     read.createMergeReader(
-                                                            split.partition(),
-                                                            split.bucket(),
-                                                            split.beforeFiles(),
-                                                            split.beforeDeletionFiles()
-                                                                    .orElse(null),
+                                                            incrementalSplit.partition(),
+                                                            incrementalSplit.bucket(),
+                                                            incrementalSplit.beforeFiles(),
+                                                            incrementalSplit.beforeDeletionFiles(),
                                                             false)),
                                     () ->
                                             read.createMergeReader(
-                                                    split.partition(),
-                                                    split.bucket(),
-                                                    split.dataFiles(),
-                                                    split.deletionFiles().orElse(null),
+                                                    incrementalSplit.partition(),
+                                                    incrementalSplit.bucket(),
+                                                    incrementalSplit.afterFiles(),
+                                                    incrementalSplit.afterDeletionFiles(),
                                                     false));
-                    return unwrap(reader);
+                    return unwrap(reader, read.tableSchema().options());
                 };
 
         return SplitRead.convert(read, convertedFactory);
     }
 
     @Override
-    public boolean match(DataSplit split, boolean forceKeepDelete) {
-        return !split.beforeFiles().isEmpty() && split.isStreaming();
+    public boolean match(Split split, Context context) {
+        if (!(split instanceof IncrementalSplit)) {
+            return false;
+        }
+        return ((IncrementalSplit) split).isStreaming();
     }
 
     @Override

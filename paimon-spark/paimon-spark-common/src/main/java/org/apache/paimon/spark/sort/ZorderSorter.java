@@ -48,6 +48,14 @@ public class ZorderSorter extends TableSorter {
         return sortedDF.drop(Z_COLUMN);
     }
 
+    @Override
+    public Dataset<Row> sortLocal(Dataset<Row> df) {
+        Column zColumn = zValue(df);
+        Dataset<Row> zValueDF = df.withColumn(Z_COLUMN, zColumn);
+        Dataset<Row> sortedDF = zValueDF.sortWithinPartitions(zValueDF.col(Z_COLUMN));
+        return sortedDF.drop(Z_COLUMN);
+    }
+
     private Column zValue(Dataset<Row> df) {
         SparkZOrderUDF zOrderUDF =
                 new SparkZOrderUDF(

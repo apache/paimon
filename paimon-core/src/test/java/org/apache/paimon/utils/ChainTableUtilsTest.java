@@ -1,0 +1,998 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.utils;
+
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.codegen.RecordComparator;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryRowWriter;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.stats.StatsTestUtils;
+import org.apache.paimon.table.source.ChainSplit;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
+
+import org.assertj.core.util.Lists;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+/** Test class for {@link org.apache.paimon.utils.ChainTableUtils}. */
+public class ChainTableUtilsTest {
+
+    public static final RecordComparator KEY_COMPARATOR =
+            (a, b) -> a.getString(0).compareTo(b.getString(0));
+
+    private static String partString(BinaryRow partition, InternalRow.FieldGetter[] getters) {
+        StringBuilder builder = new StringBuilder();
+        for (InternalRow.FieldGetter getter : getters) {
+            builder.append(getter.getFieldOrNull(partition));
+        }
+        return builder.toString();
+    }
+
+    /** Extract a string value from a BinaryRow at the given position. */
+    private static String getString(BinaryRow row, int pos) {
+        return row.getString(pos).toString();
+    }
+
+    private static BinaryRow row(List<String> values) {
+        BinaryRow row = new BinaryRow(values.size());
+        BinaryRowWriter writer = new BinaryRowWriter(row);
+        for (int i = 0; i < values.size(); i++) {
+            writer.writeString(i, BinaryString.fromString(values.get(i)));
+        }
+        writer.complete();
+        return row;
+    }
+
+    @Test
+    public void testFindFirstLatestPartitions() {
+        String[] snapshotPartitions = {"20251105", "20251101"};
+        String[] deltaPartitions = {"20251102", "20251106"};
+
+        RowType rowType = RowType.builder().field("dt", DataTypes.STRING().notNull()).build();
+
+        BinaryRow snapshotPartition1 = new BinaryRow(1);
+        BinaryRowWriter writer = new BinaryRowWriter(snapshotPartition1);
+        writer.writeString(0, BinaryString.fromString(snapshotPartitions[0]));
+        InternalRow.FieldGetter[] fieldGetters =
+                InternalRowUtils.createFieldGetters(rowType.getFieldTypes());
+
+        BinaryRow snapshotPartition2 = new BinaryRow(1);
+        writer = new BinaryRowWriter(snapshotPartition2);
+        writer.writeString(0, BinaryString.fromString(snapshotPartitions[1]));
+        List<BinaryRow> sourcePartitions =
+                Stream.of(snapshotPartition1, snapshotPartition2)
+                        .sorted(KEY_COMPARATOR)
+                        .collect(Collectors.toList());
+
+        BinaryRow deltaPartition1 = new BinaryRow(1);
+        writer = new BinaryRowWriter(deltaPartition1);
+        writer.writeString(0, BinaryString.fromString(deltaPartitions[0]));
+
+        BinaryRow deltaPartition2 = new BinaryRow(1);
+        writer = new BinaryRowWriter(deltaPartition2);
+        writer.writeString(0, BinaryString.fromString(deltaPartitions[1]));
+        List<BinaryRow> targetPartitions =
+                Stream.of(deltaPartition1, deltaPartition2)
+                        .sorted(KEY_COMPARATOR)
+                        .collect(Collectors.toList());
+
+        Map<BinaryRow, BinaryRow> firstLatestPartitions =
+                ChainTableUtils.findFirstLatestPartitions(
+                        targetPartitions, sourcePartitions, KEY_COMPARATOR);
+
+        BinaryRow key1 = firstLatestPartitions.get(deltaPartition1);
+        Assertions.assertEquals(partString(key1, fieldGetters), snapshotPartitions[1]);
+
+        BinaryRow key2 = firstLatestPartitions.get(deltaPartition2);
+        Assertions.assertEquals(partString(key2, fieldGetters), snapshotPartitions[0]);
+    }
+
+    @Test
+    public void testCreateTriangularPredicate() {
+        RowType rowType =
+                RowType.builder()
+                        .field("dt", DataTypes.STRING().notNull())
+                        .field("hour", DataTypes.STRING().notNull())
+                        .build();
+        BinaryRow partitionValue = new BinaryRow(2);
+        BinaryRowWriter writer = new BinaryRowWriter(partitionValue);
+        writer.writeString(0, BinaryString.fromString("20250810"));
+        writer.writeString(1, BinaryString.fromString("23"));
+        RowDataToObjectArrayConverter partitionConverter =
+                new RowDataToObjectArrayConverter(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        Predicate predicate =
+                ChainTableUtils.createTriangularPredicate(
+                        partitionValue,
+                        partitionConverter,
+                        (Integer i, Object j) -> builder.equal(i, j),
+                        (Integer i, Object j) -> builder.lessThan(i, j));
+        Assertions.assertTrue(!predicate.test(partitionValue));
+        List<Predicate> predicates = new ArrayList<>();
+        predicates.add(builder.lessThan(0, partitionValue.getString(0)));
+        List<Predicate> subPredicates = new ArrayList<>();
+        subPredicates.add(builder.equal(0, partitionValue.getString(0)));
+        subPredicates.add(builder.lessThan(1, partitionValue.getString(1)));
+        predicates.add(PredicateBuilder.and(subPredicates));
+        Predicate expected = PredicateBuilder.or(predicates);
+        Assertions.assertTrue(predicate.equals(expected));
+    }
+
+    @Test
+    public void testCreateLinearPredicate() {
+        RowType rowType =
+                RowType.builder()
+                        .field("dt", DataTypes.STRING().notNull())
+                        .field("hour", DataTypes.STRING().notNull())
+                        .build();
+        BinaryRow partitionValue = new BinaryRow(2);
+        BinaryRowWriter writer = new BinaryRowWriter(partitionValue);
+        writer.writeString(0, BinaryString.fromString("20250810"));
+        writer.writeString(1, BinaryString.fromString("23"));
+        RowDataToObjectArrayConverter partitionConverter =
+                new RowDataToObjectArrayConverter(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        Predicate predicate =
+                ChainTableUtils.createLinearPredicate(
+                        partitionValue,
+                        partitionConverter,
+                        (Integer i, Object j) -> builder.equal(i, j));
+        Assertions.assertTrue(predicate.test(partitionValue));
+        List<Predicate> predicates = new ArrayList<>();
+        predicates.add(builder.equal(0, partitionValue.getString(0)));
+        predicates.add(builder.equal(1, partitionValue.getString(1)));
+        Predicate expected = PredicateBuilder.and(predicates);
+        Assertions.assertTrue(predicate.equals(expected));
+    }
+
+    // ========================== Tests for findFirstLatestPartitionsWithProjector
+    // ==========================
+
+    @Test
+    public void testFindFirstLatestPartitionsWithProjectorWithBasicGrouping() {
+        // partition keys: (region, date), chain keys: (date)
+        // Snapshot: (US,20250720), (US,20250725)
+        // Delta:    (US,20250722), (US,20250727)
+        // Expected: 20250722 → 20250720, 20250727 → 20250725
+        RowType fullType =
+                RowType.builder()
+                        .field("region", DataTypes.STRING().notNull())
+                        .field("date", DataTypes.STRING().notNull())
+                        .build();
+
+        ChainPartitionProjector projector = new ChainPartitionProjector(fullType, 1);
+        RecordComparator chainComparator = (a, b) -> a.getString(0).compareTo(b.getString(0));
+
+        // Snapshot partitions, pre-sorted by chain field (date)
+        BinaryRow snap1 = row(Lists.newArrayList("US", "20250720"));
+        BinaryRow snap2 = row(Lists.newArrayList("US", "20250725"));
+        List<BinaryRow> snapshotPartitions = Arrays.asList(snap1, snap2);
+
+        // Delta partitions, pre-sorted by chain field (date)
+        BinaryRow delta1 = row(Lists.newArrayList("US", "20250722"));
+        BinaryRow delta2 = row(Lists.newArrayList("US", "20250727"));
+        List<BinaryRow> deltaPartitions = Arrays.asList(delta1, delta2);
+
+        Map<BinaryRow, BinaryRow> mapping =
+                ChainTableUtils.findFirstLatestPartitionsWithProjector(
+                        deltaPartitions, snapshotPartitions, chainComparator, projector);
+
+        // delta (US,20250722) → snapshot (US,20250720)
+        BinaryRow matched1 = mapping.get(delta1);
+        assertThat(matched1).isNotNull();
+        assertThat(getString(matched1, 0)).isEqualTo("US");
+        assertThat(getString(matched1, 1)).isEqualTo("20250720");
+
+        // delta (US,20250727) → snapshot (US,20250725)
+        BinaryRow matched2 = mapping.get(delta2);
+        assertThat(matched2).isNotNull();
+        assertThat(getString(matched2, 0)).isEqualTo("US");
+        assertThat(getString(matched2, 1)).isEqualTo("20250725");
+    }
+
+    @Test
+    public void testFindFirstLatestPartitionsWithProjectorWithNoMatchingSnapshot() {
+        // Delta partition is earlier than all snapshots → null mapping
+        RowType fullType =
+                RowType.builder()
+                        .field("region", DataTypes.STRING().notNull())
+                        .field("date", DataTypes.STRING().notNull())
+                        .build();
+
+        ChainPartitionProjector projector = new ChainPartitionProjector(fullType, 1);
+        RecordComparator chainComparator = (a, b) -> a.getString(0).compareTo(b.getString(0));
+
+        List<BinaryRow> snapshotPartitions =
+                Arrays.asList(row(Lists.newArrayList("US", "20250725")));
+        BinaryRow delta1 = row(Lists.newArrayList("US", "20250720"));
+        List<BinaryRow> deltaPartitions = Arrays.asList(delta1);
+
+        Map<BinaryRow, BinaryRow> mapping =
+                ChainTableUtils.findFirstLatestPartitionsWithProjector(
+                        deltaPartitions, snapshotPartitions, chainComparator, projector);
+
+        // delta 20250720 < snapshot 20250725, no earlier snapshot → null
+        assertThat(mapping.get(delta1)).isNull();
+    }
+
+    @Test
+    public void testFindFirstLatestPartitionsWithProjectorWithEmptySnapshot() {
+        // No snapshot partitions at all → all mappings are null
+        RowType fullType =
+                RowType.builder()
+                        .field("region", DataTypes.STRING().notNull())
+                        .field("date", DataTypes.STRING().notNull())
+                        .build();
+
+        ChainPartitionProjector projector = new ChainPartitionProjector(fullType, 1);
+        RecordComparator chainComparator = (a, b) -> a.getString(0).compareTo(b.getString(0));
+
+        BinaryRow delta1 = row(Lists.newArrayList("US", "20250720"));
+        BinaryRow delta2 = row(Lists.newArrayList("US", "20250722"));
+        List<BinaryRow> deltaPartitions = Arrays.asList(delta1, delta2);
+
+        Map<BinaryRow, BinaryRow> mapping =
+                ChainTableUtils.findFirstLatestPartitionsWithProjector(
+                        deltaPartitions, new ArrayList<>(), chainComparator, projector);
+
+        for (BinaryRow delta : deltaPartitions) {
+            assertThat(mapping.get(delta)).isNull();
+        }
+    }
+
+    @Test
+    public void testFindFirstLatestPartitionsWithProjectorWithMultipleChainFields() {
+        // partition keys: (region, dt, hour), chain keys: (dt, hour)
+        RowType fullType =
+                RowType.builder()
+                        .field("region", DataTypes.STRING().notNull())
+                        .field("dt", DataTypes.STRING().notNull())
+                        .field("hour", DataTypes.STRING().notNull())
+                        .build();
+
+        ChainPartitionProjector projector = new ChainPartitionProjector(fullType, 2);
+
+        // Compare chain partition (dt, hour) lexicographically
+        RecordComparator chainComparator =
+                (a, b) -> {
+                    int cmp = a.getString(0).compareTo(b.getString(0));
+                    if (cmp != 0) {
+                        return cmp;
+                    }
+                    return a.getString(1).compareTo(b.getString(1));
+                };
+
+        // snapshot: (US, 20250720, 12)
+        BinaryRow snap1 = row(Lists.newArrayList("US", "20250720", "12"));
+        List<BinaryRow> snapshotPartitions = Arrays.asList(snap1);
+
+        // delta: (US, 20250720, 10), (US, 20250720, 14) — pre-sorted by chain (dt, hour)
+        BinaryRow delta1 = row(Lists.newArrayList("US", "20250720", "10"));
+        BinaryRow delta2 = row(Lists.newArrayList("US", "20250720", "14"));
+        List<BinaryRow> deltaPartitions = Arrays.asList(delta1, delta2);
+
+        Map<BinaryRow, BinaryRow> mapping =
+                ChainTableUtils.findFirstLatestPartitionsWithProjector(
+                        deltaPartitions, snapshotPartitions, chainComparator, projector);
+
+        // delta (US,20250720,10): chain (20250720,10) < snapshot chain (20250720,12) → null
+        assertThat(mapping.get(delta1)).isNull();
+
+        // delta (US,20250720,14): chain (20250720,14) > snapshot chain (20250720,12) → match
+        BinaryRow matched = mapping.get(delta2);
+        assertThat(matched).isNotNull();
+        assertThat(getString(matched, 1)).isEqualTo("20250720");
+        assertThat(getString(matched, 2)).isEqualTo("12");
+    }
+
+    // ========================== Tests for getDeltaPartitionsWithProjector
+    // ==========================
+
+    @Test
+    public void testGetDeltaPartitionsWithProjectorWithDailyPartition() {
+        // partition keys: (region, date), chain keys: (date)
+        // begin: (US, 20250720), end: (US, 20250724)
+        // Expected delta: (US,20250721), (US,20250722), (US,20250723), (US,20250724)
+        RowType fullType =
+                RowType.builder()
+                        .field("region", DataTypes.STRING().notNull())
+                        .field("date", DataTypes.STRING().notNull())
+                        .build();
+
+        ChainPartitionProjector projector = new ChainPartitionProjector(fullType, 1);
+        RecordComparator chainComparator = (a, b) -> a.getString(0).compareTo(b.getString(0));
+
+        Options opts = new Options();
+        opts.set(CoreOptions.PARTITION_TIMESTAMP_PATTERN, "$date");
+        opts.set(CoreOptions.PARTITION_TIMESTAMP_FORMATTER, "yyyyMMdd");
+        CoreOptions options = new CoreOptions(opts);
+
+        BinaryRow begin = row(Lists.newArrayList("US", "20250720"));
+        BinaryRow end = row(Lists.newArrayList("US", "20250724"));
+
+        List<BinaryRow> deltas =
+                ChainTableUtils.getDeltaPartitionsWithProjector(
+                        begin, end, options, chainComparator, projector);
+
+        // (20250720, 20250724]: 4 days
+        assertThat(deltas).hasSize(4);
+        assertThat(getString(deltas.get(0), 0)).isEqualTo("US");
+        assertThat(getString(deltas.get(0), 1)).isEqualTo("20250721");
+        assertThat(getString(deltas.get(1), 1)).isEqualTo("20250722");
+        assertThat(getString(deltas.get(2), 1)).isEqualTo("20250723");
+        assertThat(getString(deltas.get(3), 1)).isEqualTo("20250724");
+
+        // all should have group = US
+        for (BinaryRow delta : deltas) {
+            assertThat(getString(delta, 0)).isEqualTo("US");
+        }
+    }
+
+    @Test
+    public void testGetDeltaPartitionsWithProjectorWithSameBeginAndEnd() {
+        // begin == end → empty result (open-closed interval: (begin, end])
+        RowType fullType =
+                RowType.builder()
+                        .field("region", DataTypes.STRING().notNull())
+                        .field("date", DataTypes.STRING().notNull())
+                        .build();
+
+        ChainPartitionProjector projector = new ChainPartitionProjector(fullType, 1);
+        RecordComparator chainComparator = (a, b) -> a.getString(0).compareTo(b.getString(0));
+
+        Options opts = new Options();
+        opts.set(CoreOptions.PARTITION_TIMESTAMP_PATTERN, "$date");
+        opts.set(CoreOptions.PARTITION_TIMESTAMP_FORMATTER, "yyyyMMdd");
+        CoreOptions options = new CoreOptions(opts);
+
+        BinaryRow partition = row(Lists.newArrayList("EU", "20250720"));
+
+        List<BinaryRow> deltas =
+                ChainTableUtils.getDeltaPartitionsWithProjector(
+                        partition, partition, options, chainComparator, projector);
+
+        assertThat(deltas).isEmpty();
+    }
+
+    @Test
+    public void testGetDeltaPartitionsWithProjectorWithConsecutiveDays() {
+        // begin: (EU, 20250720), end: (EU, 20250721) → only (EU, 20250721)
+        RowType fullType =
+                RowType.builder()
+                        .field("region", DataTypes.STRING().notNull())
+                        .field("date", DataTypes.STRING().notNull())
+                        .build();
+
+        ChainPartitionProjector projector = new ChainPartitionProjector(fullType, 1);
+        RecordComparator chainComparator = (a, b) -> a.getString(0).compareTo(b.getString(0));
+
+        Options opts = new Options();
+        opts.set(CoreOptions.PARTITION_TIMESTAMP_PATTERN, "$date");
+        opts.set(CoreOptions.PARTITION_TIMESTAMP_FORMATTER, "yyyyMMdd");
+        CoreOptions options = new CoreOptions(opts);
+
+        BinaryRow begin = row(Lists.newArrayList("EU", "20250720"));
+        BinaryRow end = row(Lists.newArrayList("EU", "20250721"));
+
+        List<BinaryRow> deltas =
+                ChainTableUtils.getDeltaPartitionsWithProjector(
+                        begin, end, options, chainComparator, projector);
+
+        assertThat(deltas).hasSize(1);
+        assertThat(getString(deltas.get(0), 0)).isEqualTo("EU");
+        assertThat(getString(deltas.get(0), 1)).isEqualTo("20250721");
+    }
+
+    @Test
+    public void testGetDeltaPartitionsWithProjectorWithGroupPreserved() {
+        // Verify that group part from beginPartition is preserved for all results
+        RowType fullType =
+                RowType.builder()
+                        .field("country", DataTypes.STRING().notNull())
+                        .field("city", DataTypes.STRING().notNull())
+                        .field("date", DataTypes.STRING().notNull())
+                        .build();
+
+        // chain keys: (date), group keys: (country, city)
+        ChainPartitionProjector projector = new ChainPartitionProjector(fullType, 1);
+        RecordComparator chainComparator = (a, b) -> a.getString(0).compareTo(b.getString(0));
+
+        Options opts = new Options();
+        opts.set(CoreOptions.PARTITION_TIMESTAMP_PATTERN, "$date");
+        opts.set(CoreOptions.PARTITION_TIMESTAMP_FORMATTER, "yyyyMMdd");
+        CoreOptions options = new CoreOptions(opts);
+
+        BinaryRow begin = row(Lists.newArrayList("China", "Beijing", "20250720"));
+        BinaryRow end = row(Lists.newArrayList("China", "Beijing", "20250723"));
+
+        List<BinaryRow> deltas =
+                ChainTableUtils.getDeltaPartitionsWithProjector(
+                        begin, end, options, chainComparator, projector);
+
+        assertThat(deltas).hasSize(3);
+        for (BinaryRow delta : deltas) {
+            assertThat(getString(delta, 0)).isEqualTo("China");
+            assertThat(getString(delta, 1)).isEqualTo("Beijing");
+        }
+        assertThat(getString(deltas.get(0), 2)).isEqualTo("20250721");
+        assertThat(getString(deltas.get(1), 2)).isEqualTo("20250722");
+        assertThat(getString(deltas.get(2), 2)).isEqualTo("20250723");
+    }
+
+    // ========================== Tests for createGroupChainPredicate ==========================
+
+    @Test
+    public void testCreateGroupChainPredicateWithOneGroupOneChainLessThan() {
+        // partition: (region, date), groupFieldCount=1
+        // Expected: region=equal AND date=lessThan
+        RowType rowType =
+                RowType.builder()
+                        .field("region", DataTypes.STRING().notNull())
+                        .field("date", DataTypes.STRING().notNull())
+                        .build();
+
+        BinaryRow partition = row(Lists.newArrayList("US", "20250726"));
+        RowDataToObjectArrayConverter converter = new RowDataToObjectArrayConverter(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+
+        Predicate predicate =
+                ChainTableUtils.createGroupChainPredicate(
+                        partition,
+                        converter,
+                        1,
+                        (Integer i, Object v) -> builder.equal(i, v),
+                        (Integer i, Object v) -> builder.lessThan(i, v));
+
+        // Expected: region='US' AND date < '20250726'
+        List<Predicate> expected = new ArrayList<>();
+        expected.add(builder.equal(0, BinaryString.fromString("US")));
+        expected.add(builder.lessThan(1, BinaryString.fromString("20250726")));
+        Predicate expectedPredicate = PredicateBuilder.and(expected);
+
+        assertThat(predicate).isEqualTo(expectedPredicate);
+
+        // Verify: (US, 20250725) should match
+        assertThat(predicate.test(row(Lists.newArrayList("US", "20250725")))).isTrue();
+
+        // Verify: (US, 20250726) should NOT match (not less than)
+        assertThat(predicate.test(partition)).isFalse();
+
+        // Verify: (EU, 20250725) should NOT match (region mismatch)
+        assertThat(predicate.test(row(Lists.newArrayList("EU", "20250725")))).isFalse();
+    }
+
+    @Test
+    public void testCreateGroupChainPredicateWithCombinedWithLinearForLessOrEqual() {
+        // Correct pattern: OR(groupChainPredicate(lessThan), linearPredicate(equal))
+        // to achieve partition <= target with group exact match.
+        // This is the pattern used in planChainInGroup.
+        RowType rowType =
+                RowType.builder()
+                        .field("region", DataTypes.STRING().notNull())
+                        .field("date", DataTypes.STRING().notNull())
+                        .build();
+
+        BinaryRow partition = row(Lists.newArrayList("EU", "20250801"));
+        RowDataToObjectArrayConverter converter = new RowDataToObjectArrayConverter(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+
+        List<Predicate> predicates = new ArrayList<>();
+        predicates.add(
+                ChainTableUtils.createGroupChainPredicate(
+                        partition,
+                        converter,
+                        1,
+                        (Integer i, Object v) -> builder.equal(i, v),
+                        (Integer i, Object v) -> builder.lessThan(i, v)));
+        predicates.add(
+                ChainTableUtils.createLinearPredicate(
+                        partition, converter, (Integer i, Object v) -> builder.equal(i, v)));
+        Predicate combined = PredicateBuilder.or(predicates);
+
+        // Exact match → match (via linearPredicate)
+        assertThat(combined.test(partition)).isTrue();
+
+        // Earlier date, same region → match (via groupChainPredicate)
+        assertThat(combined.test(row(Lists.newArrayList("EU", "20250731")))).isTrue();
+
+        // Later date → no match
+        assertThat(combined.test(row(Lists.newArrayList("EU", "20250802")))).isFalse();
+
+        // Different region → no match
+        assertThat(combined.test(row(Lists.newArrayList("US", "20250801")))).isFalse();
+    }
+
+    @Test
+    public void testCreateGroupChainPredicateWithOneGroupTwoChainLessThan() {
+        // partition: (region, dt, hour), groupFieldCount=1
+        // Expected: region=equal AND triangular(dt, hour) with lessThan
+        //   → region='US' AND (dt < '20250810' OR (dt = '20250810' AND hour < '23'))
+        RowType rowType =
+                RowType.builder()
+                        .field("region", DataTypes.STRING().notNull())
+                        .field("dt", DataTypes.STRING().notNull())
+                        .field("hour", DataTypes.STRING().notNull())
+                        .build();
+
+        BinaryRow partition = row(Lists.newArrayList("US", "20250810", "23"));
+        RowDataToObjectArrayConverter converter = new RowDataToObjectArrayConverter(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+
+        Predicate predicate =
+                ChainTableUtils.createGroupChainPredicate(
+                        partition,
+                        converter,
+                        1,
+                        (Integer i, Object v) -> builder.equal(i, v),
+                        (Integer i, Object v) -> builder.lessThan(i, v));
+
+        // (US, 20250809, 23) → dt < 20250810 → match
+        assertThat(predicate.test(row(Lists.newArrayList("US", "20250809", "23")))).isTrue();
+
+        // (US, 20250810, 22) → dt=20250810 AND hour<23 → match
+        assertThat(predicate.test(row(Lists.newArrayList("US", "20250810", "22")))).isTrue();
+
+        // (US, 20250810, 23) → not less than → no match
+        assertThat(predicate.test(partition)).isFalse();
+
+        // (EU, 20250809, 23) → region mismatch → no match
+        assertThat(predicate.test(row(Lists.newArrayList("EU", "20250809", "23")))).isFalse();
+    }
+
+    @Test
+    public void testCreateGroupChainPredicateWithOneGroupTwoChainLessOrEqual() {
+        // partition: (region, dt, hour), groupFieldCount=1
+        // Combine groupChainPredicate(lessThan) OR linearPredicate(equal)
+        // to achieve <= semantics with correct multi-chain-field handling.
+        RowType rowType =
+                RowType.builder()
+                        .field("region", DataTypes.STRING().notNull())
+                        .field("dt", DataTypes.STRING().notNull())
+                        .field("hour", DataTypes.STRING().notNull())
+                        .build();
+
+        BinaryRow partition = row(Lists.newArrayList("US", "20250810", "14"));
+        RowDataToObjectArrayConverter converter = new RowDataToObjectArrayConverter(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+
+        List<Predicate> predicates = new ArrayList<>();
+        predicates.add(
+                ChainTableUtils.createGroupChainPredicate(
+                        partition,
+                        converter,
+                        1,
+                        (Integer i, Object v) -> builder.equal(i, v),
+                        (Integer i, Object v) -> builder.lessThan(i, v)));
+        predicates.add(
+                ChainTableUtils.createLinearPredicate(
+                        partition, converter, (Integer i, Object v) -> builder.equal(i, v)));
+        Predicate combined = PredicateBuilder.or(predicates);
+
+        // (US, 20250810, 14) → exact match → match (via linear)
+        assertThat(combined.test(partition)).isTrue();
+
+        // (US, 20250810, 13) → same dt, hour < 14 → match (via groupChain)
+        assertThat(combined.test(row(Lists.newArrayList("US", "20250810", "13")))).isTrue();
+
+        // (US, 20250809, 23) → dt < 20250810 → match (via groupChain)
+        assertThat(combined.test(row(Lists.newArrayList("US", "20250809", "23")))).isTrue();
+
+        // (US, 20250810, 15) → same dt, hour > 14, no exact match → no match
+        assertThat(combined.test(row(Lists.newArrayList("US", "20250810", "15")))).isFalse();
+
+        // (US, 20250811, 00) → dt > 20250810 → no match
+        assertThat(combined.test(row(Lists.newArrayList("US", "20250811", "00")))).isFalse();
+
+        // (EU, 20250810, 14) → region mismatch → no match
+        assertThat(combined.test(row(Lists.newArrayList("EU", "20250810", "14")))).isFalse();
+    }
+
+    @Test
+    public void testCreateGroupChainPredicateWithZeroGroup() {
+        // groupFieldCount=0 → same as createTriangularPredicate
+        RowType rowType =
+                RowType.builder()
+                        .field("dt", DataTypes.STRING().notNull())
+                        .field("hour", DataTypes.STRING().notNull())
+                        .build();
+
+        BinaryRow partition = row(Lists.newArrayList("20250810", "23"));
+        RowDataToObjectArrayConverter converter = new RowDataToObjectArrayConverter(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+
+        Predicate groupChainPredicate =
+                ChainTableUtils.createGroupChainPredicate(
+                        partition,
+                        converter,
+                        0,
+                        (Integer i, Object v) -> builder.equal(i, v),
+                        (Integer i, Object v) -> builder.lessThan(i, v));
+
+        Predicate triangularPredicate =
+                ChainTableUtils.createTriangularPredicate(
+                        partition,
+                        converter,
+                        (Integer i, Object v) -> builder.equal(i, v),
+                        (Integer i, Object v) -> builder.lessThan(i, v));
+
+        // When groupFieldCount=0, createGroupChainPredicate should produce
+        // the same result as createTriangularPredicate
+        assertThat(groupChainPredicate).isEqualTo(triangularPredicate);
+    }
+
+    @Test
+    public void testCreateGroupChainPredicateWithTwoGroupOneChain() {
+        // partition: (country, city, date), groupFieldCount=2
+        // Expected: country=equal AND city=equal AND date=lessThan
+        RowType rowType =
+                RowType.builder()
+                        .field("country", DataTypes.STRING().notNull())
+                        .field("city", DataTypes.STRING().notNull())
+                        .field("date", DataTypes.STRING().notNull())
+                        .build();
+
+        BinaryRow partition = row(Lists.newArrayList("China", "Beijing", "20250801"));
+        RowDataToObjectArrayConverter converter = new RowDataToObjectArrayConverter(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+
+        Predicate predicate =
+                ChainTableUtils.createGroupChainPredicate(
+                        partition,
+                        converter,
+                        2,
+                        (Integer i, Object v) -> builder.equal(i, v),
+                        (Integer i, Object v) -> builder.lessThan(i, v));
+
+        // (China, Beijing, 20250731) → match
+        assertThat(predicate.test(row(Lists.newArrayList("China", "Beijing", "20250731"))))
+                .isTrue();
+
+        // (China, Beijing, 20250801) → not less than → no match
+        assertThat(predicate.test(partition)).isFalse();
+
+        // (China, Shanghai, 20250731) → city mismatch → no match
+        assertThat(predicate.test(row(Lists.newArrayList("China", "Shanghai", "20250731"))))
+                .isFalse();
+
+        // (US, Beijing, 20250731) → country mismatch → no match
+        assertThat(predicate.test(row(Lists.newArrayList("US", "Beijing", "20250731")))).isFalse();
+    }
+
+    @Test
+    public void testFindFirstLatestPartitionsWithMultiChainKeys() {
+        // partition keys: (dt, hour), chain keys: (dt, hour)
+        RowType fullType =
+                RowType.builder()
+                        .field("dt", DataTypes.STRING().notNull())
+                        .field("hour", DataTypes.STRING().notNull())
+                        .build();
+
+        ChainPartitionProjector projector = new ChainPartitionProjector(fullType, 2);
+
+        // Snapshot partitions with same dt but different hour
+        BinaryRow snap1 = row(Lists.newArrayList("20250809", "01"));
+        BinaryRow snap2 = row(Lists.newArrayList("20250809", "02"));
+        List<BinaryRow> snapshotPartitions = Arrays.asList(snap1, snap2);
+
+        // Delta partitions
+        BinaryRow delta1 = row(Lists.newArrayList("20250810", "03"));
+        BinaryRow delta2 = row(Lists.newArrayList("20250810", "05"));
+        List<BinaryRow> deltaPartitions = Arrays.asList(delta1, delta2);
+
+        RecordComparator chainComparator =
+                (a, b) -> {
+                    int cmp = a.getString(0).compareTo(b.getString(0));
+                    if (cmp != 0) {
+                        return cmp;
+                    }
+                    return a.getString(1).compareTo(b.getString(1));
+                };
+        Map<BinaryRow, BinaryRow> mapping =
+                ChainTableUtils.findFirstLatestPartitionsWithProjector(
+                        deltaPartitions, snapshotPartitions, chainComparator, projector);
+
+        // delta (20250810,03) → snapshot (20250809,02) (nearest earlier)
+        BinaryRow matched1 = mapping.get(delta1);
+        assertThat(matched1).isNotNull();
+        assertThat(getString(matched1, 0)).isEqualTo("20250809");
+        assertThat(getString(matched1, 1)).isEqualTo("02");
+
+        // delta (20250810,05) → snapshot (20250809,02) (nearest earlier)
+        BinaryRow matched2 = mapping.get(delta2);
+        assertThat(matched2).isNotNull();
+        assertThat(getString(matched2, 0)).isEqualTo("20250809");
+        assertThat(getString(matched2, 1)).isEqualTo("02");
+    }
+
+    @Test
+    public void testBuildChainSplitsWithKeyRangeSplitting() {
+        // Single bucket. Snapshot files S1=[a,b], S2=[m,n]; delta files D1=[a,b] (overlaps S1),
+        // D2=[m,n] (overlaps S2). The two sections are key-disjoint, so they form two splits;
+        // within each section the overlapping snapshot and delta files must stay together so that
+        // all versions of a key are merged in the same split.
+        BinaryRow partition = row(Lists.newArrayList("p0"));
+        String snapBranch = "snap";
+        String deltaBranch = "delta";
+
+        DataFileMeta s1 = makeFile("S1", "a", "b", 100);
+        DataFileMeta s2 = makeFile("S2", "m", "n", 100);
+        DataFileMeta d1 = makeFile("D1", "a", "b", 100);
+        DataFileMeta d2 = makeFile("D2", "m", "n", 100);
+
+        DataSplit snapshotSplit = dataSplit(partition, 0, Lists.newArrayList(s1, s2));
+        DataSplit deltaSplit = dataSplit(partition, 0, Lists.newArrayList(d1, d2));
+
+        // Small targetSplitSize so each section forms its own split.
+        List<ChainSplit> splits =
+                ChainTableUtils.buildChainSplits(
+                        partition,
+                        Collections.singletonList(snapshotSplit),
+                        Collections.singletonList(deltaSplit),
+                        snapBranch,
+                        deltaBranch,
+                        KEY_COMPARATOR,
+                        1L,
+                        1L);
+
+        assertThat(splits).hasSize(2);
+
+        List<Set<String>> groups =
+                splits.stream().map(ChainTableUtilsTest::fileNames).collect(Collectors.toList());
+        // Overlapping files are kept together: {S1,D1} and {S2,D2}, never mixed.
+        assertThat(groups)
+                .containsExactlyInAnyOrder(
+                        new HashSet<>(Arrays.asList("S1", "D1")),
+                        new HashSet<>(Arrays.asList("S2", "D2")));
+
+        // Branch tagging is preserved per file across the resulting splits.
+        ChainSplit s1Split =
+                splits.stream().filter(s -> fileNames(s).contains("S1")).findFirst().get();
+        assertThat(s1Split.fileBranchMapping().get("S1")).isEqualTo(snapBranch);
+        assertThat(s1Split.fileBranchMapping().get("D1")).isEqualTo(deltaBranch);
+        ChainSplit s2Split =
+                splits.stream().filter(s -> fileNames(s).contains("S2")).findFirst().get();
+        assertThat(s2Split.fileBranchMapping().get("S2")).isEqualTo(snapBranch);
+        assertThat(s2Split.fileBranchMapping().get("D2")).isEqualTo(deltaBranch);
+    }
+
+    @Test
+    public void testBuildChainSplitsKeyRangeSplittingLargeTargetKeepsOneSplit() {
+        // With a large targetSplitSize all key-disjoint sections are packed into a single split.
+        BinaryRow partition = row(Lists.newArrayList("p0"));
+        DataFileMeta s1 = makeFile("S1", "a", "b", 100);
+        DataFileMeta s2 = makeFile("S2", "m", "n", 100);
+        DataFileMeta d1 = makeFile("D1", "a", "b", 100);
+        DataFileMeta d2 = makeFile("D2", "m", "n", 100);
+
+        DataSplit snapshotSplit = dataSplit(partition, 0, Lists.newArrayList(s1, s2));
+        DataSplit deltaSplit = dataSplit(partition, 0, Lists.newArrayList(d1, d2));
+
+        List<ChainSplit> splits =
+                ChainTableUtils.buildChainSplits(
+                        partition,
+                        Collections.singletonList(snapshotSplit),
+                        Collections.singletonList(deltaSplit),
+                        "snap",
+                        "delta",
+                        KEY_COMPARATOR,
+                        Long.MAX_VALUE,
+                        1L);
+
+        assertThat(splits).hasSize(1);
+        assertThat(fileNames(splits.get(0))).containsExactlyInAnyOrder("S1", "S2", "D1", "D2");
+    }
+
+    @Test
+    public void testBuildChainSplitsWithoutKeyRangeSplitting() {
+        // A null keyComparator keeps the original one-split-per-bucket behavior (used by
+        // streaming).
+        BinaryRow partition = row(Lists.newArrayList("p0"));
+        DataFileMeta s1 = makeFile("S1", "a", "b", 100);
+        DataFileMeta d1 = makeFile("D1", "a", "b", 100);
+        DataSplit snapshotSplit = dataSplit(partition, 0, Lists.newArrayList(s1));
+        DataSplit deltaSplit = dataSplit(partition, 0, Lists.newArrayList(d1));
+
+        List<ChainSplit> splits =
+                ChainTableUtils.buildChainSplits(
+                        partition,
+                        Collections.singletonList(snapshotSplit),
+                        Collections.singletonList(deltaSplit),
+                        "snap",
+                        "delta",
+                        null,
+                        0L,
+                        0L);
+
+        assertThat(splits).hasSize(1);
+        assertThat(fileNames(splits.get(0))).containsExactlyInAnyOrder("S1", "D1");
+    }
+
+    private static DataFileMeta makeFile(String name, String min, String max, long size) {
+        return DataFileMeta.create(
+                name,
+                size,
+                10L,
+                row(Lists.newArrayList(min)),
+                row(Lists.newArrayList(max)),
+                StatsTestUtils.newEmptySimpleStats(),
+                StatsTestUtils.newEmptySimpleStats(),
+                0L,
+                9L,
+                0L,
+                0,
+                Collections.emptyList(),
+                Timestamp.fromEpochMillis(1000L),
+                0L,
+                null,
+                FileSource.APPEND,
+                null,
+                null,
+                null,
+                null);
+    }
+
+    private static DataSplit dataSplit(BinaryRow partition, int bucket, List<DataFileMeta> files) {
+        return DataSplit.builder()
+                .withPartition(partition)
+                .withBucket(bucket)
+                .withBucketPath("bucket_" + bucket)
+                .withTotalBuckets(1)
+                .withDataFiles(files)
+                .build();
+    }
+
+    private static Set<String> fileNames(ChainSplit split) {
+        return split.dataFiles().stream().map(DataFileMeta::fileName).collect(Collectors.toSet());
+    }
+
+    @Test
+    public void testGetDeltaPartitionsWithHourMinuteGranularity() {
+        // partition keys: (region, dt, hour_minute), chain keys: (dt, hour_minute)
+        RowType fullType =
+                RowType.builder()
+                        .field("region", DataTypes.STRING().notNull())
+                        .field("dt", DataTypes.STRING().notNull())
+                        .field("hour_minute", DataTypes.STRING().notNull())
+                        .build();
+
+        ChainPartitionProjector projector = new ChainPartitionProjector(fullType, 2);
+
+        // Compare chain partition (dt, hour_minute) lexicographically
+        RecordComparator chainComparator = (a, b) -> a.getString(1).compareTo(b.getString(1));
+
+        Options opts = new Options();
+        opts.set(CoreOptions.PARTITION_TIMESTAMP_PATTERN, "$dtT$hour_minute");
+        opts.set(CoreOptions.PARTITION_TIMESTAMP_FORMATTER, "yyyyMMdd'T'HHmm");
+        CoreOptions options = new CoreOptions(opts);
+
+        BinaryRow begin = row(Lists.newArrayList("CN", "20260609", "1010"));
+        BinaryRow end = row(Lists.newArrayList("CN", "20260609", "1015"));
+
+        List<BinaryRow> deltas =
+                ChainTableUtils.getDeltaPartitionsWithProjector(
+                        begin, end, options, chainComparator, projector);
+
+        assertThat(deltas).hasSize(5);
+        for (BinaryRow delta : deltas) {
+            assertThat(getString(delta, 0)).isEqualTo("CN");
+            assertThat(getString(delta, 1)).isEqualTo("20260609");
+        }
+        assertThat(getString(deltas.get(0), 2)).isEqualTo("1011");
+        assertThat(getString(deltas.get(1), 2)).isEqualTo("1012");
+        assertThat(getString(deltas.get(2), 2)).isEqualTo("1013");
+        assertThat(getString(deltas.get(3), 2)).isEqualTo("1014");
+        assertThat(getString(deltas.get(4), 2)).isEqualTo("1015");
+    }
+
+    @Test
+    public void testGetDeltaPartitionsWithSeparateHourAndMinute() {
+        // partition keys: (region, dt, hour, minute), chain keys: (dt, hour, minute)
+        RowType fullType =
+                RowType.builder()
+                        .field("region", DataTypes.STRING().notNull())
+                        .field("dt", DataTypes.STRING().notNull())
+                        .field("hour", DataTypes.STRING().notNull())
+                        .field("minute", DataTypes.STRING().notNull())
+                        .build();
+
+        ChainPartitionProjector projector = new ChainPartitionProjector(fullType, 3);
+
+        // Compare chain partition (dt, hour, minute) lexicographically
+        RecordComparator chainComparator = (a, b) -> a.getString(2).compareTo(b.getString(2));
+
+        Options opts = new Options();
+        opts.set(CoreOptions.PARTITION_TIMESTAMP_PATTERN, "$dtT$hour$minute00");
+        opts.set(CoreOptions.PARTITION_TIMESTAMP_FORMATTER, "yyyyMMdd'T'HHmmss");
+        CoreOptions options = new CoreOptions(opts);
+
+        BinaryRow begin = row(Lists.newArrayList("CN", "20260609", "10", "10"));
+        BinaryRow end = row(Lists.newArrayList("CN", "20260609", "10", "15"));
+
+        List<BinaryRow> deltas =
+                ChainTableUtils.getDeltaPartitionsWithProjector(
+                        begin, end, options, chainComparator, projector);
+
+        assertThat(deltas).hasSize(5);
+        for (BinaryRow delta : deltas) {
+            assertThat(getString(delta, 0)).isEqualTo("CN");
+            assertThat(getString(delta, 1)).isEqualTo("20260609");
+            assertThat(getString(delta, 2)).isEqualTo("10");
+        }
+        assertThat(getString(deltas.get(0), 3)).isEqualTo("11");
+        assertThat(getString(deltas.get(1), 3)).isEqualTo("12");
+        assertThat(getString(deltas.get(2), 3)).isEqualTo("13");
+        assertThat(getString(deltas.get(3), 3)).isEqualTo("14");
+        assertThat(getString(deltas.get(4), 3)).isEqualTo("15");
+    }
+
+    @Test
+    public void testGetDeltaPartitionsExceedsMaxLimit() {
+        RowType partType = RowType.builder().field("dt", DataTypes.STRING().notNull()).build();
+
+        Options opts = new Options();
+        opts.set(CoreOptions.PARTITION_TIMESTAMP_PATTERN, "$dt");
+        opts.set(CoreOptions.PARTITION_TIMESTAMP_FORMATTER, "yyyyMMddHHmmss");
+        CoreOptions options = new CoreOptions(opts);
+
+        InternalRowPartitionComputer partitionComputer =
+                new InternalRowPartitionComputer(
+                        options.partitionDefaultName(),
+                        partType,
+                        new String[] {"dt"},
+                        options.legacyPartitionName());
+
+        BinaryRow begin = row(Lists.newArrayList("20250101000000"));
+        BinaryRow end = row(Lists.newArrayList("20260101000000"));
+
+        assertThatThrownBy(
+                        () ->
+                                ChainTableUtils.getDeltaPartitions(
+                                        begin,
+                                        end,
+                                        Collections.singletonList("dt"),
+                                        partType,
+                                        options,
+                                        partitionComputer))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Too many delta partitions generated");
+    }
+}

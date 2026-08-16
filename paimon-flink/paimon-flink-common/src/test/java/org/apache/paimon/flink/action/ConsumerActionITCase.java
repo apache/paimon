@@ -26,10 +26,9 @@ import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.BlockingIterator;
 
+import org.apache.flink.runtime.client.JobExecutionException;
 import org.apache.flink.table.api.TableException;
-import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -39,9 +38,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
-import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
-import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testStreamingRead;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -50,7 +47,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @Timeout(60)
-    @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
+    @ValueSource(strings = {"action", "action_job", "procedure_indexed", "procedure_named"})
     public void testResetConsumer(String invoker) throws Exception {
         init(warehouse);
 
@@ -75,22 +72,8 @@ public class ConsumerActionITCase extends ActionITCaseBase {
         writeData(rowData(2L, BinaryString.fromString("Hello")));
         writeData(rowData(3L, BinaryString.fromString("Paimon")));
 
-        // use consumer streaming read table
-        BlockingIterator<Row, Row> iterator =
-                testStreamingRead(
-                        "SELECT * FROM `"
-                                + tableName
-                                + "` /*+ OPTIONS('consumer-id'='myid','consumer.expiration-time'='3h') */",
-                        Arrays.asList(
-                                changelogRow("+I", 1L, "Hi"),
-                                changelogRow("+I", 2L, "Hello"),
-                                changelogRow("+I", 3L, "Paimon")));
-
         ConsumerManager consumerManager = new ConsumerManager(table.fileIO(), table.location());
-        while (!consumerManager.consumer("myid").isPresent()) {
-            Thread.sleep(1000);
-        }
-        iterator.close();
+        consumerManager.resetConsumer("myid", new Consumer(4));
 
         Optional<Consumer> consumer1 = consumerManager.consumer("myid");
         assertThat(consumer1).isPresent();
@@ -108,10 +91,13 @@ public class ConsumerActionITCase extends ActionITCaseBase {
                         "--consumer_id",
                         "myid",
                         "--next_snapshot",
-                        "1");
+                        "1",
+                        "--force_start_flink_job",
+                        Boolean.toString(invoker.equals("action_job")));
         // reset consumer
         switch (invoker) {
             case "action":
+            case "action_job":
                 createAction(ResetConsumerAction.class, args).run();
                 break;
             case "procedure_indexed":
@@ -136,6 +122,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
         // delete consumer
         switch (invoker) {
             case "action":
+            case "action_job":
                 createAction(ResetConsumerAction.class, args.subList(0, 9)).run();
                 break;
             case "procedure_indexed":
@@ -168,11 +155,18 @@ public class ConsumerActionITCase extends ActionITCaseBase {
                         "--consumer_id",
                         "myid",
                         "--next_snapshot",
-                        "10");
+                        "10",
+                        "--force_start_flink_job",
+                        Boolean.toString(invoker.equals("action_job")));
         switch (invoker) {
             case "action":
                 assertThrows(
                         RuntimeException.class,
+                        () -> createAction(ResetConsumerAction.class, args1).run());
+                break;
+            case "action_job":
+                assertThrows(
+                        JobExecutionException.class,
                         () -> createAction(ResetConsumerAction.class, args1).run());
                 break;
             case "procedure_indexed":
@@ -200,7 +194,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @Timeout(60)
-    @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
+    @ValueSource(strings = {"action", "action_job", "procedure_indexed", "procedure_named"})
     public void testResetBranchConsumer(String invoker) throws Exception {
         init(warehouse);
 
@@ -230,23 +224,9 @@ public class ConsumerActionITCase extends ActionITCaseBase {
         table.createBranch("b1", "tag");
         String branchTableName = tableName + "$branch_b1";
 
-        // use consumer streaming read table
-        BlockingIterator<Row, Row> iterator =
-                testStreamingRead(
-                        "SELECT * FROM `"
-                                + branchTableName
-                                + "` /*+ OPTIONS('consumer-id'='myid','consumer.expiration-time'='3h') */",
-                        Arrays.asList(
-                                changelogRow("+I", 1L, "Hi"),
-                                changelogRow("+I", 2L, "Hello"),
-                                changelogRow("+I", 3L, "Paimon")));
-
         ConsumerManager consumerManager =
                 new ConsumerManager(table.fileIO(), table.location(), branchName);
-        while (!consumerManager.consumer("myid").isPresent()) {
-            Thread.sleep(1000);
-        }
-        iterator.close();
+        consumerManager.resetConsumer("myid", new Consumer(4));
 
         Optional<Consumer> consumer1 = consumerManager.consumer("myid");
         assertThat(consumer1).isPresent();
@@ -263,11 +243,14 @@ public class ConsumerActionITCase extends ActionITCaseBase {
                         branchTableName,
                         "--consumer_id",
                         "myid",
+                        "--force_start_flink_job",
+                        Boolean.toString(invoker.equals("action_job")),
                         "--next_snapshot",
                         "3");
         // reset consumer
         switch (invoker) {
             case "action":
+            case "action_job":
                 createAction(ResetConsumerAction.class, args).run();
                 break;
             case "procedure_indexed":
@@ -292,7 +275,8 @@ public class ConsumerActionITCase extends ActionITCaseBase {
         // delete consumer
         switch (invoker) {
             case "action":
-                createAction(ResetConsumerAction.class, args.subList(0, 9)).run();
+            case "action_job":
+                createAction(ResetConsumerAction.class, args.subList(0, 11)).run();
                 break;
             case "procedure_indexed":
                 executeSQL(
@@ -315,7 +299,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
 
     @ParameterizedTest
     @Timeout(120)
-    @ValueSource(strings = {"action", "procedure_indexed", "procedure_named"})
+    @ValueSource(strings = {"action", "action_job", "procedure_indexed", "procedure_named"})
     public void testClearConsumers(String invoker) throws Exception {
         init(warehouse);
 
@@ -340,54 +324,10 @@ public class ConsumerActionITCase extends ActionITCaseBase {
         writeData(rowData(2L, BinaryString.fromString("Hello")));
         writeData(rowData(3L, BinaryString.fromString("Paimon")));
 
-        // use consumer streaming read table
-        BlockingIterator<Row, Row> iterator1 =
-                testStreamingRead(
-                        "SELECT * FROM `"
-                                + tableName
-                                + "` /*+ OPTIONS('consumer-id'='myid1_1','consumer.expiration-time'='3h') */",
-                        Arrays.asList(
-                                changelogRow("+I", 1L, "Hi"),
-                                changelogRow("+I", 2L, "Hello"),
-                                changelogRow("+I", 3L, "Paimon")));
-
         ConsumerManager consumerManager = new ConsumerManager(table.fileIO(), table.location());
-        while (!consumerManager.consumer("myid1_1").isPresent()) {
-            Thread.sleep(1000);
-        }
-        iterator1.close();
-
-        // use consumer streaming read table
-        BlockingIterator<Row, Row> iterator2 =
-                testStreamingRead(
-                        "SELECT * FROM `"
-                                + tableName
-                                + "` /*+ OPTIONS('consumer-id'='myid1_2','consumer.expiration-time'='3h') */",
-                        Arrays.asList(
-                                changelogRow("+I", 1L, "Hi"),
-                                changelogRow("+I", 2L, "Hello"),
-                                changelogRow("+I", 3L, "Paimon")));
-
-        while (!consumerManager.consumer("myid1_2").isPresent()) {
-            Thread.sleep(1000);
-        }
-        iterator2.close();
-
-        // use consumer streaming read table
-        BlockingIterator<Row, Row> iterator3 =
-                testStreamingRead(
-                        "SELECT * FROM `"
-                                + tableName
-                                + "` /*+ OPTIONS('consumer-id'='myid2','consumer.expiration-time'='3h') */",
-                        Arrays.asList(
-                                changelogRow("+I", 1L, "Hi"),
-                                changelogRow("+I", 2L, "Hello"),
-                                changelogRow("+I", 3L, "Paimon")));
-
-        while (!consumerManager.consumer("myid2").isPresent()) {
-            Thread.sleep(1000);
-        }
-        iterator3.close();
+        consumerManager.resetConsumer("myid1_1", new Consumer(4));
+        consumerManager.resetConsumer("myid1_2", new Consumer(4));
+        consumerManager.resetConsumer("myid2", new Consumer(4));
 
         Optional<Consumer> consumer1 = consumerManager.consumer("myid1_1");
         Optional<Consumer> consumer2 = consumerManager.consumer("myid1_2");
@@ -408,11 +348,14 @@ public class ConsumerActionITCase extends ActionITCaseBase {
                         "--including_consumers",
                         "",
                         "--excluding_consumers",
-                        "myid1.+");
+                        "myid1.+",
+                        "--force_start_flink_job",
+                        Boolean.toString(invoker.equals("action_job")));
 
         // clear all consumers except the excluding_consumers in the table
         switch (invoker) {
             case "action":
+            case "action_job":
                 createAction(ClearConsumerAction.class, args).run();
                 break;
             case "procedure_indexed":
@@ -447,12 +390,15 @@ public class ConsumerActionITCase extends ActionITCaseBase {
                         database,
                         "--table",
                         tableName,
+                        "--force_start_flink_job",
+                        Boolean.toString(invoker.equals("action_job")),
                         "--including_consumers",
                         "myid1_1");
 
         // clear consumers in the table that meet the including_consumers expression
         switch (invoker) {
             case "action":
+            case "action_job":
                 createAction(ClearConsumerAction.class, args).run();
                 break;
             case "procedure_indexed":
@@ -481,7 +427,8 @@ public class ConsumerActionITCase extends ActionITCaseBase {
         // clear all consumers in the table
         switch (invoker) {
             case "action":
-                createAction(ClearConsumerAction.class, args.subList(0, 7)).run();
+            case "action_job":
+                createAction(ClearConsumerAction.class, args.subList(0, 9)).run();
                 break;
             case "procedure_indexed":
                 executeSQL(String.format("CALL sys.clear_consumers('%s.%s')", database, tableName));

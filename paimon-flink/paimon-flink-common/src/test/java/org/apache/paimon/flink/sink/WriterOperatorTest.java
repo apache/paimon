@@ -27,7 +27,6 @@ import org.apache.paimon.flink.utils.TestingMetricUtils;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.CompactIncrement;
-import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
@@ -93,7 +92,7 @@ public class WriterOperatorTest {
         options.set("bucket", "1");
         options.set("write-buffer-size", "256 b");
         options.set("write-buffer-spillable", "false");
-        options.set("page-size", "32 b");
+        options.set("page-size", "64 b");
 
         FileStoreTable table =
                 createFileStoreTable(
@@ -110,7 +109,7 @@ public class WriterOperatorTest {
         Options options = new Options();
         options.set("write-buffer-for-append", "true");
         options.set("write-buffer-size", "256 b");
-        options.set("page-size", "32 b");
+        options.set("page-size", "64 b");
         options.set("write-buffer-spillable", "false");
 
         FileStoreTable table =
@@ -447,7 +446,7 @@ public class WriterOperatorTest {
         options.set("bucket", "1");
         options.set("write-buffer-size", "256 b");
         options.set("write-buffer-spillable", "false");
-        options.set("page-size", "32 b");
+        options.set("page-size", "64 b");
 
         FileStoreTable fileStoreTable =
                 createFileStoreTable(
@@ -490,7 +489,7 @@ public class WriterOperatorTest {
         commit.commit(
                 1,
                 harness.extractOutputValues().stream()
-                        .map(c -> (CommitMessage) c.wrappedCommittable())
+                        .map(Committable::commitMessage)
                         .collect(Collectors.toList()));
         assertThat(numWriters.getValue()).isEqualTo(3);
 
@@ -508,7 +507,7 @@ public class WriterOperatorTest {
         commit.commit(
                 2,
                 harness.extractOutputValues().stream()
-                        .map(c -> (CommitMessage) c.wrappedCommittable())
+                        .map(Committable::commitMessage)
                         .collect(Collectors.toList()));
         harness.prepareSnapshotPreBarrier(3);
 
@@ -530,7 +529,6 @@ public class WriterOperatorTest {
             FileStoreTable fileStoreTable) {
         return new RowDataStoreWriteOperator.Factory(
                 fileStoreTable,
-                null,
                 (table, commitUser, state, ioManager, memoryPool, metricGroup) ->
                         new StoreSinkWriteImpl(
                                 table,
@@ -549,8 +547,7 @@ public class WriterOperatorTest {
             FileStoreTable fileStoreTable, boolean waitCompaction) {
         return new RowDataStoreWriteOperator.Factory(
                 fileStoreTable,
-                null,
-                (table, commitUser, state, ioManager, memoryPool, metricGroup) ->
+                (table, commitUser, state, ioManager, memoryPoolFactory, metricGroup) ->
                         new LookupSinkWrite(
                                 table,
                                 commitUser,
@@ -559,7 +556,7 @@ public class WriterOperatorTest {
                                 false,
                                 waitCompaction,
                                 true,
-                                memoryPool,
+                                memoryPoolFactory,
                                 metricGroup),
                 commitUser);
     }
@@ -573,8 +570,7 @@ public class WriterOperatorTest {
         while (!harness.getOutput().isEmpty()) {
             Committable committable =
                     ((StreamRecord<Committable>) harness.getOutput().poll()).getValue();
-            assertThat(committable.kind()).isEqualTo(Committable.Kind.FILE);
-            commitMessages.add((CommitMessage) committable.wrappedCommittable());
+            commitMessages.add(committable.commitMessage());
         }
         commit.commit(commitIdentifier, commitMessages);
     }
@@ -588,16 +584,14 @@ public class WriterOperatorTest {
         while (!harness.getOutput().isEmpty()) {
             Committable committable =
                     ((StreamRecord<Committable>) harness.getOutput().poll()).getValue();
-            assertThat(committable.kind()).isEqualTo(Committable.Kind.FILE);
-            CommitMessageImpl message = (CommitMessageImpl) committable.wrappedCommittable();
+            CommitMessageImpl message = (CommitMessageImpl) committable.commitMessage();
             CommitMessageImpl newMessage =
                     new CommitMessageImpl(
                             message.partition(),
                             message.bucket(),
                             message.totalBuckets(),
                             message.newFilesIncrement(),
-                            CompactIncrement.emptyIncrement(),
-                            new IndexIncrement(Collections.emptyList()));
+                            CompactIncrement.emptyIncrement());
             commitMessages.add(newMessage);
         }
         commit.commit(commitIdentifier, commitMessages);

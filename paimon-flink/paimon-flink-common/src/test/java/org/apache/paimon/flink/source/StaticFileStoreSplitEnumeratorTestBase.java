@@ -19,6 +19,8 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
@@ -37,13 +39,16 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.apache.paimon.flink.source.StaticFileStoreSource.createSplitAssigner;
+import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Base test class of {@link StaticFileStoreSplitEnumerator}. */
-public abstract class StaticFileStoreSplitEnumeratorTestBase extends FileSplitEnumeratorTestBase {
+public abstract class StaticFileStoreSplitEnumeratorTestBase
+        extends FileSplitEnumeratorTestBase<FileStoreSourceSplit> {
 
     @Test
     public void testDynamicPartitionFilteringAfterStarted() {
@@ -182,5 +187,21 @@ public abstract class StaticFileStoreSplitEnumeratorTestBase extends FileSplitEn
             }
             return true;
         }
+    }
+
+    @Override
+    protected FileStoreSourceSplit createSnapshotSplit(
+            int snapshotId, int bucket, List<DataFileMeta> files, int... partitions) {
+        return new FileStoreSourceSplit(
+                UUID.randomUUID().toString(),
+                DataSplit.builder()
+                        .withSnapshot(snapshotId)
+                        .withPartition(row(partitions))
+                        .withBucket(bucket)
+                        .withDataFiles(files)
+                        .isStreaming(true)
+                        .withBucketPath("/temp/xxx") // not used
+                        .build(),
+                0);
     }
 }

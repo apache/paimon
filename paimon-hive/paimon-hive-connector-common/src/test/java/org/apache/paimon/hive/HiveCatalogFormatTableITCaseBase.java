@@ -213,7 +213,7 @@ public abstract class HiveCatalogFormatTableITCaseBase {
         assertThat(descResult)
                 .containsExactly(
                         "+I[a, INT, true, null, null, null, comment a]",
-                        "+I[b, TIMESTAMP(3), true, null, null, null, comment b]");
+                        "+I[b, TIMESTAMP(6), true, null, null, null, comment b]");
         hiveShell.execute(
                 String.format(
                         "INSERT INTO %s VALUES (1, '2025-03-17 10:15:30'), (2, '2025-03-18 10:15:30')",

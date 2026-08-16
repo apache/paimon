@@ -18,11 +18,13 @@
 
 package org.apache.paimon.spark.catalyst.analysis
 
-import org.apache.paimon.table.Table
+import org.apache.paimon.spark.SparkTable
+import org.apache.paimon.spark.catalyst.optimizer.OptimizeMetadataOnlyDeleteFromPaimonTable
+import org.apache.paimon.table.{FileStoreTable, Table}
 
 import org.apache.spark.sql.catalyst.SQLConfHelper
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, AttributeSet, BinaryExpression, EqualTo, Expression, SubqueryExpression}
-import org.apache.spark.sql.catalyst.plans.logical.Assignment
+import org.apache.spark.sql.catalyst.plans.logical.{Assignment, MergeIntoTable, UpdateTable}
 
 trait RowLevelHelper extends SQLConfHelper {
 
@@ -72,5 +74,37 @@ trait RowLevelHelper extends SQLConfHelper {
           isTargetPrimaryKey(key)
         case _ => false
       }
+  }
+
+  protected def shouldFallbackToV1(table: SparkTable): Boolean = {
+    !SparkTable.supportsV2RowLevelOps(table)
+  }
+
+  // `SparkTable.supportsV2RowLevelOps` controls whether the table exposes Spark row-level
+  // capability at all. These per-operation checks are the remaining V1 fallbacks for cases Spark's
+  // V2 rewrite cannot safely handle: metadata-only DELETE, non-rewritable UPDATE/MERGE, or
+  // assignments that have not been aligned yet.
+  /** Determines if DataSourceV2 delete is not supported for the given table. */
+  protected def shouldFallbackToV1Delete(table: SparkTable, condition: Expression): Boolean = {
+    shouldFallbackToV1(table) ||
+    OptimizeMetadataOnlyDeleteFromPaimonTable.isMetadataOnlyDelete(
+      table.getTable.asInstanceOf[FileStoreTable],
+      condition)
+  }
+
+  /** Determines if DataSourceV2 update is not supported for the given table. */
+  protected def shouldFallbackToV1Update(table: SparkTable, updateTable: UpdateTable): Boolean = {
+    shouldFallbackToV1(table) ||
+    !updateTable.rewritable ||
+    !updateTable.aligned
+  }
+
+  /** Determines if DataSourceV2 merge into is not supported for the given table. */
+  protected def shouldFallbackToV1MergeInto(m: MergeIntoTable): Boolean = {
+    val relation = PaimonRelation.getPaimonRelation(m.targetTable)
+    val table = relation.table.asInstanceOf[SparkTable]
+    shouldFallbackToV1(table) ||
+    !m.rewritable ||
+    !m.aligned
   }
 }

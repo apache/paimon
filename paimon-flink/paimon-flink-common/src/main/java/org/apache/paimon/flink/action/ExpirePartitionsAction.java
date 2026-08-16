@@ -23,6 +23,7 @@ import org.apache.paimon.FileStore;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.TimeUtils;
 
 import java.time.Duration;
@@ -32,8 +33,9 @@ import java.util.Map;
 import static org.apache.paimon.partition.PartitionExpireStrategy.createPartitionExpireStrategy;
 
 /** Expire partitions action for Flink. */
-public class ExpirePartitionsAction extends TableActionBase {
-    private final PartitionExpire partitionExpire;
+public class ExpirePartitionsAction extends TableActionBase implements LocalAction {
+    private final String expirationTime;
+    private final Map<String, String> map;
 
     public ExpirePartitionsAction(
             String databaseName,
@@ -52,14 +54,19 @@ public class ExpirePartitionsAction extends TableActionBase {
                             table.getClass().getName()));
         }
         table = table.copy(tableConfig);
-        Map<String, String> map = new HashMap<>();
+        this.expirationTime = expirationTime;
+        map = new HashMap<>();
         map.put(CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(), expireStrategy);
         map.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), timestampFormatter);
         map.put(CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), timestampPattern);
+    }
 
+    @Override
+    public void executeLocally() throws Exception {
         FileStoreTable fileStoreTable = (FileStoreTable) table;
         FileStore<?> fileStore = fileStoreTable.store();
-        this.partitionExpire =
+
+        PartitionExpire partitionExpire =
                 fileStore.newPartitionExpire(
                         "",
                         fileStoreTable,
@@ -69,11 +76,11 @@ public class ExpirePartitionsAction extends TableActionBase {
                                 CoreOptions.fromMap(map),
                                 fileStore.partitionType(),
                                 catalogLoader(),
-                                new Identifier(databaseName, tableName)));
-    }
-
-    @Override
-    public void run() throws Exception {
-        this.partitionExpire.expire(Long.MAX_VALUE);
+                                new Identifier(
+                                        identifier.getDatabaseName(), identifier.getTableName())));
+        Preconditions.checkNotNull(
+                partitionExpire,
+                "Both the partition expiration time and partition field can not be null.");
+        partitionExpire.expire(Long.MAX_VALUE);
     }
 }

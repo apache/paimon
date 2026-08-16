@@ -26,6 +26,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.mergetree.compact.LookupMergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
+import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.KeyValueFileStoreScan;
 import org.apache.paimon.predicate.Predicate;
@@ -33,11 +34,14 @@ import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.sink.TableWriteImpl;
+import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.KeyValueTableRead;
 import org.apache.paimon.table.source.MergeTreeSplitGenerator;
+import org.apache.paimon.table.source.PrimaryKeyBatchScan;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.RowKindFilter;
 
 import javax.annotation.Nullable;
 
@@ -76,10 +80,12 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
             KeyValueFieldsExtractor extractor =
                     PrimaryKeyTableUtils.PrimaryKeyFieldsExtractor.EXTRACTOR;
 
+            RowType keyType = new RowType(extractor.keyFields(tableSchema));
+
             MergeFunctionFactory<KeyValue> mfFactory =
-                    PrimaryKeyTableUtils.createMergeFunctionFactory(tableSchema, extractor);
+                    PrimaryKeyTableUtils.createMergeFunctionFactory(tableSchema);
             if (options.needLookup()) {
-                mfFactory = LookupMergeFunction.wrap(mfFactory);
+                mfFactory = LookupMergeFunction.wrap(mfFactory, options, keyType, rowType);
             }
 
             lazyStore =
@@ -90,9 +96,7 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                             tableSchema.crossPartitionUpdate(),
                             options,
                             tableSchema.logicalPartitionType(),
-                            PrimaryKeyTableUtils.addKeyNamePrefix(
-                                    tableSchema.logicalBucketKeyType()),
-                            new RowType(extractor.keyFields(tableSchema)),
+                            keyType,
                             rowType,
                             extractor,
                             mfFactory,
@@ -146,7 +150,25 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
     @Override
     public InnerTableRead newRead() {
         return new KeyValueTableRead(
-                () -> store().newRead(), () -> store().newBatchRawFileRead(), schema());
+                () -> store().newRead(),
+                () -> store().newBatchRawFileRead(),
+                schema(),
+                coreOptions(),
+                catalogEnvironment.dependencyReadContext());
+    }
+
+    @Override
+    public DataTableScan newScan() {
+        return newScan(FileStoreTable::newSnapshotReader);
+    }
+
+    @Override
+    public DataTableScan newScan(SnapshotReaderFactory snapshotReaderFactory) {
+        return new PrimaryKeyBatchScan(
+                this,
+                snapshotReaderFactory.create(this),
+                catalogEnvironment.tableQueryAuth(coreOptions()),
+                null);
     }
 
     @Override
@@ -156,10 +178,20 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public TableWriteImpl<KeyValue> newWrite(String commitUser, @Nullable Integer writeId) {
+        return newWrite(store().newWrite(commitUser, writeId));
+    }
+
+    @Override
+    public TableWriteImpl<KeyValue> newPostponeFixedBucketWrite(
+            String commitUser, @Nullable Integer writeId) {
+        return newWrite(store().newPostponeFixedBucketWrite(commitUser));
+    }
+
+    private TableWriteImpl<KeyValue> newWrite(AbstractFileStoreWrite<KeyValue> storeWrite) {
         KeyValue kv = new KeyValue();
         return new TableWriteImpl<>(
                 rowType(),
-                store().newWrite(commitUser, writeId),
+                storeWrite,
                 createRowKeyExtractor(),
                 (record, rowKind) ->
                         kv.replace(
@@ -168,7 +200,7 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                                 rowKind,
                                 record.row()),
                 rowKindGenerator(),
-                CoreOptions.fromMap(tableSchema.options()).ignoreDelete());
+                RowKindFilter.of(coreOptions()));
     }
 
     @Override

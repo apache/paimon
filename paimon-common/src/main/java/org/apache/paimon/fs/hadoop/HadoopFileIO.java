@@ -22,11 +22,13 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
+import org.apache.paimon.fs.HadoopOptionsProvider;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.RemoteIterator;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.hadoop.SerializableConfiguration;
+import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.FunctionWithException;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ReflectionUtils;
@@ -43,12 +45,13 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** Hadoop {@link FileIO}. */
-public class HadoopFileIO implements FileIO {
+public class HadoopFileIO implements FileIO, HadoopOptionsProvider {
 
     private static final long serialVersionUID = 1L;
 
@@ -58,15 +61,21 @@ public class HadoopFileIO implements FileIO {
 
     protected transient volatile Map<Pair<String, String>, FileSystem> fsMap;
 
+    private final Path path;
+
+    public HadoopFileIO(Path path) {
+        this.path = path;
+    }
+
     @VisibleForTesting
-    public void setFileSystem(Path path, FileSystem fs) throws IOException {
-        org.apache.hadoop.fs.Path hadoopPath = path(path);
-        getFileSystem(hadoopPath, p -> fs);
+    public void setFileSystem(FileSystem fs) throws IOException {
+        getFileSystem(path(path), p -> fs);
     }
 
     @Override
     public boolean isObjectStore() {
-        return false;
+        String scheme = path.toUri().getScheme().toLowerCase(Locale.US);
+        return FileIOUtils.isObjectStore(scheme);
     }
 
     @Override
@@ -77,6 +86,15 @@ public class HadoopFileIO implements FileIO {
 
     public Configuration hadoopConf() {
         return hadoopConf.get();
+    }
+
+    public org.apache.paimon.options.Options hadoopOptions() {
+        return new org.apache.paimon.options.Options(hadoopConf.get());
+    }
+
+    @Override
+    public org.apache.paimon.options.Options hadoopOptions(Path path, String opType) {
+        return hadoopOptions();
     }
 
     @Override

@@ -30,13 +30,14 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.partition.actions.AddDonePartitionAction;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
-import org.apache.paimon.table.PartitionHandler;
+import org.apache.paimon.table.PartitionModification;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
@@ -61,11 +62,14 @@ import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -79,15 +83,17 @@ import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.WRITE_ONLY;
 import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Test for {@link PartitionExpire}. */
+/** Test for {@link NormalPartitionExpire}. */
 public class PartitionExpireTest {
 
     @TempDir java.nio.file.Path tempDir;
 
     private Path path;
     private FileStoreTable table;
+    private Set<Map<String, String>> createdPartitions;
     private List<Map<String, String>> deletedPartitions;
 
     @BeforeEach
@@ -102,17 +108,25 @@ public class PartitionExpireTest {
         Path tablePath = CoreOptions.path(options);
         String branchName = CoreOptions.branch(options.toMap());
         TableSchema tableSchema = new SchemaManager(fileIO, tablePath, branchName).latest().get();
+        createdPartitions = new HashSet<>();
         deletedPartitions = new ArrayList<>();
-        PartitionHandler partitionHandler =
-                new PartitionHandler() {
+        PartitionModification partitionModification =
+                new PartitionModification() {
                     @Override
                     public void createPartitions(List<Map<String, String>> partitions)
-                            throws Catalog.TableNotExistException {}
+                            throws Catalog.TableNotExistException {
+                        createdPartitions.addAll(partitions);
+                    }
 
                     @Override
                     public void dropPartitions(List<Map<String, String>> partitions)
                             throws Catalog.TableNotExistException {
-                        deletedPartitions.addAll(partitions);
+                        for (Map<String, String> partition : partitions) {
+                            // only record partitions that were created
+                            if (createdPartitions.contains(partition)) {
+                                deletedPartitions.add(partition);
+                            }
+                        }
                         try (FileStoreCommit commit =
                                 table.store()
                                         .newCommit(
@@ -128,19 +142,15 @@ public class PartitionExpireTest {
                             throws Catalog.TableNotExistException {}
 
                     @Override
-                    public void markDonePartitions(List<Map<String, String>> partitions)
-                            throws Catalog.TableNotExistException {}
-
-                    @Override
                     public void close() throws Exception {}
                 };
 
         CatalogEnvironment env =
-                new CatalogEnvironment(null, null, null, null, null, false) {
+                new CatalogEnvironment(null, null, null, null, null, null, false, false) {
 
                     @Override
-                    public PartitionHandler partitionHandler() {
-                        return partitionHandler;
+                    public PartitionModification partitionModification() {
+                        return partitionModification;
                     }
                 };
         table = FileStoreTableFactory.create(fileIO, path, tableSchema, env);
@@ -149,7 +159,7 @@ public class PartitionExpireTest {
     @Test
     public void testNonPartitionedTable() {
         SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), path);
-        assertThatThrownBy(
+        assertThatCode(
                         () ->
                                 schemaManager.createTable(
                                         new Schema(
@@ -159,8 +169,7 @@ public class PartitionExpireTest {
                                                 Collections.singletonMap(
                                                         PARTITION_EXPIRATION_TIME.key(), "1 d"),
                                                 "")))
-                .hasMessageContaining(
-                        "Can not set 'partition.expiration-time' for non-partitioned table");
+                .doesNotThrowAnyException();
     }
 
     @Test
@@ -180,7 +189,7 @@ public class PartitionExpireTest {
         write("20230103", "31");
         write("20230103", "32");
         write("20230105", "51");
-        PartitionExpire expire = newExpire();
+        NormalPartitionExpire expire = newExpire();
         expire.setLastCheck(date(1));
         Assertions.assertDoesNotThrow(() -> expire.expire(date(8), Long.MAX_VALUE));
         assertThat(read()).containsExactlyInAnyOrder("abcd:12");
@@ -206,7 +215,7 @@ public class PartitionExpireTest {
         write("20230103", "31");
         write("20230103", "32");
         write("20230105", "51");
-        PartitionExpire expire = newExpire();
+        NormalPartitionExpire expire = newExpire();
         expire.setLastCheck(date(1));
         Assertions.assertDoesNotThrow(() -> expire.expire(date(8), Long.MAX_VALUE));
 
@@ -215,6 +224,34 @@ public class PartitionExpireTest {
                         .filter(snapshot -> snapshot.commitKind() == Snapshot.CommitKind.OVERWRITE)
                         .count();
         assertThat(overwriteSnapshotCnt).isEqualTo(3L);
+    }
+
+    @Test
+    public void testExpireWithNullOrEmptyPartition() throws Exception {
+        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), path);
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(VarCharType.STRING_TYPE, VarCharType.STRING_TYPE).getFields(),
+                        Arrays.asList("f0", "f1"),
+                        emptyList(),
+                        Collections.singletonMap(METASTORE_PARTITIONED_TABLE.key(), "true"),
+                        ""));
+        newTable();
+        write("20230101", "11");
+        write("20230101", "12");
+        // sub partition is null
+        write("20230101", null);
+        // sub partition is empty string
+        write("20230103", "");
+        write("20230103", "32");
+        write("20230105", "51");
+
+        NormalPartitionExpire expire = newExpire();
+        expire.setLastCheck(date(1));
+        Assertions.assertDoesNotThrow(() -> expire.expire(date(6), Long.MAX_VALUE));
+
+        // null partition and empty string partition should be expired
+        assertThat(read()).containsExactlyInAnyOrder("20230105:51");
     }
 
     @Test
@@ -235,7 +272,7 @@ public class PartitionExpireTest {
         write("20230103", "32");
         write("20230105", "51");
 
-        PartitionExpire expire = newExpire();
+        NormalPartitionExpire expire = newExpire();
         expire.setLastCheck(date(1));
 
         expire.expire(date(3), Long.MAX_VALUE);
@@ -258,6 +295,41 @@ public class PartitionExpireTest {
                         new LinkedHashMap<>(Collections.singletonMap("f0", "20230101")),
                         new LinkedHashMap<>(Collections.singletonMap("f0", "20230103")),
                         new LinkedHashMap<>(Collections.singletonMap("f0", "20230105")));
+    }
+
+    @Test
+    public void testDonePartitionExpire() throws Exception {
+        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), path);
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(VarCharType.STRING_TYPE, VarCharType.STRING_TYPE).getFields(),
+                        singletonList("f0"),
+                        emptyList(),
+                        Collections.singletonMap(METASTORE_PARTITIONED_TABLE.key(), "true"),
+                        ""));
+        newTable();
+
+        write("20230101", "11");
+        write("20230103", "31");
+        write("20230108", "81");
+
+        AddDonePartitionAction doneAction =
+                new AddDonePartitionAction(table.catalogEnvironment().partitionModification());
+        doneAction.markDone("f0=20230101");
+        doneAction.markDone("f0=20230103");
+        doneAction.markDone("f0=20230108");
+
+        NormalPartitionExpire expire = newExpire();
+        expire.setLastCheck(date(1));
+        expire.expire(date(8), Long.MAX_VALUE);
+
+        assertThat(deletedPartitions)
+                .containsExactlyInAnyOrder(
+                        new LinkedHashMap<>(Collections.singletonMap("f0", "20230101")),
+                        new LinkedHashMap<>(Collections.singletonMap("f0", "20230103")),
+                        new LinkedHashMap<>(Collections.singletonMap("f0", "20230101.done")),
+                        new LinkedHashMap<>(Collections.singletonMap("f0", "20230103.done")));
+        assertThat(read()).containsExactlyInAnyOrder("20230108:81");
     }
 
     @Test
@@ -351,7 +423,7 @@ public class PartitionExpireTest {
         List<CommitMessage> commitMessages = write("20230101", "11");
         write("20230105", "51");
 
-        PartitionExpire expire = newExpire();
+        NormalPartitionExpire expire = newExpire();
         expire.setLastCheck(date(1));
         expire.expire(date(5), Long.MAX_VALUE);
         assertThat(read()).containsExactlyInAnyOrder("20230105:51");
@@ -399,9 +471,9 @@ public class PartitionExpireTest {
         return commitMessages;
     }
 
-    private PartitionExpire newExpire() {
+    private NormalPartitionExpire newExpire() {
         FileStoreTable table = newExpireTable();
-        return table.store().newPartitionExpire("", table);
+        return (NormalPartitionExpire) table.store().newPartitionExpire("", table);
     }
 
     private FileStoreTable newExpireTable() {

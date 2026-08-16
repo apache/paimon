@@ -1,5 +1,4 @@
 # Licensed to the Apache Software Foundation (ASF) under one
-# Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
 # regarding copyright ownership.  The ASF licenses this file
@@ -7,29 +6,34 @@
 # "License"); you may not use this file except in compliance
 # with the License.  You may obtain a copy of the License at
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 import os
 import shutil
 import tempfile
 import unittest
+from unittest.mock import MagicMock, patch
 
+import pyarrow as pa
+
+from pypaimon import CatalogFactory, Schema
 from pypaimon.catalog.catalog_exception import (DatabaseAlreadyExistException,
                                                 DatabaseNotExistException,
                                                 TableAlreadyExistException,
                                                 TableNotExistException)
-from pypaimon.catalog.catalog_factory import CatalogFactory
 from pypaimon.schema.data_types import AtomicType, DataField
-from pypaimon.schema.schema import Schema
+from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.table.file_store_table import FileStoreTable
 
 
-class FileSystemCatalogTestCase(unittest.TestCase):
+class FileSystemCatalogTest(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp(prefix="unittest_")
@@ -86,3 +90,626 @@ class FileSystemCatalogTestCase(unittest.TestCase):
         self.assertEqual(table.fields[2].name, "f2")
         self.assertTrue(isinstance(table.fields[2].type, AtomicType))
         self.assertEqual(table.fields[2].type.type, "STRING")
+
+    def test_s3_filesystem_catalog_with_paimon_options(self):
+        with patch("pypaimon.filesystem.pyarrow_file_io.pafs.S3FileSystem") as s3_file_system:
+            CatalogFactory.create({
+                "warehouse": "s3://bucket/warehouse",
+                "s3.endpoint": "http://localhost:9000",
+                "s3.access-key": "access-key",
+                "s3.secret-key": "secret-key",
+                "s3.session-token": "session-token",
+                "s3.region": "us-east-1",
+                "s3.path-style-access": "true",
+            })
+
+        s3_file_system.assert_called_once()
+        kwargs = s3_file_system.call_args[1]
+        self.assertEqual(kwargs["endpoint_override"], "http://localhost:9000")
+        self.assertEqual(kwargs["access_key"], "access-key")
+        self.assertEqual(kwargs["secret_key"], "secret-key")
+        self.assertEqual(kwargs["session_token"], "session-token")
+        self.assertEqual(kwargs["region"], "us-east-1")
+        if "force_virtual_addressing" in kwargs:
+            self.assertFalse(kwargs["force_virtual_addressing"])
+
+    def test_s3_filesystem_catalog_with_legacy_options(self):
+        with patch("pypaimon.filesystem.pyarrow_file_io.pafs.S3FileSystem") as s3_file_system:
+            CatalogFactory.create({
+                "warehouse": "s3://bucket/warehouse",
+                "fs.s3.endpoint": "http://localhost:9000",
+                "fs.s3.accessKeyId": "access-key",
+                "fs.s3.accessKeySecret": "secret-key",
+                "fs.s3.securityToken": "session-token",
+                "fs.s3.region": "us-east-1",
+            })
+
+        s3_file_system.assert_called_once()
+        kwargs = s3_file_system.call_args[1]
+        self.assertEqual(kwargs["endpoint_override"], "http://localhost:9000")
+        self.assertEqual(kwargs["access_key"], "access-key")
+        self.assertEqual(kwargs["secret_key"], "secret-key")
+        self.assertEqual(kwargs["session_token"], "session-token")
+        self.assertEqual(kwargs["region"], "us-east-1")
+        if "force_virtual_addressing" in kwargs:
+            self.assertTrue(kwargs["force_virtual_addressing"])
+
+    def test_alter_table(self):
+        catalog = CatalogFactory.create({
+            "warehouse": self.warehouse
+        })
+        catalog.create_database("test_db", False)
+
+        identifier = "test_db.test_table"
+        schema = Schema(
+            fields=[
+                DataField.from_dict({"id": 0, "name": "col1", "type": "STRING", "description": "field1"}),
+                DataField.from_dict({"id": 1, "name": "col2", "type": "STRING", "description": "field2"})
+            ],
+            partition_keys=[],
+            primary_keys=[],
+            options={},
+            comment="comment"
+        )
+        catalog.create_table(identifier, schema, False)
+
+        catalog.alter_table(
+            identifier,
+            [SchemaChange.add_column("col3", AtomicType("DATE"))],
+            False
+        )
+        table = catalog.get_table(identifier)
+        self.assertEqual(len(table.fields), 3)
+        self.assertEqual(table.fields[2].name, "col3")
+        self.assertEqual(table.fields[2].type.type, "DATE")
+
+        catalog.alter_table(
+            identifier,
+            [SchemaChange.update_comment("new comment")],
+            False
+        )
+        table = catalog.get_table(identifier)
+        self.assertEqual(table.table_schema.comment, "new comment")
+
+        catalog.alter_table(
+            identifier,
+            [SchemaChange.rename_column("col1", "new_col1")],
+            False
+        )
+        table = catalog.get_table(identifier)
+        self.assertEqual(table.fields[0].name, "new_col1")
+
+        catalog.alter_table(
+            identifier,
+            [SchemaChange.update_column_type("col2", AtomicType("BIGINT"))],
+            False
+        )
+        table = catalog.get_table(identifier)
+        self.assertEqual(table.fields[1].type.type, "BIGINT")
+
+        catalog.alter_table(
+            identifier,
+            [SchemaChange.update_column_comment("col2", "col2 field")],
+            False
+        )
+        table = catalog.get_table(identifier)
+        self.assertEqual(table.fields[1].description, "col2 field")
+
+        catalog.alter_table(
+            identifier,
+            [SchemaChange.set_option("write-buffer-size", "256 MB")],
+            False
+        )
+        table = catalog.get_table(identifier)
+        self.assertEqual(table.table_schema.options.get("write-buffer-size"), "256 MB")
+
+        catalog.alter_table(
+            identifier,
+            [SchemaChange.remove_option("write-buffer-size")],
+            False
+        )
+        table = catalog.get_table(identifier)
+        self.assertNotIn("write-buffer-size", table.table_schema.options)
+
+        catalog.alter_table(
+            identifier,
+            [SchemaChange.drop_column("col3")],
+            False
+        )
+        table = catalog.get_table(identifier)
+        self.assertEqual(len(table.fields), 2)
+
+    def test_alter_immutable_options(self):
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db", False)
+
+        # while a table has no snapshots, structural options may still be changed
+        empty_identifier = "test_db.immutable_options_empty"
+        pa_schema = pa.schema([('id', pa.int32()), ('name', pa.string())])
+        catalog.create_table(empty_identifier, Schema.from_pyarrow_schema(pa_schema), False)
+        catalog.alter_table(
+            empty_identifier,
+            [SchemaChange.set_option("merge-engine", "first-row")],
+            False
+        )
+        # the type is rejected even without snapshots: table kinds like format
+        # tables never create Paimon snapshots but can still hold data
+        with self.assertRaises(RuntimeError) as ctx:
+            catalog.alter_table(
+                empty_identifier,
+                [SchemaChange.set_option("type", "format-table")], False)
+        self.assertIn("Change 'type' is not supported yet.", str(ctx.exception))
+        with self.assertRaises(RuntimeError):
+            catalog.alter_table(
+                empty_identifier, [SchemaChange.remove_option("type")], False)
+
+        # once the table has a snapshot, immutable options are rejected
+        identifier = "test_db.immutable_options_table"
+        catalog.create_table(identifier, Schema.from_pyarrow_schema(pa_schema), False)
+        table = catalog.get_table(identifier)
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(
+            pa.Table.from_pydict({'id': [1, 2], 'name': ['a', 'b']}, schema=pa_schema))
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        # the catalog wraps alter failures in RuntimeError
+        with self.assertRaises(RuntimeError) as ctx:
+            catalog.alter_table(
+                identifier, [SchemaChange.set_option("type", "format-table")], False)
+        self.assertIn("Change 'type' is not supported yet.", str(ctx.exception))
+
+        with self.assertRaises(RuntimeError) as ctx:
+            catalog.alter_table(
+                identifier, [SchemaChange.set_option("merge-engine", "deduplicate")], False)
+        self.assertIn("Change 'merge-engine' is not supported yet.", str(ctx.exception))
+
+        with self.assertRaises(RuntimeError) as ctx:
+            catalog.alter_table(
+                identifier, [SchemaChange.remove_option("merge-engine")], False)
+        self.assertIn("Change 'merge-engine' is not supported yet.", str(ctx.exception))
+
+        # canonical hyphenated keys are guarded too
+        with self.assertRaises(RuntimeError) as ctx:
+            catalog.alter_table(
+                identifier,
+                [SchemaChange.set_option("index-file-in-data-file-dir", "true")], False)
+        self.assertIn(
+            "Change 'index-file-in-data-file-dir' is not supported yet.", str(ctx.exception))
+
+        # setting the default type explicitly is not a change
+        catalog.alter_table(
+            identifier, [SchemaChange.set_option("type", "table")], False)
+        table = catalog.get_table(identifier)
+        self.assertNotIn("type", table.table_schema.options)
+        # ...and the reloaded effective type resolves to the requested "table"
+        # (the default), not some other configured default
+        from pypaimon.common.options import CoreOptions, Options
+        self.assertEqual(
+            CoreOptions(Options(table.table_schema.options)).type(), "table")
+
+        # mutable options can still be changed
+        catalog.alter_table(
+            identifier, [SchemaChange.set_option("target-file-size", "10mb")], False)
+
+        # repeated changes to the same option in one batch apply in order
+        catalog.alter_table(identifier, [
+            SchemaChange.set_option("target-file-size", "20mb"),
+            SchemaChange.set_option("target-file-size", "10mb")], False)
+        table = catalog.get_table(identifier)
+        self.assertEqual(table.table_schema.options.get("target-file-size"), "10mb")
+        catalog.alter_table(identifier, [
+            SchemaChange.remove_option("target-file-size"),
+            SchemaChange.set_option("target-file-size", "10mb")], False)
+        table = catalog.get_table(identifier)
+        self.assertEqual(table.table_schema.options.get("target-file-size"), "10mb")
+
+        # replaying the actual primary/partition keys is not a change: they are
+        # stored in the schema fields, not the options map
+        pk_identifier = "test_db.immutable_options_pk"
+        catalog.create_table(
+            pk_identifier,
+            Schema.from_pyarrow_schema(
+                pa_schema, primary_keys=['id'], options={'bucket': '1'}),
+            False)
+        pk_table = catalog.get_table(pk_identifier)
+        write_builder = pk_table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(
+            pa.Table.from_pydict({'id': [1], 'name': ['a']}, schema=pa_schema))
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+        catalog.alter_table(
+            pk_identifier, [SchemaChange.set_option("primary-key", "id")], False)
+        pk_table = catalog.get_table(pk_identifier)
+        self.assertNotIn("primary-key", pk_table.table_schema.options)
+        with self.assertRaises(RuntimeError):
+            catalog.alter_table(
+                pk_identifier, [SchemaChange.set_option("primary-key", "name")], False)
+
+        part_identifier = "test_db.immutable_options_part"
+        self._create_partitioned_table_with_data(
+            catalog, part_identifier, [{'dt': '2026-01-01', 'rows': 1}])
+        catalog.alter_table(
+            part_identifier, [SchemaChange.set_option("partition", "dt")], False)
+        with self.assertRaises(RuntimeError):
+            catalog.alter_table(
+                part_identifier, [SchemaChange.set_option("partition", "col1")], False)
+
+        # the LATEST file is only a hint: the guard must still see the
+        # snapshots when it is missing
+        os.remove(os.path.join(
+            self.warehouse, "test_db.db", "immutable_options_table",
+            "snapshot", "LATEST"))
+        with self.assertRaises(RuntimeError):
+            catalog.alter_table(
+                identifier,
+                [SchemaChange.set_option("merge-engine", "deduplicate")], False)
+
+    def test_update_column_type_guards_null_to_not_null(self):
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db_guard", False)
+
+        def _make_table(name, options):
+            identifier = "test_db_guard.{}".format(name)
+            schema = Schema(
+                fields=[
+                    DataField.from_dict({"id": 0, "name": "k", "type": "INT"}),
+                    DataField.from_dict({"id": 1, "name": "v", "type": "BIGINT"}),
+                ],
+                partition_keys=[], primary_keys=[], options=options, comment="",
+            )
+            catalog.create_table(identifier, schema, False)
+            return identifier
+
+        # Default option (disabled=true) rejects nullable -> not null, mirroring
+        # Java SchemaManager#updateColumnType.
+        default_id = _make_table("default_opt", {})
+        with self.assertRaises(RuntimeError) as ctx:
+            catalog.alter_table(
+                default_id,
+                [SchemaChange.update_column_type(
+                    "v", AtomicType("BIGINT", nullable=False))],
+                False)
+        self.assertIn("nullable to non nullable", str(ctx.exception))
+
+        # Opting out via the table option allows the transition.
+        allowed_id = _make_table(
+            "allow_opt", {"alter-column-null-to-not-null.disabled": "false"})
+        catalog.alter_table(
+            allowed_id,
+            [SchemaChange.update_column_type(
+                "v", AtomicType("BIGINT", nullable=False))],
+            False)
+        table = catalog.get_table(allowed_id)
+        self.assertFalse(table.fields[1].type.nullable)
+
+    def test_update_column_type_rejects_non_executable_cast(self):
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db_cast", False)
+
+        identifier = "test_db_cast.ts_table"
+        schema = Schema(
+            fields=[
+                DataField.from_dict({"id": 0, "name": "k", "type": "INT"}),
+                DataField.from_dict({"id": 1, "name": "ts", "type": "TIMESTAMP(3)"}),
+            ],
+            partition_keys=[], primary_keys=[], options={}, comment="",
+        )
+        catalog.create_table(identifier, schema, False)
+
+        # TIMESTAMP -> DECIMAL is logically allowed but has no PyArrow cast
+        # kernel, so the read path could not materialize it. Reject at alter
+        # time (mirrors Java's CastExecutors.resolve(...) != null check) instead
+        # of failing later at read with ArrowNotImplementedError.
+        with self.assertRaises(RuntimeError) as ctx:
+            catalog.alter_table(
+                identifier,
+                [SchemaChange.update_column_type(
+                    "ts", AtomicType("DECIMAL(10, 0)"))],
+                False)
+        self.assertIn("no executable cast", str(ctx.exception))
+
+        # INT -> DECIMAL(10, 2) has a PyArrow kernel but the target precision is
+        # too small to hold an int's range at scale 2 (needs >= 12); the read
+        # path would fail with ArrowInvalid, so reject it at alter time too.
+        with self.assertRaises(RuntimeError) as ctx:
+            catalog.alter_table(
+                identifier,
+                [SchemaChange.update_column_type(
+                    "k", AtomicType("DECIMAL(10, 2)"))],
+                False)
+        self.assertIn("no executable cast", str(ctx.exception))
+
+        # A wide-enough DECIMAL is executable and succeeds.
+        catalog.alter_table(
+            identifier,
+            [SchemaChange.update_column_type("k", AtomicType("DECIMAL(12, 2)"))],
+            False)
+        table = catalog.get_table(identifier)
+        self.assertEqual(table.fields[0].type.type, "DECIMAL(12, 2)")
+
+    def test_update_column_type_parameterized_not_null_target(self):
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db_nn_param", False)
+        identifier = "test_db_nn_param.t"
+        schema = Schema(
+            fields=[
+                DataField.from_dict({"id": 0, "name": "v", "type": "INT NOT NULL"}),
+                DataField.from_dict({"id": 1, "name": "s", "type": "STRING"}),
+            ],
+            partition_keys=[], primary_keys=[], options={}, comment="",
+        )
+        catalog.create_table(identifier, schema, False)
+
+        # Widening a non-null INT to a non-null DECIMAL(12, 2) is valid. The
+        # target's to_dict() is "DECIMAL(12, 2) NOT NULL"; the atomic parser must
+        # keep the nullability in `nullable` so the executable-cast check does
+        # not choke on a doubled "NOT NULL NOT NULL" type string.
+        catalog.alter_table(
+            identifier,
+            [SchemaChange.update_column_type(
+                "v", AtomicType("DECIMAL(12, 2)", nullable=False))],
+            False)
+        table = catalog.get_table(identifier)
+        self.assertEqual(table.fields[0].type.type, "DECIMAL(12, 2)")
+        self.assertFalse(table.fields[0].type.nullable)
+
+    def test_add_column_before_partition(self):
+        catalog = CatalogFactory.create({
+            "warehouse": self.warehouse
+        })
+        catalog.create_database("test_db", False)
+
+        identifier = "test_db.test_table"
+        schema = Schema(
+            fields=[
+                DataField.from_dict({"id": 0, "name": "col1", "type": "STRING", "description": "field1"}),
+                DataField.from_dict(
+                    {"id": 1, "name": "partition_col", "type": "STRING", "description": "partition field"})
+            ],
+            partition_keys=["partition_col"],
+            primary_keys=[],
+            options={},
+            comment="comment"
+        )
+        catalog.create_table(identifier, schema, False)
+
+        table = catalog.get_table(identifier)
+        self.assertEqual(len(table.fields), 2)
+        self.assertEqual(table.fields[1].name, "partition_col")
+
+        catalog.alter_table(
+            identifier,
+            [SchemaChange.set_option("add-column-before-partition", "true")],
+            False
+        )
+
+        catalog.alter_table(
+            identifier,
+            [SchemaChange.add_column("new_col", AtomicType("INT"))],
+            False
+        )
+        table = catalog.get_table(identifier)
+        self.assertEqual(len(table.fields), 3)
+        self.assertEqual(table.fields[0].name, "col1")
+        self.assertEqual(table.fields[1].name, "new_col")
+        self.assertEqual(table.fields[2].name, "partition_col")
+
+        catalog.alter_table(
+            identifier,
+            [SchemaChange.add_column("col_multi1", AtomicType("INT")),
+             SchemaChange.add_column("col_multi2", AtomicType("STRING")),
+             SchemaChange.add_column("col_multi3", AtomicType("DOUBLE"))],
+            False
+        )
+        table = catalog.get_table(identifier)
+        self.assertEqual(len(table.fields), 6)
+        self.assertEqual(table.fields[0].name, "col1")
+        self.assertEqual(table.fields[1].name, "new_col")
+        self.assertEqual(table.fields[2].name, "col_multi1")
+        self.assertEqual(table.fields[3].name, "col_multi2")
+        self.assertEqual(table.fields[4].name, "col_multi3")
+        self.assertEqual(table.fields[5].name, "partition_col")
+
+        catalog.alter_table(
+            identifier,
+            [SchemaChange.set_option("add-column-before-partition", "false")],
+            False
+        )
+
+        catalog.alter_table(
+            identifier,
+            [SchemaChange.add_column("another_col", AtomicType("BIGINT"))],
+            False
+        )
+        table = catalog.get_table(identifier)
+        self.assertEqual(len(table.fields), 7)
+        self.assertEqual(table.fields[0].name, "col1")
+        self.assertEqual(table.fields[1].name, "new_col")
+        self.assertEqual(table.fields[2].name, "col_multi1")
+        self.assertEqual(table.fields[3].name, "col_multi2")
+        self.assertEqual(table.fields[4].name, "col_multi3")
+        self.assertEqual(table.fields[5].name, "partition_col")
+        self.assertEqual(table.fields[6].name, "another_col")
+
+    def test_get_database_propagates_exists_error(self):
+        catalog = CatalogFactory.create({
+            "warehouse": self.warehouse
+        })
+
+        with self.assertRaises(DatabaseNotExistException):
+            catalog.get_database("nonexistent_db")
+
+        catalog.create_database("test_db", False)
+
+        # FileSystemCatalog has file_io attribute
+        from pypaimon.catalog.filesystem_catalog import FileSystemCatalog
+        self.assertIsInstance(catalog, FileSystemCatalog)
+        filesystem_catalog = catalog  # type: FileSystemCatalog
+
+        original_exists = filesystem_catalog.file_io.exists
+        filesystem_catalog.file_io.exists = MagicMock(side_effect=OSError("Permission denied"))
+
+        # Now get_database should propagate OSError, not DatabaseNotExistException
+        with self.assertRaises(OSError) as context:
+            catalog.get_database("test_db")
+        self.assertIn("Permission denied", str(context.exception))
+        self.assertNotIsInstance(context.exception, DatabaseNotExistException)
+
+        # Restore original method
+        filesystem_catalog.file_io.exists = original_exists
+
+    def _create_partitioned_table_with_data(self, catalog, identifier, partitions_data):
+        pa_schema = pa.schema([
+            ('dt', pa.string()),
+            ('col1', pa.int32()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=['dt'])
+        catalog.create_table(identifier, schema, True)
+        table = catalog.get_table(identifier)
+
+        for part in partitions_data:
+            write_builder = table.new_batch_write_builder()
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+            data = pa.Table.from_pydict({
+                'dt': [part['dt']] * part['rows'],
+                'col1': list(range(part['rows'])),
+            }, schema=pa_schema)
+            table_write.write_arrow(data)
+            table_commit.commit(table_write.prepare_commit())
+            table_write.close()
+            table_commit.close()
+
+    def test_list_partitions_paged_pagination(self):
+        """Test list_partitions_paged pagination with max_results and page_token."""
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db", False)
+
+        identifier = "test_db.paged_tbl"
+        self._create_partitioned_table_with_data(catalog, identifier, [
+            {'dt': '2024-01-01', 'rows': 1},
+            {'dt': '2024-01-02', 'rows': 1},
+            {'dt': '2024-01-03', 'rows': 1},
+        ])
+
+        # First page: max_results=2
+        page1 = catalog.list_partitions_paged(identifier, max_results=2)
+        self.assertEqual(len(page1.elements), 2)
+        self.assertIsNotNone(page1.next_page_token)
+
+        # Second page: use next_page_token
+        page2 = catalog.list_partitions_paged(
+            identifier, max_results=2, page_token=page1.next_page_token
+        )
+        self.assertEqual(len(page2.elements), 1)
+        self.assertIsNone(page2.next_page_token)
+
+        # All specs across pages should cover all 3 partitions
+        all_specs = [p.spec['dt'] for p in page1.elements + page2.elements]
+        self.assertEqual(sorted(all_specs), ['2024-01-01', '2024-01-02', '2024-01-03'])
+
+        # max_results larger than total returns all
+        result = catalog.list_partitions_paged(identifier, max_results=100)
+        self.assertEqual(len(result.elements), 3)
+        self.assertIsNone(result.next_page_token)
+
+    def test_list_partitions_paged_pattern(self):
+        """Test list_partitions_paged with partition_name_pattern filter."""
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db", False)
+
+        identifier = "test_db.pattern_tbl"
+        self._create_partitioned_table_with_data(catalog, identifier, [
+            {'dt': '2024-01-01', 'rows': 1},
+            {'dt': '2024-02-01', 'rows': 1},
+            {'dt': '2024-02-15', 'rows': 1},
+        ])
+
+        # Exact match
+        result = catalog.list_partitions_paged(
+            identifier, partition_name_pattern='dt=2024-01-01'
+        )
+        self.assertEqual(len(result.elements), 1)
+        self.assertEqual(result.elements[0].spec['dt'], '2024-01-01')
+
+        # Wildcard match
+        result = catalog.list_partitions_paged(
+            identifier, partition_name_pattern='dt=2024-02*'
+        )
+        self.assertEqual(len(result.elements), 2)
+        specs = sorted(p.spec['dt'] for p in result.elements)
+        self.assertEqual(specs, ['2024-02-01', '2024-02-15'])
+
+        # No match
+        result = catalog.list_partitions_paged(
+            identifier, partition_name_pattern='dt=2025*'
+        )
+        self.assertEqual(len(result.elements), 0)
+
+    def test_drop_partitions(self):
+        """Test drop_partitions removes specified partitions from a table."""
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db", False)
+
+        identifier = "test_db.drop_part_tbl"
+        self._create_partitioned_table_with_data(catalog, identifier, [
+            {'dt': '2024-01-01', 'rows': 2},
+            {'dt': '2024-01-02', 'rows': 3},
+            {'dt': '2024-01-03', 'rows': 1},
+        ])
+
+        # Verify all 3 partitions exist
+        result = catalog.list_partitions_paged(identifier)
+        self.assertEqual(len(result.elements), 3)
+
+        # Drop one partition
+        catalog.drop_partitions(identifier, [{'dt': '2024-01-02'}])
+
+        # Verify only 2 partitions remain
+        result = catalog.list_partitions_paged(identifier)
+        self.assertEqual(len(result.elements), 2)
+        specs = sorted(p.spec['dt'] for p in result.elements)
+        self.assertEqual(specs, ['2024-01-01', '2024-01-03'])
+
+    def test_drop_partitions_multiple(self):
+        """Test drop_partitions with multiple partitions at once."""
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db", False)
+
+        identifier = "test_db.drop_multi_tbl"
+        self._create_partitioned_table_with_data(catalog, identifier, [
+            {'dt': '2024-01-01', 'rows': 1},
+            {'dt': '2024-01-02', 'rows': 1},
+            {'dt': '2024-01-03', 'rows': 1},
+        ])
+
+        # Drop two partitions at once
+        catalog.drop_partitions(identifier, [
+            {'dt': '2024-01-01'},
+            {'dt': '2024-01-03'},
+        ])
+
+        # Verify only 1 partition remains
+        result = catalog.list_partitions_paged(identifier)
+        self.assertEqual(len(result.elements), 1)
+        self.assertEqual(result.elements[0].spec['dt'], '2024-01-02')
+
+    def test_drop_partitions_empty_list_raises(self):
+        """Test drop_partitions raises ValueError for empty partitions list."""
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db", False)
+
+        identifier = "test_db.drop_empty_tbl"
+        self._create_partitioned_table_with_data(catalog, identifier, [
+            {'dt': '2024-01-01', 'rows': 1},
+        ])
+
+        with self.assertRaises(ValueError):
+            catalog.drop_partitions(identifier, [])

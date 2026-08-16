@@ -1,0 +1,925 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.spark.sql
+
+import org.apache.paimon.CoreOptions
+import org.apache.paimon.catalog.CatalogContext
+import org.apache.paimon.data.{Blob, BlobDescriptor, BlobViewStruct}
+import org.apache.paimon.fs.{IsolatedDirectoryFileIO, Path}
+import org.apache.paimon.fs.local.LocalFileIO
+import org.apache.paimon.options.Options
+import org.apache.paimon.spark.{PaimonSparkTestBase, SparkCatalog}
+import org.apache.paimon.utils.UriReaderFactory
+
+import org.apache.spark.SparkConf
+import org.apache.spark.sql.Row
+
+import java.util
+import java.util.Random
+
+class BlobTestBase extends PaimonSparkTestBase {
+
+  private val RANDOM = new Random
+
+  private def writeFile(fileIO: LocalFileIO, uri: String, data: Array[Byte]): Unit = {
+    val outputStream = fileIO.newOutputStream(new Path(uri), true)
+    try {
+      outputStream.write(data)
+    } finally {
+      outputStream.close()
+    }
+  }
+
+  override def sparkConf: SparkConf = {
+    super.sparkConf.set("spark.paimon.write.use-v2-write", "false")
+  }
+
+  test("Blob: test basic") {
+    withTable("t") {
+      sql(
+        "CREATE TABLE t (id INT, data STRING, picture BINARY) TBLPROPERTIES ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture')")
+      sql("INSERT INTO t VALUES (1, 'paimon', X'48656C6C6F')")
+
+      checkAnswer(
+        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t"),
+        Seq(Row(1, "paimon", Array[Byte](72, 101, 108, 108, 111), 0, 1))
+      )
+
+      checkAnswer(
+        sql("SELECT COUNT(*) FROM `t$files`"),
+        Seq(Row(2))
+      )
+    }
+  }
+
+  test("Blob: test multiple blobs") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, data STRING, pic1 BINARY, pic2 BINARY) TBLPROPERTIES (" +
+        "'row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='pic1,pic2')")
+      sql("INSERT INTO t VALUES (1, 'paimon', X'48656C6C6F', X'5945')")
+
+      checkAnswer(
+        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t"),
+        Seq(Row(1, "paimon", Array[Byte](72, 101, 108, 108, 111), Array[Byte](89, 69), 0, 1))
+      )
+
+      checkAnswer(
+        sql("SELECT COUNT(*) FROM `t$files`"),
+        Seq(Row(3))
+      )
+    }
+  }
+
+  test("Blob: test array blob") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, data STRING, pictures ARRAY<BINARY>) TBLPROPERTIES (" +
+        "'row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='pictures')")
+      sql(
+        "INSERT INTO t VALUES " +
+          "(1, 'paimon', array(X'48656C6C6F', CAST(NULL AS BINARY), X'5945')), " +
+          "(2, 'one', array(X'414243')), " +
+          "(3, 'null-array', CAST(NULL AS ARRAY<BINARY>))")
+
+      val pictures = sql("SELECT pictures FROM t WHERE id = 1")
+        .collect()(0)
+        .getSeq[Array[Byte]](0)
+      assert(pictures.size == 3)
+      assert(util.Arrays.equals(pictures.head, Array[Byte](72, 101, 108, 108, 111)))
+      assert(pictures(1) == null)
+      assert(util.Arrays.equals(pictures(2), Array[Byte](89, 69)))
+
+      val first =
+        sql("SELECT id, size(pictures), pictures[0], pictures[1], pictures[2] FROM t WHERE id = 1")
+          .collect()(0)
+      assert(first.getInt(0) == 1)
+      assert(first.getInt(1) == 3)
+      assert(util.Arrays.equals(first.getAs[Array[Byte]](2), Array[Byte](72, 101, 108, 108, 111)))
+      assert(first.isNullAt(3))
+      assert(util.Arrays.equals(first.getAs[Array[Byte]](4), Array[Byte](89, 69)))
+
+      val second = sql("SELECT id, size(pictures), pictures[0] FROM t WHERE id = 2").collect()(0)
+      assert(second.getInt(0) == 2)
+      assert(second.getInt(1) == 1)
+      assert(util.Arrays.equals(second.getAs[Array[Byte]](2), Array[Byte](65, 66, 67)))
+
+      checkAnswer(
+        sql("SELECT id, pictures IS NULL FROM t WHERE id = 3"),
+        Seq(Row(3, true))
+      )
+      checkAnswer(
+        sql("SELECT COUNT(*) > 0 FROM `t$files` WHERE file_path LIKE '%.blob'"),
+        Seq(Row(true))
+      )
+    }
+  }
+
+  test("Blob: test map blob") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, data STRING, pictures MAP<STRING, BINARY>) TBLPROPERTIES (" +
+        "'row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='pictures')")
+      sql(
+        "INSERT INTO t VALUES " +
+          "(1, 'paimon', map('first', X'48656C6C6F', 'null', CAST(NULL AS BINARY), " +
+          "'second', X'5945')), " +
+          "(2, 'empty', CAST(map() AS MAP<STRING, BINARY>)), " +
+          "(3, 'null-map', CAST(NULL AS MAP<STRING, BINARY>))")
+
+      val first = sql(
+        "SELECT id, size(pictures), pictures['first'], pictures['null'], pictures['second'] " +
+          "FROM t WHERE id = 1").collect()(0)
+      assert(first.getInt(0) == 1)
+      assert(first.getInt(1) == 3)
+      assert(util.Arrays.equals(first.getAs[Array[Byte]](2), Array[Byte](72, 101, 108, 108, 111)))
+      assert(first.isNullAt(3))
+      assert(util.Arrays.equals(first.getAs[Array[Byte]](4), Array[Byte](89, 69)))
+
+      checkAnswer(
+        sql("SELECT id, size(pictures) FROM t WHERE id = 2"),
+        Seq(Row(2, 0))
+      )
+      checkAnswer(
+        sql("SELECT id, pictures IS NULL FROM t WHERE id = 3"),
+        Seq(Row(3, true))
+      )
+      checkAnswer(
+        sql("SELECT COUNT(*) > 0 FROM `t$files` WHERE file_path LIKE '%.blob'"),
+        Seq(Row(true))
+      )
+    }
+  }
+
+  test("Blob: test primary-key array blob") {
+    withTable("t") {
+      sql(
+        "CREATE TABLE t (id INT, pictures ARRAY<BINARY>) TBLPROPERTIES (" +
+          "'primary-key'='id', 'bucket'='1', 'blob-field'='pictures')")
+      sql(
+        "INSERT INTO t VALUES " +
+          "(1, array(X'48656C6C6F', CAST(NULL AS BINARY), X'5945'))")
+
+      val row =
+        sql("SELECT id, size(pictures), pictures[0], pictures[1], pictures[2] FROM t")
+          .collect()(0)
+      assert(row.getInt(0) == 1)
+      assert(row.getInt(1) == 3)
+      assert(util.Arrays.equals(row.getAs[Array[Byte]](2), Array[Byte](72, 101, 108, 108, 111)))
+      assert(row.isNullAt(3))
+      assert(util.Arrays.equals(row.getAs[Array[Byte]](4), Array[Byte](89, 69)))
+    }
+  }
+
+  test("Blob: test primary-key map blob") {
+    withTable("t") {
+      sql(
+        "CREATE TABLE t (id INT, pictures MAP<STRING, BINARY>) TBLPROPERTIES (" +
+          "'primary-key'='id', 'bucket'='1', 'blob-field'='pictures')")
+      sql(
+        "INSERT INTO t VALUES " +
+          "(1, map('first', X'48656C6C6F', 'null', CAST(NULL AS BINARY), " +
+          "'second', X'5945'))")
+
+      val row = sql(
+        "SELECT id, size(pictures), pictures['first'], pictures['null'], pictures['second'] " +
+          "FROM t").collect()(0)
+      assert(row.getInt(0) == 1)
+      assert(row.getInt(1) == 3)
+      assert(util.Arrays.equals(row.getAs[Array[Byte]](2), Array[Byte](72, 101, 108, 108, 111)))
+      assert(row.isNullAt(3))
+      assert(util.Arrays.equals(row.getAs[Array[Byte]](4), Array[Byte](89, 69)))
+
+      sql("INSERT INTO t VALUES (1, map('first', X'4E4557'))")
+      val updated = sql("SELECT id, size(pictures), pictures['first'] FROM t").collect()(0)
+      assert(updated.getInt(0) == 1)
+      assert(updated.getInt(1) == 1)
+      assert(util.Arrays.equals(updated.getAs[Array[Byte]](2), Array[Byte](78, 69, 87)))
+    }
+  }
+
+  test("Blob: array blob writes descriptor elements and reads descriptors") {
+    withTable("t") {
+      val blobData = new Array[Byte](1024)
+      RANDOM.nextBytes(blobData)
+      val fileIO = new LocalFileIO
+      val uri = "file://" + tempDBDir.toString + "/external_array_blob"
+      writeFile(fileIO, uri, blobData)
+
+      sql(
+        "CREATE TABLE t (id INT, data STRING, pictures ARRAY<BINARY>) TBLPROPERTIES (" +
+          "'row-tracking.enabled'='true', " +
+          "'data-evolution.enabled'='true', " +
+          "'blob-field'='pictures', " +
+          "'blob-as-descriptor'='true')")
+      sql(s"INSERT INTO t VALUES (1, 'paimon', array(sys.path_to_descriptor('$uri'), X'5945'))")
+
+      val descriptorRow = sql("SELECT pictures[0], pictures[1] FROM t WHERE id = 1").collect()(0)
+      val firstDescriptor = BlobDescriptor.deserialize(descriptorRow.getAs[Array[Byte]](0))
+      val secondDescriptor = BlobDescriptor.deserialize(descriptorRow.getAs[Array[Byte]](1))
+      val options = new Options()
+      options.set("warehouse", tempDBDir.toString)
+      val catalogContext = CatalogContext.create(options)
+      val uriReaderFactory = new UriReaderFactory(catalogContext)
+      val firstBlob =
+        Blob.fromDescriptor(uriReaderFactory.create(firstDescriptor.uri), firstDescriptor)
+      val secondBlob =
+        Blob.fromDescriptor(uriReaderFactory.create(secondDescriptor.uri), secondDescriptor)
+      assert(util.Arrays.equals(blobData, firstBlob.toData))
+      assert(util.Arrays.equals(Array[Byte](89, 69), secondBlob.toData))
+
+      sql("ALTER TABLE t SET TBLPROPERTIES ('blob-as-descriptor'='false')")
+      val dataRow = sql("SELECT pictures[0], pictures[1] FROM t WHERE id = 1").collect()(0)
+      assert(util.Arrays.equals(blobData, dataRow.getAs[Array[Byte]](0)))
+      assert(util.Arrays.equals(Array[Byte](89, 69), dataRow.getAs[Array[Byte]](1)))
+    }
+  }
+
+  test("Blob: map blob writes descriptor values and reads descriptors") {
+    withTable("t") {
+      val blobData = new Array[Byte](1024)
+      RANDOM.nextBytes(blobData)
+      val fileIO = new LocalFileIO
+      val uri = "file://" + tempDBDir.toString + "/external_map_blob"
+      writeFile(fileIO, uri, blobData)
+
+      sql(
+        "CREATE TABLE t (id INT, data STRING, pictures MAP<STRING, BINARY>) TBLPROPERTIES (" +
+          "'row-tracking.enabled'='true', " +
+          "'data-evolution.enabled'='true', " +
+          "'blob-field'='pictures', " +
+          "'blob-as-descriptor'='true')")
+      sql(
+        s"INSERT INTO t VALUES (1, 'paimon', " +
+          s"map('external', sys.path_to_descriptor('$uri'), 'inline', X'5945'))")
+
+      val descriptorRow =
+        sql("SELECT pictures['external'], pictures['inline'] FROM t WHERE id = 1").collect()(0)
+      val firstDescriptor = BlobDescriptor.deserialize(descriptorRow.getAs[Array[Byte]](0))
+      val secondDescriptor = BlobDescriptor.deserialize(descriptorRow.getAs[Array[Byte]](1))
+      val options = new Options()
+      options.set("warehouse", tempDBDir.toString)
+      val catalogContext = CatalogContext.create(options)
+      val uriReaderFactory = new UriReaderFactory(catalogContext)
+      val firstBlob =
+        Blob.fromDescriptor(uriReaderFactory.create(firstDescriptor.uri), firstDescriptor)
+      val secondBlob =
+        Blob.fromDescriptor(uriReaderFactory.create(secondDescriptor.uri), secondDescriptor)
+      assert(util.Arrays.equals(blobData, firstBlob.toData))
+      assert(util.Arrays.equals(Array[Byte](89, 69), secondBlob.toData))
+
+      sql("ALTER TABLE t SET TBLPROPERTIES ('blob-as-descriptor'='false')")
+      val dataRow =
+        sql("SELECT pictures['external'], pictures['inline'] FROM t WHERE id = 1").collect()(0)
+      assert(util.Arrays.equals(blobData, dataRow.getAs[Array[Byte]](0)))
+      assert(util.Arrays.equals(Array[Byte](89, 69), dataRow.getAs[Array[Byte]](1)))
+    }
+  }
+
+  test("Blob: array blob inline fields are rejected") {
+    Seq(
+      ("array_blob_descriptor_reject", "'blob-descriptor-field'='pictures'"),
+      ("array_blob_view_reject", "'blob-view-field'='pictures'")
+    ).foreach {
+      case (tableName, blobOptions) =>
+        withTable(tableName) {
+          val error = intercept[Exception] {
+            sql(
+              s"CREATE TABLE $tableName (id INT, pictures ARRAY<BINARY>) TBLPROPERTIES (" +
+                s"'row-tracking.enabled'='true', 'data-evolution.enabled'='true', $blobOptions)")
+          }
+          assert(
+            exceptionContains(error, "ARRAY<BLOB> is only supported by 'blob-field'."),
+            exceptionMessages(error))
+        }
+    }
+  }
+
+  test("Blob: map blob validation") {
+    Seq(
+      ("map_blob_descriptor_reject", "'blob-descriptor-field'='pictures'"),
+      ("map_blob_view_reject", "'blob-view-field'='pictures'")
+    ).foreach {
+      case (tableName, blobOptions) =>
+        withTable(tableName) {
+          val error = intercept[Exception] {
+            sql(
+              s"CREATE TABLE $tableName (id INT, pictures MAP<STRING, BINARY>) TBLPROPERTIES (" +
+                s"'row-tracking.enabled'='true', 'data-evolution.enabled'='true', $blobOptions)")
+          }
+          assert(
+            exceptionContains(error, "MAP<X, BLOB> is only supported by 'blob-field'."),
+            exceptionMessages(error))
+        }
+    }
+
+    withTable("map_blob_boolean_key") {
+      sql(
+        "CREATE TABLE map_blob_boolean_key " +
+          "(id INT, pictures MAP<BOOLEAN, BINARY>) TBLPROPERTIES (" +
+          "'row-tracking.enabled'='true', 'data-evolution.enabled'='true', " +
+          "'blob-field'='pictures')")
+    }
+  }
+
+  test("Blob: test write blob descriptor") {
+    withTable("t") {
+      val blobData = new Array[Byte](1024 * 1024)
+      RANDOM.nextBytes(blobData)
+      val fileIO = new LocalFileIO
+      val uri = "file://" + tempDBDir.toString + "/external_blob"
+      writeFile(fileIO, uri, blobData)
+
+      val blobDescriptor = new BlobDescriptor(uri, 0, blobData.length)
+
+      sql(
+        "CREATE TABLE t (id INT, data STRING, picture BINARY) TBLPROPERTIES ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture')")
+      sql(
+        "INSERT INTO t VALUES (1, 'paimon', X'" + bytesToHex(blobDescriptor.serialize()) + "'),"
+          + "(5, 'paimon', X'" + bytesToHex(blobDescriptor.serialize()) + "'),"
+          + "(2, 'paimon', X'" + bytesToHex(blobDescriptor.serialize()) + "'),"
+          + "(3, 'paimon', X'" + bytesToHex(blobDescriptor.serialize()) + "'),"
+          + "(4, 'paimon', X'" + bytesToHex(blobDescriptor.serialize()) + "')")
+
+      sql("ALTER TABLE t SET TBLPROPERTIES ('blob-as-descriptor'='true')")
+      val newDescriptorBytes =
+        sql("SELECT picture FROM t WHERE id = 1").collect()(0).get(0).asInstanceOf[Array[Byte]]
+      val newBlobDescriptor = BlobDescriptor.deserialize(newDescriptorBytes)
+      val options = new Options()
+      options.set("warehouse", tempDBDir.toString)
+      val catalogContext = CatalogContext.create(options)
+      val uriReaderFactory = new UriReaderFactory(catalogContext)
+      val blob = Blob.fromDescriptor(uriReaderFactory.create(newBlobDescriptor.uri), blobDescriptor)
+      assert(util.Arrays.equals(blobData, blob.toData))
+
+      sql("ALTER TABLE t SET TBLPROPERTIES ('blob-as-descriptor'='false')")
+      checkAnswer(
+        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t WHERE id = 1"),
+        Seq(Row(1, "paimon", blobData, 0, 1))
+      )
+    }
+  }
+
+  test("Blob: materialize descriptor with source table FileIO") {
+    withTable("blob_source", "blob_target") {
+      sql(
+        "CREATE TABLE blob_source (id INT, picture BINARY) TBLPROPERTIES (" +
+          "'row-tracking.enabled'='true', " +
+          "'data-evolution.enabled'='true', " +
+          "'blob-field'='picture')")
+      sql("INSERT INTO blob_source VALUES (1, X'48656C6C6F'), (2, X'5945')")
+      sql(
+        "ALTER TABLE blob_source SET TBLPROPERTIES (" +
+          "'blob-as-descriptor'='true')")
+
+      sql(
+        "CREATE TABLE blob_target (id INT, picture BINARY) TBLPROPERTIES (" +
+          "'row-tracking.enabled'='true', " +
+          "'data-evolution.enabled'='true', " +
+          "'blob-field'='picture', " +
+          s"'blob-descriptor.source-table'='$dbName0.blob_source')")
+      sql("INSERT INTO blob_target SELECT * FROM blob_source")
+
+      checkAnswer(
+        sql("SELECT id, picture FROM blob_target ORDER BY id"),
+        Seq(
+          Row(1, Array[Byte](72, 101, 108, 108, 111)),
+          Row(2, Array[Byte](89, 69))
+        )
+      )
+    }
+  }
+
+  test("Blob: test write blob descriptor with partition") {
+    withTable("t") {
+      val blobData = new Array[Byte](1024 * 1024)
+      RANDOM.nextBytes(blobData)
+      val fileIO = new LocalFileIO
+      val uri = "file://" + tempDBDir.toString + "/external_blob"
+      writeFile(fileIO, uri, blobData)
+
+      val blobDescriptor = new BlobDescriptor(uri, 0, blobData.length)
+      sql(
+        "CREATE TABLE IF NOT EXISTS t (\n" + "id STRING,\n" + "name STRING,\n" + "file_size STRING,\n" + "crc64 STRING,\n" + "modified_time STRING,\n" + "content BINARY\n" + ") \n" +
+          "PARTITIONED BY (ds STRING, batch STRING) \n" +
+          "TBLPROPERTIES ('comment' = 'blob table','partition.expiration-time' = '365 d','row-tracking.enabled' = 'true','data-evolution.enabled' = 'true','blob-field' = 'content')")
+      sql(
+        "INSERT OVERWRITE TABLE t\nPARTITION(ds= '1017',batch = 'test') VALUES \n('1','paimon','1024','12345678','20241017',X'" + bytesToHex(
+          blobDescriptor.serialize()) + "')")
+      sql("ALTER TABLE t SET TBLPROPERTIES ('blob-as-descriptor'='true')")
+      val newDescriptorBytes =
+        sql("SELECT content FROM t WHERE id = '1'").collect()(0).get(0).asInstanceOf[Array[Byte]]
+      val newBlobDescriptor = BlobDescriptor.deserialize(newDescriptorBytes)
+      val options = new Options()
+      options.set("warehouse", tempDBDir.toString)
+      val catalogContext = CatalogContext.create(options)
+      val uriReaderFactory = new UriReaderFactory(catalogContext)
+      val blob = Blob.fromDescriptor(uriReaderFactory.create(newBlobDescriptor.uri), blobDescriptor)
+      assert(util.Arrays.equals(blobData, blob.toData))
+
+      sql("ALTER TABLE t SET TBLPROPERTIES ('blob-as-descriptor'='false')")
+      checkAnswer(
+        sql("SELECT id, name, content, _ROW_ID, _SEQUENCE_NUMBER FROM t WHERE id = 1"),
+        Seq(Row("1", "paimon", blobData, 0, 1))
+      )
+    }
+  }
+
+  test("Blob: test write blob descriptor with built-in function") {
+    withTable("t") {
+      val blobData = new Array[Byte](1024 * 1024)
+      RANDOM.nextBytes(blobData)
+      val fileIO = new LocalFileIO
+      val uri = "file://" + tempDBDir.toString + "/external_blob"
+      writeFile(fileIO, uri, blobData)
+
+      val blobDescriptor = new BlobDescriptor(uri, 0, blobData.length)
+      sql(
+        "CREATE TABLE IF NOT EXISTS t (\n" + "id STRING,\n" + "name STRING,\n" + "file_size STRING,\n" + "crc64 STRING,\n" + "modified_time STRING,\n" + "content BINARY\n" + ") \n" +
+          "PARTITIONED BY (ds STRING, batch STRING) \n" +
+          "TBLPROPERTIES ('comment' = 'blob table','partition.expiration-time' = '365 d','row-tracking.enabled' = 'true','data-evolution.enabled' = 'true','blob-field' = 'content','blob-as-descriptor' = 'true')")
+      sql(
+        "INSERT OVERWRITE TABLE t\nPARTITION(ds= '1017',batch = 'test') VALUES \n('1','paimon','1024','12345678','20241017', sys.path_to_descriptor('" + uri + "'))")
+      val newDescriptorBytes =
+        sql("SELECT content FROM t WHERE id = '1'").collect()(0).get(0).asInstanceOf[Array[Byte]]
+      val newBlobDescriptor = BlobDescriptor.deserialize(newDescriptorBytes)
+      val options = new Options()
+      options.set("warehouse", tempDBDir.toString)
+      val catalogContext = CatalogContext.create(options)
+      val uriReaderFactory = new UriReaderFactory(catalogContext)
+      val blob = Blob.fromDescriptor(uriReaderFactory.create(newBlobDescriptor.uri), blobDescriptor)
+      assert(util.Arrays.equals(blobData, blob.toData))
+
+      checkAnswer(
+        sql("SELECT sys.descriptor_to_string(content) FROM t"),
+        Seq(Row(newBlobDescriptor.toString))
+      )
+
+      sql("ALTER TABLE t SET TBLPROPERTIES ('blob-as-descriptor'='false')")
+      checkAnswer(
+        sql("SELECT id, name, content, _ROW_ID, _SEQUENCE_NUMBER FROM t WHERE id = 1"),
+        Seq(Row("1", "paimon", blobData, 0, 1))
+      )
+    }
+  }
+
+  test("Blob: test write blob view with built-in function") {
+    withTable("upstream_blob_view", "downstream_blob_view") {
+      sql(
+        "CREATE TABLE upstream_blob_view (id INT, name STRING, picture BINARY) " +
+          "TBLPROPERTIES (" +
+          "'row-tracking.enabled'='true', " +
+          "'data-evolution.enabled'='true', " +
+          "'blob-field'='picture')")
+      sql(
+        "INSERT INTO upstream_blob_view VALUES " +
+          "(1, 'row1', X'48656C6C6F'), " +
+          "(2, 'row2', X'5945')")
+
+      val upstreamFullName = s"$dbName0.upstream_blob_view"
+
+      sql(
+        "CREATE TABLE downstream_blob_view (id INT, label STRING, image_ref BINARY) " +
+          "TBLPROPERTIES (" +
+          "'row-tracking.enabled'='true', " +
+          "'data-evolution.enabled'='true', " +
+          "'blob-field'='image_ref', " +
+          "'blob-view-field'='image_ref')")
+
+      sql(
+        s"INSERT INTO downstream_blob_view " +
+          s"SELECT id, name, sys.blob_view('$upstreamFullName', 'picture', _ROW_ID) " +
+          s"FROM `upstream_blob_view$$row_tracking`")
+
+      checkAnswer(
+        sql("SELECT * FROM downstream_blob_view ORDER BY id"),
+        Seq(
+          Row(1, "row1", Array[Byte](72, 101, 108, 108, 111)),
+          Row(2, "row2", Array[Byte](89, 69)))
+      )
+    }
+  }
+
+  test("Blob: forward blob view reference with dynamic option") {
+    withTable(
+      "upstream_blob_view_forward",
+      "first_downstream_blob_view",
+      "second_downstream_blob_view") {
+      sql(
+        "CREATE TABLE upstream_blob_view_forward (id INT, name STRING, picture BINARY) " +
+          "TBLPROPERTIES (" +
+          "'row-tracking.enabled'='true', " +
+          "'data-evolution.enabled'='true', " +
+          "'blob-field'='picture')")
+      sql(
+        "INSERT INTO upstream_blob_view_forward VALUES " +
+          "(1, 'row1', X'48656C6C6F'), " +
+          "(2, 'row2', X'5945')")
+
+      val upstreamFullName = s"$dbName0.upstream_blob_view_forward"
+      sql(
+        "CREATE TABLE first_downstream_blob_view (id INT, label STRING, image_ref BINARY) " +
+          "TBLPROPERTIES (" +
+          "'row-tracking.enabled'='true', " +
+          "'data-evolution.enabled'='true', " +
+          "'blob-field'='image_ref', " +
+          "'blob-view-field'='image_ref')")
+      sql(
+        s"INSERT INTO first_downstream_blob_view " +
+          s"SELECT id, name, sys.blob_view('$upstreamFullName', 'picture', _ROW_ID) " +
+          s"FROM `upstream_blob_view_forward$$row_tracking`")
+
+      sql(
+        "CREATE TABLE second_downstream_blob_view (id INT, label STRING, image_ref BINARY) " +
+          "TBLPROPERTIES (" +
+          "'row-tracking.enabled'='true', " +
+          "'data-evolution.enabled'='true', " +
+          "'blob-field'='image_ref', " +
+          "'blob-view-field'='image_ref')")
+
+      val preserveFirstReferenceOption =
+        s"spark.paimon.paimon.$dbName0.first_downstream_blob_view." +
+          CoreOptions.BLOB_VIEW_RESOLVE_ENABLED.key()
+      val preserveSecondReferenceOption =
+        s"spark.paimon.paimon.$dbName0.second_downstream_blob_view." +
+          CoreOptions.BLOB_VIEW_RESOLVE_ENABLED.key()
+      withSparkSQLConf(preserveFirstReferenceOption -> "false") {
+        sql(
+          "INSERT INTO second_downstream_blob_view " +
+            "SELECT id, label, image_ref FROM first_downstream_blob_view")
+
+        checkAnswer(
+          sql("SELECT * FROM second_downstream_blob_view ORDER BY id"),
+          Seq(
+            Row(1, "row1", Array[Byte](72, 101, 108, 108, 111)),
+            Row(2, "row2", Array[Byte](89, 69)))
+        )
+
+        withSparkSQLConf(preserveSecondReferenceOption -> "false") {
+          val originalReferences =
+            sql("SELECT image_ref FROM first_downstream_blob_view ORDER BY id").collect()
+          val forwardedReferences =
+            sql("SELECT image_ref FROM second_downstream_blob_view ORDER BY id").collect()
+
+          assert(forwardedReferences.length == originalReferences.length)
+          forwardedReferences.zip(originalReferences).foreach {
+            case (forwarded, original) =>
+              val originalReference = original.getAs[Array[Byte]](0)
+              val forwardedReference = forwarded.getAs[Array[Byte]](0)
+              assert(util.Arrays.equals(originalReference, forwardedReference))
+              assert(BlobViewStruct.deserialize(forwardedReference).identifier().getFullName ==
+                upstreamFullName)
+          }
+        }
+      }
+    }
+  }
+
+  test("Blob: test write blob descriptor from external storage") {
+    val catalogName = "isolated_paimon"
+    val databaseName = "external_blob_db"
+    val paimonRoot = tempDBDir.getCanonicalPath + "/paimon-isolated-root"
+    val externalRoot = tempDBDir.getCanonicalPath + "/external-blob-root"
+    val isolatedPaimonRoot = "isolated://" + paimonRoot
+    val isolatedExternalRoot = "isolated://" + externalRoot
+    spark.conf.set(s"spark.sql.catalog.$catalogName", classOf[SparkCatalog].getName)
+    spark.conf.set(s"spark.sql.catalog.$catalogName.warehouse", isolatedPaimonRoot)
+    spark.conf.set(
+      s"spark.sql.catalog.$catalogName.${IsolatedDirectoryFileIO.ROOT_DIR}",
+      isolatedPaimonRoot)
+
+    try {
+      sql(s"CREATE DATABASE IF NOT EXISTS $catalogName.$databaseName")
+      sql(s"USE $catalogName.$databaseName")
+
+      val blobData = new Array[Byte](1024 * 1024)
+      RANDOM.nextBytes(blobData)
+      val blobPath = externalRoot + "/external_blob"
+      val fileIO = new LocalFileIO
+      writeFile(fileIO, "file://" + blobPath, blobData)
+
+      val isolatedPath = "isolated://" + blobPath
+
+      withTable("t") {
+        sql(
+          "CREATE TABLE t (id INT, data STRING, picture BINARY) TBLPROPERTIES (" +
+            "'row-tracking.enabled'='true', " +
+            "'data-evolution.enabled'='true', " +
+            "'blob-field'='picture', " +
+            "'blob-as-descriptor'='true')")
+
+        // 1. directly writing raise expected errors.
+        val error = intercept[Exception] {
+          sql("INSERT INTO t VALUES (1, 'paimon', sys.path_to_descriptor('" + isolatedPath + "'))")
+        }
+        assert(
+          exceptionContains(
+            error,
+            "Isolated file io only supports reading child of root directory") &&
+            exceptionContains(error, "paimon-isolated-root") &&
+            exceptionContains(error, "external-blob-root/external_blob"),
+          exceptionMessages(error)
+        )
+
+        // 2. inject blob-descriptor io info through dynamic params.
+        // this time writing should success.
+        val descriptorRootOption =
+          s"spark.paimon.$catalogName.$databaseName.t." +
+            CoreOptions.BLOB_DESCRIPTOR_PREFIX + IsolatedDirectoryFileIO.ROOT_DIR
+        withSparkSQLConf(descriptorRootOption -> isolatedExternalRoot) {
+          sql("INSERT INTO t VALUES (2, 'paimon', sys.path_to_descriptor('" + isolatedPath + "'))")
+
+          val newDescriptorBytes =
+            sql("SELECT picture FROM t WHERE id = 2").collect()(0).get(0).asInstanceOf[Array[Byte]]
+          val newBlobDescriptor = BlobDescriptor.deserialize(newDescriptorBytes)
+          val options = new Options()
+          options.set(IsolatedDirectoryFileIO.ROOT_DIR, isolatedPaimonRoot)
+          val catalogContext = CatalogContext.create(options)
+          val uriReaderFactory = new UriReaderFactory(catalogContext)
+          val blob =
+            Blob.fromDescriptor(uriReaderFactory.create(newBlobDescriptor.uri), newBlobDescriptor)
+          assert(util.Arrays.equals(blobData, blob.toData))
+        }
+      }
+    } finally {
+      sql(s"USE paimon.$dbName0")
+      sql(s"DROP DATABASE IF EXISTS $catalogName.$databaseName CASCADE")
+    }
+  }
+
+  private def exceptionContains(throwable: Throwable, message: String): Boolean = {
+    if (throwable == null) {
+      false
+    } else if (throwable.getMessage != null && throwable.getMessage.contains(message)) {
+      true
+    } else {
+      exceptionContains(throwable.getCause, message)
+    }
+  }
+
+  private def exceptionMessages(throwable: Throwable): String = {
+    if (throwable == null) {
+      ""
+    } else {
+      throwable.getClass.getName + ": " + throwable.getMessage + "\n" +
+        exceptionMessages(throwable.getCause)
+    }
+  }
+
+  test("Blob: test compaction") {
+    withTable("t") {
+      sql(
+        "CREATE TABLE t (id INT, data STRING, picture BINARY) TBLPROPERTIES ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture')")
+      for (i <- 1 to 10) {
+        sql("INSERT INTO t VALUES (" + i + ", 'paimon', X'48656C6C6F')")
+      }
+      sql("INSERT INTO t VALUES (1, 'paimon', X'48656C6C6F')")
+
+      checkAnswer(
+        sql("SELECT COUNT(*) FROM `t$files`"),
+        Seq(Row(22))
+      )
+      sql("CALL paimon.sys.compact('t')").collect()
+      checkAnswer(
+        sql("SELECT COUNT(*) FROM `t$files`"),
+        Seq(Row(12))
+      )
+      checkAnswer(
+        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t LIMIT 1"),
+        Seq(Row(1, "paimon", Array[Byte](72, 101, 108, 108, 111), 0, 11))
+      )
+    }
+  }
+
+  test("Blob: test compaction with blob compaction enabled") {
+    withTable("t") {
+      sql(
+        "CREATE TABLE t (id INT, data STRING, picture BINARY) TBLPROPERTIES ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture', 'blob-compaction.enabled'='true')")
+      for (i <- 1 to 10) {
+        sql("INSERT INTO t VALUES (" + i + ", 'paimon', X'48656C6C6F')")
+      }
+      sql("INSERT INTO t VALUES (1, 'paimon', X'48656C6C6F')")
+
+      checkAnswer(
+        sql("SELECT COUNT(*) FROM `t$files`"),
+        Seq(Row(22))
+      )
+      sql("CALL paimon.sys.compact('t')").collect()
+      checkAnswer(
+        sql("SELECT COUNT(*) FROM `t$files`"),
+        Seq(Row(2))
+      )
+      checkAnswer(
+        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t LIMIT 1"),
+        Seq(Row(1, "paimon", Array[Byte](72, 101, 108, 108, 111), 0, 11))
+      )
+    }
+  }
+
+  test("Blob: merge-into updates non-blob column on raw blob table with split blob files") {
+    withTable("s", "t") {
+      sql(
+        "CREATE TABLE t (id INT, name STRING, picture BINARY) TBLPROPERTIES " +
+          "('row-tracking.enabled'='true', 'data-evolution.enabled'='true', " +
+          "'blob-field'='picture', 'blob.target-file-size'='1 b')")
+      sql(
+        "INSERT INTO t VALUES " +
+          "(1, 'name1', X'48656C6C6F'), " +
+          "(2, 'name2', X'5945'), " +
+          "(3, 'name3', X'414243')")
+
+      sql("CREATE TABLE s (id INT, name STRING)")
+      sql("INSERT INTO s VALUES (1, 'updated_name1')")
+
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN MATCHED THEN UPDATE SET t.name = s.name
+            |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT id, name FROM t ORDER BY id"),
+        Seq(Row(1, "updated_name1"), Row(2, "name2"), Row(3, "name3"))
+      )
+    }
+  }
+
+  test("Blob: merge-into updates non-blob column on raw array blob table with split files") {
+    withTable("s", "t") {
+      sql(
+        "CREATE TABLE t (id INT, name STRING, pictures ARRAY<BINARY>) TBLPROPERTIES " +
+          "('row-tracking.enabled'='true', 'data-evolution.enabled'='true', " +
+          "'blob-field'='pictures', 'blob.target-file-size'='1 b')")
+      sql(
+        "INSERT INTO t VALUES " +
+          "(1, 'name1', array(X'48656C6C6F', X'5945')), " +
+          "(2, 'name2', array(X'414243')), " +
+          "(3, 'name3', CAST(NULL AS ARRAY<BINARY>))")
+
+      checkAnswer(
+        sql("SELECT COUNT(*) > 1 FROM `t$files` WHERE file_path LIKE '%.blob'"),
+        Seq(Row(true))
+      )
+
+      sql("CREATE TABLE s (id INT, name STRING)")
+      sql("INSERT INTO s VALUES (1, 'updated_name1')")
+
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN MATCHED THEN UPDATE SET t.name = s.name
+            |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT id, name FROM t ORDER BY id"),
+        Seq(Row(1, "updated_name1"), Row(2, "name2"), Row(3, "name3"))
+      )
+
+      val first = sql("SELECT name, pictures[0], pictures[1] FROM t WHERE id = 1").collect()(0)
+      assert(first.getString(0) == "updated_name1")
+      assert(util.Arrays.equals(first.getAs[Array[Byte]](1), Array[Byte](72, 101, 108, 108, 111)))
+      assert(util.Arrays.equals(first.getAs[Array[Byte]](2), Array[Byte](89, 69)))
+
+      val second = sql("SELECT pictures[0], size(pictures) FROM t WHERE id = 2").collect()(0)
+      assert(util.Arrays.equals(second.getAs[Array[Byte]](0), Array[Byte](65, 66, 67)))
+      assert(second.getInt(1) == 1)
+
+      checkAnswer(
+        sql("SELECT pictures IS NULL FROM t WHERE id = 3"),
+        Seq(Row(true))
+      )
+    }
+  }
+
+  test("Blob: merge-into updates non-blob column on raw map blob table with split files") {
+    withTable("s", "t") {
+      sql(
+        "CREATE TABLE t (id INT, name STRING, pictures MAP<STRING, BINARY>) TBLPROPERTIES " +
+          "('row-tracking.enabled'='true', 'data-evolution.enabled'='true', " +
+          "'blob-field'='pictures', 'blob.target-file-size'='1 b')")
+      sql(
+        "INSERT INTO t VALUES " +
+          "(1, 'name1', map('first', X'48656C6C6F', 'second', X'5945')), " +
+          "(2, 'name2', map('only', X'414243')), " +
+          "(3, 'name3', CAST(NULL AS MAP<STRING, BINARY>))")
+
+      checkAnswer(
+        sql("SELECT COUNT(*) > 1 FROM `t$files` WHERE file_path LIKE '%.blob'"),
+        Seq(Row(true))
+      )
+
+      sql("CREATE TABLE s (id INT, name STRING)")
+      sql("INSERT INTO s VALUES (1, 'updated_name1')")
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN MATCHED THEN UPDATE SET t.name = s.name
+            |""".stripMargin)
+
+      val first =
+        sql("SELECT name, pictures['first'], pictures['second'] FROM t WHERE id = 1").collect()(0)
+      assert(first.getString(0) == "updated_name1")
+      assert(util.Arrays.equals(first.getAs[Array[Byte]](1), Array[Byte](72, 101, 108, 108, 111)))
+      assert(util.Arrays.equals(first.getAs[Array[Byte]](2), Array[Byte](89, 69)))
+      checkAnswer(
+        sql("SELECT pictures IS NULL FROM t WHERE id = 3"),
+        Seq(Row(true))
+      )
+    }
+  }
+
+  test("Blob: self merge reads raw blob column to update non-blob column") {
+    withTable("t") {
+      sql(
+        "CREATE TABLE t (id INT, name STRING, picture BINARY) TBLPROPERTIES " +
+          "('row-tracking.enabled'='true', 'data-evolution.enabled'='true', " +
+          "'blob-field'='picture', 'blob.target-file-size'='1 b')")
+      sql(
+        "INSERT INTO t VALUES " +
+          "(1, 'name1', X'48656C6C6F'), " +
+          "(2, 'name2', X'5945'), " +
+          "(3, 'name3', X'414243')")
+
+      sql("""
+            |MERGE INTO t
+            |USING t AS source
+            |ON t._ROW_ID = source._ROW_ID
+            |WHEN MATCHED THEN UPDATE SET t.name = CAST(length(source.picture) AS STRING)
+            |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT id, name FROM t ORDER BY id"),
+        Seq(Row(1, "5"), Row(2, "2"), Row(3, "3"))
+      )
+    }
+  }
+
+  test("Blob: merge-into updates non-blob column on descriptor blob table") {
+    withTable("s", "t") {
+      sql(
+        "CREATE TABLE t (id INT, name STRING, picture BINARY) TBLPROPERTIES " +
+          "('row-tracking.enabled'='true', 'data-evolution.enabled'='true', " +
+          "'blob-descriptor-field'='picture')")
+
+      // Insert with a descriptor pointing to a real file
+      val blobData = new Array[Byte](256)
+      RANDOM.nextBytes(blobData)
+      val fileIO = new LocalFileIO()
+      val uri = "file://" + tempDBDir.getCanonicalPath + "/external_desc_blob"
+      writeFile(fileIO, uri, blobData)
+      val desc = new BlobDescriptor(uri, 0, blobData.length)
+      sql(s"INSERT INTO t VALUES (1, 'name1', X'${bytesToHex(desc.serialize())}')")
+      sql(s"INSERT INTO t VALUES (2, 'name2', X'${bytesToHex(desc.serialize())}')")
+
+      sql("CREATE TABLE s (id INT, name STRING)")
+      sql("INSERT INTO s VALUES (1, 'updated_name1')")
+
+      // Update only the 'name' column — should succeed for descriptor-based blob table
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN MATCHED THEN UPDATE SET t.name = s.name
+            |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT id, name FROM t ORDER BY id"),
+        Seq(Row(1, "updated_name1"), Row(2, "name2"))
+      )
+    }
+  }
+
+  private val HEX_ARRAY = "0123456789ABCDEF".toCharArray
+
+  def bytesToHex(bytes: Array[Byte]): String = {
+    val hexChars = new Array[Char](bytes.length * 2)
+    for (j <- bytes.indices) {
+      val v = bytes(j) & 0xff
+      hexChars(j * 2) = HEX_ARRAY(v >>> 4)
+      hexChars(j * 2 + 1) = HEX_ARRAY(v & 0x0f)
+    }
+    new String(hexChars)
+  }
+}
+
+class BlobTestWithV2Write extends BlobTestBase {
+  override def sparkConf: SparkConf = {
+    super.sparkConf.set("spark.paimon.write.use-v2-write", "true")
+  }
+}

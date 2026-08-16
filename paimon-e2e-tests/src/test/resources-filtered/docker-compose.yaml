@@ -25,6 +25,7 @@ services:
   # ----------------------------------------
 
   jobmanager:
+    user: root
     image: apache/flink:${test.flink.version}-${test.java.version}
     volumes:
       - testdata:/test-data
@@ -49,6 +50,7 @@ services:
       - "8081"
 
   taskmanager:
+    user: root
     image: apache/flink:${test.flink.version}-${test.java.version}
     volumes:
       - testdata:/test-data

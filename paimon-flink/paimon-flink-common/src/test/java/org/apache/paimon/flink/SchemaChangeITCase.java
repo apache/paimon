@@ -273,7 +273,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         assertThatThrownBy(() -> sql("ALTER TABLE T MODIFY (f BOOLEAN)"))
                 .hasRootCauseInstanceOf(IllegalStateException.class)
                 .hasRootCauseMessage(
-                        "Column type f[DOUBLE] cannot be converted to BOOLEAN without loosing information.");
+                        "Column type f[DOUBLE] cannot be converted to BOOLEAN without losing information.");
     }
 
     @Test
@@ -896,14 +896,6 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                 .rootCause()
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage("Change 'merge-engine' is not supported yet.");
-
-        // sequence.field is immutable
-        sql("CREATE TABLE T5 (a STRING, b STRING, c STRING) WITH ('sequence.field' = 'b')");
-        sql("INSERT INTO T5 VALUES ('a', 'b', 'c')");
-        assertThatThrownBy(() -> sql("ALTER TABLE T5 SET ('sequence.field' = 'c')"))
-                .rootCause()
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage("Change 'sequence.field' is not supported yet.");
     }
 
     @Test
@@ -1036,6 +1028,45 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         sql("INSERT INTO T3 VALUES ('a', 'd', 3.0)");
         sql("INSERT INTO T3 VALUES ('a', 'e', 2.0)");
         assertThat(sql("select * from T3").toString()).isEqualTo("[+I[a, d, 3.0]]");
+    }
+
+    @Test
+    public void testSequenceFieldSortOrderWithWriteSideMerge() {
+        // When multiple rows with the same primary key are written in a single INSERT,
+        // they are merged on the write side by SortBufferWriteBuffer.
+        // This test verifies that sequence.field.sort-order=descending is correctly
+        // applied during write-side merge (not just merge-on-read).
+        sql(
+                "CREATE TABLE T_WRITE_MERGE (a STRING PRIMARY KEY NOT ENFORCED, b STRING, c BIGINT)"
+                        + " WITH ("
+                        + "'sequence.field'='c', "
+                        + "'sequence.field.sort-order'='descending', "
+                        + "'bucket'='1')");
+
+        // Insert multiple rows with the same key in a single statement to trigger write-side merge
+        sql("INSERT INTO T_WRITE_MERGE VALUES ('a', 'b', 1), ('a', 'd', 3), ('a', 'e', 2)");
+
+        // With descending sort order, the smallest sequence value (c=1) should win
+        assertThat(sql("select * from T_WRITE_MERGE").toString()).isEqualTo("[+I[a, b, 1]]");
+    }
+
+    @Test
+    public void testSequenceFieldSortOrderWithIntKeys() {
+        // When both primary key and sequence field are INT types, their NormalizedKey
+        // would fit within 18 bytes (5+5=10). This test verifies that UDS descending
+        // still works correctly because NormalizedKey only covers key fields in this case.
+        sql(
+                "CREATE TABLE T_INT_MERGE (a INT PRIMARY KEY NOT ENFORCED, b INT)"
+                        + " WITH ("
+                        + "'sequence.field'='b', "
+                        + "'sequence.field.sort-order'='descending', "
+                        + "'bucket'='1')");
+
+        // Insert multiple rows with the same key to trigger write-side merge
+        sql("INSERT INTO T_INT_MERGE VALUES (1, 10), (1, 30), (1, 20)");
+
+        // With descending sort order, the smallest sequence value (b=10) should win
+        assertThat(sql("select * from T_INT_MERGE").toString()).isEqualTo("[+I[1, 10]]");
     }
 
     @Test
@@ -1574,16 +1605,259 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         assertThat(sql("SELECT * FROM T")).containsExactlyInAnyOrder(Row.of(1, 10), Row.of(2, 20));
         assertThatCode(() -> sql("ALTER TABLE T MODIFY v SMALLINT"))
                 .hasStackTraceContaining(
-                        "Column type v[INT] cannot be converted to SMALLINT without loosing information");
+                        "Column type v[INT] cannot be converted to SMALLINT without losing information");
         sql("ALTER TABLE T MODIFY v BIGINT");
         assertThat(sql("SELECT * FROM T"))
                 .containsExactlyInAnyOrder(Row.of(1, 10L), Row.of(2, 20L));
         assertThatCode(() -> sql("ALTER TABLE T MODIFY v INT"))
                 .hasStackTraceContaining(
-                        "Column type v[BIGINT] cannot be converted to INT without loosing information");
+                        "Column type v[BIGINT] cannot be converted to INT without losing information");
         // disable explicit type casting
         sql("ALTER TABLE T SET ('disable-explicit-type-casting' = 'false')");
         sql("ALTER TABLE T MODIFY v INT");
         assertThat(sql("SELECT * FROM T")).containsExactlyInAnyOrder(Row.of(1, 10), Row.of(2, 20));
+    }
+
+    @Test
+    public void testAddColumnBeforePartitionEnabled() {
+        sql(
+                "CREATE TABLE T_PART (\n"
+                        + "    user_id BIGINT,\n"
+                        + "    item_id BIGINT,\n"
+                        + "    behavior STRING,\n"
+                        + "    dt STRING,\n"
+                        + "    hh STRING\n"
+                        + ") PARTITIONED BY (dt, hh) WITH (\n"
+                        + "    'add-column-before-partition' = 'true'\n"
+                        + ")");
+
+        sql("INSERT INTO T_PART VALUES(1, 100, 'buy', '2024-01-01', '10')");
+
+        // Add column without specifying position
+        sql("ALTER TABLE T_PART ADD score DOUBLE");
+
+        List<Row> result = sql("SHOW CREATE TABLE T_PART");
+        assertThat(result.toString())
+                .contains(
+                        "`user_id` BIGINT,\n"
+                                + "  `item_id` BIGINT,\n"
+                                + "  `behavior` VARCHAR(2147483647),\n"
+                                + "  `score` DOUBLE,\n"
+                                + "  `dt` VARCHAR(2147483647),\n"
+                                + "  `hh` VARCHAR(2147483647)");
+
+        sql("INSERT INTO T_PART VALUES(2, 200, 'sell', 99.5, '2024-01-02', '11')");
+        result = sql("SELECT * FROM T_PART");
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(1L, 100L, "buy", null, "2024-01-01", "10"),
+                        Row.of(2L, 200L, "sell", 99.5, "2024-01-02", "11"));
+    }
+
+    @Test
+    public void testAddColumnBeforePartitionDisabledByDefault() {
+        sql(
+                "CREATE TABLE T_PART_DEFAULT (\n"
+                        + "    user_id BIGINT,\n"
+                        + "    item_id BIGINT,\n"
+                        + "    dt STRING\n"
+                        + ") PARTITIONED BY (dt)");
+
+        // Add column without specifying position (default behavior)
+        sql("ALTER TABLE T_PART_DEFAULT ADD score DOUBLE");
+
+        List<Row> result = sql("SHOW CREATE TABLE T_PART_DEFAULT");
+        // score should be appended at the end
+        assertThat(result.toString())
+                .contains(
+                        "`user_id` BIGINT,\n"
+                                + "  `item_id` BIGINT,\n"
+                                + "  `dt` VARCHAR(2147483647),\n"
+                                + "  `score` DOUBLE");
+    }
+
+    @Test
+    public void testAddColumnBeforePartitionWithExplicitPosition() {
+        sql(
+                "CREATE TABLE T_PART_POS (\n"
+                        + "    user_id BIGINT,\n"
+                        + "    item_id BIGINT,\n"
+                        + "    dt STRING\n"
+                        + ") PARTITIONED BY (dt) WITH (\n"
+                        + "    'add-column-before-partition' = 'true'\n"
+                        + ")");
+
+        // Add column with explicit FIRST position, should respect explicit position
+        sql("ALTER TABLE T_PART_POS ADD score DOUBLE FIRST");
+
+        List<Row> result = sql("SHOW CREATE TABLE T_PART_POS");
+        assertThat(result.toString())
+                .contains(
+                        "`score` DOUBLE,\n"
+                                + "  `user_id` BIGINT,\n"
+                                + "  `item_id` BIGINT,\n"
+                                + "  `dt` VARCHAR(2147483647)");
+    }
+
+    @Test
+    public void testAddColumnBeforePartitionViaAlterOption() {
+        sql(
+                "CREATE TABLE T_PART_ALTER (\n"
+                        + "    user_id BIGINT,\n"
+                        + "    item_id BIGINT,\n"
+                        + "    dt STRING\n"
+                        + ") PARTITIONED BY (dt)");
+
+        // First add column without config (default: append at end)
+        sql("ALTER TABLE T_PART_ALTER ADD col1 INT");
+        List<Row> result = sql("SHOW CREATE TABLE T_PART_ALTER");
+        assertThat(result.toString())
+                .contains(
+                        "`user_id` BIGINT,\n"
+                                + "  `item_id` BIGINT,\n"
+                                + "  `dt` VARCHAR(2147483647),\n"
+                                + "  `col1` INT");
+
+        // Enable config via ALTER TABLE SET
+        sql("ALTER TABLE T_PART_ALTER SET ('add-column-before-partition' = 'true')");
+
+        // Now add another column, should go before partition column dt
+        sql("ALTER TABLE T_PART_ALTER ADD col2 DOUBLE");
+        result = sql("SHOW CREATE TABLE T_PART_ALTER");
+        assertThat(result.toString())
+                .contains(
+                        "`user_id` BIGINT,\n"
+                                + "  `item_id` BIGINT,\n"
+                                + "  `col2` DOUBLE,\n"
+                                + "  `dt` VARCHAR(2147483647),\n"
+                                + "  `col1` INT");
+    }
+
+    @Test
+    public void testAddMultipleColumnsBeforePartition() {
+        sql(
+                "CREATE TABLE T_PART_MULTI (\n"
+                        + "    user_id BIGINT,\n"
+                        + "    item_id BIGINT,\n"
+                        + "    dt STRING,\n"
+                        + "    hh STRING\n"
+                        + ") PARTITIONED BY (dt, hh) WITH (\n"
+                        + "    'add-column-before-partition' = 'true'\n"
+                        + ")");
+
+        // Add first column
+        sql("ALTER TABLE T_PART_MULTI ADD col1 INT");
+        // Add second column
+        sql("ALTER TABLE T_PART_MULTI ADD ( col2 INT, col3 DOUBLE )");
+
+        List<Row> result = sql("SHOW CREATE TABLE T_PART_MULTI");
+        // Both new columns should be before partition columns dt and hh
+        assertThat(result.toString())
+                .contains(
+                        "`user_id` BIGINT,\n"
+                                + "  `item_id` BIGINT,\n"
+                                + "  `col1` INT,\n"
+                                + "  `col2` INT,\n"
+                                + "  `col3` DOUBLE,\n"
+                                + "  `dt` VARCHAR(2147483647),\n"
+                                + "  `hh` VARCHAR(2147483647)");
+    }
+
+    @Test
+    public void testAddColumnBeforePartitionOnPrimaryKeyTable() {
+        sql(
+                "CREATE TABLE T_PK_PART (\n"
+                        + "    user_id BIGINT,\n"
+                        + "    item_id BIGINT,\n"
+                        + "    behavior STRING,\n"
+                        + "    dt STRING,\n"
+                        + "    hh STRING,\n"
+                        + "    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED\n"
+                        + ") PARTITIONED BY (dt, hh) WITH (\n"
+                        + "    'add-column-before-partition' = 'true'\n"
+                        + ")");
+
+        sql("INSERT INTO T_PK_PART VALUES(1, 100, 'buy', '2024-01-01', '10')");
+
+        //  Add single column
+        sql("ALTER TABLE T_PK_PART ADD score DOUBLE");
+
+        List<Row> result = sql("SHOW CREATE TABLE T_PK_PART");
+        assertThat(result.toString())
+                .contains(
+                        "`user_id` BIGINT NOT NULL,\n"
+                                + "  `item_id` BIGINT,\n"
+                                + "  `behavior` VARCHAR(2147483647),\n"
+                                + "  `score` DOUBLE,\n"
+                                + "  `dt` VARCHAR(2147483647) NOT NULL,\n"
+                                + "  `hh` VARCHAR(2147483647) NOT NULL");
+
+        // Add multiple columns
+        sql("ALTER TABLE T_PK_PART ADD ( col1 INT, col2 DOUBLE )");
+
+        result = sql("SHOW CREATE TABLE T_PK_PART");
+        assertThat(result.toString())
+                .contains(
+                        "`user_id` BIGINT NOT NULL,\n"
+                                + "  `item_id` BIGINT,\n"
+                                + "  `behavior` VARCHAR(2147483647),\n"
+                                + "  `score` DOUBLE,\n"
+                                + "  `col1` INT,\n"
+                                + "  `col2` DOUBLE,\n"
+                                + "  `dt` VARCHAR(2147483647) NOT NULL,\n"
+                                + "  `hh` VARCHAR(2147483647) NOT NULL");
+
+        // Verify data read/write still works
+        sql("INSERT INTO T_PK_PART VALUES(2, 200, 'sell', 99.5, 10, 3.14, '2024-01-02', '11')");
+        result = sql("SELECT * FROM T_PK_PART");
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(1L, 100L, "buy", null, null, null, "2024-01-01", "10"),
+                        Row.of(2L, 200L, "sell", 99.5, 10, 3.14, "2024-01-02", "11"));
+    }
+
+    @Test
+    public void testDropPrimaryKeyOnEmptyTable() {
+        sql("CREATE TABLE T (a INT, b INT, c STRING, PRIMARY KEY (a) NOT ENFORCED)");
+
+        // drop primary key on empty table should succeed
+        sql("ALTER TABLE T DROP PRIMARY KEY");
+
+        List<Row> result = sql("SHOW CREATE TABLE T");
+        assertThat(result.get(0).toString()).doesNotContain("PRIMARY KEY");
+    }
+
+    @Test
+    public void testDropPrimaryKeyOnNonEmptyTable() {
+        sql("CREATE TABLE T (a INT, b INT, c STRING, PRIMARY KEY (a) NOT ENFORCED)");
+        sql("INSERT INTO T VALUES (1, 2, 'hello')");
+
+        // drop primary key on non-empty table should fail
+        assertThatThrownBy(() -> sql("ALTER TABLE T DROP PRIMARY KEY"))
+                .satisfies(
+                        anyCauseMatches(
+                                UnsupportedOperationException.class,
+                                "Cannot drop primary keys on a non-empty table."));
+    }
+
+    private static final String BLOB_TABLE_OPTIONS =
+            "'row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'bucket'='-1'";
+
+    @Test
+    public void testAddBlobColumnViaCommentDirective() {
+        sql("CREATE TABLE T (id INT, data STRING) WITH (" + BLOB_TABLE_OPTIONS + ")");
+
+        // bare directive — no user comment
+        sql("ALTER TABLE T ADD desc_col BYTES COMMENT '__BLOB_DESCRIPTOR_FIELD'");
+        // directive + user comment
+        sql("ALTER TABLE T ADD picture BYTES COMMENT '__BLOB_FIELD; profile picture'");
+
+        String createSql = sql("SHOW CREATE TABLE T").get(0).toString();
+        assertThat(createSql).doesNotContain("__BLOB");
+        assertThat(createSql).contains("`desc_col`");
+        assertThat(createSql).contains("`picture`");
+        assertThat(createSql).contains("COMMENT 'profile picture'");
+        assertThat(createSql).contains("'blob-field' = 'picture'");
+        assertThat(createSql).contains("'blob-descriptor-field' = 'desc_col'");
     }
 }

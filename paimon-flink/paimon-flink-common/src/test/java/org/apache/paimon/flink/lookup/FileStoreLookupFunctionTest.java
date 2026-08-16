@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
@@ -26,7 +27,6 @@ import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.lookup.PrimaryKeyPartialLookupTable.LocalQueryExecutor;
 import org.apache.paimon.flink.lookup.PrimaryKeyPartialLookupTable.QueryExecutor;
 import org.apache.paimon.flink.lookup.PrimaryKeyPartialLookupTable.RemoteQueryExecutor;
-import org.apache.paimon.lookup.rocksdb.RocksDBOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -43,6 +43,17 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.TraceableFileIO;
 
+import org.apache.flink.table.data.RowData;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.Appender;
+import org.apache.logging.log4j.core.LogEvent;
+import org.apache.logging.log4j.core.LoggerContext;
+import org.apache.logging.log4j.core.appender.AbstractAppender;
+import org.apache.logging.log4j.core.config.Configuration;
+import org.apache.logging.log4j.core.config.LoggerConfig;
+import org.apache.logging.log4j.core.config.Property;
+import org.apache.logging.log4j.core.layout.PatternLayout;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -63,9 +74,13 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
+import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_CACHE_MODE;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_REFRESH_TIME_PERIODS_BLACKLIST;
+import static org.apache.paimon.flink.FlinkConnectorOptions.LookupCacheMode.FULL;
+import static org.apache.paimon.flink.lookup.LookupFileStoreTable.LookupStreamScanMode.CHANGELOG;
 import static org.apache.paimon.service.ServiceManager.PRIMARY_KEY_LOOKUP;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -91,16 +106,19 @@ public class FileStoreLookupFunctionTest {
     }
 
     private void createLookupFunction(boolean refreshAsync) throws Exception {
-        createLookupFunction(true, false, false, refreshAsync);
+        createLookupFunction(true, false, false, refreshAsync, null);
     }
 
     private void createLookupFunction(
             boolean isPartition,
             boolean joinEqualPk,
             boolean dynamicPartition,
-            boolean refreshAsync)
+            boolean refreshAsync,
+            Integer fullLoadThreshold)
             throws Exception {
-        table = createFileStoreTable(isPartition, dynamicPartition, refreshAsync);
+        table =
+                createFileStoreTable(
+                        isPartition, dynamicPartition, refreshAsync, fullLoadThreshold);
         lookupFunction = createLookupFunction(table, joinEqualPk);
         lookupFunction.open(tempDir.toString());
     }
@@ -116,16 +134,24 @@ public class FileStoreLookupFunctionTest {
     }
 
     private FileStoreTable createFileStoreTable(
-            boolean isPartition, boolean dynamicPartition, boolean refreshAsync) throws Exception {
+            boolean isPartition,
+            boolean dynamicPartition,
+            boolean refreshAsync,
+            Integer fullLoadThreshold)
+            throws Exception {
         SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
         Options conf = new Options();
         conf.set(FlinkConnectorOptions.LOOKUP_REFRESH_ASYNC, refreshAsync);
         conf.set(CoreOptions.BUCKET, 2);
         conf.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 3);
         conf.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 2);
-        conf.set(RocksDBOptions.LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL, Duration.ofSeconds(1));
+        conf.set(CoreOptions.LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL, Duration.ofSeconds(1));
         if (dynamicPartition) {
             conf.set(FlinkConnectorOptions.SCAN_PARTITIONS, "max_pt()");
+        }
+
+        if (fullLoadThreshold != null) {
+            conf.set(FlinkConnectorOptions.LOOKUP_REFRESH_FULL_LOAD_THRESHOLD, fullLoadThreshold);
         }
 
         RowType rowType =
@@ -153,7 +179,7 @@ public class FileStoreLookupFunctionTest {
 
     @Test
     public void testCompatibilityForOldVersion() throws Exception {
-        createLookupFunction(false, true, false, false);
+        createLookupFunction(false, true, false, false, null);
         commit(writeCommit(1));
         PrimaryKeyPartialLookupTable lookupTable =
                 (PrimaryKeyPartialLookupTable) lookupFunction.lookupTable();
@@ -174,7 +200,7 @@ public class FileStoreLookupFunctionTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testDefaultLocalPartial(boolean refreshAsync) throws Exception {
-        createLookupFunction(false, true, false, refreshAsync);
+        createLookupFunction(false, true, false, refreshAsync, null);
         assertThat(lookupFunction.lookupTable()).isInstanceOf(PrimaryKeyPartialLookupTable.class);
         QueryExecutor queryExecutor =
                 ((PrimaryKeyPartialLookupTable) lookupFunction.lookupTable()).queryExecutor();
@@ -184,7 +210,7 @@ public class FileStoreLookupFunctionTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testDefaultRemotePartial(boolean refreshAsync) throws Exception {
-        createLookupFunction(false, true, false, refreshAsync);
+        createLookupFunction(false, true, false, refreshAsync, null);
         ServiceManager serviceManager = new ServiceManager(fileIO, tablePath);
         serviceManager.resetService(
                 PRIMARY_KEY_LOOKUP, new InetSocketAddress[] {new InetSocketAddress(1)});
@@ -195,10 +221,31 @@ public class FileStoreLookupFunctionTest {
         assertThat(queryExecutor).isInstanceOf(RemoteQueryExecutor.class);
     }
 
-    @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    public void testLookupScanLeak(boolean refreshAsync) throws Exception {
-        createLookupFunction(refreshAsync);
+    @Test
+    public void testFallbackUpdatesCacheModeToFull() throws Exception {
+        table =
+                createFileStoreTable(false, false, false, null)
+                        .copy(Collections.singletonMap(CoreOptions.SEQUENCE_FIELD.key(), "v"));
+        lookupFunction = createLookupFunction(table, true);
+        lookupFunction.open(tempDir.toString());
+
+        assertThat(lookupFunction.lookupTable()).isInstanceOf(FullCacheLookupTable.class);
+        FullCacheLookupTable fullCacheLookupTable =
+                (FullCacheLookupTable) lookupFunction.lookupTable();
+        assertThat(
+                        Options.fromMap(fullCacheLookupTable.context.table.options())
+                                .get(LOOKUP_CACHE_MODE))
+                .isEqualTo(FULL);
+        assertThat(
+                        fullCacheLookupTable.context.table.lookupStreamScanMode(
+                                fullCacheLookupTable.context.table.wrapped(),
+                                fullCacheLookupTable.context.joinKey))
+                .isEqualTo(CHANGELOG);
+    }
+
+    @Test
+    public void testLookupScanLeak() throws Exception {
+        createLookupFunction(false);
         commit(writeCommit(1));
         lookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 10L)));
         assertThat(
@@ -232,7 +279,7 @@ public class FileStoreLookupFunctionTest {
 
     @Test
     public void testLookupDynamicPartition() throws Exception {
-        createLookupFunction(true, false, true, false);
+        createLookupFunction(true, false, true, false, null);
         commit(writeCommit(1));
         lookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 10L)));
         assertThat(
@@ -252,7 +299,7 @@ public class FileStoreLookupFunctionTest {
 
     @Test
     public void testParseWrongTimePeriodsBlacklist() throws Exception {
-        FileStoreTable table = createFileStoreTable(false, false, false);
+        FileStoreTable table = createFileStoreTable(false, false, false, null);
 
         FileStoreTable table1 =
                 table.copy(
@@ -299,7 +346,7 @@ public class FileStoreLookupFunctionTest {
         String right = end.atZone(ZoneId.systemDefault()).format(formatter);
 
         FileStoreTable table =
-                createFileStoreTable(false, false, false)
+                createFileStoreTable(false, false, false, null)
                         .copy(
                                 Collections.singletonMap(
                                         LOOKUP_REFRESH_TIME_PERIODS_BLACKLIST.key(),
@@ -310,6 +357,88 @@ public class FileStoreLookupFunctionTest {
         lookupFunction.tryRefresh();
 
         assertThat(lookupFunction.nextBlacklistCheckTime()).isEqualTo(end.toEpochMilli() + 1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testLookupTableWithFullLoad(boolean joinEqualPk) throws Exception {
+        createLookupFunction(false, joinEqualPk, false, false, 3);
+
+        if (joinEqualPk) {
+            assertThat(lookupFunction.lookupTable())
+                    .isInstanceOf(PrimaryKeyPartialLookupTable.class);
+        } else {
+            assertThat(lookupFunction.lookupTable()).isInstanceOf(FullCacheLookupTable.class);
+        }
+
+        GenericRow expectedRow = GenericRow.of(1, 1, 1L);
+        StreamTableWrite writer = table.newStreamWriteBuilder().newWrite();
+        writer.write(expectedRow);
+        commit(writer.prepareCommit(true, 1));
+
+        List<RowData> result =
+                new ArrayList<>(lookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 1L))));
+        assertThat(result).size().isEqualTo(1);
+        RowData resultRow = result.get(0);
+        assertThat(resultRow.getInt(0)).isEqualTo(expectedRow.getInt(0));
+        assertThat(resultRow.getInt(1)).isEqualTo(expectedRow.getInt(1));
+
+        // Create more commits to exceed threshold (3 more to have gap > 3)
+        for (int i = 2; i < 6; i++) {
+            writer.write(GenericRow.of(i, i, (long) i));
+            commit(writer.prepareCommit(true, i));
+        }
+        writer.close();
+
+        // wait refresh
+        Thread.sleep(2000);
+
+        expectedRow = GenericRow.of(5, 5, 5L);
+        assertThat(lookupFunction.shouldDoFullLoad()).isTrue();
+        lookupFunction.tryRefresh();
+        result = new ArrayList<>(lookupFunction.lookup(new FlinkRowData(GenericRow.of(5, 5, 5L))));
+        assertThat(result).size().isEqualTo(1);
+        resultRow = result.get(0);
+        assertThat(resultRow.getInt(0)).isEqualTo(expectedRow.getInt(0));
+        assertThat(resultRow.getInt(1)).isEqualTo(expectedRow.getInt(1));
+    }
+
+    @Test
+    public void testDebugLogRowsWithAppendedPrimaryKey() throws Exception {
+        table = createStringFileStoreTable();
+        lookupFunction =
+                new FileStoreLookupFunction(table, new int[] {2, 1}, new int[] {1}, null, null);
+        lookupFunction.open(tempDir.toString());
+
+        StreamTableWrite writer = table.newStreamWriteBuilder().newWrite();
+        writer.write(
+                GenericRow.of(
+                        -1, BinaryString.fromString("key-1"), BinaryString.fromString("value-1")));
+        commit(writer.prepareCommit(true, 1));
+        writer.close();
+
+        Appender appender = addLookupFunctionAppender(Level.INFO);
+        try {
+            lookupFunction.lookup(
+                    new FlinkRowData(GenericRow.of(BinaryString.fromString("key-1"))));
+            assertThat(((CollectingAppender) appender).messages)
+                    .noneMatch(message -> message.contains("matched rows in lookup table"));
+        } finally {
+            removeLookupFunctionAppender(appender);
+        }
+
+        appender = addLookupFunctionAppender(Level.DEBUG);
+        try {
+            lookupFunction.lookup(
+                    new FlinkRowData(GenericRow.of(BinaryString.fromString("key-1"))));
+            assertThat(((CollectingAppender) appender).messages)
+                    .anyMatch(
+                            message ->
+                                    message.contains("matched rows in lookup table")
+                                            && message.contains("[value-1, key-1, -1]"));
+        } finally {
+            removeLookupFunctionAppender(appender);
+        }
     }
 
     private void commit(List<CommitMessage> messages) throws Exception {
@@ -330,5 +459,62 @@ public class FileStoreLookupFunctionTest {
 
     private InternalRow randomRow() {
         return GenericRow.of(RANDOM.nextInt(100), RANDOM.nextInt(100), RANDOM.nextLong());
+    }
+
+    private FileStoreTable createStringFileStoreTable() throws Exception {
+        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
+        Options conf = new Options();
+        conf.set(CoreOptions.BUCKET, 2);
+        conf.set(CoreOptions.LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL, Duration.ofSeconds(1));
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.STRING(), DataTypes.STRING()},
+                        new String[] {"pt", "k", "v"});
+        Schema schema =
+                new Schema(
+                        rowType.getFields(),
+                        Collections.emptyList(),
+                        Arrays.asList("pt", "k"),
+                        conf.toMap(),
+                        "");
+        TableSchema tableSchema = schemaManager.createTable(schema);
+        return FileStoreTableFactory.create(fileIO, tablePath, tableSchema);
+    }
+
+    private Appender addLookupFunctionAppender(Level level) {
+        LoggerContext context = (LoggerContext) LogManager.getContext(false);
+        Configuration configuration = context.getConfiguration();
+        CollectingAppender appender = new CollectingAppender("lookup-function-test-appender");
+        appender.start();
+
+        LoggerConfig loggerConfig =
+                new LoggerConfig(FileStoreLookupFunction.class.getName(), level, false);
+        loggerConfig.addAppender(appender, Level.DEBUG, null);
+        configuration.addLogger(FileStoreLookupFunction.class.getName(), loggerConfig);
+        context.updateLoggers();
+        return appender;
+    }
+
+    private void removeLookupFunctionAppender(Appender appender) {
+        LoggerContext context = (LoggerContext) LogManager.getContext(false);
+        Configuration configuration = context.getConfiguration();
+        configuration.removeLogger(FileStoreLookupFunction.class.getName());
+        appender.stop();
+        context.updateLoggers();
+    }
+
+    private static class CollectingAppender extends AbstractAppender {
+
+        private final List<String> messages = new CopyOnWriteArrayList<>();
+
+        private CollectingAppender(String name) {
+            super(name, null, PatternLayout.createDefaultLayout(), false, Property.EMPTY_ARRAY);
+        }
+
+        @Override
+        public void append(LogEvent event) {
+            messages.add(event.getMessage().getFormattedMessage());
+        }
     }
 }

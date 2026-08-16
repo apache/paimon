@@ -64,7 +64,11 @@ public interface DataTypeVisitor<R> {
 
     R visit(VariantType variantType);
 
+    R visit(BlobType blobType);
+
     R visit(ArrayType arrayType);
+
+    R visit(VectorType vectorType);
 
     R visit(MultisetType multisetType);
 

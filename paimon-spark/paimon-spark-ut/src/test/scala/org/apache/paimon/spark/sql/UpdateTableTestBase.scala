@@ -18,12 +18,17 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.CoreOptions
+import org.apache.paimon.{CoreOptions, Snapshot}
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.spark.catalyst.analysis.Update
 
 import org.apache.spark.sql.Row
 import org.assertj.core.api.Assertions.{assertThat, assertThatThrownBy}
+
+import scala.concurrent.{Await, Future}
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.duration.DurationInt
+import scala.util.Random
 
 abstract class UpdateTableTestBase extends PaimonSparkTestBase {
 
@@ -348,7 +353,7 @@ abstract class UpdateTableTestBase extends PaimonSparkTestBase {
 
     assertThatThrownBy(
       () => spark.sql("UPDATE T SET s.c2 = 'a_new', s = struct(11, 'a_new') WHERE s.c1 = 1"))
-      .hasMessageContaining("Conflicting update/insert on attrs: s.c2, s")
+      .hasMessageContaining("Conflicting assignments for 's'")
   }
 
   test("Paimon update: update table with char type") {
@@ -356,5 +361,95 @@ abstract class UpdateTableTestBase extends PaimonSparkTestBase {
     sql("INSERT INTO T VALUES (1, 's', 'a')")
     sql("UPDATE T SET c = 'b' WHERE id = 1")
     checkAnswer(sql("SELECT * FROM T"), Seq(Row(1, "s", "b")))
+  }
+
+  test("Paimon update: overlong CHAR value throws (same as INSERT)") {
+    withTable("t_char") {
+      sql("CREATE TABLE t_char (id INT, c CHAR(2))")
+      sql("INSERT INTO t_char VALUES (1, 'aa')")
+      assertThatThrownBy(() => sql("UPDATE t_char SET c = 'abc' WHERE id = 1"))
+        .hasMessageContaining("char/varchar")
+      checkAnswer(sql("SELECT * FROM t_char"), Seq(Row(1, "aa")))
+    }
+  }
+
+  test("Paimon update: overlong VARCHAR value throws (same as INSERT)") {
+    withTable("t_varchar") {
+      sql("CREATE TABLE t_varchar (id INT, v VARCHAR(2))")
+      sql("INSERT INTO t_varchar VALUES (1, 'bb')")
+      assertThatThrownBy(() => sql("UPDATE t_varchar SET v = 'abc' WHERE id = 1"))
+        .hasMessageContaining("char/varchar")
+      checkAnswer(sql("SELECT * FROM t_varchar"), Seq(Row(1, "bb")))
+    }
+  }
+
+  test("Paimon update: non pk table commit kind") {
+    for (dvEnabled <- Seq(true, false)) {
+      withTable("t") {
+        sql(
+          s"CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('deletion-vectors.enabled' = '$dvEnabled')")
+        sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS data FROM range(1, 4)")
+
+        sql("UPDATE t SET data = 111 WHERE id = 1")
+        checkAnswer(sql("SELECT * FROM t ORDER BY id"), Seq(Row(1, 111), Row(2, 2), Row(3, 3)))
+        val table = loadTable("t")
+        var latestSnapshot = table.latestSnapshot().get()
+        assert(latestSnapshot.id == 2)
+        assert(latestSnapshot.commitKind.equals(Snapshot.CommitKind.OVERWRITE))
+
+        sql("UPDATE t SET data = 222 WHERE id = 2")
+        checkAnswer(sql("SELECT * FROM t ORDER BY id"), Seq(Row(1, 111), Row(2, 222), Row(3, 3)))
+        latestSnapshot = table.latestSnapshot().get()
+        assert(latestSnapshot.id == 3)
+        assert(latestSnapshot.commitKind.equals(Snapshot.CommitKind.OVERWRITE))
+      }
+    }
+  }
+
+  test("Paimon update: pk dv table commit kind") {
+    withTable("t") {
+      sql(
+        s"CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'primary-key' = 'id')")
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS data FROM range(1, 4)")
+      sql("UPDATE t SET data = 111 WHERE id = 1")
+      val table = loadTable("t")
+      val latestSnapshot = table.latestSnapshot().get()
+      assert(latestSnapshot.id == 4)
+      assert(latestSnapshot.commitKind.equals(Snapshot.CommitKind.COMPACT))
+    }
+  }
+
+  test("Paimon update: random concurrent update and dv table") {
+    withTable("t") {
+      val recordCount = 10000
+      val maxCurrent = Random.nextInt(2) + 1
+
+      sql(s"CREATE TABLE t (a INT, b INT) TBLPROPERTIES ('deletion-vectors.enabled' = 'true')")
+      sql(s"INSERT INTO t SELECT id AS a, 0 AS b FROM range(0, $recordCount)")
+
+      def run(): Future[Unit] = Future {
+        for (_ <- 1 to 20) {
+          try {
+            val i = 20 + Random.nextInt(100)
+            Random.nextInt(2) match {
+              case 0 => sql(s"UPDATE t SET b = b + 1 WHERE (a % $i) = ${Random.nextInt(i)}")
+              case 1 =>
+                sql("CALL sys.compact(table => 't', options => 'compaction.min.file-num=1')")
+              case 2 =>
+                sql("CALL sys.compact(table => 't', order_strategy => 'order', order_by => 'a')")
+            }
+          } catch {
+            case a: Throwable => assert(a.getMessage.contains("Conflicts during commits"))
+          }
+          checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(recordCount)))
+        }
+      }
+
+      (1 to maxCurrent)
+        .map(_ => run())
+        .foreach(
+          Await.result(_, 600.seconds)
+        )
+    }
   }
 }

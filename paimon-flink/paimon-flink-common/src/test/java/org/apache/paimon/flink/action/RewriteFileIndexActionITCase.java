@@ -65,14 +65,17 @@ public class RewriteFileIndexActionITCase extends ActionITCaseBase {
                         + " 'write-only' = 'true',"
                         + " 'bucket' = '-1'"
                         + ")");
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
         tEnv.executeSql(
                 "INSERT INTO T VALUES (1, '100', 15, '20221208'), (1, '100', 16, '20221208'), (1, '100', 15, '20221209')");
-        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
         tEnv.executeSql("ALTER TABLE T SET ('file-index.bloom-filter.columns'='k,v')");
 
         if (ThreadLocalRandom.current().nextBoolean()) {
             StreamExecutionEnvironment env =
-                    streamExecutionEnvironmentBuilder().streamingMode().build();
+                    streamExecutionEnvironmentBuilder()
+                            .batchMode()
+                            .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                            .build();
             createAction(
                             RewriteFileIndexAction.class,
                             "rewrite_file_index",
@@ -83,11 +86,97 @@ public class RewriteFileIndexActionITCase extends ActionITCaseBase {
                     .withStreamExecutionEnvironment(env)
                     .run();
         } else {
-            executeSQL("CALL sys.rewrite_file_index('test_db.T')");
+            executeSQL("CALL sys.rewrite_file_index('test_db.T')", false, true);
         }
 
         FileStoreTable table = (FileStoreTable) catalog.getTable(new Identifier("test_db", "T"));
         List<ManifestEntry> list = table.store().newScan().plan().files();
+        testIndexFile(list, table);
+    }
+
+    @Test
+    public void testFileIndexAddIndexWithSpecifiedPartition() throws Exception {
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+        tEnv.executeSql(
+                String.format(
+                        "CREATE CATALOG PAIMON WITH ('type'='paimon', 'warehouse'='%s');",
+                        warehouse));
+        tEnv.useCatalog("PAIMON");
+
+        tEnv.executeSql("CREATE DATABASE IF NOT EXISTS test_db;").await();
+        tEnv.executeSql("USE test_db").await();
+
+        tEnv.executeSql(
+                "CREATE TABLE T ("
+                        + " k INT,"
+                        + " v STRING,"
+                        + " hh INT,"
+                        + " dt STRING"
+                        + ") PARTITIONED BY (dt, hh) WITH ("
+                        + " 'write-only' = 'true',"
+                        + " 'bucket' = '-1'"
+                        + ")");
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        tEnv.executeSql(
+                "INSERT INTO T VALUES (1, '100', 15, '20221208'), (1, '100', 16, '20221208'), (1, '100', 15, '20221209')");
+        tEnv.executeSql("ALTER TABLE T SET ('file-index.bloom-filter.columns'='k,v')");
+
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            StreamExecutionEnvironment env =
+                    streamExecutionEnvironmentBuilder()
+                            .batchMode()
+                            .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                            .build();
+            createAction(
+                            RewriteFileIndexAction.class,
+                            "rewrite_file_index",
+                            "--warehouse",
+                            warehouse,
+                            "--identifier",
+                            "test_db.T",
+                            "--partitions",
+                            "dt=20221208")
+                    .withStreamExecutionEnvironment(env)
+                    .run();
+        } else {
+            executeSQL("CALL sys.rewrite_file_index('test_db.T', 'dt=20221208')", false, true);
+        }
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(new Identifier("test_db", "T"));
+
+        List<ManifestEntry> partition20221209List =
+                table.store()
+                        .newScan()
+                        .withPartitionFilter(
+                                new PredicateBuilder(table.schema().logicalPartitionType())
+                                        .equal(0, BinaryString.fromString("20221209")))
+                        .plan()
+                        .files();
+
+        partition20221209List.forEach(
+                entry -> {
+                    List<String> extraFiles =
+                            entry.file().extraFiles().stream()
+                                    .filter(s -> s.endsWith(DataFilePathFactory.INDEX_PATH_SUFFIX))
+                                    .collect(Collectors.toList());
+
+                    // Means no index file
+                    Assertions.assertThat(extraFiles.size()).isEqualTo(0);
+                });
+
+        List<ManifestEntry> partition20221208List =
+                table.store()
+                        .newScan()
+                        .withPartitionFilter(
+                                new PredicateBuilder(table.schema().logicalPartitionType())
+                                        .equal(0, BinaryString.fromString("20221208")))
+                        .plan()
+                        .files();
+
+        testIndexFile(partition20221208List, table);
+    }
+
+    private void testIndexFile(List<ManifestEntry> list, FileStoreTable table) throws Exception {
         for (ManifestEntry entry : list) {
             List<String> extraFiles =
                     entry.file().extraFiles().stream()

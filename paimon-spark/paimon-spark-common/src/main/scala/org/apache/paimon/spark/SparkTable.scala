@@ -18,150 +18,159 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.CoreOptions
-import org.apache.paimon.CoreOptions.BucketFunctionType
-import org.apache.paimon.options.Options
-import org.apache.paimon.spark.catalog.functions.BucketFunction
-import org.apache.paimon.spark.schema.PaimonMetadataColumn
-import org.apache.paimon.spark.util.OptionUtils
-import org.apache.paimon.spark.write.{PaimonV2WriteBuilder, PaimonWriteBuilder}
-import org.apache.paimon.table.{DataTable, FileStoreTable, InnerTable, KnownSplitsTable, Table}
-import org.apache.paimon.table.BucketMode.{BUCKET_UNAWARE, HASH_FIXED, POSTPONE_MODE}
-import org.apache.paimon.utils.StringUtils
+import org.apache.paimon.spark.read.ObjectTableScanBuilder
+import org.apache.paimon.spark.rowops.{PaimonSparkCopyOnWriteOperation, PaimonSparkDeltaOperation}
+import org.apache.paimon.table.`object`.ObjectTable
+import org.apache.paimon.table.{BucketMode, FileStoreTable, Table}
 
-import org.apache.spark.sql.connector.catalog._
-import org.apache.spark.sql.connector.expressions.{Expressions, Transform}
+import org.apache.spark.sql.connector.catalog.{SupportsRead, SupportsRowLevelOperations, TableCapability}
 import org.apache.spark.sql.connector.read.ScanBuilder
-import org.apache.spark.sql.connector.write.{LogicalWriteInfo, WriteBuilder}
-import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.connector.write.{RowLevelOperationBuilder, RowLevelOperationInfo}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
-import java.util.{Collections, EnumSet => JEnumSet, HashMap => JHashMap, Map => JMap, Set => JSet}
+import java.util.{EnumSet => JEnumSet, Set => JSet}
 
-import scala.collection.JavaConverters._
-import scala.collection.mutable.ArrayBuffer
+/**
+ * A spark [[org.apache.spark.sql.connector.catalog.Table]] for paimon.
+ *
+ * This base variant does NOT implement [[SupportsRowLevelOperations]]. Spark 4.1 moved
+ * `RewriteDeleteFromTable` / `RewriteUpdateTable` / `RewriteMergeIntoTable` from the separate "DML
+ * rewrite" batch into the main Resolution batch, which fires BEFORE Paimon's own
+ * postHocResolutionRule interceptors (`PaimonDeleteTable`, `PaimonUpdateTable`, `PaimonMergeInto`).
+ * If this base class implemented `SupportsRowLevelOperations`, Spark 4.1 would immediately call
+ * `newRowLevelOperationBuilder` on tables whose V2 write is disabled (e.g. dynamic bucket or
+ * primary-key tables that fall back to V1 write) and fail before Paimon has a chance to rewrite the
+ * plan to a V1 command. Likewise, data-evolution and fixed-length CHAR tables need to stay on
+ * Paimon's V1 postHoc path even when `useV2Write=true`, so they must also not expose
+ * `SupportsRowLevelOperations`.
+ *
+ * Tables that DO support V2 row-level operations use the [[SparkTableWithRowLevelOps]] subclass
+ * instead; the [[SparkTable.of]] factory picks the right variant via
+ * [[SparkTable.supportsV2RowLevelOps]]. Append-only tables, including row-tracking-only tables,
+ * expose `SupportsRowLevelOperations` so DELETE, UPDATE, and MERGE INTO can go through the V2
+ * copy-on-write path when the table has no PK, deletion vectors, data evolution, or CHAR columns;
+ * unaware-bucket deletion-vector append tables expose it so DELETE can go through the delta path
+ * (see [[SparkTable.supportsV2DeltaOps]]).
+ */
+case class SparkTable(override val table: Table) extends PaimonSparkTableBase(table)
 
-/** A spark [[org.apache.spark.sql.connector.catalog.Table]] for paimon. */
-case class SparkTable(table: Table)
-  extends org.apache.spark.sql.connector.catalog.Table
-  with SupportsRead
-  with SupportsWrite
-  with SupportsMetadataColumns
-  with PaimonPartitionManagement {
+/**
+ * A Paimon [[SparkTable]] that additionally exposes V2 row-level operations to Spark. Constructed
+ * when [[PaimonSparkTableBase.useV2Write]] is true.
+ */
+class SparkTableWithRowLevelOps(tableArg: Table)
+  extends SparkTable(tableArg)
+  with SupportsRowLevelOperations {
 
-  lazy val coreOptions = new CoreOptions(table.options())
-
-  private lazy val useV2Write: Boolean = {
-    val v2WriteConfigured = OptionUtils.useV2Write()
-    v2WriteConfigured && supportsV2Write
-  }
-
-  private def supportsV2Write: Boolean = {
-    coreOptions.bucketFunctionType() == BucketFunctionType.DEFAULT && {
-      table match {
-        case storeTable: FileStoreTable =>
-          storeTable.bucketMode() match {
-            case HASH_FIXED => BucketFunction.supportsTable(storeTable)
-            case BUCKET_UNAWARE | POSTPONE_MODE => true
-            case _ => false
-          }
-
-        case _ => false
-      }
-    }
-  }
-
-  def getTable: Table = table
-
-  override def name: String = table.fullName
-
-  override lazy val schema: StructType = SparkTypeUtils.fromPaimonRowType(table.rowType)
-
-  override def partitioning: Array[Transform] = {
-    table.partitionKeys().asScala.map(p => Expressions.identity(StringUtils.quote(p))).toArray
-  }
-
-  override def properties: JMap[String, String] = {
+  override def newRowLevelOperationBuilder(
+      info: RowLevelOperationInfo): RowLevelOperationBuilder = {
     table match {
-      case dataTable: DataTable =>
-        val properties = new JHashMap[String, String](dataTable.coreOptions.toMap)
-        if (!table.primaryKeys.isEmpty) {
-          properties.put(CoreOptions.PRIMARY_KEY.key, String.join(",", table.primaryKeys))
-        }
-        properties.put(TableCatalog.PROP_PROVIDER, SparkSource.NAME)
-        if (table.comment.isPresent) {
-          properties.put(TableCatalog.PROP_COMMENT, table.comment.get)
-        }
-        if (properties.containsKey(CoreOptions.PATH.key())) {
-          properties.put(TableCatalog.PROP_LOCATION, properties.get(CoreOptions.PATH.key()))
-        }
-        properties
-      case _ => Collections.emptyMap()
+      case t: FileStoreTable =>
+        if (SparkTable.supportsV2DeltaOps(this)) { () => new PaimonSparkDeltaOperation(t, info) }
+        else { () => new PaimonSparkCopyOnWriteOperation(t, info) }
+      case _ =>
+        throw new UnsupportedOperationException(
+          "Row-level write operation is only supported for FileStoreTable. " +
+            s"Actual table type: ${table.getClass.getSimpleName}")
+    }
+  }
+}
+
+/** Factory helpers for constructing the right [[SparkTable]] subclass. */
+object SparkTable {
+
+  /**
+   * Returns a [[SparkTable]] variant suitable for the given table: [[SparkTableWithRowLevelOps]]
+   * when the table can participate in Spark's V2 row-level ops path, the plain [[SparkTable]]
+   * otherwise.
+   */
+  def of(table: Table): SparkTable = {
+    // We need `useV2Write` (and other coreOptions) which are instance state, so construct once to
+    // probe and promote to the row-level-ops variant only if the table truly supports the V2
+    // row-level write path. The base instance is cheap and is discarded if we decide to return
+    // the subclass.
+    val base = SparkTable(table)
+    if (supportsV2RowLevelOps(base)) new SparkTableWithRowLevelOps(table) else base
+  }
+
+  /**
+   * Whether the given table supports Paimon's V2 row-level operations, i.e. whether it is safe to
+   * expose [[SupportsRowLevelOperations]] to Spark.
+   *
+   * Append-only tables return `true` here so that `SparkTable.of` wraps them as
+   * `SparkTableWithRowLevelOps`, enabling Spark's V2 copy-on-write DELETE, UPDATE, and MERGE INTO
+   * paths. Row-tracking append-only tables require Spark 4.0+ because Spark 3.5 does not have the
+   * metadata-aware `DataWriter.write(metadata, data)` path needed to preserve row-tracking metadata
+   * for rewritten rows.
+   *
+   * Per-version shims for Spark 3.2/3.3/3.4 each ship their own
+   * `org.apache.paimon.spark.SparkTable` (class + companion) that shadows this one at packaging
+   * time — the common jar is also shaded into every per-version artifact, and the per-version copy
+   * wins classloader precedence. Those shim companions MUST therefore expose a method with this
+   * exact signature (they hard-code `false` because Spark < 3.5 cannot participate in V2 row-level
+   * ops), otherwise `RowLevelHelper.shouldFallbackToV1` on the shim classpath throws
+   * `NoSuchMethodError` at the first DML statement.
+   */
+  private[spark] def supportsV2RowLevelOps(sparkTable: SparkTable): Boolean = {
+    supportsV2CopyOnWriteOps(sparkTable) || supportsV2DeltaOps(sparkTable)
+  }
+
+  private def supportsV2CopyOnWriteOps(sparkTable: SparkTable): Boolean = {
+    if (org.apache.spark.SPARK_VERSION < "3.5") return false
+    if (!sparkTable.useV2Write) return false
+    sparkTable.getTable match {
+      case fs: FileStoreTable =>
+        val supportsRowTrackingCopyOnWrite =
+          !sparkTable.coreOptions.rowTrackingEnabled() || org.apache.spark.SPARK_VERSION >= "4.0"
+        fs.primaryKeys().isEmpty &&
+        supportsRowTrackingCopyOnWrite &&
+        !sparkTable.coreOptions.deletionVectorsEnabled() &&
+        !sparkTable.coreOptions.dataEvolutionEnabled() &&
+        !SparkTypeUtils.containsCharType(fs.rowType())
+      case _ => false
     }
   }
 
-  override def capabilities: JSet[TableCapability] = {
-    val capabilities = JEnumSet.of(
-      TableCapability.BATCH_READ,
-      TableCapability.OVERWRITE_BY_FILTER,
-      TableCapability.MICRO_BATCH_READ
-    )
-
-    if (useV2Write) {
-      capabilities.add(TableCapability.BATCH_WRITE)
-      capabilities.add(TableCapability.OVERWRITE_DYNAMIC)
-    } else {
-      capabilities.add(TableCapability.ACCEPT_ANY_SCHEMA)
-      capabilities.add(TableCapability.V1_BATCH_WRITE)
+  /**
+   * Whether the table takes the delta-based row-level path ([[PaimonSparkDeltaOperation]]): an
+   * unaware-bucket append-only table with deletion vectors enabled. Bucketed append tables are
+   * excluded because commit conflict detection does not cover concurrent deletion-vector index
+   * changes of the same bucket (`IndexManifestFileHandler` overwrites the whole bucket's index);
+   * row-tracking deletion-vector tables are excluded until the delta path defines the row lineage
+   * semantics for rewritten rows.
+   *
+   * The Spark 3.2/3.3/3.4 shim `SparkTable` companions must expose a method with this exact
+   * signature (hard-coded `false`), same as [[supportsV2RowLevelOps]]. Public because the Spark 4.1
+   * rewrite scope (`PureAppendOnlyScope.targetsV2DeltaTable`) delegates to it as the single source
+   * of truth for the delta gating conditions.
+   */
+  def supportsV2DeltaOps(sparkTable: SparkTable): Boolean = {
+    if (org.apache.spark.SPARK_VERSION < "3.5") return false
+    if (!sparkTable.useV2Write) return false
+    sparkTable.getTable match {
+      case fs: FileStoreTable =>
+        fs.primaryKeys().isEmpty &&
+        fs.bucketMode() == BucketMode.BUCKET_UNAWARE &&
+        sparkTable.coreOptions.deletionVectorsEnabled() &&
+        !sparkTable.coreOptions.rowTrackingEnabled() &&
+        !sparkTable.coreOptions.dataEvolutionEnabled() &&
+        !SparkTypeUtils.containsCharType(fs.rowType())
+      case _ => false
     }
-
-    capabilities
   }
+}
 
-  override def metadataColumns: Array[MetadataColumn] = {
-    val partitionType = SparkTypeUtils.toSparkPartitionType(table)
+case class SparkIcebergTable(table: Table) extends BaseTable
 
-    val _metadataColumns = ArrayBuffer[MetadataColumn](
-      PaimonMetadataColumn.FILE_PATH,
-      PaimonMetadataColumn.ROW_INDEX,
-      PaimonMetadataColumn.PARTITION(partitionType),
-      PaimonMetadataColumn.BUCKET
-    )
+case class SparkLanceTable(table: Table) extends BaseTable
 
-    if (coreOptions.rowTrackingEnabled()) {
-      _metadataColumns.append(PaimonMetadataColumn.ROW_ID)
-      _metadataColumns.append(PaimonMetadataColumn.SEQUENCE_NUMBER)
-    }
+case class SparkObjectTable(override val table: ObjectTable) extends BaseTable with SupportsRead {
 
-    _metadataColumns.toArray
+  override def capabilities(): JSet[TableCapability] = {
+    JEnumSet.of(TableCapability.BATCH_READ)
   }
 
   override def newScanBuilder(options: CaseInsensitiveStringMap): ScanBuilder = {
-    table match {
-      case t: KnownSplitsTable =>
-        new PaimonSplitScanBuilder(t)
-      case _: InnerTable =>
-        new PaimonScanBuilder(table.copy(options.asCaseSensitiveMap).asInstanceOf[InnerTable])
-      case _ =>
-        throw new RuntimeException("Only InnerTable can be scanned.")
-    }
-  }
-
-  override def newWriteBuilder(info: LogicalWriteInfo): WriteBuilder = {
-    table match {
-      case fileStoreTable: FileStoreTable =>
-        val options = Options.fromMap(info.options)
-        if (useV2Write) {
-          new PaimonV2WriteBuilder(fileStoreTable, info.schema())
-        } else {
-          new PaimonWriteBuilder(fileStoreTable, options)
-        }
-      case _ =>
-        throw new RuntimeException("Only FileStoreTable can be written.")
-    }
-  }
-
-  override def toString: String = {
-    s"${table.getClass.getSimpleName}[${table.fullName()}]"
+    new ObjectTableScanBuilder(table.copy(options.asCaseSensitiveMap))
   }
 }

@@ -23,12 +23,19 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
+import org.apache.arrow.vector.FieldVector;
+import org.apache.arrow.vector.IntVector;
+import org.apache.arrow.vector.VectorSchemaRoot;
+import org.apache.arrow.vector.complex.StructVector;
+import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.FieldType;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 
@@ -107,5 +114,52 @@ public class ArrowUtilsTest {
                         .get(1)
                         .getFieldType();
         Assertions.assertThat(fieldType.isNullable()).isTrue();
+    }
+
+    @Test
+    public void testVectorType() {
+        Field field =
+                ArrowUtils.toArrowField("embed", 0, DataTypes.VECTOR(4, DataTypes.FLOAT()), 0);
+        Assertions.assertThat(field.getFieldType().getType())
+                .isEqualTo(new ArrowType.FixedSizeList(4));
+        Assertions.assertThat(field.getChildren()).hasSize(1);
+    }
+
+    @Test
+    public void testSameRootAllocatorIncludesNestedVectors() {
+        try (RootAllocator allocator = new RootAllocator();
+                BufferAllocator childAllocator =
+                        allocator.newChildAllocator("same-root-child", 0, Long.MAX_VALUE);
+                VectorSchemaRoot root =
+                        nestedRoot(allocator, new IntVector("value", childAllocator))) {
+            Assertions.assertThat(ArrowUtils.hasSameRootAllocator(root, allocator)).isTrue();
+        }
+
+        try (RootAllocator allocator = new RootAllocator();
+                RootAllocator differentRoot = new RootAllocator();
+                VectorSchemaRoot root =
+                        nestedRoot(allocator, new IntVector("value", differentRoot))) {
+            Assertions.assertThat(ArrowUtils.hasSameRootAllocator(root, allocator)).isFalse();
+        }
+    }
+
+    private static VectorSchemaRoot nestedRoot(BufferAllocator allocator, FieldVector childVector) {
+        TestingStructVector structVector = new TestingStructVector("nested", allocator);
+        structVector.putTestingChild("value", childVector);
+        return new VectorSchemaRoot(
+                Collections.singletonList(structVector.getField()),
+                Collections.singletonList(structVector),
+                0);
+    }
+
+    private static class TestingStructVector extends StructVector {
+
+        private TestingStructVector(String name, BufferAllocator allocator) {
+            super(name, allocator, FieldType.nullable(ArrowType.Struct.INSTANCE), null);
+        }
+
+        private void putTestingChild(String name, FieldVector childVector) {
+            putChild(name, childVector);
+        }
     }
 }

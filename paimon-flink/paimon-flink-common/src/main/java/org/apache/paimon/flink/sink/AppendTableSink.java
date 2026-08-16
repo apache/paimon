@@ -23,6 +23,7 @@ import org.apache.paimon.flink.compact.AppendPreCommitCompactCoordinatorOperator
 import org.apache.paimon.flink.compact.AppendPreCommitCompactWorkerOperator;
 import org.apache.paimon.flink.source.AppendBypassCoordinateOperatorFactory;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
@@ -37,6 +38,9 @@ import javax.annotation.Nullable;
 
 import java.util.Map;
 
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_MANAGED_WRITER_BUFFER_MEMORY;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEMORY;
+import static org.apache.paimon.flink.utils.ManagedMemoryUtils.declareManagedMemory;
 import static org.apache.paimon.flink.utils.ParallelismUtils.forwardParallelism;
 import static org.apache.paimon.flink.utils.ParallelismUtils.setParallelism;
 
@@ -51,18 +55,15 @@ public abstract class AppendTableSink<T> extends FlinkWriteSink<T> {
     private static final long serialVersionUID = 1L;
 
     protected final FileStoreTable table;
-    protected final LogSinkFunction logSinkFunction;
 
     @Nullable protected final Integer parallelism;
 
     public AppendTableSink(
             FileStoreTable table,
             @Nullable Map<String, String> overwritePartitions,
-            LogSinkFunction logSinkFunction,
             @Nullable Integer parallelism) {
         super(table, overwritePartitions);
         this.table = table;
-        this.logSinkFunction = logSinkFunction;
         this.parallelism = parallelism;
     }
 
@@ -95,7 +96,10 @@ public abstract class AppendTableSink<T> extends FlinkWriteSink<T> {
         }
 
         boolean enableCompaction =
-                !table.coreOptions().writeOnly() && !table.coreOptions().dataEvolutionEnabled();
+                !table.coreOptions().writeOnly()
+                        && !table.coreOptions().dataEvolutionEnabled()
+                        && !(table.bucketMode() == BucketMode.BUCKET_UNAWARE
+                                && table.coreOptions().clusteringIncrementalEnabled());
         boolean isStreamingMode =
                 input.getExecutionEnvironment()
                                 .getConfiguration()
@@ -120,6 +124,10 @@ public abstract class AppendTableSink<T> extends FlinkWriteSink<T> {
                             .startNewChain();
             setParallelism(newWritten, written.getParallelism(), false);
             written = newWritten;
+
+            if (options.get(SINK_USE_MANAGED_MEMORY)) {
+                declareManagedMemory(written, options.get(SINK_MANAGED_WRITER_BUFFER_MEMORY));
+            }
         }
 
         return written;

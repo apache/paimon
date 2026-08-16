@@ -101,6 +101,18 @@ public final class IOUtils {
         return output.toByteArray();
     }
 
+    public static int readNBytes(InputStream in, byte[] b, int off, int len) throws IOException {
+        int n = 0;
+        while (n < len) {
+            int count = in.read(b, off + n, len - n);
+            if (count < 0) {
+                break;
+            }
+            n += count;
+        }
+        return n;
+    }
+
     /**
      * Reads len bytes in a loop.
      *

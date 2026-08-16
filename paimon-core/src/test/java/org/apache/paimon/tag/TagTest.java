@@ -32,6 +32,8 @@ public class TagTest {
 
     private final Snapshot snapshot =
             new Snapshot(
+                    3,
+                    "snapshot-uuid",
                     0,
                     0L,
                     null,
@@ -45,8 +47,8 @@ public class TagTest {
                     0L,
                     Snapshot.CommitKind.APPEND,
                     1000,
-                    null,
-                    null,
+                    0L,
+                    0L,
                     null,
                     null,
                     null,
@@ -60,17 +62,17 @@ public class TagTest {
         assertEquals(
                 "{\n"
                         + "  \"version\" : 3,\n"
+                        + "  \"uuid\" : \"snapshot-uuid\",\n"
                         + "  \"id\" : 0,\n"
                         + "  \"schemaId\" : 0,\n"
                         + "  \"baseManifestList\" : null,\n"
                         + "  \"deltaManifestList\" : null,\n"
-                        + "  \"changelogManifestList\" : null,\n"
                         + "  \"commitUser\" : null,\n"
                         + "  \"commitIdentifier\" : 0,\n"
                         + "  \"commitKind\" : \"APPEND\",\n"
                         + "  \"timeMillis\" : 1000,\n"
-                        + "  \"totalRecordCount\" : null,\n"
-                        + "  \"deltaRecordCount\" : null\n"
+                        + "  \"totalRecordCount\" : 0,\n"
+                        + "  \"deltaRecordCount\" : 0\n"
                         + "}",
                 tag.toJson());
     }
@@ -86,17 +88,17 @@ public class TagTest {
         assertEquals(
                 "{\n"
                         + "  \"version\" : 3,\n"
+                        + "  \"uuid\" : \"snapshot-uuid\",\n"
                         + "  \"id\" : 0,\n"
                         + "  \"schemaId\" : 0,\n"
                         + "  \"baseManifestList\" : null,\n"
                         + "  \"deltaManifestList\" : null,\n"
-                        + "  \"changelogManifestList\" : null,\n"
                         + "  \"commitUser\" : null,\n"
                         + "  \"commitIdentifier\" : 0,\n"
                         + "  \"commitKind\" : \"APPEND\",\n"
                         + "  \"timeMillis\" : 1000,\n"
-                        + "  \"totalRecordCount\" : null,\n"
-                        + "  \"deltaRecordCount\" : null,\n"
+                        + "  \"totalRecordCount\" : 0,\n"
+                        + "  \"deltaRecordCount\" : 0,\n"
                         + "  \"tagCreateTime\" : [ 1969, 1, 1, 0, 0, 0, 123456789 ],\n"
                         + "  \"tagTimeRetained\" : 5.000000000\n"
                         + "}",

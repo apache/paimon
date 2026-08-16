@@ -20,6 +20,7 @@ package org.apache.paimon.tag;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.TagTimeExtractor.ProcessTimeExtractor;
@@ -36,6 +37,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.SortedMap;
@@ -60,6 +62,7 @@ public class TagAutoCreation {
     private final List<TagCallback> callbacks;
     private final Duration idlenessTimeout;
     private final boolean automaticCompletion;
+    private final ZoneId sinkProcessTimeZone;
 
     private LocalDateTime nextTag;
     private long nextSnapshot;
@@ -75,7 +78,8 @@ public class TagAutoCreation {
             @Nullable Duration defaultTimeRetained,
             Duration idlenessTimeout,
             boolean automaticCompletion,
-            List<TagCallback> callbacks) {
+            List<TagCallback> callbacks,
+            ZoneId sinkProcessTimeZone) {
         this.snapshotManager = snapshotManager;
         this.tagManager = tagManager;
         this.tagDeletion = tagDeletion;
@@ -87,19 +91,23 @@ public class TagAutoCreation {
         this.callbacks = callbacks;
         this.idlenessTimeout = idlenessTimeout;
         this.automaticCompletion = automaticCompletion;
+        this.sinkProcessTimeZone = sinkProcessTimeZone;
 
         this.periodHandler.validateDelay(delay);
 
-        SortedMap<Snapshot, List<String>> tags = tagManager.tags(periodHandler::isAutoTag);
+        // Auto-created tag times advance with snapshot IDs. Read only the latest tag to restore
+        // progress instead of reading every tag file.
+        List<String> tagNames = tagManager.tagNames(periodHandler::isAutoTag);
+        tagNames.sort(Comparator.comparing(periodHandler::tagToTime, Comparator.reverseOrder()));
 
-        if (tags.isEmpty()) {
+        if (tagNames.isEmpty()) {
             this.nextSnapshot =
                     firstNonNull(snapshotManager.earliestSnapshotId(), FIRST_SNAPSHOT_ID);
         } else {
-            Snapshot lastTag = tags.lastKey();
-            this.nextSnapshot = lastTag.id() + 1;
+            String tagName = tagNames.get(0);
+            Tag tag = tagManager.getOrThrow(tagName);
+            this.nextSnapshot = tag.trimToSnapshot().id() + 1;
 
-            String tagName = checkAndGetOneAutoTag(tags.get(lastTag));
             LocalDateTime time = periodHandler.tagToTime(tagName);
             this.nextTag = periodHandler.nextTagTime(time);
         }
@@ -123,11 +131,15 @@ public class TagAutoCreation {
 
             return isAfterOrEqual(LocalDateTime.now().minus(idlenessTimeout), snapshotTime);
         } else if (timeExtractor instanceof ProcessTimeExtractor) {
-            return nextTag == null
-                    || isAfterOrEqual(
-                            LocalDateTime.now().minus(delay), periodHandler.nextTagTime(nextTag));
+            return forceCreatingSnapshotProcessTime(LocalDateTime.now(sinkProcessTimeZone));
         }
         return false;
+    }
+
+    @VisibleForTesting
+    boolean forceCreatingSnapshotProcessTime(LocalDateTime now) {
+        return nextTag == null
+                || isAfterOrEqual(now.minus(delay), periodHandler.nextTagTime(nextTag));
     }
 
     public void run() {
@@ -230,6 +242,7 @@ public class TagAutoCreation {
                 options.tagDefaultTimeRetained(),
                 options.snapshotWatermarkIdleTimeout(),
                 options.tagAutomaticCompletion(),
-                callbacks);
+                callbacks,
+                options.sinkProcessTimeZone());
     }
 }

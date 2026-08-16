@@ -18,17 +18,28 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.stats.Statistics;
+import org.apache.paimon.table.format.FormatBatchWriteBuilder;
+import org.apache.paimon.table.format.FormatReadBuilder;
+import org.apache.paimon.table.format.FormatTablePartitionManager;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
+import org.apache.paimon.table.source.BatchVectorSearchBuilder;
+import org.apache.paimon.table.source.FullTextSearchBuilder;
+import org.apache.paimon.table.source.HybridSearchBuilder;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.VectorSearchBuilder;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SimpleFileReader;
 
@@ -42,13 +53,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
+
 /**
  * A file format table refers to a directory that contains multiple files of the same format, where
  * operations on this table allow for reading or writing to these files, facilitating the retrieval
  * of existing data and the addition of new files.
  *
- * <p>Partitioned file format table just like the standard hive format. Partitions are discovered
- * and inferred based on directory structure.
+ * <p>A partitioned file format table uses the standard Hive directory layout. By default,
+ * partitions are discovered from that layout. Format Tables with catalog-managed partitions use
+ * catalog metadata for partition visibility while retaining the same physical layout.
  *
  * @since 0.9.0
  */
@@ -64,12 +78,27 @@ public interface FormatTable extends Table {
     @Override
     FormatTable copy(Map<String, String> dynamicOptions);
 
+    CatalogContext catalogContext();
+
+    /**
+     * The catalog partition registrations of this table, or null when its partitions are discovered
+     * from the filesystem. When non-null, catalog registration decides partition visibility: a
+     * partition directory that is not registered is not visible to scans.
+     */
+    @Experimental
+    @Nullable
+    default FormatTablePartitionManager partitionManager() {
+        return null;
+    }
+
     /** Currently supported formats. */
     enum Format {
         ORC,
         PARQUET,
         CSV,
-        JSON
+        TEXT,
+        JSON,
+        MOSAIC
     }
 
     /** Parses a file format string to a corresponding {@link Format} enum constant. */
@@ -86,8 +115,8 @@ public interface FormatTable extends Table {
     }
 
     /** Create a new builder for {@link FormatTable}. */
-    static FormatTable.Builder builder() {
-        return new FormatTable.Builder();
+    static Builder builder() {
+        return new Builder();
     }
 
     /** Builder for {@link FormatTable}. */
@@ -98,58 +127,82 @@ public interface FormatTable extends Table {
         private RowType rowType;
         private List<String> partitionKeys;
         private String location;
-        private FormatTable.Format format;
+        private Format format;
         private Map<String, String> options;
         @Nullable private String comment;
+        private CatalogContext catalogContext;
+        @Nullable private FormatTablePartitionManager partitionManager;
 
-        public FormatTable.Builder fileIO(FileIO fileIO) {
+        public Builder fileIO(FileIO fileIO) {
             this.fileIO = fileIO;
             return this;
         }
 
-        public FormatTable.Builder identifier(Identifier identifier) {
+        public Builder identifier(Identifier identifier) {
             this.identifier = identifier;
             return this;
         }
 
-        public FormatTable.Builder rowType(RowType rowType) {
+        public Builder rowType(RowType rowType) {
             this.rowType = rowType;
             return this;
         }
 
-        public FormatTable.Builder partitionKeys(List<String> partitionKeys) {
+        public Builder partitionKeys(List<String> partitionKeys) {
             this.partitionKeys = partitionKeys;
             return this;
         }
 
-        public FormatTable.Builder location(String location) {
+        public Builder location(String location) {
             this.location = location;
             return this;
         }
 
-        public FormatTable.Builder format(FormatTable.Format format) {
+        public Builder format(Format format) {
             this.format = format;
             return this;
         }
 
-        public FormatTable.Builder options(Map<String, String> options) {
+        public Builder options(Map<String, String> options) {
             this.options = options;
             return this;
         }
 
-        public FormatTable.Builder comment(@Nullable String comment) {
+        public Builder comment(@Nullable String comment) {
             this.comment = comment;
             return this;
         }
 
+        public Builder catalogContext(CatalogContext catalogContext) {
+            this.catalogContext = catalogContext;
+            return this;
+        }
+
+        @Experimental
+        public Builder partitionManager(@Nullable FormatTablePartitionManager partitionManager) {
+            this.partitionManager = partitionManager;
+            return this;
+        }
+
         public FormatTable build() {
-            return new FormatTable.FormatTableImpl(
-                    fileIO, identifier, rowType, partitionKeys, location, format, options, comment);
+            return new FormatTableImpl(
+                    fileIO,
+                    identifier,
+                    rowType,
+                    partitionKeys,
+                    location,
+                    format,
+                    options,
+                    comment,
+                    catalogContext,
+                    partitionManager);
         }
     }
 
     /** An implementation for {@link FormatTable}. */
     class FormatTableImpl implements FormatTable {
+
+        private static final long serialVersionUID = 1L;
 
         private final FileIO fileIO;
         private final Identifier identifier;
@@ -159,6 +212,8 @@ public interface FormatTable extends Table {
         private final Format format;
         private final Map<String, String> options;
         @Nullable private final String comment;
+        private CatalogContext catalogContext;
+        @Nullable private final FormatTablePartitionManager partitionManager;
 
         public FormatTableImpl(
                 FileIO fileIO,
@@ -168,7 +223,9 @@ public interface FormatTable extends Table {
                 String location,
                 Format format,
                 Map<String, String> options,
-                @Nullable String comment) {
+                @Nullable String comment,
+                CatalogContext catalogContext,
+                @Nullable FormatTablePartitionManager partitionManager) {
             this.fileIO = fileIO;
             this.identifier = identifier;
             this.rowType = rowType;
@@ -177,6 +234,8 @@ public interface FormatTable extends Table {
             this.format = format;
             this.options = options;
             this.comment = comment;
+            this.catalogContext = catalogContext;
+            this.partitionManager = partitionManager;
         }
 
         @Override
@@ -233,6 +292,30 @@ public interface FormatTable extends Table {
         public FormatTable copy(Map<String, String> dynamicOptions) {
             Map<String, String> newOptions = new HashMap<>(options);
             newOptions.putAll(dynamicOptions);
+
+            CoreOptions coreOptions = CoreOptions.fromMap(options);
+            CoreOptions copiedCoreOptions = CoreOptions.fromMap(newOptions);
+            boolean hasCatalogManagedPartitions = partitionManager != null;
+            boolean persistedPartitionsFromCatalog = coreOptions.partitionedTableInMetastore();
+            boolean dynamicPartitionsFromCatalog = copiedCoreOptions.partitionedTableInMetastore();
+            if (persistedPartitionsFromCatalog != dynamicPartitionsFromCatalog) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Dynamic option '%s' cannot change where a Format Table's partitions come from.",
+                                CoreOptions.METASTORE_PARTITIONED_TABLE.key()));
+            }
+            if (hasCatalogManagedPartitions
+                    && coreOptions.formatTablePartitionOnlyValueInPath()
+                            != copiedCoreOptions.formatTablePartitionOnlyValueInPath()) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "Dynamic option '%s' cannot change the physical partition layout of a Format Table with catalog-managed partitions.",
+                                CoreOptions.FORMAT_TABLE_PARTITION_ONLY_VALUE_IN_PATH.key()));
+            }
+            if (hasCatalogManagedPartitions) {
+                CatalogUtils.validateCatalogManagedPartitionOptions(newOptions);
+            }
+
             return new FormatTableImpl(
                     fileIO,
                     identifier,
@@ -241,8 +324,61 @@ public interface FormatTable extends Table {
                     location,
                     format,
                     newOptions,
-                    comment);
+                    comment,
+                    catalogContext,
+                    partitionManager);
         }
+
+        @Override
+        public VectorSearchBuilder newVectorSearchBuilder() {
+            throw new UnsupportedOperationException("FormatTable does not support vector search.");
+        }
+
+        @Override
+        public HybridSearchBuilder newHybridSearchBuilder() {
+            throw new UnsupportedOperationException("FormatTable does not support hybrid search.");
+        }
+
+        @Override
+        public BatchVectorSearchBuilder newBatchVectorSearchBuilder() {
+            throw new UnsupportedOperationException("FormatTable does not support vector search.");
+        }
+
+        @Override
+        public FullTextSearchBuilder newFullTextSearchBuilder() {
+            throw new UnsupportedOperationException(
+                    "FormatTable does not support full-text search.");
+        }
+
+        @Override
+        public CatalogContext catalogContext() {
+            return this.catalogContext;
+        }
+
+        @Override
+        @Nullable
+        public FormatTablePartitionManager partitionManager() {
+            return partitionManager;
+        }
+    }
+
+    @Override
+    default ReadBuilder newReadBuilder() {
+        return new FormatReadBuilder(this);
+    }
+
+    @Override
+    default BatchWriteBuilder newBatchWriteBuilder() {
+        return new FormatBatchWriteBuilder(this);
+    }
+
+    default RowType partitionType() {
+        return rowType().project(partitionKeys());
+    }
+
+    default String defaultPartName() {
+        return options()
+                .getOrDefault(PARTITION_DEFAULT_NAME.key(), PARTITION_DEFAULT_NAME.defaultValue());
     }
 
     // ===================== Unsupported ===============================
@@ -323,6 +459,11 @@ public interface FormatTable extends Table {
     }
 
     @Override
+    default void rollbackSchema(long schemaId) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     default void createBranch(String branchName) {
         throw new UnsupportedOperationException();
     }
@@ -333,12 +474,32 @@ public interface FormatTable extends Table {
     }
 
     @Override
+    default void createBranch(String branchName, boolean ignoreIfExists) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    default void createBranch(String branchName, String tagName, boolean ignoreIfExists) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     default void deleteBranch(String branchName) {
         throw new UnsupportedOperationException();
     }
 
     @Override
+    default void renameBranch(String fromBranch, String toBranch) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     default void fastForward(String branchName) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    default void mergeBranch(String sourceBranch, String targetBranch) {
         throw new UnsupportedOperationException();
     }
 
@@ -349,16 +510,6 @@ public interface FormatTable extends Table {
 
     @Override
     default ExpireSnapshots newExpireChangelog() {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    default ReadBuilder newReadBuilder() {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    default BatchWriteBuilder newBatchWriteBuilder() {
         throw new UnsupportedOperationException();
     }
 

@@ -72,7 +72,6 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.SNAPSHOT_CLEAN_EMPTY_DIRECTORIES;
-import static org.apache.paimon.operation.FileStoreCommitImpl.mustConflictCheck;
 import static org.apache.paimon.operation.FileStoreTestUtils.assertNFilesExists;
 import static org.apache.paimon.operation.FileStoreTestUtils.assertPathExists;
 import static org.apache.paimon.operation.FileStoreTestUtils.assertPathNotExists;
@@ -154,14 +153,12 @@ public class FileDeletionTest {
         FileStoreCommitImpl commit = store.newCommit();
         Map<String, String> partitionSpec = new HashMap<>();
         partitionSpec.put("dt", "0401");
-        commit.overwrite(
-                partitionSpec, new ManifestCommittable(commitIdentifier++), Collections.emptyMap());
+        commit.overwritePartition(partitionSpec, new ManifestCommittable(commitIdentifier++));
 
         // step 3: generate snapshot 3 by cleaning partition dt=0402/hr=10
         partitionSpec.put("dt", "0402");
         partitionSpec.put("hr", "8");
-        commit.overwrite(
-                partitionSpec, new ManifestCommittable(commitIdentifier++), Collections.emptyMap());
+        commit.overwritePartition(partitionSpec, new ManifestCommittable(commitIdentifier++));
         commit.close();
 
         // step 4: generate snapshot 4 by cleaning dt=0402/hr=12/bucket-0
@@ -751,7 +748,7 @@ public class FileDeletionTest {
                         store.newStatsFileHandler(),
                         store.options().changelogProducer() != CoreOptions.ChangelogProducer.NONE,
                         store.options().cleanEmptyDirectories(),
-                        store.options().deleteFileThreadNum());
+                        store.options().fileOperationThreadNum());
 
         ExpireSnapshots expireSnapshots =
                 new ExpireSnapshotsImpl(
@@ -816,7 +813,7 @@ public class FileDeletionTest {
                         store.newStatsFileHandler(),
                         store.options().changelogProducer() != CoreOptions.ChangelogProducer.NONE,
                         store.options().cleanEmptyDirectories(),
-                        store.options().deleteFileThreadNum());
+                        store.options().fileOperationThreadNum());
         ExpireSnapshots expireSnapshots =
                 new ExpireSnapshotsImpl(
                         snapshotManager, changelogManager, snapshotDeletion, tagManager);
@@ -912,7 +909,7 @@ public class FileDeletionTest {
                 bucketEntries.stream()
                         .map(
                                 entry ->
-                                        new ManifestEntry(
+                                        ManifestEntry.create(
                                                 FileKind.DELETE,
                                                 partition,
                                                 bucket,
@@ -929,10 +926,10 @@ public class FileDeletionTest {
                     commitIdentifier++,
                     null,
                     Collections.emptyMap(),
-                    Collections.emptyMap(),
                     Snapshot.CommitKind.APPEND,
+                    false,
                     store.snapshotManager().latestSnapshot(),
-                    mustConflictCheck(),
+                    true,
                     null);
         }
     }

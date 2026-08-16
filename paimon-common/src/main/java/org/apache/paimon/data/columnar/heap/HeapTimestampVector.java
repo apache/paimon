@@ -61,6 +61,13 @@ public class HeapTimestampVector extends AbstractHeapVector implements WritableT
     }
 
     @Override
+    public void appendTimestamp(Timestamp timestamp) {
+        reserve(elementsAppended + 1);
+        setTimestamp(elementsAppended, timestamp);
+        elementsAppended++;
+    }
+
+    @Override
     public void fill(Timestamp value) {
         Arrays.fill(milliseconds, value.getMillisecond());
         Arrays.fill(nanoOfMilliseconds, value.getNanoOfMillisecond());

@@ -23,6 +23,7 @@ import org.apache.paimon.table.CatalogTableType;
 import java.time.Duration;
 
 import static org.apache.paimon.options.ConfigOptions.key;
+import static org.apache.paimon.options.MemorySize.ofMebiBytes;
 
 /** Options for catalog. */
 public class CatalogOptions {
@@ -129,12 +130,33 @@ public class CatalogOptions {
                     .noDefaultValue()
                     .withDescription("Controls the maximum memory to cache manifest content.");
 
+    public static final ConfigOption<Boolean> CACHE_MANIFEST_SOFT_VALUES =
+            key("cache.manifest.soft-values")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "If true (default), manifest cache entries are held with soft references "
+                                    + "and may be reclaimed by the GC under memory pressure. This can "
+                                    + "trigger a cache-thrash spiral where reclaimed entries are "
+                                    + "refetched, spiking heap and forcing further reclamation. Set to "
+                                    + "false to hold entries with strong references, breaking the spiral; "
+                                    + "the cache then stays bounded by weight up to "
+                                    + "'cache.manifest.max-memory' (size the total heap memory to at "
+                                    + "least roughly twice that value).");
+
     public static final ConfigOption<Integer> CACHE_SNAPSHOT_MAX_NUM_PER_TABLE =
             key("cache.snapshot.max-num-per-table")
                     .intType()
                     .defaultValue(20)
                     .withDescription(
                             "Controls the max number for snapshots per table in the catalog are cached.");
+
+    public static final ConfigOption<Integer> CACHE_DV_MAX_NUM =
+            key("cache.deletion-vectors.max-num")
+                    .intType()
+                    .defaultValue(100_000)
+                    .withDescription(
+                            "Controls the maximum number of deletion vector meta that can be cached.");
 
     public static final ConfigOption<Boolean> CASE_SENSITIVE =
             ConfigOptions.key("case-sensitive")
@@ -146,10 +168,11 @@ public class CatalogOptions {
     public static final ConfigOption<Boolean> SYNC_ALL_PROPERTIES =
             ConfigOptions.key("sync-all-properties")
                     .booleanType()
-                    // We should set default value to true in case of hive metastore losing table
+                    // We should set default value to true in case of metastore losing table
                     // properties.
                     .defaultValue(true)
-                    .withDescription("Sync all table properties to hive metastore");
+                    .withDescription(
+                            "Sync all table properties to the catalog metastore (e.g. Hive metastore, JDBC catalog store)");
 
     public static final ConfigOption<Boolean> FORMAT_TABLE_ENABLED =
             ConfigOptions.key("format-table.enabled")
@@ -159,6 +182,12 @@ public class CatalogOptions {
                             "Whether to support format tables, format table corresponds to a regular csv, parquet or orc table, allowing read and write operations. "
                                     + "However, during these processes, it does not connect to the metastore; hence, newly added partitions will not be reflected in"
                                     + " the metastore and need to be manually added as separate partition operations.");
+
+    public static final ConfigOption<Boolean> CATALOG_OPTIONS_TABLE_ENABLED =
+            ConfigOptions.key("catalog-options-table.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to support the sys.catalog_options table.");
 
     public static final ConfigOption<Boolean> RESOLVING_FILE_IO_ENABLED =
             ConfigOptions.key("resolving-file-io.enabled")
@@ -177,4 +206,41 @@ public class CatalogOptions {
                             "Whether to allow static cache in file io implementation. If not allowed, this means that "
                                     + "there may be a large number of FileIO instances generated, enabling caching can "
                                     + "lead to resource leakage.");
+
+    public static final ConfigOption<Boolean> LOCAL_CACHE_ENABLED =
+            key("local-cache.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to enable local block cache for file reads. "
+                                    + "If local-cache.dir is configured, disk cache is used; otherwise memory cache is used.");
+
+    public static final ConfigOption<String> LOCAL_CACHE_DIR =
+            key("local-cache.dir")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Directory for local block cache on disk. "
+                                    + "If not configured, memory cache is used instead.");
+
+    public static final ConfigOption<MemorySize> LOCAL_CACHE_MAX_SIZE =
+            key("local-cache.max-size")
+                    .memoryType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Maximum total size of the local block cache. Unlimited by default.");
+
+    public static final ConfigOption<MemorySize> LOCAL_CACHE_BLOCK_SIZE =
+            key("local-cache.block-size")
+                    .memoryType()
+                    .defaultValue(ofMebiBytes(1))
+                    .withDescription("Block size for local cache.");
+
+    public static final ConfigOption<String> LOCAL_CACHE_WHITELIST =
+            key("local-cache.whitelist")
+                    .stringType()
+                    .defaultValue("meta,global-index")
+                    .withDescription(
+                            "Comma-separated list of file types to cache. "
+                                    + "Supported values: meta, global-index, bucket-index, data, file-index.");
 }

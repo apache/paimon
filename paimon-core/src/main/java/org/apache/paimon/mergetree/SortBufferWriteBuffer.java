@@ -35,6 +35,7 @@ import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.mergetree.compact.MergeFunction;
 import org.apache.paimon.mergetree.compact.ReducerMergeFunctionWrapper;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.sort.BinaryInMemorySortBuffer;
 import org.apache.paimon.sort.SortBuffer;
@@ -50,6 +51,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.IntStream;
@@ -92,6 +94,18 @@ public class SortBufferWriteBuffer implements WriteBuffer {
 
         int[] sortFieldArray = sortFields.toArray();
 
+        // build per-field ascending orders:
+        // key fields -> ascending, uds fields -> based on config, sequence number -> ascending
+        int keyFieldCount = keyType.getFieldCount();
+        boolean udsAscending =
+                userDefinedSeqComparator == null || userDefinedSeqComparator.isAscendingOrder();
+        boolean[] ascendingOrders = new boolean[sortFieldArray.length];
+        Arrays.fill(ascendingOrders, true);
+        if (!udsAscending) {
+            int udsFieldCount = userDefinedSeqComparator.compareFields().length;
+            Arrays.fill(ascendingOrders, keyFieldCount, keyFieldCount + udsFieldCount, false);
+        }
+
         // row type
         List<DataType> fieldTypes = new ArrayList<>(keyType.getFieldTypes());
         fieldTypes.add(new BigIntType(false));
@@ -99,9 +113,9 @@ public class SortBufferWriteBuffer implements WriteBuffer {
         fieldTypes.addAll(valueType.getFieldTypes());
 
         NormalizedKeyComputer normalizedKeyComputer =
-                CodeGenUtils.newNormalizedKeyComputer(fieldTypes, sortFieldArray);
+                CodeGenUtils.newNormalizedKeyComputer(fieldTypes, sortFieldArray, ascendingOrders);
         RecordComparator keyComparator =
-                CodeGenUtils.newRecordComparator(fieldTypes, sortFieldArray, true);
+                CodeGenUtils.newRecordComparator(fieldTypes, sortFieldArray, ascendingOrders);
 
         if (memoryPool.freePages() < 3) {
             throw new IllegalArgumentException(
@@ -138,6 +152,11 @@ public class SortBufferWriteBuffer implements WriteBuffer {
     }
 
     @Override
+    public boolean isEmpty() {
+        return buffer.isEmpty();
+    }
+
+    @Override
     public long memoryOccupancy() {
         return buffer.getOccupancy();
     }
@@ -161,6 +180,46 @@ public class SortBufferWriteBuffer implements WriteBuffer {
         while (mergeIterator.hasNext()) {
             mergedConsumer.accept(mergeIterator.next());
         }
+    }
+
+    /** Returns a merged reader which releases this buffer when closed. */
+    public RecordReader<KeyValue> createReader(
+            Comparator<InternalRow> keyComparator, MergeFunction<KeyValue> mergeFunction)
+            throws IOException {
+        MergeIterator mergeIterator =
+                new MergeIterator(null, buffer.sortedIterator(), keyComparator, mergeFunction);
+        return new RecordReader<KeyValue>() {
+
+            private boolean read;
+            private boolean closed;
+
+            @Nullable
+            @Override
+            public RecordIterator<KeyValue> readBatch() {
+                if (read) {
+                    return null;
+                }
+                read = true;
+                return new RecordIterator<KeyValue>() {
+                    @Nullable
+                    @Override
+                    public KeyValue next() throws IOException {
+                        return mergeIterator.hasNext() ? mergeIterator.next() : null;
+                    }
+
+                    @Override
+                    public void releaseBatch() {}
+                };
+            }
+
+            @Override
+            public void close() {
+                if (!closed) {
+                    closed = true;
+                    clear();
+                }
+            }
+        };
     }
 
     @Override

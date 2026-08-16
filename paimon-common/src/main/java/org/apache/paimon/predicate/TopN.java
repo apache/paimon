@@ -18,11 +18,17 @@
 
 package org.apache.paimon.predicate;
 
-import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.predicate.SortValue.NullOrdering;
+import org.apache.paimon.predicate.SortValue.SortDirection;
 
 import java.io.Serializable;
+import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
+
+import static org.apache.paimon.utils.ListUtils.isNullOrEmpty;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Represents the TopN predicate. */
 public class TopN implements Serializable {
@@ -33,7 +39,14 @@ public class TopN implements Serializable {
     private final int limit;
 
     public TopN(List<SortValue> orders, int limit) {
-        this.orders = Preconditions.checkNotNull(orders);
+        checkArgument(!isNullOrEmpty(orders), "orders should not be null or empty");
+        this.orders = orders;
+        this.limit = limit;
+    }
+
+    public TopN(FieldRef ref, SortDirection direction, NullOrdering nullOrdering, int limit) {
+        SortValue order = new SortValue(ref, direction, nullOrdering);
+        this.orders = Collections.singletonList(order);
         this.limit = limit;
     }
 
@@ -49,5 +62,19 @@ public class TopN implements Serializable {
     public String toString() {
         String sort = orders.stream().map(SortValue::toString).collect(Collectors.joining(", "));
         return String.format("Sort(%s), Limit(%s)", sort, limit);
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        TopN topN = (TopN) o;
+        return limit == topN.limit && Objects.equals(orders, topN.orders);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(orders, limit);
     }
 }

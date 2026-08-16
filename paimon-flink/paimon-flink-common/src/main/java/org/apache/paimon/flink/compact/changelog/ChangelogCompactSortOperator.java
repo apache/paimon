@@ -23,7 +23,6 @@ import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
-import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
@@ -60,12 +59,7 @@ public class ChangelogCompactSortOperator extends AbstractStreamOperator<Committ
     @Override
     public void processElement(StreamRecord<Committable> record) throws Exception {
         Committable committable = record.getValue();
-        if (committable.kind() != Committable.Kind.FILE) {
-            output.collect(record);
-            return;
-        }
-
-        CommitMessageImpl message = (CommitMessageImpl) committable.wrappedCommittable();
+        CommitMessageImpl message = (CommitMessageImpl) committable.commitMessage();
         if (message.newFilesIncrement().changelogFiles().isEmpty()
                 && message.compactIncrement().changelogFiles().isEmpty()) {
             output.collect(record);
@@ -95,15 +89,17 @@ public class ChangelogCompactSortOperator extends AbstractStreamOperator<Committ
                         new DataIncrement(
                                 message.newFilesIncrement().newFiles(),
                                 message.newFilesIncrement().deletedFiles(),
-                                Collections.emptyList()),
+                                Collections.emptyList(),
+                                message.newFilesIncrement().newIndexFiles(),
+                                message.newFilesIncrement().deletedIndexFiles()),
                         new CompactIncrement(
                                 message.compactIncrement().compactBefore(),
                                 message.compactIncrement().compactAfter(),
-                                Collections.emptyList()),
-                        message.indexIncrement());
+                                Collections.emptyList(),
+                                message.compactIncrement().newIndexFiles(),
+                                message.compactIncrement().deletedIndexFiles()));
         if (!newMessage.isEmpty()) {
-            Committable newCommittable =
-                    new Committable(committable.checkpointId(), Committable.Kind.FILE, newMessage);
+            Committable newCommittable = new Committable(committable.checkpointId(), newMessage);
             output.collect(new StreamRecord<>(newCommittable));
         }
     }
@@ -138,10 +134,9 @@ public class ChangelogCompactSortOperator extends AbstractStreamOperator<Committ
                                 new CompactIncrement(
                                         Collections.emptyList(),
                                         Collections.emptyList(),
-                                        sortedChangelogs(compactChangelogFiles, partition, bucket)),
-                                new IndexIncrement(Collections.emptyList()));
-                Committable newCommittable =
-                        new Committable(checkpointId, Committable.Kind.FILE, newMessage);
+                                        sortedChangelogs(
+                                                compactChangelogFiles, partition, bucket)));
+                Committable newCommittable = new Committable(checkpointId, newMessage);
                 output.collect(new StreamRecord<>(newCommittable));
             }
         }

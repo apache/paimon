@@ -21,6 +21,7 @@ package org.apache.paimon.arrow.writer;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataTypeVisitor;
@@ -40,8 +41,10 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VectorType;
 
 import org.apache.arrow.vector.FieldVector;
+import org.apache.arrow.vector.complex.FixedSizeListVector;
 import org.apache.arrow.vector.complex.ListVector;
 import org.apache.arrow.vector.complex.MapVector;
 
@@ -144,7 +147,13 @@ public class ArrowFieldWriterFactoryVisitor implements DataTypeVisitor<ArrowFiel
 
     @Override
     public ArrowFieldWriterFactory visit(VariantType variantType) {
-        throw new UnsupportedOperationException("Doesn't support VariantType.");
+        return (fieldVector, isNullable) ->
+                new ArrowFieldWriters.VariantWriter(fieldVector, isNullable, null);
+    }
+
+    @Override
+    public ArrowFieldWriterFactory visit(BlobType blobType) {
+        throw new UnsupportedOperationException("Doesn't support BlobType.");
     }
 
     @Override
@@ -154,7 +163,21 @@ public class ArrowFieldWriterFactoryVisitor implements DataTypeVisitor<ArrowFiel
                 new ArrowFieldWriters.ArrayWriter(
                         fieldVector,
                         elementWriterFactory.create(
-                                ((ListVector) fieldVector).getDataVector(), isNullable),
+                                ((ListVector) fieldVector).getDataVector(),
+                                arrayType.getElementType().isNullable()),
+                        isNullable);
+    }
+
+    @Override
+    public ArrowFieldWriterFactory visit(VectorType vectorType) {
+        ArrowFieldWriterFactory elementWriterFactory = vectorType.getElementType().accept(this);
+        return (fieldVector, isNullable) ->
+                new ArrowFieldWriters.VectorWriter(
+                        fieldVector,
+                        vectorType.getLength(),
+                        elementWriterFactory.create(
+                                ((FixedSizeListVector) fieldVector).getDataVector(),
+                                vectorType.getElementType().isNullable()),
                         isNullable);
     }
 
@@ -173,8 +196,13 @@ public class ArrowFieldWriterFactoryVisitor implements DataTypeVisitor<ArrowFiel
             List<FieldVector> keyValueVectors = mapVector.getDataVector().getChildrenFromFields();
             return new ArrowFieldWriters.MapWriter(
                     fieldVector,
-                    keyWriterFactory.create(keyValueVectors.get(0), isNullable),
-                    valueWriterFactory.create(keyValueVectors.get(1), isNullable),
+                    // The Arrow map key is always declared NOT NULL by ArrowUtils.toArrowField
+                    // (per the Arrow spec), so the key writer must stay non-nullable regardless of
+                    // the declared key type's nullability. A null key then fails loud instead of
+                    // producing data that conflicts with the schema.
+                    keyWriterFactory.create(keyValueVectors.get(0), false),
+                    valueWriterFactory.create(
+                            keyValueVectors.get(1), mapType.getValueType().isNullable()),
                     isNullable);
         };
     }
@@ -186,7 +214,9 @@ public class ArrowFieldWriterFactoryVisitor implements DataTypeVisitor<ArrowFiel
             ArrowFieldWriter[] fieldWriters = new ArrowFieldWriter[children.size()];
             for (int i = 0; i < children.size(); i++) {
                 fieldWriters[i] =
-                        rowType.getTypeAt(i).accept(this).create(children.get(i), isNullable);
+                        rowType.getTypeAt(i)
+                                .accept(this)
+                                .create(children.get(i), rowType.getTypeAt(i).isNullable());
             }
             return new ArrowFieldWriters.RowWriter(fieldVector, fieldWriters, isNullable);
         };

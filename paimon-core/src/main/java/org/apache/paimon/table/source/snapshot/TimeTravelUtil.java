@@ -20,8 +20,9 @@ package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.ChangelogManager;
@@ -38,8 +39,10 @@ import java.io.FileNotFoundException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.TimeZone;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
 import static org.apache.paimon.CoreOptions.SCAN_TAG_NAME;
@@ -48,7 +51,7 @@ import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP_MILLIS;
 import static org.apache.paimon.CoreOptions.SCAN_WATERMARK;
 import static org.apache.paimon.utils.DateTimeUtils.parseTimestampData;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.SnapshotManager.EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM;
+import static org.apache.paimon.utils.SnapshotManager.retryEarliestSnapshot;
 
 /** The util class of resolve snapshot from scan params for time travel. */
 public class TimeTravelUtil {
@@ -65,6 +68,7 @@ public class TimeTravelUtil {
         SCAN_TIMESTAMP_MILLIS.key()
     };
 
+    @Nullable
     public static Snapshot tryTravelOrLatest(FileStoreTable table) {
         return tryTravelToSnapshot(table).orElseGet(() -> table.latestSnapshot().orElse(null));
     }
@@ -131,6 +135,19 @@ public class TimeTravelUtil {
             throw new UnsupportedOperationException("Unsupported time travel mode: " + key);
         }
         return Optional.of(snapshot);
+    }
+
+    public static boolean hasTimeTravelOptions(Options options) {
+        if (options.containsKey(CoreOptions.SCAN_VERSION.key())) {
+            return true;
+        }
+
+        for (String key : SCAN_KEYS) {
+            if (options.containsKey(key)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void adaptScanVersion(Options options, TagManager tagManager) {
@@ -210,29 +227,11 @@ public class TimeTravelUtil {
             return null;
         }
 
-        if (stopSnapshotId == null) {
-            stopSnapshotId = snapshotId + EARLIEST_SNAPSHOT_DEFAULT_RETRY_NUM;
-        }
-
         FunctionWithException<Long, Snapshot, FileNotFoundException> snapshotFunction =
                 includeChangelog
                         ? s -> tryGetChangelogOrSnapshot(snapshotManager, changelogManager, s)
                         : snapshotManager::tryGetSnapshot;
-
-        do {
-            try {
-                return snapshotFunction.apply(snapshotId);
-            } catch (FileNotFoundException e) {
-                snapshotId++;
-                if (snapshotId > stopSnapshotId) {
-                    return null;
-                }
-                LOG.warn(
-                        "The earliest snapshot or changelog was once identified but disappeared. "
-                                + "It might have been expired by other jobs operating on this table. "
-                                + "Searching for the second earliest snapshot or changelog instead. ");
-            }
-        } while (true);
+        return retryEarliestSnapshot(snapshotId, stopSnapshotId, snapshotFunction);
     }
 
     private static Snapshot tryGetChangelogOrSnapshot(
@@ -255,24 +254,66 @@ public class TimeTravelUtil {
     }
 
     public static void checkRescaleBucketForIncrementalDiffQuery(
-            SchemaManager schemaManager, Snapshot start, Snapshot end) {
-        if (start.schemaId() != end.schemaId()) {
-            int startBucketNumber = bucketNumber(schemaManager, start.schemaId());
-            int endBucketNumber = bucketNumber(schemaManager, end.schemaId());
-            if (startBucketNumber != endBucketNumber) {
-                throw new InconsistentTagBucketException(
-                        start.id(),
-                        end.id(),
-                        String.format(
-                                "The bucket number of two snapshots are different (%s, %s), which is not supported in incremental diff query.",
-                                startBucketNumber, endBucketNumber));
+            TableSchema schema,
+            Snapshot start,
+            Map<BinaryRow, Map<Integer, List<ManifestEntry>>> startFiles,
+            Snapshot end,
+            Map<BinaryRow, Map<Integer, List<ManifestEntry>>> endFiles) {
+        if (schema.numBuckets() == -1) {
+            return;
+        }
+
+        for (Map.Entry<BinaryRow, Map<Integer, List<ManifestEntry>>> entry :
+                startFiles.entrySet()) {
+            Map<Integer, List<ManifestEntry>> endPartitionFiles = endFiles.get(entry.getKey());
+            if (endPartitionFiles == null) {
+                continue;
             }
+
+            Integer startPartitionBucketNumber =
+                    realBucketNumbers(
+                            entry.getValue().values().stream()
+                                    .flatMap(List::stream)
+                                    .collect(Collectors.toList()));
+            Integer endPartitionBucketNumber =
+                    realBucketNumbers(
+                            endPartitionFiles.values().stream()
+                                    .flatMap(List::stream)
+                                    .collect(Collectors.toList()));
+
+            if (startPartitionBucketNumber != null
+                    && endPartitionBucketNumber != null
+                    && startPartitionBucketNumber.equals(endPartitionBucketNumber)) {
+                continue;
+            }
+
+            throw new InconsistentTagBucketException(
+                    start.id(),
+                    end.id(),
+                    String.format(
+                            "The bucket number of two snapshots are different (%s, %s), which is not supported in incremental diff query.",
+                            startPartitionBucketNumber, endPartitionBucketNumber));
         }
     }
 
-    private static int bucketNumber(SchemaManager schemaManager, long schemaId) {
-        TableSchema schema = schemaManager.schema(schemaId);
-        return CoreOptions.fromMap(schema.options()).bucket();
+    @Nullable
+    private static Integer realBucketNumbers(List<ManifestEntry> entries) {
+        Integer totalBuckets = null;
+        for (ManifestEntry entry : entries) {
+            if (entry.totalBuckets() >= 0) {
+                if (totalBuckets != null && totalBuckets != entry.totalBuckets()) {
+                    throw new IllegalStateException(
+                            "Partition "
+                                    + entry.partition()
+                                    + " has different totalBuckets "
+                                    + totalBuckets
+                                    + " and "
+                                    + entry.totalBuckets());
+                }
+                totalBuckets = entry.totalBuckets();
+            }
+        }
+        return totalBuckets;
     }
 
     /**

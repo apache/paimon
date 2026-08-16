@@ -37,8 +37,6 @@ import java.util.Map;
 import java.util.Stack;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 /** {@link DataTypeFamily#CHARACTER_STRING} to {@link DataTypeRoot#MAP} cast rule. */
 class StringToMapCastRule extends AbstractCastRule<BinaryString, InternalMap> {
@@ -82,7 +80,13 @@ class StringToMapCastRule extends AbstractCastRule<BinaryString, InternalMap> {
             if ("{}".equals(str) || "MAP()".equalsIgnoreCase(str)) {
                 return new GenericMap(new HashMap<>());
             }
-            return new GenericMap(parseDefaultMap(str, keyCastExecutor, valueCastExecutor));
+            Map<Object, Object> defaultMapValue =
+                    parseDefaultMap(str, keyCastExecutor, valueCastExecutor);
+            if (defaultMapValue == null) {
+                return null;
+            } else {
+                return new GenericMap(defaultMapValue);
+            }
         } catch (Exception e) {
             throw new RuntimeException("Cannot parse '" + value + "' as MAP: " + e.getMessage(), e);
         }
@@ -104,7 +108,10 @@ class StringToMapCastRule extends AbstractCastRule<BinaryString, InternalMap> {
             CastExecutor<BinaryString, Object> keyCastExecutor,
             CastExecutor<BinaryString, Object> valueCastExecutor) {
 
-        Map<Object, Object> mapContent = Maps.newHashMap();
+        if (str.equalsIgnoreCase("NULL")) {
+            return null;
+        }
+
         Matcher bracketMatcher = BRACKET_MAP_PATTERN.matcher(str);
         if (bracketMatcher.matches()) {
             // Parse bracket format (arrow-separated entries)
@@ -132,15 +139,13 @@ class StringToMapCastRule extends AbstractCastRule<BinaryString, InternalMap> {
             throw new RuntimeException("Invalid Function map format: odd number of elements");
         }
 
-        return IntStream.range(0, elements.size() / 2)
-                .boxed()
-                .collect(
-                        Collectors.toMap(
-                                i -> parseValue(elements.get(i * 2).trim(), keyCastExecutor),
-                                i ->
-                                        parseValue(
-                                                elements.get(i * 2 + 1).trim(),
-                                                valueCastExecutor)));
+        Map<Object, Object> mapContent = Maps.newHashMap();
+        for (int i = 0; i < elements.size(); i += 2) {
+            mapContent.put(
+                    parseValue(elements.get(i).trim(), keyCastExecutor),
+                    parseValue(elements.get(i + 1).trim(), valueCastExecutor));
+        }
+        return mapContent;
     }
 
     private Map<Object, Object> parseMapEntry(
@@ -167,7 +172,7 @@ class StringToMapCastRule extends AbstractCastRule<BinaryString, InternalMap> {
                 : castExecutor.cast(BinaryString.fromString(valueStr));
     }
 
-    private List<String> splitMapEntries(String content) {
+    public List<String> splitMapEntries(String content) {
         List<String> entries = new ArrayList<>();
         StringBuilder current = new StringBuilder();
         Stack<Character> bracketStack = new Stack<>();
@@ -177,10 +182,13 @@ class StringToMapCastRule extends AbstractCastRule<BinaryString, InternalMap> {
         for (char c : content.toCharArray()) {
             if (escaped) {
                 escaped = false;
+                continue;
             } else if (c == '\\') {
                 escaped = true;
+                continue;
             } else if (c == '"') {
                 inQuotes = !inQuotes;
+                continue;
             } else if (!inQuotes) {
                 if (StringUtils.isOpenBracket(c)) {
                     bracketStack.push(c);
@@ -200,7 +208,7 @@ class StringToMapCastRule extends AbstractCastRule<BinaryString, InternalMap> {
 
     private void addCurrentEntry(List<String> entries, StringBuilder current) {
         if (current.length() > 0) {
-            entries.add(current.toString());
+            entries.add(current.toString().trim());
             current.setLength(0);
         }
     }

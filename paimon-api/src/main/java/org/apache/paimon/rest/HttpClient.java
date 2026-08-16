@@ -24,6 +24,7 @@ import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.RESTException;
 import org.apache.paimon.rest.interceptor.LoggingInterceptor;
 import org.apache.paimon.rest.responses.ErrorResponse;
+import org.apache.paimon.utils.SensitiveConfigUtils;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
@@ -32,24 +33,27 @@ import org.apache.hc.client5.http.classic.methods.HttpDelete;
 import org.apache.hc.client5.http.classic.methods.HttpGet;
 import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.classic.methods.HttpUriRequestBase;
-import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
-import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
+import org.apache.hc.core5.http.ClassicHttpResponse;
+import org.apache.hc.core5.http.ContentType;
 import org.apache.hc.core5.http.Header;
-import org.apache.hc.core5.http.ParseException;
+import org.apache.hc.core5.http.io.HttpClientResponseHandler;
 import org.apache.hc.core5.http.io.entity.StringEntity;
 import org.apache.hc.core5.http.message.BasicHeader;
+import org.apache.hc.core5.http.protocol.HttpContext;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.Function;
 
-import static org.apache.paimon.rest.HttpClientUtils.createLoggingBuilder;
+import static org.apache.paimon.rest.HttpClientUtils.DEFAULT_HTTP_CLIENT;
 
 /** Apache HTTP client for REST catalog. */
 public class HttpClient implements RESTClient {
-
-    private static final CloseableHttpClient HTTP_CLIENT = createLoggingBuilder().build();
 
     private final String uri;
 
@@ -64,7 +68,7 @@ public class HttpClient implements RESTClient {
     public <T extends RESTResponse> T get(
             String path, Class<T> responseType, RESTAuthFunction restAuthFunction) {
         Header[] authHeaders = getHeaders(path, "GET", "", restAuthFunction);
-        HttpGet httpGet = new HttpGet(getRequestUrl(path, null));
+        HttpGet httpGet = HttpClientUtils.newHttpGet(getRequestUrl(path, null));
         httpGet.setHeaders(authHeaders);
         return exec(httpGet, responseType);
     }
@@ -76,7 +80,7 @@ public class HttpClient implements RESTClient {
             Class<T> responseType,
             RESTAuthFunction restAuthFunction) {
         Header[] authHeaders = getHeaders(path, queryParams, "GET", "", restAuthFunction);
-        HttpGet httpGet = new HttpGet(getRequestUrl(path, queryParams));
+        HttpGet httpGet = HttpClientUtils.newHttpGet(getRequestUrl(path, queryParams));
         httpGet.setHeaders(authHeaders);
         return exec(httpGet, responseType);
     }
@@ -93,19 +97,20 @@ public class HttpClient implements RESTClient {
             RESTRequest body,
             Class<T> responseType,
             RESTAuthFunction restAuthFunction) {
-        try {
-            String bodyStr = RESTApi.toJson(body);
-            Header[] authHeaders = getHeaders(path, "POST", bodyStr, restAuthFunction);
-            HttpPost httpPost = new HttpPost(getRequestUrl(path, null));
-            httpPost.setHeaders(authHeaders);
-            String encodedBody = RESTUtil.encodedBody(body);
-            if (encodedBody != null) {
-                httpPost.setEntity(new StringEntity(encodedBody));
-            }
-            return exec(httpPost, responseType);
-        } catch (JsonProcessingException e) {
-            throw new RESTException(e, "build post request failed.");
+        HttpPost httpPost = HttpClientUtils.newHttpPost(getRequestUrl(path, null));
+        String encodedBody = RESTUtil.encodedBody(body);
+        if (encodedBody != null) {
+            httpPost.setEntity(new StringEntity(encodedBody, ContentType.APPLICATION_JSON));
         }
+        Header[] authHeaders = getHeaders(path, "POST", encodedBody, restAuthFunction);
+        httpPost.setHeaders(authHeaders);
+        // A POST the server cannot absorb twice is sent exactly once, whatever the status says.
+        return exec(
+                httpPost,
+                responseType,
+                body != null && !body.isRetrySafe()
+                        ? ExponentialHttpRequestRetryStrategy.retryUnsafeContext()
+                        : null);
     }
 
     @Override
@@ -116,19 +121,14 @@ public class HttpClient implements RESTClient {
     @Override
     public <T extends RESTResponse> T delete(
             String path, RESTRequest body, RESTAuthFunction restAuthFunction) {
-        try {
-            String bodyStr = RESTApi.toJson(body);
-            Header[] authHeaders = getHeaders(path, "DELETE", bodyStr, restAuthFunction);
-            HttpDelete httpDelete = new HttpDelete(getRequestUrl(path, null));
-            httpDelete.setHeaders(authHeaders);
-            String encodedBody = RESTUtil.encodedBody(body);
-            if (encodedBody != null) {
-                httpDelete.setEntity(new StringEntity(encodedBody));
-            }
-            return exec(httpDelete, null);
-        } catch (JsonProcessingException e) {
-            throw new RESTException(e, "build delete request failed.");
+        HttpDelete httpDelete = HttpClientUtils.newHttpDelete(getRequestUrl(path, null));
+        String encodedBody = RESTUtil.encodedBody(body);
+        if (encodedBody != null) {
+            httpDelete.setEntity(new StringEntity(encodedBody, ContentType.APPLICATION_JSON));
         }
+        Header[] authHeaders = getHeaders(path, "DELETE", encodedBody, restAuthFunction);
+        httpDelete.setHeaders(authHeaders);
+        return exec(httpDelete, null);
     }
 
     @VisibleForTesting
@@ -137,34 +137,50 @@ public class HttpClient implements RESTClient {
     }
 
     private <T extends RESTResponse> T exec(HttpUriRequestBase request, Class<T> responseType) {
-        try (CloseableHttpResponse response = HTTP_CLIENT.execute(request)) {
-            String responseBodyStr = RESTUtil.extractResponseBodyAsString(response);
-            if (!RESTUtil.isSuccessful(response)) {
-                ErrorResponse error;
-                try {
-                    error = RESTApi.fromJson(responseBodyStr, ErrorResponse.class);
-                } catch (JsonProcessingException e) {
-                    error =
-                            new ErrorResponse(
-                                    null,
-                                    null,
-                                    responseBodyStr != null
-                                            ? responseBodyStr
-                                            : "response body is null",
-                                    response.getCode());
-                }
-                errorHandler.accept(error, getRequestId(response));
-            }
-            if (responseType != null && responseBodyStr != null) {
-                return RESTApi.fromJson(responseBodyStr, responseType);
-            } else if (responseType == null) {
-                return null;
-            } else {
-                throw new RESTException("response body is null.");
-            }
-        } catch (IOException | ParseException e) {
+        return exec(request, responseType, null);
+    }
+
+    private <T extends RESTResponse> T exec(
+            HttpUriRequestBase request, Class<T> responseType, @Nullable HttpContext context) {
+        try {
+            HttpClientResponseHandler<T> handler =
+                    response -> {
+                        String responseBodyStr = RESTUtil.extractResponseBodyAsString(response);
+                        if (!RESTUtil.isSuccessful(response)) {
+                            ErrorResponse error = null;
+                            try {
+                                error = RESTApi.fromJson(responseBodyStr, ErrorResponse.class);
+                            } catch (JsonProcessingException e) {
+                                // ignore exception
+                            }
+                            error = buildErrorResponse(error, response.getCode());
+
+                            errorHandler.accept(error, extractRequestId(response));
+                        }
+                        if (responseType != null && responseBodyStr != null) {
+                            try {
+                                return RESTApi.fromJson(responseBodyStr, responseType);
+                            } catch (JsonProcessingException e) {
+                                // Do not surface the body or Jackson's source snippet: a
+                                // successful response (e.g. a token response) may contain
+                                // credentials. Report only the target type.
+                                throw new RESTException(
+                                        "Failed to parse REST response into %s",
+                                        responseType.getName());
+                            }
+                        } else if (responseType == null) {
+                            return null;
+                        } else {
+                            throw new RESTException("response body is null.");
+                        }
+                    };
+            return context == null
+                    ? DEFAULT_HTTP_CLIENT.execute(request, handler)
+                    : DEFAULT_HTTP_CLIENT.execute(request, context, handler);
+        } catch (IOException e) {
+            // No cause: a redirect/protocol error message can echo the target URL (a signed URL).
             throw new RESTException(
-                    e, "Error occurred while processing %s request", request.getMethod());
+                    "Error occurred while processing %s request", request.getMethod());
         }
     }
 
@@ -194,9 +210,22 @@ public class HttpClient implements RESTClient {
         return uri;
     }
 
-    private static String getRequestId(CloseableHttpResponse response) {
+    private static String extractRequestId(ClassicHttpResponse response) {
         Header header = response.getFirstHeader(LoggingInterceptor.REQUEST_ID_KEY);
-        return header != null ? header.getValue() : LoggingInterceptor.DEFAULT_REQUEST_ID;
+        if (header != null && header.getValue() != null) {
+            return header.getValue();
+        }
+
+        // look for any header containing "request-id"
+        return Arrays.stream(response.getHeaders())
+                .filter(
+                        h ->
+                                h.getName() != null
+                                        && h.getName().toLowerCase().contains("request-id"))
+                .map(Header::getValue)
+                .filter(Objects::nonNull)
+                .findFirst()
+                .orElse(LoggingInterceptor.DEFAULT_REQUEST_ID);
     }
 
     private static Header[] getHeaders(
@@ -222,5 +251,25 @@ public class HttpClient implements RESTClient {
         return headers.entrySet().stream()
                 .map(entry -> new BasicHeader(entry.getKey(), entry.getValue()))
                 .toArray(Header[]::new);
+    }
+
+    private static ErrorResponse buildErrorResponse(ErrorResponse error, int errorCode) {
+        String resourceType =
+                (error != null && error.getResourceType() != null) ? error.getResourceType() : "";
+        String resourceName =
+                (error != null && error.getResourceName() != null) ? error.getResourceName() : "";
+        int code = (error != null && error.getCode() != null) ? error.getCode() : errorCode;
+        String message;
+        if (error != null && error.getMessage() != null && !error.getMessage().isEmpty()) {
+            // A parsed message may still embed secrets (e.g. "password=..."); redact it.
+            message = SensitiveConfigUtils.redactText(error.getMessage());
+        } else if (error == null) {
+            // The body could not be parsed; it is arbitrary and is not echoed (may hold secrets).
+            message = "Unparseable error response body (HTTP " + code + ").";
+        } else {
+            // Parsed as an ErrorResponse but with no message.
+            message = "Empty error message (HTTP " + code + ").";
+        }
+        return new ErrorResponse(resourceType, resourceName, message, code);
     }
 }

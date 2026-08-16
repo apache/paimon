@@ -95,6 +95,14 @@ public class TypeE2eTest extends E2eTestBase {
                 "true, 1, 10, 100, 1000, 1.1, 1.11, 12.456, "
                         + "123456789123456789.12345678, hi, hello, table桌子store商店, [116], "
                         + "2022-04-28, 2022-04-28T15:35:45.123, [hi, hello, null, test], +I[1, 10, 测试]";
+
+        if (isFlinkVersionAtLeast("2.2.0")) {
+            // https://issues.apache.org/jira/browse/FLINK-38062 ENCODE function behaves wrong
+            expected =
+                    "true, 1, 10, 100, 1000, 1.1, 1.11, 12.456, "
+                            + "123456789123456789.12345678, hi, hello, table桌子store商店, [116, 97, 98, 108, 101, -26, -95, -116, -27, -83, -112, 115, 116, 111, 114, 101, -27, -107, -122, -27, -70, -105], "
+                            + "2022-04-28, 2022-04-28T15:35:45.123, [hi, hello, null, test], +I[1, 10, 测试]";
+        }
         checkResult(
                 expected,
                 "null, null, null, null, null, null, null, null, null, "
@@ -182,6 +190,15 @@ public class TypeE2eTest extends E2eTestBase {
                         + "123456789123456789.12345678, hi, hello, table桌子store商店, [116], "
                         + "2022-04-28, 2022-04-28T15:35:45.123, [hi, hello, null, test], +I[1, 10, 测试], "
                         + "{hi=1, test=3, hello=null}";
+
+        if (isFlinkVersionAtLeast("2.2.0")) {
+            // https://issues.apache.org/jira/browse/FLINK-38062 ENCODE function behaves wrong
+            expected =
+                    "1, true, 1, 10, 100, 1000, 1.1, 1.11, 12.456, "
+                            + "123456789123456789.12345678, hi, hello, table桌子store商店, [116, 97, 98, 108, 101, -26, -95, -116, -27, -83, -112, 115, 116, 111, 114, 101, -27, -107, -122, -27, -70, -105], "
+                            + "2022-04-28, 2022-04-28T15:35:45.123, [hi, hello, null, test], +I[1, 10, 测试], "
+                            + "{hi=1, test=3, hello=null}";
+        }
         checkResult(
                 expected,
                 "2, null, null, null, null, null, null, null, null, null, "

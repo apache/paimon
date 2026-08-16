@@ -26,7 +26,7 @@ import org.apache.paimon.flink.action.cdc.pulsar.PulsarDebeziumAvroDeserializati
 
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.streaming.connectors.kafka.KafkaDeserializationSchema;
+import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
 
 import java.util.function.Function;
 
@@ -42,7 +42,7 @@ public class DebeziumAvroDataFormat extends AbstractDataFormat {
     }
 
     @Override
-    protected Function<Configuration, KafkaDeserializationSchema<CdcSourceRecord>>
+    protected Function<Configuration, KafkaRecordDeserializationSchema<CdcSourceRecord>>
             kafkaDeserializer() {
         return KafkaDebeziumAvroDeserializationSchema::new;
     }

@@ -71,36 +71,43 @@ public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
     @Test
     @Timeout(120)
     public void testRandomCdcEvents() throws Exception {
-        innerTestRandomCdcEvents(ThreadLocalRandom.current().nextInt(5) + 1, false, false);
+        innerTestRandomCdcEvents(ThreadLocalRandom.current().nextInt(5) + 1, false, false, false);
     }
 
     @Test
     @Timeout(120)
     public void testRandomCdcEventsDynamicBucket() throws Exception {
-        innerTestRandomCdcEvents(-1, false, false);
+        innerTestRandomCdcEvents(-1, false, false, false);
     }
 
     @Test
     @Timeout(120)
     public void testRandomCdcEventsPostponeBucket() throws Exception {
-        innerTestRandomCdcEvents(BucketMode.POSTPONE_BUCKET, false, false);
+        innerTestRandomCdcEvents(BucketMode.POSTPONE_BUCKET, false, false, false);
     }
 
     @Disabled
     @Test
     @Timeout(120)
     public void testRandomCdcEventsGlobalDynamicBucket() throws Exception {
-        innerTestRandomCdcEvents(-1, true, false);
+        innerTestRandomCdcEvents(-1, true, false, false);
     }
 
     @Test
     @Timeout(120)
     public void testRandomCdcEventsUnawareBucket() throws Exception {
-        innerTestRandomCdcEvents(-1, false, true);
+        innerTestRandomCdcEvents(-1, false, true, false);
+    }
+
+    @Test
+    @Timeout(120)
+    public void testRandomCdcEventsUnawareBucketNoShuffle() throws Exception {
+        innerTestRandomCdcEvents(-1, false, true, true);
     }
 
     private void innerTestRandomCdcEvents(
-            int numBucket, boolean globalIndex, boolean unawareBucketMode) throws Exception {
+            int numBucket, boolean globalIndex, boolean unawareBucketMode, boolean noShuffle)
+            throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
 
         int numEvents = random.nextInt(1500) + 1;
@@ -177,6 +184,7 @@ public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
                 .withParallelism(3)
                 .withIdentifier(Identifier.create(DATABASE_NAME, TABLE_NAME))
                 .withCatalogLoader(catalogLoader)
+                .withNoShuffle(noShuffle)
                 .build();
 
         // enable failure when running jobs if needed

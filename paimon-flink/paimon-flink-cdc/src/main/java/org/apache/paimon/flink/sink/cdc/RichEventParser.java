@@ -42,25 +42,25 @@ public class RichEventParser implements EventParser<RichCdcRecord> {
     public CdcSchema parseSchemaChange() {
         CdcSchema.Builder change = CdcSchema.newBuilder();
         CdcSchema recordedSchema = record.cdcSchema();
-        recordedSchema
-                .fields()
-                .forEach(
-                        dataField -> {
-                            DataField previous = previousDataFields.get(dataField.name());
-                            // When the order of the same field is different, its ID may also be
-                            // different,
-                            // so the comparison should not include the ID.
-                            if (!DataField.dataFieldEqualsIgnoreId(previous, dataField)) {
-                                previousDataFields.put(dataField.name(), dataField);
-                                change.column(dataField);
-                            }
-                        });
+        boolean hasChange = false;
+
+        for (DataField dataField : recordedSchema.fields()) {
+            DataField previous = previousDataFields.get(dataField.name());
+            // When the order of the same field is different, its ID may also be different,
+            // so the comparison should not include the ID.
+            if (!DataField.dataFieldEqualsIgnoreId(previous, dataField)) {
+                previousDataFields.put(dataField.name(), dataField);
+                change.column(dataField);
+                hasChange = true;
+            }
+        }
 
         if (recordedSchema.comment() != null && !recordedSchema.comment().equals(previousComment)) {
             previousComment = recordedSchema.comment();
             change.comment(recordedSchema.comment());
+            hasChange = true;
         }
-        return change.build();
+        return hasChange ? change.build() : null;
     }
 
     @Override

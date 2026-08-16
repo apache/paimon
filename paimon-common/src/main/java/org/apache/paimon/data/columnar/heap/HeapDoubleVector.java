@@ -91,6 +91,13 @@ public class HeapDoubleVector extends AbstractHeapVector implements WritableDoub
     }
 
     @Override
+    public void appendDouble(double v) {
+        reserve(elementsAppended + 1);
+        setDouble(elementsAppended, v);
+        elementsAppended++;
+    }
+
+    @Override
     public void fill(double value) {
         Arrays.fill(vector, value);
     }

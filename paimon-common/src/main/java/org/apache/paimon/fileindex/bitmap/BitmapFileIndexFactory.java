@@ -37,4 +37,9 @@ public class BitmapFileIndexFactory implements FileIndexerFactory {
     public FileIndexer create(DataType dataType, Options options) {
         return new BitmapFileIndex(dataType, options);
     }
+
+    @Override
+    public void validate(DataType dataType) {
+        BitmapFileIndex.getValueMapper(dataType);
+    }
 }

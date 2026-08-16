@@ -27,6 +27,8 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.sql.Timestamp;
@@ -70,16 +72,17 @@ public class ExpireSnapshotsProcedureITCase extends CatalogITCaseBase {
                         + "', retain_min => 3)");
         checkSnapshots(snapshotManager, 4, 6);
 
-        // older_than => timestamp of snapshot 6, expected snapshots (6)
+        // older_than => timestamp + 1 of snapshot 6, expected snapshots (6)
         sql(
                 "CALL sys.expire_snapshots(`table`  => 'default.word_count', older_than => '"
-                        + ts6.toString()
+                        + new Timestamp(ts6.getTime() + 1)
                         + "')");
         checkSnapshots(snapshotManager, 6, 6);
     }
 
-    @Test
-    public void testExpireSnapshotsAction() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testExpireSnapshotsAction(boolean forceStartFlinkJob) throws Exception {
         sql(
                 "CREATE TABLE word_count ( word STRING PRIMARY KEY NOT ENFORCED, cnt INT)"
                         + " WITH ( 'num-sorted-run.compaction-trigger' = '9999',"
@@ -107,7 +110,9 @@ public class ExpireSnapshotsProcedureITCase extends CatalogITCaseBase {
                         "--table",
                         "word_count",
                         "--retain_max",
-                        "5")
+                        "5",
+                        "--force_start_flink_job",
+                        Boolean.toString(forceStartFlinkJob))
                 .withStreamExecutionEnvironment(env)
                 .run();
         checkSnapshots(snapshotManager, 2, 6);
@@ -126,7 +131,9 @@ public class ExpireSnapshotsProcedureITCase extends CatalogITCaseBase {
                         "--older_than",
                         ts6.toString(),
                         "--max_deletes",
-                        "1")
+                        "1",
+                        "--force_start_flink_job",
+                        Boolean.toString(forceStartFlinkJob))
                 .withStreamExecutionEnvironment(env)
                 .run();
         checkSnapshots(snapshotManager, 3, 6);
@@ -143,12 +150,14 @@ public class ExpireSnapshotsProcedureITCase extends CatalogITCaseBase {
                         "--older_than",
                         ts6.toString(),
                         "--retain_min",
-                        "3")
+                        "3",
+                        "--force_start_flink_job",
+                        Boolean.toString(forceStartFlinkJob))
                 .withStreamExecutionEnvironment(env)
                 .run();
         checkSnapshots(snapshotManager, 4, 6);
 
-        // older_than => timestamp of snapshot 6, expected snapshots (6)
+        // older_than => timestamp + 1 of snapshot 6, expected snapshots (6)
         createAction(
                         ExpireSnapshotsAction.class,
                         "expire_snapshots",
@@ -159,7 +168,9 @@ public class ExpireSnapshotsProcedureITCase extends CatalogITCaseBase {
                         "--table",
                         "word_count",
                         "--older_than",
-                        ts6.toString())
+                        new Timestamp(ts6.getTime() + 1).toString(),
+                        "--force_start_flink_job",
+                        Boolean.toString(forceStartFlinkJob))
                 .withStreamExecutionEnvironment(env)
                 .run();
         checkSnapshots(snapshotManager, 6, 6);

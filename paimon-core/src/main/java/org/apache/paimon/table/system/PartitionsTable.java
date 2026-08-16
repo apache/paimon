@@ -18,16 +18,30 @@
 
 package org.apache.paimon.table.system;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.casting.CastExecutors;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.index.DeletionVectorMeta;
+import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
@@ -38,15 +52,22 @@ import org.apache.paimon.table.source.ReadOnceTableScan;
 import org.apache.paimon.table.source.SingletonSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
+import org.apache.paimon.utils.InternalRowUtils;
 import org.apache.paimon.utils.IteratorRecordReader;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.SerializationUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -55,11 +76,17 @@ import java.time.ZoneId;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.OptionalLong;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
+import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 
 /** A {@link Table} for showing partitions info. */
 public class PartitionsTable implements ReadonlyTable {
@@ -75,7 +102,14 @@ public class PartitionsTable implements ReadonlyTable {
                             new DataField(1, "record_count", new BigIntType(false)),
                             new DataField(2, "file_size_in_bytes", new BigIntType(false)),
                             new DataField(3, "file_count", new BigIntType(false)),
-                            new DataField(4, "last_update_time", DataTypes.TIMESTAMP_MILLIS())));
+                            new DataField(4, "last_update_time", DataTypes.TIMESTAMP_MILLIS()),
+                            new DataField(5, "created_at", DataTypes.TIMESTAMP_MILLIS()),
+                            new DataField(6, "created_by", DataTypes.STRING()),
+                            new DataField(7, "updated_by", DataTypes.STRING()),
+                            new DataField(8, "options", DataTypes.STRING()),
+                            new DataField(9, "total_buckets", DataTypes.INT().notNull()),
+                            new DataField(10, "done", DataTypes.BOOLEAN().notNull()),
+                            new DataField(11, "deleted_record_count", new BigIntType(true))));
 
     private final FileStoreTable storeTable;
 
@@ -147,6 +181,11 @@ public class PartitionsTable implements ReadonlyTable {
         public int hashCode() {
             return 1;
         }
+
+        @Override
+        public OptionalLong mergedRowCount() {
+            return OptionalLong.empty();
+        }
     }
 
     private static class PartitionsRead implements InnerTableRead {
@@ -155,13 +194,15 @@ public class PartitionsTable implements ReadonlyTable {
 
         private RowType readType;
 
+        @Nullable private Predicate predicate;
+
         public PartitionsRead(FileStoreTable table) {
             this.fileStoreTable = table;
         }
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
-            // TODO
+            this.predicate = predicate;
             return this;
         }
 
@@ -182,20 +223,39 @@ public class PartitionsTable implements ReadonlyTable {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
 
-            List<PartitionEntry> partitions = fileStoreTable.newScan().listPartitionEntries();
+            List<Partition> partitions = listPartitions();
 
-            @SuppressWarnings("unchecked")
-            CastExecutor<InternalRow, BinaryString> partitionCastExecutor =
-                    (CastExecutor<InternalRow, BinaryString>)
-                            CastExecutors.resolveToString(
-                                    fileStoreTable.schema().logicalPartitionType());
+            List<DataType> fieldTypes =
+                    fileStoreTable.schema().logicalPartitionType().getFieldTypes();
+            InternalRow.FieldGetter[] fieldGetters =
+                    InternalRowUtils.createFieldGetters(fieldTypes);
+            List<CastExecutor> castExecutors =
+                    fieldTypes.stream()
+                            .map(CastExecutors::resolveToString)
+                            .collect(Collectors.toList());
+
+            Map<BinaryRow, Long> deletionNums = deletionNums();
 
             // sorted by partition
             Iterator<InternalRow> iterator =
                     partitions.stream()
-                            .map(partitionEntry -> toRow(partitionEntry, partitionCastExecutor))
+                            .map(
+                                    partition ->
+                                            toRow(
+                                                    partition,
+                                                    fileStoreTable.partitionKeys(),
+                                                    castExecutors,
+                                                    fieldGetters,
+                                                    fileStoreTable
+                                                            .coreOptions()
+                                                            .partitionDefaultName(),
+                                                    deletionNums))
                             .sorted(Comparator.comparing(row -> row.getString(0)))
                             .iterator();
+
+            if (predicate != null) {
+                iterator = Iterators.filter(iterator, predicate::test);
+            }
 
             if (readType != null) {
                 iterator =
@@ -209,17 +269,179 @@ public class PartitionsTable implements ReadonlyTable {
         }
 
         private InternalRow toRow(
-                PartitionEntry entry,
-                CastExecutor<InternalRow, BinaryString> partitionCastExecutor) {
+                Partition partition,
+                List<String> partitionKeys,
+                List<CastExecutor> castExecutors,
+                InternalRow.FieldGetter[] fieldGetters,
+                String defaultPartitionName,
+                @Nullable Map<BinaryRow, Long> deletionNums) {
+            PartitionEntry entry = toPartitionEntry(partition);
+
+            StringBuilder partitionStringBuilder = new StringBuilder();
+
+            for (int i = 0; i < partitionKeys.size(); i++) {
+                if (i > 0) {
+                    partitionStringBuilder.append("/");
+                }
+                Object partitionValue = fieldGetters[i].getFieldOrNull(entry.partition());
+                String partitionValueString =
+                        partitionValue == null
+                                ? defaultPartitionName
+                                : castExecutors
+                                        .get(i)
+                                        .cast(fieldGetters[i].getFieldOrNull(entry.partition()))
+                                        .toString();
+                partitionStringBuilder
+                        .append(partitionKeys.get(i))
+                        .append("=")
+                        .append(partitionValueString);
+            }
+
+            BinaryString createdByString = BinaryString.fromString(partition.createdBy());
+            Timestamp createdAtTimestamp = toTimestamp(partition.createdAt());
+            BinaryString updatedByString = BinaryString.fromString(partition.updatedBy());
+            BinaryString optionsString = null;
+            if (Objects.nonNull(partition.options())) {
+                optionsString =
+                        BinaryString.fromString(JsonSerdeUtil.toFlatJson(partition.options()));
+            }
+
             return GenericRow.of(
-                    partitionCastExecutor.cast(entry.partition()),
-                    entry.recordCount(),
-                    entry.fileSizeInBytes(),
-                    entry.fileCount(),
-                    Timestamp.fromLocalDateTime(
-                            LocalDateTime.ofInstant(
-                                    Instant.ofEpochMilli(entry.lastFileCreationTime()),
-                                    ZoneId.systemDefault())));
+                    BinaryString.fromString(partitionStringBuilder.toString()),
+                    partition.recordCount(),
+                    partition.fileSizeInBytes(),
+                    partition.fileCount(),
+                    toTimestamp(partition.lastFileCreationTime()),
+                    createdAtTimestamp,
+                    createdByString,
+                    updatedByString,
+                    optionsString,
+                    partition.totalBuckets(),
+                    partition.done(),
+                    deletionNums == null ? null : deletionNums.getOrDefault(entry.partition(), 0L));
+        }
+
+        @Nullable
+        private Map<BinaryRow, Long> deletionNums() {
+            if (!fileStoreTable.coreOptions().deletionVectorsEnabled()) {
+                return Collections.emptyMap();
+            }
+
+            // do not scan deletion indices if query doesn't need them.
+            if (readType != null
+                    && !readType.containsField("deleted_record_count")
+                    && !PredicateVisitor.collectFieldNames(predicate)
+                            .contains("deleted_record_count")) {
+                return null;
+            }
+
+            Snapshot snapshot = TimeTravelUtil.tryTravelOrLatest(fileStoreTable);
+            if (snapshot == null || snapshot.indexManifest() == null) {
+                return Collections.emptyMap();
+            }
+
+            IndexFileHandler indexFileHandler = fileStoreTable.store().newIndexFileHandler();
+            Map<BinaryRow, Long> result = new HashMap<>();
+            for (IndexManifestEntry entry :
+                    indexFileHandler.scan(snapshot, DELETION_VECTORS_INDEX)) {
+                accumulateDeletionNum(result, entry.partition(), entry.indexFile());
+            }
+            return result;
+        }
+
+        private void accumulateDeletionNum(
+                Map<BinaryRow, Long> result, BinaryRow partition, IndexFileMeta indexFile) {
+            if (result.containsKey(partition) && result.get(partition) == null) {
+                return;
+            }
+
+            LinkedHashMap<String, DeletionVectorMeta> dvRanges = indexFile.dvRanges();
+            if (dvRanges == null || dvRanges.isEmpty()) {
+                return;
+            }
+
+            long count = result.getOrDefault(partition, 0L);
+            for (DeletionVectorMeta dvMeta : dvRanges.values()) {
+                Long cardinality = dvMeta.cardinality();
+                if (cardinality == null) {
+                    result.put(partition.copy(), null);
+                    return;
+                }
+                count += cardinality;
+            }
+            result.put(partition.copy(), count);
+        }
+
+        private PartitionEntry toPartitionEntry(Partition partition) {
+            RowType partitionType = fileStoreTable.schema().logicalPartitionType();
+            String defaultPartitionName = fileStoreTable.coreOptions().partitionDefaultName();
+            InternalRowSerializer serializer = new InternalRowSerializer(partitionType);
+            GenericRow partitionRow =
+                    InternalRowPartitionComputer.convertSpecToInternalRow(
+                            partition.spec(), partitionType, defaultPartitionName);
+            BinaryRow binaryPartition = serializer.toBinaryRow(partitionRow).copy();
+            return new PartitionEntry(
+                    binaryPartition,
+                    partition.recordCount(),
+                    partition.fileSizeInBytes(),
+                    partition.fileCount(),
+                    partition.lastFileCreationTime(),
+                    partition.totalBuckets());
+        }
+
+        private Timestamp toTimestamp(Long epochMillis) {
+            if (epochMillis == null) {
+                return null;
+            }
+            return Timestamp.fromLocalDateTime(
+                    LocalDateTime.ofInstant(
+                            Instant.ofEpochMilli(epochMillis), ZoneId.systemDefault()));
+        }
+
+        private List<Partition> listPartitions() {
+            CatalogLoader catalogLoader = fileStoreTable.catalogEnvironment().catalogLoader();
+            if (TimeTravelUtil.hasTimeTravelOptions(new Options(fileStoreTable.options()))
+                    || catalogLoader == null) {
+                return listPartitionEntries();
+            }
+
+            try (Catalog catalog = catalogLoader.load()) {
+                Identifier baseIdentifier = fileStoreTable.catalogEnvironment().identifier();
+                if (baseIdentifier == null) {
+                    return listPartitionEntries();
+                }
+                String branch = fileStoreTable.coreOptions().branch();
+                Identifier identifier;
+                if (branch != null && !branch.equals(CoreOptions.BRANCH.defaultValue())) {
+                    identifier =
+                            new Identifier(
+                                    baseIdentifier.getDatabaseName(),
+                                    baseIdentifier.getTableName(),
+                                    branch);
+                } else {
+                    identifier = baseIdentifier;
+                }
+                return catalog.listPartitions(identifier);
+            } catch (Exception e) {
+                return listPartitionEntries();
+            }
+        }
+
+        private List<Partition> listPartitionEntries() {
+            List<PartitionEntry> partitionEntries =
+                    fileStoreTable.newScan().withLevelFilter(level -> true).listPartitionEntries();
+            RowType partitionType = fileStoreTable.schema().logicalPartitionType();
+            String defaultPartitionName = fileStoreTable.coreOptions().partitionDefaultName();
+            String[] partitionColumns = fileStoreTable.partitionKeys().toArray(new String[0]);
+            InternalRowPartitionComputer computer =
+                    new InternalRowPartitionComputer(
+                            defaultPartitionName,
+                            partitionType,
+                            partitionColumns,
+                            fileStoreTable.coreOptions().legacyPartitionName());
+            return partitionEntries.stream()
+                    .map(entry -> entry.toPartition(computer))
+                    .collect(Collectors.toList());
         }
     }
 }

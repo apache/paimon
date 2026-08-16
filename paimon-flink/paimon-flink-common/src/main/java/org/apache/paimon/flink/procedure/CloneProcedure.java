@@ -67,7 +67,23 @@ public class CloneProcedure extends ProcedureBase {
                         type = @DataTypeHint("STRING"),
                         isOptional = true),
                 @ArgumentHint(
+                        name = "prefer_file_format",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(
                         name = "clone_from",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "meta_only",
+                        type = @DataTypeHint("BOOLEAN"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "clone_if_exists",
+                        type = @DataTypeHint("BOOLEAN"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "target_table_conf",
                         type = @DataTypeHint("STRING"),
                         isOptional = true)
             })
@@ -83,13 +99,19 @@ public class CloneProcedure extends ProcedureBase {
             String where,
             String includedTablesStr,
             String excludedTablesStr,
-            String cloneFrom)
+            String preferFileFormat,
+            String cloneFrom,
+            Boolean metaOnly,
+            Boolean cloneIfExists,
+            String targetTableConfigStr)
             throws Exception {
         Map<String, String> sourceCatalogConfig =
                 new HashMap<>(optionalConfigMap(sourceCatalogConfigStr));
 
         Map<String, String> targetCatalogConfig =
                 new HashMap<>(optionalConfigMap(targetCatalogConfigStr));
+        Map<String, String> targetTableConfig =
+                new HashMap<>(optionalConfigMap(targetTableConfigStr));
 
         List<String> includedTables =
                 StringUtils.isNullOrWhitespaceOnly(includedTablesStr)
@@ -108,11 +130,15 @@ public class CloneProcedure extends ProcedureBase {
                         targetDatabase,
                         targetTableName,
                         targetCatalogConfig,
+                        targetTableConfig,
                         parallelism,
                         where,
                         includedTables,
                         excludedTables,
-                        cloneFrom);
+                        preferFileFormat,
+                        cloneFrom,
+                        metaOnly != null && metaOnly,
+                        cloneIfExists == null || cloneIfExists);
         return execute(procedureContext, action, "Clone Job");
     }
 

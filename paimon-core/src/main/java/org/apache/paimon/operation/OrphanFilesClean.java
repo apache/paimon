@@ -19,6 +19,7 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.blob.ManagedBlobReferenceFile;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
@@ -108,7 +109,6 @@ public abstract class OrphanFilesClean implements Serializable {
 
     protected List<String> validBranches() {
         List<String> branches = table.branchManager().branches();
-        branches.add(DEFAULT_MAIN_BRANCH);
 
         List<String> abnormalBranches = new ArrayList<>();
         for (String branch : branches) {
@@ -124,6 +124,7 @@ public abstract class OrphanFilesClean implements Serializable {
                                     + "Please check these branches manually.",
                             abnormalBranches));
         }
+        branches.add(DEFAULT_MAIN_BRANCH);
         return branches;
     }
 
@@ -181,6 +182,7 @@ public abstract class OrphanFilesClean implements Serializable {
             Path directory, Predicate<FileStatus> fileStatusFilter, Predicate<Path> fileFilter) {
         List<FileStatus> statuses = tryBestListingDirs(directory);
         return statuses.stream()
+                .filter(status -> !status.isDir())
                 .filter(fileStatusFilter)
                 .filter(status -> fileFilter.test(status.getPath()))
                 .map(status -> Pair.of(status.getPath(), status.getLen()))
@@ -217,16 +219,28 @@ public abstract class OrphanFilesClean implements Serializable {
     }
 
     protected void cleanFile(Path path) {
+        if (isManagedBlobPack(path)) {
+            return;
+        }
+
         if (!dryRun) {
             try {
                 if (fileIO.isDir(path)) {
-                    fileIO.deleteDirectoryQuietly(path);
+                    LOG.error(
+                            "Refusing to delete directory {} in orphan file cleanup. "
+                                    + "This indicates a bug in candidate collection.",
+                            path);
                 } else {
                     fileIO.deleteQuietly(path);
                 }
-            } catch (IOException ignored) {
+            } catch (IOException e) {
+                LOG.warn("Failed to check whether {} is directory, skip deleting it.", path, e);
             }
         }
+    }
+
+    protected boolean isManagedBlobPack(Path path) {
+        return path.getName().endsWith(ManagedBlobReferenceFile.MANAGED_BLOB_SUFFIX);
     }
 
     protected Set<Snapshot> safelyGetAllSnapshots(String branch) throws IOException {
@@ -376,7 +390,14 @@ public abstract class OrphanFilesClean implements Serializable {
 
         List<Path> result = new ArrayList<>();
         for (Path partitionPath : partitionPaths) {
-            result.addAll(listFileDirs(partitionPath, level - 1));
+            List<Path> sub = listFileDirs(partitionPath, level - 1);
+            if (sub.isEmpty()) {
+                // Empty partition (no bucket subdirs), include for empty-dir cleanup
+                LOG.info("Found empty partition directory for cleanup: {}", partitionPath);
+                result.add(partitionPath);
+            } else {
+                result.addAll(sub);
+            }
         }
         return result;
     }
@@ -386,7 +407,7 @@ public abstract class OrphanFilesClean implements Serializable {
 
         for (FileStatus status : statuses) {
             Path path = status.getPath();
-            if (filter.test(path)) {
+            if (status.isDir() && filter.test(path)) {
                 filtered.add(path);
             }
             // ignore unknown dirs

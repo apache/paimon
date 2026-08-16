@@ -21,14 +21,19 @@ package org.apache.paimon.predicate;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.types.DataType;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+
 import java.util.List;
 import java.util.Optional;
 
-/** A {@link NullFalseLeafBinaryFunction} to evaluate {@code filter like '%abc%'}. */
-public class Contains extends NullFalseLeafBinaryFunction {
+/** A {@link LeafBinaryFunction} to evaluate {@code filter like '%abc%'}. */
+public class Contains extends LeafBinaryFunction {
+
+    public static final String NAME = "CONTAINS";
 
     public static final Contains INSTANCE = new Contains();
 
+    @JsonCreator
     private Contains() {}
 
     @Override
@@ -56,5 +61,10 @@ public class Contains extends NullFalseLeafBinaryFunction {
     @Override
     public <T> T visit(FunctionVisitor<T> visitor, FieldRef fieldRef, List<Object> literals) {
         return visitor.visitContains(fieldRef, literals.get(0));
+    }
+
+    @Override
+    public String toJson() {
+        return NAME;
     }
 }

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.partition;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.types.RowType;
@@ -33,8 +34,10 @@ import java.util.stream.Collectors;
  */
 public class PartitionUpdateTimeExpireStrategy extends PartitionExpireStrategy {
 
-    public PartitionUpdateTimeExpireStrategy(RowType partitionType) {
-        super(partitionType);
+    private static final long serialVersionUID = 1L;
+
+    public PartitionUpdateTimeExpireStrategy(CoreOptions options, RowType partitionType) {
+        super(partitionType, options.partitionDefaultName());
     }
 
     @Override

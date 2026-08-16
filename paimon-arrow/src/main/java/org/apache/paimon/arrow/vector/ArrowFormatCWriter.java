@@ -20,6 +20,7 @@ package org.apache.paimon.arrow.vector;
 
 import org.apache.paimon.arrow.ArrowUtils;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.types.RowType;
 
 import org.apache.arrow.c.ArrowArray;
@@ -47,8 +48,15 @@ public class ArrowFormatCWriter implements AutoCloseable {
             RowType rowType,
             int writeBatchSize,
             boolean caseSensitive,
-            @Nullable Long memoryUsedMaxInVSR) {
-        this(new ArrowFormatWriter(rowType, writeBatchSize, caseSensitive, memoryUsedMaxInVSR));
+            @Nullable Long memoryUsedMaxInVSR,
+            @Nullable RowType shreddingSchemas) {
+        this(
+                new ArrowFormatWriter(
+                        rowType,
+                        writeBatchSize,
+                        caseSensitive,
+                        memoryUsedMaxInVSR,
+                        shreddingSchemas));
     }
 
     public ArrowFormatCWriter(
@@ -56,20 +64,30 @@ public class ArrowFormatCWriter implements AutoCloseable {
         this(new ArrowFormatWriter(rowType, writeBatchSize, caseSensitive, allocator, null));
     }
 
-    private ArrowFormatCWriter(ArrowFormatWriter arrowFormatWriter) {
+    public ArrowFormatCWriter(ArrowFormatWriter arrowFormatWriter) {
         this.realWriter = arrowFormatWriter;
         BufferAllocator allocator = realWriter.getAllocator();
         array = ArrowArray.allocateNew(allocator);
         schema = ArrowSchema.allocateNew(allocator);
     }
 
+    public ArrowFormatWriter formatWriter() {
+        return realWriter;
+    }
+
     public boolean write(InternalRow currentRow) {
         return realWriter.write(currentRow);
     }
 
+    public void write(
+            ColumnVector[] columns, @Nullable int[] pickedInColumn, int startIndex, int batchRows) {
+        realWriter.write(columns, pickedInColumn, startIndex, batchRows);
+    }
+
     public ArrowCStruct toCStruct() {
         VectorSchemaRoot vectorSchemaRoot = realWriter.getVectorSchemaRoot();
-        return ArrowUtils.serializeToCStruct(vectorSchemaRoot, array, schema);
+        return ArrowUtils.serializeToCStruct(
+                vectorSchemaRoot, array, schema, realWriter.getAllocator());
     }
 
     public void flush() {

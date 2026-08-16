@@ -27,7 +27,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 
-import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
+import org.apache.hc.core5.http.ClassicHttpResponse;
 import org.apache.hc.core5.http.HttpStatus;
 import org.apache.hc.core5.http.ParseException;
 import org.apache.hc.core5.http.io.entity.EntityUtils;
@@ -64,21 +64,33 @@ public class RESTUtil {
         return result;
     }
 
+    /**
+     * Merges two string maps with override properties taking precedence over base properties.
+     *
+     * <p>This method combines two maps of string key-value pairs, where the override map's values
+     * will override any conflicting keys from the base map. Only non-null values are included in
+     * the final result.
+     */
     public static Map<String, String> merge(
-            Map<String, String> targets, Map<String, String> updates) {
-        if (targets == null) {
-            targets = Maps.newHashMap();
+            Map<String, String> baseProperties, Map<String, String> overrideProperties) {
+        if (overrideProperties == null) {
+            overrideProperties = Maps.newHashMap();
         }
-        if (updates == null) {
-            updates = Maps.newHashMap();
+        if (baseProperties == null) {
+            baseProperties = Maps.newHashMap();
         }
+
         ImmutableMap.Builder<String, String> builder = ImmutableMap.builder();
-        for (Map.Entry<String, String> entry : targets.entrySet()) {
-            if (!updates.containsKey(entry.getKey()) && entry.getValue() != null) {
+
+        // First, add all non-null entries from baseProperties that are not in overrideProperties
+        for (Map.Entry<String, String> entry : baseProperties.entrySet()) {
+            if (entry.getValue() != null && !overrideProperties.containsKey(entry.getKey())) {
                 builder.put(entry.getKey(), entry.getValue());
             }
         }
-        for (Map.Entry<String, String> entry : updates.entrySet()) {
+
+        // Then, add all non-null entries from overrideProperties (these take precedence)
+        for (Map.Entry<String, String> entry : overrideProperties.entrySet()) {
             if (entry.getValue() != null) {
                 builder.put(entry.getKey(), entry.getValue());
             }
@@ -155,13 +167,16 @@ public class RESTUtil {
             try {
                 return RESTApi.toJson(body);
             } catch (JsonProcessingException e) {
-                throw new RESTException(e, "Failed to encode request body: %s", body);
+                // Keep only the body type: a throwing getter can surface the secret in both
+                // the cause chain and Jackson's message, so neither is safe to include.
+                throw new RESTException(
+                        "Failed to encode request body of type %s", body.getClass().getName());
             }
         }
         return null;
     }
 
-    public static String extractResponseBodyAsString(CloseableHttpResponse response)
+    public static String extractResponseBodyAsString(ClassicHttpResponse response)
             throws IOException, ParseException {
         if (response.getEntity() == null) {
             return null;
@@ -170,7 +185,7 @@ public class RESTUtil {
         return EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
     }
 
-    public static boolean isSuccessful(CloseableHttpResponse response) {
+    public static boolean isSuccessful(ClassicHttpResponse response) {
         int code = response.getCode();
         return code == HttpStatus.SC_OK
                 || code == HttpStatus.SC_ACCEPTED
@@ -187,7 +202,8 @@ public class RESTUtil {
                 url = builder.build().toString();
             }
         } catch (URISyntaxException e) {
-            throw new RESTException(e, "build request URL failed.");
+            // cause / getMessage() echo the raw URL (may carry credentials); keep only the reason.
+            throw new RESTException("build request URL failed: %s", e.getReason());
         }
 
         return url;

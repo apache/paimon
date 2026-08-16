@@ -1,27 +1,28 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-#################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 import pyarrow as pa
 
-from pypaimon.common.rest_json import json_field
-from pypaimon.schema.data_types import DataField, PyarrowFieldParser
+from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.common.json_util import json_field
+from pypaimon.schema.data_types import DataField, PyarrowFieldParser, VectorType
 
 
 @dataclass
@@ -47,8 +48,65 @@ class Schema:
         self.options = options if options is not None else {}
         self.comment = comment
 
+        primary_key_nullable = CoreOptions.primary_key_nullable_from_dict(self.options)
+        if primary_key_nullable and not self.primary_keys:
+            raise ValueError(
+                "Option 'primary-key.nullable' can only be enabled for a table "
+                "with primary keys."
+            )
+        pk_set = set(self.primary_keys)
+        for field in self.fields:
+            if field.name in pk_set:
+                field.type.nullable = primary_key_nullable
+
+        changelog_producer = self.options.get(CoreOptions.CHANGELOG_PRODUCER.key(), 'none')
+        if changelog_producer != 'none' and not self.primary_keys:
+            raise ValueError(
+                f"Cannot set 'changelog-producer' to '{changelog_producer}' on a table without primary keys. "
+                f"Changelog producer requires primary keys to be defined."
+            )
+
     @staticmethod
     def from_pyarrow_schema(pa_schema: pa.Schema, partition_keys: Optional[List[str]] = None,
                             primary_keys: Optional[List[str]] = None, options: Optional[Dict] = None,
                             comment: Optional[str] = None):
-        return Schema(PyarrowFieldParser.to_paimon_schema(pa_schema), partition_keys, primary_keys, options, comment)
+        # Convert PyArrow schema to Paimon fields
+        fields = PyarrowFieldParser.to_paimon_schema(pa_schema)
+
+        # Check if Vector type with dedicated file format
+        vector_names = [
+            field.name for field in fields
+            if isinstance(field.type, VectorType)
+        ]
+        vector_file_format = options.get(CoreOptions.VECTOR_FILE_FORMAT.key(), '') if options else ''
+
+        if vector_names and vector_file_format:
+            if options is None:
+                options = {}
+
+            if len(fields) <= len(vector_names):
+                raise ValueError(
+                    "Table with VECTOR type column must have other normal columns."
+                )
+
+            partition_key_set = set(partition_keys) if partition_keys else set()
+            vector_partitions = [n for n in vector_names if n in partition_key_set]
+            if vector_partitions:
+                raise ValueError(
+                    "The vector-store columns can not be part of partition keys."
+                )
+
+            required_options = {
+                CoreOptions.ROW_TRACKING_ENABLED.key(): 'true',
+                CoreOptions.DATA_EVOLUTION_ENABLED.key(): 'true',
+            }
+            missing = [
+                f"{k}='{v}'" for k, v in required_options.items()
+                if options.get(k) != v
+            ]
+            if missing:
+                raise ValueError(
+                    f"Table with vector-store file format requires: {', '.join(missing)}."
+                )
+
+        return Schema(fields, partition_keys, primary_keys, options, comment)

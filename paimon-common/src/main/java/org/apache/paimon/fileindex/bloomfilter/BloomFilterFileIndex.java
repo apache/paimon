@@ -117,7 +117,7 @@ public class BloomFilterFileIndex implements FileIndexer {
         private final FastHash hashFunction;
 
         public Reader(DataType type, byte[] serializedBytes) {
-            // little endian
+            // big endian
             int numHashFunctions =
                     ((serializedBytes[0] << 24)
                             + (serializedBytes[1] << 16)

@@ -111,6 +111,10 @@ public class TestChangelogDataReadWrite {
                         CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         null,
+                        null,
+                        CoreOptions.ExternalPathStrategy.NONE,
+                        null,
+                        false,
                         null);
         this.snapshotManager = newSnapshotManager(LocalFileIO.create(), new Path(root));
         this.commitUser = UUID.randomUUID().toString();
@@ -138,6 +142,7 @@ public class TestChangelogDataReadWrite {
                                 pathFactory,
                                 EXTRACTOR,
                                 options));
+
         RawFileSplitRead rawFileRead =
                 new RawFileSplitRead(
                         LocalFileIO.create(),
@@ -146,15 +151,14 @@ public class TestChangelogDataReadWrite {
                         VALUE_TYPE,
                         FileFormatDiscover.of(options),
                         pathFactory,
-                        options.fileIndexReadEnabled(),
-                        false);
-        return new KeyValueTableRead(() -> read, () -> rawFileRead, null);
+                        options);
+        return new KeyValueTableRead(() -> read, () -> rawFileRead, schema, options, null);
     }
 
-    public List<DataFileMeta> writeFiles(
-            BinaryRow partition, int bucket, List<Tuple2<Long, Long>> kvs) throws Exception {
+    public <T> List<DataFileMeta> writeFiles(
+            BinaryRow partition, int bucket, List<Tuple2<Long, T>> kvs) throws Exception {
         RecordWriter<KeyValue> writer = createMergeTreeWriter(partition, bucket);
-        for (Tuple2<Long, Long> tuple2 : kvs) {
+        for (Tuple2<Long, T> tuple2 : kvs) {
             writer.write(
                     new KeyValue()
                             .replace(
@@ -189,6 +193,7 @@ public class TestChangelogDataReadWrite {
                         (coreOptions, format) -> pathFactory,
                         snapshotManager,
                         null, // not used, we only create an empty writer
+                        null,
                         null,
                         null,
                         options,

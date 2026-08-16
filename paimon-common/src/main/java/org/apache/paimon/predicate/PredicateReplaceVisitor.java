@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Optional;
 
 /** A {@link PredicateVisitor} to replace {@link Predicate}. */
+@FunctionalInterface
 public interface PredicateReplaceVisitor extends PredicateVisitor<Optional<Predicate>> {
 
     @Override
@@ -36,6 +37,10 @@ public interface PredicateReplaceVisitor extends PredicateVisitor<Optional<Predi
                 return Optional.empty();
             }
         }
-        return Optional.of(new CompoundPredicate(predicate.function(), converted));
+        if (predicate.function() instanceof And) {
+            return Optional.of(PredicateBuilder.and(converted));
+        } else {
+            return Optional.of(PredicateBuilder.or(converted));
+        }
     }
 }

@@ -21,7 +21,7 @@ package org.apache.paimon.flink.action;
 import java.util.Map;
 
 /** Delete tag action for Flink. */
-public class DeleteTagAction extends TableActionBase {
+public class DeleteTagAction extends TableActionBase implements LocalAction {
 
     private final String tagNameStr;
 
@@ -35,7 +35,7 @@ public class DeleteTagAction extends TableActionBase {
     }
 
     @Override
-    public void run() throws Exception {
+    public void executeLocally() throws Exception {
         table.deleteTags(tagNameStr);
     }
 }

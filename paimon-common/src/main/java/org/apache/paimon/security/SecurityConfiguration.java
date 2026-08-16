@@ -84,15 +84,11 @@ public class SecurityConfiguration {
 
     public boolean isLegal() {
         if (StringUtils.isNullOrWhitespaceOnly(keytab)
-                != StringUtils.isNullOrWhitespaceOnly(principal)) {
+                || StringUtils.isNullOrWhitespaceOnly(principal)) {
             return false;
         }
 
-        if (!StringUtils.isNullOrWhitespaceOnly(keytab)) {
-            File keytabFile = new File(keytab);
-            return keytabFile.exists() && keytabFile.isFile() && keytabFile.canRead();
-        }
-
-        return true;
+        File keytabFile = new File(keytab);
+        return keytabFile.exists() && keytabFile.isFile() && keytabFile.canRead();
     }
 }

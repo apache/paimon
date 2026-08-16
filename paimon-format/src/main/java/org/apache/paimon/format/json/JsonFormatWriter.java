@@ -24,14 +24,17 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.BaseTextFileWriter;
+import org.apache.paimon.data.InternalVector;
+import org.apache.paimon.format.text.AbstractTextFileWriter;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.InternalRowUtils;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
@@ -45,16 +48,20 @@ import java.util.List;
 import java.util.Map;
 
 /** Json format writer implementation. */
-public class JsonFormatWriter extends BaseTextFileWriter {
+public class JsonFormatWriter extends AbstractTextFileWriter {
 
     private static final Base64.Encoder BASE64_ENCODER = Base64.getEncoder();
 
-    private final char lineDelimiter;
+    private final String lineDelimiter;
 
     public JsonFormatWriter(
-            PositionOutputStream outputStream, RowType rowType, JsonOptions options) {
-        super(outputStream, rowType);
-        this.lineDelimiter = options.getLineDelimiter().charAt(0);
+            PositionOutputStream outputStream,
+            RowType rowType,
+            JsonOptions options,
+            String compression)
+            throws IOException {
+        super(outputStream, rowType, compression);
+        this.lineDelimiter = options.getLineDelimiter();
     }
 
     @Override
@@ -108,6 +115,8 @@ public class JsonFormatWriter extends BaseTextFileWriter {
                 return BASE64_ENCODER.encodeToString((byte[]) value);
             case ARRAY:
                 return convertRowArray((InternalArray) value, (ArrayType) dataType);
+            case VECTOR:
+                return convertRowVector((InternalVector) value, (VectorType) dataType);
             case MAP:
                 return convertRowMap((InternalMap) value, (MapType) dataType);
             case ROW:
@@ -127,6 +136,14 @@ public class JsonFormatWriter extends BaseTextFileWriter {
             result.add(convertRowValue(InternalRowUtils.get(array, i, elementType), elementType));
         }
         return result;
+    }
+
+    private List<Object> convertRowVector(InternalVector vector, VectorType vectorType) {
+        if (vector.size() != vectorType.getLength()) {
+            throw new IllegalArgumentException(
+                    "Size " + vector.size() + " != " + vectorType.getLength() + " in JsonWriter");
+        }
+        return convertRowArray(vector, DataTypes.ARRAY(vectorType.getElementType()));
     }
 
     private Map<String, Object> convertRowMap(InternalMap map, MapType mapType) {

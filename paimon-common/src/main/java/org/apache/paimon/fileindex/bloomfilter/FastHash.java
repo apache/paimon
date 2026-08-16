@@ -23,6 +23,7 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataType;
@@ -43,6 +44,7 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VectorType;
 
 import net.openhft.hashing.LongHashFunction;
 
@@ -166,8 +168,18 @@ public interface FastHash {
         }
 
         @Override
+        public FastHash visit(BlobType blobType) {
+            throw new UnsupportedOperationException("Does not support type blob");
+        }
+
+        @Override
         public FastHash visit(ArrayType arrayType) {
             throw new UnsupportedOperationException("Does not support type array");
+        }
+
+        @Override
+        public FastHash visit(VectorType vectorType) {
+            throw new UnsupportedOperationException("Does not support type vector");
         }
 
         @Override

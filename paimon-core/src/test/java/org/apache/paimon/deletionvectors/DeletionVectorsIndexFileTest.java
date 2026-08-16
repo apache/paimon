@@ -22,9 +22,9 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.table.source.DeletionFile;
-import org.apache.paimon.utils.PathFactory;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -34,7 +34,10 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -52,7 +55,7 @@ public class DeletionVectorsIndexFileTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testReadDvIndex(boolean bitmap64) {
-        PathFactory pathFactory = getPathFactory();
+        IndexPathFactory pathFactory = getPathFactory();
 
         DeletionVectorsIndexFile deletionVectorsIndexFile =
                 deletionVectorsIndexFile(pathFactory, bitmap64);
@@ -72,11 +75,11 @@ public class DeletionVectorsIndexFileTest {
         index3.delete(3);
         deleteMap.put("file33.parquet", index3);
 
-        List<IndexFileMeta> indexFiles = deletionVectorsIndexFile.write(deleteMap);
+        List<IndexFileMeta> indexFiles = deletionVectorsIndexFile.writeWithRolling(deleteMap);
         assertThat(indexFiles.size()).isEqualTo(1);
 
         // read
-        String fileName = indexFiles.get(0).fileName();
+        IndexFileMeta file = indexFiles.get(0);
         Map<String, DeletionVector> actualDeleteMap =
                 deletionVectorsIndexFile.readAllDeletionVectors(indexFiles);
         assertThat(actualDeleteMap.get("file1.parquet").isDeleted(1)).isTrue();
@@ -86,14 +89,14 @@ public class DeletionVectorsIndexFileTest {
         assertThat(actualDeleteMap.get("file33.parquet").isDeleted(3)).isTrue();
 
         // delete
-        deletionVectorsIndexFile.delete(fileName);
-        assertThat(deletionVectorsIndexFile.exists(fileName)).isFalse();
+        deletionVectorsIndexFile.delete(file);
+        assertThat(deletionVectorsIndexFile.exists(file)).isFalse();
     }
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testReadDvIndexWithCopiousDv(boolean bitmap64) {
-        PathFactory pathFactory = getPathFactory();
+        IndexPathFactory pathFactory = getPathFactory();
         DeletionVectorsIndexFile deletionVectorsIndexFile =
                 deletionVectorsIndexFile(pathFactory, bitmap64);
 
@@ -110,7 +113,7 @@ public class DeletionVectorsIndexFileTest {
         }
 
         // read
-        List<IndexFileMeta> indexFiles = deletionVectorsIndexFile.write(deleteMap);
+        List<IndexFileMeta> indexFiles = deletionVectorsIndexFile.writeWithRolling(deleteMap);
         assertThat(indexFiles.size()).isEqualTo(1);
         Map<String, DeletionVector> dvs =
                 deletionVectorsIndexFile.readAllDeletionVectors(indexFiles);
@@ -125,7 +128,7 @@ public class DeletionVectorsIndexFileTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testReadDvIndexWithEnormousDv(boolean bitmap64) {
-        PathFactory pathFactory = getPathFactory();
+        IndexPathFactory pathFactory = getPathFactory();
         DeletionVectorsIndexFile deletionVectorsIndexFile =
                 deletionVectorsIndexFile(pathFactory, bitmap64);
 
@@ -142,7 +145,7 @@ public class DeletionVectorsIndexFileTest {
             fileToCardinality.put("f" + i, index.getCardinality());
             fileToDV.put("f" + i, index);
         }
-        List<IndexFileMeta> indexFiles = deletionVectorsIndexFile.write(fileToDV);
+        List<IndexFileMeta> indexFiles = deletionVectorsIndexFile.writeWithRolling(fileToDV);
 
         // read
         assertThat(indexFiles.size()).isEqualTo(1);
@@ -157,7 +160,7 @@ public class DeletionVectorsIndexFileTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testWriteDVIndexWithLimitedTargetSizePerIndexFile(boolean bitmap64) {
-        PathFactory pathFactory = getPathFactory();
+        IndexPathFactory pathFactory = getPathFactory();
         DeletionVectorsIndexFile deletionVectorsIndexFile =
                 deletionVectorsIndexFile(pathFactory, MemorySize.parse("2MB"), bitmap64);
 
@@ -174,7 +177,7 @@ public class DeletionVectorsIndexFileTest {
             fileToCardinality.put("f" + i, index.getCardinality());
             fileToDV.put("f" + i, index);
         }
-        List<IndexFileMeta> indexFiles = deletionVectorsIndexFile.write(fileToDV);
+        List<IndexFileMeta> indexFiles = deletionVectorsIndexFile.writeWithRolling(fileToDV);
 
         // assert 1
         assertThat(indexFiles.size()).isEqualTo(3);
@@ -196,7 +199,7 @@ public class DeletionVectorsIndexFileTest {
             fileToCardinality.put("f" + i, index.getCardinality());
             fileToDV.put("f" + i, index);
         }
-        indexFiles = deletionVectorsIndexFile.write(fileToDV);
+        indexFiles = deletionVectorsIndexFile.writeWithRolling(fileToDV);
 
         // assert 2
         assertThat(indexFiles.size()).isGreaterThan(1);
@@ -208,7 +211,7 @@ public class DeletionVectorsIndexFileTest {
 
     @Test
     public void testReadV1AndV2() {
-        PathFactory pathFactory = getPathFactory();
+        IndexPathFactory pathFactory = getPathFactory();
         DeletionVectorsIndexFile v1DeletionVectorsIndexFile =
                 deletionVectorsIndexFile(pathFactory, false);
         DeletionVectorsIndexFile v2DeletionVectorsIndexFile =
@@ -226,7 +229,7 @@ public class DeletionVectorsIndexFileTest {
             deleteMap1.put(String.format("file%s.parquet", i), index);
             deleteInteger.put(String.format("file%s.parquet", i), num);
         }
-        List<IndexFileMeta> indexFiles1 = v1DeletionVectorsIndexFile.write(deleteMap1);
+        List<IndexFileMeta> indexFiles1 = v1DeletionVectorsIndexFile.writeWithRolling(deleteMap1);
         assertThat(indexFiles1.size()).isEqualTo(1);
 
         // write v2 dv
@@ -238,7 +241,7 @@ public class DeletionVectorsIndexFileTest {
             deleteMap2.put(String.format("file%s.parquet", i), index);
             deleteInteger.put(String.format("file%s.parquet", i), num);
         }
-        List<IndexFileMeta> indexFiles2 = v2DeletionVectorsIndexFile.write(deleteMap2);
+        List<IndexFileMeta> indexFiles2 = v2DeletionVectorsIndexFile.writeWithRolling(deleteMap2);
         assertThat(indexFiles2.size()).isEqualTo(1);
 
         List<IndexFileMeta> totalIndexFiles =
@@ -262,8 +265,61 @@ public class DeletionVectorsIndexFileTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
+    public void testReadAllDeletionVectorsWithOutOfOrderDvRanges(boolean bitmap64) {
+        IndexPathFactory pathFactory = getPathFactory();
+        DeletionVectorsIndexFile deletionVectorsIndexFile =
+                deletionVectorsIndexFile(pathFactory, bitmap64);
+
+        // write multiple DVs so they are stored sequentially in the index file
+        HashMap<String, DeletionVector> deleteMap = new HashMap<>();
+        Map<String, Integer> expected = new HashMap<>();
+        for (int i = 0; i < 10; i++) {
+            DeletionVector dv = createEmptyDV(bitmap64);
+            dv.delete(i * 100);
+            dv.delete(i * 100 + 1);
+            deleteMap.put("file" + i + ".parquet", dv);
+            expected.put("file" + i + ".parquet", i * 100);
+        }
+
+        List<IndexFileMeta> indexFiles = deletionVectorsIndexFile.writeWithRolling(deleteMap);
+        assertThat(indexFiles.size()).isEqualTo(1);
+        IndexFileMeta original = indexFiles.get(0);
+
+        // build a new IndexFileMeta with dvRanges in reverse offset order,
+        // simulating compaction merging dvRanges from multiple sources
+        LinkedHashMap<String, DeletionVectorMeta> originalRanges = original.dvRanges();
+        List<Map.Entry<String, DeletionVectorMeta>> entries =
+                new ArrayList<>(originalRanges.entrySet());
+        Collections.reverse(entries);
+        LinkedHashMap<String, DeletionVectorMeta> reversedRanges = new LinkedHashMap<>();
+        for (Map.Entry<String, DeletionVectorMeta> entry : entries) {
+            reversedRanges.put(entry.getKey(), entry.getValue());
+        }
+
+        IndexFileMeta reordered =
+                new IndexFileMeta(
+                        original.indexType(),
+                        original.fileName(),
+                        original.fileSize(),
+                        original.rowCount(),
+                        reversedRanges,
+                        original.externalPath());
+
+        // read with out-of-order dvRanges — this would fail without the seek fix
+        Map<String, DeletionVector> result =
+                deletionVectorsIndexFile.readAllDeletionVectors(reordered);
+        assertThat(result).hasSize(10);
+        for (Map.Entry<String, Integer> e : expected.entrySet()) {
+            assertThat(result.get(e.getKey()).isDeleted(e.getValue())).isTrue();
+            assertThat(result.get(e.getKey()).isDeleted(e.getValue() + 1)).isTrue();
+            assertThat(result.get(e.getKey()).isDeleted(e.getValue() + 2)).isFalse();
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
     public void testReadDeletionFile(boolean bitmap64) throws IOException {
-        PathFactory pathFactory = getPathFactory();
+        IndexPathFactory pathFactory = getPathFactory();
         DeletionVectorsIndexFile deletionVectorsIndexFile =
                 deletionVectorsIndexFile(pathFactory, bitmap64);
 
@@ -274,16 +330,15 @@ public class DeletionVectorsIndexFileTest {
         index1.delete(100);
         deleteMap.put("file1.parquet", index1);
 
-        List<IndexFileMeta> indexFiles = deletionVectorsIndexFile.write(deleteMap);
+        List<IndexFileMeta> indexFiles = deletionVectorsIndexFile.writeWithRolling(deleteMap);
         assertThat(indexFiles.size()).isEqualTo(1);
 
         IndexFileMeta indexFileMeta = indexFiles.get(0);
-        DeletionVectorMeta deletionVectorMeta =
-                indexFileMeta.deletionVectorMetas().get("file1.parquet");
+        DeletionVectorMeta deletionVectorMeta = indexFileMeta.dvRanges().get("file1.parquet");
 
         DeletionFile deletionFile =
                 new DeletionFile(
-                        pathFactory.toPath(indexFileMeta.fileName()).toString(),
+                        pathFactory.toPath(indexFileMeta).toString(),
                         deletionVectorMeta.offset(),
                         deletionVectorMeta.length(),
                         deletionVectorMeta.cardinality());
@@ -341,27 +396,32 @@ public class DeletionVectorsIndexFileTest {
     }
 
     private DeletionVectorsIndexFile deletionVectorsIndexFile(
-            PathFactory pathFactory, boolean bitmap64) {
+            IndexPathFactory pathFactory, boolean bitmap64) {
         return deletionVectorsIndexFile(pathFactory, MemorySize.ofBytes(Long.MAX_VALUE), bitmap64);
     }
 
     private DeletionVectorsIndexFile deletionVectorsIndexFile(
-            PathFactory pathFactory, MemorySize targetSizePerIndexFile, boolean bitmap64) {
+            IndexPathFactory pathFactory, MemorySize targetSizePerIndexFile, boolean bitmap64) {
         return new DeletionVectorsIndexFile(
                 LocalFileIO.create(), pathFactory, targetSizePerIndexFile, bitmap64);
     }
 
-    private PathFactory getPathFactory() {
+    private IndexPathFactory getPathFactory() {
         Path dir = new Path(tempPath.toUri());
-        return new PathFactory() {
+        return new IndexPathFactory() {
+            @Override
+            public Path toPath(String fileName) {
+                return new Path(dir, fileName);
+            }
+
             @Override
             public Path newPath() {
                 return new Path(dir, UUID.randomUUID().toString());
             }
 
             @Override
-            public Path toPath(String fileName) {
-                return new Path(dir, fileName);
+            public boolean isExternalPath() {
+                return false;
             }
         };
     }

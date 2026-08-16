@@ -43,7 +43,17 @@ public class FileUtils {
      */
     public static Stream<Long> listVersionedFiles(FileIO fileIO, Path dir, String prefix)
             throws IOException {
-        return listOriginalVersionedFiles(fileIO, dir, prefix).map(Long::parseLong);
+        // Python temporary files may share the versioned-file prefix, for example
+        // snapshot-1<UUID>.tmp, so ignore entries which are not valid version IDs.
+        return listOriginalVersionedFiles(fileIO, dir, prefix)
+                .flatMap(
+                        version -> {
+                            try {
+                                return Stream.of(Long.parseLong(version));
+                            } catch (NumberFormatException ignored) {
+                                return Stream.empty();
+                            }
+                        });
     }
 
     /**
@@ -109,15 +119,19 @@ public class FileUtils {
 
     public static void checkExists(FileIO fileIO, Path file) throws IOException {
         if (!fileIO.exists(file)) {
-            throw new FileNotFoundException(
-                    String.format(
-                            "File '%s' not found, Possible causes: "
-                                    + "1.snapshot expires too fast, you can configure 'snapshot.time-retained'"
-                                    + " option with a larger value. "
-                                    + "2.consumption is too slow, you can improve the performance of consumption"
-                                    + " (For example, increasing parallelism).",
-                            file));
+            throw newFileNotFoundException(file);
         }
+    }
+
+    public static FileNotFoundException newFileNotFoundException(Path file) {
+        return new FileNotFoundException(
+                String.format(
+                        "File '%s' not found, Possible causes: "
+                                + "1.snapshot expires too fast, you can configure 'snapshot.time-retained'"
+                                + " option with a larger value. "
+                                + "2.consumption is too slow, you can improve the performance of consumption"
+                                + " (For example, increasing parallelism).",
+                        file));
     }
 
     public static RecordReader<InternalRow> createFormatReader(

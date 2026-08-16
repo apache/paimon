@@ -54,7 +54,9 @@ public class RemoteTableQuery implements TableQuery {
         ServiceManager manager = this.table.store().newServiceManager();
         this.client = new KvQueryClient(new QueryLocationImpl(manager), 1);
         this.keySerializer =
-                InternalSerializers.create(TypeUtils.project(table.rowType(), table.primaryKeys()));
+                InternalSerializers.create(
+                        TypeUtils.project(
+                                this.table.rowType(), this.table.schema().trimmedPrimaryKeys()));
     }
 
     public static boolean isRemoteServiceAvailable(FileStoreTable table) {

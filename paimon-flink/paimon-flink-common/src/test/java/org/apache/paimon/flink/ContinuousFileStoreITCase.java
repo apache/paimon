@@ -27,7 +27,6 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
 import org.apache.flink.table.api.StatementSet;
-import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
@@ -42,6 +41,7 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.SnapshotTest.newSnapshotManager;
@@ -226,7 +226,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
 
         BlockingIterator<Row, Row> iterator =
                 BlockingIterator.of(
-                        streamSqlIter("SELECT * FROM T1 /*+ OPTIONS('log.scan'='latest') */"));
+                        streamSqlIter("SELECT * FROM T1 /*+ OPTIONS('scan.mode'='latest') */"));
 
         batchSql("INSERT INTO T1 VALUES ('7', '8', '9'), ('10', '11', '12')");
         assertThat(iterator.collect(2))
@@ -254,7 +254,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     @Test
     public void testContinuousFromTimestamp() throws Exception {
         String sql =
-                "SELECT * FROM T1 /*+ OPTIONS('log.scan'='from-timestamp', 'log.scan.timestamp-millis'='%s') */";
+                "SELECT * FROM T1 /*+ OPTIONS('scan.mode'='from-timestamp', 'scan.timestamp-millis'='%s') */";
 
         // empty table
         BlockingIterator<Row, Row> iterator = BlockingIterator.of(streamSqlIter(sql, 0));
@@ -322,7 +322,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
         assertThatThrownBy(
                         () ->
                                 streamSqlIter(
-                                        "SELECT * FROM T1 /*+ OPTIONS('log.scan'='from-timestamp') */"))
+                                        "SELECT * FROM T1 /*+ OPTIONS('scan.mode'='from-timestamp') */"))
                 .hasCauseInstanceOf(IllegalArgumentException.class)
                 .hasRootCauseMessage(
                         "must set only one key in [scan.timestamp-millis,scan.timestamp] when you use from-timestamp for scan.mode");
@@ -330,11 +330,11 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
 
     @Test
     public void testConfigureStartupTimestamp() throws Exception {
-        // Configure 'log.scan.timestamp-millis' without 'log.scan'.
+        // Configure 'scan.timestamp-millis' without 'scan.mode'.
         BlockingIterator<Row, Row> iterator =
                 BlockingIterator.of(
                         streamSqlIter(
-                                "SELECT * FROM T1 /*+ OPTIONS('log.scan.timestamp-millis'='%s') */",
+                                "SELECT * FROM T1 /*+ OPTIONS('scan.timestamp-millis'='%s') */",
                                 0));
         batchSql("INSERT INTO T1 VALUES ('1', '2', '3'), ('4', '5', '6')");
         batchSql("INSERT INTO T1 VALUES ('7', '8', '9'), ('10', '11', '12')");
@@ -342,11 +342,11 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                 .containsExactlyInAnyOrder(Row.of("1", "2", "3"), Row.of("4", "5", "6"));
         iterator.close();
 
-        // Configure 'log.scan.timestamp-millis' with 'log.scan=latest'.
+        // Configure 'scan.timestamp-millis' with 'scan.mode=latest'.
         assertThatThrownBy(
                         () ->
                                 streamSqlIter(
-                                        "SELECT * FROM T1 /*+ OPTIONS('log.scan'='latest', 'log.scan.timestamp-millis'='%s') */",
+                                        "SELECT * FROM T1 /*+ OPTIONS('scan.mode'='latest', 'scan.timestamp-millis'='%s') */",
                                         0))
                 .hasCauseInstanceOf(IllegalArgumentException.class)
                 .hasRootCauseMessage(
@@ -463,28 +463,6 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
         batchSql("INSERT INTO T1 VALUES ('9', '10', '11')");
         assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of("9", "10", "11"));
         iterator.close();
-    }
-
-    @Test
-    public void testUnsupportedUpsert() {
-        assertThatThrownBy(
-                        () ->
-                                streamSqlIter(
-                                        "SELECT * FROM T1 /*+ OPTIONS('log.changelog-mode'='upsert') */"))
-                .hasCauseInstanceOf(ValidationException.class)
-                .hasRootCauseMessage(
-                        "File store continuous reading does not support upsert changelog mode.");
-    }
-
-    @Test
-    public void testUnsupportedEventual() {
-        assertThatThrownBy(
-                        () ->
-                                streamSqlIter(
-                                        "SELECT * FROM T1 /*+ OPTIONS('log.consistency'='eventual') */"))
-                .hasCauseInstanceOf(ValidationException.class)
-                .hasRootCauseMessage(
-                        "File store continuous reading does not support eventual consistency mode.");
     }
 
     @Test
@@ -641,7 +619,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testAvroRetractNotNullField() {
+    public void testAvroRetractNotNullField() throws ExecutionException, InterruptedException {
         List<Row> input =
                 Arrays.asList(
                         Row.ofKind(RowKind.INSERT, 1, "A"), Row.ofKind(RowKind.DELETE, 1, "A"));
@@ -661,7 +639,8 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                         () -> sEnv.executeSql("INSERT INTO avro_sink select * from source").await())
                 .satisfies(
                         anyCauseMatches(
-                                RuntimeException.class,
-                                "Caught NullPointerException, the possible reason is you have set following options together"));
+                                IllegalArgumentException.class,
+                                "Field 'a' expected not null but found null value. A possible cause is that "
+                                        + "the table used partial-update or aggregation merge-engine and the aggregate function produced null value when retracting."));
     }
 }

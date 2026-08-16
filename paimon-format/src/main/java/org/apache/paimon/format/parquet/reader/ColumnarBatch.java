@@ -26,6 +26,7 @@ import org.apache.paimon.data.columnar.MapColumnVector;
 import org.apache.paimon.data.columnar.RowColumnVector;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.data.columnar.VectorizedRowIterator;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.utils.LongIterator;
 
@@ -38,7 +39,7 @@ public class ColumnarBatch {
     protected final VectorizedColumnBatch vectorizedColumnBatch;
     protected final ColumnarRowIterator vectorizedRowIterator;
 
-    public ColumnarBatch(Path filePath, ColumnVector[] columns) {
+    public ColumnarBatch(Path filePath, ColumnVector[] columns, FileIO fileIO) {
         this.columns = columns;
         this.vectorizedColumnBatch = new VectorizedColumnBatch(columns);
         boolean containsNestedColumn =
@@ -49,6 +50,7 @@ public class ColumnarBatch {
                                                 || vector instanceof RowColumnVector
                                                 || vector instanceof ArrayColumnVector);
         ColumnarRow row = new ColumnarRow(vectorizedColumnBatch);
+        row.setFileIO(fileIO);
         this.vectorizedRowIterator =
                 containsNestedColumn
                         ? new ColumnarRowIterator(filePath, row, null)
@@ -63,6 +65,10 @@ public class ColumnarBatch {
     /** Sets the number of rows in this batch. */
     public void setNumRows(int numRows) {
         this.vectorizedColumnBatch.setNumRows(numRows);
+    }
+
+    int numRows() {
+        return vectorizedColumnBatch.getNumRows();
     }
 
     /** Returns the column at `ordinal`. */

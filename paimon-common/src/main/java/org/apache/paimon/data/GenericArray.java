@@ -211,6 +211,11 @@ public final class GenericArray implements InternalArray, Serializable {
     }
 
     @Override
+    public Blob getBlob(int pos) {
+        return (Blob) getObject(pos);
+    }
+
+    @Override
     public BinaryString getString(int pos) {
         return (BinaryString) getObject(pos);
     }
@@ -233,6 +238,11 @@ public final class GenericArray implements InternalArray, Serializable {
     @Override
     public InternalArray getArray(int pos) {
         return (InternalArray) getObject(pos);
+    }
+
+    @Override
+    public InternalVector getVector(int pos) {
+        return (InternalVector) getObject(pos);
     }
 
     @Override

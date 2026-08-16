@@ -22,7 +22,7 @@ import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.utils.SnapshotManager
 
 import org.apache.spark.sql.{Dataset, Row}
-import org.apache.spark.sql.execution.streaming.MemoryStream
+import org.apache.spark.sql.paimon.shims.memstream.MemoryStream
 import org.apache.spark.sql.streaming.StreamTest
 import org.assertj.core.api.Assertions.{assertThat, assertThatIllegalArgumentException}
 
@@ -263,7 +263,8 @@ class ExpireSnapshotsProcedureTest extends PaimonSparkTestBase with StreamTest {
             checkAnswer(
               spark.sql(
                 "CALL paimon.sys.expire_snapshots(table => 'test.T', options => 'snapshot.num-retained.max=2, snapshot.num-retained.min=1')"),
-              Row(1L) :: Nil)
+              Row(1L) :: Nil
+            )
 
             checkAnswer(
               spark.sql("SELECT snapshot_id FROM paimon.test.`T$snapshots`"),

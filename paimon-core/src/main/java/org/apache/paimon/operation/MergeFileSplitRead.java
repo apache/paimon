@@ -20,34 +20,40 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.io.ChainKeyValueFileReaderFactory;
+import org.apache.paimon.io.ChainReadContext;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.mergetree.DropDeleteReader;
 import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.MergeTreeReaders;
+import org.apache.paimon.mergetree.SortBufferWriteBuffer;
 import org.apache.paimon.mergetree.SortedRun;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.mergetree.compact.IntervalPartition;
+import org.apache.paimon.mergetree.compact.LookupMergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
-import org.apache.paimon.mergetree.compact.MergeFunctionFactory.AdjustedProjection;
 import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
 import org.apache.paimon.mergetree.compact.ReducerMergeFunctionWrapper;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.reader.EmptyRecordReader;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.source.ChainSplit;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ProjectedRow;
-import org.apache.paimon.utils.Projection;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
 
 import javax.annotation.Nullable;
@@ -55,6 +61,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
@@ -63,10 +70,17 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.predicate.PredicateBuilder.containsFields;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 
-/** A {@link SplitRead} to read row lineage table which need field merge. */
+/**
+ * An implementation for {@link KeyValueFileStore}, this class handle LSM merging and changelog row
+ * kind things, it will force reading fields such as sequence and row_kind.
+ *
+ * @see RawFileSplitRead If in batch mode and reading raw files, it is recommended to use this read.
+ */
 public class MergeFileSplitRead implements SplitRead<KeyValue> {
 
+    private final CoreOptions options;
     private final TableSchema tableSchema;
+    private final RowType keyType;
     private final FileIO fileIO;
     private final KeyValueFileReaderFactory.Builder readerFactoryBuilder;
     private final Comparator<InternalRow> keyComparator;
@@ -76,13 +90,11 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     private final boolean sequenceOrder;
 
     @Nullable private RowType readKeyType;
+    @Nullable private RowType outerReadType;
+    @Nullable private IOManager ioManager;
 
     @Nullable private List<Predicate> filtersForKeys;
-
     @Nullable private List<Predicate> filtersForAll;
-
-    @Nullable private int[][] pushdownProjection;
-    @Nullable private int[][] outerProjection;
 
     private boolean forceKeepDelete = false;
 
@@ -94,7 +106,9 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
             Comparator<InternalRow> keyComparator,
             MergeFunctionFactory<KeyValue> mfFactory,
             KeyValueFileReaderFactory.Builder readerFactoryBuilder) {
+        this.options = options;
         this.tableSchema = schema;
+        this.keyType = keyType;
         this.readerFactoryBuilder = readerFactoryBuilder;
         this.fileIO = readerFactoryBuilder.fileIO();
         this.keyComparator = keyComparator;
@@ -126,66 +140,50 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
 
     @Override
     public MergeFileSplitRead withReadType(RowType readType) {
-        // todo: replace projectedFields with readType
-        RowType tableRowType = tableSchema.logicalRowType();
-        int[][] projectedFields =
-                Arrays.stream(tableRowType.getFieldIndices(readType.getFieldNames()))
-                        .mapToObj(i -> new int[] {i})
-                        .toArray(int[][]::new);
-        int[][] newProjectedFields = projectedFields;
-        if (sequenceFields.size() > 0) {
-            // make sure projection contains sequence fields
-            List<String> fieldNames = tableSchema.fieldNames();
-            List<String> projectedNames = Projection.of(projectedFields).project(fieldNames);
-            int[] lackFields =
-                    sequenceFields.stream()
-                            .filter(f -> !projectedNames.contains(f))
-                            .mapToInt(fieldNames::indexOf)
-                            .toArray();
-            if (lackFields.length > 0) {
-                newProjectedFields =
-                        Arrays.copyOf(projectedFields, projectedFields.length + lackFields.length);
-                for (int i = 0; i < lackFields.length; i++) {
-                    newProjectedFields[projectedFields.length + i] = new int[] {lackFields[i]};
-                }
-            }
-        }
+        RowType adjustedReadType = adjustReadType(readType);
 
-        AdjustedProjection projection = mfFactory.adjustProjection(newProjectedFields);
-        this.pushdownProjection = projection.pushdownProjection;
-        this.outerProjection = projection.outerProjection;
-        if (pushdownProjection != null) {
-            List<DataField> tableFields = tableRowType.getFields();
-            List<DataField> readFields = readType.getFields();
-            List<DataField> finalReadFields = new ArrayList<>();
-            for (int i : Arrays.stream(pushdownProjection).mapToInt(arr -> arr[0]).toArray()) {
-                DataField requiredField = tableFields.get(i);
-                finalReadFields.add(
-                        readFields.stream()
-                                .filter(x -> x.name().equals(requiredField.name()))
-                                .findFirst()
-                                .orElse(requiredField));
-            }
-            RowType pushdownRowType = new RowType(finalReadFields);
-            readerFactoryBuilder.withReadValueType(pushdownRowType);
-            mergeSorter.setProjectedValueType(pushdownRowType);
-        }
+        readerFactoryBuilder.withReadValueType(adjustedReadType);
+        mergeSorter.setProjectedValueType(adjustedReadType);
 
-        if (newProjectedFields != projectedFields) {
-            // Discard the completed sequence fields
-            if (outerProjection == null) {
-                outerProjection = Projection.range(0, projectedFields.length).toNestedIndexes();
-            } else {
-                outerProjection = Arrays.copyOf(outerProjection, projectedFields.length);
-            }
+        // Project away fields added for merging.
+        if (adjustedReadType != readType) {
+            outerReadType = readType;
         }
 
         return this;
     }
 
+    /** Returns the value type required internally by the configured merge function. */
+    public RowType adjustReadType(RowType readType) {
+        RowType tableRowType = tableSchema.logicalRowType();
+        RowType adjustedReadType = readType;
+
+        if (!sequenceFields.isEmpty()) {
+            // make sure actual readType contains sequence fields
+            List<String> readFieldNames = readType.getFieldNames();
+            List<DataField> extraFields = new ArrayList<>();
+            for (String seqField : sequenceFields) {
+                if (!readFieldNames.contains(seqField)) {
+                    extraFields.add(tableRowType.getField(seqField));
+                }
+            }
+            if (!extraFields.isEmpty()) {
+                List<DataField> allFields = new ArrayList<>(readType.getFields());
+                allFields.addAll(extraFields);
+                adjustedReadType = new RowType(allFields);
+            }
+        }
+        adjustedReadType = mfFactory.adjustReadType(adjustedReadType);
+        return adjustedReadType;
+    }
+
     @Override
     public MergeFileSplitRead withIOManager(IOManager ioManager) {
+        this.ioManager = ioManager;
         this.mergeSorter.setIOManager(ioManager);
+        if (mfFactory instanceof LookupMergeFunction.Factory) {
+            ((LookupMergeFunction.Factory) mfFactory).withIOManager(ioManager);
+        }
         return this;
     }
 
@@ -235,11 +233,18 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     }
 
     @Override
-    public RecordReader<KeyValue> createReader(DataSplit split) throws IOException {
-        if (!split.beforeFiles().isEmpty()) {
-            throw new IllegalArgumentException("This read cannot accept split with before files.");
+    public RecordReader<KeyValue> createReader(Split split) throws IOException {
+        if (split instanceof DataSplit) {
+            return createReader((DataSplit) split);
+        } else if (split instanceof ChainSplit) {
+            return createChainReader((ChainSplit) split);
+        } else {
+            throw new IllegalArgumentException(
+                    "Un-supported split type: " + split.getClass().getName());
         }
+    }
 
+    public RecordReader<KeyValue> createReader(DataSplit split) throws IOException {
         if (split.isStreaming() || split.bucket() == BucketMode.POSTPONE_BUCKET) {
             return createNoMergeReader(
                     split.partition(),
@@ -257,6 +262,44 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         }
     }
 
+    /** Reads a writer-grouped postpone split with key predicates only. */
+    public RecordReader<KeyValue> createPostponeReader(DataSplit split) throws IOException {
+        if (split.isStreaming() || split.bucket() != BucketMode.POSTPONE_BUCKET) {
+            throw new IllegalArgumentException(
+                    "Postpone reader requires a batch split from the postpone bucket.");
+        }
+        return createNoMergeReader(
+                split.partition(),
+                split.bucket(),
+                split.dataFiles(),
+                split.deletionFiles().orElse(null),
+                true);
+    }
+
+    public RecordReader<KeyValue> createChainReader(ChainSplit chainSplit) throws IOException {
+        List<DataFileMeta> files = chainSplit.dataFiles();
+        ChainReadContext chainReadContext =
+                new ChainReadContext.Builder()
+                        .withLogicalPartition(chainSplit.logicalPartition())
+                        .withFileBranchPathMapping(chainSplit.fileBranchMapping())
+                        .withFileBucketPathMapping(chainSplit.fileBucketPathMapping())
+                        .build();
+        DeletionVector.Factory dvFactory =
+                DeletionVector.factory(fileIO, files, chainSplit.deletionFiles().orElse(null));
+        ChainKeyValueFileReaderFactory.Builder builder =
+                ChainKeyValueFileReaderFactory.newBuilder(readerFactoryBuilder);
+        ChainKeyValueFileReaderFactory overlappedSectionFactory =
+                builder.build(null, dvFactory, false, filtersForKeys, chainReadContext);
+        ChainKeyValueFileReaderFactory nonOverlappedSectionFactory =
+                builder.build(null, dvFactory, false, filtersForAll, chainReadContext);
+        return createMergeReader(
+                files,
+                overlappedSectionFactory,
+                nonOverlappedSectionFactory,
+                forceKeepDelete,
+                new ReducerMergeFunctionWrapper(unwrapLookup(mfFactory).create(actualReadType())));
+    }
+
     public RecordReader<KeyValue> createMergeReader(
             BinaryRow partition,
             int bucket,
@@ -271,10 +314,22 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
                 readerFactoryBuilder.build(partition, bucket, dvFactory, false, filtersForKeys);
         KeyValueFileReaderFactory nonOverlappedSectionFactory =
                 readerFactoryBuilder.build(partition, bucket, dvFactory, false, filtersForAll);
+        return createMergeReader(
+                files,
+                overlappedSectionFactory,
+                nonOverlappedSectionFactory,
+                keepDelete,
+                new ReducerMergeFunctionWrapper(mfFactory.create(actualReadType())));
+    }
 
+    public RecordReader<KeyValue> createMergeReader(
+            List<DataFileMeta> files,
+            KeyValueFileReaderFactory overlappedSectionFactory,
+            KeyValueFileReaderFactory nonOverlappedSectionFactory,
+            boolean keepDelete,
+            MergeFunctionWrapper<KeyValue> mergeFuncWrapper)
+            throws IOException {
         List<ReaderSupplier<KeyValue>> sectionReaders = new ArrayList<>();
-        MergeFunctionWrapper<KeyValue> mergeFuncWrapper =
-                new ReducerMergeFunctionWrapper(mfFactory.create(pushdownProjection));
         for (List<SortedRun> section : new IntervalPartition(files, keyComparator).partition()) {
             sectionReaders.add(
                     () ->
@@ -288,7 +343,140 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
                                     mergeFuncWrapper,
                                     mergeSorter));
         }
-        RecordReader<KeyValue> reader = ConcatRecordReader.create(sectionReaders);
+        return finishMergeReader(ConcatRecordReader.create(sectionReaders), keepDelete);
+    }
+
+    /**
+     * Merges one real-bucket split with routed postpone records.
+     *
+     * <p>The postpone reader is consumed and closed eagerly. Its input order defines sequence
+     * numbers after the real files, while user-defined sequence fields take precedence. A null
+     * split represents a postpone-only bucket.
+     */
+    public RecordReader<KeyValue> createPostponeMergeReader(
+            @Nullable DataSplit realSplit, RecordReader<KeyValue> postponeRecords)
+            throws IOException {
+        List<DataFileMeta> realFiles =
+                realSplit == null ? Collections.emptyList() : realSplit.dataFiles();
+
+        RowType valueType = actualReadType();
+        UserDefinedSeqComparator udsComparator = null;
+        SortBufferWriteBuffer postponeBuffer = null;
+        long nextSequenceNumber = -1L;
+        try (RecordReader<KeyValue> records = postponeRecords) {
+            RecordReader.RecordIterator<KeyValue> batch;
+            while ((batch = records.readBatch()) != null) {
+                try {
+                    KeyValue record;
+                    while ((record = batch.next()) != null) {
+                        if (postponeBuffer == null) {
+                            for (DataFileMeta file : realFiles) {
+                                nextSequenceNumber =
+                                        Math.max(nextSequenceNumber, file.maxSequenceNumber());
+                            }
+                            udsComparator = createUdsComparator();
+                            postponeBuffer =
+                                    new SortBufferWriteBuffer(
+                                            keyType,
+                                            valueType,
+                                            udsComparator,
+                                            mergeSorter.memoryPool(),
+                                            options.writeBufferSpillable(),
+                                            options.writeBufferSpillDiskSize(),
+                                            options.localSortMaxNumFileHandles(),
+                                            options.spillCompressOptions(),
+                                            ioManager);
+                        }
+                        nextSequenceNumber = Math.addExact(nextSequenceNumber, 1L);
+                        if (!postponeBuffer.put(
+                                nextSequenceNumber,
+                                record.valueKind(),
+                                record.key(),
+                                record.value())) {
+                            throw new IOException(
+                                    "Postpone merge read buffer is full. Enable write-buffer-spillable or increase sort-spill-buffer-size.");
+                        }
+                    }
+                } finally {
+                    batch.releaseBatch();
+                }
+            }
+        } catch (IOException | RuntimeException e) {
+            if (postponeBuffer != null) {
+                postponeBuffer.clear();
+            }
+            throw e;
+        }
+
+        if (postponeBuffer == null) {
+            return realSplit == null ? new EmptyRecordReader<>() : createReader(realSplit);
+        }
+
+        final RecordReader<KeyValue> postponeReader;
+        try {
+            postponeReader =
+                    postponeBuffer.createReader(keyComparator, mfFactory.create(valueType));
+        } catch (IOException | RuntimeException e) {
+            postponeBuffer.clear();
+            throw e;
+        }
+
+        if (realFiles.isEmpty()) {
+            return finishMergeReader(postponeReader, forceKeepDelete);
+        }
+
+        // Postpone records make real-file value filters unsafe before the final merge.
+        final RecordReader<KeyValue> realBucketReader;
+        try {
+            DeletionVector.Factory dvFactory =
+                    DeletionVector.factory(
+                            fileIO, realFiles, realSplit.deletionFiles().orElse(null));
+            KeyValueFileReaderFactory realFileReaderFactory =
+                    readerFactoryBuilder.build(
+                            realSplit.partition(),
+                            realSplit.bucket(),
+                            dvFactory,
+                            false,
+                            filtersForKeys);
+            realBucketReader =
+                    MergeTreeReaders.readerForMergeTree(
+                            new IntervalPartition(realFiles, keyComparator).partition(),
+                            realFileReaderFactory,
+                            keyComparator,
+                            udsComparator,
+                            new ReducerMergeFunctionWrapper(mfFactory.create(valueType)),
+                            mergeSorter);
+        } catch (IOException | RuntimeException e) {
+            closeAndSuppress(postponeReader, e);
+            throw e;
+        }
+
+        RecordReader<KeyValue> reader;
+        try {
+            reader =
+                    mergeSorter.mergeSortNoSpill(
+                            Arrays.asList(() -> realBucketReader, () -> postponeReader),
+                            keyComparator,
+                            udsComparator,
+                            new ReducerMergeFunctionWrapper(mfFactory.create(valueType)));
+        } catch (IOException | RuntimeException e) {
+            closeAndSuppress(realBucketReader, e);
+            closeAndSuppress(postponeReader, e);
+            throw e;
+        }
+        return finishMergeReader(reader, forceKeepDelete);
+    }
+
+    private static void closeAndSuppress(RecordReader<?> reader, Exception exception) {
+        try {
+            reader.close();
+        } catch (IOException closeException) {
+            exception.addSuppressed(closeException);
+        }
+    }
+
+    private RecordReader<KeyValue> finishMergeReader(
+            RecordReader<KeyValue> reader, boolean keepDelete) {
 
         if (!keepDelete) {
             reader = new DropDeleteReader(reader);
@@ -319,6 +507,14 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         return projectOuter(ConcatRecordReader.create(suppliers));
     }
 
+    /**
+     * Returns the pushed read type if {@link #withReadType(RowType)} was called, else the default
+     * read type.
+     */
+    private RowType actualReadType() {
+        return readerFactoryBuilder.readValueType();
+    }
+
     private RecordReader<KeyValue> projectKey(RecordReader<KeyValue> reader) {
         if (readKeyType == null) {
             return reader;
@@ -329,8 +525,8 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     }
 
     private RecordReader<KeyValue> projectOuter(RecordReader<KeyValue> reader) {
-        if (outerProjection != null) {
-            ProjectedRow projectedRow = ProjectedRow.from(outerProjection);
+        if (outerReadType != null) {
+            ProjectedRow projectedRow = ProjectedRow.from(outerReadType, actualReadType());
             reader = reader.transform(kv -> kv.replaceValue(projectedRow.replaceRow(kv.value())));
         }
         return reader;
@@ -338,7 +534,13 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
 
     @Nullable
     public UserDefinedSeqComparator createUdsComparator() {
-        return UserDefinedSeqComparator.create(
-                readerFactoryBuilder.readValueType(), sequenceFields, sequenceOrder);
+        return UserDefinedSeqComparator.create(actualReadType(), sequenceFields, sequenceOrder);
+    }
+
+    private static MergeFunctionFactory<KeyValue> unwrapLookup(
+            MergeFunctionFactory<KeyValue> factory) {
+        return factory instanceof LookupMergeFunction.Factory
+                ? ((LookupMergeFunction.Factory) factory).wrapped()
+                : factory;
     }
 }

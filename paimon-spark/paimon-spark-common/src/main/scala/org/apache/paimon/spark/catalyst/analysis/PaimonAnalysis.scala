@@ -18,47 +18,81 @@
 
 package org.apache.paimon.spark.catalyst.analysis
 
-import org.apache.paimon.spark.{SparkConnectorOptions, SparkTable}
+import org.apache.paimon.options.Options
+import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation.isPaimonTable
-import org.apache.paimon.spark.commands.{PaimonAnalyzeTableColumnCommand, PaimonDynamicPartitionOverwriteCommand, PaimonShowColumnsCommand, PaimonTruncateTableCommand}
+import org.apache.paimon.spark.catalyst.plans.logical.{PaimonDropPartitions, PaimonHiveDynamicPartitionQuery}
+import org.apache.paimon.spark.commands.{PaimonAnalyzeTableColumnCommand, PaimonDynamicPartitionOverwriteCommand, PaimonShowColumnsCommand, SchemaEvolutionHelper}
 import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.table.FileStoreTable
 
-import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.analysis.{NamedRelation, ResolvedTable}
-import org.apache.spark.sql.catalyst.expressions.{Alias, ArrayTransform, Attribute, CreateStruct, Expression, GetArrayItem, GetStructField, If, IsNull, LambdaFunction, Literal, NamedExpression, NamedLambdaVariable}
-import org.apache.spark.sql.catalyst.plans.logical._
+import org.apache.spark.sql.{PaimonUtils, SparkSession}
+import org.apache.spark.sql.catalyst.analysis.ResolvedTable
+import org.apache.spark.sql.catalyst.expressions.Attribute
+import org.apache.spark.sql.catalyst.plans.logical.{AnalysisHelper, _}
 import org.apache.spark.sql.catalyst.rules.Rule
+import org.apache.spark.sql.catalyst.trees.TreeNodeTag
 import org.apache.spark.sql.catalyst.util.CharVarcharUtils
-import org.apache.spark.sql.catalyst.util.TypeUtils.toSQLId
 import org.apache.spark.sql.connector.catalog.TableCapability
-import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
-import org.apache.spark.sql.types._
+import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Implicits, DataSourceV2Relation}
 
-import scala.collection.mutable
+import scala.collection.JavaConverters._
 
 class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
+  import DataSourceV2Implicits._
+  import PaimonAnalysis._
 
-  override def apply(plan: LogicalPlan): LogicalPlan = plan.resolveOperatorsDown {
+  override def apply(plan: LogicalPlan): LogicalPlan = {
+    val withPaimonWrites = AnalysisHelper.allowInvokingTransformsInAnalyzer {
+      plan.transformDown {
+        // Keep fallback conversion before the generic V2 rewrite; otherwise an already-resolved
+        // query can remain as OverwritePartitionsDynamic until Spark's capability check rejects it.
+        case o @ PaimonDynamicPartitionOverwrite(r, d) if o.resolved =>
+          PaimonDynamicPartitionOverwriteCommand(r, d, o.query, o.writeOptions, o.isByName)
 
-    case a @ PaimonV2WriteCommand(table) if !paimonWriteResolved(a.query, table) =>
-      val mergeSchemaEnabled =
-        writeOptions(a).get(SparkConnectorOptions.MERGE_SCHEMA.key()).contains("true") ||
-          OptionUtils.writeMergeSchemaEnabled()
-      resolveQueryColumns(a.query, table, a.isByName, mergeSchemaEnabled) match {
-        case Some(newQuery) if newQuery != a.query => Compatibility.withNewQuery(a, newQuery)
-        case _ => a
+        case a @ PaimonV2WriteCommand(table)
+            if a.query.getTagValue(PAIMON_WRITE_RESOLVED).isEmpty =>
+          val options = Options.fromMap(writeOptions(a).asJava)
+          val mergeSchemaEnabled = SchemaEvolutionHelper.mergeSchemaEnabled(options)
+          val newQuery = resolvePaimonWrite(a, table, options, mergeSchemaEnabled)
+          if (newQuery ne a.query) {
+            // Tag to short-circuit the next Analyzer pass; otherwise inline-kept extras would loop.
+            newQuery.setTagValue(PAIMON_WRITE_RESOLVED, ())
+            Compatibility.withNewQuery(a, newQuery)
+          } else {
+            a
+          }
       }
+    }
 
-    case o @ PaimonDynamicPartitionOverwrite(r, d) if o.resolved =>
-      PaimonDynamicPartitionOverwriteCommand(r, d, o.query, o.writeOptions, o.isByName)
+    withPaimonWrites.resolveOperatorsDown {
+      case merge: MergeIntoTable
+          if !merge.resolved && isPaimonTable(merge.targetTable) && merge.childrenResolved =>
+        PaimonMergeIntoResolver(merge, session)
 
-    case merge: MergeIntoTable if isPaimonTable(merge.targetTable) && merge.childrenResolved =>
-      PaimonMergeIntoResolver(merge, session)
+      case s @ ShowColumns(PaimonRelation(table), _, _) if s.resolved =>
+        PaimonShowColumnsCommand(table)
 
-    case s @ ShowColumns(PaimonRelation(table), _, _) if s.resolved =>
-      PaimonShowColumnsCommand(table)
+      case d @ PaimonDropPartitions(ResolvedTable(_, _, table: SparkTable, _), parts, _, _)
+          if d.resolved =>
+        PaimonDropPartitions.validate(table, parts.asResolvedPartitionSpecs)
+        d
+
+      case SetTableLocation(ResolvedTable(_, _, _: SparkTable, _), _, _) =>
+        throw new UnsupportedOperationException(
+          "ALTER TABLE ... SET LOCATION is not supported for Paimon tables.")
+
+      case r: ReplaceColumns if r.resolved && isPaimonTable(r.table) =>
+        // Spark rewrites REPLACE COLUMNS into a batch that drops every existing column and re-adds
+        // the new set. Re-adding columns assigns brand-new field ids while existing data files keep
+        // the old ids, so same-named columns are read back as null, silently corrupting data. Reject
+        // it here, before the change batch reaches the catalog where it is indistinguishable from an
+        // ordinary drop+add.
+        throw new UnsupportedOperationException(
+          "ALTER TABLE ... REPLACE COLUMNS is not supported for Paimon tables. " +
+            "Please use RENAME COLUMN, ALTER COLUMN TYPE, DROP COLUMN, and ADD COLUMN instead.")
+    }
   }
 
   private def writeOptions(v2WriteCommand: V2WriteCommand): Map[String, String] = {
@@ -70,262 +104,184 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
     }
   }
 
-  private def paimonWriteResolved(query: LogicalPlan, table: NamedRelation): Boolean = {
-    query.output.size == table.output.size &&
-    query.output.zip(table.output).forall {
+  private def resolvePaimonWrite(
+      v2WriteCommand: V2WriteCommand,
+      table: DataSourceV2Relation,
+      options: Options,
+      mergeSchemaEnabled: Boolean): LogicalPlan = {
+    val query = stripHiveDynamicPartitionMarker(v2WriteCommand.query)
+    val hiveStyleDynamicPartitionEnabled = OptionUtils.hiveStyleDynamicPartitionEnabled()
+    hiveDynamicPartitionColumns(v2WriteCommand.query) match {
+      case Some(dynamicPartitionColumns)
+          if hiveStyleDynamicPartitionEnabled && !v2WriteCommand.isByName =>
+        resolveDynamicPartitionWrite(
+          query,
+          table,
+          hiveStyleDynamicPartitionOutput(table, dynamicPartitionColumns),
+          options,
+          mergeSchemaEnabled)
+      case _ =>
+        v2WriteCommand match {
+          case o: OverwritePartitionsDynamic if hiveStyleDynamicPartitionEnabled && !o.isByName =>
+            resolveDynamicPartitionWrite(
+              query,
+              table,
+              hiveStyleDynamicPartitionOutput(query, table),
+              options,
+              mergeSchemaEnabled)
+          case _ =>
+            val expected =
+              expectedAttrsForWrite(query, table, options, v2WriteCommand.isByName)
+            resolveWriteOutput(
+              query,
+              table.name,
+              expected,
+              v2WriteCommand.isByName,
+              mergeSchemaEnabled)
+        }
+    }
+  }
+
+  private def hiveDynamicPartitionColumns(query: LogicalPlan): Option[Seq[String]] = {
+    query.collectFirst {
+      case PaimonHiveDynamicPartitionQuery(dynamicPartitionColumns, _) =>
+        dynamicPartitionColumns
+    }
+  }
+
+  private def stripHiveDynamicPartitionMarker(query: LogicalPlan): LogicalPlan = {
+    query.transformDown { case PaimonHiveDynamicPartitionQuery(_, child) => child }
+  }
+
+  private def resolveDynamicPartitionWrite(
+      query: LogicalPlan,
+      table: DataSourceV2Relation,
+      hiveStyleOutput: Option[Seq[Attribute]],
+      options: Options,
+      mergeSchemaEnabled: Boolean): LogicalPlan = {
+    hiveStyleOutput match {
+      case Some(hiveStyleOutput)
+          if !sameOutputNames(query.output, table.output) &&
+            !sameOutputNames(hiveStyleOutput, table.output) =>
+        val hiveStyleQuery =
+          resolveWriteOutput(query, table.name, hiveStyleOutput, byName = false, mergeSchemaEnabled)
+        resolveWriteOutput(
+          hiveStyleQuery,
+          table.name,
+          expectedAttrsForWrite(hiveStyleQuery, table, options, byName = true),
+          byName = true,
+          mergeSchemaEnabled)
+      case _ =>
+        resolveWriteOutput(
+          query,
+          table.name,
+          expectedAttrsForWrite(query, table, options, byName = false),
+          byName = false,
+          mergeSchemaEnabled)
+    }
+  }
+
+  private def expectedAttrsForWrite(
+      query: LogicalPlan,
+      table: DataSourceV2Relation,
+      options: Options,
+      byName: Boolean): Seq[Attribute] = {
+    SchemaEvolutionHelper.expectedAttrsForCatalogWrite(
+      table,
+      query.schema,
+      options,
+      byName,
+      session)
+  }
+
+  private def resolveWriteOutput(
+      query: LogicalPlan,
+      tableName: String,
+      expectedOutput: Seq[Attribute],
+      byName: Boolean,
+      mergeSchemaEnabled: Boolean): LogicalPlan = {
+    if (paimonWriteResolved(query, expectedOutput)) {
+      query
+    } else {
+      PaimonOutputResolver.resolveOutputColumns(
+        tableName,
+        expectedOutput,
+        query,
+        byName,
+        mergeSchemaEnabled)
+    }
+  }
+
+  private def hiveStyleDynamicPartitionOutput(
+      query: LogicalPlan,
+      table: DataSourceV2Relation): Option[Seq[Attribute]] = {
+    val dynamicPartitionColumns =
+      table.table.asInstanceOf[SparkTable].getTable.partitionKeys().asScala.toSeq
+    hiveStyleDynamicPartitionOutput(table, dynamicPartitionColumns).filter {
+      hiveStyleOutput => sameOutputNames(query.output, hiveStyleOutput)
+    }
+  }
+
+  private def hiveStyleDynamicPartitionOutput(
+      table: DataSourceV2Relation,
+      dynamicPartitionColumns: Seq[String]): Option[Seq[Attribute]] = {
+    val partitionKeys = table.table.asInstanceOf[SparkTable].getTable.partitionKeys().asScala.toSeq
+    if (partitionKeys.isEmpty || dynamicPartitionColumns.isEmpty) {
+      None
+    } else {
+      val dynamicPartitionAttrs = partitionKeys
+        .filter {
+          partition => dynamicPartitionColumns.exists(dynamic => conf.resolver(dynamic, partition))
+        }
+        .flatMap {
+          dynamicPartition => table.output.find(attr => conf.resolver(attr.name, dynamicPartition))
+        }
+      val dataAttrs = table.output.filterNot {
+        attr => dynamicPartitionColumns.exists(partition => conf.resolver(attr.name, partition))
+      }
+      val hiveStyleOutput = dataAttrs ++ dynamicPartitionAttrs
+      if (dynamicPartitionAttrs.size == dynamicPartitionColumns.size) {
+        Some(hiveStyleOutput)
+      } else {
+        None
+      }
+    }
+  }
+
+  private def sameOutputNames(left: Seq[Attribute], right: Seq[Attribute]): Boolean = {
+    left.length == right.length &&
+    left.zip(right).forall { case (l, r) => conf.resolver(l.name, r.name) }
+  }
+
+  // Mirrors Spark's V2WriteCommand `outputResolved` strictness: query and table outputs must match
+  // by name, position, type (ignoring nullable compatibility), and nullability. Any nested
+  // structural differences also have to be reconciled before we declare the write resolved.
+  private def paimonWriteResolved(query: LogicalPlan, expectedOutput: Seq[Attribute]): Boolean = {
+    query.output.size == expectedOutput.size &&
+    query.output.zip(expectedOutput).forall {
       case (inAttr, outAttr) =>
         val inType = CharVarcharUtils.getRawType(inAttr.metadata).getOrElse(inAttr.dataType)
         val outType = CharVarcharUtils.getRawType(outAttr.metadata).getOrElse(outAttr.dataType)
-        inAttr.name == outAttr.name && schemaCompatible(inType, outType)
+        inAttr.name == outAttr.name &&
+        PaimonUtils.equalsIgnoreCompatibleNullability(inType, outType) &&
+        (outAttr.nullable || !inAttr.nullable)
     }
   }
 
-  private def resolveQueryColumns(
-      query: LogicalPlan,
-      table: NamedRelation,
-      byName: Boolean,
-      mergeSchemaEnabled: Boolean = false): Option[LogicalPlan] = {
-    // More details see: `TableOutputResolver#resolveOutputColumns`
-    if (byName) {
-      try {
-        Option.apply(resolveQueryColumnsByName(query, table))
-      } catch {
-        case e: Exception =>
-          // Merge schema is effective only when using byName mode.
-          // Schema validation is skipped here, because schema validation or merging will be
-          // done during insertion when mergeSchemaEnabled.
-          if (mergeSchemaEnabled) {
-            Option.empty
-          } else {
-            throw e
-          }
-      }
-    } else {
-      Option.apply(resolveQueryColumnsByPosition(query, table))
-    }
-  }
+}
 
-  private def resolveQueryColumnsByName(query: LogicalPlan, table: NamedRelation): LogicalPlan = {
-    val inputCols = query.output
-    val expectedCols = table.output
-    if (inputCols.size > expectedCols.size) {
-      throw new RuntimeException(
-        s"Cannot write incompatible data for the table `${table.name}`, " +
-          "the number of data columns don't match with the table schema's.")
-    }
-
-    val matchedCols = mutable.HashSet.empty[String]
-    val reorderedCols = expectedCols.map {
-      expectedCol =>
-        val matched = inputCols.filter(col => conf.resolver(col.name, expectedCol.name))
-        if (matched.isEmpty) {
-          // TODO: Support Spark default value framework if Paimon supports to change default values.
-          if (!expectedCol.nullable) {
-            throw new RuntimeException(
-              s"Cannot write incompatible data for the table `${table.name}`, " +
-                s"due to non-nullable column `${expectedCol.name}` has no specified value.")
-          }
-          Alias(Literal(null, expectedCol.dataType), expectedCol.name)()
-        } else if (matched.length > 1) {
-          throw new RuntimeException(
-            s"Cannot write incompatible data for the table `${table.name}`, due to column name conflicts: ${matched
-                .mkString(", ")}.")
-        } else {
-          matchedCols += matched.head.name
-          val matchedCol = matched.head
-          addCastToColumn(matchedCol, expectedCol, isByName = true)
-        }
-    }
-
-    assert(reorderedCols.length == expectedCols.length)
-    if (matchedCols.size < inputCols.length) {
-      val extraCols = inputCols
-        .filterNot(col => matchedCols.contains(col.name))
-        .map(col => s"${toSQLId(col.name)}")
-        .mkString(", ")
-      // There are seme unknown column names
-      throw new RuntimeException(
-        s"Cannot write incompatible data for the table `${table.name}`, due to unknown column names: $extraCols.")
-    }
-    Project(reorderedCols, query)
-  }
-
-  private def resolveQueryColumnsByPosition(
-      query: LogicalPlan,
-      table: NamedRelation): LogicalPlan = {
-    val expectedCols = table.output
-    val queryCols = query.output
-    if (queryCols.size != expectedCols.size) {
-      throw new RuntimeException(
-        s"Cannot write incompatible data for the table `${table.name}`, " +
-          "the number of data columns don't match with the table schema's.")
-    }
-
-    val project = queryCols.zipWithIndex.map {
-      case (attr, i) =>
-        val targetAttr = expectedCols(i)
-        addCastToColumn(attr, targetAttr, isByName = false)
-    }
-    Project(project, query)
-  }
-
-  private def schemaCompatible(dataSchema: DataType, tableSchema: DataType): Boolean = {
-    (dataSchema, tableSchema) match {
-      case (s1: StructType, s2: StructType) =>
-        s1.zip(s2).forall { case (d1, d2) => schemaCompatible(d1.dataType, d2.dataType) }
-      case (a1: ArrayType, a2: ArrayType) =>
-        // todo: support array type nullable evaluation
-        schemaCompatible(a1.elementType, a2.elementType)
-      case (m1: MapType, m2: MapType) =>
-        m1.valueContainsNull == m2.valueContainsNull &&
-        schemaCompatible(m1.keyType, m2.keyType) &&
-        schemaCompatible(m1.valueType, m2.valueType)
-      case (d1, d2) => d1 == d2
-    }
-  }
-
-  private def addCastToColumn(
-      attr: Attribute,
-      targetAttr: Attribute,
-      isByName: Boolean): NamedExpression = {
-    val expr = (attr.dataType, targetAttr.dataType) match {
-      case (s, t) if s == t =>
-        attr
-      case (s: StructType, t: StructType) if s != t =>
-        if (isByName) {
-          addCastToStructByName(attr, s, t)
-        } else {
-          addCastToStructByPosition(attr, s, t)
-        }
-      case (ArrayType(s: StructType, sNull: Boolean), ArrayType(t: StructType, _: Boolean))
-          if s != t =>
-        val castToStructFunc = if (isByName) {
-          addCastToStructByName _
-        } else {
-          addCastToStructByPosition _
-        }
-        castToArrayStruct(attr, s, t, sNull, castToStructFunc)
-      case _ =>
-        cast(attr, targetAttr.dataType)
-    }
-    Alias(stringLengthCheck(expr, targetAttr.metadata), targetAttr.name)(explicitMetadata =
-      Option(targetAttr.metadata))
-  }
-
-  private def addCastToStructByName(
-      parent: NamedExpression,
-      source: StructType,
-      target: StructType): NamedExpression = {
-    val fields = target.map {
-      case targetField @ StructField(name, nested: StructType, _, _) =>
-        val sourceIndex = source.fieldIndex(name)
-        val sourceField = source(sourceIndex)
-        sourceField.dataType match {
-          case s: StructType =>
-            val subField = castStructField(parent, sourceIndex, sourceField.name, targetField)
-            addCastToStructByName(subField, s, nested)
-          case o =>
-            throw new RuntimeException(s"Can not support to cast $o to StructType.")
-        }
-      case targetField =>
-        val sourceIndex = source.fieldIndex(targetField.name)
-        val sourceField = source(sourceIndex)
-        castStructField(parent, sourceIndex, sourceField.name, targetField)
-    }
-    structAlias(fields, parent)
-  }
-
-  private def addCastToStructByPosition(
-      parent: NamedExpression,
-      source: StructType,
-      target: StructType): NamedExpression = {
-    if (source.length != target.length) {
-      throw new RuntimeException("The number of fields in source and target is not same.")
-    }
-
-    val fields = target.zipWithIndex.map {
-      case (targetField @ StructField(_, nested: StructType, _, _), i) =>
-        val sourceField = source(i)
-        sourceField.dataType match {
-          case s: StructType =>
-            val subField = castStructField(parent, i, sourceField.name, targetField)
-            addCastToStructByPosition(subField, s, nested)
-          case o =>
-            throw new RuntimeException(s"Can not support to cast $o to StructType.")
-        }
-      case (targetField, i) =>
-        val sourceField = source(i)
-        castStructField(parent, i, sourceField.name, targetField)
-    }
-    structAlias(fields, parent)
-  }
-
-  private def structAlias(
-      fields: Seq[NamedExpression],
-      parent: NamedExpression): NamedExpression = {
-    val struct = CreateStruct(fields)
-    val res = if (parent.nullable) {
-      If(IsNull(parent), Literal(null, struct.dataType), struct)
-    } else {
-      struct
-    }
-    Alias(res, parent.name)(parent.exprId, parent.qualifier, Option(parent.metadata))
-  }
-
-  private def castStructField(
-      parent: NamedExpression,
-      i: Int,
-      sourceFieldName: String,
-      targetField: StructField): NamedExpression = {
-    Alias(
-      stringLengthCheck(
-        cast(GetStructField(parent, i, Option(sourceFieldName)), targetField.dataType),
-        targetField.metadata),
-      targetField.name)(explicitMetadata = Option(targetField.metadata))
-  }
-
-  private def castToArrayStruct(
-      parent: NamedExpression,
-      source: StructType,
-      target: StructType,
-      sourceNullable: Boolean,
-      castToStructFunc: (NamedExpression, StructType, StructType) => NamedExpression
-  ): Expression = {
-    val structConverter: (Expression, Expression) => Expression = (_, i) =>
-      castToStructFunc(Alias(GetArrayItem(parent, i), i.toString)(), source, target)
-    val transformLambdaFunc = {
-      val elementVar = NamedLambdaVariable("elementVar", source, sourceNullable)
-      val indexVar = NamedLambdaVariable("indexVar", IntegerType, false)
-      LambdaFunction(structConverter(elementVar, indexVar), Seq(elementVar, indexVar))
-    }
-    ArrayTransform(parent, transformLambdaFunc)
-  }
-
-  private def cast(expr: Expression, dataType: DataType): Expression = {
-    val cast = Compatibility.cast(expr, dataType, Option(conf.sessionLocalTimeZone))
-    cast.setTagValue(Compatibility.castByTableInsertionTag, ())
-    cast
-  }
-
-  private def stringLengthCheck(expr: Expression, metadata: Metadata): Expression = {
-    if (!conf.charVarcharAsString) {
-      CharVarcharUtils
-        .getRawType(metadata)
-        .map(rawType => CharVarcharUtils.stringLengthCheck(expr, rawType))
-        .getOrElse(expr)
-    } else {
-      expr
-    }
-  }
+object PaimonAnalysis {
+  val PAIMON_WRITE_RESOLVED: TreeNodeTag[Unit] = TreeNodeTag[Unit]("paimon.write.resolved")
 }
 
 case class PaimonPostHocResolutionRules(session: SparkSession) extends Rule[LogicalPlan] {
 
   override def apply(plan: LogicalPlan): LogicalPlan = {
-    plan match {
-      case t @ TruncateTable(PaimonRelation(table)) if t.resolved =>
-        PaimonTruncateTableCommand(table, Map.empty)
+    val withoutHiveDynamicPartitionMarkers = AnalysisHelper.allowInvokingTransformsInAnalyzer {
+      plan.transformDown { case PaimonHiveDynamicPartitionQuery(_, child) => child }
+    }
 
+    withoutHiveDynamicPartitionMarkers match {
       case a @ AnalyzeTable(
             ResolvedTable(catalog, identifier, table: SparkTable, _),
             partitionSpec,
@@ -349,7 +305,7 @@ case class PaimonPostHocResolutionRules(session: SparkSession) extends Rule[Logi
             allColumns) if a.resolved =>
         PaimonAnalyzeTableColumnCommand(catalog, identifier, table, columnNames, allColumns)
 
-      case _ => plan
+      case _ => withoutHiveDynamicPartitionMarkers
     }
   }
 }

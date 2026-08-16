@@ -21,12 +21,17 @@ package org.apache.paimon.spark.write
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.CoreOptions.TagCreationMode
 import org.apache.paimon.partition.actions.PartitionMarkDoneAction
-import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.spark.catalyst.Compatibility
+import org.apache.paimon.table.{BlobDescriptorReaderFactory, FileStoreTable}
 import org.apache.paimon.table.sink.CommitMessage
 import org.apache.paimon.tag.TagBatchCreation
-import org.apache.paimon.utils.{InternalRowPartitionComputer, PartitionPathUtils, PartitionStatisticsReporter, TypeUtils}
+import org.apache.paimon.utils.{InternalRowPartitionComputer, PartitionPathUtils, PartitionStatisticsReporter, TypeUtils, UriReaderFactory}
 
 import org.apache.spark.internal.Logging
+import org.apache.spark.sql.PaimonSparkSession
+import org.apache.spark.sql.connector.metric.CustomTaskMetric
+import org.apache.spark.sql.execution.SQLExecution
+import org.apache.spark.sql.execution.metric.SQLMetrics
 
 import scala.collection.JavaConverters._
 
@@ -35,6 +40,25 @@ trait WriteHelper extends Logging {
   val table: FileStoreTable
 
   lazy val coreOptions: CoreOptions = table.coreOptions()
+
+  lazy val uriReaderFactoryForBlobDescriptor: UriReaderFactory =
+    BlobDescriptorReaderFactory.create(table)
+
+  // Spark support v2 write driver metrics since 4.0, see https://github.com/apache/spark/pull/48573
+  // To ensure compatibility with 3.x, manually post driver metrics here instead of using Spark's API.
+  def postDriverMetrics(commitMetrics: Array[CustomTaskMetric]): Unit = {
+    val spark = PaimonSparkSession.active
+    val executionId = spark.sparkContext.getLocalProperty(SQLExecution.EXECUTION_ID_KEY)
+    val executionMetrics = Compatibility.getExecutionMetrics(spark, executionId.toLong).distinct
+    val metricUpdates = executionMetrics.flatMap {
+      m =>
+        commitMetrics.find(x => m.metricType.toLowerCase.contains(x.name.toLowerCase)) match {
+          case Some(customTaskMetric) => Some((m.accumulatorId, customTaskMetric.value()))
+          case None => None
+        }
+    }
+    SQLMetrics.postDriverMetricsUpdatedByValue(spark.sparkContext, executionId, metricUpdates)
+  }
 
   def postCommit(messages: Seq[CommitMessage]): Unit = {
     if (messages.isEmpty) {
@@ -52,7 +76,7 @@ trait WriteHelper extends Logging {
       config.get(CoreOptions.PARTITION_IDLE_TIME_TO_REPORT_STATISTIC).toMillis <= 0 ||
       table.partitionKeys.isEmpty ||
       !coreOptions.partitionedTableInMetastore ||
-      table.catalogEnvironment.partitionHandler() == null
+      table.catalogEnvironment.partitionModification() == null
     ) {
       return
     }
@@ -65,7 +89,7 @@ trait WriteHelper extends Logging {
     )
     val hmsReporter = new PartitionStatisticsReporter(
       table,
-      table.catalogEnvironment.partitionHandler()
+      table.catalogEnvironment.partitionModification()
     )
 
     val partitions = messages.map(_.partition()).distinct

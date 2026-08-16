@@ -19,10 +19,13 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 import org.apache.flink.table.data.RowData;
+
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_WRITER_COORDINATOR_ENABLED;
 
 /** {@link FlinkSink} for dedicated compact jobs. */
 public class CompactorSink extends FlinkSink<RowData> {
@@ -39,7 +42,13 @@ public class CompactorSink extends FlinkSink<RowData> {
     @Override
     protected OneInputStreamOperatorFactory<RowData, Committable> createWriteOperatorFactory(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return new StoreCompactOperator.Factory(table, writeProvider, commitUser, fullCompaction);
+        Options options = table.coreOptions().toConfiguration();
+        boolean coordinatorEnabled = options.get(SINK_WRITER_COORDINATOR_ENABLED);
+        return coordinatorEnabled
+                ? new StoreCompactOperator.CoordinatedFactory(
+                        table, writeProvider, commitUser, fullCompaction)
+                : new StoreCompactOperator.Factory(
+                        table, writeProvider, commitUser, fullCompaction);
     }
 
     @Override

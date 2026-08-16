@@ -26,7 +26,6 @@ import org.apache.paimon.fileindex.FileIndexWriter;
 import org.apache.paimon.fileindex.FileIndexer;
 import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.fs.SeekableInputStream;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataType;
@@ -59,7 +58,7 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
 
     private final DataType dataType;
 
-    public BitSliceIndexBitmapFileIndex(DataType dataType, Options options) {
+    public BitSliceIndexBitmapFileIndex(DataType dataType) {
         this.dataType = dataType;
     }
 
@@ -241,7 +240,11 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
                                     .map(valueMapper)
                                     .map(
                                             value -> {
-                                                if (value < 0) {
+                                                if (value == Long.MIN_VALUE) {
+                                                    // Writer cannot store Long.MIN_VALUE, so no
+                                                    // row can match it
+                                                    return new RoaringBitmap32();
+                                                } else if (value < 0) {
                                                     return negative.eq(Math.abs(value));
                                                 } else {
                                                     return positive.eq(value);
@@ -263,7 +266,9 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
                                         .map(valueMapper)
                                         .map(
                                                 value -> {
-                                                    if (value < 0) {
+                                                    if (value == Long.MIN_VALUE) {
+                                                        return new RoaringBitmap32();
+                                                    } else if (value < 0) {
                                                         return negative.eq(Math.abs(value));
                                                     } else {
                                                         return positive.eq(value);
@@ -281,7 +286,10 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
             return new BitmapIndexResult(
                     () -> {
                         Long value = valueMapper.apply(literal);
-                        if (value < 0) {
+                        if (value == Long.MIN_VALUE) {
+                            // Nothing is less than Long.MIN_VALUE
+                            return new RoaringBitmap32();
+                        } else if (value < 0) {
                             return negative.gt(Math.abs(value));
                         } else {
                             return RoaringBitmap32.or(positive.lt(value), negative.isNotNull());
@@ -290,11 +298,14 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
         }
 
         @Override
-        public FileIndexResult visitLessOrEqual(FieldRef fieldRef, Object literal) {
+        public BitmapIndexResult visitLessOrEqual(FieldRef fieldRef, Object literal) {
             return new BitmapIndexResult(
                     () -> {
                         Long value = valueMapper.apply(literal);
-                        if (value < 0) {
+                        if (value == Long.MIN_VALUE) {
+                            // Writer cannot store Long.MIN_VALUE, so no row can match
+                            return new RoaringBitmap32();
+                        } else if (value < 0) {
                             return negative.gte(Math.abs(value));
                         } else {
                             return RoaringBitmap32.or(positive.lte(value), negative.isNotNull());
@@ -307,7 +318,10 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
             return new BitmapIndexResult(
                     () -> {
                         Long value = valueMapper.apply(literal);
-                        if (value < 0) {
+                        if (value == Long.MIN_VALUE) {
+                            // Everything is greater than Long.MIN_VALUE (writer cannot store it)
+                            return RoaringBitmap32.or(positive.isNotNull(), negative.isNotNull());
+                        } else if (value < 0) {
                             return RoaringBitmap32.or(
                                     positive.isNotNull(), negative.lt(Math.abs(value)));
                         } else {
@@ -317,16 +331,29 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
         }
 
         @Override
-        public FileIndexResult visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
+        public BitmapIndexResult visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
             return new BitmapIndexResult(
                     () -> {
                         Long value = valueMapper.apply(literal);
-                        if (value < 0) {
+                        if (value == Long.MIN_VALUE) {
+                            // All non-null rows satisfy x >= Long.MIN_VALUE
+                            return RoaringBitmap32.or(positive.isNotNull(), negative.isNotNull());
+                        } else if (value < 0) {
                             return RoaringBitmap32.or(
                                     positive.isNotNull(), negative.lte(Math.abs(value)));
                         } else {
                             return positive.gte(value);
                         }
+                    });
+        }
+
+        @Override
+        public FileIndexResult visitBetween(FieldRef fieldRef, Object from, Object to) {
+            return new BitmapIndexResult(
+                    () -> {
+                        RoaringBitmap32 gte = visitGreaterOrEqual(fieldRef, from).get();
+                        RoaringBitmap32 lte = visitLessOrEqual(fieldRef, to).get();
+                        return RoaringBitmap32.and(gte, lte);
                     });
         }
     }

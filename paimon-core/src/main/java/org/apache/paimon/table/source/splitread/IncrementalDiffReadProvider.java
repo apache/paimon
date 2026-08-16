@@ -21,7 +21,8 @@ package org.apache.paimon.table.source.splitread;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
-import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.IncrementalSplit;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.LazyField;
 
 import java.util.function.Supplier;
@@ -47,8 +48,12 @@ public class IncrementalDiffReadProvider implements SplitReadProvider {
     }
 
     @Override
-    public boolean match(DataSplit split, boolean forceKeepDelete) {
-        return !split.beforeFiles().isEmpty() && !split.isStreaming();
+    public boolean match(Split split, Context context) {
+        if (!(split instanceof IncrementalSplit)) {
+            return false;
+        }
+        IncrementalSplit incrementalSplit = (IncrementalSplit) split;
+        return !incrementalSplit.isStreaming();
     }
 
     @Override

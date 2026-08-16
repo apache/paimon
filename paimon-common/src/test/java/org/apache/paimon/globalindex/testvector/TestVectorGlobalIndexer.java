@@ -1,0 +1,137 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.globalindex.testvector;
+
+import org.apache.paimon.globalindex.GlobalIndexIOMeta;
+import org.apache.paimon.globalindex.GlobalIndexReader;
+import org.apache.paimon.globalindex.GlobalIndexWriter;
+import org.apache.paimon.globalindex.VectorGlobalIndexer;
+import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
+import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.VectorType;
+
+import java.io.IOException;
+import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
+/**
+ * A test-only {@link VectorGlobalIndexer} for vector similarity search. Uses brute-force linear
+ * scan for ANN queries. No native library dependency required.
+ *
+ * <p>Supported distance metrics (configured via option {@code test.vector.metric}):
+ *
+ * <ul>
+ *   <li>{@code l2} (default) - Euclidean distance, score = 1 / (1 + distance)
+ *   <li>{@code cosine} - Cosine distance, score = 1 - distance
+ *   <li>{@code inner_product} - Inner product similarity (directly used as score)
+ * </ul>
+ */
+public class TestVectorGlobalIndexer implements VectorGlobalIndexer {
+
+    /** Option key for vector dimension. */
+    public static final String OPT_DIMENSION = "test.vector.dimension";
+
+    /** Option key for distance metric. */
+    public static final String OPT_METRIC = "test.vector.metric";
+
+    /** Option key to reverse scores for testing refine/rerank behavior. */
+    public static final String OPT_REVERSE_SCORE = "test.vector.reverse-score";
+
+    public static final String OPT_REQUIRED_OPTION_KEY = "test.vector.required-option.key";
+
+    public static final String OPT_REQUIRED_OPTION_VALUE = "test.vector.required-option.value";
+
+    private static final AtomicInteger METRIC_CALLS = new AtomicInteger();
+
+    private final DataType fieldType;
+    private final int dimension;
+    private final String metric;
+    private final boolean reverseScore;
+    private final String requiredOptionKey;
+    private final String requiredOptionValue;
+
+    public TestVectorGlobalIndexer(DataType fieldType, Options options) {
+        checkArgument(
+                isFloatVector(fieldType),
+                "TestVectorGlobalIndexer only supports VECTOR<FLOAT> or ARRAY<FLOAT>, but got: "
+                        + fieldType);
+        this.fieldType = fieldType;
+        this.dimension =
+                fieldType instanceof VectorType
+                        ? ((VectorType) fieldType).getLength()
+                        : options.getInteger(OPT_DIMENSION, 0);
+        this.metric = options.getString(OPT_METRIC, "l2");
+        this.reverseScore = options.getBoolean(OPT_REVERSE_SCORE, false);
+        this.requiredOptionKey = options.getString(OPT_REQUIRED_OPTION_KEY, null);
+        this.requiredOptionValue = options.getString(OPT_REQUIRED_OPTION_VALUE, null);
+    }
+
+    private static boolean isFloatVector(DataType fieldType) {
+        return (fieldType instanceof VectorType
+                        && ((VectorType) fieldType).getElementType() instanceof FloatType)
+                || (fieldType instanceof ArrayType
+                        && ((ArrayType) fieldType).getElementType() instanceof FloatType);
+    }
+
+    @Override
+    public GlobalIndexWriter createWriter(GlobalIndexFileWriter fileWriter) throws IOException {
+        return new TestVectorGlobalIndexWriter(fileWriter, dimension);
+    }
+
+    @Override
+    public GlobalIndexReader createReader(
+            GlobalIndexFileReader fileReader,
+            List<GlobalIndexIOMeta> files,
+            long totalRowCount,
+            ExecutorService executor) {
+        checkArgument(files.size() == 1, "Expected exactly one index file per shard");
+        return new TestVectorGlobalIndexReader(
+                fileReader,
+                files.get(0),
+                metric,
+                reverseScore,
+                requiredOptionKey,
+                requiredOptionValue);
+    }
+
+    public int dimension() {
+        return dimension;
+    }
+
+    @Override
+    public String metric() {
+        METRIC_CALLS.incrementAndGet();
+        return metric;
+    }
+
+    public static void resetMetricCalls() {
+        METRIC_CALLS.set(0);
+    }
+
+    public static int metricCalls() {
+        return METRIC_CALLS.get();
+    }
+}

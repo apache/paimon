@@ -19,7 +19,6 @@
 package org.apache.paimon.mergetree;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.lookup.LookupStoreReader;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.types.RowType;
@@ -38,10 +37,11 @@ import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.time.Duration;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.apache.paimon.mergetree.LookupUtils.fileKibiBytes;
 import static org.apache.paimon.utils.InternalRowPartitionComputer.partToSimpleString;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Lookup file for cache remote file to local. */
 public class LookupFile {
@@ -49,53 +49,121 @@ public class LookupFile {
     private static final Logger LOG = LoggerFactory.getLogger(LookupFile.class);
 
     private final File localFile;
-    private final DataFileMeta remoteFile;
+    private final int level;
+    private final long schemaId;
+    private final String serVersion;
     private final LookupStoreReader reader;
     private final Runnable callback;
 
-    private long requestCount;
-    private long hitCount;
-    private boolean isClosed = false;
+    private final AtomicLong requestCount = new AtomicLong();
+    private final AtomicLong hitCount = new AtomicLong();
+    private final AtomicBoolean isClosed = new AtomicBoolean(false);
 
     public LookupFile(
-            File localFile, DataFileMeta remoteFile, LookupStoreReader reader, Runnable callback) {
+            File localFile,
+            int level,
+            long schemaId,
+            String serVersion,
+            LookupStoreReader reader,
+            Runnable callback) {
         this.localFile = localFile;
-        this.remoteFile = remoteFile;
+        this.level = level;
+        this.schemaId = schemaId;
+        this.serVersion = serVersion;
         this.reader = reader;
         this.callback = callback;
     }
 
+    public File localFile() {
+        return localFile;
+    }
+
+    public long schemaId() {
+        return schemaId;
+    }
+
+    public String serVersion() {
+        return serVersion;
+    }
+
     @Nullable
-    public byte[] get(byte[] key) throws IOException {
-        checkArgument(!isClosed);
-        requestCount++;
+    public synchronized byte[] get(byte[] key) throws IOException {
+        if (isClosed.get()) {
+            return null;
+        }
+        requestCount.incrementAndGet();
         byte[] res = reader.lookup(key);
         if (res != null) {
-            hitCount++;
+            hitCount.incrementAndGet();
         }
         return res;
     }
 
-    public DataFileMeta remoteFile() {
-        return remoteFile;
+    public int level() {
+        return level;
     }
 
     public boolean isClosed() {
-        return isClosed;
+        return isClosed.get();
     }
 
-    public void close(RemovalCause cause) throws IOException {
-        reader.close();
-        isClosed = true;
-        callback.run();
+    public synchronized void close(RemovalCause cause) throws IOException {
+        if (!isClosed.compareAndSet(false, true)) {
+            return;
+        }
+
+        Throwable throwable = null;
+        try {
+            reader.close();
+        } catch (Throwable t) {
+            throwable = t;
+        }
+
+        try {
+            callback.run();
+        } catch (Throwable t) {
+            throwable = addSuppressed(throwable, t);
+        }
+
         LOG.info(
                 "Delete Lookup file {} due to {}. Access stats: requestCount={}, hitCount={}, size={}KB",
                 localFile.getName(),
                 cause,
-                requestCount,
-                hitCount,
+                requestCount.get(),
+                hitCount.get(),
                 localFile.length() >> 10);
-        FileIOUtils.deleteFileOrDirectory(localFile);
+
+        try {
+            FileIOUtils.deleteFileOrDirectory(localFile);
+        } catch (Throwable t) {
+            throwable = addSuppressed(throwable, t);
+        }
+
+        throwIfNotNull(throwable);
+    }
+
+    private static Throwable addSuppressed(@Nullable Throwable throwable, Throwable suppressed) {
+        if (throwable == null) {
+            return suppressed;
+        }
+        throwable.addSuppressed(suppressed);
+        return throwable;
+    }
+
+    private static void throwIfNotNull(@Nullable Throwable throwable) throws IOException {
+        if (throwable == null) {
+            return;
+        }
+        if (throwable instanceof IOException) {
+            throw (IOException) throwable;
+        }
+        if (throwable instanceof RuntimeException) {
+            throw (RuntimeException) throwable;
+        }
+        if (throwable instanceof Error) {
+            throw (Error) throwable;
+        }
+        throw new IOException(throwable);
     }
 
     // ==================== Cache for Local File ======================

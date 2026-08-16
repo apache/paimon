@@ -37,6 +37,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -46,6 +47,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link BinaryExternalSortBuffer}. */
 public class BinaryExternalSortBufferTest {
@@ -94,6 +96,33 @@ public class BinaryExternalSortBufferTest {
                         .filter(f -> !f.isDirectory())
                         .collect(Collectors.toList());
         assertThat(files).isEmpty();
+    }
+
+    private static void setNumRecords(BinaryExternalSortBuffer sorter, long numRecords)
+            throws Exception {
+        Field numRecordsField = BinaryExternalSortBuffer.class.getDeclaredField("numRecords");
+        numRecordsField.setAccessible(true);
+        numRecordsField.setLong(sorter, numRecords);
+    }
+
+    @Test
+    public void testSizeBoundary() throws Exception {
+        BinaryExternalSortBuffer sorter = createBuffer();
+
+        assertThat(sorter.size()).isEqualTo(0);
+        assertThat(sorter.isEmpty()).isTrue();
+
+        setNumRecords(sorter, Integer.MAX_VALUE);
+        assertThat(sorter.size()).isEqualTo(Integer.MAX_VALUE);
+        assertThat(sorter.isEmpty()).isFalse();
+
+        setNumRecords(sorter, (long) Integer.MAX_VALUE + 1);
+        assertThat(sorter.isEmpty()).isFalse();
+        assertThatThrownBy(sorter::size)
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("exceeds Integer.MAX_VALUE");
+
+        sorter.clear();
     }
 
     @Test

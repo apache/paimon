@@ -27,6 +27,7 @@ import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl, CommitMessageSerializer}
 
 import org.apache.spark.internal.Logging
+import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{PaimonSparkSession, SparkSession}
 import org.apache.spark.sql.catalyst.SQLConfHelper
 
@@ -43,8 +44,12 @@ case class SparkRemoveUnexistingFiles(
   extends SQLConfHelper
   with Logging {
 
-  private def buildRDD() = {
+  private def buildRDD(): RDD[String] = {
     val binaryPartitions = table.newScan().listPartitions()
+    if (binaryPartitions.isEmpty) {
+      return spark.sparkContext.emptyRDD[String]
+    }
+
     val realParallelism = Math.min(binaryPartitions.size(), parallelism)
 
     val numPartitionFields = table.schema().partitionKeys().size()
@@ -71,7 +76,8 @@ case class SparkRemoveUnexistingFiles(
                         Collections.emptyList(),
                         new util.ArrayList[DataFileMeta](metaMap.values()),
                         Collections.emptyList()),
-                      CompactIncrement.emptyIncrement())
+                      CompactIncrement.emptyIncrement()
+                    )
                     (metaMap.keySet().asScala.toSeq, serializer.serialize(message))
                 }
               })

@@ -18,9 +18,9 @@
 
 package org.apache.paimon.flink;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.sink.FlinkTableSink;
 import org.apache.paimon.flink.source.DataTableSource;
+import org.apache.paimon.flink.utils.ChangelogModeUtils;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
@@ -40,7 +40,12 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.util.Collections;
 
+import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
+import static org.apache.paimon.CoreOptions.ChangelogProducer.INPUT;
+import static org.apache.paimon.CoreOptions.ChangelogProducer.LOOKUP;
+import static org.apache.paimon.CoreOptions.PRIMARY_KEY_NULLABLE;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for changelog mode with flink source and sink. */
 public class ChangelogModeTest {
@@ -56,8 +61,7 @@ public class ChangelogModeTest {
         path = new Path(temp.toUri().toString());
     }
 
-    private void test(Options options, ChangelogMode expectSource, ChangelogMode expectSink)
-            throws Exception {
+    private FileStoreTable createTable(Options options) throws Exception {
         new SchemaManager(LocalFileIO.create(), path)
                 .createTable(
                         new Schema(
@@ -66,13 +70,30 @@ public class ChangelogModeTest {
                                 Collections.singletonList("f0"),
                                 options.toMap(),
                                 ""));
-        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), path);
+        return FileStoreTableFactory.create(LocalFileIO.create(), path);
+    }
 
-        DataTableSource source = new DataTableSource(identifier, table, true, null, null);
+    private void test(Options options, ChangelogMode expectSource, ChangelogMode expectSink)
+            throws Exception {
+        FileStoreTable table = createTable(options);
+
+        DataTableSource source = new DataTableSource(identifier, table, true, null);
         assertThat(source.getChangelogMode()).isEqualTo(expectSource);
 
-        FlinkTableSink sink = new FlinkTableSink(identifier, table, null, null);
+        FlinkTableSink sink = new FlinkTableSink(identifier, table, null);
         assertThat(sink.getChangelogMode(ChangelogMode.all())).isEqualTo(expectSink);
+    }
+
+    @Test
+    public void testNullablePrimaryKey() throws Exception {
+        Options options = new Options();
+        options.set(PRIMARY_KEY_NULLABLE, true);
+        FileStoreTable table = createTable(options);
+
+        DataTableSource source = new DataTableSource(identifier, table, true, null);
+        assertThatThrownBy(source::getChangelogMode)
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("nullable primary keys require a full changelog");
     }
 
     @Test
@@ -88,16 +109,48 @@ public class ChangelogModeTest {
     }
 
     @Test
+    public void testKeyOnlyDeletesEnabled() throws Exception {
+        Options options = new Options();
+        options.set(FlinkConnectorOptions.SINK_KEY_ONLY_DELETES_ENABLED, true);
+        // keyOnlyDeletes is a no-op on Flink 1.x and set on Flink 2.1+, so build the expected
+        // mode through the same adapter the sink uses.
+        ChangelogMode.Builder expectSink =
+                ChangelogMode.newBuilder()
+                        .addContainedKind(RowKind.INSERT)
+                        .addContainedKind(RowKind.UPDATE_AFTER)
+                        .addContainedKind(RowKind.DELETE);
+        ChangelogModeUtils.enableKeyOnlyDeletes(expectSink);
+        test(options, ChangelogMode.upsert(), expectSink.build());
+    }
+
+    @Test
     public void testInputChangelogProducer() throws Exception {
         Options options = new Options();
-        options.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.INPUT);
+        options.set(CHANGELOG_PRODUCER, INPUT);
         test(options, ChangelogMode.all(), ChangelogMode.all());
     }
 
     @Test
-    public void testChangelogModeAll() throws Exception {
+    public void testKeyOnlyDeletesIgnoredWithInputChangelogProducer() throws Exception {
         Options options = new Options();
-        options.set(CoreOptions.LOG_CHANGELOG_MODE, CoreOptions.LogChangelogMode.ALL);
+        options.set(CHANGELOG_PRODUCER, INPUT);
+        options.set(FlinkConnectorOptions.SINK_KEY_ONLY_DELETES_ENABLED, true);
+        // The input changelog producer forces ChangelogMode.all(), so key-only deletes is ignored.
         test(options, ChangelogMode.all(), ChangelogMode.all());
+    }
+
+    @Test
+    public void testLookupChangelogProducer() throws Exception {
+        Options options = new Options();
+        options.set(CHANGELOG_PRODUCER, LOOKUP);
+
+        // Compatible to Flink 2.0 (keyOnlyDeletes)
+        ChangelogMode.Builder upsertBuilder = ChangelogMode.newBuilder();
+        for (RowKind kind : ChangelogMode.all().getContainedKinds()) {
+            if (kind != RowKind.UPDATE_BEFORE) {
+                upsertBuilder.addContainedKind(kind);
+            }
+        }
+        test(options, ChangelogMode.all(), upsertBuilder.build());
     }
 }

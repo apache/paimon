@@ -22,13 +22,16 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.BinaryMap;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalRow.FieldGetter;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.memory.MemorySegment;
@@ -36,6 +39,9 @@ import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VectorType;
+import org.apache.paimon.utils.SortUtil;
+import org.apache.paimon.utils.TypeCheckUtils;
 import org.apache.paimon.utils.VarLengthIntUtils;
 
 import javax.annotation.Nullable;
@@ -163,6 +169,7 @@ public class RowCompactedSerializer implements Serializer<InternalRow> {
     }
 
     public Comparator<MemorySlice> createSliceComparator() {
+        checkComparableFields(rowType);
         return new SliceComparator(rowType);
     }
 
@@ -213,6 +220,19 @@ public class RowCompactedSerializer implements Serializer<InternalRow> {
                         (writer, pos, value) ->
                                 writer.writeTimestamp((Timestamp) value, timestampPrecision);
                 break;
+            case VARIANT:
+                fieldWriter =
+                        (writer, pos, value) -> {
+                            Variant variant = (Variant) value;
+                            byte[] bytes;
+                            try {
+                                bytes = VariantSerializer.INSTANCE.serializeToBytes(variant);
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
+                            writer.writeBinary(bytes);
+                        };
+                break;
             case ARRAY:
                 Serializer<InternalArray> arraySerializer = InternalSerializers.create(fieldType);
                 fieldWriter =
@@ -220,6 +240,18 @@ public class RowCompactedSerializer implements Serializer<InternalRow> {
                                 writer.writeArray(
                                         (InternalArray) value,
                                         (InternalArraySerializer) arraySerializer);
+                break;
+            case VECTOR:
+                VectorType vectorType = (VectorType) fieldType;
+                InternalVectorSerializer vectorSerializer =
+                        new InternalVectorSerializer(
+                                vectorType.getElementType(), vectorType.getLength());
+                fieldWriter =
+                        (writer, pos, value) -> {
+                            InternalVector vector = (InternalVector) value;
+                            checkVectorLength(vector, vectorType.getLength());
+                            writer.writeVector(vector, vectorSerializer);
+                        };
                 break;
             case MULTISET:
             case MAP:
@@ -301,8 +333,23 @@ public class RowCompactedSerializer implements Serializer<InternalRow> {
                 final int timestampPrecision = getPrecision(fieldType);
                 fieldReader = (reader, pos) -> reader.readTimestamp(timestampPrecision);
                 break;
+            case VARIANT:
+                fieldReader =
+                        (reader, pos) -> {
+                            byte[] bytes = reader.readBinary();
+                            try {
+                                return VariantSerializer.INSTANCE.deserializeFromBytes(bytes);
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
+                        };
+                break;
             case ARRAY:
                 fieldReader = (reader, pos) -> reader.readArray();
+                break;
+            case VECTOR:
+                VectorType vectorType = (VectorType) fieldType;
+                fieldReader = (reader, pos) -> reader.readVector(vectorType.getLength());
                 break;
             case MULTISET:
             case MAP:
@@ -329,6 +376,27 @@ public class RowCompactedSerializer implements Serializer<InternalRow> {
             }
             return fieldReader.readField(reader, pos);
         };
+    }
+
+    private static void checkVectorLength(InternalVector vector, int expectedLength) {
+        if (vector.size() != expectedLength) {
+            throw new IllegalArgumentException(
+                    "Vector length mismatch: expected "
+                            + expectedLength
+                            + " but got "
+                            + vector.size());
+        }
+    }
+
+    private static void checkComparableFields(RowType rowType) {
+        for (int i = 0; i < rowType.getFieldCount(); i++) {
+            DataType type = rowType.getTypeAt(i);
+            checkArgument(
+                    TypeCheckUtils.isComparable(type),
+                    "Field %s with type %s is not comparable in slice comparator.",
+                    rowType.getFields().get(i).name(),
+                    type);
+        }
     }
 
     private interface FieldWriter extends Serializable {
@@ -439,6 +507,11 @@ public class RowCompactedSerializer implements Serializer<InternalRow> {
 
         private void writeArray(InternalArray value, InternalArraySerializer serializer) {
             BinaryArray binary = serializer.toBinaryArray(value);
+            writeSegments(binary.getSegments(), binary.getOffset(), binary.getSizeInBytes());
+        }
+
+        private void writeVector(InternalVector value, InternalVectorSerializer serializer) {
+            BinaryVector binary = serializer.toBinaryVector(value);
             writeSegments(binary.getSegments(), binary.getOffset(), binary.getSizeInBytes());
         }
 
@@ -634,6 +707,14 @@ public class RowCompactedSerializer implements Serializer<InternalRow> {
             return value;
         }
 
+        private InternalVector readVector(int vectorLength) {
+            BinaryVector value = new BinaryVector(vectorLength);
+            int length = readUnsignedInt();
+            value.pointTo(segments, position, length);
+            position += length;
+            return value;
+        }
+
         private InternalMap readMap() {
             BinaryMap value = new BinaryMap();
             int length = readUnsignedInt();
@@ -680,8 +761,16 @@ public class RowCompactedSerializer implements Serializer<InternalRow> {
                         FieldReader fieldReader = fieldReaders[i];
                         Object o1 = fieldReader.readField(reader1, i);
                         Object o2 = fieldReader.readField(reader2, i);
-                        @SuppressWarnings({"unchecked", "rawtypes"})
-                        int comp = ((Comparable) o1).compareTo(o2);
+                        int comp;
+                        if (o1 instanceof byte[]) {
+                            // BINARY / VARBINARY fields read back as byte[], which does not
+                            // implement Comparable; order them like BinaryRow does.
+                            comp = SortUtil.compareBinary((byte[]) o1, (byte[]) o2);
+                        } else {
+                            @SuppressWarnings({"unchecked", "rawtypes"})
+                            int comparableComp = ((Comparable) o1).compareTo(o2);
+                            comp = comparableComp;
+                        }
                         if (comp != 0) {
                             return comp;
                         }

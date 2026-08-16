@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink.listener;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.flink.sink.state.StateStore;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionTimeExtractor;
@@ -27,7 +28,6 @@ import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
-import org.apache.flink.api.common.state.OperatorStateStore;
 import org.apache.flink.api.common.typeutils.base.ListSerializer;
 import org.apache.flink.api.common.typeutils.base.StringSerializer;
 import org.slf4j.Logger;
@@ -132,19 +132,26 @@ public class PartitionMarkDoneTrigger {
         if (timeInterval == null || idleTime == null) {
             return Collections.emptyList();
         }
+        LOG.debug(
+                "End input is true and markDoneWhenEndInput is enabled, mark all pending partitions done: {}",
+                String.join(",", pendingPartitions.keySet()));
 
         List<String> needDone = new ArrayList<>();
         Iterator<Map.Entry<String, Long>> iter = pendingPartitions.entrySet().iterator();
         while (iter.hasNext()) {
             Map.Entry<String, Long> entry = iter.next();
             String partition = entry.getKey();
-
             long lastUpdateTime = entry.getValue();
-            long partitionStartTime;
+            LOG.debug(
+                    "Partition {} is in progress, last update time: {}",
+                    partition,
+                    entry.getValue());
 
+            long partitionStartTime;
             Optional<LocalDateTime> partitionLocalDateTimeOpt = extractDateTime(partition);
             // skip illegal partition
             if (!partitionLocalDateTimeOpt.isPresent()) {
+                LOG.debug("Partition {} is illegal, skip it", partition);
                 iter.remove();
                 continue;
             }
@@ -167,12 +174,30 @@ public class PartitionMarkDoneTrigger {
             }
             long partitionEndTime = partitionStartTime + timeInterval;
             lastUpdateTime = Math.max(lastUpdateTime, partitionEndTime);
+            LOG.debug(
+                    "Partition {} start time: {}, end time: {}, last update time after compare: {}",
+                    partition,
+                    partitionStartTime,
+                    partitionEndTime,
+                    lastUpdateTime);
 
             if (currentTimeMillis - lastUpdateTime > idleTime) {
+                LOG.debug(
+                        "Partition {} is idle for {} greater than idleTime {}, mark it done",
+                        partition,
+                        currentTimeMillis - lastUpdateTime,
+                        idleTime);
                 needDone.add(partition);
                 iter.remove();
+            } else {
+                LOG.debug(
+                        "Partition {} is idle for {} less than idleTime {}, no not mark it done",
+                        partition,
+                        currentTimeMillis - lastUpdateTime,
+                        idleTime);
             }
         }
+        LOG.debug("Need done partitions: {}", String.join(",", needDone));
         return needDone;
     }
 
@@ -206,7 +231,7 @@ public class PartitionMarkDoneTrigger {
         private final boolean isRestored;
         private final ListState<List<String>> pendingPartitionsState;
 
-        public PartitionMarkDoneTriggerState(boolean isRestored, OperatorStateStore stateStore)
+        public PartitionMarkDoneTriggerState(boolean isRestored, StateStore stateStore)
                 throws Exception {
             this.isRestored = isRestored;
             this.pendingPartitionsState = stateStore.getListState(PENDING_PARTITIONS_STATE_DESC);
@@ -231,8 +256,7 @@ public class PartitionMarkDoneTrigger {
     }
 
     public static PartitionMarkDoneTrigger create(
-            CoreOptions coreOptions, boolean isRestored, OperatorStateStore stateStore)
-            throws Exception {
+            CoreOptions coreOptions, boolean isRestored, StateStore stateStore) throws Exception {
         Options options = coreOptions.toConfiguration();
         return new PartitionMarkDoneTrigger(
                 new PartitionMarkDoneTrigger.PartitionMarkDoneTriggerState(isRestored, stateStore),

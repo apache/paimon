@@ -18,11 +18,11 @@
 
 package org.apache.paimon.flink.sorter;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.utils.InternalTypeInfo;
-import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.KeyComparatorSupplier;
 import org.apache.paimon.utils.Projection;
@@ -41,22 +41,24 @@ public class OrderSorter extends TableSorter {
     public OrderSorter(
             StreamExecutionEnvironment batchTEnv,
             DataStream<RowData> origin,
-            FileStoreTable table,
+            CoreOptions options,
+            RowType rowType,
             TableSortInfo tableSortInfo) {
-        super(batchTEnv, origin, table, tableSortInfo.getSortColumns());
+        super(batchTEnv, origin, options, rowType, tableSortInfo.getSortColumns());
         this.tableSortInfo = tableSortInfo;
     }
 
     @Override
     public DataStream<RowData> sort() {
-        final RowType valueRowType = table.rowType();
-        final int[] keyProjectionMap = table.schema().projection(orderColNames);
+        final RowType valueRowType = rowType;
+        final int[] keyProjectionMap = valueRowType.projectIndexes(orderColNames);
         final RowType keyRowType =
                 addKeyNamePrefix(Projection.of(keyProjectionMap).project(valueRowType));
 
         return SortUtils.sortStreamByKey(
                 origin,
-                table,
+                options,
+                valueRowType,
                 keyRowType,
                 InternalTypeInfo.fromRowType(keyRowType),
                 new KeyComparatorSupplier(keyRowType),

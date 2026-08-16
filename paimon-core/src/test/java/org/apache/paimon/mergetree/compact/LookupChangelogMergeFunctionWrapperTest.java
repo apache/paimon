@@ -66,7 +66,8 @@ public class LookupChangelogMergeFunctionWrapperTest {
         Map<InternalRow, KeyValue> highLevel = new HashMap<>();
         LookupChangelogMergeFunctionWrapper function =
                 new LookupChangelogMergeFunctionWrapper(
-                        LookupMergeFunction.wrap(DeduplicateMergeFunction.factory()),
+                        LookupMergeFunction.wrap(
+                                DeduplicateMergeFunction.factory(), null, null, null),
                         highLevel::get,
                         changelogRowDeduplicate ? EQUALISER : null,
                         LookupStrategy.from(false, true, false, false),
@@ -228,7 +229,8 @@ public class LookupChangelogMergeFunctionWrapperTest {
                 ValueEqualiserSupplier.fromIgnoreFields(valueType, ignoreFields);
         LookupChangelogMergeFunctionWrapper function =
                 new LookupChangelogMergeFunctionWrapper(
-                        LookupMergeFunction.wrap(DeduplicateMergeFunction.factory()),
+                        LookupMergeFunction.wrap(
+                                DeduplicateMergeFunction.factory(), null, null, null),
                         highLevel::get,
                         logDedupEqualSupplier.get(),
                         LookupStrategy.from(false, true, false, false),
@@ -288,7 +290,10 @@ public class LookupChangelogMergeFunctionWrapperTest {
                                                             .create(DataTypes.INT(), null, null)
                                                 },
                                                 false,
-                                                null)),
+                                                null),
+                                null,
+                                null,
+                                null),
                         key -> null,
                         changelogRowDeduplicate ? EQUALISER : null,
                         LookupStrategy.from(false, true, false, false),
@@ -377,7 +382,10 @@ public class LookupChangelogMergeFunctionWrapperTest {
                                                             .create(DataTypes.INT(), null, null)
                                                 },
                                                 false,
-                                                null)),
+                                                null),
+                                null,
+                                null,
+                                null),
                         highLevel::get,
                         null,
                         LookupStrategy.from(false, true, false, false),
@@ -514,7 +522,8 @@ public class LookupChangelogMergeFunctionWrapperTest {
         Map<InternalRow, KeyValue> highLevel = new HashMap<>();
         LookupChangelogMergeFunctionWrapper function =
                 new LookupChangelogMergeFunctionWrapper(
-                        LookupMergeFunction.wrap(DeduplicateMergeFunction.factory()),
+                        LookupMergeFunction.wrap(
+                                DeduplicateMergeFunction.factory(), null, null, null),
                         highLevel::get,
                         null,
                         LookupStrategy.from(false, true, false, false),

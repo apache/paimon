@@ -19,6 +19,7 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.format.HadoopCompressionType;
 import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileEntry;
@@ -29,6 +30,9 @@ import javax.annotation.concurrent.ThreadSafe;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.StringUtils.isEmpty;
 
 /** Factory which produces new {@link Path}s for data files. */
 @ThreadSafe
@@ -44,8 +48,8 @@ public class DataFilePathFactory {
     private final String dataFilePrefix;
     private final String changelogFilePrefix;
     private final boolean fileSuffixIncludeCompression;
-    private final String fileCompression;
-    @Nullable private final ExternalPathProvider externalPathProvider;
+    private final @Nullable String compressExtension;
+    private final @Nullable ExternalPathProvider externalPathProvider;
 
     public DataFilePathFactory(
             Path parent,
@@ -62,8 +66,12 @@ public class DataFilePathFactory {
         this.dataFilePrefix = dataFilePrefix;
         this.changelogFilePrefix = changelogFilePrefix;
         this.fileSuffixIncludeCompression = fileSuffixIncludeCompression;
-        this.fileCompression = fileCompression;
+        this.compressExtension = compressFileExtension(fileCompression);
         this.externalPathProvider = externalPathProvider;
+    }
+
+    public Path parent() {
+        return parent;
     }
 
     public String dataFilePrefix() {
@@ -72,6 +80,10 @@ public class DataFilePathFactory {
 
     public Path newPath() {
         return newPath(dataFilePrefix);
+    }
+
+    public Path newBlobPath() {
+        return newPathFromName(newFileName(dataFilePrefix, ".blob"));
     }
 
     public Path newChangelogPath() {
@@ -87,20 +99,31 @@ public class DataFilePathFactory {
     }
 
     private String newFileName(String prefix) {
+        return newFileName(prefix, makeExtension(compressExtension, formatIdentifier));
+    }
+
+    public Path newVectorPath(String formatIdentifier) {
+        String extension = ".vector" + makeExtension(compressExtension, formatIdentifier);
+        return newPathFromName(newFileName(dataFilePrefix, extension));
+    }
+
+    private String makeExtension(String compressExtension, String formatIdentifier) {
         String extension;
-        if (fileSuffixIncludeCompression) {
-            extension = "." + fileCompression + "." + formatIdentifier;
+        if (compressExtension != null && isTextFormat(formatIdentifier)) {
+            extension = "." + formatIdentifier + "." + compressExtension;
+        } else if (compressExtension != null && fileSuffixIncludeCompression) {
+            extension = "." + compressExtension + "." + formatIdentifier;
         } else {
             extension = "." + formatIdentifier;
         }
-        return newFileName(prefix, extension);
+        return extension;
     }
 
     public Path newPathFromExtension(String extension) {
         return newPathFromName(newFileName(dataFilePrefix, extension));
     }
 
-    private Path newPathFromName(String fileName) {
+    public Path newPathFromName(String fileName) {
         if (externalPathProvider != null) {
             return externalPathProvider.getNextExternalDataPath(fileName);
         }
@@ -129,7 +152,7 @@ public class DataFilePathFactory {
         Optional<String> externalPathDir =
                 Optional.ofNullable(aligned.externalPath())
                         .map(Path::new)
-                        .map(p -> p.getParent().toUri().toString());
+                        .map(p -> p.getParent().toString());
         return new Path(externalPathDir.map(Path::new).orElse(parent), fileName);
     }
 
@@ -158,11 +181,16 @@ public class DataFilePathFactory {
 
     public static String formatIdentifier(String fileName) {
         int index = fileName.lastIndexOf('.');
-        if (index == -1) {
-            throw new IllegalArgumentException(fileName + " is not a legal file name.");
+        checkArgument(index != -1, "%s is not a legal file name.", fileName);
+
+        String extension = fileName.substring(index + 1);
+        if (HadoopCompressionType.isCompressExtension(extension)) {
+            int secondLastDot = fileName.lastIndexOf('.', index - 1);
+            checkArgument(secondLastDot != -1, "%s is not a legal file name.", fileName);
+            return fileName.substring(secondLastDot + 1, index);
         }
 
-        return fileName.substring(index + 1);
+        return extension;
     }
 
     public boolean isExternalPath() {
@@ -172,5 +200,24 @@ public class DataFilePathFactory {
     @VisibleForTesting
     String uuid() {
         return uuid;
+    }
+
+    private static boolean isTextFormat(String formatIdentifier) {
+        return "json".equalsIgnoreCase(formatIdentifier)
+                || "csv".equalsIgnoreCase(formatIdentifier);
+    }
+
+    @Nullable
+    private static String compressFileExtension(String compression) {
+        if (isEmpty(compression)) {
+            return null;
+        }
+
+        Optional<HadoopCompressionType> hadoopOptional =
+                HadoopCompressionType.fromValue(compression);
+        if (hadoopOptional.isPresent()) {
+            return hadoopOptional.get().fileExtension();
+        }
+        return compression;
     }
 }

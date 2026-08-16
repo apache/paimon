@@ -67,6 +67,8 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
         return Stream.of(
                 Arguments.of(true, "action"),
                 Arguments.of(false, "action"),
+                Arguments.of(true, "action_job"),
+                Arguments.of(false, "action_job"),
                 Arguments.of(true, "procedure_indexed"),
                 Arguments.of(false, "procedure_indexed"),
                 Arguments.of(true, "procedure_named"),
@@ -81,6 +83,7 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
 
         switch (invoker) {
             case "action":
+            case "action_job":
                 createAction(
                                 MarkPartitionDoneAction.class,
                                 "mark_partition_done",
@@ -91,7 +94,9 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
                                 "--table",
                                 tableName,
                                 "--partition",
-                                "partKey0=0")
+                                "partKey0=0",
+                                "--force_start_flink_job",
+                                Boolean.toString(invoker.equals("action_job")))
                         .run();
                 break;
             case "procedure_indexed":
@@ -123,6 +128,7 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
 
         switch (invoker) {
             case "action":
+            case "action_job":
                 createAction(
                                 MarkPartitionDoneAction.class,
                                 "mark_partition_done",
@@ -135,7 +141,9 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
                                 "--partition",
                                 "partKey0=0,partKey1=1",
                                 "--partition",
-                                "partKey0=1,partKey1=0")
+                                "partKey0=1,partKey1=0",
+                                "--force_start_flink_job",
+                                Boolean.toString(invoker.equals("action_job")))
                         .run();
                 break;
             case "procedure_indexed":
@@ -179,6 +187,7 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
 
         switch (invoker) {
             case "action":
+            case "action_job":
                 createAction(
                                 MarkPartitionDoneAction.class,
                                 "mark_partition_done",
@@ -191,7 +200,9 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
                                 "--partition",
                                 "partKey0=0,partKey1=1",
                                 "--partition",
-                                "partKey0=1,partKey1=0")
+                                "partKey0=1,partKey1=0",
+                                "--force_start_flink_job",
+                                Boolean.toString(invoker.equals("action_job")))
                         .run();
                 break;
             case "procedure_indexed":
@@ -244,6 +255,7 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
 
             switch (invoker) {
                 case "action":
+                case "action_job":
                     createAction(
                                     MarkPartitionDoneAction.class,
                                     "mark_partition_done",
@@ -256,7 +268,9 @@ public class MarkPartitionDoneActionITCase extends ActionITCaseBase {
                                     "--partition",
                                     "partKey0=0,partKey1=1",
                                     "--partition",
-                                    "partKey0=1,partKey1=0")
+                                    "partKey0=1,partKey1=0",
+                                    "--force_start_flink_job",
+                                    Boolean.toString(invoker.equals("action_job")))
                             .run();
                     break;
                 case "procedure_indexed":

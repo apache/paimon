@@ -21,7 +21,7 @@ package org.apache.paimon.types;
 import org.apache.paimon.annotation.Public;
 
 /**
- * Data type of a 1-byte signed integer with values from -128 to 127.
+ * Data type of 1-byte signed integer with values from -128 to 127.
  *
  * @since 0.4.0
  */

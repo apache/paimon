@@ -82,6 +82,13 @@ public class HeapBooleanVector extends AbstractHeapVector implements WritableBoo
     }
 
     @Override
+    public void appendBoolean(boolean v) {
+        reserve(elementsAppended + 1);
+        setBoolean(elementsAppended, v);
+        elementsAppended++;
+    }
+
+    @Override
     public void fill(boolean value) {
         Arrays.fill(vector, value);
     }

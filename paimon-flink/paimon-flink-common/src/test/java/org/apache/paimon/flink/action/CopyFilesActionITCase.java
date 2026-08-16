@@ -876,8 +876,17 @@ public class CopyFilesActionITCase extends ActionITCaseBase {
                         IntStream.range(0, numPartitions)
                                 .mapToObj(i -> String.format("+I[%d, %d]", i, numKeysPerPartition))
                                 .collect(Collectors.toList()));
-        assertThat(collect(tEnv, "SELECT COUNT(DISTINCT v) FROM t"))
-                .isEqualTo(Collections.singletonList("+I[1]"));
+
+        while (true) {
+            try {
+                result = collect(tEnv, "SELECT COUNT(DISTINCT v) FROM t");
+            } catch (Exception e) {
+                doCopyJob(invoker, sourceWarehouse, targetWarehouse);
+                continue;
+            }
+            break;
+        }
+        assertThat(result).isEqualTo(Collections.singletonList("+I[1]"));
     }
 
     private void doCopyJob(String invoker, String sourceWarehouse, String targetWarehouse)

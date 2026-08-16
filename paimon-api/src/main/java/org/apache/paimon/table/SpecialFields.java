@@ -91,7 +91,7 @@ public class SpecialFields {
                     Integer.MAX_VALUE - 4, "rowkind", new VarCharType(VarCharType.MAX_LENGTH));
 
     public static final DataField ROW_ID =
-            new DataField(Integer.MAX_VALUE - 5, "_ROW_ID", DataTypes.BIGINT());
+            new DataField(Integer.MAX_VALUE - 5, "_ROW_ID", DataTypes.BIGINT().notNull());
 
     public static final Set<String> SYSTEM_FIELD_NAMES =
             Stream.of(
@@ -139,33 +139,48 @@ public class SpecialFields {
                 + depth;
     }
 
-    public static RowType rowTypeWithRowLineage(RowType rowType) {
-        return rowTypeWithRowLineage(rowType, false);
+    public static RowType rowTypeWithRowTracking(RowType rowType) {
+        return rowTypeWithRowTracking(rowType, false, false);
     }
 
     /**
-     * Add row lineage fields to rowType.
+     * Add row tracking fields to rowType.
      *
-     * @param sequenceNumberNullable sequence number is not null for user, but is nullable when read
-     *     and write
+     * @param rowIdNullable id is not null for user, but is nullable when read (not null for write)
+     * @param sequenceNumberNullable sn is not null for user, but is nullable when read and write
      */
-    public static RowType rowTypeWithRowLineage(RowType rowType, boolean sequenceNumberNullable) {
-        List<DataField> fieldsWithRowLineage = new ArrayList<>(rowType.getFields());
+    public static RowType rowTypeWithRowTracking(
+            RowType rowType, boolean rowIdNullable, boolean sequenceNumberNullable) {
+        List<DataField> fieldsWithRowTracking = new ArrayList<>(rowType.getFields());
 
-        fieldsWithRowLineage.forEach(
+        fieldsWithRowTracking.forEach(
                 f -> {
                     if (ROW_ID.name().equals(f.name()) || SEQUENCE_NUMBER.name().equals(f.name())) {
                         throw new IllegalArgumentException(
-                                "Row lineage field name '"
+                                "Row tracking field name '"
                                         + f.name()
                                         + "' conflicts with existing field names.");
                     }
                 });
-        fieldsWithRowLineage.add(SpecialFields.ROW_ID);
-        fieldsWithRowLineage.add(
-                sequenceNumberNullable
-                        ? SpecialFields.SEQUENCE_NUMBER.copy(true)
-                        : SpecialFields.SEQUENCE_NUMBER);
-        return new RowType(fieldsWithRowLineage);
+        fieldsWithRowTracking.add(rowIdNullable ? ROW_ID.copy(true) : ROW_ID);
+        fieldsWithRowTracking.add(
+                sequenceNumberNullable ? SEQUENCE_NUMBER.copy(true) : SEQUENCE_NUMBER);
+        return new RowType(fieldsWithRowTracking);
+    }
+
+    public static RowType rowTypeWithRowId(RowType rowType) {
+        List<DataField> fieldsWithRowTracking = new ArrayList<>(rowType.getFields());
+
+        fieldsWithRowTracking.forEach(
+                f -> {
+                    if (ROW_ID.name().equals(f.name())) {
+                        throw new IllegalArgumentException(
+                                "Row tracking field name '"
+                                        + f.name()
+                                        + "' conflicts with existing field names.");
+                    }
+                });
+        fieldsWithRowTracking.add(SpecialFields.ROW_ID);
+        return new RowType(fieldsWithRowTracking);
     }
 }

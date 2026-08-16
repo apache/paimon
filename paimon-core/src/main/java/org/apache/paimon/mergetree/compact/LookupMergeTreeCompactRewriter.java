@@ -23,7 +23,7 @@ import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
+import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.FileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
@@ -31,6 +31,7 @@ import org.apache.paimon.lookup.LookupStrategy;
 import org.apache.paimon.mergetree.LookupLevels;
 import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.SortedRun;
+import org.apache.paimon.mergetree.lookup.RemoteLookupFileManager;
 import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
 
@@ -38,6 +39,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -56,8 +58,11 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
     private final LookupLevels<T> lookupLevels;
     private final MergeFunctionWrapperFactory<T> wrapperFactory;
     private final boolean noSequenceField;
-    @Nullable private final DeletionVectorsMaintainer dvMaintainer;
+    private final boolean forceRewriteLevelZeroForVectorIndex;
+    @Nullable private final BucketedDvMaintainer dvMaintainer;
     private final IntFunction<String> level2FileFormat;
+
+    @Nullable private final RemoteLookupFileManager<T> remoteLookupFileManager;
 
     public LookupMergeTreeCompactRewriter(
             int maxLevel,
@@ -71,8 +76,9 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
             MergeSorter mergeSorter,
             MergeFunctionWrapperFactory<T> wrapperFactory,
             boolean produceChangelog,
-            @Nullable DeletionVectorsMaintainer dvMaintainer,
-            CoreOptions options) {
+            @Nullable BucketedDvMaintainer dvMaintainer,
+            CoreOptions options,
+            @Nullable RemoteLookupFileManager<T> remoteLookupFileManager) {
         super(
                 maxLevel,
                 mergeEngine,
@@ -88,9 +94,11 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
         this.lookupLevels = lookupLevels;
         this.wrapperFactory = wrapperFactory;
         this.noSequenceField = options.sequenceField().isEmpty();
+        this.forceRewriteLevelZeroForVectorIndex = options.primaryKeyVectorIndexEnabled();
         String fileFormat = options.fileFormatString();
         Map<Integer, String> fileFormatPerLevel = options.fileFormatPerLevel();
         this.level2FileFormat = level -> fileFormatPerLevel.getOrDefault(level, fileFormat);
+        this.remoteLookupFileManager = remoteLookupFileManager;
     }
 
     @Override
@@ -98,6 +106,23 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
         if (dvMaintainer != null) {
             files.forEach(file -> dvMaintainer.removeDeletionVectorOf(file.fileName()));
         }
+    }
+
+    @Override
+    protected List<DataFileMeta> notifyRewriteCompactAfter(List<DataFileMeta> files) {
+        if (remoteLookupFileManager == null) {
+            return files;
+        }
+
+        List<DataFileMeta> result = new ArrayList<>();
+        for (DataFileMeta file : files) {
+            try {
+                result.add(remoteLookupFileManager.genRemoteLookupFile(file));
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }
+        return result;
     }
 
     @Override
@@ -110,6 +135,10 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
     protected UpgradeStrategy upgradeStrategy(int outputLevel, DataFileMeta file) {
         if (file.level() != 0) {
             return NO_CHANGELOG_NO_REWRITE;
+        }
+
+        if (forceRewriteLevelZeroForVectorIndex) {
+            return CHANGELOG_WITH_REWRITE;
         }
 
         // forcing rewriting when upgrading from level 0 to level x with different file formats
@@ -156,7 +185,7 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
                 MergeFunctionFactory<KeyValue> mfFactory,
                 int outputLevel,
                 LookupLevels<T> lookupLevels,
-                @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer);
+                @Nullable BucketedDvMaintainer deletionVectorsMaintainer);
     }
 
     /** A normal {@link MergeFunctionWrapperFactory} to create lookup wrapper. */
@@ -181,7 +210,7 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
                 MergeFunctionFactory<KeyValue> mfFactory,
                 int outputLevel,
                 LookupLevels<T> lookupLevels,
-                @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer) {
+                @Nullable BucketedDvMaintainer deletionVectorsMaintainer) {
             return new LookupChangelogMergeFunctionWrapper<>(
                     mfFactory,
                     key -> {
@@ -207,7 +236,7 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
                 MergeFunctionFactory<KeyValue> mfFactory,
                 int outputLevel,
                 LookupLevels<Boolean> lookupLevels,
-                @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer) {
+                @Nullable BucketedDvMaintainer deletionVectorsMaintainer) {
             return new FirstRowMergeFunctionWrapper(
                     mfFactory,
                     key -> {

@@ -18,31 +18,66 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.TableType;
+import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
+import org.apache.paimon.consumer.ConsumerInfo;
+import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.function.FunctionDefinition;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.operation.BaseAppendFileStoreWrite;
+import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.predicate.CastTransform;
+import org.apache.paimon.predicate.ConcatTransform;
+import org.apache.paimon.predicate.ConcatWsTransform;
+import org.apache.paimon.predicate.Equal;
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.FieldTransform;
+import org.apache.paimon.predicate.GreaterOrEqual;
+import org.apache.paimon.predicate.GreaterThan;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.predicate.Transform;
+import org.apache.paimon.predicate.UpperTransform;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.rest.auth.DLFToken;
+import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.BadRequestException;
+import org.apache.paimon.rest.exceptions.ForbiddenException;
+import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.responses.ConfigResponse;
+import org.apache.paimon.rest.responses.CreatePartitionsResponse;
+import org.apache.paimon.rest.responses.DropPartitionsResponse;
+import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.object.ObjectTable;
@@ -50,14 +85,21 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.TableWriteImpl;
+import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.SnapshotNotExistException;
+import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewChange;
 
@@ -65,16 +107,15 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
-import org.apache.paimon.shade.org.apache.commons.lang3.StringUtils;
 
 import org.apache.commons.io.FileUtils;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.Mockito;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
@@ -83,21 +124,33 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
+import static java.util.Collections.emptyList;
 import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonList;
 import static java.util.Collections.singletonMap;
+import static org.apache.paimon.CoreOptions.COMMIT_USER_PREFIX;
+import static org.apache.paimon.CoreOptions.END_INPUT_CHECK_PARTITION_EXPIRE;
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.CoreOptions.METASTORE_TAG_TO_PARTITION;
+import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_STRATEGY;
+import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_TIME;
 import static org.apache.paimon.CoreOptions.QUERY_AUTH_ENABLED;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.OBJECT_TABLE;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
+import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
+import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
+import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.apache.paimon.rest.RESTApi.PAGE_TOKEN;
+import static org.apache.paimon.rest.RESTCatalogOptions.DLF_OSS_ENDPOINT;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENABLED;
 import static org.apache.paimon.rest.auth.DLFToken.TOKEN_DATE_FORMATTER;
 import static org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMillis;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -237,6 +290,34 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    void testApiWhenViewNoPermission() throws Exception {
+        Identifier identifier = Identifier.create("test_view_db", "no_permission_view");
+        catalog.createDatabase(identifier.getDatabaseName(), false);
+        View view = createView(identifier);
+        catalog.createView(identifier, view, false);
+        revokeViewPermission(identifier);
+        assertThrows(Catalog.ViewNoPermissionException.class, () -> catalog.getView(identifier));
+        assertThrows(
+                Catalog.ViewNoPermissionException.class, () -> catalog.dropView(identifier, false));
+        assertThrows(
+                Catalog.ViewNoPermissionException.class,
+                () ->
+                        catalog.renameView(
+                                identifier,
+                                Identifier.create("test_view_db", "no_permission_view2"),
+                                false));
+        assertThrows(
+                Catalog.ViewNoPermissionException.class,
+                () ->
+                        catalog.alterView(
+                                identifier,
+                                ImmutableList.of(
+                                        ViewChange.addDialect(
+                                                "flink_1", "SELECT * FROM FLINK_TABLE_1")),
+                                false));
+    }
+
+    @Test
     void testApiWhenDatabaseNoExistAndNotIgnore() {
         String database = "test_no_exist_db";
         assertThrows(
@@ -251,10 +332,10 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                                 false));
         assertThrows(
                 Catalog.DatabaseNotExistException.class,
-                () -> catalog.listTablesPaged(database, 100, null, null));
+                () -> catalog.listTablesPaged(database, 100, null, null, null));
         assertThrows(
                 Catalog.DatabaseNotExistException.class,
-                () -> catalog.listTableDetailsPaged(database, 100, null, null));
+                () -> catalog.listTableDetailsPaged(database, 100, null, null, null));
     }
 
     @Test
@@ -292,6 +373,17 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThrows(
                 Catalog.TableNoPermissionException.class,
                 () -> catalog.listPartitionsPaged(identifier, 100, null, null));
+        Predicate partitionFilter =
+                new PredicateBuilder(
+                                RowType.of(
+                                        new org.apache.paimon.types.DataType[] {DataTypes.INT()},
+                                        new String[] {"col1"}))
+                        .equal(0, 1);
+        assertThrows(
+                Catalog.TableNoPermissionException.class,
+                () ->
+                        catalog.listPartitionsByFilterPaged(
+                                identifier, partitionFilter, 100, null, null));
         assertThrows(
                 Catalog.TableNoPermissionException.class,
                 () -> restCatalog.createBranch(identifier, "test_branch", null));
@@ -304,9 +396,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThrows(
                 Catalog.TableNoPermissionException.class,
                 () -> restCatalog.fastForward(identifier, "test_branch"));
-        assertThrows(
-                Catalog.TableNoPermissionException.class,
-                () -> restCatalog.loadTableToken(identifier));
+        assertThrows(ForbiddenException.class, () -> restCatalog.api().loadTableToken(identifier));
         assertThrows(
                 Catalog.TableNoPermissionException.class,
                 () -> restCatalog.loadSnapshot(identifier));
@@ -316,8 +406,27 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         restCatalog.commitSnapshot(
                                 identifier,
                                 "",
+                                null,
                                 createSnapshotWithMillis(1L, System.currentTimeMillis()),
                                 new ArrayList<PartitionStatistics>()));
+    }
+
+    @Test
+    void testGetTableById() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "get_table_by_id");
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+        Table table = restCatalog.getTable(identifier);
+        Table tableById = restCatalog.getTableById(table.uuid());
+        assertThat(tableById.uuid()).isEqualTo(table.uuid());
+        assertThat(tableById.name()).isEqualTo(identifier.getObjectName());
+        FileStoreTable fileStoreTable = (FileStoreTable) tableById;
+        assertThat(
+                        Objects.requireNonNull(fileStoreTable.catalogEnvironment().identifier())
+                                .getDatabaseName())
+                .isEqualTo("test_table_db");
+        assertThrows(
+                Catalog.TableIdNotExistException.class,
+                () -> restCatalog.getTableById("missing_table_id"));
     }
 
     @Test
@@ -362,7 +471,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         // List tables paged returns an empty list when there are no tables in the database
         String databaseName = "tables_paged_db";
         catalog.createDatabase(databaseName, false);
-        PagedList<String> pagedTables = catalog.listTablesPaged(databaseName, null, null, null);
+        PagedList<String> pagedTables =
+                catalog.listTablesPaged(databaseName, null, null, null, null);
         assertThat(pagedTables.getElements()).isEmpty();
         assertNull(pagedTables.getNextPageToken());
 
@@ -374,7 +484,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
         // when maxResults is null or 0, the page length is set to a server configured value
         String[] sortedTableNames = Arrays.stream(tableNames).sorted().toArray(String[]::new);
-        pagedTables = catalog.listTablesPaged(databaseName, null, null, null);
+        pagedTables = catalog.listTablesPaged(databaseName, null, null, null, null);
         List<String> tables = pagedTables.getElements();
         assertThat(tables).containsExactly(sortedTableNames);
         assertNull(pagedTables.getNextPageToken());
@@ -383,7 +493,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         // server configured value
         // when pageToken is null, will list tables from the beginning
         int maxResults = 2;
-        pagedTables = catalog.listTablesPaged(databaseName, maxResults, null, null);
+        pagedTables = catalog.listTablesPaged(databaseName, maxResults, null, null, null);
         tables = pagedTables.getElements();
         assertEquals(maxResults, tables.size());
         assertThat(tables).containsExactly("abd", "def");
@@ -392,7 +502,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         // when pageToken is not null, will list tables from the pageToken (exclusive)
         pagedTables =
                 catalog.listTablesPaged(
-                        databaseName, maxResults, pagedTables.getNextPageToken(), null);
+                        databaseName, maxResults, pagedTables.getNextPageToken(), null, null);
         tables = pagedTables.getElements();
         assertEquals(maxResults, tables.size());
         assertThat(tables).containsExactly("opr", "table1");
@@ -400,7 +510,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
         pagedTables =
                 catalog.listTablesPaged(
-                        databaseName, maxResults, pagedTables.getNextPageToken(), null);
+                        databaseName, maxResults, pagedTables.getNextPageToken(), null, null);
         tables = pagedTables.getElements();
         assertEquals(maxResults, tables.size());
         assertThat(tables).containsExactly("table2", "table3");
@@ -408,18 +518,18 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
         pagedTables =
                 catalog.listTablesPaged(
-                        databaseName, maxResults, pagedTables.getNextPageToken(), null);
+                        databaseName, maxResults, pagedTables.getNextPageToken(), null, null);
         tables = pagedTables.getElements();
         assertEquals(1, tables.size());
         assertNull(pagedTables.getNextPageToken());
 
         maxResults = 8;
-        pagedTables = catalog.listTablesPaged(databaseName, maxResults, null, null);
+        pagedTables = catalog.listTablesPaged(databaseName, maxResults, null, null, null);
         tables = pagedTables.getElements();
         assertThat(tables).containsExactly(sortedTableNames);
         assertNull(pagedTables.getNextPageToken());
 
-        pagedTables = catalog.listTablesPaged(databaseName, maxResults, "table1", null);
+        pagedTables = catalog.listTablesPaged(databaseName, maxResults, "table1", null, null);
         tables = pagedTables.getElements();
         assertEquals(3, tables.size());
         assertThat(tables).containsExactly("table2", "table3", "table_name");
@@ -429,24 +539,24 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThatExceptionOfType(Catalog.DatabaseNotExistException.class)
                 .isThrownBy(() -> catalog.listTables("non_existing_db"));
 
-        pagedTables = catalog.listTablesPaged(databaseName, null, null, "table%");
+        pagedTables = catalog.listTablesPaged(databaseName, null, null, "table%", null);
         tables = pagedTables.getElements();
         assertEquals(4, tables.size());
         assertThat(tables).containsExactly("table1", "table2", "table3", "table_name");
         assertNull(pagedTables.getNextPageToken());
 
-        pagedTables = catalog.listTablesPaged(databaseName, null, null, "table_");
+        pagedTables = catalog.listTablesPaged(databaseName, null, null, "table_", null);
         tables = pagedTables.getElements();
         assertTrue(tables.isEmpty());
         assertNull(pagedTables.getNextPageToken());
 
-        pagedTables = catalog.listTablesPaged(databaseName, null, null, "table_%");
+        pagedTables = catalog.listTablesPaged(databaseName, null, null, "table_%", null);
         tables = pagedTables.getElements();
         assertEquals(1, tables.size());
         assertThat(tables).containsExactly("table_name");
         assertNull(pagedTables.getNextPageToken());
 
-        pagedTables = catalog.listTablesPaged(databaseName, null, null, "table_name");
+        pagedTables = catalog.listTablesPaged(databaseName, null, null, "table_name", null);
         tables = pagedTables.getElements();
         assertEquals(1, tables.size());
         assertThat(tables).containsExactly("table_name");
@@ -454,11 +564,11 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
         Assertions.assertThrows(
                 BadRequestException.class,
-                () -> catalog.listTablesPaged(databaseName, null, null, "%table"));
+                () -> catalog.listTablesPaged(databaseName, null, null, "%table", null));
 
         Assertions.assertThrows(
                 BadRequestException.class,
-                () -> catalog.listTablesPaged(databaseName, null, null, "ta%le"));
+                () -> catalog.listTablesPaged(databaseName, null, null, "ta%le", null));
     }
 
     @Test
@@ -467,7 +577,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         String databaseName = "table_details_paged_db";
         catalog.createDatabase(databaseName, false);
         PagedList<Table> pagedTableDetails =
-                catalog.listTableDetailsPaged(databaseName, null, null, null);
+                catalog.listTableDetailsPaged(databaseName, null, null, null, null);
         assertThat(pagedTableDetails.getElements()).isEmpty();
         assertNull(pagedTableDetails.getNextPageToken());
 
@@ -478,42 +588,44 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                     Identifier.create(databaseName, tableName), DEFAULT_TABLE_SCHEMA, false);
         }
 
-        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null, null);
+        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null, null, null);
         assertPagedTableDetails(pagedTableDetails, tableNames.length, expectedTableNames);
         assertNull(pagedTableDetails.getNextPageToken());
 
         int maxResults = 2;
-        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, maxResults, null, null);
+        pagedTableDetails =
+                catalog.listTableDetailsPaged(databaseName, maxResults, null, null, null);
         assertPagedTableDetails(pagedTableDetails, maxResults, "abd", "def");
         assertEquals("def", pagedTableDetails.getNextPageToken());
 
         pagedTableDetails =
                 catalog.listTableDetailsPaged(
-                        databaseName, maxResults, pagedTableDetails.getNextPageToken(), null);
+                        databaseName, maxResults, pagedTableDetails.getNextPageToken(), null, null);
         assertPagedTableDetails(pagedTableDetails, maxResults, "opr", "table1");
         assertEquals("table1", pagedTableDetails.getNextPageToken());
 
         pagedTableDetails =
                 catalog.listTableDetailsPaged(
-                        databaseName, maxResults, pagedTableDetails.getNextPageToken(), null);
+                        databaseName, maxResults, pagedTableDetails.getNextPageToken(), null, null);
         assertPagedTableDetails(pagedTableDetails, maxResults, "table2", "table3");
         assertEquals("table3", pagedTableDetails.getNextPageToken());
 
         pagedTableDetails =
                 catalog.listTableDetailsPaged(
-                        databaseName, maxResults, pagedTableDetails.getNextPageToken(), null);
+                        databaseName, maxResults, pagedTableDetails.getNextPageToken(), null, null);
         assertEquals(1, pagedTableDetails.getElements().size());
         assertNull(pagedTableDetails.getNextPageToken());
 
         maxResults = 8;
-        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, maxResults, null, null);
+        pagedTableDetails =
+                catalog.listTableDetailsPaged(databaseName, maxResults, null, null, null);
         assertPagedTableDetails(
                 pagedTableDetails, Math.min(maxResults, tableNames.length), expectedTableNames);
         assertNull(pagedTableDetails.getNextPageToken());
 
         String pageToken = "table1";
         pagedTableDetails =
-                catalog.listTableDetailsPaged(databaseName, maxResults, pageToken, null);
+                catalog.listTableDetailsPaged(databaseName, maxResults, pageToken, null, null);
         assertPagedTableDetails(pagedTableDetails, 3, "table2", "table3", "table_name");
         assertNull(pagedTableDetails.getNextPageToken());
 
@@ -523,31 +635,397 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 .isThrownBy(
                         () ->
                                 catalog.listTableDetailsPaged(
-                                        "non_existing_db", finalMaxResults, pageToken, null));
+                                        "non_existing_db", finalMaxResults, pageToken, null, null));
 
         // List tables throws DatabaseNotExistException when the database does not exist
         assertThatExceptionOfType(Catalog.DatabaseNotExistException.class)
                 .isThrownBy(() -> catalog.listTables("non_existing_db"));
 
-        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null, "table%");
+        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null, "table%", null);
         assertPagedTableDetails(pagedTableDetails, 4, "table1", "table2", "table3", "table_name");
         assertNull(pagedTableDetails.getNextPageToken());
 
-        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null, "table_");
+        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null, "table_", null);
         Assertions.assertTrue(pagedTableDetails.getElements().isEmpty());
         assertNull(pagedTableDetails.getNextPageToken());
 
-        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null, "table_%");
+        pagedTableDetails =
+                catalog.listTableDetailsPaged(databaseName, null, null, "table_%", null);
         assertPagedTableDetails(pagedTableDetails, 1, "table_name");
         assertNull(pagedTableDetails.getNextPageToken());
 
         Assertions.assertThrows(
                 BadRequestException.class,
-                () -> catalog.listTableDetailsPaged(databaseName, null, null, "ta%le"));
+                () -> catalog.listTableDetailsPaged(databaseName, null, null, "ta%le", null));
 
         Assertions.assertThrows(
                 BadRequestException.class,
-                () -> catalog.listTableDetailsPaged(databaseName, null, null, "%tale"));
+                () -> catalog.listTableDetailsPaged(databaseName, null, null, "%tale", null));
+    }
+
+    @Test
+    public void testListSystemTablesPaged() throws Exception {
+        String[] systemTableNames =
+                SystemTableLoader.loadGlobalTableNames(options).stream()
+                        .sorted()
+                        .toArray(String[]::new);
+        List<String> allTablePrefixedNames =
+                Arrays.stream(systemTableNames)
+                        .filter(tableName -> tableName.startsWith("all_table"))
+                        .collect(Collectors.toList());
+
+        PagedList<String> pagedTables =
+                catalog.listTablesPaged(SYSTEM_DATABASE_NAME, null, null, null, null);
+        assertThat(pagedTables.getElements()).containsExactly(systemTableNames);
+        assertNull(pagedTables.getNextPageToken());
+
+        pagedTables = catalog.listTablesPaged(SYSTEM_DATABASE_NAME, 1, null, null, null);
+        assertThat(pagedTables.getElements()).containsExactly(systemTableNames[0]);
+        assertEquals(systemTableNames[0], pagedTables.getNextPageToken());
+
+        pagedTables =
+                catalog.listTablesPaged(
+                        SYSTEM_DATABASE_NAME, 1, pagedTables.getNextPageToken(), null, null);
+        assertThat(pagedTables.getElements()).containsExactly(systemTableNames[1]);
+        assertEquals(systemTableNames[1], pagedTables.getNextPageToken());
+
+        pagedTables = catalog.listTablesPaged(SYSTEM_DATABASE_NAME, null, null, "all_table%", null);
+        assertThat(pagedTables.getElements()).containsExactlyElementsOf(allTablePrefixedNames);
+        assertNull(pagedTables.getNextPageToken());
+
+        pagedTables = catalog.listTablesPaged(SYSTEM_DATABASE_NAME, null, null, "catalog_%", null);
+        assertThat(pagedTables.getElements()).isEmpty();
+        assertNull(pagedTables.getNextPageToken());
+
+        pagedTables =
+                catalog.listTablesPaged(
+                        SYSTEM_DATABASE_NAME, null, null, null, TableType.TABLE.toString());
+        assertThat(pagedTables.getElements()).containsExactly(systemTableNames);
+        assertNull(pagedTables.getNextPageToken());
+
+        pagedTables =
+                catalog.listTablesPaged(
+                        SYSTEM_DATABASE_NAME, null, null, null, TableType.OBJECT_TABLE.toString());
+        assertThat(pagedTables.getElements()).isEmpty();
+        assertNull(pagedTables.getNextPageToken());
+
+        PagedList<Table> pagedTableDetails =
+                catalog.listTableDetailsPaged(SYSTEM_DATABASE_NAME, 1, null, null, null);
+        assertPagedTableDetails(pagedTableDetails, 1, systemTableNames[0]);
+        assertEquals(systemTableNames[0], pagedTableDetails.getNextPageToken());
+
+        pagedTableDetails =
+                catalog.listTableDetailsPaged(
+                        SYSTEM_DATABASE_NAME, null, null, "all_table%", TableType.TABLE.toString());
+        assertPagedTableDetails(
+                pagedTableDetails,
+                allTablePrefixedNames.size(),
+                allTablePrefixedNames.toArray(new String[0]));
+        assertNull(pagedTableDetails.getNextPageToken());
+
+        pagedTableDetails =
+                catalog.listTableDetailsPaged(
+                        SYSTEM_DATABASE_NAME, null, null, null, TableType.OBJECT_TABLE.toString());
+        assertThat(pagedTableDetails.getElements()).isEmpty();
+        assertNull(pagedTableDetails.getNextPageToken());
+
+        Assertions.assertThrows(
+                BadRequestException.class,
+                () ->
+                        catalog.listTablesPaged(
+                                SYSTEM_DATABASE_NAME, null, null, "all%tables", null));
+
+        Assertions.assertThrows(
+                BadRequestException.class,
+                () ->
+                        catalog.listTableDetailsPaged(
+                                SYSTEM_DATABASE_NAME, null, null, "all%tables", null));
+    }
+
+    @Test
+    public void testListTableDetailsPagedWithTableType() throws Exception {
+        String databaseName = "table_type_filter_db";
+        catalog.createDatabase(databaseName, false);
+
+        // Create tables with different types
+        Schema normalTableSchema = DEFAULT_TABLE_SCHEMA;
+        catalog.createTable(
+                Identifier.create(databaseName, "normal_table"), normalTableSchema, false);
+
+        Schema formatTableSchema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("name", DataTypes.STRING())
+                        .option("type", TableType.FORMAT_TABLE.toString())
+                        .build();
+        catalog.createTable(
+                Identifier.create(databaseName, "format_table"), formatTableSchema, false);
+
+        Schema objectTableSchema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("name", DataTypes.STRING())
+                        .option("type", TableType.OBJECT_TABLE.toString())
+                        .build();
+        catalog.createTable(
+                Identifier.create(databaseName, "object_table"), objectTableSchema, false);
+
+        // Test filtering by table type
+        PagedList<Table> allTables =
+                catalog.listTableDetailsPaged(databaseName, null, null, null, null);
+        assertThat(allTables.getElements()).hasSize(3);
+
+        PagedList<Table> normalTables =
+                catalog.listTableDetailsPaged(
+                        databaseName, null, null, null, TableType.TABLE.toString());
+        assertThat(normalTables.getElements()).hasSize(1);
+        assertThat(normalTables.getElements().get(0).name()).isEqualTo("normal_table");
+
+        PagedList<Table> formatTables =
+                catalog.listTableDetailsPaged(
+                        databaseName, null, null, null, TableType.FORMAT_TABLE.toString());
+        assertThat(formatTables.getElements()).hasSize(1);
+        assertThat(formatTables.getElements().get(0).name()).isEqualTo("format_table");
+
+        PagedList<Table> objectTables =
+                catalog.listTableDetailsPaged(
+                        databaseName, null, null, null, TableType.OBJECT_TABLE.toString());
+        assertThat(objectTables.getElements()).hasSize(1);
+        assertThat(objectTables.getElements().get(0).name()).isEqualTo("object_table");
+
+        // Test with non-existent table type
+        PagedList<Table> nonExistentType =
+                catalog.listTableDetailsPaged(databaseName, null, null, null, "non-existent-type");
+        assertThat(nonExistentType.getElements()).isEmpty();
+
+        // Test with table name pattern and table type filter combined
+        PagedList<Table> filteredTables =
+                catalog.listTableDetailsPaged(
+                        databaseName, null, null, "format_%", TableType.FORMAT_TABLE.toString());
+        assertThat(filteredTables.getElements()).hasSize(1);
+        assertThat(filteredTables.getElements().get(0).name()).isEqualTo("format_table");
+
+        // Test with table name pattern and non-existent table type filter combined
+        PagedList<Table> filteredNonExistentType =
+                catalog.listTableDetailsPaged(
+                        databaseName, null, null, "format_%", "non-existent-type");
+        assertThat(filteredNonExistentType.getElements()).isEmpty();
+
+        // Test maxResults parameter variations with table type filtering
+        // Test maxResults=1 with different table types
+        PagedList<Table> singleNormalTable =
+                catalog.listTableDetailsPaged(
+                        databaseName, 1, null, null, TableType.TABLE.toString());
+        assertThat(singleNormalTable.getElements()).hasSize(1);
+        assertEquals("normal_table", singleNormalTable.getElements().get(0).name());
+        assertEquals("normal_table", singleNormalTable.getNextPageToken());
+
+        PagedList<Table> singleFormatTable =
+                catalog.listTableDetailsPaged(
+                        databaseName, 1, null, null, TableType.FORMAT_TABLE.toString());
+        assertThat(singleFormatTable.getElements()).hasSize(1);
+        assertEquals("format_table", singleFormatTable.getElements().get(0).name());
+        assertEquals("format_table", singleFormatTable.getNextPageToken());
+
+        PagedList<Table> singleObjectTable =
+                catalog.listTableDetailsPaged(
+                        databaseName, 1, null, null, TableType.OBJECT_TABLE.toString());
+        assertThat(singleObjectTable.getElements()).hasSize(1);
+        assertEquals("object_table", singleObjectTable.getElements().get(0).name());
+        assertEquals("object_table", singleObjectTable.getNextPageToken());
+
+        // Test maxResults=2 with all table types
+        PagedList<Table> allTablesWithMaxResults =
+                catalog.listTableDetailsPaged(databaseName, 2, null, null, null);
+        assertThat(allTablesWithMaxResults.getElements()).hasSize(2);
+        assertThat(allTablesWithMaxResults.getNextPageToken()).isNotNull();
+
+        // Test maxResults=2 with table name pattern and table type filter combined
+        PagedList<Table> filteredTablesWithMaxResults =
+                catalog.listTableDetailsPaged(
+                        databaseName, 2, null, "format_%", TableType.FORMAT_TABLE.toString());
+        assertThat(filteredTablesWithMaxResults.getElements()).hasSize(1);
+        assertEquals("format_table", filteredTablesWithMaxResults.getElements().get(0).name());
+        assertThat(filteredTablesWithMaxResults.getNextPageToken()).isNull();
+
+        // Test maxResults=0 (should return all tables)
+        PagedList<Table> allTablesWithZeroMaxResults =
+                catalog.listTableDetailsPaged(databaseName, 0, null, null, null);
+        assertThat(allTablesWithZeroMaxResults.getElements()).hasSize(3);
+        assertThat(allTablesWithZeroMaxResults.getNextPageToken()).isNull();
+
+        // Test maxResults larger than total tables with table type filter
+        PagedList<Table> largeMaxResultsWithType =
+                catalog.listTableDetailsPaged(
+                        databaseName, 10, null, null, TableType.TABLE.toString());
+        assertThat(largeMaxResultsWithType.getElements()).hasSize(1);
+        assertEquals("normal_table", largeMaxResultsWithType.getElements().get(0).name());
+        assertThat(largeMaxResultsWithType.getNextPageToken()).isNull();
+
+        // Test maxResults with non-existent table type
+        PagedList<Table> nonExistentTypeWithMaxResults =
+                catalog.listTableDetailsPaged(databaseName, 5, null, null, "non-existent-type");
+        assertThat(nonExistentTypeWithMaxResults.getElements()).isEmpty();
+        assertThat(nonExistentTypeWithMaxResults.getNextPageToken()).isNull();
+    }
+
+    @Test
+    public void testListTableDetails() throws Exception {
+        // List table details returns an empty list when there are no tables in the database
+        String databaseName = "table_details_db";
+        catalog.createDatabase(databaseName, false);
+        List<Table> tableDetails = catalog.listTableDetails(databaseName);
+        assertThat(tableDetails).isEmpty();
+
+        String[] tableNames = {"table1", "table2", "table3", "abd", "def", "opr", "table_name"};
+        String[] expectedTableNames = Arrays.stream(tableNames).sorted().toArray(String[]::new);
+        for (String tableName : tableNames) {
+            catalog.createTable(
+                    Identifier.create(databaseName, tableName), DEFAULT_TABLE_SCHEMA, false);
+        }
+
+        tableDetails = catalog.listTableDetails(databaseName);
+        assertThat(tableDetails).hasSize(tableNames.length);
+        List<String> actualTableNames =
+                tableDetails.stream().map(Table::name).sorted().collect(Collectors.toList());
+        assertThat(actualTableNames).containsExactly(expectedTableNames);
+
+        // List table details throws DatabaseNotExistException when the database does not exist
+        assertThatExceptionOfType(Catalog.DatabaseNotExistException.class)
+                .isThrownBy(() -> catalog.listTableDetails("non_existing_db"));
+    }
+
+    @Test
+    public void testListTablesPagedWithTableType() throws Exception {
+        String databaseName = "tables_paged_table_type_db";
+        catalog.createDatabase(databaseName, false);
+
+        // Create tables with different types
+        Schema normalTableSchema = DEFAULT_TABLE_SCHEMA;
+        catalog.createTable(
+                Identifier.create(databaseName, "normal_table"), normalTableSchema, false);
+
+        Schema formatTableSchema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("name", DataTypes.STRING())
+                        .option("type", TableType.FORMAT_TABLE.toString())
+                        .build();
+        catalog.createTable(
+                Identifier.create(databaseName, "format_table"), formatTableSchema, false);
+
+        Schema objectTableSchema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("name", DataTypes.STRING())
+                        .option("type", TableType.OBJECT_TABLE.toString())
+                        .build();
+        catalog.createTable(
+                Identifier.create(databaseName, "object_table"), objectTableSchema, false);
+
+        // Test filtering by table type
+        PagedList<String> allTables = catalog.listTablesPaged(databaseName, null, null, null, null);
+        assertThat(allTables.getElements()).hasSize(3);
+
+        PagedList<String> normalTables =
+                catalog.listTablesPaged(databaseName, null, null, null, TableType.TABLE.toString());
+        assertThat(normalTables.getElements()).hasSize(1);
+        assertThat(normalTables.getElements().get(0)).isEqualTo("normal_table");
+
+        PagedList<String> formatTables =
+                catalog.listTablesPaged(
+                        databaseName, null, null, null, TableType.FORMAT_TABLE.toString());
+        assertThat(formatTables.getElements()).hasSize(1);
+        assertThat(formatTables.getElements().get(0)).isEqualTo("format_table");
+
+        PagedList<String> objectTables =
+                catalog.listTablesPaged(
+                        databaseName, null, null, null, TableType.OBJECT_TABLE.toString());
+        assertThat(objectTables.getElements()).hasSize(1);
+        assertThat(objectTables.getElements().get(0)).isEqualTo("object_table");
+
+        // Test with non-existent table type
+        PagedList<String> nonExistentType =
+                catalog.listTablesPaged(databaseName, null, null, null, "non-existent-type");
+        assertThat(nonExistentType.getElements()).isEmpty();
+
+        // Test with table name pattern and table type filter combined
+        PagedList<String> filteredTables =
+                catalog.listTablesPaged(
+                        databaseName, null, null, "format_%", TableType.FORMAT_TABLE.toString());
+        assertThat(filteredTables.getElements()).hasSize(1);
+        assertThat(filteredTables.getElements().get(0)).isEqualTo("format_table");
+
+        // Test with table name pattern and non-existent table type filter combined
+        PagedList<String> filteredNonExistentType =
+                catalog.listTablesPaged(databaseName, null, null, "format_%", "non-existent-type");
+        assertThat(filteredNonExistentType.getElements()).isEmpty();
+
+        // Test paging with table type filter
+        int maxResults = 10;
+        PagedList<String> pagedNormalTables =
+                catalog.listTablesPaged(
+                        databaseName, maxResults, null, null, TableType.TABLE.toString());
+        assertThat(pagedNormalTables.getElements()).hasSize(1);
+        assertThat(pagedNormalTables.getElements().get(0)).isEqualTo("normal_table");
+        assertNull(pagedNormalTables.getNextPageToken());
+
+        // Test maxResults parameter variations with table type filtering
+        // Test maxResults=0 (should return all tables)
+        PagedList<String> allTablesWithZeroMaxResults =
+                catalog.listTablesPaged(databaseName, 0, null, null, null);
+        assertThat(allTablesWithZeroMaxResults.getElements()).hasSize(3);
+        assertNull(allTablesWithZeroMaxResults.getNextPageToken());
+
+        // Test maxResults=1 with different table types
+        PagedList<String> singleNormalTable =
+                catalog.listTablesPaged(databaseName, 1, null, null, TableType.TABLE.toString());
+        assertThat(singleNormalTable.getElements()).hasSize(1);
+        assertEquals("normal_table", singleNormalTable.getElements().get(0));
+        assertEquals("normal_table", singleNormalTable.getNextPageToken());
+
+        PagedList<String> singleFormatTable =
+                catalog.listTablesPaged(
+                        databaseName, 1, null, null, TableType.FORMAT_TABLE.toString());
+        assertThat(singleFormatTable.getElements()).hasSize(1);
+        assertEquals("format_table", singleFormatTable.getElements().get(0));
+        assertEquals("format_table", singleFormatTable.getNextPageToken());
+
+        PagedList<String> singleObjectTable =
+                catalog.listTablesPaged(
+                        databaseName, 1, null, null, TableType.OBJECT_TABLE.toString());
+        assertThat(singleObjectTable.getElements()).hasSize(1);
+        assertEquals("object_table", singleObjectTable.getElements().get(0));
+        assertEquals("object_table", singleObjectTable.getNextPageToken());
+
+        // Test maxResults=2 with all table types
+        PagedList<String> allTablesWithMaxResults =
+                catalog.listTablesPaged(databaseName, 2, null, null, null);
+        assertThat(allTablesWithMaxResults.getElements()).hasSize(2);
+        assertThat(allTablesWithMaxResults.getNextPageToken()).isNotNull();
+
+        // Test maxResults=2 with table name pattern and table type filter combined
+        PagedList<String> filteredTablesWithMaxResults =
+                catalog.listTablesPaged(
+                        databaseName, 2, null, "format_%", TableType.FORMAT_TABLE.toString());
+        assertThat(filteredTablesWithMaxResults.getElements()).hasSize(1);
+        assertThat(filteredTablesWithMaxResults.getElements().get(0)).isEqualTo("format_table");
+        assertNull(filteredTablesWithMaxResults.getNextPageToken());
+        assertEquals("format_table", filteredTablesWithMaxResults.getElements().get(0));
+        assertNull(filteredTablesWithMaxResults.getNextPageToken());
+
+        // Test maxResults larger than total tables with table type filter
+        PagedList<String> largeMaxResultsWithType =
+                catalog.listTablesPaged(databaseName, 10, null, null, TableType.TABLE.toString());
+        assertThat(largeMaxResultsWithType.getElements()).hasSize(1);
+        assertEquals("normal_table", largeMaxResultsWithType.getElements().get(0));
+        assertNull(largeMaxResultsWithType.getNextPageToken());
+
+        // Test maxResults with non-existent table type
+        PagedList<String> nonExistentTypeWithMaxResults =
+                catalog.listTablesPaged(databaseName, 5, null, null, "non-existent-type");
+        assertThat(nonExistentTypeWithMaxResults.getElements()).isEmpty();
+        assertNull(nonExistentTypeWithMaxResults.getNextPageToken());
     }
 
     @Test
@@ -1071,6 +1549,176 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    void testCreatePartitionsForCatalogManagedFormatTablePartitions() throws Exception {
+        Identifier identifier = Identifier.create("format_partition_db", "catalog_partition_table");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(CoreOptions.TYPE.key(), TableType.FORMAT_TABLE.toString())
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(CoreOptions.FILE_FORMAT.key(), "parquet")
+                        .column("id", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build(),
+                false);
+
+        List<Map<String, String>> partitionSpecs =
+                Arrays.asList(singletonMap("dt", "20260714"), singletonMap("dt", "20260715"));
+        CreatePartitionsResponse response =
+                restCatalog.api().createPartitions(identifier, partitionSpecs);
+
+        assertThat(response.getCreated()).containsExactlyInAnyOrderElementsOf(partitionSpecs);
+        assertThat(response.getExisted()).isEmpty();
+
+        catalog.createPartitions(identifier, partitionSpecs);
+        catalog.createPartitions(identifier, partitionSpecs);
+
+        List<Map<String, String>> conflictingSpecs =
+                Arrays.asList(partitionSpecs.get(0), singletonMap("dt", "20260716"));
+        assertThatThrownBy(
+                        () ->
+                                restCatalog
+                                        .api()
+                                        .createPartitions(identifier, conflictingSpecs, false))
+                .isInstanceOf(AlreadyExistsException.class)
+                .hasMessageContaining("dt=20260714");
+
+        assertThat(catalog.listPartitions(identifier).stream().map(Partition::spec))
+                .containsExactlyInAnyOrderElementsOf(partitionSpecs);
+    }
+
+    @Test
+    void testDropPartitionsForCatalogManagedFormatTablePartitions() throws Exception {
+        Identifier identifier =
+                Identifier.create("format_partition_db", "catalog_partition_drop_table");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(CoreOptions.TYPE.key(), TableType.FORMAT_TABLE.toString())
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(CoreOptions.FILE_FORMAT.key(), "parquet")
+                        .column("id", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build(),
+                false);
+
+        List<Map<String, String>> partitionSpecs =
+                Arrays.asList(singletonMap("dt", "20260714"), singletonMap("dt", "20260715"));
+        catalog.createPartitions(identifier, partitionSpecs);
+
+        DropPartitionsResponse response =
+                restCatalog
+                        .api()
+                        .dropPartitions(
+                                identifier,
+                                Arrays.asList(
+                                        singletonMap("dt", "20260714"),
+                                        singletonMap("dt", "20260799")),
+                                true);
+        assertThat(response.getDropped()).containsExactly(singletonMap("dt", "20260714"));
+        assertThat(response.getMissing()).containsExactly(singletonMap("dt", "20260799"));
+        assertThat(catalog.listPartitions(identifier).stream().map(Partition::spec))
+                .containsExactly(singletonMap("dt", "20260715"));
+
+        // Catalog contract: dropPartitions ignores non-existent partitions and unregisters
+        // metadata only (no data deletion on the server).
+        catalog.dropPartitions(
+                identifier,
+                Arrays.asList(singletonMap("dt", "20260715"), singletonMap("dt", "20260799")));
+        assertThat(catalog.listPartitions(identifier)).isEmpty();
+
+        assertThatThrownBy(
+                        () ->
+                                restCatalog
+                                        .api()
+                                        .dropPartitions(
+                                                identifier,
+                                                singletonList(singletonMap("dt", "20260799")),
+                                                false))
+                .isInstanceOf(NoSuchResourceException.class)
+                .hasMessageContaining("dt=20260799");
+    }
+
+    @Test
+    void testDropPartitionsLoadsNonManagedTableOnce() throws Exception {
+        Identifier identifier = Identifier.create("test_db", "drop_partition_table");
+        createTable(identifier, emptyMap(), singletonList("col1"));
+        RESTCatalog catalogSpy = Mockito.spy(restCatalog);
+
+        catalogSpy.dropPartitions(identifier, singletonList(singletonMap("col1", "20260717")));
+
+        Mockito.verify(catalogSpy, Mockito.times(1)).getTable(identifier);
+    }
+
+    @Test
+    void testCatalogManagedPartitionCommitAndScanMatchesFileSystemMode() throws Exception {
+        Identifier identifier =
+                Identifier.create("format_partition_db", "catalog_partition_scan_table");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(CoreOptions.TYPE.key(), TableType.FORMAT_TABLE.toString())
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(CoreOptions.FILE_FORMAT.key(), "csv")
+                        .column("id", DataTypes.INT())
+                        .column("year", DataTypes.INT())
+                        .column("month", DataTypes.INT())
+                        .partitionKeys("year", "month")
+                        .build(),
+                false);
+
+        FormatTable managedTable = (FormatTable) catalog.getTable(identifier);
+        BatchWriteBuilder writeBuilder = managedTable.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(1, 2024, 10));
+            write.write(GenericRow.of(2, 2025, 10));
+            write.write(GenericRow.of(3, 2025, 11));
+            commit.commit(write.prepareCommit());
+        }
+
+        List<Map<String, String>> registeredPartitions =
+                Arrays.asList(
+                        ImmutableMap.of("year", "2024", "month", "10"),
+                        ImmutableMap.of("year", "2025", "month", "10"),
+                        ImmutableMap.of("year", "2025", "month", "11"));
+        assertThat(catalog.listPartitions(identifier).stream().map(Partition::spec))
+                .containsExactlyInAnyOrderElementsOf(registeredPartitions);
+        // The table carries the catalog partition metadata its scan reads from.
+        assertThat(managedTable.partitionManager()).isNotNull();
+
+        Map<String, String> fileSystemOptions = new HashMap<>(managedTable.options());
+        fileSystemOptions.put(METASTORE_PARTITIONED_TABLE.key(), "false");
+        FormatTable fileSystemTable =
+                FormatTable.builder()
+                        .fileIO(managedTable.fileIO())
+                        .identifier(Identifier.create("format_partition_db", "filesystem_scan"))
+                        .rowType(managedTable.rowType())
+                        .partitionKeys(managedTable.partitionKeys())
+                        .location(managedTable.location())
+                        .format(managedTable.format())
+                        .options(fileSystemOptions)
+                        .catalogContext(managedTable.catalogContext())
+                        .build();
+
+        Map<String, String> partitionFilter = singletonMap("year", "2025");
+        List<InternalRow> readFromCatalog = read(managedTable, null, null, partitionFilter, null);
+        // Assert the rows themselves first: comparing the two reads alone would also pass if
+        // both stopped returning anything.
+        assertThat(readFromCatalog)
+                .extracting(row -> row.getInt(0) + "," + row.getInt(1) + "," + row.getInt(2))
+                .containsExactlyInAnyOrder("2,2025,10", "3,2025,11");
+        assertThat(readFromCatalog)
+                .containsExactlyInAnyOrderElementsOf(
+                        read(fileSystemTable, null, null, partitionFilter, null));
+    }
+
+    @Test
     void testListPartitions() throws Exception {
         innerTestListPartitions(true);
     }
@@ -1243,6 +1891,96 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    public void testListPartitionsByFilterPaged() throws Exception {
+        if (!supportPartitions()) {
+            return;
+        }
+
+        String databaseName = "partitions_filter_db";
+        List<Map<String, String>> partitionSpecs =
+                Arrays.asList(
+                        singletonMap("dt", "20250101"),
+                        singletonMap("dt", "20250102"),
+                        singletonMap("dt", "20250103"),
+                        singletonMap("dt", "20260101"));
+        Schema schema =
+                Schema.newBuilder()
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(METASTORE_TAG_TO_PARTITION.key(), "dt")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build();
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        RowType.of(
+                                new org.apache.paimon.types.DataType[] {DataTypes.STRING()},
+                                new String[] {"dt"}));
+        Predicate range =
+                PredicateBuilder.and(
+                        builder.greaterOrEqual(0, BinaryString.fromString("20250101")),
+                        builder.lessThan(0, BinaryString.fromString("20260101")));
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        Identifier identifier = Identifier.create(databaseName, "table");
+        assertThrows(
+                Catalog.TableNotExistException.class,
+                () -> catalog.listPartitionsByFilterPaged(identifier, range, 2, null, "dt=2025%"));
+        catalog.createTable(identifier, schema, true);
+        BatchWriteBuilder writeBuilder = catalog.getTable(identifier).newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (Map<String, String> partitionSpec : partitionSpecs) {
+                write.write(GenericRow.of(0, BinaryString.fromString(partitionSpec.get("dt"))));
+            }
+            commit.commit(write.prepareCommit());
+        }
+
+        String distractorDatabase = databaseName + "_other";
+        catalog.dropDatabase(distractorDatabase, true, true);
+        catalog.createDatabase(distractorDatabase, true);
+        Identifier distractor = Identifier.create(distractorDatabase, identifier.getObjectName());
+        catalog.createTable(distractor, schema, true);
+        catalog.createPartitions(distractor, singletonList(singletonMap("dt", "20250104")));
+
+        // The predicate goes on the wire as its own JSON serialization; the server evaluates
+        // the very same tree the scan would evaluate locally.
+        PagedList<Partition> firstPage =
+                catalog.listPartitionsByFilterPaged(identifier, range, 2, null, "dt=2025%");
+        assertThat(firstPage.getElements())
+                .extracting(partition -> partition.spec().get("dt"))
+                .containsExactly("20250103", "20250102");
+        assertThat(firstPage.getNextPageToken()).isEqualTo("dt=20250102");
+
+        PagedList<Partition> secondPage =
+                catalog.listPartitionsByFilterPaged(
+                        identifier, range, 2, firstPage.getNextPageToken(), "dt=2025%");
+        assertThat(secondPage.getElements())
+                .extracting(partition -> partition.spec().get("dt"))
+                .containsExactly("20250101");
+        assertThat(secondPage.getNextPageToken()).isNull();
+
+        // A predicate the server cannot re-anchor (unknown column) counts as always-true: the
+        // response is a superset of the matching partitions and the client keeps filtering
+        // locally.
+        PredicateBuilder unknownColumn =
+                new PredicateBuilder(
+                        RowType.of(
+                                new org.apache.paimon.types.DataType[] {DataTypes.STRING()},
+                                new String[] {"nope"}));
+        assertThat(
+                        catalog.listPartitionsByFilterPaged(
+                                        identifier,
+                                        unknownColumn.equal(0, BinaryString.fromString("x")),
+                                        null,
+                                        null,
+                                        null)
+                                .getElements())
+                .extracting(Partition::spec)
+                .containsExactlyInAnyOrderElementsOf(partitionSpecs);
+    }
+
+    @Test
     public void testListPartitionsPagedWithMultiLevel() throws Exception {
         if (!supportPartitions()) {
             return;
@@ -1297,6 +2035,63 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    public void testListPartitionsByNamesExceedsLimit() throws Exception {
+        if (!supportPartitions()) {
+            return;
+        }
+
+        String databaseName = "partitions_by_names_limit_db";
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        Identifier identifier = Identifier.create(databaseName, "table");
+
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(METASTORE_TAG_TO_PARTITION.key(), "dt")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build(),
+                true);
+
+        // Create a list with more than 1000 partition specs
+        List<Map<String, String>> tooManySpecs = new ArrayList<>();
+        for (int i = 0; i < 1001; i++) {
+            tooManySpecs.add(singletonMap("dt", String.format("202501%04d", i)));
+        }
+
+        // Should throw IllegalArgumentException
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> catalog.listPartitionsByNames(identifier, tooManySpecs));
+    }
+
+    @Test
+    void testPartitionExpire() throws Exception {
+        // create table
+        Identifier identifier = Identifier.create("test_db", "test_partition_expire");
+        Map<String, String> options = new HashMap<>();
+        options.put(PARTITION_EXPIRATION_STRATEGY.key(), "update-time");
+        options.put(PARTITION_EXPIRATION_TIME.key(), "1 ms");
+        options.put(END_INPUT_CHECK_PARTITION_EXPIRE.key(), "TRUE");
+        options.put(METASTORE_PARTITIONED_TABLE.key(), "TRUE");
+        createTable(identifier, options, Lists.newArrayList("col1"));
+
+        // write and expire table
+        Table table =
+                catalog.getTable(identifier)
+                        .copy(singletonMap(COMMIT_USER_PREFIX.key(), "my_user"));
+        batchWrite(table, Arrays.asList(1, 2, 3));
+        Thread.sleep(1000);
+        batchWrite(table, Arrays.asList(4, 5, 6));
+        Snapshot snapshot = table.latestSnapshot().get();
+        assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
+        assertThat(snapshot.commitUser()).startsWith("my_user");
+    }
+
+    @Test
     void testRefreshFileIO() throws Exception {
         this.catalog = newRestCatalogWithDataToken();
         List<Identifier> identifiers =
@@ -1313,7 +2108,59 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
             RESTToken fileDataToken = fileIO.validToken();
             RESTToken serverDataToken = getDataTokenFromRestServer(identifier);
             assertEquals(serverDataToken, fileDataToken);
+
+            // Test system table FileIO refresh
+            Identifier systemTableIdentifier =
+                    Identifier.create(
+                            identifier.getDatabaseName(), identifier.getTableName() + "$snapshots");
+            Table systemTable = catalog.getTable(systemTableIdentifier);
+
+            // Verify system table uses the same FileIO as origin table
+            assertThat(systemTable.fileIO()).isInstanceOf(RESTTokenFileIO.class);
+            RESTTokenFileIO systemTableFileIO = (RESTTokenFileIO) systemTable.fileIO();
+            RESTToken systemTableToken = systemTableFileIO.validToken();
+            assertEquals(serverDataToken, systemTableToken);
         }
+    }
+
+    @Test
+    void testValidToken() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(DLF_OSS_ENDPOINT.key(), "test-endpoint");
+        this.catalog = newRestCatalogWithDataToken(options);
+        Identifier identifier =
+                Identifier.create("test_data_token", "table_for_testing_valid_token");
+        RESTToken expiredDataToken =
+                new RESTToken(
+                        ImmutableMap.of("akId", "akId", "akSecret", UUID.randomUUID().toString()),
+                        System.currentTimeMillis() + 3600_000L);
+        setDataTokenToRestServerForMock(identifier, expiredDataToken);
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+        FileStoreTable fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
+        RESTTokenFileIO fileIO = (RESTTokenFileIO) fileStoreTable.fileIO();
+        RESTToken fileDataToken = fileIO.validToken();
+        assertEquals("test-endpoint", fileDataToken.token().get("fs.oss.endpoint"));
+    }
+
+    @Test
+    void testValidTokenWithIOCacheEnabled() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(IO_CACHE_ENABLED.key(), "true");
+        this.catalog = newRestCatalogWithDataToken(options);
+        Identifier identifier =
+                Identifier.create("test_data_token", "table_for_testing_io_cache_enabled");
+        RESTToken expiredDataToken =
+                new RESTToken(
+                        ImmutableMap.of("akId", "akId", "akSecret", UUID.randomUUID().toString()),
+                        System.currentTimeMillis() + 3600_000L);
+        setDataTokenToRestServerForMock(identifier, expiredDataToken);
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+        FileStoreTable fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
+        RESTTokenFileIO fileIO = (RESTTokenFileIO) fileStoreTable.fileIO();
+        RESTToken fileDataToken = fileIO.validToken();
+
+        // Verify IO_CACHE_ENABLED is merged into token
+        assertEquals("true", fileDataToken.token().get(IO_CACHE_ENABLED.key()));
     }
 
     @Test
@@ -1339,6 +2186,41 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         RESTToken nextFileDataToken = fileIO.validToken();
         assertEquals(newDataToken, nextFileDataToken);
         assertEquals(true, nextFileDataToken.expireAtMillis() - fileDataToken.expireAtMillis() > 0);
+
+        // Test system table FileIO refresh when expired
+        Identifier systemTableIdentifier =
+                Identifier.create(
+                        identifier.getDatabaseName(), identifier.getTableName() + "$snapshots");
+        Table systemTable = catalog.getTable(systemTableIdentifier);
+
+        // Verify system table FileIO can refresh token properly
+        assertThat(systemTable.fileIO()).isInstanceOf(RESTTokenFileIO.class);
+        RESTTokenFileIO systemTableFileIO = (RESTTokenFileIO) systemTable.fileIO();
+
+        // Set an even newer token to test refresh
+        RESTToken newerDataToken =
+                new RESTToken(
+                        ImmutableMap.of("akId", "akId", "akSecret", UUID.randomUUID().toString()),
+                        System.currentTimeMillis() + 5000_000L);
+        setDataTokenToRestServerForMock(identifier, newerDataToken);
+
+        // Verify system table can get the newest token
+        RESTToken systemTableRefreshedToken = systemTableFileIO.validToken();
+        assertEquals(newerDataToken, systemTableRefreshedToken);
+        assertEquals(
+                true,
+                systemTableRefreshedToken.expireAtMillis() - nextFileDataToken.expireAtMillis()
+                        > 0);
+
+        // Test with different system table types
+        Identifier manifestsTableIdentifier =
+                Identifier.create(
+                        identifier.getDatabaseName(), identifier.getTableName() + "$manifests");
+        Table manifestsTable = catalog.getTable(manifestsTableIdentifier);
+        assertThat(manifestsTable.fileIO()).isInstanceOf(RESTTokenFileIO.class);
+        RESTTokenFileIO manifestsTableFileIO = (RESTTokenFileIO) manifestsTable.fileIO();
+        RESTToken manifestsTableToken = manifestsTableFileIO.validToken();
+        assertEquals(newerDataToken, manifestsTableToken);
     }
 
     @Test
@@ -1356,6 +2238,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         restCatalog.commitSnapshot(
                                 hasSnapshotTableIdentifier,
                                 "",
+                                null,
                                 createSnapshotWithMillis(1L, System.currentTimeMillis()),
                                 new ArrayList<>()));
 
@@ -1367,6 +2250,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         restCatalog.commitSnapshot(
                                 hasSnapshotTableIdentifier,
                                 "unknown_id",
+                                null,
                                 createSnapshotWithMillis(1L, System.currentTimeMillis()),
                                 new ArrayList<>()));
 
@@ -1403,6 +2287,39 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    void testCommitSnapshotChecksBaseUuid() throws Exception {
+        RESTCatalogServer.commitSuccessThrowException = false;
+        Identifier identifier = Identifier.create("test_db_a", "snapshot_uuid_commit");
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+        Table table = catalog.getTable(identifier);
+
+        Snapshot first = createSnapshotWithMillis(1L, System.currentTimeMillis());
+        assertThat(
+                        restCatalog.commitSnapshot(
+                                identifier, table.uuid(), null, first, Collections.emptyList()))
+                .isTrue();
+
+        Snapshot second = createSnapshotWithMillis(2L, System.currentTimeMillis());
+        assertThat(
+                        restCatalog.commitSnapshot(
+                                identifier,
+                                table.uuid(),
+                                "wrong-base-snapshot-uuid",
+                                second,
+                                Collections.emptyList()))
+                .isFalse();
+        assertThat(
+                        restCatalog.commitSnapshot(
+                                identifier,
+                                table.uuid(),
+                                first.uuid(),
+                                second,
+                                Collections.emptyList()))
+                .isTrue();
+        assertThat(restCatalog.loadSnapshot(identifier).get().snapshot()).isEqualTo(second);
+    }
+
+    @Test
     public void testTableRollback() throws Exception {
         Identifier identifier = Identifier.create("test_rollback", "table_for_rollback");
         createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
@@ -1413,24 +2330,123 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
             GenericRow record = GenericRow.of(i);
             write.write(record);
             commit.commit(i, write.prepareCommit(false, i));
-            table.createTag("tag-" + i);
+            table.createTag("tag-" + (i + 1));
         }
         write.close();
         commit.close();
+
+        // rollback to snapshot 4
         long rollbackToSnapshotId = 4;
         table.rollbackTo(rollbackToSnapshotId);
         assertThat(table.snapshotManager().snapshot(rollbackToSnapshotId))
                 .isEqualTo(restCatalog.loadSnapshot(identifier).get().snapshot());
         assertThat(table.tagManager().tagExists("tag-" + (rollbackToSnapshotId + 2))).isFalse();
         assertThat(table.snapshotManager().snapshotExists(rollbackToSnapshotId + 1)).isFalse();
-
         assertThrows(
                 IllegalArgumentException.class, () -> table.rollbackTo(rollbackToSnapshotId + 1));
 
+        // rollback to snapshot 3
         String rollbackToTagName = "tag-" + (rollbackToSnapshotId - 1);
         table.rollbackTo(rollbackToTagName);
         Snapshot tagSnapshot = table.tagManager().getOrThrow(rollbackToTagName).trimToSnapshot();
         assertThat(tagSnapshot).isEqualTo(restCatalog.loadSnapshot(identifier).get().snapshot());
+
+        // rollback to snapshot 2 from snapshot
+        assertThatThrownBy(() -> catalog.rollbackTo(identifier, Instant.snapshot(2L), 4L))
+                .hasMessageContaining("Latest snapshot 3 is not 4");
+        catalog.rollbackTo(identifier, Instant.snapshot(2L), 3L);
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(2);
+    }
+
+    @Test
+    public void testRollbackSchema() throws Exception {
+        Identifier identifier = Identifier.create("test_rollback_schema", "table_for_schema");
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+
+        // get initial schema id
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        long firstSchemaId = schemaManager.latest().get().id();
+
+        // evolve schema
+        catalog.alterTable(identifier, SchemaChange.setOption("aa", "bb"), false);
+        long secondSchemaId = schemaManager.latest().get().id();
+        assertThat(secondSchemaId).isEqualTo(firstSchemaId + 1);
+
+        // rollback schema to first version
+        catalog.rollbackSchema(identifier, firstSchemaId);
+        assertThat(schemaManager.latest().get().id()).isEqualTo(firstSchemaId);
+        assertThat(schemaManager.schemaExists(secondSchemaId)).isFalse();
+
+        // rollback to non-existent schema should fail
+        assertThatThrownBy(() -> catalog.rollbackSchema(identifier, 999))
+                .isInstanceOf(Exception.class);
+    }
+
+    @Test
+    public void testRollbackSchemaFromTable() throws Exception {
+        Identifier identifier =
+                Identifier.create("test_rollback_schema", "table_for_schema_from_table");
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+
+        // get initial schema id
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        long firstSchemaId = schemaManager.latest().get().id();
+
+        // evolve schema
+        catalog.alterTable(identifier, SchemaChange.setOption("aa", "bb"), false);
+        long secondSchemaId = schemaManager.latest().get().id();
+        assertThat(secondSchemaId).isEqualTo(firstSchemaId + 1);
+
+        // rollback schema to first version
+        table.rollbackSchema(firstSchemaId);
+        assertThat(schemaManager.latest().get().id()).isEqualTo(firstSchemaId);
+        assertThat(schemaManager.schemaExists(secondSchemaId)).isFalse();
+
+        // get schema from new table
+        table = (FileStoreTable) catalog.getTable(identifier);
+        assertThat(table.schema().id()).isEqualTo(1);
+    }
+
+    @Test
+    public void testRollbackSchemaFailedWithSnapshotReference() throws Exception {
+        Identifier identifier =
+                Identifier.create("test_rollback_schema_fail", "table_for_schema_fail");
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        long firstSchemaId = schemaManager.latest().get().id();
+
+        // write data to create a snapshot referencing firstSchemaId
+        StreamTableWrite write = table.newWrite("commitUser");
+        StreamTableCommit commit = table.newCommit("commitUser");
+        write.write(GenericRow.of(1));
+        commit.commit(0, write.prepareCommit(false, 0));
+        write.close();
+        commit.close();
+
+        // evolve schema
+        catalog.alterTable(identifier, SchemaChange.setOption("aa", "bb"), false);
+        long secondSchemaId = schemaManager.latest().get().id();
+
+        // write data to create a snapshot referencing secondSchemaId
+        table = (FileStoreTable) catalog.getTable(identifier);
+        write = table.newWrite("commitUser");
+        commit = table.newCommit("commitUser");
+        write.write(GenericRow.of(2));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.close();
+        commit.close();
+
+        // rollback should fail because snapshot references secondSchemaId
+        assertThatThrownBy(() -> catalog.rollbackSchema(identifier, firstSchemaId))
+                .hasMessageContaining("Cannot rollback to schema " + firstSchemaId)
+                .hasMessageContaining(
+                        "schema "
+                                + secondSchemaId
+                                + " is still referenced by snapshots/tags/changelogs");
     }
 
     @Test
@@ -1448,7 +2464,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         FileStoreTable tableTestWrite = (FileStoreTable) catalog.getTable(identifier);
         List<Integer> data = Lists.newArrayList(12);
         Exception exception =
-                assertThrows(UncheckedIOException.class, () -> batchWrite(tableTestWrite, data));
+                assertThrows(RuntimeException.class, () -> batchWrite(tableTestWrite, data));
         assertEquals(RESTTestFileIO.TOKEN_EXPIRED_MSG, exception.getCause().getMessage());
         RESTToken dataToken =
                 new RESTToken(
@@ -1473,7 +2489,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         restTokenFileIO.isObjectStore();
         resetDataTokenOnRestServer(identifier);
         Exception exception =
-                assertThrows(UncheckedIOException.class, () -> batchWrite(tableTestWrite, data));
+                assertThrows(RuntimeException.class, () -> batchWrite(tableTestWrite, data));
         assertEquals(RESTTestFileIO.TOKEN_UN_EXIST_MSG, exception.getCause().getMessage());
     }
 
@@ -1541,6 +2557,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 Catalog.BranchAlreadyExistException.class,
                 () -> restCatalog.createBranch(identifier, "my_branch", null));
         assertThat(restCatalog.listBranches(identifier)).containsOnly("my_branch");
+
         restCatalog.dropBranch(identifier, "my_branch");
 
         assertThrows(
@@ -1550,6 +2567,104 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 Catalog.BranchNotExistException.class,
                 () -> restCatalog.fastForward(identifier, "no_exist_branch"));
         assertThat(restCatalog.listBranches(identifier)).isEmpty();
+    }
+
+    @Test
+    void testTags() throws Exception {
+        String databaseName = "testTagTable";
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        Identifier identifier = Identifier.create(databaseName, "table");
+
+        // Test table not exist
+        assertThrows(
+                Catalog.TableNotExistException.class,
+                () -> restCatalog.createTag(identifier, "my_tag", null, null, false));
+        assertThrows(
+                Catalog.TableNotExistException.class,
+                () -> restCatalog.getTag(identifier, "my_tag"));
+
+        // Create table
+        catalog.createTable(
+                identifier, Schema.newBuilder().column("col", DataTypes.INT()).build(), true);
+
+        // Test tag not exist
+        assertThrows(
+                Catalog.TagNotExistException.class,
+                () -> restCatalog.getTag(identifier, "non_exist_tag"));
+
+        // Create snapshot by writing data
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        batchWrite(table, Lists.newArrayList(1, 2, 3));
+
+        // Get latest snapshot
+        SnapshotManager snapshotManager = table.snapshotManager();
+        Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+        assertThat(latestSnapshot).isNotNull();
+
+        // Create tag from latest snapshot
+        restCatalog.createTag(identifier, "my_tag", null, null, false);
+
+        // Get tag and verify
+        GetTagResponse tagResponse = restCatalog.getTag(identifier, "my_tag");
+        assertThat(tagResponse.tagName()).isEqualTo("my_tag");
+        assertThat(tagResponse.snapshot().id()).isEqualTo(latestSnapshot.id());
+        assertThat(tagResponse.snapshot()).isEqualTo(latestSnapshot);
+
+        // Create another snapshot
+        batchWrite(table, Lists.newArrayList(4, 5, 6));
+        Snapshot newSnapshot = snapshotManager.latestSnapshot();
+        // Create tag from specific snapshot
+        restCatalog.createTag(identifier, "my_tag_v2", newSnapshot.id(), null, false);
+
+        // Get tag and verify
+        GetTagResponse tagResponse2 = restCatalog.getTag(identifier, "my_tag_v2");
+        assertThat(tagResponse2.tagName()).isEqualTo("my_tag_v2");
+        assertThat(tagResponse2.snapshot().id()).isEqualTo(newSnapshot.id());
+        assertThat(tagResponse2.snapshot()).isEqualTo(newSnapshot);
+
+        // Test tag already exists
+        assertThrows(
+                Catalog.TagAlreadyExistException.class,
+                () -> restCatalog.createTag(identifier, "my_tag", null, null, false));
+
+        // Test create tag with ignoreIfExists = true
+        assertDoesNotThrow(() -> restCatalog.createTag(identifier, "my_tag", null, null, true));
+
+        // Test snapshot not exist
+        assertThrows(
+                SnapshotNotExistException.class,
+                () -> restCatalog.createTag(identifier, "my_tag_v3", 99999L, null, false));
+
+        // Test listTags for pageToken
+        PagedList<String> tags = restCatalog.listTagsPaged(identifier, 1, null, null);
+        tags = restCatalog.listTagsPaged(identifier, 1, tags.getNextPageToken(), null);
+        assertThat(tags.getElements()).containsExactlyInAnyOrder("my_tag_v2");
+        tags = restCatalog.listTagsPaged(identifier, null, null, null);
+        assertThat(tags.getElements()).containsExactlyInAnyOrder("my_tag", "my_tag_v2");
+
+        // Test listTags for tagNamePrefix
+        tags = restCatalog.listTagsPaged(identifier, 1, null, "my_tag_v2");
+        assertThat(tags.getElements()).containsExactlyInAnyOrder("my_tag_v2");
+
+        // Test deleteTag
+        restCatalog.deleteTag(identifier, "my_tag");
+        tags = restCatalog.listTagsPaged(identifier, null, null, null);
+        assertThat(tags.getElements()).containsExactlyInAnyOrder("my_tag_v2");
+
+        // Test deleteTag with non-existent tag
+        assertThrows(
+                Catalog.TagNotExistException.class,
+                () -> restCatalog.deleteTag(identifier, "non_exist_tag"));
+
+        // Verify tag is deleted
+        assertThrows(
+                Catalog.TagNotExistException.class, () -> restCatalog.getTag(identifier, "my_tag"));
+
+        // Delete remaining tag
+        restCatalog.deleteTag(identifier, "my_tag_v2");
+        tags = restCatalog.listTagsPaged(identifier, null, null, null);
+        assertThat(tags.getElements()).isEmpty();
     }
 
     @Test
@@ -2012,15 +3127,146 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    void testListConsumers() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "consumers_table");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        Lists.newArrayList(new DataField(0, "col", DataTypes.INT())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        emptyMap(),
+                        ""),
+                true);
+        FileStoreTable fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
+
+        // Create some snapshots
+        batchWrite(fileStoreTable, singletonList(1));
+        batchWrite(fileStoreTable, singletonList(1));
+        batchWrite(fileStoreTable, singletonList(1));
+
+        // Create consumers
+        ConsumerManager consumerManager =
+                new ConsumerManager(fileStoreTable.fileIO(), fileStoreTable.location());
+        consumerManager.resetConsumer("consumer1", new org.apache.paimon.consumer.Consumer(1));
+        consumerManager.resetConsumer("consumer2", new org.apache.paimon.consumer.Consumer(2));
+
+        // Test listConsumersPaged
+        assertThat(catalog.listConsumersPaged(identifier, null, null).getElements().size())
+                .isEqualTo(2);
+
+        // Test with RESTApi directly
+        RESTApi api = ((RESTCatalog) catalog).api();
+        List<ConsumerInfo> consumers =
+                PagedList.listAllFromPagedApi(
+                        token -> api.listConsumersPaged(identifier, null, token));
+        assertThat(consumers)
+                .extracting(ConsumerInfo::getConsumerId)
+                .containsExactlyInAnyOrder("consumer1", "consumer2");
+        assertThat(consumers)
+                .extracting(ConsumerInfo::getNextSnapshot)
+                .containsExactlyInAnyOrder(1L, 2L);
+    }
+
+    @Test
+    void testResetConsumer() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "reset_consumer_table");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        Lists.newArrayList(new DataField(0, "col", DataTypes.INT())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        emptyMap(),
+                        ""),
+                true);
+        FileStoreTable fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
+
+        // Create some snapshots
+        batchWrite(fileStoreTable, singletonList(1));
+        batchWrite(fileStoreTable, singletonList(1));
+        batchWrite(fileStoreTable, singletonList(1));
+
+        // Create consumers
+        ConsumerManager consumerManager =
+                new ConsumerManager(fileStoreTable.fileIO(), fileStoreTable.location());
+        consumerManager.resetConsumer("consumer1", new org.apache.paimon.consumer.Consumer(1));
+        consumerManager.resetConsumer("consumer2", new org.apache.paimon.consumer.Consumer(2));
+
+        // Verify initial state
+        List<ConsumerInfo> consumers =
+                PagedList.listAllFromPagedApi(
+                        token ->
+                                ((RESTCatalog) catalog)
+                                        .api()
+                                        .listConsumersPaged(identifier, null, token));
+        assertThat(consumers).hasSize(2);
+
+        // Test reset consumer with new snapshot id
+        catalog.resetConsumer(identifier, "consumer1", 3L);
+
+        // Verify consumer1 has been reset
+        consumers =
+                PagedList.listAllFromPagedApi(
+                        token ->
+                                ((RESTCatalog) catalog)
+                                        .api()
+                                        .listConsumersPaged(identifier, null, token));
+        assertThat(consumers).hasSize(2);
+        assertThat(consumers)
+                .filteredOn(c -> c.getConsumerId().equals("consumer1"))
+                .extracting(ConsumerInfo::getNextSnapshot)
+                .containsExactly(3L);
+
+        // Test reset consumer with null snapshot id (delete consumer)
+        catalog.resetConsumer(identifier, "consumer2", null);
+
+        // Verify consumer2 has been deleted
+        consumers =
+                PagedList.listAllFromPagedApi(
+                        token ->
+                                ((RESTCatalog) catalog)
+                                        .api()
+                                        .listConsumersPaged(identifier, null, token));
+        assertThat(consumers).hasSize(1);
+        assertThat(consumers).extracting(ConsumerInfo::getConsumerId).containsExactly("consumer1");
+    }
+
+    @Test
     public void testObjectTable() throws Exception {
-        // create object table
+        // create object table with custom options
         catalog.createDatabase("test_db", false);
         Identifier identifier = Identifier.create("test_db", "object_table");
-        Schema schema = Schema.newBuilder().option(TYPE.key(), OBJECT_TABLE.toString()).build();
+        Schema schema =
+                Schema.newBuilder()
+                        .option(TYPE.key(), OBJECT_TABLE.toString())
+                        .option("custom-key", "custom-value")
+                        .build();
         catalog.createTable(identifier, schema, false);
         Table table = catalog.getTable(identifier);
         assertThat(table).isInstanceOf(ObjectTable.class);
         ObjectTable objectTable = (ObjectTable) table;
+
+        // verify options are preserved
+        assertThat(objectTable.options()).containsEntry("custom-key", "custom-value");
+        assertThat(objectTable.options().containsKey("path")).isTrue();
+
+        // verify copy merges dynamic options
+        ObjectTable copiedTable =
+                objectTable.copy(Collections.singletonMap("dynamic-key", "dynamic-value"));
+        assertThat(copiedTable.options()).containsEntry("custom-key", "custom-value");
+        assertThat(copiedTable.options()).containsEntry("dynamic-key", "dynamic-value");
+
+        // verify copy can override existing options
+        ObjectTable overriddenTable =
+                objectTable.copy(Collections.singletonMap("custom-key", "overridden"));
+        assertThat(overriddenTable.options()).containsEntry("custom-key", "overridden");
+
+        // verify original table is not modified after copy
+        assertThat(objectTable.options()).containsEntry("custom-key", "custom-value");
+        assertThat(objectTable.options()).doesNotContainKey("dynamic-key");
 
         // write file to object path
         FileIO fileIO = objectTable.fileIO();
@@ -2084,7 +3330,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         Lists.newArrayList(
                                 new DataField(0, "pt", DataTypes.INT()),
                                 new DataField(1, "col1", DataTypes.STRING()),
-                                new DataField(2, "col2", DataTypes.STRING())),
+                                new DataField(2, "col2", DataTypes.STRING()),
+                                new DataField(3, "payload", DataTypes.VARIANT())),
                         Collections.singletonList("pt"),
                         Collections.emptyList(),
                         options,
@@ -2098,6 +3345,159 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThat(table.partitionKeys()).containsExactly("pt");
         assertThat(table.fileIO()).isInstanceOf(RESTTokenFileIO.class);
         assertThat(tables).containsExactlyInAnyOrder("table1");
+        assertThat(table.uuid()).isNotEmpty();
+        assertThat(table.uuid()).isNotEqualTo(table.fullName());
+        assertThat(table.rowType().getField("payload").type())
+                .isInstanceOf(org.apache.paimon.types.VariantType.class);
+    }
+
+    @Test
+    void testAllTablesAndAllPartitionsTable() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "all_tables");
+
+        // create table
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .column("pk", DataTypes.INT())
+                        .column("f1", DataTypes.INT())
+                        .column("f2", DataTypes.INT())
+                        .primaryKey("pk", "f1")
+                        .partitionKeys("f1")
+                        .option("bucket", "1")
+                        .build(),
+                true);
+        Table table = catalog.getTable(identifier);
+
+        // write table
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        write.write(GenericRow.of(1, 1, 1));
+        write.write(GenericRow.of(2, 2, 2));
+        List<CommitMessage> messages = write.prepareCommit();
+        BatchTableCommit commit = writeBuilder.newCommit();
+        commit.commit(messages);
+        write.close();
+        commit.close();
+
+        // query tables
+        Table tables = catalog.getTable(Identifier.create("sys", "tables"));
+        InternalRow row;
+        {
+            ReadBuilder readBuilder = tables.newReadBuilder();
+            List<Split> splits = readBuilder.newScan().plan().splits();
+            TableRead read = readBuilder.newRead();
+            RecordReader<InternalRow> reader = read.createReader(splits);
+            List<InternalRow> result = new ArrayList<>();
+            reader.forEachRemaining(result::add);
+            assertThat(result).hasSize(1);
+            row = result.get(0);
+        }
+
+        Consumer<InternalRow> tablesCheck =
+                r -> {
+                    assertThat(r.getString(0).toString()).isEqualTo("test_table_db");
+                    assertThat(r.getString(1).toString()).isEqualTo("all_tables");
+                    assertThat(r.getString(2).toString()).isEqualTo("table");
+                    assertThat(r.getBoolean(3)).isEqualTo(true);
+                    assertThat(r.getBoolean(4)).isEqualTo(true);
+                    assertThat(r.getString(5).toString()).isEqualTo("owner");
+                    assertThat(r.getLong(6)).isEqualTo(1);
+                    assertThat(r.getString(7).toString()).isEqualTo("created");
+                    assertThat(r.getLong(8)).isEqualTo(1);
+                    assertThat(r.getString(9).toString()).isEqualTo("updated");
+                    assertThat(r.getLong(10)).isEqualTo(2);
+                    assertThat(r.getLong(11)).isGreaterThan(0);
+                    assertThat(r.getLong(12)).isEqualTo(2);
+                };
+        tablesCheck.accept(row);
+
+        // check tables types
+        tablesCheck.accept(new InternalRowSerializer(tables.rowType()).toBinaryRow(row));
+
+        // query partitions
+        Table partitions = catalog.getTable(Identifier.create("sys", "partitions"));
+        List<InternalRow> result = new ArrayList<>();
+        {
+            ReadBuilder readBuilder = partitions.newReadBuilder();
+            List<Split> splits = readBuilder.newScan().plan().splits();
+            TableRead read = readBuilder.newRead();
+            RecordReader<InternalRow> reader = read.createReader(splits);
+            reader.forEachRemaining(result::add);
+            assertThat(result).hasSize(2);
+        }
+
+        Consumer<InternalRow> partitionsCheck =
+                r -> {
+                    assertThat(r.getString(0).toString()).isEqualTo("test_table_db");
+                    assertThat(r.getString(1).toString()).isEqualTo("all_tables");
+                    assertThat(r.getString(2).toString()).isEqualTo("f1=2");
+                    assertThat(r.getLong(3)).isEqualTo(1);
+                    assertThat(r.getLong(4)).isGreaterThan(0);
+                    assertThat(r.getLong(5)).isEqualTo(1);
+                    assertThat(r.getBoolean(7)).isEqualTo(false);
+                };
+        partitionsCheck.accept(result.get(0));
+
+        // check types
+        partitionsCheck.accept(
+                new InternalRowSerializer(partitions.rowType()).toBinaryRow(result.get(0)));
+    }
+
+    @Test
+    void testReadPartitionsTable() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "partitions_audit_table");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .column("pk", DataTypes.INT())
+                        .column("f1", DataTypes.INT())
+                        .primaryKey("pk")
+                        .partitionKeys("f1")
+                        .option("bucket", "1")
+                        .option("metastore.partitioned-table", "true")
+                        .build(),
+                true);
+
+        Table table = catalog.getTable(identifier);
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(1, 1));
+            commit.commit(write.prepareCommit());
+        }
+
+        Table partitionsTable =
+                catalog.getTable(
+                        Identifier.create(
+                                identifier.getDatabaseName(),
+                                identifier.getObjectName() + "$partitions"));
+        ReadBuilder readBuilder = partitionsTable.newReadBuilder();
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        TableRead read = readBuilder.newRead();
+        List<InternalRow> result = new ArrayList<>();
+        try (RecordReader<InternalRow> reader = read.createReader(splits)) {
+            reader.forEachRemaining(result::add);
+        }
+
+        assertThat(result).isNotEmpty();
+        for (InternalRow row : result) {
+            if (!row.isNullAt(5)) { // created_at
+                assertThat(row.getTimestamp(5, 3)).isNotNull();
+            }
+            assertThat(row.isNullAt(6)).isFalse(); // created_by
+            assertThat(row.getString(6).toString()).isEqualTo("created");
+
+            assertThat(row.isNullAt(7)).isFalse(); // updated_by
+            assertThat(row.getString(7).toString()).isEqualTo("updated");
+
+            if (!row.isNullAt(8)) {
+                String optionsJson = row.getString(8).toString();
+                assertThat(optionsJson).isNotEmpty();
+            }
+        }
     }
 
     private TestPagedResponse generateTestPagedResponse(
@@ -2155,10 +3555,938 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         return true;
     }
 
+    @Override
+    protected boolean supportsReplaceTable() {
+        return true;
+    }
+
     // TODO implement this
     @Override
     @Test
     public void testTableUUID() {}
+
+    @Test
+    public void testCreateExternalTable(@TempDir java.nio.file.Path path) throws Exception {
+        // Create external table with specified location
+        Path externalTablePath = new Path(path.toString(), "external_table_location");
+
+        Map<String, String> options = new HashMap<>();
+        options.put("type", TableType.TABLE.toString());
+        options.put("path", externalTablePath.toString());
+
+        Schema externalTableSchema =
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(1, "name", DataTypes.STRING()),
+                                new DataField(2, "age", DataTypes.INT())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        "External table for testing");
+
+        // Create database and external table
+        restCatalog.createDatabase("test_external_table_db", true);
+        Identifier identifier = Identifier.create("test_external_table_db", "external_test_table");
+
+        try {
+            catalog.dropTable(identifier, true);
+        } catch (Exception e) {
+            // Ignore drop errors - table might not exist
+        }
+
+        // Pre-create external table directory and schema files (simulating existing external table)
+        createExternalTableDirectory(externalTablePath, externalTableSchema);
+
+        catalog.createTable(identifier, externalTableSchema, false);
+
+        // Verify table exists
+        Table table = catalog.getTable(identifier);
+        assertThat(table).isNotNull();
+
+        // Verify table is external (path should be the specified external path)
+        FileIO fileIO = table.fileIO();
+        assertTrue(fileIO.exists(externalTablePath), "External table path should exist");
+
+        // Verify table metadata
+        assertThat(table.comment()).isEqualTo(Optional.of("External table for testing"));
+        assertThat(table.rowType().getFieldCount()).isEqualTo(3);
+        assertThat(table.rowType().getFieldNames()).containsExactly("id", "name", "age");
+
+        // Test writing data to external table
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        BatchTableCommit commit = writeBuilder.newCommit();
+
+        // Write test data
+        InternalRowSerializer serializer = InternalSerializers.create(table.rowType());
+        InternalRow row1 = GenericRow.of(100, BinaryString.fromString("Alice"), 25);
+        InternalRow row2 = GenericRow.of(200, BinaryString.fromString("Bob"), 30);
+
+        write.write(row1);
+        write.write(row2);
+        List<CommitMessage> commitMessages = write.prepareCommit();
+        commit.commit(commitMessages);
+        write.close();
+        commit.close();
+
+        // Verify data can be read from external table
+        ReadBuilder readBuilder = table.newReadBuilder();
+        TableRead read = readBuilder.newRead();
+        List<Split> splits = readBuilder.newScan().plan().splits();
+
+        List<InternalRow> results = new ArrayList<>();
+        for (Split split : splits) {
+            try (RecordReader<InternalRow> reader = read.createReader(split)) {
+                reader.forEachRemaining(results::add);
+            }
+        }
+
+        // Verify we can read data from external table (at least one row)
+        assertThat(results).isNotEmpty();
+
+        // Verify the data structure is correct
+        for (InternalRow row : results) {
+            assertThat(row.getInt(0)).isGreaterThan(0); // id should be positive
+            assertThat(row.getString(1).toString()).isNotEmpty(); // name should not be empty
+            assertThat(row.getInt(2)).isGreaterThan(0); // age should be positive
+        }
+
+        // Test snapshot reading functionality - should read from client side, not server side
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
+        SnapshotManager snapshotManager = fileStoreTable.snapshotManager();
+
+        // Verify that snapshot manager can read latest snapshot ID from file system
+        Long latestSnapshotId = snapshotManager.latestSnapshotId();
+        assertThat(latestSnapshotId).isNotNull();
+        assertThat(latestSnapshotId).isPositive();
+
+        // Verify that snapshot manager can read the latest snapshot from file system
+        Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+        assertThat(latestSnapshot).isNotNull();
+        assertThat(latestSnapshot.id()).isEqualTo(latestSnapshotId);
+
+        // Verify that snapshot manager can read specific snapshot from file system
+        Snapshot specificSnapshot = snapshotManager.snapshot(latestSnapshotId);
+        assertThat(specificSnapshot).isNotNull();
+        assertThat(specificSnapshot.id()).isEqualTo(latestSnapshotId);
+
+        // Verify snapshot contains our committed data
+        assertThat(latestSnapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
+
+        // Test that external table can be listed in catalog
+        List<String> tables = catalog.listTables("test_external_table_db");
+        assertThat(tables).contains("external_test_table");
+
+        // Test that external table can be accessed again after operations
+        Table tableAgain = catalog.getTable(identifier);
+        assertThat(tableAgain).isNotNull();
+        assertThat(tableAgain.comment()).isEqualTo(Optional.of("External table for testing"));
+    }
+
+    @Test
+    public void testCreateExternalTableWithSchemaInference(@TempDir java.nio.file.Path path)
+            throws Exception {
+        Path externalTablePath = new Path(path.toString(), "external_table_inference_location");
+        DEFAULT_TABLE_SCHEMA.options().put(CoreOptions.PATH.key(), externalTablePath.toString());
+        restCatalog.createDatabase("test_schema_inference_db", true);
+        Identifier identifier =
+                Identifier.create("test_schema_inference_db", "external_inference_table");
+        try {
+            catalog.dropTable(identifier, true);
+        } catch (Exception e) {
+            // Ignore drop errors
+        }
+
+        createExternalTableDirectory(externalTablePath, DEFAULT_TABLE_SCHEMA);
+        Schema emptySchema =
+                new Schema(
+                        Lists.newArrayList(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        DEFAULT_TABLE_SCHEMA.options(),
+                        "");
+        catalog.createTable(identifier, emptySchema, false);
+
+        Table table = catalog.getTable(identifier);
+        assertThat(table).isNotNull();
+        assertThat(table.rowType().getFieldCount()).isEqualTo(3);
+        assertThat(table.rowType().getFieldNames()).containsExactly("pk", "col1", "col2");
+
+        Schema clientProvidedSchema =
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "pk", DataTypes.INT()),
+                                new DataField(1, "col1", DataTypes.STRING())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        DEFAULT_TABLE_SCHEMA.options(),
+                        "");
+        // schema mismatch should throw an exception
+        Assertions.assertThrows(
+                RuntimeException.class,
+                () -> catalog.createTable(identifier, clientProvidedSchema, false));
+        DEFAULT_TABLE_SCHEMA.options().remove(CoreOptions.PATH.key());
+    }
+
+    @Test
+    public void testReadSystemTablesWithExternalTable(@TempDir java.nio.file.Path path)
+            throws Exception {
+        // Create an external table
+        Path externalTablePath = new Path(path.toString(), "external_sys_table_location");
+        DEFAULT_TABLE_SCHEMA.options().put(CoreOptions.PATH.key(), externalTablePath.toString());
+
+        restCatalog.createDatabase("test_sys_table_db", true);
+        Identifier identifier = Identifier.create("test_sys_table_db", "external_sys_table");
+
+        try {
+            catalog.dropTable(identifier, true);
+        } catch (Exception e) {
+            // Ignore drop errors
+        }
+
+        createExternalTableDirectory(externalTablePath, DEFAULT_TABLE_SCHEMA);
+        catalog.createTable(identifier, DEFAULT_TABLE_SCHEMA, false);
+
+        // Test reading system table with external table
+        Identifier allTablesIdentifier = Identifier.create("sys", "tables");
+        Table allTablesTable = catalog.getTable(allTablesIdentifier);
+        assertThat(allTablesTable).isNotNull();
+
+        ReadBuilder readBuilder = allTablesTable.newReadBuilder();
+        TableRead read = readBuilder.newRead();
+        List<Split> splits = readBuilder.newScan().plan().splits();
+
+        List<InternalRow> results = new ArrayList<>();
+        for (Split split : splits) {
+            try (RecordReader<InternalRow> reader = read.createReader(split)) {
+                reader.forEachRemaining(results::add);
+            }
+        }
+
+        // Verify external table appears in system table
+        assertThat(results).isNotEmpty();
+        boolean foundExternalTable = false;
+        for (InternalRow row : results) {
+            String databaseName = row.getString(0).toString();
+            String tableName = row.getString(1).toString();
+            if ("test_sys_table_db".equals(databaseName)
+                    && "external_sys_table".equals(tableName)) {
+                foundExternalTable = true;
+                break;
+            }
+        }
+        assertThat(foundExternalTable).isTrue();
+        DEFAULT_TABLE_SCHEMA.options().remove(CoreOptions.PATH.key());
+    }
+
+    @Test
+    void testColumnMaskingApplyOnRead() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_table_masking_apply");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+
+        // Create table with multiple columns of different types
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "col1", DataTypes.STRING()));
+        fields.add(new DataField(1, "col2", DataTypes.STRING()));
+        fields.add(new DataField(2, "col3", DataTypes.INT()));
+        fields.add(new DataField(3, "col4", DataTypes.STRING()));
+        fields.add(new DataField(4, "col5", DataTypes.STRING()));
+
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        fields,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.singletonMap(QUERY_AUTH_ENABLED.key(), "true"),
+                        ""),
+                true);
+
+        Table table = catalog.getTable(identifier);
+
+        // Write test data
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        write.write(
+                GenericRow.of(
+                        BinaryString.fromString("hello"),
+                        BinaryString.fromString("world"),
+                        100,
+                        BinaryString.fromString("test"),
+                        BinaryString.fromString("data")));
+        write.write(
+                GenericRow.of(
+                        BinaryString.fromString("foo"),
+                        BinaryString.fromString("bar"),
+                        200,
+                        BinaryString.fromString("example"),
+                        BinaryString.fromString("value")));
+        List<CommitMessage> messages = write.prepareCommit();
+        BatchTableCommit commit = writeBuilder.newCommit();
+        commit.commit(messages);
+        write.close();
+        commit.close();
+
+        // Set up column masking with various transform types
+        Map<String, Transform> columnMasking = new HashMap<>();
+
+        // Test 1: ConcatTransform - mask col1 with "****"
+        ConcatTransform concatTransform =
+                new ConcatTransform(Collections.singletonList(BinaryString.fromString("****")));
+        columnMasking.put("col1", concatTransform);
+
+        // Test 2: UpperTransform - convert col2 to uppercase
+        UpperTransform upperTransform =
+                new UpperTransform(
+                        Collections.singletonList(new FieldRef(1, "col2", DataTypes.STRING())));
+        columnMasking.put("col2", upperTransform);
+
+        // Test 3: CastTransform - cast col3 (INT) to STRING
+        CastTransform castTransform =
+                new CastTransform(new FieldRef(2, "col3", DataTypes.INT()), DataTypes.STRING());
+        columnMasking.put("col3", castTransform);
+
+        // Test 4: ConcatWsTransform - concatenate col4 with separator
+        ConcatWsTransform concatWsTransform =
+                new ConcatWsTransform(
+                        java.util.Arrays.asList(
+                                BinaryString.fromString("-"),
+                                BinaryString.fromString("prefix"),
+                                new FieldRef(3, "col4", DataTypes.STRING())));
+        columnMasking.put("col4", concatWsTransform);
+
+        // col5 is intentionally not masked to verify unmasked columns work correctly
+
+        setColumnMasking(identifier, columnMasking);
+
+        // Read and verify masked data
+        ReadBuilder readBuilder = table.newReadBuilder();
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        TableRead read = readBuilder.newRead();
+        RecordReader<InternalRow> reader = read.createReader(splits);
+
+        List<InternalRow> rows = new ArrayList<>();
+        reader.forEachRemaining(rows::add);
+
+        assertThat(rows).hasSize(2);
+
+        // Verify first row
+        InternalRow row1 = rows.get(0);
+        assertThat(row1.getString(0).toString())
+                .isEqualTo("****"); // col1 masked with ConcatTransform
+        assertThat(row1.getString(1).toString())
+                .isEqualTo("WORLD"); // col2 masked with UpperTransform
+        assertThat(row1.getString(2).toString())
+                .isEqualTo("100"); // col3 masked with CastTransform (INT->STRING)
+        assertThat(row1.getString(3).toString())
+                .isEqualTo("prefix-test"); // col4 masked with ConcatWsTransform
+        assertThat(row1.getString(4).toString())
+                .isEqualTo("data"); // col5 NOT masked - original value
+
+        // Verify second row
+        InternalRow row2 = rows.get(1);
+        assertThat(row2.getString(0).toString())
+                .isEqualTo("****"); // col1 masked with ConcatTransform
+        assertThat(row2.getString(1).toString())
+                .isEqualTo("BAR"); // col2 masked with UpperTransform
+        assertThat(row2.getString(2).toString())
+                .isEqualTo("200"); // col3 masked with CastTransform (INT->STRING)
+        assertThat(row2.getString(3).toString())
+                .isEqualTo("prefix-example"); // col4 masked with ConcatWsTransform
+        assertThat(row2.getString(4).toString())
+                .isEqualTo("value"); // col5 NOT masked - original value
+    }
+
+    @Test
+    void testRowFilter() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_table_filter");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+
+        // Create table with multiple data types
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "id", DataTypes.INT()));
+        fields.add(new DataField(1, "name", DataTypes.STRING()));
+        fields.add(new DataField(2, "age", DataTypes.BIGINT()));
+        fields.add(new DataField(3, "salary", DataTypes.DOUBLE()));
+        fields.add(new DataField(4, "is_active", DataTypes.BOOLEAN()));
+        fields.add(new DataField(5, "score", DataTypes.FLOAT()));
+
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        fields,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.singletonMap(QUERY_AUTH_ENABLED.key(), "true"),
+                        ""),
+                true);
+
+        Table table = catalog.getTable(identifier);
+
+        // Write test data with various types
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        write.write(GenericRow.of(1, BinaryString.fromString("Alice"), 25L, 50000.0, true, 85.5f));
+        write.write(GenericRow.of(2, BinaryString.fromString("Bob"), 30L, 60000.0, false, 90.0f));
+        write.write(
+                GenericRow.of(3, BinaryString.fromString("Charlie"), 35L, 70000.0, true, 95.5f));
+        write.write(GenericRow.of(4, BinaryString.fromString("David"), 28L, 55000.0, true, 88.0f));
+        List<CommitMessage> messages = write.prepareCommit();
+        BatchTableCommit commit = writeBuilder.newCommit();
+        commit.commit(messages);
+        write.close();
+        commit.close();
+
+        // Test 1: Filter by INT type (id > 2)
+        LeafPredicate intFilterPredicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(0, "id", DataTypes.INT())),
+                        GreaterThan.INSTANCE,
+                        Collections.singletonList(2));
+        setRowFilter(identifier, Collections.singletonList(intFilterPredicate));
+
+        List<String> result1 = batchRead(table);
+        assertThat(result1).hasSize(2);
+        assertThat(result1)
+                .contains(
+                        "+I[3, Charlie, 35, 70000.0, true, 95.5]",
+                        "+I[4, David, 28, 55000.0, true, 88.0]");
+
+        // Test 2: Filter by BIGINT type (age >= 30)
+        LeafPredicate bigintFilterPredicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(2, "age", DataTypes.BIGINT())),
+                        GreaterOrEqual.INSTANCE,
+                        Collections.singletonList(30L));
+        setRowFilter(identifier, Collections.singletonList(bigintFilterPredicate));
+
+        List<String> result2 = batchRead(table);
+        assertThat(result2).hasSize(2);
+        assertThat(result2)
+                .contains(
+                        "+I[2, Bob, 30, 60000.0, false, 90.0]",
+                        "+I[3, Charlie, 35, 70000.0, true, 95.5]");
+
+        // Test 3: Filter by DOUBLE type (salary > 55000.0)
+        LeafPredicate doubleFilterPredicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(3, "salary", DataTypes.DOUBLE())),
+                        GreaterThan.INSTANCE,
+                        Collections.singletonList(55000.0));
+        setRowFilter(identifier, Collections.singletonList(doubleFilterPredicate));
+
+        List<String> result3 = batchRead(table);
+        assertThat(result3).hasSize(2);
+        assertThat(result3)
+                .contains(
+                        "+I[2, Bob, 30, 60000.0, false, 90.0]",
+                        "+I[3, Charlie, 35, 70000.0, true, 95.5]");
+
+        // Test 4: Filter by BOOLEAN type (is_active = true)
+        LeafPredicate booleanFilterPredicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(4, "is_active", DataTypes.BOOLEAN())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(true));
+        setRowFilter(identifier, Collections.singletonList(booleanFilterPredicate));
+
+        List<String> result4 = batchRead(table);
+        assertThat(result4).hasSize(3);
+        assertThat(result4)
+                .contains(
+                        "+I[1, Alice, 25, 50000.0, true, 85.5]",
+                        "+I[3, Charlie, 35, 70000.0, true, 95.5]",
+                        "+I[4, David, 28, 55000.0, true, 88.0]");
+
+        // Test 5: Filter by FLOAT type (score >= 90.0)
+        LeafPredicate floatFilterPredicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(5, "score", DataTypes.FLOAT())),
+                        GreaterOrEqual.INSTANCE,
+                        Collections.singletonList(90.0f));
+        setRowFilter(identifier, Collections.singletonList(floatFilterPredicate));
+
+        List<String> result5 = batchRead(table);
+        assertThat(result5).hasSize(2);
+        assertThat(result5)
+                .contains(
+                        "+I[2, Bob, 30, 60000.0, false, 90.0]",
+                        "+I[3, Charlie, 35, 70000.0, true, 95.5]");
+
+        // Test 6: Filter by STRING type (name = "Alice")
+        LeafPredicate stringFilterPredicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(1, "name", DataTypes.STRING())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(BinaryString.fromString("Alice")));
+        setRowFilter(identifier, Collections.singletonList(stringFilterPredicate));
+
+        List<String> result6 = batchRead(table);
+        assertThat(result6).hasSize(1);
+        assertThat(result6).contains("+I[1, Alice, 25, 50000.0, true, 85.5]");
+
+        // Test 7: Filter with two predicates (age >= 30 AND is_active = true)
+        LeafPredicate ageGe30Predicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(2, "age", DataTypes.BIGINT())),
+                        GreaterOrEqual.INSTANCE,
+                        Collections.singletonList(30L));
+        LeafPredicate isActiveTruePredicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(4, "is_active", DataTypes.BOOLEAN())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(true));
+        setRowFilter(identifier, Arrays.asList(ageGe30Predicate, isActiveTruePredicate));
+
+        List<String> result7 = batchRead(table);
+        assertThat(result7).hasSize(1);
+        assertThat(result7).contains("+I[3, Charlie, 35, 70000.0, true, 95.5]");
+
+        // Test 8: Filter with two predicates (salary > 55000.0 AND score >= 90.0)
+        LeafPredicate salaryGt55000Predicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(3, "salary", DataTypes.DOUBLE())),
+                        GreaterThan.INSTANCE,
+                        Collections.singletonList(55000.0));
+        LeafPredicate scoreGe90Predicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(5, "score", DataTypes.FLOAT())),
+                        GreaterOrEqual.INSTANCE,
+                        Collections.singletonList(90.0f));
+        setRowFilter(identifier, Arrays.asList(salaryGt55000Predicate, scoreGe90Predicate));
+
+        List<String> result8 = batchRead(table);
+        assertThat(result8).hasSize(2);
+        assertThat(result8)
+                .contains(
+                        "+I[2, Bob, 30, 60000.0, false, 90.0]",
+                        "+I[3, Charlie, 35, 70000.0, true, 95.5]");
+    }
+
+    @Test
+    void testColumnMaskingAndRowFilter() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "combined_auth_table");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+
+        // Create table with test data
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "id", DataTypes.INT()));
+        fields.add(new DataField(1, "name", DataTypes.STRING()));
+        fields.add(new DataField(2, "salary", DataTypes.STRING()));
+        fields.add(new DataField(3, "age", DataTypes.INT()));
+        fields.add(new DataField(4, "department", DataTypes.STRING()));
+
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        fields,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.singletonMap(QUERY_AUTH_ENABLED.key(), "true"),
+                        ""),
+                true);
+
+        Table table = catalog.getTable(identifier);
+
+        // Write test data
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        write.write(
+                GenericRow.of(
+                        1,
+                        BinaryString.fromString("Alice"),
+                        BinaryString.fromString("50000.0"),
+                        25,
+                        BinaryString.fromString("IT")));
+        write.write(
+                GenericRow.of(
+                        2,
+                        BinaryString.fromString("Bob"),
+                        BinaryString.fromString("60000.0"),
+                        30,
+                        BinaryString.fromString("HR")));
+        write.write(
+                GenericRow.of(
+                        3,
+                        BinaryString.fromString("Charlie"),
+                        BinaryString.fromString("70000.0"),
+                        35,
+                        BinaryString.fromString("IT")));
+        write.write(
+                GenericRow.of(
+                        4,
+                        BinaryString.fromString("David"),
+                        BinaryString.fromString("55000.0"),
+                        28,
+                        BinaryString.fromString("Finance")));
+        List<CommitMessage> messages = write.prepareCommit();
+        BatchTableCommit commit = writeBuilder.newCommit();
+        commit.commit(messages);
+        write.close();
+        commit.close();
+
+        // Test column masking only
+        Transform salaryMaskTransform =
+                new ConcatTransform(Collections.singletonList(BinaryString.fromString("***")));
+        Map<String, Transform> columnMasking = new HashMap<>();
+        columnMasking.put("salary", salaryMaskTransform);
+        setColumnMasking(identifier, columnMasking);
+
+        ReadBuilder readBuilder = table.newReadBuilder();
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        TableRead read = readBuilder.newRead();
+        RecordReader<InternalRow> reader = read.createReader(splits);
+
+        List<InternalRow> rows = new ArrayList<>();
+        reader.forEachRemaining(rows::add);
+        assertThat(rows).hasSize(4);
+        assertThat(rows.get(0).getString(2).toString()).isEqualTo("***");
+
+        // Test row filter only (clear column masking first)
+        setColumnMasking(identifier, new HashMap<>());
+        Predicate ageGe30Predicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(3, "age", DataTypes.INT())),
+                        GreaterOrEqual.INSTANCE,
+                        Collections.singletonList(30));
+        setRowFilter(identifier, Collections.singletonList(ageGe30Predicate));
+
+        readBuilder = table.newReadBuilder();
+        splits = readBuilder.newScan().plan().splits();
+        read = readBuilder.newRead();
+        reader = read.createReader(splits);
+
+        rows = new ArrayList<>();
+        reader.forEachRemaining(rows::add);
+        assertThat(rows).hasSize(2);
+
+        // Test both column masking and row filter together
+        columnMasking.put("salary", salaryMaskTransform);
+        Transform nameMaskTransform =
+                new ConcatTransform(Collections.singletonList(BinaryString.fromString("***")));
+        columnMasking.put("name", nameMaskTransform);
+        setColumnMasking(identifier, columnMasking);
+        Predicate deptPredicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(4, "department", DataTypes.STRING())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(BinaryString.fromString("IT")));
+        setRowFilter(identifier, Collections.singletonList(deptPredicate));
+
+        readBuilder = table.newReadBuilder();
+        splits = readBuilder.newScan().plan().splits();
+        read = readBuilder.newRead();
+        reader = read.createReader(splits);
+
+        rows = new ArrayList<>();
+        reader.forEachRemaining(rows::add);
+        assertThat(rows).hasSize(2);
+        assertThat(rows.get(0).getString(1).toString()).isEqualTo("***"); // name masked
+        assertThat(rows.get(0).getString(2).toString()).isEqualTo("***"); // salary masked
+        assertThat(rows.get(0).getString(4).toString()).isEqualTo("IT"); // department not masked
+
+        // Test complex scenario: row filter + column masking combined
+        Predicate combinedPredicate = PredicateBuilder.and(ageGe30Predicate, deptPredicate);
+        setRowFilter(identifier, Collections.singletonList(combinedPredicate));
+
+        readBuilder = table.newReadBuilder();
+        splits = readBuilder.newScan().plan().splits();
+        read = readBuilder.newRead();
+        reader = read.createReader(splits);
+
+        rows = new ArrayList<>();
+        reader.forEachRemaining(rows::add);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getInt(0)).isEqualTo(3); // id
+        assertThat(rows.get(0).getString(1).toString()).isEqualTo("***"); // name masked
+        assertThat(rows.get(0).getString(2).toString()).isEqualTo("***"); // salary masked
+        assertThat(rows.get(0).getInt(3)).isEqualTo(35); // age not masked
+
+        // Clear both column masking and row filter
+        setColumnMasking(identifier, new HashMap<>());
+        setRowFilter(identifier, null);
+
+        readBuilder = table.newReadBuilder();
+        splits = readBuilder.newScan().plan().splits();
+        read = readBuilder.newRead();
+        reader = read.createReader(splits);
+
+        rows = new ArrayList<>();
+        reader.forEachRemaining(rows::add);
+        assertThat(rows).hasSize(4);
+        assertThat(rows.get(0).getString(1).toString()).isIn("Alice", "Bob", "Charlie", "David");
+    }
+
+    @Test
+    void testRowFilterWithLimitReadsPastUnauthorizedFiles() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_table_limit");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "id", DataTypes.INT()));
+        fields.add(new DataField(1, "secret", DataTypes.INT()));
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        fields,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.singletonMap(QUERY_AUTH_ENABLED.key(), "true"),
+                        ""),
+                true);
+
+        Table table = catalog.getTable(identifier);
+
+        // Two files, each with an authorized (secret=1) and an unauthorized (secret=0) row.
+        commitRows(table, GenericRow.of(1, 1), GenericRow.of(2, 0));
+        commitRows(table, GenericRow.of(3, 1), GenericRow.of(4, 0));
+
+        // secret is a data column, so the filter is enforced at read time, not pushed to the store.
+        LeafPredicate secretFilter =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(1, "secret", DataTypes.INT())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(1));
+        setRowFilter(identifier, Collections.singletonList(secretFilter));
+
+        // The file-store limit must be disabled under the auth filter, else the scan stops at the
+        // first file and misses the authorized row in the second.
+        List<String> result = batchReadWithLimit(table, 1);
+        assertThat(result).contains("+I[1, 1]", "+I[3, 1]");
+    }
+
+    @Test
+    void testRowFilterReadBuilderLimitAfterAuth() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_table_read_limit");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "id", DataTypes.INT()));
+        fields.add(new DataField(1, "v", DataTypes.INT()));
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        fields,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.singletonMap(QUERY_AUTH_ENABLED.key(), "true"),
+                        ""),
+                true);
+
+        Table table = catalog.getTable(identifier);
+
+        // Rows 1,2 unauthorized and come first; rows 3,4 authorized.
+        commitRows(
+                table,
+                GenericRow.of(1, 10),
+                GenericRow.of(2, 20),
+                GenericRow.of(3, 30),
+                GenericRow.of(4, 40));
+
+        LeafPredicate idGt2 =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(0, "id", DataTypes.INT())),
+                        GreaterThan.INSTANCE,
+                        Collections.singletonList(2));
+        setRowFilter(identifier, Collections.singletonList(idGt2));
+
+        // withLimit(1) must return exactly one authorized row: skipping the limit returns 2,
+        // applying it before auth returns 0.
+        List<String> result = batchReadWithReadLimit(table, 1);
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0)).isIn("+I[3, 30]", "+I[4, 40]");
+    }
+
+    @Test
+    void testRowFilterReadLimitSkippedWithTopN() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_table_read_limit_topn");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "id", DataTypes.INT()));
+        fields.add(new DataField(1, "score", DataTypes.INT()));
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        fields,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.singletonMap(QUERY_AUTH_ENABLED.key(), "true"),
+                        ""),
+                true);
+
+        Table table = catalog.getTable(identifier);
+
+        // Rows 1,2 unauthorized; 3,4 authorized. The highest-sorted authorized row (id=4) is last.
+        commitRows(
+                table,
+                GenericRow.of(1, 10),
+                GenericRow.of(2, 20),
+                GenericRow.of(3, 30),
+                GenericRow.of(4, 40));
+
+        LeafPredicate idGt2 =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(0, "id", DataTypes.INT())),
+                        GreaterThan.INSTANCE,
+                        Collections.singletonList(2));
+        setRowFilter(identifier, Collections.singletonList(idGt2));
+
+        // With a TopN pushed, the read-side limit must be skipped so all authorized rows reach the
+        // engine's ORDER BY; else id=4 (last in scan order) gets truncated.
+        TopN topN = new TopN(new FieldRef(1, "score", DataTypes.INT()), DESCENDING, NULLS_LAST, 1);
+        ReadBuilder readBuilder = table.newReadBuilder().withTopN(topN).withLimit(1);
+        List<String> result = batchRead(table, readBuilder.newScan().plan().splits(), readBuilder);
+        assertThat(result).containsExactlyInAnyOrder("+I[3, 30]", "+I[4, 40]");
+    }
+
+    @Test
+    void testRowFilterWithTopNKeepsAuthorizedSplits() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_table_topn");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+
+        // Partitioned so each row is its own split; TopN pruning works at split granularity.
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "pt", DataTypes.INT()));
+        fields.add(new DataField(1, "score", DataTypes.INT()));
+        fields.add(new DataField(2, "secret", DataTypes.INT()));
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        fields,
+                        Collections.singletonList("pt"),
+                        Collections.emptyList(),
+                        Collections.singletonMap(QUERY_AUTH_ENABLED.key(), "true"),
+                        ""),
+                true);
+
+        Table table = catalog.getTable(identifier);
+
+        // The split with the highest score is unauthorized; the authorized row has a lower score.
+        commitRows(table, GenericRow.of(1, 100, 0));
+        commitRows(table, GenericRow.of(2, 50, 1));
+
+        LeafPredicate secretFilter =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(2, "secret", DataTypes.INT())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(1));
+        setRowFilter(identifier, Collections.singletonList(secretFilter));
+
+        // ORDER BY score DESC LIMIT 1: TopN split pruning must be disabled under the auth filter,
+        // else it keeps the top unauthorized split and drops the authorized row.
+        TopN topN = new TopN(new FieldRef(1, "score", DataTypes.INT()), DESCENDING, NULLS_LAST, 1);
+        List<String> result = batchReadWithTopN(table, topN);
+        assertThat(result).contains("+I[2, 50, 1]");
+    }
+
+    @Test
+    public void testConflictRollback() throws Exception {
+        doTestConflictRollback(false);
+    }
+
+    @Test
+    public void testConflictRollbackFail() throws Exception {
+        doTestConflictRollback(true);
+    }
+
+    private void doTestConflictRollback(boolean insertMiddle) throws Exception {
+        Identifier identifier =
+                Identifier.create("test_conflict_rollback", "test_conflict_rollback");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        Lists.newArrayList(new DataField(0, "col1", DataTypes.INT())),
+                        emptyList(),
+                        emptyList(),
+                        new HashMap<>(),
+                        ""),
+                true);
+        Table table = catalog.getTable(identifier);
+
+        // write 5 files
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        List<DataFileMeta> files = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            try (BatchTableWrite write = writeBuilder.newWrite();
+                    BatchTableCommit commit = writeBuilder.newCommit()) {
+                write.write(GenericRow.of(i));
+                List<CommitMessage> commitMessages = write.prepareCommit();
+                commit.commit(commitMessages);
+                DataFileMeta file =
+                        ((CommitMessageImpl) commitMessages.get(0))
+                                .newFilesIncrement()
+                                .newFiles()
+                                .get(0);
+                files.add(file);
+            }
+        }
+
+        // delete write
+        DataFileMeta file = files.get(0);
+        CommitMessageImpl deleteCommitMessage =
+                new CommitMessageImpl(
+                        EMPTY_ROW,
+                        0,
+                        -1,
+                        new DataIncrement(emptyList(), singletonList(file), emptyList()),
+                        new CompactIncrement(emptyList(), emptyList(), emptyList()));
+
+        // compact write
+        CommitMessage compactCommitMessage;
+        try (BatchTableWrite write = writeBuilder.newWrite()) {
+            AppendCompactTask compactTask = new AppendCompactTask(EMPTY_ROW, files);
+            FileStoreWrite<?> fileStoreWrite = ((TableWriteImpl<?>) write).getWrite();
+            compactCommitMessage =
+                    compactTask.doCompact(
+                            (FileStoreTable) table, (BaseAppendFileStoreWrite) fileStoreWrite);
+        }
+
+        // do compact commit first
+        try (BatchTableCommit commit = writeBuilder.newCommit()) {
+            commit.commit(singletonList(compactCommitMessage));
+        }
+
+        if (insertMiddle) {
+            try (BatchTableWrite write = writeBuilder.newWrite();
+                    BatchTableCommit commit = writeBuilder.newCommit()) {
+                write.write(GenericRow.of(0));
+                commit.commit(write.prepareCommit());
+            }
+        }
+
+        // do delete commit after
+        // expire snapshots first
+        SnapshotManager snapshotManager = ((FileStoreTable) table).snapshotManager();
+        snapshotManager.deleteSnapshot(1);
+        snapshotManager.deleteSnapshot(2);
+        try (BatchTableCommit commit = writeBuilder.newCommit()) {
+            List<CommitMessage> messages = singletonList(deleteCommitMessage);
+            if (insertMiddle) {
+                assertThatThrownBy(() -> commit.commit(messages))
+                        .hasMessageContaining("File deletion conflicts detected");
+            } else {
+                // should rollback compact commit
+                commit.commit(messages);
+            }
+        }
+
+        // scan for rollback success
+        if (!insertMiddle) {
+            ReadBuilder readBuilder = table.newReadBuilder();
+            List<Integer> result = new ArrayList<>();
+            readBuilder
+                    .newRead()
+                    .createReader(readBuilder.newScan().plan())
+                    .forEachRemaining(r -> result.add(r.getInt(0)));
+            assertThat(result).containsExactlyInAnyOrder(1, 2, 3, 4);
+        }
+
+        // clear
+        catalog.dropDatabase(identifier.getDatabaseName(), false, true);
+    }
 
     protected void createTable(
             Identifier identifier, Map<String, String> options, List<String> partitionKeys)
@@ -2177,7 +4505,12 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
     protected abstract Catalog newRestCatalogWithDataToken() throws IOException;
 
+    protected abstract Catalog newRestCatalogWithDataToken(Map<String, String> extraOptions)
+            throws IOException;
+
     protected abstract void revokeTablePermission(Identifier identifier);
+
+    protected abstract void revokeViewPermission(Identifier identifier);
 
     protected abstract void authTableColumns(Identifier identifier, List<String> columns);
 
@@ -2198,6 +4531,11 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
             long fileCount,
             long lastFileCreationTime);
 
+    protected abstract void setColumnMasking(
+            Identifier identifier, Map<String, Transform> columnMasking);
+
+    protected abstract void setRowFilter(Identifier identifier, List<Predicate> rowFilter);
+
     protected void batchWrite(Table table, List<Integer> data) throws Exception {
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         BatchTableWrite write = writeBuilder.newWrite();
@@ -2212,17 +4550,70 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         commit.close();
     }
 
+    protected void commitRows(Table table, GenericRow... rows) throws Exception {
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        for (GenericRow row : rows) {
+            write.write(row);
+        }
+        BatchTableCommit commit = writeBuilder.newCommit();
+        commit.commit(write.prepareCommit());
+        write.close();
+        commit.close();
+    }
+
     protected List<String> batchRead(Table table) throws IOException {
-        ReadBuilder readBuilder = table.newReadBuilder();
-        List<Split> splits = readBuilder.newScan().plan().splits();
+        return batchRead(table, table.newReadBuilder().newScan().plan().splits());
+    }
+
+    protected List<String> batchReadWithLimit(Table table, int limit) throws IOException {
+        // Limit only the scan (file pruning), not the read, so the result reflects the kept files.
+        InnerTableScan scan = (InnerTableScan) table.newReadBuilder().newScan();
+        return batchRead(table, scan.withLimit(limit).plan().splits());
+    }
+
+    protected List<String> batchReadWithTopN(Table table, TopN topN) throws IOException {
+        // Apply TopN only on the scan (split pruning), so the result reflects the kept splits.
+        InnerTableScan scan = (InnerTableScan) table.newReadBuilder().newScan();
+        return batchRead(table, scan.withTopN(topN).plan().splits());
+    }
+
+    protected List<String> batchReadWithReadLimit(Table table, int limit) throws IOException {
+        // Exercises the ReadBuilder.withLimit path, which limits both the scan and the read side.
+        ReadBuilder readBuilder = table.newReadBuilder().withLimit(limit);
+        return batchRead(table, readBuilder.newScan().plan().splits(), readBuilder);
+    }
+
+    private List<String> batchRead(Table table, List<Split> splits) throws IOException {
+        return batchRead(table, splits, table.newReadBuilder());
+    }
+
+    private List<String> batchRead(Table table, List<Split> splits, ReadBuilder readBuilder)
+            throws IOException {
         TableRead read = readBuilder.newRead();
         RecordReader<InternalRow> reader = read.createReader(splits);
         List<String> result = new ArrayList<>();
+
+        // Create field getters for each column
+        InternalRow.FieldGetter[] fieldGetters =
+                new InternalRow.FieldGetter[table.rowType().getFieldCount()];
+        for (int i = 0; i < table.rowType().getFieldCount(); i++) {
+            fieldGetters[i] = InternalRow.createFieldGetter(table.rowType().getTypeAt(i), i);
+        }
+
         reader.forEachRemaining(
                 row -> {
-                    String rowStr =
-                            String.format("%s[%d]", row.getRowKind().shortString(), row.getInt(0));
-                    result.add(rowStr);
+                    StringBuilder sb = new StringBuilder();
+                    sb.append(row.getRowKind().shortString()).append("[");
+                    for (int i = 0; i < row.getFieldCount(); i++) {
+                        if (i > 0) {
+                            sb.append(", ");
+                        }
+                        Object value = fieldGetters[i].getFieldOrNull(row);
+                        sb.append(value);
+                    }
+                    sb.append("]");
+                    result.add(sb.toString());
                 });
         return result;
     }
@@ -2235,5 +4626,22 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         DLFToken token = new DLFToken("accessKeyId", secret, "securityToken", expiration);
         String tokenStr = RESTApi.toJson(token);
         FileUtils.writeStringToFile(tokenFile, tokenStr);
+    }
+
+    private void createExternalTableDirectory(Path externalTablePath, Schema schema)
+            throws Exception {
+        // Create external table directory structure
+        FileIO fileIO =
+                FileIO.get(
+                        externalTablePath, CatalogContext.create(new Options(catalog.options())));
+
+        // Create the external table directory
+        if (!fileIO.exists(externalTablePath)) {
+            fileIO.mkdirs(externalTablePath);
+        }
+
+        // Create schema file in the external table directory
+        SchemaManager schemaManager = new SchemaManager(fileIO, externalTablePath);
+        schemaManager.createTable(schema, true); // true indicates external table
     }
 }

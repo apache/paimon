@@ -18,39 +18,36 @@
 
 package org.apache.paimon.spark.write
 
-import org.apache.paimon.CoreOptions
-import org.apache.paimon.spark.{SparkInternalRowWrapper, SparkUtils}
+import org.apache.paimon.CoreOptions.ChangelogProducer
+import org.apache.paimon.Snapshot
+import org.apache.paimon.options.Options
+import org.apache.paimon.spark._
+import org.apache.paimon.spark.commands.SchemaEvolutionHelper
+import org.apache.paimon.spark.rowops.PaimonCopyOnWriteScan
+import org.apache.paimon.table.BucketMode.BUCKET_UNAWARE
 import org.apache.paimon.table.FileStoreTable
-import org.apache.paimon.table.sink.{BatchTableWrite, BatchWriteBuilder, CommitMessage, CommitMessageSerializer}
 
 import org.apache.spark.internal.Logging
-import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.connector.distributions.Distribution
 import org.apache.spark.sql.connector.expressions.SortOrder
+import org.apache.spark.sql.connector.metric.CustomMetric
 import org.apache.spark.sql.connector.write._
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.types.StructType
 
-import java.io.{IOException, UncheckedIOException}
-
-import scala.collection.JavaConverters._
-import scala.util.{Failure, Success, Try}
+import scala.collection.mutable
 
 class PaimonV2Write(
-    storeTable: FileStoreTable,
-    overwriteDynamic: Boolean,
+    override val originTable: FileStoreTable,
     overwritePartitions: Option[Map[String, String]],
-    writeSchema: StructType
+    copyOnWriteScan: Option[PaimonCopyOnWriteScan],
+    dataSchema: StructType,
+    options: Options,
+    operationType: Option[Snapshot.Operation] = None
 ) extends Write
   with RequiresDistributionAndOrdering
+  with SchemaEvolutionHelper
   with Logging {
-
-  assert(
-    !(overwriteDynamic && overwritePartitions.exists(_.nonEmpty)),
-    "Cannot overwrite dynamically and by filter both")
-
-  private val table =
-    storeTable.copy(
-      Map(CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key -> overwriteDynamic.toString).asJava)
 
   private val writeRequirement = PaimonWriteRequirement(table)
 
@@ -66,9 +63,52 @@ class PaimonV2Write(
     ordering
   }
 
-  override def toBatch: BatchWrite = PaimonBatchWrite(table, writeSchema, overwritePartitions)
+  override def toBatch: BatchWrite = {
+    // Commit the evolved schema at execution (not at planning), then write to the evolved table.
+    val writeSchema = mergeSchema(dataSchema, options)
+    SparkShimLoader.shim.createPaimonBatchWrite(
+      table,
+      writeSchema,
+      dataSchema,
+      overwritePartitions,
+      copyOnWriteScan,
+      operationType)
+  }
+
+  override def supportedCustomMetrics(): Array[CustomMetric] = {
+    val buffer = mutable.ArrayBuffer[CustomMetric](
+      // write metrics
+      PaimonNumWritersMetric(),
+      // commit metrics
+      PaimonCommitDurationMetric(),
+      PaimonAddedTableFilesMetric()
+    )
+    if (copyOnWriteScan.isEmpty) {
+      buffer += PaimonInsertedRecordsMetric()
+    }
+    if (copyOnWriteScan.nonEmpty) {
+      buffer += PaimonDeletedTableFilesMetric()
+      // For DELETE, the number of deleted records is exactly the row count difference between
+      // the removed files and the rewritten files. For UPDATE and MERGE, the rewritten files
+      // mix copied rows with modified rows, so record metrics cannot be derived from file stats.
+      if (operationType.contains(Snapshot.Operation.DELETE)) {
+        buffer += PaimonDeletedRecordsMetric()
+      }
+    }
+    if (!coreOptions.changelogProducer().equals(ChangelogProducer.NONE)) {
+      buffer += PaimonAppendedChangelogFilesMetric()
+    }
+    if (!table.partitionKeys().isEmpty) {
+      buffer += PaimonPartitionsWrittenMetric()
+    }
+    if (!table.bucketMode().equals(BUCKET_UNAWARE)) {
+      buffer += PaimonBucketsWrittenMetric()
+    }
+    buffer.toArray
+  }
 
   override def toString: String = {
+    val overwriteDynamic = table.coreOptions().dynamicPartitionOverwrite()
     val overwriteDynamicStr = if (overwriteDynamic) {
       ", overwriteDynamic=true"
     } else {
@@ -76,136 +116,11 @@ class PaimonV2Write(
     }
     val overwritePartitionsStr = overwritePartitions match {
       case Some(partitions) if partitions.nonEmpty => s", overwritePartitions=$partitions"
-      case Some(_) => ", overwriteTable=true"
-      case None => ""
+      case Some(_) if !overwriteDynamic => ", overwriteTable=true"
+      case _ => ""
     }
     s"PaimonWrite(table=${table.fullName()}$overwriteDynamicStr$overwritePartitionsStr)"
   }
-}
 
-private case class PaimonBatchWrite(
-    table: FileStoreTable,
-    writeSchema: StructType,
-    overwritePartitions: Option[Map[String, String]])
-  extends BatchWrite
-  with WriteHelper {
-
-  private val batchWriteBuilder = {
-    val builder = table.newBatchWriteBuilder()
-    overwritePartitions.foreach(partitions => builder.withOverwrite(partitions.asJava))
-    builder
-  }
-
-  override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory =
-    WriterFactory(writeSchema, batchWriteBuilder)
-
-  override def useCommitCoordinator(): Boolean = false
-
-  override def commit(messages: Array[WriterCommitMessage]): Unit = {
-    logInfo(s"Committing to table ${table.name()}")
-    val batchTableCommit = batchWriteBuilder.newCommit()
-
-    val commitMessages = messages
-      .collect {
-        case taskCommit: TaskCommit => taskCommit.commitMessages()
-        case other =>
-          throw new IllegalArgumentException(s"${other.getClass.getName} is not supported")
-      }
-      .flatten
-      .toSeq
-
-    try {
-      val start = System.currentTimeMillis()
-      batchTableCommit.commit(commitMessages.asJava)
-      logInfo(s"Committed in ${System.currentTimeMillis() - start} ms")
-    } finally {
-      batchTableCommit.close()
-    }
-    postCommit(commitMessages)
-  }
-
-  override def abort(messages: Array[WriterCommitMessage]): Unit = {
-    // TODO clean uncommitted files
-  }
-}
-
-private case class WriterFactory(writeSchema: StructType, batchWriteBuilder: BatchWriteBuilder)
-  extends DataWriterFactory {
-
-  override def createWriter(partitionId: Int, taskId: Long): DataWriter[InternalRow] = {
-    val batchTableWrite = batchWriteBuilder.newWrite()
-    new PaimonDataWriter(batchTableWrite, writeSchema)
-  }
-}
-
-private class PaimonDataWriter(batchTableWrite: BatchTableWrite, writeSchema: StructType)
-  extends DataWriter[InternalRow] {
-
-  private val ioManager = SparkUtils.createIOManager()
-  batchTableWrite.withIOManager(ioManager)
-
-  private val rowConverter: InternalRow => SparkInternalRowWrapper = {
-    val numFields = writeSchema.fields.length
-    val reusableWrapper = new SparkInternalRowWrapper(-1, writeSchema, numFields)
-    record => reusableWrapper.replace(record)
-  }
-
-  override def write(record: InternalRow): Unit = {
-    batchTableWrite.write(rowConverter.apply(record))
-  }
-
-  override def commit(): WriterCommitMessage = {
-    try {
-      val commitMessages = batchTableWrite.prepareCommit().asScala.toSeq
-      TaskCommit(commitMessages)
-    } finally {
-      close()
-    }
-  }
-
-  override def abort(): Unit = close()
-
-  override def close(): Unit = {
-    try {
-      batchTableWrite.close()
-      ioManager.close()
-    } catch {
-      case e: Exception => throw new RuntimeException(e)
-    }
-  }
-}
-
-class TaskCommit private (
-    private val serializedMessageBytes: Seq[Array[Byte]]
-) extends WriterCommitMessage {
-  def commitMessages(): Seq[CommitMessage] = {
-    val deserializer = new CommitMessageSerializer()
-    serializedMessageBytes.map {
-      bytes =>
-        Try(deserializer.deserialize(deserializer.getVersion, bytes)) match {
-          case Success(msg) => msg
-          case Failure(e: IOException) => throw new UncheckedIOException(e)
-          case Failure(e) => throw e
-        }
-    }
-  }
-}
-
-object TaskCommit {
-  def apply(commitMessages: Seq[CommitMessage]): TaskCommit = {
-    val serializer = new CommitMessageSerializer()
-    val serializedBytes: Seq[Array[Byte]] = Option(commitMessages)
-      .filter(_.nonEmpty)
-      .map(_.map {
-        msg =>
-          Try(serializer.serialize(msg)) match {
-            case Success(serializedBytes) => serializedBytes
-            case Failure(e: IOException) => throw new UncheckedIOException(e)
-            case Failure(e) => throw e
-          }
-      })
-      .getOrElse(Seq.empty)
-
-    new TaskCommit(serializedBytes)
-  }
+  override def description(): String = toString
 }

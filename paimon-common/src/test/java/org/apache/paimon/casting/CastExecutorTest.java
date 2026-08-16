@@ -51,7 +51,9 @@ import org.apache.paimon.utils.DecimalUtils;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDateTime;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.TimeZone;
 
@@ -642,6 +644,15 @@ public class CastExecutorTest {
         assertThat(valueArray.getInt(0)).isEqualTo(42);
         assertThat(keyArray.getString(1).toString()).isEqualTo("key1");
         assertThat(valueArray.isNullAt(1)).isTrue();
+
+        result = stringToMap.cast(BinaryString.fromString("MAP(key1, null, key2, 42)"));
+        assertThat(result.size()).isEqualTo(2);
+        keyArray = result.keyArray();
+        valueArray = result.valueArray();
+        assertThat(keyArray.getString(0).toString()).isEqualTo("key2");
+        assertThat(valueArray.getInt(0)).isEqualTo(42);
+        assertThat(keyArray.getString(1).toString()).isEqualTo("key1");
+        assertThat(valueArray.isNullAt(1)).isTrue();
     }
 
     @Test
@@ -817,6 +828,47 @@ public class CastExecutorTest {
     }
 
     @Test
+    public void testTimestampToDatePreEpoch() {
+        CastExecutor<?, ?> cast = CastExecutors.resolve(new TimestampType(6), new DateType());
+        LocalDateTime[] timestamps = {
+            LocalDateTime.of(1969, 12, 31, 23, 59, 59),
+            LocalDateTime.of(1960, 6, 15, 10, 30),
+            LocalDateTime.of(1969, 12, 31, 0, 0),
+            LocalDateTime.of(2024, 3, 4, 5, 6, 7)
+        };
+
+        for (LocalDateTime timestamp : timestamps) {
+            compareCastResult(
+                    cast,
+                    Timestamp.fromLocalDateTime(timestamp),
+                    (int) timestamp.toLocalDate().toEpochDay());
+        }
+    }
+
+    @Test
+    public void testTimestampToTimePreEpoch() {
+        CastExecutor<?, ?> cast = CastExecutors.resolve(new TimestampType(3), new TimeType(3));
+
+        // pre-epoch 1969-12-31 23:00:00 -> time-of-day 23:00:00 == 82_800_000 ms
+        compareCastResult(
+                cast,
+                Timestamp.fromLocalDateTime(LocalDateTime.of(1969, 12, 31, 23, 0, 0)),
+                82800000);
+
+        // pre-epoch 1969-12-31 12:34:56.789 -> 12*3600000 + 34*60000 + 56*1000 + 789
+        compareCastResult(
+                cast,
+                Timestamp.fromLocalDateTime(LocalDateTime.of(1969, 12, 31, 12, 34, 56, 789000000)),
+                45296789);
+
+        // post-epoch 1970-01-01 10:00:00 -> 36_000_000 ms (unchanged behavior)
+        compareCastResult(
+                cast,
+                Timestamp.fromLocalDateTime(LocalDateTime.of(1970, 1, 1, 10, 0, 0)),
+                36000000);
+    }
+
+    @Test
     public void testDateToTimestamp() {
         String date = "2023-06-06";
         compareCastResult(
@@ -896,6 +948,13 @@ public class CastExecutorTest {
                 CastExecutors.resolve(rowType, DataTypes.STRING()),
                 row,
                 BinaryString.fromString("{1, {2025-01-06, {1 -> [1, null, 2]}, null}}"));
+    }
+
+    @Test
+    public void testSplitMapEntriesWithQuotes() {
+        String content = "1, \"abc\"";
+        List<String> result = StringToMapCastRule.INSTANCE.splitMapEntries(content);
+        assertThat(result).containsExactly("1", "abc");
     }
 
     @SuppressWarnings("rawtypes")

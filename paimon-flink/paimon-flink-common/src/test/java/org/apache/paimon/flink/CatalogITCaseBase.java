@@ -31,6 +31,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
+import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.table.api.internal.TableEnvironmentImpl;
 import org.apache.flink.table.catalog.Catalog;
 import org.apache.flink.table.catalog.CatalogBaseTable;
@@ -69,7 +70,11 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
 
     @BeforeEach
     public void before() throws IOException {
-        tEnv = tableEnvironmentBuilder().batchMode().build();
+        TableEnvironmentBuilder tBuilder = tableEnvironmentBuilder().batchMode();
+        if (sqlSyncMode() != null) {
+            tBuilder.setConf(TableConfigOptions.TABLE_DML_SYNC, sqlSyncMode());
+        }
+        tEnv = tBuilder.build();
         String catalog = "PAIMON";
         path = getTempDirPath();
         String inferScan =
@@ -95,6 +100,11 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
 
         setParallelism(defaultParallelism());
         prepareEnv();
+    }
+
+    @Nullable
+    protected Boolean sqlSyncMode() {
+        return null;
     }
 
     protected Map<String, String> catalogOptions() {

@@ -26,6 +26,7 @@ import org.apache.paimon.utils.RoaringBitmap32;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * A {@link FileRecordIterator} wraps a {@link FileRecordIterator} and {@link BitmapIndexResult}.
@@ -35,12 +36,16 @@ public class ApplyBitmapIndexFileRecordIterator implements FileRecordIterator<In
     private final FileRecordIterator<InternalRow> iterator;
     private final RoaringBitmap32 bitmap;
     private final int last;
+    private final AtomicBoolean exhausted;
 
-    public ApplyBitmapIndexFileRecordIterator(
-            FileRecordIterator<InternalRow> iterator, BitmapIndexResult fileIndexResult) {
+    ApplyBitmapIndexFileRecordIterator(
+            FileRecordIterator<InternalRow> iterator,
+            BitmapIndexResult fileIndexResult,
+            AtomicBoolean exhausted) {
         this.iterator = iterator;
         this.bitmap = fileIndexResult.get();
         this.last = bitmap.last();
+        this.exhausted = exhausted;
     }
 
     @Override
@@ -63,9 +68,13 @@ public class ApplyBitmapIndexFileRecordIterator implements FileRecordIterator<In
             }
             int position = (int) returnedPosition();
             if (position > last) {
+                exhausted.set(true);
                 return null;
             }
             if (bitmap.contains(position)) {
+                if (position >= last) {
+                    exhausted.set(true);
+                }
                 return next;
             }
         }

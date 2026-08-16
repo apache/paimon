@@ -20,12 +20,10 @@ package org.apache.paimon.flink.action;
 
 import org.apache.paimon.flink.procedure.RepairProcedure;
 
-import org.apache.flink.table.procedure.DefaultProcedureContext;
-
 import java.util.Map;
 
 /** Repair action for Flink. */
-public class RepairAction extends ActionBase {
+public class RepairAction extends ActionBase implements LocalAction {
 
     private final String identifier;
 
@@ -35,9 +33,9 @@ public class RepairAction extends ActionBase {
     }
 
     @Override
-    public void run() throws Exception {
+    public void executeLocally() throws Exception {
         RepairProcedure repairProcedure = new RepairProcedure();
         repairProcedure.withCatalog(catalog);
-        repairProcedure.call(new DefaultProcedureContext(env), identifier);
+        repairProcedure.call(null, identifier);
     }
 }

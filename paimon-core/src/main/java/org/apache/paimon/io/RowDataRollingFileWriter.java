@@ -18,26 +18,24 @@
 
 package org.apache.paimon.io;
 
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.format.SimpleStatsCollector;
-import org.apache.paimon.format.avro.AvroFileFormat;
+import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileSource;
-import org.apache.paimon.statistics.NoneSimpleColStatsCollector;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LongCounter;
 
 import javax.annotation.Nullable;
 
-import java.util.Arrays;
 import java.util.List;
+import java.util.function.Supplier;
 
-/** {@link RollingFileWriter} for data files containing {@link InternalRow}. */
-public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, DataFileMeta> {
+/** {@link RollingFileWriterImpl} for data files containing {@link InternalRow}. */
+public class RowDataRollingFileWriter extends RollingFileWriterImpl<InternalRow, DataFileMeta> {
 
     public RowDataRollingFileWriter(
             FileIO fileIO,
@@ -46,60 +44,54 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
             long targetFileSize,
             RowType writeSchema,
             DataFilePathFactory pathFactory,
-            LongCounter seqNumCounter,
+            Supplier<LongCounter> seqNumCounterSupplier,
             String fileCompression,
             SimpleColStatsCollector.Factory[] statsCollectors,
             FileIndexOptions fileIndexOptions,
             FileSource fileSource,
             boolean asyncFileWrite,
             boolean statsDenseStore,
-            @Nullable List<String> writeCols) {
+            @Nullable List<String> writeCols,
+            @Nullable FileFormat rowSidecarFormat,
+            long targetFileRowNum) {
         super(
-                () ->
-                        new RowDataFileWriter(
+                new Supplier<RowDataFileWriter>() {
+
+                    private final FormatWriterFactory formatWriterFactory =
+                            fileFormat.createWriterFactory(writeSchema);
+
+                    @Override
+                    public RowDataFileWriter get() {
+                        Path dataPath = pathFactory.newPath();
+                        Path rowSidecarPath =
+                                rowSidecarFormat == null
+                                        ? null
+                                        : new Path(
+                                                dataPath.getParent(), dataPath.getName() + ".row");
+                        FileWriterContext writerContext =
+                                new FileWriterContext(
+                                        formatWriterFactory,
+                                        RollingFileWriter.createStatsProducer(
+                                                fileFormat, writeSchema, statsCollectors),
+                                        fileCompression);
+                        return new RowDataFileWriter(
                                 fileIO,
-                                createFileWriterContext(
-                                        fileFormat, writeSchema, statsCollectors, fileCompression),
-                                pathFactory.newPath(),
+                                writerContext,
+                                dataPath,
                                 writeSchema,
                                 schemaId,
-                                seqNumCounter,
+                                seqNumCounterSupplier,
                                 fileIndexOptions,
                                 fileSource,
                                 asyncFileWrite,
                                 statsDenseStore,
                                 pathFactory.isExternalPath(),
-                                writeCols),
-                targetFileSize);
-    }
-
-    @VisibleForTesting
-    static FileWriterContext createFileWriterContext(
-            FileFormat fileFormat,
-            RowType rowType,
-            SimpleColStatsCollector.Factory[] statsCollectors,
-            String fileCompression) {
-        return new FileWriterContext(
-                fileFormat.createWriterFactory(rowType),
-                createStatsProducer(fileFormat, rowType, statsCollectors),
-                fileCompression);
-    }
-
-    private static SimpleStatsProducer createStatsProducer(
-            FileFormat fileFormat,
-            RowType rowType,
-            SimpleColStatsCollector.Factory[] statsCollectors) {
-        boolean isDisabled =
-                Arrays.stream(SimpleColStatsCollector.create(statsCollectors))
-                        .allMatch(p -> p instanceof NoneSimpleColStatsCollector);
-        if (isDisabled) {
-            return SimpleStatsProducer.disabledProducer();
-        }
-        if (fileFormat instanceof AvroFileFormat) {
-            SimpleStatsCollector collector = new SimpleStatsCollector(rowType, statsCollectors);
-            return SimpleStatsProducer.fromCollector(collector);
-        }
-        return SimpleStatsProducer.fromExtractor(
-                fileFormat.createStatsExtractor(rowType, statsCollectors).orElse(null));
+                                writeCols,
+                                rowSidecarFormat,
+                                rowSidecarPath);
+                    }
+                },
+                targetFileSize,
+                targetFileRowNum);
     }
 }

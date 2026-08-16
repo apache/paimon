@@ -270,7 +270,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                 case BUCKET_UNAWARE:
                     buildForUnawareBucket(table, converted);
                     break;
-                case CROSS_PARTITION:
+                case KEY_DYNAMIC:
                 default:
                     throw new UnsupportedOperationException(
                             "Unsupported bucket mode: " + bucketMode);

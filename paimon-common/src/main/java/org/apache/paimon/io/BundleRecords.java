@@ -32,9 +32,11 @@ import org.apache.paimon.data.InternalRow;
 public interface BundleRecords extends Iterable<InternalRow> {
 
     /**
-     * The total row count of this batch.
+     * The stable, non-negative row count of this batch.
      *
-     * @return the number of row count.
+     * <p>The count must equal the number of records exposed by {@link #iterator()}.
+     *
+     * @return the number of records in this batch.
      */
     long rowCount();
 }

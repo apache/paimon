@@ -20,6 +20,8 @@ package org.apache.paimon.format;
 
 import org.apache.paimon.data.InternalRow;
 
+import javax.annotation.Nullable;
+
 import java.io.Closeable;
 import java.io.IOException;
 
@@ -49,4 +51,19 @@ public interface FormatWriter extends Closeable {
      * @throws IOException Thrown if calculating the length fails.
      */
     boolean reachTargetSize(boolean suggestedCheck, long targetSize) throws IOException;
+
+    /**
+     * Returns format-specific writer metadata that can be used to extract statistics without
+     * re-reading the file. This is useful for object stores (like OSS/S3) where the file may not be
+     * immediately visible after close.
+     *
+     * <p>This method should only be called after {@link #close()}. By default, returns {@code null}
+     * indicating no in-memory metadata is available.
+     *
+     * @return format-specific metadata object, or {@code null} if not available.
+     */
+    @Nullable
+    default Object writerMetadata() {
+        return null;
+    }
 }

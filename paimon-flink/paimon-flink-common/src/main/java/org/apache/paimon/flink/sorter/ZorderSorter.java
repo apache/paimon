@@ -18,16 +18,15 @@
 
 package org.apache.paimon.flink.sorter;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.action.SortCompactAction;
 import org.apache.paimon.sort.zorder.ZIndexer;
-import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
-
-import org.apache.paimon.shade.guava30.com.google.common.primitives.UnsignedBytes;
+import org.apache.paimon.utils.SortUtil;
 
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -36,6 +35,8 @@ import org.apache.flink.table.data.RowData;
 
 import java.util.Arrays;
 import java.util.Collections;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * This is a table sorter which will sort the records by the z-order of specified columns. It works
@@ -53,15 +54,16 @@ public class ZorderSorter extends TableSorter {
     public ZorderSorter(
             StreamExecutionEnvironment batchTEnv,
             DataStream<RowData> origin,
-            FileStoreTable table,
+            CoreOptions options,
+            RowType rowType,
             TableSortInfo sortInfo) {
-        super(batchTEnv, origin, table, sortInfo.getSortColumns());
+        super(batchTEnv, origin, options, rowType, sortInfo.getSortColumns());
         this.sortInfo = sortInfo;
     }
 
     @Override
     public DataStream<RowData> sort() {
-        return sortStreamByZOrder(origin, table);
+        return sortStreamByZOrder(origin, options, rowType);
     }
 
     /**
@@ -71,24 +73,22 @@ public class ZorderSorter extends TableSorter {
      * @return the sorted data stream
      */
     private DataStream<RowData> sortStreamByZOrder(
-            DataStream<RowData> inputStream, FileStoreTable table) {
-        final ZIndexer zIndexer =
-                new ZIndexer(table.rowType(), orderColNames, table.coreOptions().varTypeSize());
+            DataStream<RowData> inputStream, CoreOptions options, RowType rowType) {
+        final ZIndexer zIndexer = new ZIndexer(rowType, orderColNames, options.varTypeSize());
         return SortUtils.sortStreamByKey(
                 inputStream,
-                table,
+                options,
+                rowType,
                 KEY_TYPE,
                 TypeInformation.of(byte[].class),
                 () ->
                         (b1, b2) -> {
-                            assert b1.length == b2.length;
-                            for (int i = 0; i < b1.length; i++) {
-                                int ret = UnsignedBytes.compare(b1[i], b2[i]);
-                                if (ret != 0) {
-                                    return ret;
-                                }
-                            }
-                            return 0;
+                            checkArgument(
+                                    b1.length == b2.length,
+                                    "Z-order curve keys must have the same length, but got %d and %d",
+                                    b1.length,
+                                    b2.length);
+                            return SortUtil.compareBinary(b1, b2);
                         },
                 new SortUtils.KeyAbstract<byte[]>() {
                     @Override

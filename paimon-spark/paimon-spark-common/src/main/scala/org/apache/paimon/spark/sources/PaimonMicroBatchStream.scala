@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.sources
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.{PaimonImplicits, PaimonInputPartition, PaimonPartitionReaderFactory, SparkConnectorOptions}
 import org.apache.paimon.table.DataTable
@@ -90,6 +91,8 @@ class PaimonMicroBatchStream(
       .getOrElse(ReadLimit.allAvailable())
   }
 
+  private lazy val blobAsDescriptor: Boolean = options.get(CoreOptions.BLOB_AS_DESCRIPTOR)
+
   override def getDefaultReadLimit: ReadLimit = defaultReadLimit
 
   override def prepareForTriggerAvailableNow(): Unit = {
@@ -113,7 +116,17 @@ class PaimonMicroBatchStream(
   override def planInputPartitions(start: Offset, end: Offset): Array[InputPartition] = {
     val startOffset = {
       val startOffset0 = PaimonSourceOffset(start)
-      if (startOffset0.compareTo(initOffset) < 0) {
+      // Fall back to initOffset only when the checkpointed snapshot has expired.
+      // initOffset is recomputed from the current table state on every (re)start,
+      // so with scan modes like latest-full it points at the current snapshot with
+      // scanSnapshot=true. Clamping a still-valid checkpointed offset up to it made
+      // a restarted query silently skip the changelog gap and re-scan the whole
+      // snapshot, re-emitting every row as +I.
+      if (startOffset0.snapshotId < table.snapshotManager().earliestSnapshotId()) {
+        logWarning(
+          s"Checkpointed start offset $startOffset0 is no longer available " +
+            s"(earliest snapshot: ${table.snapshotManager().earliestSnapshotId()}), " +
+            s"falling back to $initOffset.")
         initOffset
       } else {
         startOffset0
@@ -127,7 +140,7 @@ class PaimonMicroBatchStream(
   }
 
   override def createReaderFactory(): PartitionReaderFactory = {
-    PaimonPartitionReaderFactory(readBuilder)
+    PaimonPartitionReaderFactory(readBuilder, blobAsDescriptor = blobAsDescriptor)
   }
 
   override def initialOffset(): Offset = {

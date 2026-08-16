@@ -26,6 +26,7 @@ import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 
 import javax.annotation.Nullable;
@@ -37,10 +38,16 @@ import javax.annotation.Nullable;
 public class CdcAppendTableSink extends FlinkWriteSink<CdcRecord> {
 
     private final Integer parallelism;
+    private final boolean noShuffle;
 
     public CdcAppendTableSink(FileStoreTable table, Integer parallelism) {
+        this(table, parallelism, false);
+    }
+
+    public CdcAppendTableSink(FileStoreTable table, Integer parallelism, boolean noShuffle) {
         super(table, null);
         this.parallelism = parallelism;
+        this.noShuffle = noShuffle;
     }
 
     @Override
@@ -52,7 +59,13 @@ public class CdcAppendTableSink extends FlinkWriteSink<CdcRecord> {
     @Override
     public DataStream<Committable> doWrite(
             DataStream<CdcRecord> input, String initialCommitUser, @Nullable Integer parallelism) {
-        return super.doWrite(input, initialCommitUser, this.parallelism);
+        DataStream<Committable> written = super.doWrite(input, initialCommitUser, this.parallelism);
+        if (noShuffle) {
+            // Break operator chaining between parse and write to avoid deadlock
+            // during schema evolution retries, without introducing a network shuffle.
+            ((SingleOutputStreamOperator<Committable>) written).startNewChain();
+        }
+        return written;
     }
 
     @Override

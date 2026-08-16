@@ -71,6 +71,7 @@ import org.apache.parquet.internal.column.columnindex.ColumnIndex;
 import org.apache.parquet.internal.column.columnindex.OffsetIndex;
 import org.apache.parquet.internal.filter2.columnindex.ColumnIndexFilter;
 import org.apache.parquet.internal.filter2.columnindex.ColumnIndexStore;
+import org.apache.parquet.internal.filter2.columnindex.ColumnIndexStore.MissingOffsetIndexException;
 import org.apache.parquet.internal.filter2.columnindex.RowRanges;
 import org.apache.parquet.internal.hadoop.metadata.IndexReference;
 import org.apache.parquet.io.InputFile;
@@ -132,8 +133,26 @@ public class ParquetFileReader implements Closeable {
 
     public static final ParquetMetadata readFooter(
             InputFile file, ParquetReadOptions options, SeekableInputStream f) throws IOException {
+        return readFooter(file, options, f, /*closeStreamOnFailure*/ false);
+    }
+
+    public static final ParquetMetadata readFooter(
+            InputFile file,
+            ParquetReadOptions options,
+            SeekableInputStream f,
+            boolean closeStreamOnFailure)
+            throws IOException {
         ParquetMetadataConverter converter = new ParquetMetadataConverter(options);
-        return readFooter(file, options, f, converter);
+        try {
+            return readFooter(file, options, f, converter);
+        } catch (Exception e) {
+            // In case that readFooter throws an exception in the constructor, the new stream
+            // should be closed. Otherwise, there's no way to close this outside.
+            if (closeStreamOnFailure) {
+                f.close();
+            }
+            throw e;
+        }
     }
 
     private static final ParquetMetadata readFooter(
@@ -161,7 +180,13 @@ public class ParquetFileReader implements Closeable {
         long fileMetadataLengthIndex = fileLen - magic.length - footerLengthSize;
         LOG.debug("reading footer index at {}", fileMetadataLengthIndex);
         f.seek(fileMetadataLengthIndex);
-        int fileMetadataLength = readIntLittleEndian(f);
+        long readFileMetadataLength = readIntLittleEndian(f) & 0xFFFFFFFFL;
+        if (readFileMetadataLength > Integer.MAX_VALUE) {
+            throw new RuntimeException(
+                    "footer is too large: " + readFileMetadataLength + "to be read");
+        }
+        int fileMetadataLength = (int) readFileMetadataLength;
+
         f.readFully(magic);
 
         boolean encryptedFooterMode;
@@ -229,7 +254,7 @@ public class ParquetFileReader implements Closeable {
         }
     }
 
-    protected final ParquetInputStream f;
+    protected ParquetInputStream f;
     private final ParquetInputFile file;
     private final ParquetReadOptions options;
     private final Map<ColumnPath, ColumnDescriptor> paths = new HashMap<>();
@@ -252,19 +277,31 @@ public class ParquetFileReader implements Closeable {
     public ParquetFileReader(
             InputFile file, ParquetReadOptions options, @Nullable RoaringBitmap32 selection)
             throws IOException {
+        this(file, options, ((ParquetInputFile) file).newStream(), selection);
+    }
+
+    public ParquetFileReader(
+            InputFile file,
+            ParquetReadOptions options,
+            ParquetInputStream f,
+            @Nullable RoaringBitmap32 selection)
+            throws IOException {
+        this(file, readFooter(file, options, f, true), options, f, selection);
+    }
+
+    public ParquetFileReader(
+            InputFile file,
+            ParquetMetadata footer,
+            ParquetReadOptions options,
+            ParquetInputStream f,
+            @Nullable RoaringBitmap32 selection)
+            throws IOException {
         this.converter = new ParquetMetadataConverter(options);
         this.file = (ParquetInputFile) file;
-        this.f = this.file.newStream();
+        this.f = f;
         this.options = options;
         this.selection = selection;
-        try {
-            this.footer = readFooter(file, options, f, converter);
-        } catch (Exception e) {
-            // In case that reading footer throws an exception in the constructor, the new stream
-            // should be closed. Otherwise, there's no way to close this outside.
-            f.close();
-            throw e;
-        }
+        this.footer = footer;
         this.fileMetaData = footer.getFileMetaData();
         this.fileDecryptor =
                 fileMetaData.getFileDecryptor(); // must be called before filterRowGroups!
@@ -406,11 +443,15 @@ public class ParquetFileReader implements Closeable {
         return blocks;
     }
 
-    public void setRequestedSchema(MessageType projection) {
+    public void setRequestedSchema(List<ColumnDescriptor> columns) {
         paths.clear();
-        for (ColumnDescriptor col : projection.getColumns()) {
+        for (ColumnDescriptor col : columns) {
             paths.put(ColumnPath.get(col.getPath()), col);
         }
+    }
+
+    public void setRequestedSchema(MessageType projection) {
+        setRequestedSchema(projection.getColumns());
     }
 
     public void appendTo(ParquetFileWriter writer) throws IOException {
@@ -811,30 +852,40 @@ public class ParquetFileReader implements Closeable {
     private RowRanges calculateRowRanges(int blockIndex) {
         BlockMetaData block = blocks.get(blockIndex);
         RowRanges rowRanges = RowRanges.createSingle(block.getRowCount());
-        if (selection != null) {
+        FilterCompat.Filter recordFilter = options.getRecordFilter();
+        boolean filteringRequired = FilterCompat.isFilteringRequired(recordFilter);
+        if (selection != null || filteringRequired) {
             ColumnIndexStore store = getColumnIndexStore(blockIndex);
-            List<OffsetIndex> offsets =
-                    paths.keySet().stream()
-                            .map(store::getOffsetIndex)
-                            .filter(Objects::nonNull)
-                            .collect(Collectors.toList());
-            long rowCount = block.getRowCount();
-            long rowIndexOffset = block.getRowIndexOffset();
-            for (OffsetIndex offset : offsets) {
-                // avoiding creating too many ranges, just filter columns pages
-                RowRanges result = RowRanges.create(rowCount, rowIndexOffset, offset, selection);
+
+            // do filter by selection
+            if (selection != null) {
+                List<OffsetIndex> offsets = new ArrayList<>();
+                for (ColumnChunkMetaData mc : block.getColumns()) {
+                    ColumnPath pathKey = mc.getPath();
+                    if (paths.containsKey(pathKey)) {
+                        try {
+                            offsets.add(store.getOffsetIndex(pathKey));
+                        } catch (MissingOffsetIndexException ignored) {
+                        }
+                    }
+                }
+                long rowCount = block.getRowCount();
+                long rowIndexOffset = block.getRowIndexOffset();
+                for (OffsetIndex offset : offsets) {
+                    // avoiding creating too many ranges, just filter columns pages
+                    RowRanges result =
+                            RowRanges.create(rowCount, rowIndexOffset, offset, selection);
+                    rowRanges = RowRanges.intersection(result, rowRanges);
+                }
+            }
+
+            // do filter by push down filter
+            if (filteringRequired) {
+                RowRanges result =
+                        ColumnIndexFilter.calculateRowRanges(
+                                recordFilter, store, paths.keySet(), block.getRowCount());
                 rowRanges = RowRanges.intersection(result, rowRanges);
             }
-        }
-
-        if (FilterCompat.isFilteringRequired(options.getRecordFilter())) {
-            RowRanges result =
-                    ColumnIndexFilter.calculateRowRanges(
-                            options.getRecordFilter(),
-                            getColumnIndexStore(blockIndex),
-                            paths.keySet(),
-                            block.getRowCount());
-            rowRanges = RowRanges.intersection(result, rowRanges);
         }
         return rowRanges;
     }
@@ -1075,7 +1126,14 @@ public class ParquetFileReader implements Closeable {
         byte[] bitset;
         if (null == bloomFilterDecryptor) {
             bitset = new byte[numBytes];
-            in.read(bitset);
+            // For negative bloomFilterLength (files from older versions), use readFully() instead
+            // of read(). readFully() guarantees reading exactly numBytes bytes, while read() may
+            // read fewer bytes in a single call. This ensures the entire bitset is properly loaded.
+            if (bloomFilterLength < 0) {
+                f.readFully(bitset);
+            } else {
+                in.read(bitset);
+            }
         } else {
             bitset = bloomFilterDecryptor.decrypt(in, bloomFilterBitsetAAD);
             if (bitset.length != numBytes) {
@@ -1153,6 +1211,14 @@ public class ParquetFileReader implements Closeable {
         }
         return ParquetMetadataConverter.fromParquetOffsetIndex(
                 Util.readOffsetIndex(f, offsetIndexDecryptor, offsetIndexAAD));
+    }
+
+    /**
+     * Explicitly detach the input stream for the file to avoid being closed via {@link
+     * ParquetFileReader#close()}.
+     */
+    public void detachFileInputStream() {
+        f = null;
     }
 
     @Override

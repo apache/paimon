@@ -148,7 +148,8 @@ public class BinaryInMemorySortBuffer extends BinaryIndexedSortable implements S
         return false;
     }
 
-    boolean isEmpty() {
+    @Override
+    public boolean isEmpty() {
         return this.numRecords == 0;
     }
 

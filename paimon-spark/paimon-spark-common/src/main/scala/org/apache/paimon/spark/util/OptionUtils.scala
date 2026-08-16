@@ -18,11 +18,14 @@
 
 package org.apache.paimon.spark.util
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.catalog.Identifier
 import org.apache.paimon.options.ConfigOption
 import org.apache.paimon.spark.{SparkCatalogOptions, SparkConnectorOptions}
 import org.apache.paimon.table.Table
 
+import org.apache.spark.internal.Logging
+import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.SQLConfHelper
 import org.apache.spark.sql.internal.StaticSQLConf
 
@@ -31,48 +34,116 @@ import java.util.regex.Pattern
 
 import scala.collection.JavaConverters._
 
-object OptionUtils extends SQLConfHelper {
+object OptionUtils extends SQLConfHelper with Logging {
 
   private val PAIMON_OPTION_PREFIX = "spark.paimon."
   private val SPARK_CATALOG_PREFIX = "spark.sql.catalog."
+  private val PAIMON_SPARK_SESSION_EXTENSIONS =
+    "org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions"
 
-  def paimonExtensionEnabled: Boolean = {
-    conf
+  def paimonExtensionEnabled(sparkSession: SparkSession): Boolean = {
+    sparkSession.sessionState.conf
       .getConf(StaticSQLConf.SPARK_SESSION_EXTENSIONS)
       .getOrElse(Seq.empty)
-      .contains("org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions")
+      .contains(PAIMON_SPARK_SESSION_EXTENSIONS)
   }
 
   def getOptionString(option: ConfigOption[_]): String = {
     conf.getConfString(s"$PAIMON_OPTION_PREFIX${option.key()}", option.defaultValue().toString)
   }
 
-  def checkRequiredConfigurations(): Unit = {
-    if (getOptionString(SparkConnectorOptions.REQUIRED_SPARK_CONFS_CHECK_ENABLED).toBoolean) {
-      if (!paimonExtensionEnabled) {
-        throw new RuntimeException(
-          """
-            |When using Paimon, it is necessary to configure `spark.sql.extensions` and ensure that it includes `org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions`.
-            |You can disable this check by configuring `spark.paimon.requiredSparkConfsCheck.enabled` to `false`, but it is strongly discouraged to do so.
-            |""".stripMargin)
-      }
+  private def getSparkVersionSpecificDefault(option: ConfigOption[_]): String = {
+    val sparkVersion = org.apache.spark.SPARK_VERSION
+
+    option.key() match {
+      case key if key == SparkConnectorOptions.USE_V2_WRITE.key() =>
+        if (sparkVersion >= "3.4") {
+          "false"
+        } else {
+          option.defaultValue().toString
+        }
+      case _ =>
+        option.defaultValue().toString
+    }
+  }
+
+  private def requiredSparkConfsCheckEnabled(sparkSession: SparkSession): Boolean = {
+    sparkSession.sessionState.conf
+      .getConfString(
+        s"$PAIMON_OPTION_PREFIX${SparkConnectorOptions.REQUIRED_SPARK_CONFS_CHECK_ENABLED.key()}",
+        SparkConnectorOptions.REQUIRED_SPARK_CONFS_CHECK_ENABLED.defaultValue().toString
+      )
+      .toBoolean
+  }
+
+  def checkRequiredConfigurations(sparkSession: SparkSession): Unit = {
+    if (requiredSparkConfsCheckEnabled(sparkSession) && !paimonExtensionEnabled(sparkSession)) {
+      throw new RuntimeException(
+        """
+          |When using Paimon, it is necessary to configure `spark.sql.extensions` and ensure that it includes `org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions`.
+          |You can disable this check by configuring `spark.paimon.requiredSparkConfsCheck.enabled` to `false`, but it is strongly discouraged to do so.
+          |""".stripMargin)
     }
   }
 
   def useV2Write(): Boolean = {
-    getOptionString(SparkConnectorOptions.USE_V2_WRITE).toBoolean
+    val defaultValue = getSparkVersionSpecificDefault(SparkConnectorOptions.USE_V2_WRITE)
+    val configuredValue = conf
+      .getConfString(
+        s"$PAIMON_OPTION_PREFIX${SparkConnectorOptions.USE_V2_WRITE.key()}",
+        defaultValue
+      )
+      .toBoolean
+
+    val sparkVersion = org.apache.spark.SPARK_VERSION
+    val isVersionSupported = sparkVersion >= "3.4"
+
+    if (configuredValue && !isVersionSupported) {
+      logWarning(
+        "DataSourceV2 write is not supported in Spark versions prior to 3.4. Falling back to DataSourceV1.")
+    }
+
+    configuredValue && isVersionSupported
   }
 
   def writeMergeSchemaEnabled(): Boolean = {
     getOptionString(SparkConnectorOptions.MERGE_SCHEMA).toBoolean
   }
 
+  def hiveStyleDynamicPartitionEnabled(): Boolean = {
+    getOptionString(SparkConnectorOptions.HIVE_STYLE_DYNAMIC_PARTITION_ENABLED).toBoolean
+  }
+
   def writeMergeSchemaExplicitCastEnabled(): Boolean = {
     getOptionString(SparkConnectorOptions.EXPLICIT_CAST).toBoolean
   }
 
+  def writeMergeSchemaTypeWideningEnabled(): Boolean = {
+    getOptionString(SparkConnectorOptions.TYPE_WIDENING).toBoolean
+  }
+
+  def dataEvolutionUpdateConflictRetryMaxAttempts(): Int = {
+    getOptionString(SparkConnectorOptions.DATA_EVOLUTION_UPDATE_CONFLICT_RETRY_MAX_ATTEMPTS).toInt
+  }
+
+  def dataEvolutionUpdateConflictRetryWaitMs(): Long = {
+    getOptionString(SparkConnectorOptions.DATA_EVOLUTION_UPDATE_CONFLICT_RETRY_WAIT_MS).toLong
+  }
+
+  def legacyTimestampMappingEnabled(): Boolean = {
+    getOptionString(SparkConnectorOptions.LEGACY_TIMESTAMP_MAPPING).toBoolean
+  }
+
   def v1FunctionEnabled(): Boolean = {
     getOptionString(SparkCatalogOptions.V1FUNCTION_ENABLED).toBoolean
+  }
+
+  def readAllowFullScan(): Boolean = {
+    getOptionString(SparkConnectorOptions.READ_ALLOW_FULL_SCAN).toBoolean
+  }
+
+  def sourceSplitTargetSizeWithColumnPruning(): Boolean = {
+    getOptionString(SparkConnectorOptions.SOURCE_SPLIT_TARGET_SIZE_WITH_COLUMN_PRUNING).toBoolean
   }
 
   private def mergeSQLConf(extraOptions: JMap[String, String]): JMap[String, String] = {
@@ -115,15 +186,41 @@ object OptionUtils extends SQLConfHelper {
       catalogName: String = null,
       ident: Identifier = null,
       extraOptions: JMap[String, String] = new JHashMap[String, String]()): T = {
-    val mergedOptions = if (catalogName != null && ident != null) {
-      mergeSQLConfWithIdentifier(extraOptions, catalogName, ident)
-    } else {
-      mergeSQLConf(extraOptions)
-    }
+    val mergedOptions = getMergedOptions(catalogName, ident, extraOptions)
     if (mergedOptions.isEmpty) {
       table
     } else {
       table.copy(mergedOptions).asInstanceOf[T]
     }
+  }
+
+  private def getMergedOptions(
+      catalogName: String = null,
+      ident: Identifier = null,
+      extraOptions: JMap[String, String] = new JHashMap[String, String]()): JMap[String, String] = {
+    if (catalogName != null && ident != null) {
+      mergeSQLConfWithIdentifier(extraOptions, catalogName, ident)
+    } else {
+      mergeSQLConf(extraOptions)
+    }
+  }
+
+  def withBranchFromOptions(
+      catalogName: String = null,
+      identifier: Identifier = null,
+      extraOptions: JMap[String, String] = new JHashMap[String, String]()
+  ): Identifier = {
+    if (identifier != null && !identifier.isSystemTable) {
+      val branch =
+        getMergedOptions(catalogName, identifier, extraOptions).get(CoreOptions.BRANCH.key)
+      if (branch != null && identifier.getBranchName == null) {
+        logWarning(
+          s"Using deprecated 'spark.paimon.branch=$branch' to access table '${identifier.getTableName}'. " +
+            s"Please migrate to '${identifier.getTableName}$$branch_$branch' syntax, as 'spark.paimon.branch' " +
+            s"will be removed in a future version.")
+        return new Identifier(identifier.getDatabaseName, identifier.getTableName, branch)
+      }
+    }
+    identifier
   }
 }

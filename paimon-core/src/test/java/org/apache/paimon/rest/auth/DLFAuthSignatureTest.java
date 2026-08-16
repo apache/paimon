@@ -28,7 +28,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-/** Test for {@link DLFAuthSignature}. */
+/** Test for {@link DLFDefaultSigner}. */
 public class DLFAuthSignatureTest {
 
     @Test
@@ -43,12 +43,14 @@ public class DLFAuthSignatureTest {
         RESTAuthParameter restAuthParameter =
                 new RESTAuthParameter("/v1/paimon/databases", parameters, "POST", data);
         DLFToken token = new DLFToken("access-key-id", "access-key-secret", "securityToken", null);
+        DLFDefaultSigner signer = new DLFDefaultSigner(region);
         Map<String, String> signHeaders =
-                DLFAuthProvider.generateSignHeaders(
-                        restAuthParameter.data(), dateTime, "securityToken");
-        String authorization =
-                DLFAuthSignature.getAuthorization(
-                        restAuthParameter, token, region, signHeaders, dateTime, date);
+                signer.signHeaders(
+                        data,
+                        java.time.Instant.parse("2023-12-03T12:12:12Z"),
+                        "securityToken",
+                        "host");
+        String authorization = signer.authorization(restAuthParameter, token, "host", signHeaders);
         assertEquals(
                 "DLF4-HMAC-SHA256 Credential=access-key-id/20231203/cn-hangzhou/DlfNext/aliyun_v4_request,Signature=c72caf1d40b55b1905d891ee3e3de48a2f8bebefa7e39e4f277acc93c269c5e3",
                 authorization);

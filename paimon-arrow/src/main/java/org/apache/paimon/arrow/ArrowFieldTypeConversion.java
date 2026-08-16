@@ -21,6 +21,7 @@ package org.apache.paimon.arrow;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataType;
@@ -41,13 +42,12 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VectorType;
 
 import org.apache.arrow.vector.types.TimeUnit;
 import org.apache.arrow.vector.types.Types;
 import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.FieldType;
-
-import java.time.ZoneId;
 
 /** Utils for conversion between Paimon {@link DataType} and Arrow {@link FieldType}. */
 public class ArrowFieldTypeConversion {
@@ -146,13 +146,17 @@ public class ArrowFieldTypeConversion {
         public FieldType visit(LocalZonedTimestampType localZonedTimestampType) {
             int precision = localZonedTimestampType.getPrecision();
             TimeUnit timeUnit = getTimeUnit(precision);
-            ArrowType arrowType =
-                    new ArrowType.Timestamp(timeUnit, ZoneId.systemDefault().toString());
+            ArrowType arrowType = new ArrowType.Timestamp(timeUnit, "UTC");
             return new FieldType(localZonedTimestampType.isNullable(), arrowType, null);
         }
 
         @Override
         public FieldType visit(VariantType variantType) {
+            return new FieldType(variantType.isNullable(), Types.MinorType.STRUCT.getType(), null);
+        }
+
+        @Override
+        public FieldType visit(BlobType blobType) {
             throw new UnsupportedOperationException();
         }
 
@@ -171,6 +175,12 @@ public class ArrowFieldTypeConversion {
         @Override
         public FieldType visit(ArrayType arrayType) {
             return new FieldType(arrayType.isNullable(), Types.MinorType.LIST.getType(), null);
+        }
+
+        @Override
+        public FieldType visit(VectorType vectorType) {
+            ArrowType arrowType = new ArrowType.FixedSizeList(vectorType.getLength());
+            return new FieldType(vectorType.isNullable(), arrowType, null);
         }
 
         @Override

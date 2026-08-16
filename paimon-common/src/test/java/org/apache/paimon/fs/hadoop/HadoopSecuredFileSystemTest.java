@@ -19,6 +19,7 @@
 package org.apache.paimon.fs.hadoop;
 
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 
 import org.junit.jupiter.api.Test;
@@ -33,7 +34,15 @@ public class HadoopSecuredFileSystemTest {
     @TempDir private java.nio.file.Path tmp;
 
     @Test
-    public void test() throws Exception {
+    public void testEmptySecurityConfigurationDoesNotWrapFileSystem() throws Exception {
+        HadoopFileIO fileIO = createFileIO(new Options());
+
+        assertThat(fileIO.getFileSystem(new org.apache.hadoop.fs.Path("file:///tmp/test")))
+                .isNotInstanceOf(HadoopSecuredFileSystem.class);
+    }
+
+    @Test
+    public void testValidKeytabAndPrincipalWrapsFileSystem() throws Exception {
         File keytabFile = new File(tmp.toFile(), "test-keytab.keytab");
         assertThat(keytabFile.createNewFile()).isTrue();
 
@@ -41,9 +50,37 @@ public class HadoopSecuredFileSystemTest {
         options.set("security.kerberos.login.principal", "test-user");
         options.set("security.kerberos.login.keytab", keytabFile.getAbsolutePath());
 
-        HadoopFileIO fileIO = new HadoopFileIO();
-        fileIO.configure(CatalogContext.create(options));
+        HadoopFileIO fileIO = createFileIO(options);
+
         assertThat(fileIO.getFileSystem(new org.apache.hadoop.fs.Path("file:///tmp/test")))
                 .isInstanceOf(HadoopSecuredFileSystem.class);
+    }
+
+    @Test
+    public void testPreserveExternalUgiWhenNoKerberosCredentials() throws Exception {
+        Options options = new Options();
+
+        HadoopFileIO fileIO = createFileIO(options);
+        assertThat(fileIO.getFileSystem(new org.apache.hadoop.fs.Path("file:///tmp/test")))
+                .isNotInstanceOf(HadoopSecuredFileSystem.class);
+    }
+
+    @Test
+    public void testReturnOriginalFileSystemWhenSecurityConfigIsIllegal() throws Exception {
+        File keytabFile = new File(tmp.toFile(), "test-keytab.keytab");
+        assertThat(keytabFile.createNewFile()).isTrue();
+
+        Options options = new Options();
+        options.set("security.kerberos.login.keytab", keytabFile.getAbsolutePath());
+
+        HadoopFileIO fileIO = createFileIO(options);
+        assertThat(fileIO.getFileSystem(new org.apache.hadoop.fs.Path("file:///tmp/test")))
+                .isNotInstanceOf(HadoopSecuredFileSystem.class);
+    }
+
+    private HadoopFileIO createFileIO(Options options) {
+        HadoopFileIO fileIO = new HadoopFileIO(new Path("file:///tmp/test"));
+        fileIO.configure(CatalogContext.create(options));
+        return fileIO;
     }
 }

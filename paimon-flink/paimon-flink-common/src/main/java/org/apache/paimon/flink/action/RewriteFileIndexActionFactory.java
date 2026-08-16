@@ -28,6 +28,8 @@ public class RewriteFileIndexActionFactory implements ActionFactory {
 
     private static final String IDENTIFIER_KEY = "identifier";
 
+    private static final String PARTITIONS_KEY = "partitions";
+
     @Override
     public String identifier() {
         return IDENTIFIER;
@@ -37,8 +39,10 @@ public class RewriteFileIndexActionFactory implements ActionFactory {
     public Optional<Action> create(MultipleParameterToolAdapter params) {
         Map<String, String> catalogConfig = catalogConfigMap(params);
         String identifier = params.get(IDENTIFIER_KEY);
+        String partitions = params.get(PARTITIONS_KEY);
 
-        RewriteFileIndexAction action = new RewriteFileIndexAction(identifier, catalogConfig);
+        RewriteFileIndexAction action =
+                new RewriteFileIndexAction(identifier, partitions, catalogConfig);
 
         return Optional.of(action);
     }
@@ -52,6 +56,7 @@ public class RewriteFileIndexActionFactory implements ActionFactory {
         System.out.println(
                 "  rewrite_file_index \\\n"
                         + "--warehouse <warehouse_path> \\\n"
-                        + "--identifier <database.table>");
+                        + "--identifier <database.table> \\\n"
+                        + "[--partitions <partition_spec>]");
     }
 }

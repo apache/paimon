@@ -31,6 +31,7 @@ import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.PrimaryKeysRequest;
+import org.apache.hadoop.hive.metastore.api.SerDeInfo;
 import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.slf4j.Logger;
@@ -46,6 +47,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
 
+import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
 import static org.apache.paimon.hive.HiveTypeUtils.toPaimonType;
 
 /** Utils for cloning Hive table to Paimon table. */
@@ -55,6 +57,8 @@ public class HiveCloneUtils {
 
     public static final Predicate<FileStatus> HIDDEN_PATH_FILTER =
             p -> !p.getPath().getName().startsWith("_") && !p.getPath().getName().startsWith(".");
+
+    public static final String SUPPORT_CLONE_SPLITS = "support.clone.splits";
 
     public static Map<String, String> getDatabaseOptions(
             HiveCatalog hiveCatalog, String databaseName) throws Exception {
@@ -148,6 +152,13 @@ public class HiveCloneUtils {
         List<FieldSchema> fields = extractor.extractSchema(client, hiveTable, database, table);
         List<String> partitionKeys = extractor.extractPartitionKeys(hiveTable);
         Map<String, String> options = extractor.extractOptions(hiveTable);
+        if (hiveTable.isSetPartitionKeys()) {
+            options.put(
+                    PARTITION_DEFAULT_NAME.key(),
+                    client.getConfigValue(
+                            "hive.exec.default.partition.name", "__HIVE_DEFAULT_PARTITION__"));
+        }
+
         Schema.Builder schemaBuilder =
                 Schema.newBuilder()
                         .comment(options.get("comment"))
@@ -186,14 +197,28 @@ public class HiveCloneUtils {
                         predicate);
     }
 
-    private static String parseFormat(StorageDescriptor storageDescriptor) {
-        String serder = storageDescriptor.getSerdeInfo().toString();
-        if (serder.contains("avro")) {
+    private static String parseFormat(StorageDescriptor sd) {
+        SerDeInfo serdeInfo = sd.getSerdeInfo();
+        if (serdeInfo == null) {
+            return null;
+        }
+        String serLib =
+                serdeInfo.getSerializationLib() == null
+                        ? ""
+                        : serdeInfo.getSerializationLib().toLowerCase();
+        String inputFormat = sd.getInputFormat() == null ? "" : sd.getInputFormat();
+        if (serLib.contains("avro")) {
             return "avro";
-        } else if (serder.contains("parquet")) {
+        } else if (serLib.contains("parquet")) {
             return "parquet";
-        } else if (serder.contains("orc")) {
+        } else if (serLib.contains("orc")) {
             return "orc";
+        } else if (inputFormat.contains("Text")) {
+            if (serLib.contains("json")) {
+                return "json";
+            } else {
+                return "csv";
+            }
         }
         return null;
     }

@@ -18,176 +18,38 @@
 
 package org.apache.paimon.operation;
 
-import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.manifest.PartitionEntry;
-import org.apache.paimon.partition.PartitionExpireStrategy;
-import org.apache.paimon.partition.PartitionValuesTimeExpireStrategy;
-import org.apache.paimon.table.PartitionHandler;
-
-import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.time.Duration;
-import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
-/** Expire partitions. */
-public class PartitionExpire {
+/**
+ * Common interface for partition expiration strategies.
+ *
+ * <p>Implementations include {@link NormalPartitionExpire} for normal tables and {@link
+ * ChainTablePartitionExpire} for chain tables that require segment-based expiration across snapshot
+ * and delta branches.
+ */
+public interface PartitionExpire {
 
-    private static final Logger LOG = LoggerFactory.getLogger(PartitionExpire.class);
+    /**
+     * Expire partitions that are older than the configured expiration time.
+     *
+     * @return the list of expired partition specs, or null if the check interval has not elapsed
+     */
+    @Nullable
+    List<Map<String, String>> expire(long commitIdentifier);
 
-    private static final String DELIMITER = ",";
+    /** Whether this expiration uses values-time strategy. */
+    boolean isValueExpiration();
 
-    private final Duration expirationTime;
-    private final Duration checkInterval;
-    private final FileStoreScan scan;
-    private final FileStoreCommit commit;
-    @Nullable private final PartitionHandler partitionHandler;
-    private LocalDateTime lastCheck;
-    private final PartitionExpireStrategy strategy;
-    private final boolean endInputCheckPartitionExpire;
-    private int maxExpireNum;
-    private int expireBatchSize;
-
-    public PartitionExpire(
-            Duration expirationTime,
-            Duration checkInterval,
-            PartitionExpireStrategy strategy,
-            FileStoreScan scan,
-            FileStoreCommit commit,
-            @Nullable PartitionHandler partitionHandler,
-            boolean endInputCheckPartitionExpire,
-            int maxExpireNum,
-            int expireBatchSize) {
-        this.expirationTime = expirationTime;
-        this.checkInterval = checkInterval;
-        this.strategy = strategy;
-        this.scan = scan;
-        this.commit = commit;
-        this.partitionHandler = partitionHandler;
-        this.lastCheck = LocalDateTime.now();
-        this.endInputCheckPartitionExpire = endInputCheckPartitionExpire;
-        this.maxExpireNum = maxExpireNum;
-        this.expireBatchSize = expireBatchSize;
-    }
-
-    public PartitionExpire(
-            Duration expirationTime,
-            Duration checkInterval,
-            PartitionExpireStrategy strategy,
-            FileStoreScan scan,
-            FileStoreCommit commit,
-            @Nullable PartitionHandler partitionHandler,
-            int maxExpireNum,
-            int expireBatchSize) {
-        this(
-                expirationTime,
-                checkInterval,
-                strategy,
-                scan,
-                commit,
-                partitionHandler,
-                false,
-                maxExpireNum,
-                expireBatchSize);
-    }
-
-    public List<Map<String, String>> expire(long commitIdentifier) {
-        return expire(LocalDateTime.now(), commitIdentifier);
-    }
-
-    public boolean isValueExpiration() {
-        return strategy instanceof PartitionValuesTimeExpireStrategy;
-    }
-
-    public boolean isValueAllExpired(Collection<BinaryRow> partitions) {
-        PartitionValuesTimeExpireStrategy valuesStrategy =
-                (PartitionValuesTimeExpireStrategy) strategy;
-        LocalDateTime expireDateTime = LocalDateTime.now().minus(expirationTime);
-        for (BinaryRow partition : partitions) {
-            if (!valuesStrategy.isExpired(expireDateTime, partition)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    @VisibleForTesting
-    void setLastCheck(LocalDateTime time) {
-        lastCheck = time;
-    }
-
-    @VisibleForTesting
-    List<Map<String, String>> expire(LocalDateTime now, long commitIdentifier) {
-        if (checkInterval.isZero()
-                || now.isAfter(lastCheck.plus(checkInterval))
-                || (endInputCheckPartitionExpire && Long.MAX_VALUE == commitIdentifier)) {
-            List<Map<String, String>> expired =
-                    doExpire(now.minus(expirationTime), commitIdentifier);
-            lastCheck = now;
-            return expired;
-        }
-        return null;
-    }
-
-    private List<Map<String, String>> doExpire(
-            LocalDateTime expireDateTime, long commitIdentifier) {
-        List<PartitionEntry> partitionEntries =
-                strategy.selectExpiredPartitions(scan, expireDateTime);
-        List<List<String>> expiredPartValues = new ArrayList<>(partitionEntries.size());
-        for (PartitionEntry partition : partitionEntries) {
-            Object[] array = strategy.convertPartition(partition.partition());
-            expiredPartValues.add(strategy.toPartitionValue(array));
-        }
-
-        List<Map<String, String>> expired = new ArrayList<>();
-        if (!expiredPartValues.isEmpty()) {
-            // convert partition value to partition string, and limit the partition num
-            expired = convertToPartitionString(expiredPartValues);
-            LOG.info("Expire Partitions: {}", expired);
-            if (expireBatchSize > 0 && expireBatchSize < expired.size()) {
-                Lists.partition(expired, expireBatchSize)
-                        .forEach(
-                                expiredBatchPartitions ->
-                                        doBatchExpire(expiredBatchPartitions, commitIdentifier));
-            } else {
-                doBatchExpire(expired, commitIdentifier);
-            }
-        }
-        return expired;
-    }
-
-    private void doBatchExpire(
-            List<Map<String, String>> expiredBatchPartitions, long commitIdentifier) {
-        if (partitionHandler != null) {
-            try {
-                partitionHandler.dropPartitions(expiredBatchPartitions);
-            } catch (Catalog.TableNotExistException e) {
-                throw new RuntimeException(e);
-            }
-        } else {
-            commit.dropPartitions(expiredBatchPartitions, commitIdentifier);
-        }
-    }
-
-    private List<Map<String, String>> convertToPartitionString(
-            List<List<String>> expiredPartValues) {
-        return expiredPartValues.stream()
-                .map(values -> String.join(DELIMITER, values))
-                .sorted()
-                .map(s -> s.split(DELIMITER))
-                .map(strategy::toPartitionString)
-                .limit(Math.min(expiredPartValues.size(), maxExpireNum))
-                .collect(Collectors.toList());
-    }
+    /**
+     * Check whether all given partitions are expired according to the values-time strategy.
+     *
+     * <p>Only valid when {@link #isValueExpiration()} returns true.
+     */
+    boolean isValueAllExpired(Collection<BinaryRow> partitions);
 }

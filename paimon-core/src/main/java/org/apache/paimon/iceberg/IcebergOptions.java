@@ -26,7 +26,11 @@ import org.apache.paimon.options.description.InlineElement;
 import org.apache.paimon.options.description.TextElement;
 import org.apache.paimon.utils.Preconditions;
 
+import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.options.ConfigOptions.key;
@@ -133,7 +137,9 @@ public class IcebergOptions {
                     .noDefaultValue()
                     .withDescription(
                             "Metastore database name for Iceberg Catalog. "
-                                    + "Set this as an iceberg database alias if using a centralized Catalog.");
+                                    + "Set this as an iceberg database alias if using a centralized Catalog. "
+                                    + "Multiple databases can be specified with semicolons, "
+                                    + "e.g. 'db1;db2'. The table will be registered in each database.");
 
     public static final ConfigOption<String> METASTORE_TABLE =
             key("metadata.iceberg.table")
@@ -192,27 +198,46 @@ public class IcebergOptions {
 
     /** Where to store Iceberg metadata. */
     public enum StorageType implements DescribedEnum {
-        DISABLED("disabled", "Disable Iceberg compatibility support."),
-        TABLE_LOCATION("table-location", "Store Iceberg metadata in each table's directory."),
+        DISABLED("disabled", "Disable Iceberg compatibility support.", false),
+        TABLE_LOCATION(
+                "table-location", "Store Iceberg metadata in each table's directory.", false),
         HADOOP_CATALOG(
                 "hadoop-catalog",
                 "Store Iceberg metadata in a separate directory. "
-                        + "This directory can be specified as the warehouse directory of an Iceberg Hadoop catalog."),
+                        + "This directory can be specified as the warehouse directory of an Iceberg Hadoop catalog.",
+                false),
         HIVE_CATALOG(
                 "hive-catalog",
                 "Not only store Iceberg metadata like hadoop-catalog, "
-                        + "but also create Iceberg external table in Hive."),
+                        + "but also create Iceberg external table in Hive.",
+                true),
         REST_CATALOG(
                 "rest-catalog",
                 "Store Iceberg metadata in a REST catalog. "
-                        + "This allows integration with Iceberg REST catalog services.");
+                        + "This allows integration with Iceberg REST catalog services.",
+                true);
 
         private final String value;
         private final String description;
+        private final boolean requiresMetadataCommitter;
 
-        StorageType(String value, String description) {
+        StorageType(String value, String description, boolean requiresMetadataCommitter) {
             this.value = value;
             this.description = description;
+            this.requiresMetadataCommitter = requiresMetadataCommitter;
+        }
+
+        /** Whether this storage type syncs metadata to an external catalog via a committer. */
+        public boolean requiresMetadataCommitter() {
+            return requiresMetadataCommitter;
+        }
+
+        /**
+         * Identifier this storage type's {@code IcebergMetadataCommitterFactory} is registered
+         * under.
+         */
+        public String committerFactoryIdentifier() {
+            return value;
         }
 
         @Override
@@ -254,5 +279,38 @@ public class IcebergOptions {
         public InlineElement getDescription() {
             return TextElement.text(description);
         }
+    }
+
+    public static List<String> metastoreDatabases(Options options, String fallbackDatabase) {
+        String dbValue = options.get(METASTORE_DATABASE);
+        if (dbValue == null || dbValue.isEmpty()) {
+            return Collections.singletonList(fallbackDatabase);
+        }
+        String[] parts = dbValue.split(";");
+        List<String> databases = new ArrayList<>(parts.length);
+        for (String part : parts) {
+            databases.add(part.trim());
+        }
+        return databases;
+    }
+
+    /**
+     * Returns all ConfigOption fields defined in this class. This method uses reflection to
+     * dynamically discover all ConfigOption fields, ensuring that new options are automatically
+     * included without code changes.
+     */
+    public static List<ConfigOption<?>> getOptions() {
+        final Field[] fields = IcebergOptions.class.getFields();
+        final List<ConfigOption<?>> list = new ArrayList<>(fields.length);
+        for (Field field : fields) {
+            if (ConfigOption.class.isAssignableFrom(field.getType())) {
+                try {
+                    list.add((ConfigOption<?>) field.get(IcebergOptions.class));
+                } catch (IllegalAccessException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        }
+        return list;
     }
 }

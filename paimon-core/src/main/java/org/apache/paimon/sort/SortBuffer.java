@@ -29,6 +29,8 @@ public interface SortBuffer {
 
     int size();
 
+    boolean isEmpty();
+
     void clear();
 
     long getOccupancy();

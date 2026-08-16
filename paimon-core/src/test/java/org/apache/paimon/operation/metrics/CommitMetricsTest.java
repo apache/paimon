@@ -100,6 +100,10 @@ public class CommitMetricsTest {
                         registeredGenericMetrics.get(
                                 CommitMetrics.LAST_CHANGELOG_RECORDS_COMMIT_COMPACTED);
 
+        Gauge<Long> lastCommittedSnapshotId =
+                (Gauge<Long>)
+                        registeredGenericMetrics.get(CommitMetrics.LAST_COMMITTED_SNAPSHOT_ID);
+
         assertThat(lastCommitDuration.getValue()).isEqualTo(0);
         assertThat(commitDuration.getCount()).isEqualTo(0);
         assertThat(commitDuration.getStatistics().size()).isEqualTo(0);
@@ -117,6 +121,7 @@ public class CommitMetricsTest {
         assertThat(lastChangelogRecordsAppended.getValue()).isEqualTo(0);
         assertThat(lastDeltaRecordsCompacted.getValue()).isEqualTo(0);
         assertThat(lastChangelogRecordsCompacted.getValue()).isEqualTo(0);
+        assertThat(lastCommittedSnapshotId.getValue()).isEqualTo(-1);
 
         // report once
         reportOnce(commitMetrics);
@@ -145,6 +150,7 @@ public class CommitMetricsTest {
         assertThat(lastChangelogRecordsAppended.getValue()).isEqualTo(503);
         assertThat(lastDeltaRecordsCompacted.getValue()).isEqualTo(613);
         assertThat(lastChangelogRecordsCompacted.getValue()).isEqualTo(512);
+        assertThat(lastCommittedSnapshotId.getValue()).isEqualTo(42);
 
         // report again
         reportAgain(commitMetrics);
@@ -173,6 +179,7 @@ public class CommitMetricsTest {
         assertThat(lastChangelogRecordsAppended.getValue()).isEqualTo(213);
         assertThat(lastDeltaRecordsCompacted.getValue()).isEqualTo(506);
         assertThat(lastChangelogRecordsCompacted.getValue()).isEqualTo(601);
+        assertThat(lastCommittedSnapshotId.getValue()).isEqualTo(99);
     }
 
     private void reportOnce(CommitMetrics commitMetrics) {
@@ -199,7 +206,8 @@ public class CommitMetricsTest {
                         compactChangelogFiles,
                         200,
                         2,
-                        1);
+                        1,
+                        42L);
 
         commitMetrics.reportCommit(commitStats);
     }
@@ -228,7 +236,8 @@ public class CommitMetricsTest {
                         compactChangelogFiles,
                         500,
                         1,
-                        2);
+                        2,
+                        99L);
 
         commitMetrics.reportCommit(commitStats);
     }

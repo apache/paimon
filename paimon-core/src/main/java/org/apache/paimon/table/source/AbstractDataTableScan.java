@@ -21,6 +21,7 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.consumer.Consumer;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
@@ -55,6 +56,8 @@ import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -65,6 +68,7 @@ import javax.annotation.Nullable;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.TimeZone;
 
@@ -78,12 +82,17 @@ abstract class AbstractDataTableScan implements DataTableScan {
 
     private static final Logger LOG = LoggerFactory.getLogger(AbstractDataTableScan.class);
 
-    private final TableSchema schema;
+    protected final TableSchema schema;
     private final CoreOptions options;
     protected final SnapshotReader snapshotReader;
     private final TableQueryAuth queryAuth;
 
     @Nullable private RowType readType;
+    // Last applied auth predicate; guards redundant re-application across plan()s.
+    @Nullable private Predicate appliedAuthPredicate;
+    // Whether the auth predicate has a non-partition part (enforced only at read time). Used by
+    // AbstractBatchTableScan to disable limit push down; not pushed through withFilter.
+    protected boolean authHasNonPartitionFilter;
 
     protected AbstractDataTableScan(
             TableSchema schema,
@@ -94,6 +103,51 @@ abstract class AbstractDataTableScan implements DataTableScan {
         this.options = options;
         this.snapshotReader = snapshotReader;
         this.queryAuth = queryAuth;
+    }
+
+    @Override
+    public final TableScan.Plan plan() {
+        TableQueryAuthResult queryAuthResult = authQuery();
+        // Always apply/clear the auth filter so removing auth leaves no stale partition pruning.
+        applyAuthFilter(queryAuthResult == null ? null : queryAuthResult.extractPredicate());
+        Plan plan = planWithoutAuth();
+        if (queryAuthResult != null) {
+            plan = queryAuthResult.convertPlan(plan);
+        }
+        return plan;
+    }
+
+    protected abstract TableScan.Plan planWithoutAuth();
+
+    private void applyAuthFilter(@Nullable Predicate authPredicate) {
+        if (Objects.equals(authPredicate, appliedAuthPredicate)) {
+            return;
+        }
+        appliedAuthPredicate = authPredicate;
+
+        PartitionPredicate authPartitionFilter = null;
+        boolean hasNonPartitionPart = false;
+        if (authPredicate != null) {
+            // Remap field-id FieldRefs to positional indices by name (as doAuth does on read), so
+            // pruning stays correct across schema evolution.
+            Predicate remappedAuth =
+                    TableQueryAuthResult.remapPredicate(authPredicate, schema.logicalRowType());
+            if (remappedAuth != null) {
+                Pair<Optional<PartitionPredicate>, List<Predicate>> split =
+                        PartitionPredicate.splitPartitionPredicatesAndDataPredicates(
+                                remappedAuth, schema.logicalRowType(), schema.partitionKeys());
+                authPartitionFilter = split.getLeft().orElse(null);
+                hasNonPartitionPart = !split.getRight().isEmpty();
+            }
+        }
+
+        // Push only the partition part, to a dedicated slot overwritten/cleared each plan() so a
+        // changed/removed auth leaves no stale pruning. The full filter is enforced at read time.
+        snapshotReader.manifestsReader().withAuthPartitionFilter(authPartitionFilter);
+        // A non-partition auth part is enforced only at read time, so limit push down is unsafe
+        // (AbstractBatchTableScan reads this). Kept off SnapshotReader since it is not a pushed
+        // filter.
+        this.authHasNonPartitionFilter = hasNonPartitionPart;
     }
 
     @Override
@@ -117,6 +171,7 @@ abstract class AbstractDataTableScan implements DataTableScan {
     @Override
     public InnerTableScan withReadType(@Nullable RowType readType) {
         this.readType = readType;
+        snapshotReader.withReadType(readType);
         return this;
     }
 
@@ -145,6 +200,12 @@ abstract class AbstractDataTableScan implements DataTableScan {
     }
 
     @Override
+    public InnerTableScan withPartitionFilter(Predicate predicate) {
+        snapshotReader.withPartitionFilter(predicate);
+        return this;
+    }
+
+    @Override
     public AbstractDataTableScan withLevelFilter(Filter<Integer> levelFilter) {
         snapshotReader.withLevelFilter(levelFilter);
         return this;
@@ -155,18 +216,34 @@ abstract class AbstractDataTableScan implements DataTableScan {
         return this;
     }
 
-    protected void authQuery() {
+    @Nullable
+    protected TableQueryAuthResult authQuery() {
         if (!options.queryAuthEnabled()) {
-            return;
+            return null;
         }
-        queryAuth.auth(readType == null ? null : readType.getFieldNames());
-        // TODO add support for row level access control
+        return queryAuth.auth(readType == null ? null : readType.getFieldNames());
     }
 
     @Override
     public AbstractDataTableScan dropStats() {
         snapshotReader.dropStats();
         return this;
+    }
+
+    @Override
+    public InnerTableScan withRowRanges(List<Range> sortedPushdownRowRanges) {
+        snapshotReader.withRowRanges(sortedPushdownRowRanges);
+        return this;
+    }
+
+    @Override
+    public InnerTableScan withRowRangeIndex(RowRangeIndex rowRangeIndex) {
+        snapshotReader.withRowRangeIndex(rowRangeIndex);
+        return this;
+    }
+
+    public SnapshotReader snapshotReader() {
+        return snapshotReader;
     }
 
     public CoreOptions options() {
@@ -209,6 +286,19 @@ abstract class AbstractDataTableScan implements DataTableScan {
                 return isStreaming
                         ? new ContinuousLatestStartingScanner(snapshotManager)
                         : new FullStartingScanner(snapshotManager);
+            case LATEST_DELTA:
+                checkArgument(
+                        !isStreaming,
+                        "'latest-delta' scan mode is only supported for batch sources.");
+                Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+                if (latestSnapshot == null) {
+                    return new EmptyResultStartingScanner(snapshotManager);
+                }
+                return IncrementalDeltaStartingScanner.betweenSnapshotIds(
+                        latestSnapshot.id() - 1,
+                        latestSnapshot.id(),
+                        snapshotManager,
+                        ScanMode.DELTA);
             case COMPACTED_FULL:
                 if (options.changelogProducer() == ChangelogProducer.FULL_COMPACTION
                         || options.toConfiguration().contains(FULL_COMPACTION_DELTA_COMMITS)) {
@@ -338,8 +428,18 @@ abstract class AbstractDataTableScan implements DataTableScan {
             Optional<Tag> endTag = tagManager.get(incrementalBetween.getRight());
 
             if (startTag.isPresent() && endTag.isPresent()) {
-                return IncrementalDiffStartingScanner.betweenTags(
-                        startTag.get(), endTag.get(), snapshotManager, incrementalBetween);
+                if (options.incrementalBetweenTagToSnapshot()) {
+                    CoreOptions.IncrementalBetweenScanMode scanMode =
+                            options.incrementalBetweenScanMode();
+                    return IncrementalDeltaStartingScanner.betweenSnapshotIds(
+                            startTag.get().id(),
+                            endTag.get().id(),
+                            snapshotManager,
+                            toSnapshotScanMode(scanMode));
+                } else {
+                    return IncrementalDiffStartingScanner.betweenTags(
+                            startTag.get(), endTag.get(), snapshotManager, incrementalBetween);
+                }
             } else {
                 long startId, endId;
                 try {

@@ -21,6 +21,7 @@ package org.apache.paimon.table.source.snapshot;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -34,9 +35,13 @@ import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BiFilter;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
@@ -65,11 +70,23 @@ public interface SnapshotReader {
 
     FileStorePathFactory pathFactory();
 
+    @Nullable
+    IndexFileHandler indexFileHandler();
+
     SnapshotReader withSnapshot(long snapshotId);
 
     SnapshotReader withSnapshot(Snapshot snapshot);
 
     SnapshotReader withFilter(Predicate predicate);
+
+    /**
+     * Applies a full read-time filter and an optional scan-pruning filter.
+     *
+     * <p>{@code predicate} is used to determine whether the reader has a non-partition filter which
+     * must still be evaluated at read time. {@code pushdownPredicate} is the only predicate used
+     * for scan pruning such as partition, stats, and bucket pruning.
+     */
+    SnapshotReader withFilter(Predicate predicate, @Nullable Predicate pushdownPredicate);
 
     SnapshotReader withPartitionFilter(Map<String, String> partitionSpec);
 
@@ -87,6 +104,8 @@ public interface SnapshotReader {
 
     SnapshotReader withLevelFilter(Filter<Integer> levelFilter);
 
+    SnapshotReader withLevelMinMaxFilter(BiFilter<Integer, Integer> minMaxFilter);
+
     SnapshotReader enableValueFilter();
 
     SnapshotReader withManifestEntryFilter(Filter<ManifestEntry> filter);
@@ -101,9 +120,22 @@ public interface SnapshotReader {
 
     SnapshotReader dropStats();
 
+    SnapshotReader keepStats();
+
     SnapshotReader withShard(int indexOfThisSubtask, int numberOfParallelSubtasks);
 
     SnapshotReader withMetricRegistry(MetricRegistry registry);
+
+    SnapshotReader withRowRanges(List<Range> rowRanges);
+
+    SnapshotReader withRowRangeIndex(RowRangeIndex rowRangeIndex);
+
+    SnapshotReader withReadType(RowType readType);
+
+    SnapshotReader withLimit(int limit);
+
+    /** Whether the pushed filter still contains non-partition predicates. */
+    boolean hasNonPartitionFilter();
 
     /** Get splits plan from snapshot. */
     Plan read();

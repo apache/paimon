@@ -75,10 +75,10 @@ public class OrcFilterConverterTest {
         test(
                 builder.in(0, Arrays.asList(1L, 2L, 3L)),
                 new OrcFilters.Or(
+                        new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 1),
                         new OrcFilters.Or(
-                                new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 1),
-                                new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 2)),
-                        new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 3)),
+                                new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 2),
+                                new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 3))),
                 true);
 
         test(
@@ -92,14 +92,14 @@ public class OrcFilterConverterTest {
         test(
                 builder.notIn(0, Arrays.asList(1L, 2L, 3L)),
                 new OrcFilters.And(
+                        new OrcFilters.Not(
+                                new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 1)),
                         new OrcFilters.And(
                                 new OrcFilters.Not(
-                                        new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 1)),
+                                        new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 2)),
                                 new OrcFilters.Not(
                                         new OrcFilters.Equals(
-                                                "long1", PredicateLeaf.Type.LONG, 2))),
-                        new OrcFilters.Not(
-                                new OrcFilters.Equals("long1", PredicateLeaf.Type.LONG, 3))),
+                                                "long1", PredicateLeaf.Type.LONG, 3)))),
                 true);
 
         assertThat(
@@ -186,29 +186,29 @@ public class OrcFilterConverterTest {
                                 Collections.singletonList(
                                         new DataField(0, "testField", new BigIntType()))));
 
-        // Test IN with multiple values (≤20 values should be converted to OR of EQUALS)
+        // Test IN with multiple values
         test(
                 builder.in(0, Arrays.asList(1L, 2L, 3L)),
                 new OrcFilters.Or(
+                        new OrcFilters.Equals("testField", PredicateLeaf.Type.LONG, 1L),
                         new OrcFilters.Or(
-                                new OrcFilters.Equals("testField", PredicateLeaf.Type.LONG, 1L),
-                                new OrcFilters.Equals("testField", PredicateLeaf.Type.LONG, 2L)),
-                        new OrcFilters.Equals("testField", PredicateLeaf.Type.LONG, 3L)),
+                                new OrcFilters.Equals("testField", PredicateLeaf.Type.LONG, 2L),
+                                new OrcFilters.Equals("testField", PredicateLeaf.Type.LONG, 3L))),
                 true);
 
-        // Test NOT IN with multiple values (should be converted to AND of NOT EQUALS)
+        // Test NOT IN with multiple values
         test(
                 builder.notIn(0, Arrays.asList(1L, 2L, 3L)),
                 new OrcFilters.And(
+                        new OrcFilters.Not(
+                                new OrcFilters.Equals("testField", PredicateLeaf.Type.LONG, 1L)),
                         new OrcFilters.And(
                                 new OrcFilters.Not(
                                         new OrcFilters.Equals(
-                                                "testField", PredicateLeaf.Type.LONG, 1L)),
+                                                "testField", PredicateLeaf.Type.LONG, 2L)),
                                 new OrcFilters.Not(
                                         new OrcFilters.Equals(
-                                                "testField", PredicateLeaf.Type.LONG, 2L))),
-                        new OrcFilters.Not(
-                                new OrcFilters.Equals("testField", PredicateLeaf.Type.LONG, 3L))),
+                                                "testField", PredicateLeaf.Type.LONG, 3L)))),
                 true);
     }
 
@@ -236,6 +236,23 @@ public class OrcFilterConverterTest {
                 true);
     }
 
+    @Test
+    public void testIsNaN() {
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        new RowType(
+                                Arrays.asList(
+                                        new DataField(0, "floatField", new FloatType()),
+                                        new DataField(1, "doubleField", new DoubleType()))));
+
+        // ORC has no isNaN SearchArgument leaf, so the visitor must skip push-down and
+        // return Optional.empty() instead of throwing UnsupportedOperationException.
+        assertThat(builder.isNaN(0).visit(OrcPredicateFunctionVisitor.VISITOR))
+                .isEqualTo(Optional.empty());
+        assertThat(builder.isNaN(1).visit(OrcPredicateFunctionVisitor.VISITOR))
+                .isEqualTo(Optional.empty());
+    }
+
     private void test(Predicate predicate, OrcFilters.Predicate orcPredicate, boolean canPushDown) {
         Optional<OrcFilters.Predicate> optionalPredicate =
                 predicate.visit(OrcPredicateFunctionVisitor.VISITOR);
@@ -252,7 +269,10 @@ public class OrcFilterConverterTest {
                         (OrcFilters.ColumnPredicate) orcPredicate;
                 assertThat(
                                 OrcPredicateFunctionVisitor.toOrcType(
-                                        ((LeafPredicate) predicate).type()))
+                                        ((LeafPredicate) predicate)
+                                                .fieldRefOptional()
+                                                .get()
+                                                .type()))
                         .isEqualTo(columnPredicate.literalType);
             }
         } else {
@@ -267,7 +287,7 @@ public class OrcFilterConverterTest {
                 Tuple4.of(new MultisetType(new TimeType()), null, null, false),
                 Tuple4.of(new ArrayType(new TimeType()), null, null, false),
                 Tuple4.of(new MapType(new BooleanType(), new BooleanType()), null, null, false),
-                Tuple4.of(new TimeType(), null, null, false),
+                Tuple4.of(new TimeType(), PredicateLeaf.Type.LONG, 10, true),
                 Tuple4.of(new BinaryType(), PredicateLeaf.Type.STRING, LocalDateTime.now(), false),
                 Tuple4.of(
                         new VarBinaryType(), PredicateLeaf.Type.STRING, LocalDateTime.now(), false),

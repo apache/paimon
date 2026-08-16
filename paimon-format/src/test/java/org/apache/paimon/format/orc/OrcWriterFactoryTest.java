@@ -22,7 +22,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.orc.writer.RowDataVectorizer;
 import org.apache.paimon.format.orc.writer.Vectorizer;
 import org.apache.paimon.fs.local.LocalFileIO.LocalPositionOutputStream;
-import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 
 import org.apache.hadoop.fs.Path;
@@ -34,6 +34,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
@@ -49,7 +50,9 @@ class OrcWriterFactoryTest {
                 new TestOrcWriterFactory(
                         new RowDataVectorizer(
                                 TypeDescription.fromString("struct<_col0:string,_col1:int>"),
-                                new DataType[] {DataTypes.STRING(), DataTypes.INT()},
+                                Arrays.asList(
+                                        new DataField(0, "f0", DataTypes.STRING()),
+                                        new DataField(1, "f1", DataTypes.INT())),
                                 true),
                         memoryManager);
         factory.create(new LocalPositionOutputStream(tmpDir.resolve("file1").toFile()), "LZ4");

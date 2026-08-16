@@ -19,10 +19,11 @@
 package org.apache.paimon.flink.sink.listener;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.flink.sink.state.StateStore;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.PartitionHandler;
+import org.apache.paimon.table.PartitionModification;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
@@ -31,7 +32,6 @@ import org.apache.paimon.utils.PartitionStatisticsReporter;
 
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
-import org.apache.flink.api.common.state.OperatorStateStore;
 import org.apache.flink.api.common.typeutils.base.LongSerializer;
 import org.apache.flink.api.common.typeutils.base.MapSerializer;
 import org.apache.flink.api.common.typeutils.base.StringSerializer;
@@ -66,7 +66,7 @@ public class ReportPartStatsListener implements CommitListener {
     private ReportPartStatsListener(
             InternalRowPartitionComputer partitionComputer,
             PartitionStatisticsReporter partitionStatisticsReporter,
-            OperatorStateStore store,
+            StateStore store,
             boolean isRestored,
             long idleTime)
             throws Exception {
@@ -141,8 +141,7 @@ public class ReportPartStatsListener implements CommitListener {
     }
 
     public static Optional<ReportPartStatsListener> create(
-            boolean isRestored, OperatorStateStore stateStore, FileStoreTable table)
-            throws Exception {
+            boolean isRestored, StateStore stateStore, FileStoreTable table) throws Exception {
 
         CoreOptions coreOptions = table.coreOptions();
         Options options = coreOptions.toConfiguration();
@@ -158,9 +157,10 @@ public class ReportPartStatsListener implements CommitListener {
             return Optional.empty();
         }
 
-        PartitionHandler partitionHandler = table.catalogEnvironment().partitionHandler();
+        PartitionModification partitionModification =
+                table.catalogEnvironment().partitionModification();
 
-        if (partitionHandler == null) {
+        if (partitionModification == null) {
             return Optional.empty();
         }
 
@@ -174,7 +174,7 @@ public class ReportPartStatsListener implements CommitListener {
         return Optional.of(
                 new ReportPartStatsListener(
                         partitionComputer,
-                        new PartitionStatisticsReporter(table, partitionHandler),
+                        new PartitionStatisticsReporter(table, partitionModification),
                         stateStore,
                         isRestored,
                         options.get(CoreOptions.PARTITION_IDLE_TIME_TO_REPORT_STATISTIC)

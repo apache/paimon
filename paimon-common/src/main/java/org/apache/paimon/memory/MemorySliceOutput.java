@@ -51,6 +51,12 @@ public class MemorySliceOutput {
         size += 4;
     }
 
+    public void writeShort(int value) {
+        ensureSize(size + 2);
+        segment.putShort(size, (short) value);
+        size += 2;
+    }
+
     public void writeVarLenInt(int value) {
         if (value < 0) {
             throw new IllegalArgumentException("negative value: v=" + value);

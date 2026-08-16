@@ -35,6 +35,7 @@ import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.StandardCopyOption;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Optional;
@@ -43,6 +44,7 @@ import java.util.concurrent.locks.ReentrantLock;
 
 import static org.apache.paimon.utils.Preconditions.checkState;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test static methods and methods with default implementations of {@link FileIO}. */
 public class FileIOTest {
@@ -166,6 +168,34 @@ public class FileIOTest {
             assertThat(statuses[0].getPath()).isEqualTo(fileA);
             assertThat(statuses[1].getPath()).isEqualTo(fileBC);
         }
+    }
+
+    @Test
+    public void testStorageTypeToString() {
+        assertThat(StorageType.STANDARD.toString()).isEqualTo("Standard");
+        assertThat(StorageType.ARCHIVE.toString()).isEqualTo("Archive");
+        assertThat(StorageType.COLD_ARCHIVE.toString()).isEqualTo("ColdArchive");
+    }
+
+    @Test
+    public void testDefaultArchiveUnsupported() {
+        FileIO fileIO = new DummyFileIO();
+        Path path = new Path(tempDir.resolve("archive-file").toUri());
+
+        assertThatThrownBy(() -> fileIO.archive(path, StorageType.ARCHIVE))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining(DummyFileIO.class.getName())
+                .hasMessageContaining("archive");
+
+        assertThatThrownBy(() -> fileIO.restoreArchive(path, Duration.ofDays(1)))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining(DummyFileIO.class.getName())
+                .hasMessageContaining("restore archive");
+
+        assertThatThrownBy(() -> fileIO.unarchive(path, StorageType.STANDARD))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining(DummyFileIO.class.getName())
+                .hasMessageContaining("unarchive");
     }
 
     /** A {@link FileIO} on local filesystem to test various default implementations. */

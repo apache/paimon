@@ -38,20 +38,21 @@ public enum BucketMode {
     HASH_FIXED,
 
     /**
-     * The dynamic bucket mode records which bucket the key corresponds to through the index files.
-     * The index records the correspondence between the hash value of the primary-key and the
-     * bucket. This mode cannot support multiple concurrent writes or bucket skipping for reading
-     * filter conditions. This mode only works for changelog table.
+     * Hash-Dynamic mode records the correspondence between the hash of the primary key and the
+     * bucket number. It is used to simplify the distribution of primary keys to buckets, but cannot
+     * support large amounts of data. It cannot support multiple concurrent writes or bucket
+     * skipping for reading filter. This mode only works for primary key table.
      */
     HASH_DYNAMIC,
 
     /**
-     * The cross partition mode is for cross partition upsert (primary keys not contain all
-     * partition fields). It directly maintains the mapping of primary keys to partition and bucket,
-     * uses local disks, and initializes indexes by reading all existing keys in the table when
-     * starting stream write job.
+     * Key-Dynamic mode records the correspondence between the primary key and the partition +
+     * bucket number. It is used to cross partition upsert (primary keys not contain all partition
+     * fields). It directly maintains the mapping of primary keys to partition and bucket using
+     * local disks, and initializes indexes by reading all existing keys in the table when starting
+     * write job.
      */
-    CROSS_PARTITION,
+    KEY_DYNAMIC,
 
     /**
      * Ignoring bucket concept, although all data is written to bucket-0, the parallelism of reads

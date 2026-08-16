@@ -1,0 +1,2153 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+import datetime
+import json
+import os
+import sys
+import unittest
+import uuid
+from decimal import Decimal
+
+import pandas as pd
+import pyarrow as pa
+from parameterized import parameterized
+from pypaimon.catalog.catalog_factory import CatalogFactory
+from pypaimon.data.generic_variant import GenericVariant
+from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
+from pypaimon.schema.data_types import PyarrowFieldParser, VectorType
+from pypaimon.schema.schema import Schema
+from pypaimon.read.read_builder import ReadBuilder
+
+if sys.version_info[:2] == (3, 6):
+    from pypaimon.tests.py36.pyarrow_compat import table_sort_by
+else:
+    def table_sort_by(table: pa.Table, column_name: str, order: str = 'ascending') -> pa.Table:
+        return table.sort_by([(column_name, order)])
+
+
+def get_file_format_params():
+    # lance has no wheel on Python < 3.8.
+    if sys.version_info[:2] < (3, 8):
+        return [('parquet',), ('orc',), ('avro',)]
+    else:
+        return [('parquet',), ('orc',), ('avro',), ('lance',)]
+
+
+def match_query(terms, operator=None):
+    body = {"query": terms}
+    if operator is not None:
+        body["operator"] = operator
+    return json.dumps({"match": body}, separators=(",", ":"))
+
+
+def boolean_query(queries):
+    return json.dumps({"boolean": {"queries": queries}}, separators=(",", ":"))
+
+
+class JavaPyReadWriteTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tempdir = os.path.abspath(".")
+        cls.warehouse = os.path.join(cls.tempdir, 'warehouse')
+        cls.catalog = CatalogFactory.create({
+            'warehouse': cls.warehouse
+        })
+        cls.catalog.create_database('default', True)
+
+    def test_read_java_dynamic_bucket_hash_index(self):
+        table = self.catalog.get_table(
+            'default.dynamic_hash_java_to_python'
+        )
+        read_builder = table.new_read_builder()
+        initial = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits()
+        )
+        self.assertEqual(
+            {
+                'key1': ['hello-java'],
+                'key2': [42],
+                'value': ['java-old'],
+            },
+            initial.to_pydict(),
+        )
+
+        builder = table.new_batch_write_builder()
+        writer = builder.new_write()
+        writer.write_arrow(pa.table({
+            'key1': ['python-only', 'hello-java'],
+            'key2': pa.array([7, 42], type=pa.int64()),
+            'value': ['python-only', 'python-new'],
+        }))
+        commit = builder.new_commit()
+        commit.commit(writer.prepare_commit())
+        writer.close()
+        commit.close()
+
+        read_builder = table.new_read_builder()
+        result = table_sort_by(read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits()
+        ), 'key1')
+        self.assertEqual(
+            {
+                'key1': ['hello-java', 'python-only'],
+                'key2': [42, 7],
+                'value': ['python-new', 'python-only'],
+            },
+            result.to_pydict(),
+        )
+
+    def test_py_write_dynamic_bucket_hash_index(self):
+        table_name = 'default.dynamic_hash_python_to_java'
+        self.catalog.drop_table(table_name, True)
+        schema = Schema.from_pyarrow_schema(
+            pa.schema([
+                pa.field('key1', pa.string()),
+                pa.field('key2', pa.int64()),
+                pa.field('value', pa.string()),
+            ]),
+            primary_keys=['key1', 'key2'],
+            options={
+                'bucket': '-1',
+                'dynamic-bucket.target-row-num': '1',
+                'file.format': 'parquet',
+            },
+        )
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+
+        builder = table.new_batch_write_builder()
+        writer = builder.new_write()
+        writer.write_arrow(pa.table({
+            'key1': ['hello-java', 'python-only'],
+            'key2': pa.array([42, 7], type=pa.int64()),
+            'value': ['python-old', 'python-only'],
+        }))
+        commit = builder.new_commit()
+        commit.commit(writer.prepare_commit())
+        writer.close()
+        commit.close()
+
+    @parameterized.expand(get_file_format_params())
+    def test_py_write_read_append_table(self, file_format):
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('category', pa.string()),
+            ('value', pa.float64()),
+            ('ts', pa.timestamp('us')),
+            ('ts_ltz', pa.timestamp('us', tz='UTC')),
+            ('t', pa.time32('ms'))
+        ])
+
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            partition_keys=['category'],
+            options={'dynamic-partition-overwrite': 'false', 'file.format': file_format}
+        )
+
+        table_name = f'default.mixed_test_append_tablep_{file_format}'
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+
+        initial_data = pd.DataFrame({
+            'id': [1, 2, 3, 4, 5, 6],
+            'name': ['Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef'],
+            'category': ['Fruit', 'Fruit', 'Vegetable', 'Vegetable', 'Meat', 'Meat'],
+            'value': [1.5, 0.8, 0.6, 1.2, 5.0, 8.0],
+            'ts': pd.to_datetime([1000000, 1000001, 1000002, 1000003, 1000004, 1000005], unit='ms'),
+            'ts_ltz': pd.to_datetime([2000000, 2000001, 2000002, 2000003, 2000004, 2000005], unit='ms', utc=True),
+            't': [datetime.time(0, 0, 1), datetime.time(0, 0, 2), datetime.time(0, 0, 3),
+                  datetime.time(0, 0, 4), datetime.time(0, 0, 5), datetime.time(0, 0, 6)]
+        })
+        # Write initial data
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+
+        table_write.write_pandas(initial_data)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        # Verify initial data
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        initial_result = table_read.to_pandas(table_scan.plan().splits())
+        print(initial_result)
+        self.assertEqual(len(initial_result), 6)
+        # Data order may vary due to partitioning/bucketing, so compare as sets
+        expected_names = {'Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef'}
+        actual_names = set(initial_result['name'].tolist())
+        self.assertEqual(actual_names, expected_names)
+
+    @parameterized.expand(get_file_format_params())
+    def test_read_append_table(self, file_format):
+        table = self.catalog.get_table('default.mixed_test_append_tablej_' + file_format)
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        res = table_read.to_pandas(table_scan.plan().splits())
+        print(res)
+
+    @parameterized.expand(get_file_format_params())
+    def test_py_write_read_pk_table(self, file_format):
+        # Lance format doesn't support timestamp, so exclude timestamp columns
+        if file_format == 'lance':
+            pa_schema = pa.schema([
+                ('id', pa.int32()),
+                ('name', pa.string()),
+                ('category', pa.string()),
+                ('value', pa.float64())
+            ])
+        else:
+            pa_schema = pa.schema([
+                ('id', pa.int32()),
+                ('name', pa.string()),
+                ('category', pa.string()),
+                ('value', pa.float64()),
+                ('ts', pa.timestamp('us')),
+                ('ts_ltz', pa.timestamp('us', tz='UTC')),
+                ('t', pa.time32('ms')),
+                ('metadata', pa.struct([
+                    pa.field('source', pa.string()),
+                    pa.field('created_at', pa.int64()),
+                    pa.field('location', pa.struct([
+                        pa.field('city', pa.string()),
+                        pa.field('country', pa.string())
+                    ]))
+                ]))
+            ])
+
+        table_name = f'default.mixed_test_pk_tablep_{file_format}'
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            partition_keys=['category'],
+            primary_keys=['id'],
+            options={
+                'dynamic-partition-overwrite': 'false',
+                'bucket': '4',
+                'file.format': file_format,
+                "orc.timestamp-ltz.legacy.type": "false"
+            }
+        )
+
+        try:
+            existing_table = self.catalog.get_table(table_name)
+            table_path = self.catalog.get_table_path(existing_table.identifier)
+            if self.catalog.file_io.exists(table_path):
+                self.catalog.file_io.delete(table_path, recursive=True)
+        except Exception:
+            pass
+
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+
+        # Lance format doesn't support timestamp, so exclude timestamp columns
+        if file_format == 'lance':
+            initial_data = pd.DataFrame({
+                'id': [1, 2, 3, 4, 5, 6],
+                'name': ['Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef'],
+                'category': ['Fruit', 'Fruit', 'Vegetable', 'Vegetable', 'Meat', 'Meat'],
+                'value': [1.5, 0.8, 0.6, 1.2, 5.0, 8.0]
+            })
+        else:
+            initial_data = pd.DataFrame({
+                'id': [1, 2, 3, 4, 5, 6],
+                'name': ['Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef'],
+                'category': ['Fruit', 'Fruit', 'Vegetable', 'Vegetable', 'Meat', 'Meat'],
+                'value': [1.5, 0.8, 0.6, 1.2, 5.0, 8.0],
+                'ts': pd.to_datetime([1000000, 1000001, 1000002, 1000003, 1000004, 1000005], unit='ms'),
+                'ts_ltz': pd.to_datetime([2000000, 2000001, 2000002, 2000003, 2000004, 2000005], unit='ms', utc=True),
+                't': [datetime.time(0, 0, 1), datetime.time(0, 0, 2), datetime.time(0, 0, 3),
+                      datetime.time(0, 0, 4), datetime.time(0, 0, 5), datetime.time(0, 0, 6)],
+                'metadata': [
+                    {'source': 'store1', 'created_at': 1001, 'location': {'city': 'Beijing', 'country': 'China'}},
+                    {'source': 'store1', 'created_at': 1002, 'location': {'city': 'Shanghai', 'country': 'China'}},
+                    {'source': 'store2', 'created_at': 1003, 'location': {'city': 'Tokyo', 'country': 'Japan'}},
+                    {'source': 'store2', 'created_at': 1004, 'location': {'city': 'Seoul', 'country': 'Korea'}},
+                    {'source': 'store3', 'created_at': 1005, 'location': {'city': 'NewYork', 'country': 'USA'}},
+                    {'source': 'store3', 'created_at': 1006, 'location': {'city': 'London', 'country': 'UK'}}
+                ]
+            })
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+
+        table_write.write_pandas(initial_data)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        result = table_read.to_pandas(table_scan.plan().splits())
+        print(f"Format: {file_format}, Result:\n{result}")
+        self.assertEqual(initial_data.to_dict(), result.to_dict())
+
+        from pypaimon.write.row_key_extractor import FixedBucketRowKeyExtractor
+        expected_bucket_first_row = 2
+        first_row = initial_data.head(1)
+        batch = pa.RecordBatch.from_pandas(first_row, schema=pa_schema)
+        extractor = FixedBucketRowKeyExtractor(table.table_schema)
+        _, buckets = extractor.extract_partition_bucket_batch(batch)
+        self.assertEqual(buckets[0], expected_bucket_first_row,
+                         "bucket for first row (id=1) with num_buckets=4 must be %d" % expected_bucket_first_row)
+
+    @parameterized.expand(get_file_format_params())
+    def test_read_pk_table(self, file_format):
+        # Skip ORC format for Python < 3.8 due to pyarrow limitation with TIMESTAMP_INSTANT
+        if sys.version_info[:2] < (3, 8) and file_format == 'orc':
+            self.skipTest("Skipping ORC format for Python < 3.8 (pyarrow does not support TIMESTAMP_INSTANT)")
+        
+        table_name = f'default.mixed_test_pk_tablej_{file_format}'
+        table = self.catalog.get_table(table_name)
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        res = table_read.to_pandas(table_scan.plan().splits())
+        print(f"Format: {file_format}, Result:\n{res}")
+
+        # Verify data
+        self.assertEqual(len(res), 7)
+        if file_format != "lance":
+            self.assertEqual(table.fields[4].type.type, "TIMESTAMP(6)")
+            self.assertEqual(table.fields[5].type.type, "TIMESTAMP(6) WITH LOCAL TIME ZONE")
+            self.assertEqual(table.fields[6].type.type, "TIME(0)")
+            self.assertEqual(table.fields[7].type.type, "BINARY(20)")
+            from pypaimon.schema.data_types import RowType
+            self.assertIsInstance(table.fields[8].type, RowType)
+            metadata_fields = table.fields[8].type.fields
+            self.assertEqual(len(metadata_fields), 3)
+            self.assertEqual(metadata_fields[0].name, 'source')
+            self.assertEqual(metadata_fields[1].name, 'created_at')
+            self.assertEqual(metadata_fields[2].name, 'location')
+            self.assertIsInstance(metadata_fields[2].type, RowType)
+        
+        # Data order may vary due to partitioning/bucketing, so compare as sets
+        expected_names = {'Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef', 'Tofu'}
+        actual_names = set(res['name'].tolist())
+        self.assertEqual(actual_names, expected_names)
+
+        # Verify null partition value (default partition) is readable
+        tofu_row = res[res['name'] == 'Tofu']
+        self.assertEqual(len(tofu_row), 1)
+        self.assertTrue(pd.isna(tofu_row['category'].iloc[0]))
+
+        if file_format != "lance" and 'bin_data' in res.columns:
+            apple_row = res[res['name'] == 'Apple']
+            self.assertEqual(apple_row['bin_data'].iloc[0], b'apple_bin_data')
+            carrot_row = res[res['name'] == 'Carrot']
+            self.assertEqual(carrot_row['bin_data'].iloc[0], b'carrot')
+
+        # Verify metadata column can be read and contains nested structures
+        if 'metadata' in res.columns:
+            self.assertFalse(res['metadata'].isnull().all())
+
+        # For primary key tables, verify that _VALUE_KIND is written correctly
+        # by checking if we can read the raw data with system fields
+        # Note: Normal read filters out system fields, so we verify through Java read
+        # which explicitly reads KeyValue objects and checks valueKind
+        print(f"Format: {file_format}, Python read completed. ValueKind verification should be done in Java test.")
+
+    def test_py_write_row_append_table(self):
+        """Python writes a ROW-format append-only table for Java to read."""
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('value', pa.float64()),
+        ])
+
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={'file.format': 'row', 'bucket': '-1'}
+        )
+
+        table_name = 'default.mixed_test_append_tablep_row'
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+
+        data = pa.table({
+            'id': pa.array([1, 2, 3, 4, 5, 6], type=pa.int32()),
+            'name': pa.array(['Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef']),
+            'value': pa.array([1.5, 0.8, 0.6, 1.2, 5.0, 8.0]),
+        })
+
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(data)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        # Verify Python can read it back
+        read_builder = table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        result = read_builder.new_read().to_arrow(splits)
+        self.assertEqual(result.num_rows, 6)
+        expected_names = {'Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef'}
+        self.assertEqual(set(result.column('name').to_pylist()), expected_names)
+
+    def test_read_row_append_table(self):
+        """Python reads a ROW-format append-only table written by Java."""
+        table = self.catalog.get_table('default.mixed_test_append_tablej_row')
+        read_builder = table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        result = read_builder.new_read().to_arrow(splits)
+        self.assertEqual(result.num_rows, 6)
+        expected_names = {'Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef'}
+        self.assertEqual(set(result.column('name').to_pylist()), expected_names)
+
+    def test_pk_dv_read(self):
+        pa_schema = pa.schema([
+            pa.field('pt', pa.int32(), nullable=False),
+            pa.field('a', pa.int32(), nullable=False),
+            ('b', pa.int64())
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema,
+                                            partition_keys=['pt'],
+                                            primary_keys=['pt', 'a'],
+                                            options={'bucket': '1'})
+        self.catalog.create_table('default.test_pk_dv', schema, True)
+        table = self.catalog.get_table('default.test_pk_dv')
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_sort_by(table_read.to_arrow(splits), 'pt')
+        expected = pa.Table.from_pydict({
+            'pt': [1, 2, 2],
+            'a': [10, 21, 22],
+            'b': [1000, 20001, 202]
+        }, schema=pa_schema)
+        self.assertEqual(expected, actual)
+
+    def test_pk_dv_read_multi_batch(self):
+        pa_schema = pa.schema([
+            pa.field('pt', pa.int32(), nullable=False),
+            pa.field('a', pa.int32(), nullable=False),
+            ('b', pa.int64())
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema,
+                                            partition_keys=['pt'],
+                                            primary_keys=['pt', 'a'],
+                                            options={'bucket': '1'})
+        self.catalog.create_table('default.test_pk_dv_multi_batch', schema, True)
+        table = self.catalog.get_table('default.test_pk_dv_multi_batch')
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_sort_by(table_read.to_arrow(splits), 'pt')
+        expected = pa.Table.from_pydict({
+            'pt': [1] * 9999,
+            'a': [i * 10 for i in range(1, 10001) if i * 10 != 81930],
+            'b': [i * 100 for i in range(1, 10001) if i * 10 != 81930]
+        }, schema=pa_schema)
+        self.assertEqual(expected, actual)
+
+    def test_pk_dv_read_multi_batch_with_value_filter(self):
+        """Test that DV-enabled PK table filters files by value stats during scan."""
+        pa_schema = pa.schema([
+            pa.field('pt', pa.int32(), nullable=False),
+            pa.field('a', pa.int32(), nullable=False),
+            ('b', pa.int64())
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema,
+                                            partition_keys=['pt'],
+                                            primary_keys=['pt', 'a'],
+                                            options={'bucket': '1'})
+        self.catalog.create_table('default.test_pk_dv_multi_batch', schema, True)
+        table = self.catalog.get_table('default.test_pk_dv_multi_batch')
+
+        # Unfiltered scan: count total files
+        rb_all = table.new_read_builder()
+        all_splits = rb_all.new_scan().plan().splits()
+        all_files_count = sum(len(s.files) for s in all_splits)
+
+        # Filtered scan: b < 500 should only match a few rows (b in {100,200,300,400})
+        # and prune files whose value stats don't overlap
+        predicate_builder = table.new_read_builder().new_predicate_builder()
+        pred = predicate_builder.less_than('b', 500)
+        rb_filtered = table.new_read_builder().with_filter(pred)
+        filtered_splits = rb_filtered.new_scan().plan().splits()
+        filtered_files_count = sum(len(s.files) for s in filtered_splits)
+        filtered_result = table_sort_by(
+            rb_filtered.new_read().to_arrow(filtered_splits), 'a')
+
+        # Verify correctness: rows with b < 500 are a=10,b=100 / a=20,b=200 / a=30,b=300 / a=40,b=400
+        expected = pa.Table.from_pydict({
+            'pt': [1, 1, 1, 1],
+            'a': [10, 20, 30, 40],
+            'b': [100, 200, 300, 400]
+        }, schema=pa_schema)
+        self.assertEqual(expected, filtered_result)
+
+        # Verify file pruning: filtered scan should read fewer files
+        self.assertLess(
+            filtered_files_count, all_files_count,
+            f"DV value filter should prune files: filtered={filtered_files_count}, all={all_files_count}")
+
+    def test_pk_dv_read_multi_batch_raw_convertable(self):
+        pa_schema = pa.schema([
+            pa.field('pt', pa.int32(), nullable=False),
+            pa.field('a', pa.int32(), nullable=False),
+            ('b', pa.int64())
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema,
+                                            partition_keys=['pt'],
+                                            primary_keys=['pt', 'a'],
+                                            options={'bucket': '1'})
+        self.catalog.create_table('default.test_pk_dv_raw_convertable', schema, True)
+        table = self.catalog.get_table('default.test_pk_dv_raw_convertable')
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_sort_by(table_read.to_arrow(splits), 'pt')
+        expected = pa.Table.from_pydict({
+            'pt': [1] * 9999,
+            'a': [i * 10 for i in range(1, 10001) if i * 10 != 81930],
+            'b': [i * 100 for i in range(1, 10001) if i * 10 != 81930]
+        }, schema=pa_schema)
+        self.assertEqual(expected, actual)
+
+    def test_read_btree_index_table(self):
+        self._test_read_btree_index_generic("test_btree_index_string", "k2", pa.string())
+        self._test_read_btree_index_generic("test_btree_index_int", 200, pa.int32())
+        self._test_read_btree_index_generic("test_btree_index_bigint", 2000, pa.int64())
+        self._test_read_btree_index_large()
+        self._test_read_btree_index_null()
+        self._test_partial_append_does_not_trigger_index_action()
+        if sys.version_info[:2] >= (3, 7):
+            self._test_index_manifest_inherited_after_write()
+
+    def test_read_btree_raw_fallback(self):
+        table = self.catalog.get_table('default.test_btree_raw_fallback')
+        fast_table = table.copy({'scalar-index.search-mode': 'fast'})
+        fast_builder = fast_table.new_read_builder()
+        fast_predicate = fast_builder.new_predicate_builder().equal('k', 'k4')
+        fast_builder.with_filter(fast_predicate)
+        fast_result = fast_builder.new_read().to_arrow(
+            fast_builder.new_scan().plan().splits())
+        self.assertEqual(0, fast_result.num_rows)
+
+        # full mode falls back to a raw scan for the unindexed k4 row
+        full_table = table.copy({'scalar-index.search-mode': 'full'})
+        read_builder = full_table.new_read_builder()
+        read_builder.with_filter(
+            read_builder.new_predicate_builder().equal('k', 'k4'))
+        actual = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        expected = pa.Table.from_pydict({
+            'k': ['k4'],
+            'v': ['v4'],
+        })
+        self.assertEqual(expected, actual)
+
+    def _test_read_btree_index_generic(self, table_name: str, k, k_type):
+        table = self.catalog.get_table('default.' + table_name)
+        read_builder: ReadBuilder = table.new_read_builder()
+
+        # read using index
+        predicate_builder = read_builder.new_predicate_builder()
+        predicate = predicate_builder.equal('k', k)
+        read_builder.with_filter(predicate)
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_sort_by(table_read.to_arrow(splits), 'k')
+        expected = pa.Table.from_pydict({
+            'k': [k],
+            'v': ["v2"]
+        }, schema=pa.schema([
+            ("k", k_type),
+            ("v", pa.string())
+        ]))
+        self.assertEqual(expected, actual)
+
+    def _test_read_btree_index_large(self):
+        table = self.catalog.get_table('default.test_btree_index_large')
+        read_builder: ReadBuilder = table.new_read_builder()
+        predicate_builder = read_builder.new_predicate_builder()
+
+        # read equal index
+        read_builder.with_filter(predicate_builder.equal('k', 'k2'))
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_sort_by(table_read.to_arrow(splits), 'k')
+        expected = pa.Table.from_pydict({
+            'k': ["k2"],
+            'v': ["v2"]
+        })
+        self.assertEqual(expected, actual)
+
+        # read between index
+        read_builder.with_filter(predicate_builder.between('k', 'k990', 'k995'))
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_sort_by(table_read.to_arrow(splits), 'k')
+        expected = pa.Table.from_pydict({
+            'k': ["k990", "k991", "k992", "k993", "k994", "k995"],
+            'v': ["v990", "v991", "v992", "v993", "v994", "v995"]
+        })
+        self.assertEqual(expected, actual)
+
+        # read in index
+        read_builder.with_filter(predicate_builder.is_in('k', ['k990', 'k995']))
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_sort_by(table_read.to_arrow(splits), 'k')
+        expected = pa.Table.from_pydict({
+            'k': ["k990", "k995"],
+            'v': ["v990", "v995"]
+        })
+        self.assertEqual(expected, actual)
+
+        # read is_not_null index (full scan across all data blocks)
+        read_builder.with_filter(predicate_builder.is_not_null('k'))
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_read.to_arrow(splits)
+        self.assertEqual(len(actual), 2000)
+
+    def _test_read_btree_index_null(self):
+        table = self.catalog.get_table('default.test_btree_index_null')
+
+        # read is null index
+        read_builder: ReadBuilder = table.new_read_builder()
+        predicate_builder = read_builder.new_predicate_builder()
+        read_builder.with_filter(predicate_builder.is_null('k'))
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_sort_by(table_read.to_arrow(splits), 'k')
+        expected = pa.Table.from_pydict({
+            'k': [None, None],
+            'v': ["v3", "v5"]
+        }, schema=pa.schema([
+            ("k", pa.string()),
+            ("v", pa.string())
+        ]))
+        self.assertEqual(expected, actual)
+
+        # read is not null index
+        read_builder: ReadBuilder = table.new_read_builder()
+        predicate_builder = read_builder.new_predicate_builder()
+        read_builder.with_filter(predicate_builder.is_not_null('k'))
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_sort_by(table_read.to_arrow(splits), 'k')
+        expected = pa.Table.from_pydict({
+            'k': ["k1", "k2", "k4"],
+            'v': ["v1", "v2", "v4"]
+        })
+        self.assertEqual(expected, actual)
+
+    def _test_index_manifest_inherited_after_write(self):
+        table = self.catalog.get_table('default.test_btree_index_string')
+
+        snapshot_before = table.snapshot_manager().get_latest_snapshot()
+        self.assertIsNotNone(snapshot_before.index_manifest,
+                             "Index manifest should exist before Python write")
+
+        write_builder = table.new_batch_write_builder()
+        write = write_builder.new_write()
+        commit = write_builder.new_commit()
+        data = pa.table({'k': ['k4'], 'v': ['v4']})
+        write.write_arrow(data)
+        commit.commit(write.prepare_commit())
+        write.close()
+        commit.close()
+
+        snapshot_after = table.snapshot_manager().get_latest_snapshot()
+        self.assertGreater(snapshot_after.id, snapshot_before.id)
+        self.assertIsNotNone(
+            snapshot_after.index_manifest,
+            "index_manifest lost after Python data write - indexes become invisible"
+        )
+
+        read_builder = table.new_read_builder()
+        predicate_builder = read_builder.new_predicate_builder()
+        read_builder.with_filter(predicate_builder.equal('k', 'k2'))
+        read_builder.with_projection(['k', '_ROW_ID'])
+        splits = read_builder.new_scan().plan().splits()
+        row_ids = read_builder.new_read().to_arrow(splits)['_ROW_ID'].to_pylist()
+        self.assertTrue(len(row_ids) > 0, "k2 should exist before update")
+
+        wb = table.new_batch_write_builder()
+        tu = wb.new_update().with_update_type(['k'])
+        update_data = pa.table({
+            '_ROW_ID': pa.array(row_ids, type=pa.int64()),
+            'k': ['k_updated'] * len(row_ids),
+        })
+        msgs = tu.update_by_arrow_with_row_id(update_data)
+        with self.assertRaises(RuntimeError) as cm:
+            wb.new_commit().commit(msgs)
+        self.assertIn("'k'", str(cm.exception))
+        self.assertIn("Conflicted columns", str(cm.exception))
+
+        table_drop = table.copy(
+            {'global-index.column-update-action': 'DROP_PARTITION_INDEX'}
+        )
+        wb_drop = table_drop.new_batch_write_builder()
+        tu_drop = wb_drop.new_update().with_update_type(['k'])
+        wb_drop.new_commit().commit(tu_drop.update_by_arrow_with_row_id(update_data))
+
+        table_after = self.catalog.get_table('default.test_btree_index_string')
+        rb = table_after.new_read_builder()
+        rb.with_filter(rb.new_predicate_builder().equal('k', 'k_updated'))
+        rows_new = rb.new_read().to_arrow(rb.new_scan().plan().splits())
+        self.assertGreater(len(rows_new), 0,
+                           "after DROP_PARTITION_INDEX, new value should read")
+
+        from pypaimon.manifest.index_manifest_file import IndexManifestFile
+        snap = table_after.snapshot_manager().get_latest_snapshot()
+        entries = (IndexManifestFile(table_after).read(snap.index_manifest)
+                   if snap.index_manifest else [])
+        field_by_id = {f.id: f.name for f in table_after.fields}
+        remaining = [e for e in entries
+                     if e.index_file.global_index_meta is not None
+                     and field_by_id.get(
+                         e.index_file.global_index_meta.index_field_id) == 'k']
+        self.assertEqual(remaining, [],
+                         "btree index entries for 'k' should be dropped")
+
+    def _test_partial_append_does_not_trigger_index_action(self):
+        table = self.catalog.get_table('default.test_btree_index_string')
+        snap_before = table.snapshot_manager().get_latest_snapshot()
+
+        wb = table.new_batch_write_builder()
+        tw = wb.new_write()
+        tw.with_write_type(['k'])
+        tw.write_arrow(pa.table({'k': ['k_new']}))
+        tc = wb.new_commit()
+        tc.commit(tw.prepare_commit())
+        tw.close()
+        tc.close()
+
+        snap_after = table.snapshot_manager().get_latest_snapshot()
+        self.assertGreater(snap_after.id, snap_before.id)
+        self.assertIsNotNone(
+            snap_after.index_manifest,
+            "partial append should not drop index manifest"
+        )
+
+    def test_read_bitmap_index_table(self):
+        table = self.catalog.get_table('default.test_bitmap_index_string')
+
+        self._assert_bitmap_index_read(
+            table,
+            lambda builder: builder.equal('k', 'k2'),
+            [1, 2],
+            {'k': ['k2', 'k2'], 'v': ['v2', 'v2b']}
+        )
+        self._assert_bitmap_index_read(
+            table,
+            lambda builder: builder.is_null('k'),
+            [4],
+            {'k': [None], 'v': ['v_null']},
+            schema=pa.schema([('k', pa.string()), ('v', pa.string())])
+        )
+        self._assert_bitmap_index_read(
+            table,
+            lambda builder: builder.is_in('k', ['k1', 'k3']),
+            [0, 3],
+            {'k': ['k1', 'k3'], 'v': ['v1', 'v3']}
+        )
+        self._assert_bitmap_index_read(
+            table,
+            lambda builder: builder.not_equal('k', 'k2'),
+            [0, 3],
+            {'k': ['k1', 'k3'], 'v': ['v1', 'v3']}
+        )
+        self._assert_bitmap_index_read(
+            table,
+            lambda builder: builder.is_not_in('k', ['k1', 'k3']),
+            [1, 2],
+            {'k': ['k2', 'k2'], 'v': ['v2', 'v2b']}
+        )
+        self._assert_bitmap_index_read(
+            table,
+            lambda builder: builder.between('k', 'k1', 'k2'),
+            [0, 1, 2],
+            {'k': ['k1', 'k2', 'k2'], 'v': ['v1', 'v2', 'v2b']}
+        )
+        self._assert_bitmap_index_read(
+            table,
+            lambda builder: builder.not_between('k', 'k2', 'k2'),
+            [0, 3],
+            {'k': ['k1', 'k3'], 'v': ['v1', 'v3']}
+        )
+        self._assert_bitmap_index_read(
+            table,
+            lambda builder: builder.startswith('k', 'k'),
+            [0, 1, 2, 3],
+            {'k': ['k1', 'k2', 'k2', 'k3'], 'v': ['v1', 'v2', 'v2b', 'v3']}
+        )
+        self._assert_bitmap_index_read(
+            table,
+            lambda builder: builder.endswith('k', '2'),
+            [1, 2],
+            {'k': ['k2', 'k2'], 'v': ['v2', 'v2b']}
+        )
+        self._assert_bitmap_index_read(
+            table,
+            lambda builder: builder.contains('k', '3'),
+            [3],
+            {'k': ['k3'], 'v': ['v3']}
+        )
+        self._assert_bitmap_index_read(
+            table,
+            lambda builder: builder.like('k', 'k_'),
+            [0, 1, 2, 3],
+            {'k': ['k1', 'k2', 'k2', 'k3'], 'v': ['v1', 'v2', 'v2b', 'v3']}
+        )
+        self._assert_bitmap_index_read(
+            table,
+            lambda builder: builder.equal('k', None),
+            [],
+            {'k': [], 'v': []},
+            schema=pa.schema([('k', pa.string()), ('v', pa.string())])
+        )
+        self._assert_bitmap_index_read(
+            table,
+            lambda builder: builder.is_not_in('k', ['k1', None]),
+            [],
+            {'k': [], 'v': []},
+            schema=pa.schema([('k', pa.string()), ('v', pa.string())])
+        )
+
+    def _assert_bitmap_index_read(self, table, predicate_factory, expected_row_ids,
+                                  expected_data, schema=None):
+        read_builder = table.new_read_builder()
+        predicate = predicate_factory(read_builder.new_predicate_builder())
+
+        scanner = DataEvolutionGlobalIndexScanner.create(table, predicate=predicate)
+        self.assertIsNotNone(scanner)
+        with scanner:
+            result = scanner.scan(predicate)
+        self.assertIsNotNone(result)
+        self.assertEqual(expected_row_ids, sorted(list(result.results())))
+
+        scan = read_builder.new_scan().with_global_index_result(result)
+        actual = table_sort_by(read_builder.new_read().to_arrow(scan.plan().splits()), 'v')
+        expected = pa.Table.from_pydict(expected_data, schema=schema)
+        expected = table_sort_by(expected, 'v')
+        self.assertEqual(expected, actual)
+
+    def test_read_compressed_global_index_fallback_scan(self):
+        for compression in ('lz4', 'lzo'):
+            self._assert_compressed_global_index_fallback_scan(
+                'test_btree_index_%s_fallback' % compression,
+                'btree-index.fallback-scan-max-size')
+            self._assert_compressed_global_index_fallback_scan(
+                'test_bitmap_index_%s_fallback' % compression,
+                'bitmap-index.fallback-scan-max-size')
+
+    def _assert_compressed_global_index_fallback_scan(self, table_name, budget_key):
+        table = self.catalog.get_table('default.' + table_name)
+        predicate = (table.new_read_builder()
+                     .new_predicate_builder()
+                     .greater_or_equal('k', 'key-295'))
+
+        scanner = DataEvolutionGlobalIndexScanner.create(table, predicate=predicate)
+        self.assertIsNotNone(scanner)
+        with scanner:
+            result = scanner.scan(predicate)
+        self.assertIsNotNone(result)
+        self.assertEqual([295, 296, 297, 298, 299],
+                         sorted(list(result.results())))
+
+        read_builder = table.new_read_builder()
+        scan = read_builder.new_scan().with_global_index_result(result)
+        actual = table_sort_by(read_builder.new_read().to_arrow(scan.plan().splits()), 'k')
+        expected = pa.Table.from_pydict({
+            'k': ['key-295', 'key-296', 'key-297', 'key-298', 'key-299'],
+            'v': ['value-295', 'value-296', 'value-297', 'value-298', 'value-299'],
+        })
+        self.assertEqual(expected, actual)
+
+        disabled_table = table.copy({budget_key: '0 b'})
+        disabled_scanner = DataEvolutionGlobalIndexScanner.create(disabled_table, predicate=predicate)
+        self.assertIsNotNone(disabled_scanner)
+        with disabled_scanner:
+            disabled_result = disabled_scanner.scan(predicate)
+        self.assertIsNone(disabled_result)
+
+    @parameterized.expand([('json',), ('csv',)])
+    def test_read_compressed_text_append_table(self, file_format):
+        table = self.catalog.get_table(
+            f'default.mixed_test_append_tablej_{file_format}_gz')
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        splits = table_scan.plan().splits()
+        with self.assertRaises(NotImplementedError) as ctx:
+            table_read.to_arrow(splits)
+        self.assertIn(file_format, str(ctx.exception))
+        self.assertIn("not yet supported", str(ctx.exception))
+
+    def test_read_vector_append_table(self):
+        table = self.catalog.get_table('default.mixed_test_vector_append_tablej_avro')
+        embedding_field = next(field for field in table.fields if field.name == 'embedding')
+        self.assertIsInstance(embedding_field.type, VectorType)
+        self.assertEqual(embedding_field.type.length, 3)
+        self.assertEqual(embedding_field.type.element.type, 'FLOAT')
+
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        pa_table = table_read.to_arrow(table_scan.plan().splits())
+        pa_table = table_sort_by(pa_table, 'id')
+
+        embedding_type = pa_table.schema.field('embedding').type
+        self.assertTrue(pa.types.is_fixed_size_list(embedding_type))
+        self.assertEqual(embedding_type.list_size, 3)
+        self.assertTrue(pa.types.is_float32(embedding_type.value_type))
+
+        self.assertEqual(pa_table.column('id').to_pylist(), [1, 2, 3])
+        self.assertEqual(
+            pa_table.column('embedding').to_pylist(),
+            [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [-1.0, 0.5, 2.5]]
+        )
+        self.assertEqual(pa_table.column('label').to_pylist(), ['first', 'second', 'third'])
+
+    def test_read_vector_dedicated_file(self):
+        """Read a vector table with dedicated .vector.vortex files written by Java."""
+        from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+
+        table = self.catalog.get_table('default.vector_dedicated_test')
+        embedding_field = next(field for field in table.fields if field.name == 'embedding')
+        self.assertIsInstance(embedding_field.type, VectorType)
+        self.assertEqual(embedding_field.type.length, 3)
+
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        splits = table_scan.plan().splits()
+
+        # Verify that splits contain .vector.vortex files
+        has_vector_file = False
+        for split in splits:
+            for f in split.files:
+                if DataFileMeta.is_vector_file(f.file_name):
+                    has_vector_file = True
+                    self.assertIn('.vector.vortex', f.file_name)
+        self.assertTrue(has_vector_file, "Should have .vector.vortex files from Java write")
+
+        pa_table = table_read.to_arrow(splits)
+        pa_table = table_sort_by(pa_table, 'id')
+
+        self.assertEqual(pa_table.num_rows, 3)
+        self.assertEqual(pa_table.column('id').to_pylist(), [1, 2, 3])
+
+        embedding_type = pa_table.schema.field('embedding').type
+        self.assertTrue(pa.types.is_fixed_size_list(embedding_type))
+        self.assertEqual(embedding_type.list_size, 3)
+
+        self.assertEqual(
+            pa_table.column('embedding').to_pylist(),
+            [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [-1.0, 0.5, 2.5]]
+        )
+        self.assertEqual(pa_table.column('label').to_pylist(), ['first', 'second', 'third'])
+
+    def test_py_write_vector_dedicated_file(self):
+        """Python writes a vector table with dedicated .vector.vortex files for Java to read."""
+        from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('embedding', pa.list_(pa.float32(), 3)),
+            ('label', pa.string()),
+        ])
+
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'file.format': 'vortex',
+                'vector.file.format': 'vortex',
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'bucket': '-1',
+            }
+        )
+
+        table_name = 'default.py_vector_dedicated_test'
+        self.catalog.drop_table(table_name, True)
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+
+        test_data = pa.table({
+            'id': pa.array([1, 2, 3], type=pa.int32()),
+            'embedding': pa.FixedSizeListArray.from_arrays(
+                pa.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, -1.0, 0.5, 2.5], type=pa.float32()),
+                3
+            ),
+            'label': pa.array(['first', 'second', 'third'], type=pa.string()),
+        })
+
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(test_data)
+        commit_messages = table_write.prepare_commit()
+
+        # Verify that commit messages contain .vector.vortex files
+        all_files = []
+        for msg in commit_messages:
+            all_files.extend(msg.new_files)
+        vector_files = [f for f in all_files if DataFileMeta.is_vector_file(f.file_name)]
+        self.assertGreater(len(vector_files), 0, "Should have .vector.vortex files")
+        for vf in vector_files:
+            self.assertIn('.vector.vortex', vf.file_name)
+
+        table_commit.commit(commit_messages)
+        table_write.close()
+        table_commit.close()
+
+        # Verify Python can read it back
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
+        result = table_sort_by(result, 'id')
+
+        self.assertEqual(result.num_rows, 3)
+        self.assertEqual(result.column('id').to_pylist(), [1, 2, 3])
+        self.assertEqual(
+            result.column('embedding').to_pylist(),
+            [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [-1.0, 0.5, 2.5]]
+        )
+        self.assertEqual(result.column('label').to_pylist(), ['first', 'second', 'third'])
+        print("test_py_write_vector_dedicated_file: wrote 3 rows with dedicated vector files")
+
+    def test_read_multi_vector_dedicated_file(self):
+        """Read a table with multiple vector columns in a single .vector.vortex file written by Java."""
+        table = self.catalog.get_table('default.multi_vector_dedicated_test')
+        embed1_field = next(f for f in table.fields if f.name == 'embed1')
+        embed2_field = next(f for f in table.fields if f.name == 'embed2')
+        self.assertIsInstance(embed1_field.type, VectorType)
+        self.assertIsInstance(embed2_field.type, VectorType)
+        self.assertEqual(embed1_field.type.length, 3)
+        self.assertEqual(embed2_field.type.length, 2)
+
+        read_builder = table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        pa_table = read_builder.new_read().to_arrow(splits)
+        pa_table = table_sort_by(pa_table, 'id')
+
+        self.assertEqual(pa_table.num_rows, 3)
+        self.assertEqual(pa_table.column('id').to_pylist(), [1, 2, 3])
+        self.assertEqual(
+            pa_table.column('embed1').to_pylist(),
+            [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [-1.0, 0.5, 2.5]]
+        )
+        self.assertEqual(
+            pa_table.column('embed2').to_pylist(),
+            [[10.0, 20.0], [40.0, 50.0], [-10.0, 5.0]]
+        )
+        self.assertEqual(pa_table.column('label').to_pylist(), ['first', 'second', 'third'])
+
+    def test_py_write_multi_vector_dedicated_file(self):
+        """Python writes a table with multiple vector columns for Java to read."""
+        from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('embed1', pa.list_(pa.float32(), 3)),
+            ('embed2', pa.list_(pa.float32(), 2)),
+            ('label', pa.string()),
+        ])
+
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'file.format': 'vortex',
+                'vector.file.format': 'vortex',
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'bucket': '-1',
+            }
+        )
+
+        table_name = 'default.py_multi_vector_dedicated_test'
+        self.catalog.drop_table(table_name, True)
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+
+        test_data = pa.table({
+            'id': pa.array([1, 2, 3], type=pa.int32()),
+            'embed1': pa.FixedSizeListArray.from_arrays(
+                pa.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, -1.0, 0.5, 2.5], type=pa.float32()),
+                3
+            ),
+            'embed2': pa.FixedSizeListArray.from_arrays(
+                pa.array([10.0, 20.0, 40.0, 50.0, -10.0, 5.0], type=pa.float32()),
+                2
+            ),
+            'label': pa.array(['first', 'second', 'third'], type=pa.string()),
+        })
+
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(test_data)
+        commit_messages = table_write.prepare_commit()
+
+        # All vector columns should be in the same .vector.vortex file
+        all_files = []
+        for msg in commit_messages:
+            all_files.extend(msg.new_files)
+        vector_files = [f for f in all_files if DataFileMeta.is_vector_file(f.file_name)]
+        self.assertEqual(len(vector_files), 1, "All vector columns should be in a single file")
+        self.assertEqual(sorted(vector_files[0].write_cols), ['embed1', 'embed2'])
+
+        table_commit.commit(commit_messages)
+        table_write.close()
+        table_commit.close()
+
+        # Verify read-back
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
+        result = table_sort_by(result, 'id')
+
+        self.assertEqual(result.num_rows, 3)
+        self.assertEqual(result.column('id').to_pylist(), [1, 2, 3])
+        self.assertEqual(
+            result.column('embed1').to_pylist(),
+            [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [-1.0, 0.5, 2.5]]
+        )
+        self.assertEqual(
+            result.column('embed2').to_pylist(),
+            [[10.0, 20.0], [40.0, 50.0], [-10.0, 5.0]]
+        )
+        self.assertEqual(result.column('label').to_pylist(), ['first', 'second', 'third'])
+        print("test_py_write_multi_vector_dedicated_file: wrote 3 rows with 2 vector columns")
+
+    def test_read_native_full_text_index(self):
+        """Test reading a Native full-text index built by Java."""
+        table = self.catalog.get_table('default.test_native_fulltext')
+
+        # Use FullTextSearchBuilder to search
+        builder = table.new_full_text_search_builder()
+        builder.with_query('content', match_query('paimon'))
+        builder.with_limit(10)
+
+        result = builder.execute_local()
+        # Row 0, 2, 4 mention "paimon"
+        row_ids = sorted(list(result.results()))
+        print(f"Native full-text search for 'paimon': row_ids={row_ids}")
+        self.assertEqual(row_ids, [0, 2, 4])
+
+        # Read matching rows using withGlobalIndexResult
+        read_builder = table.new_read_builder()
+        scan = read_builder.new_scan().with_global_index_result(result)
+        plan = scan.plan()
+        table_read = read_builder.new_read()
+        pa_table = table_read.to_arrow(plan.splits())
+        pa_table = table_sort_by(pa_table, 'id')
+        self.assertEqual(pa_table.num_rows, 3)
+        ids = pa_table.column('id').to_pylist()
+        self.assertEqual(ids, [0, 2, 4])
+
+        # Search for "native" - only row 1
+        builder2 = table.new_full_text_search_builder()
+        builder2.with_query('content', match_query('native'))
+        builder2.with_limit(10)
+
+        result2 = builder2.execute_local()
+        row_ids2 = sorted(list(result2.results()))
+        print(f"Native full-text search for 'native': row_ids={row_ids2}")
+        self.assertEqual(row_ids2, [1])
+
+        # Read matching rows
+        read_builder2 = table.new_read_builder()
+        scan2 = read_builder2.new_scan().with_global_index_result(result2)
+        plan2 = scan2.plan()
+        pa_table2 = read_builder2.new_read().to_arrow(plan2.splits())
+        self.assertEqual(pa_table2.num_rows, 1)
+        self.assertEqual(pa_table2.column('id').to_pylist(), [1])
+
+        # Search for "full-text search" - rows 1, 3
+        builder3 = table.new_full_text_search_builder()
+        builder3.with_query('content', match_query('full-text search'))
+        builder3.with_limit(10)
+
+        result3 = builder3.execute_local()
+        row_ids3 = sorted(list(result3.results()))
+        print(f"Native full-text search for 'full-text search': row_ids={row_ids3}")
+        self.assertIn(1, row_ids3)
+        self.assertIn(3, row_ids3)
+
+        # Read matching rows
+        read_builder3 = table.new_read_builder()
+        scan3 = read_builder3.new_scan().with_global_index_result(result3)
+        plan3 = scan3.plan()
+        pa_table3 = read_builder3.new_read().to_arrow(plan3.splits())
+        pa_table3 = table_sort_by(pa_table3, 'id')
+        ids3 = pa_table3.column('id').to_pylist()
+        self.assertIn(1, ids3)
+        self.assertIn(3, ids3)
+
+        ngram_table = self.catalog.get_table('default.test_native_fulltext_ngram')
+
+        # Search for Chinese fragments using the ngram tokenizer metadata written by Java.
+        ngram_builder = ngram_table.new_full_text_search_builder()
+        ngram_builder.with_query('content', match_query('中文'))
+        ngram_builder.with_limit(10)
+
+        ngram_result = ngram_builder.execute_local()
+        ngram_row_ids = sorted(list(ngram_result.results()))
+        print(f"Native full-text ngram search for '中文': row_ids={ngram_row_ids}")
+        self.assertEqual(ngram_row_ids, [0, 4])
+
+        ngram_read_builder = ngram_table.new_read_builder()
+        ngram_scan = ngram_read_builder.new_scan().with_global_index_result(ngram_result)
+        ngram_pa_table = ngram_read_builder.new_read().to_arrow(ngram_scan.plan().splits())
+        ngram_pa_table = table_sort_by(ngram_pa_table, 'id')
+        self.assertEqual(ngram_pa_table.column('id').to_pylist(), [0, 4])
+        self.assertEqual(
+            ngram_pa_table.column('content').to_pylist(),
+            ['Apache Paimon 支持中文全文检索', '中文索引支持片段查询'])
+
+        fragment_builder = ngram_table.new_full_text_search_builder()
+        fragment_builder.with_query('content', match_query('片段'))
+        fragment_builder.with_limit(10)
+
+        fragment_result = fragment_builder.execute_local()
+        fragment_row_ids = sorted(list(fragment_result.results()))
+        print(f"Native full-text ngram search for '片段': row_ids={fragment_row_ids}")
+        self.assertEqual(fragment_row_ids, [4])
+
+        ngram_and_builder = ngram_table.new_full_text_search_builder()
+        ngram_and_builder.with_query(
+            'content',
+            boolean_query([
+                ['Must', json.loads(match_query('中文'))],
+                ['Must', json.loads(match_query('片段'))],
+            ]))
+        ngram_and_builder.with_limit(10)
+
+        ngram_and_result = ngram_and_builder.execute_local()
+        ngram_and_row_ids = sorted(list(ngram_and_result.results()))
+        print(
+            "Native full-text ngram boolean search for "
+            f"'中文' AND '片段': row_ids={ngram_and_row_ids}")
+        self.assertEqual(ngram_and_row_ids, [4])
+
+        simple_table = self.catalog.get_table('default.test_native_fulltext_simple')
+        simple_builder = simple_table.new_full_text_search_builder()
+        simple_builder.with_query('content', match_query('search'))
+        simple_builder.with_limit(10)
+
+        simple_result = simple_builder.execute_local()
+        simple_row_ids = sorted(list(simple_result.results()))
+        print(f"Native full-text simple search for 'search': row_ids={simple_row_ids}")
+        self.assertEqual(simple_row_ids, [0, 1, 2])
+
+        jieba_table = self.catalog.get_table('default.test_native_fulltext_jieba')
+
+        # Search for Chinese words using the jieba tokenizer metadata written by Java.
+        jieba_builder = jieba_table.new_full_text_search_builder()
+        jieba_builder.with_query('content', match_query('售货员'))
+        jieba_builder.with_limit(10)
+
+        jieba_result = jieba_builder.execute_local()
+        jieba_row_ids = sorted(list(jieba_result.results()))
+        print(f"Native full-text jieba search for '售货员': row_ids={jieba_row_ids}")
+        self.assertEqual(jieba_row_ids, [0])
+
+        jieba_read_builder = jieba_table.new_read_builder()
+        jieba_scan = jieba_read_builder.new_scan().with_global_index_result(jieba_result)
+        jieba_pa_table = jieba_read_builder.new_read().to_arrow(jieba_scan.plan().splits())
+        jieba_pa_table = table_sort_by(jieba_pa_table, 'id')
+        self.assertEqual(jieba_pa_table.column('id').to_pylist(), [0])
+        self.assertEqual(
+            jieba_pa_table.column('content').to_pylist(),
+            ['张华在百货公司当售货员'])
+
+        jieba_phrase_builder = jieba_table.new_full_text_search_builder()
+        jieba_phrase_builder.with_query('content', match_query('自然'))
+        jieba_phrase_builder.with_limit(10)
+
+        jieba_phrase_result = jieba_phrase_builder.execute_local()
+        jieba_phrase_row_ids = sorted(list(jieba_phrase_result.results()))
+        print(f"Native full-text jieba search for '自然': row_ids={jieba_phrase_row_ids}")
+        self.assertEqual(jieba_phrase_row_ids, [3])
+
+        jieba_and_builder = jieba_table.new_full_text_search_builder()
+        jieba_and_builder.with_query(
+            'content',
+            boolean_query([
+                ['Must', json.loads(match_query('中文'))],
+                ['Must', json.loads(match_query('自然'))],
+            ]))
+        jieba_and_builder.with_limit(10)
+
+        jieba_and_result = jieba_and_builder.execute_local()
+        jieba_and_row_ids = sorted(list(jieba_and_result.results()))
+        print(
+            "Native full-text jieba boolean search for "
+            f"'中文' AND '自然': row_ids={jieba_and_row_ids}")
+        self.assertEqual(jieba_and_row_ids, [3])
+
+    def test_read_lumina_vector_index(self):
+        """Test reading a Lumina vector index built by Java (orc and lance formats)."""
+        test_cases = [('default.test_lumina_vector', 'orc')]
+        if sys.version_info[:2] != (3, 6):
+            test_cases.append(('default.test_lumina_vector_lance', 'lance'))
+        for table_name, label in test_cases:
+            with self.subTest(file_format=label):
+                table = self.catalog.get_table(table_name)
+
+                builder = table.new_vector_search_builder()
+                builder.with_vector_column('embedding')
+                builder.with_query_vector([1.0, 0.0, 0.0, 0.0])
+                builder.with_limit(3)
+
+                result = builder.execute_local()
+                row_ids = sorted(list(result.results()))
+                print(f"Lumina vector search ({label}) for [1,0,0,0]: row_ids={row_ids}")
+                self.assertIn(0, row_ids)
+                self.assertEqual(len(row_ids), 3)
+
+                read_builder = table.new_read_builder()
+                scan = read_builder.new_scan().with_global_index_result(result)
+                plan = scan.plan()
+                table_read = read_builder.new_read()
+                pa_table = table_read.to_arrow(plan.splits())
+                pa_table = table_sort_by(pa_table, 'id')
+                self.assertEqual(pa_table.num_rows, 3)
+                ids = pa_table.column('id').to_pylist()
+                print(f"Lumina vector search ({label}) matched rows: ids={ids}")
+                self.assertIn(0, ids)
+
+    def test_read_vindex_vector_index(self):
+        """Test reading a paimon-vindex vector index built by Java."""
+        if sys.version_info < (3, 9):
+            self.skipTest("paimon-vindex requires Python >= 3.9")
+        try:
+            import paimon_vindex  # noqa: F401
+        except ImportError:
+            self.skipTest("paimon-vindex is not installed")
+
+        table = self.catalog.get_table('default.test_vindex_vector')
+
+        builder = table.new_vector_search_builder()
+        builder.with_vector_column('embedding')
+        builder.with_query_vector([1.0, 0.0, 0.0, 0.0])
+        builder.with_limit(3)
+
+        result = builder.execute_local()
+        row_ids = sorted(list(result.results()))
+        print(f"paimon-vindex vector search for [1,0,0,0]: row_ids={row_ids}")
+        self.assertIn(0, row_ids)
+        self.assertEqual(len(row_ids), 3)
+
+        read_builder = table.new_read_builder()
+        scan = read_builder.new_scan().with_global_index_result(result)
+        plan = scan.plan()
+        table_read = read_builder.new_read()
+        pa_table = table_read.to_arrow(plan.splits())
+        pa_table = table_sort_by(pa_table, 'id')
+        self.assertEqual(pa_table.num_rows, 3)
+        ids = pa_table.column('id').to_pylist()
+        print(f"paimon-vindex vector search matched rows: ids={ids}")
+        self.assertIn(0, ids)
+
+    def test_read_vindex_vector_raw_fallback(self):
+        """Test raw fallback for a paimon-vindex vector index built by Java."""
+        if sys.version_info < (3, 9):
+            self.skipTest("paimon-vindex requires Python >= 3.9")
+        try:
+            import paimon_vindex  # noqa: F401
+        except ImportError:
+            self.skipTest("paimon-vindex is not installed")
+
+        table = self.catalog.get_table(
+            'default.test_vindex_vector_raw_fallback')
+        fast_result = (table.new_vector_search_builder()
+                       .with_vector_column('embedding')
+                       .with_query_vector([1.0, 0.0, 0.0, 0.0])
+                       .with_limit(1)
+                       .execute_local())
+        fast_ids = sorted(list(fast_result.results()))
+        print(
+            "paimon-vindex fast-mode vector search matched rows: "
+            f"ids={fast_ids}")
+        self.assertNotIn(3, fast_ids)
+
+        full_table = table.copy({'global-index.search-mode': 'full'})
+        full_result = (full_table.new_vector_search_builder()
+                       .with_vector_column('embedding')
+                       .with_query_vector([1.0, 0.0, 0.0, 0.0])
+                       .with_limit(1)
+                       .execute_local())
+        row_ids = sorted(list(full_result.results()))
+        print(
+            "paimon-vindex full-mode vector search matched rows: "
+            f"ids={row_ids}")
+        self.assertEqual([3], row_ids)
+
+        read_builder = full_table.new_read_builder()
+        scan = read_builder.new_scan().with_global_index_result(full_result)
+        table_read = read_builder.new_read()
+        pa_table = table_read.to_arrow(scan.plan().splits())
+        self.assertEqual(pa_table.num_rows, 1)
+        self.assertEqual([3], pa_table.column('id').to_pylist())
+
+    def test_read_lumina_vector_with_btree_filter(self):
+        """Vector search + btree scalar pre-filter, using a table that Java
+        populated with both a Lumina vector index on `embedding` and a BTree
+        global index on `id` (JavaPyLuminaE2ETest.testLuminaVectorWithBTreeIndexWrite)."""
+        from pypaimon.common.predicate_builder import PredicateBuilder
+
+        table = self.catalog.get_table('default.test_lumina_vector_btree_filter')
+
+        # Baseline search — same 6 vectors as test_read_lumina_vector_index,
+        # no filter, top 6 covers the whole table.
+        baseline = (table.new_vector_search_builder()
+                    .with_vector_column('embedding')
+                    .with_query_vector([1.0, 0.0, 0.0, 0.0])
+                    .with_limit(6)
+                    .execute_local())
+        baseline_ids = sorted(list(baseline.results()))
+        print(f"Baseline vector search ids={baseline_ids}")
+        self.assertEqual(baseline_ids, [0, 1, 2, 3, 4, 5])
+
+        # Filtered search — id >= 3 should restrict vector search to rows
+        # {3,4,5}, so top_k results must be a subset of that.
+        pb = PredicateBuilder(table.fields)
+        filter_pred = pb.greater_or_equal('id', 3)
+        filtered = (table.new_vector_search_builder()
+                    .with_vector_column('embedding')
+                    .with_query_vector([1.0, 0.0, 0.0, 0.0])
+                    .with_limit(6)
+                    .with_filter(filter_pred)
+                    .execute_local())
+        filtered_ids = sorted(list(filtered.results()))
+        print(f"Filtered (id >= 3) vector search ids={filtered_ids}")
+        self.assertEqual(filtered_ids, [3, 4, 5])
+
+        # Narrower filter — id in {5} — only row 5 should survive.
+        filter_eq = pb.equal('id', 5)
+        eq_result = (table.new_vector_search_builder()
+                     .with_vector_column('embedding')
+                     .with_query_vector([1.0, 0.0, 0.0, 0.0])
+                     .with_limit(6)
+                     .with_filter(filter_eq)
+                     .execute_local())
+        eq_ids = sorted(list(eq_result.results()))
+        print(f"Filtered (id == 5) vector search ids={eq_ids}")
+        self.assertEqual(eq_ids, [5])
+
+    def test_read_blob_after_alter_and_compact(self):
+        table = self.catalog.get_table('default.blob_alter_compact_test')
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        splits = table_scan.plan().splits()
+        result = table_read.to_arrow(splits)
+        self.assertEqual(result.num_rows, 200)
+
+    def test_read_array_blob_written_by_java(self):
+        table = self.catalog.get_table('default.array_blob_java_test')
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        result = table_sort_by(result, 'id')
+
+        self.assertTrue(pa.types.is_list(result.schema.field('payloads').type))
+        self.assertEqual(
+            result.column('id').to_pylist(),
+            [1, 2, 3, 4],
+        )
+        self.assertEqual(
+            result.column('payloads').to_pylist(),
+            [
+                [b'java-alpha', None, b''],
+                [],
+                None,
+                [b'java-omega'],
+            ],
+        )
+
+    def test_write_array_blob_for_java(self):
+        array_blob_type = pa.list_(pa.large_binary())
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('payloads', array_blob_type),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'bucket': '-1',
+            },
+        )
+        table_name = 'default.array_blob_python_test'
+        self.catalog.drop_table(table_name, True)
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+
+        data = pa.Table.from_pydict({
+            'id': [1, 2, 3, 4],
+            'payloads': pa.array(
+                [
+                    [b'python-alpha', None, b''],
+                    [],
+                    None,
+                    [b'python-omega'],
+                ],
+                type=array_blob_type,
+            ),
+        }, schema=pa_schema)
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(data)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        result = table_sort_by(result, 'id')
+        self.assertEqual(
+            result.column('id').to_pylist(),
+            data.column('id').to_pylist(),
+        )
+        self.assertEqual(
+            result.column('payloads').to_pylist(),
+            data.column('payloads').to_pylist(),
+        )
+
+    def test_read_map_blob_written_by_java(self):
+        table = self.catalog.get_table('default.map_blob_java_test')
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        result = table_sort_by(result, 'id')
+
+        self.assertTrue(pa.types.is_map(result.schema.field('payloads').type))
+        self.assertEqual(result.column('id').to_pylist(), [1, 2, 3, 4])
+        self.assertEqual(
+            [None if value is None else dict(value)
+             for value in result.column('payloads').to_pylist()],
+            [
+                {1: b'java-alpha', 2: None, 3: b''},
+                {},
+                None,
+                {4: b'java-omega'},
+            ],
+        )
+        expected_additional_payloads = {
+            'boolean_payloads': {True: b'java-boolean'},
+            'compact_decimal_payloads': {
+                Decimal('12.34'): b'java-compact-decimal',
+            },
+            'high_decimal_payloads': {
+                Decimal('123456789012345678.90'): b'java-high-decimal',
+            },
+            'date_payloads': {
+                datetime.date(1969, 12, 31): b'java-date',
+            },
+            'time_payloads': {
+                datetime.time(12, 34, 56, 789000): b'java-time',
+            },
+            'binary_payloads': {
+                bytes([0, 255, 1, 2]): b'java-binary',
+            },
+            'varbinary_payloads': {
+                b'': b'java-varbinary',
+            },
+        }
+        for name, expected in expected_additional_payloads.items():
+            self.assertEqual(
+                [None if value is None else dict(value)
+                 for value in result.column(name).to_pylist()],
+                [expected, None, None, None],
+            )
+
+    def test_write_map_blob_for_java(self):
+        map_blob_type = pa.map_(pa.int32(), pa.large_binary())
+        boolean_map_blob_type = pa.map_(pa.bool_(), pa.large_binary())
+        compact_decimal_map_blob_type = pa.map_(
+            pa.decimal128(10, 2), pa.large_binary())
+        high_decimal_map_blob_type = pa.map_(
+            pa.decimal128(20, 2), pa.large_binary())
+        date_map_blob_type = pa.map_(pa.date32(), pa.large_binary())
+        time_map_blob_type = pa.map_(pa.time32('ms'), pa.large_binary())
+        binary_schema_type = pa.map_(pa.binary(4), pa.large_binary())
+        varbinary_schema_type = pa.map_(pa.binary(), pa.large_binary())
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('payloads', map_blob_type),
+            ('boolean_payloads', boolean_map_blob_type),
+            ('compact_decimal_payloads', compact_decimal_map_blob_type),
+            ('high_decimal_payloads', high_decimal_map_blob_type),
+            ('date_payloads', date_map_blob_type),
+            ('time_payloads', time_map_blob_type),
+            ('binary_payloads', binary_schema_type),
+            ('varbinary_payloads', varbinary_schema_type),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'bucket': '-1',
+            },
+        )
+        pa_schema = PyarrowFieldParser.from_paimon_schema(schema.fields)
+        binary_map_blob_type = pa_schema.field('binary_payloads').type
+        varbinary_map_blob_type = pa_schema.field('varbinary_payloads').type
+        table_name = 'default.map_blob_python_test'
+        self.catalog.drop_table(table_name, True)
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+
+        data = pa.Table.from_pydict({
+            'id': [1, 2, 3, 4],
+            'payloads': pa.array(
+                [
+                    [(1, b'python-alpha'), (2, None), (3, b'')],
+                    [],
+                    None,
+                    [(4, b'python-omega')],
+                ],
+                type=map_blob_type,
+            ),
+            'boolean_payloads': pa.array(
+                [[(True, b'python-boolean')], None, None, None],
+                type=boolean_map_blob_type,
+            ),
+            'compact_decimal_payloads': pa.array(
+                [[(Decimal('12.34'), b'python-compact-decimal')],
+                 None, None, None],
+                type=compact_decimal_map_blob_type,
+            ),
+            'high_decimal_payloads': pa.array(
+                [[(
+                    Decimal('123456789012345678.90'),
+                    b'python-high-decimal',
+                )], None, None, None],
+                type=high_decimal_map_blob_type,
+            ),
+            'date_payloads': pa.array(
+                [[(
+                    datetime.date(1969, 12, 31),
+                    b'python-date',
+                )], None, None, None],
+                type=date_map_blob_type,
+            ),
+            'time_payloads': pa.array(
+                [[(
+                    datetime.time(12, 34, 56, 789000),
+                    b'python-time',
+                )], None, None, None],
+                type=time_map_blob_type,
+            ),
+            'binary_payloads': pa.array(
+                [
+                    [
+                        (bytes([0, 255, 1, 2]), b'python-binary'),
+                    ],
+                    None,
+                    None,
+                    None,
+                ],
+                type=binary_map_blob_type,
+            ),
+            'varbinary_payloads': pa.array(
+                [[(b'', b'python-varbinary')], None, None, None],
+                type=varbinary_map_blob_type,
+            ),
+        }, schema=pa_schema)
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(data)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        result = table_sort_by(result, 'id')
+        self.assertEqual(result.column('id').to_pylist(), [1, 2, 3, 4])
+        self.assertEqual(
+            [None if value is None else dict(value)
+             for value in result.column('payloads').to_pylist()],
+            [
+                {1: b'python-alpha', 2: None, 3: b''},
+                {},
+                None,
+                {4: b'python-omega'},
+            ],
+        )
+        expected_additional_payloads = {
+            'boolean_payloads': {True: b'python-boolean'},
+            'compact_decimal_payloads': {
+                Decimal('12.34'): b'python-compact-decimal',
+            },
+            'high_decimal_payloads': {
+                Decimal('123456789012345678.90'): b'python-high-decimal',
+            },
+            'date_payloads': {
+                datetime.date(1969, 12, 31): b'python-date',
+            },
+            'time_payloads': {
+                datetime.time(12, 34, 56, 789000): b'python-time',
+            },
+            'binary_payloads': {
+                bytes([0, 255, 1, 2]): b'python-binary',
+            },
+            'varbinary_payloads': {
+                b'': b'python-varbinary',
+            },
+        }
+        for name, expected in expected_additional_payloads.items():
+            self.assertEqual(
+                [None if value is None else dict(value)
+                 for value in result.column(name).to_pylist()],
+                [expected, None, None, None],
+            )
+
+    def test_compact_conflict_shard_update(self):
+        """
+        1. Java writes 5 base files (testCompactConflictWriteBase)
+        2. pypaimon ShardTableUpdator scans table, prepares evolution
+        3. Java runs compact (testCompactConflictRunCompact)
+        4. pypaimon rebases the stale evolution files and commits successfully
+        """
+        import subprocess
+
+        table = self.catalog.get_table('default.compact_conflict_test')
+
+        # Step 2: pypaimon shard update - scan and prepare commit
+        wb = table.new_batch_write_builder()
+        update = wb.new_update()
+        update.with_read_projection(['f0'])
+        update.with_update_type(['f2'])
+        upd = update.new_shard_updator(shard_num=0, total_shard_count=3)
+        print(f"Shard 0 row_ranges: {[(r[1].from_, r[1].to) for r in upd.row_ranges]}")
+
+        reader = upd.arrow_reader()
+        import pyarrow as pa
+        rows_read = 0
+        for batch in iter(reader.read_next_batch, None):
+            n = batch.num_rows
+            rows_read += n
+            upd.update_by_arrow_batch(
+                pa.RecordBatch.from_pydict(
+                    {'f2': [f'evo_{i}' for i in range(n)]},
+                    schema=pa.schema([('f2', pa.string())])
+                )
+            )
+        print(f"Shard update read {rows_read} rows")
+        stale_commit_msgs = upd.prepare_commit()
+
+        # Step 3: Java compact (compact happening between scan and commit)
+        project_root = os.path.join(self.tempdir, '..', '..', '..', '..')
+        result = subprocess.run(
+            ['mvn', 'test',
+             '-pl', 'paimon-core',
+             '-Dtest=org.apache.paimon.JavaPyE2ETest#testCompactConflictRunCompact',
+             '-Drun.e2e.tests=true',
+             '-Dsurefire.failIfNoSpecifiedTests=false',
+             '-q'],
+            cwd=os.path.abspath(project_root),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            universal_newlines=True, timeout=120
+        )
+        self.assertEqual(result.returncode, 0,
+                         f"Java compact failed:\n{result.stdout}\n{result.stderr}")
+        print("Java compact completed")
+
+        # Step 4: pypaimon rewrites stale evolution files against the compacted range
+        tc = wb.new_commit()
+        tc.commit(stale_commit_msgs)
+        tc.close()
+
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits())
+        self.assertEqual(
+            rows_read,
+            sum(value is not None for value in result.column('f2').to_pylist()),
+        )
+
+    def test_blob_compact_conflict_update(self):
+        import subprocess
+
+        table = self.catalog.get_table('default.blob_compact_conflict_test')
+        snapshot_before = table.new_read_builder().new_scan().plan().snapshot_id
+
+        wb = table.new_batch_write_builder()
+        table_update = wb.new_update().with_update_type(['f2'])
+        update_data = pa.Table.from_pydict({
+            '_ROW_ID': pa.array([50], type=pa.int64()),
+            'f2': pa.array([b'blob50-updated'], type=pa.large_binary()),
+        })
+        stale_commit_msgs = table_update.update_by_arrow_with_row_id(update_data)
+
+        project_root = os.path.join(self.tempdir, '..', '..', '..', '..')
+        result = subprocess.run(
+            ['mvn', 'test',
+             '-pl', 'paimon-core',
+             '-Dtest=org.apache.paimon.JavaPyE2ETest#testBlobCompactConflictRunCompact',
+             '-Drun.e2e.tests=true',
+             '-Dsurefire.failIfNoSpecifiedTests=false',
+             '-q'],
+            cwd=os.path.abspath(project_root),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            universal_newlines=True, timeout=300
+        )
+        self.assertEqual(result.returncode, 0,
+                         f"Java compact failed:\n{result.stdout}\n{result.stderr}")
+
+        table = self.catalog.get_table('default.blob_compact_conflict_test')
+        snapshot_after = table.new_read_builder().new_scan().plan().snapshot_id
+        self.assertGreater(snapshot_after, snapshot_before)
+
+        tc = wb.new_commit()
+        try:
+            with self.assertRaises(RuntimeError):
+                tc.commit(stale_commit_msgs)
+        finally:
+            tc.close()
+
+    @parameterized.expand(get_file_format_params())
+    def test_read_data_evolution_table(self, file_format):
+        """Read data evolution tables written by Java and verify merged results."""
+        table = self.catalog.get_table(f'default.data_evolution_test_{file_format}')
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        splits = table_scan.plan().splits()
+        result = table_read.to_arrow(splits)
+        result = table_sort_by(result, 'f0')
+        self.assertEqual(result.num_rows, 5)
+        for i in range(5):
+            self.assertEqual(result.column('f0')[i].as_py(), i)
+            self.assertEqual(result.column('f1')[i].as_py(), f'a{i}')
+            self.assertEqual(result.column('f2')[i].as_py(), f'b{i}')
+
+    def test_read_data_evolution_deletion_vector_table(self):
+        """Read a data evolution table with deletion vectors and blob files written by Java."""
+        table = self.catalog.get_table('default.data_evolution_dv_test')
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        result = table_read.to_arrow(table_scan.plan().splits())
+        result = table_sort_by(result, 'f0')
+
+        expected_ids = [0, 2, 3, 11, 13, 14]
+        self.assertEqual(result.num_rows, len(expected_ids))
+        self.assertEqual(result.column('f0').to_pylist(), expected_ids)
+        self.assertEqual(
+            result.column('f1').to_pylist(),
+            [f'name-{i}' for i in expected_ids])
+        self.assertEqual(
+            result.column('f2').to_pylist(),
+            [f'base-{i}' for i in expected_ids])
+        self.assertEqual(
+            result.column('f3').to_pylist(),
+            [bytes([i]) for i in expected_ids])
+
+    @parameterized.expand(get_file_format_params())
+    def test_py_write_data_evolution_table(self, file_format):
+        """Python writes data evolution tables for Java to read."""
+        table_name = f'default.data_evolution_test_py_{file_format}'
+        simple_pa_schema = pa.schema([
+            ('f0', pa.int32()),
+            ('f1', pa.utf8()),
+            ('f2', pa.utf8()),
+        ])
+        schema = Schema.from_pyarrow_schema(simple_pa_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+            'file.format': file_format,
+        })
+        self.catalog.create_table(table_name, schema, True)
+        table = self.catalog.get_table(table_name)
+
+        # Write (f0, f1) columns
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write().with_write_type(['f0', 'f1'])
+        table_commit = write_builder.new_commit()
+        data0 = pa.Table.from_pydict({
+            'f0': list(range(5)),
+            'f1': [f'a{i}' for i in range(5)],
+        }, schema=pa.schema([('f0', pa.int32()), ('f1', pa.utf8())]))
+        table_write.write_arrow(data0)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        # Write (f2) column with first_row_id
+        table_write = write_builder.new_write().with_write_type(['f2'])
+        table_commit = write_builder.new_commit()
+        data1 = pa.Table.from_pydict({
+            'f2': [f'b{i}' for i in range(5)],
+        }, schema=pa.schema([('f2', pa.utf8())]))
+        table_write.write_arrow(data1)
+        cmts = table_write.prepare_commit()
+        cmts[0].new_files[0].first_row_id = 0
+        table_commit.commit(cmts)
+        table_write.close()
+        table_commit.close()
+
+        # Verify read-back
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
+        result = table_sort_by(result, 'f0')
+        self.assertEqual(result.num_rows, 5)
+        for i in range(5):
+            self.assertEqual(result.column('f0')[i].as_py(), i)
+            self.assertEqual(result.column('f1')[i].as_py(), f'a{i}')
+            self.assertEqual(result.column('f2')[i].as_py(), f'b{i}')
+
+    def test_py_read_variant_table(self):
+        """Python reads a VARIANT-column table written by Java (Java→Python E2E)."""
+        table = self.catalog.get_table('default.variant_test')
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        splits = table_scan.plan().splits()
+        result = table_read.to_arrow(splits)
+
+        self.assertEqual(result.num_rows, 7)
+
+        # VARIANT maps to struct<value: binary NOT NULL, metadata: binary NOT NULL>
+        payload_field = result.schema.field('payload')
+        self.assertTrue(pa.types.is_struct(payload_field.type),
+                        f"Expected struct type for VARIANT, got {payload_field.type}")
+        self.assertEqual(payload_field.type.num_fields, 2)
+        self.assertEqual(payload_field.type[0].name, 'value')
+        self.assertEqual(payload_field.type[1].name, 'metadata')
+        self.assertTrue(pa.types.is_binary(payload_field.type[0].type))
+        self.assertTrue(pa.types.is_binary(payload_field.type[1].type))
+
+        # All rows should have non-null payload structs
+        payload_col = result.column('payload')
+        for i in range(result.num_rows):
+            row = payload_col[i].as_py()
+            self.assertIsNotNone(row, f"Row {i}: expected non-null VARIANT")
+            self.assertIn('value', row)
+            self.assertIn('metadata', row)
+            self.assertIsInstance(row['value'], bytes)
+            self.assertIsInstance(row['metadata'], bytes)
+            self.assertGreater(len(row['value']), 0)
+
+        # Verify bytes are non-empty and can be decoded via GenericVariant
+        result_sorted = table_sort_by(result, 'id')
+        id_list = result_sorted.column('id').to_pylist()
+        payload_list = result_sorted.column('payload').to_pylist()
+
+        # Row 1: Alice, {"age":30,"city":"Beijing"}
+        alice_data = GenericVariant.from_arrow_struct(payload_list[id_list.index(1)]).to_python()
+        self.assertEqual(alice_data['age'], 30)
+        self.assertEqual(alice_data['city'], 'Beijing')
+
+        # Row 2: Bob, {"age":25,"city":"Shanghai"}
+        bob_data = GenericVariant.from_arrow_struct(payload_list[id_list.index(2)]).to_python()
+        self.assertEqual(bob_data['age'], 25)
+        self.assertEqual(bob_data['city'], 'Shanghai')
+
+        # Row 3: Carol, [1,2,3]
+        carol_data = GenericVariant.from_arrow_struct(payload_list[id_list.index(3)]).to_python()
+        self.assertEqual(carol_data, [1, 2, 3])
+
+        # Row 4: Dave, DATE '2024-01-15'
+        dave_data = GenericVariant.from_arrow_struct(payload_list[id_list.index(4)]).to_python()
+        self.assertEqual(dave_data, datetime.date(2024, 1, 15))
+
+        # Row 5: Eve, TIMESTAMP_NTZ '2024-01-15 12:30:45.123456'
+        eve_data = GenericVariant.from_arrow_struct(payload_list[id_list.index(5)]).to_python()
+        self.assertEqual(
+            eve_data, datetime.datetime(2024, 1, 15, 12, 30, 45, 123456)
+        )
+
+        # Row 6: Frank, TIMESTAMP '2024-01-15 12:30:45.123456 UTC'
+        frank_data = GenericVariant.from_arrow_struct(payload_list[id_list.index(6)]).to_python()
+        self.assertEqual(
+            frank_data,
+            datetime.datetime(
+                2024, 1, 15, 12, 30, 45, 123456, tzinfo=datetime.timezone.utc
+            ),
+        )
+
+        # Row 7: Grace, UUID '12345678-1234-5678-1234-567812345678'
+        grace_data = GenericVariant.from_arrow_struct(payload_list[id_list.index(7)]).to_python()
+        self.assertEqual(
+            grace_data, uuid.UUID('12345678-1234-5678-1234-567812345678')
+        )
+
+        print("test_py_read_variant_table: verified {} VARIANT rows".format(result.num_rows))
+
+        # Also verify shredded VARIANT: Java wrote variant_shredded_test with
+        # parquet.variant.shreddingSchema (age+city shredded). Python must reassemble
+        # the shredded Parquet columns back into standard struct<value, metadata>.
+        # Requires Python >= 3.7 (variant_shredding module uses __future__ annotations).
+        if sys.version_info[:2] < (3, 7):
+            print("test_py_read_variant_table: skipping shredded VARIANT check (Python < 3.7)")
+            return
+        shredded_table = self.catalog.get_table('default.variant_shredded_test')
+        shredded_rb = shredded_table.new_read_builder()
+        shredded_result = shredded_rb.new_read().to_arrow(
+            shredded_rb.new_scan().plan().splits())
+        self.assertEqual(shredded_result.num_rows, 3)
+
+        # Assembled column must be the same struct<value: binary, metadata: binary> shape
+        shredded_pf = shredded_result.schema.field('payload')
+        self.assertTrue(pa.types.is_struct(shredded_pf.type),
+                        "shredded VARIANT should assemble to struct, got {}".format(shredded_pf.type))
+        self.assertEqual(shredded_pf.type.num_fields, 2)
+        self.assertEqual(shredded_pf.type[0].name, 'value')
+        self.assertEqual(shredded_pf.type[1].name, 'metadata')
+
+        # Verify decoded values match what Java wrote
+        shredded_sorted = table_sort_by(shredded_result, 'id')
+        shredded_ids = shredded_sorted.column('id').to_pylist()
+        shredded_payloads = shredded_sorted.column('payload').to_pylist()
+
+        # Row 1: Alice {"age":30,"city":"Beijing"} — both fields were shredded
+        alice = GenericVariant.from_arrow_struct(
+            shredded_payloads[shredded_ids.index(1)]).to_python()
+        self.assertEqual(alice['age'], 30)
+        self.assertEqual(alice['city'], 'Beijing')
+
+        # Row 2: Bob {"age":25,"city":"Shanghai"} — both fields were shredded
+        bob = GenericVariant.from_arrow_struct(
+            shredded_payloads[shredded_ids.index(2)]).to_python()
+        self.assertEqual(bob['age'], 25)
+        self.assertEqual(bob['city'], 'Shanghai')
+
+        # Row 3: Carol [1,2,3] — array, no shredded fields; everything in overflow
+        carol = GenericVariant.from_arrow_struct(
+            shredded_payloads[shredded_ids.index(3)]).to_python()
+        self.assertEqual(carol, [1, 2, 3])
+
+        print("test_py_read_variant_table: verified {} shredded VARIANT rows".format(
+            shredded_result.num_rows))
+
+    def test_py_write_variant_table(self):
+        """Python writes a VARIANT-column table for Java to read back (Python→Java E2E).
+
+        Data written:
+            id=1  payload={"name":"test","value":42}
+            id=2  payload=[10,20,30]
+            id=3  payload="hello"
+            id=4  payload=null
+            id=5  payload=DATE '2024-01-15'
+            id=6  payload=TIMESTAMP_NTZ '2024-01-15 12:30:45.123456'
+            id=7  payload=UUID '12345678-1234-5678-1234-567812345678'
+        """
+        variant_type = pa.struct([
+            pa.field('value', pa.binary(), nullable=False),
+            pa.field('metadata', pa.binary(), nullable=False),
+        ])
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('payload', variant_type),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, options={'bucket': '-1'})
+
+        table_name = 'default.py_variant_test'
+        self.catalog.drop_table(table_name, True)
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+
+        test_uuid = uuid.UUID('12345678-1234-5678-1234-567812345678')
+        variant_col = GenericVariant.to_arrow_array([
+            GenericVariant.from_python({"name": "test", "value": 42}),
+            GenericVariant.from_python([10, 20, 30]),
+            GenericVariant.from_python("hello"),
+            None,  # SQL NULL at the column level, not a VARIANT containing JSON null
+            GenericVariant.from_python(datetime.date(2024, 1, 15)),
+            GenericVariant.from_python(
+                datetime.datetime(2024, 1, 15, 12, 30, 45, 123456)
+            ),
+            GenericVariant.from_python(test_uuid),
+        ])
+        data = pa.table({
+            'id': pa.array([1, 2, 3, 4, 5, 6, 7], type=pa.int32()),
+            'name': pa.array(
+                ['row1', 'row2', 'row3', 'row4', 'row5', 'row6', 'row7'],
+                type=pa.string()
+            ),
+            'payload': variant_col,
+        }, schema=pa_schema)
+
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(data)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+        print("test_py_write_variant_table: wrote 7 VARIANT rows to {}".format(table_name))
+
+        # Also write a shredded VARIANT table (py_variant_shredded_test) for Java to read.
+        # Python shreds the 'age' (BIGINT) and 'city' (VARCHAR) sub-fields of 'payload'
+        # when writing Parquet. Java must reassemble the shredded columns on read.
+        # Requires Python >= 3.7 (variant_shredding module uses __future__ annotations).
+        if sys.version_info[:2] < (3, 7):
+            print("test_py_write_variant_table: skipping shredded VARIANT write (Python < 3.7)")
+            return
+        shredding_json = (
+            '{"type":"ROW","fields":[{"name":"payload","type":{"type":"ROW","fields":['
+            '{"name":"age","type":"BIGINT"},'
+            '{"name":"city","type":"VARCHAR"}'
+            ']}}]}'
+        )
+        shredded_table_name = 'default.py_variant_shredded_test'
+        self.catalog.drop_table(shredded_table_name, True)
+        shredded_schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={'bucket': '-1', 'variant.shreddingSchema': shredding_json}
+        )
+        self.catalog.create_table(shredded_table_name, shredded_schema, False)
+        shredded_table = self.catalog.get_table(shredded_table_name)
+
+        # Use data with age+city fields so the shredded sub-columns are exercised.
+        # Row 3 is an array — it has no age/city, so it goes entirely to overflow.
+        shredded_variant_col = GenericVariant.to_arrow_array([
+            GenericVariant.from_python({"age": 30, "city": "Beijing"}),
+            GenericVariant.from_python({"age": 25, "city": "Shanghai"}),
+            GenericVariant.from_python([1, 2, 3]),
+        ])
+        shredded_data = pa.table(
+            {
+                'id': pa.array([1, 2, 3], type=pa.int32()),
+                'name': pa.array(['Alice', 'Bob', 'Carol'], type=pa.string()),
+                'payload': shredded_variant_col,
+            },
+            schema=pa_schema,
+        )
+        shredded_wb = shredded_table.new_batch_write_builder()
+        shredded_tw = shredded_wb.new_write()
+        shredded_tc = shredded_wb.new_commit()
+        shredded_tw.write_arrow(shredded_data)
+        shredded_tc.commit(shredded_tw.prepare_commit())
+        shredded_tw.close()
+        shredded_tc.close()
+        print("test_py_write_variant_table: wrote 3 shredded VARIANT rows to {}".format(
+            shredded_table_name))

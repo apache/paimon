@@ -32,6 +32,7 @@ import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogEnvironment;
@@ -86,10 +87,14 @@ public abstract class ScannerTestBase {
     }
 
     protected void createAppendOnlyTable() throws Exception {
+        createAppendOnlyTable(new Options());
+    }
+
+    protected void createAppendOnlyTable(Options conf) throws Exception {
         tempDir = Files.createTempDirectory("junit");
         tablePath = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString());
         fileIO = FileIOFinder.find(tablePath);
-        table = createFileStoreTable(false);
+        table = createFileStoreTable(false, conf, tablePath);
         snapshotReader = table.newSnapshotReader();
     }
 
@@ -169,6 +174,19 @@ public abstract class ScannerTestBase {
                                 ""));
         return FileStoreTableFactory.create(
                 fileIO, tablePath, tableSchema, conf, CatalogEnvironment.empty());
+    }
+
+    protected void updateColumn(String columnName, DataType type) throws Exception {
+        TableSchema tableSchema =
+                table.schemaManager()
+                        .commitChanges(SchemaChange.updateColumnType(columnName, type));
+        table =
+                FileStoreTableFactory.create(
+                        table.fileIO(),
+                        table.location(),
+                        tableSchema,
+                        new Options(table.options()),
+                        CatalogEnvironment.empty());
     }
 
     protected List<Split> toSplits(List<DataSplit> dataSplits) {

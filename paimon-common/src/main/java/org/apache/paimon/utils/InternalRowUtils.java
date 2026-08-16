@@ -22,6 +22,7 @@ import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.BinaryMap;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.DataGetters;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
@@ -30,6 +31,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.NestedRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.ArrayType;
@@ -42,6 +44,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.types.VectorType;
 
 import javax.annotation.Nullable;
 
@@ -75,11 +78,11 @@ public class InternalRowUtils {
                 if (((InternalArray) data1).size() != ((InternalArray) data2).size()) {
                     return false;
                 }
-                ArrayType arrayType = (ArrayType) dataType;
+                DataType elementType = arrayOrVectorElementType(dataType);
                 for (int i = 0; i < ((InternalArray) data1).size(); i++) {
-                    Object value1 = get((InternalArray) data1, i, arrayType.getElementType());
-                    Object value2 = get((InternalArray) data2, i, arrayType.getElementType());
-                    if (!equals(value1, value2, arrayType.getElementType())) {
+                    Object value1 = get((InternalArray) data1, i, elementType);
+                    Object value2 = get((InternalArray) data2, i, elementType);
+                    if (!equals(value1, value2, elementType)) {
                         return false;
                     }
                 }
@@ -88,28 +91,27 @@ public class InternalRowUtils {
                     return false;
                 }
                 MapType mapType = (MapType) dataType;
-                GenericMap map1;
-                GenericMap map2;
-                if (data1 instanceof GenericMap) {
-                    map1 = (GenericMap) data1;
-                    map2 = (GenericMap) data2;
-                } else {
-                    map1 =
-                            copyToGenericMap(
-                                    (InternalMap) data1,
-                                    mapType.getKeyType(),
-                                    mapType.getValueType());
-                    map2 =
-                            copyToGenericMap(
-                                    (InternalMap) data2,
-                                    mapType.getKeyType(),
-                                    mapType.getValueType());
-                }
+                // Decide per operand. One MapType is represented by GenericMap, BinaryMap or
+                // ColumnarMap interchangeably -- which is why the conversion below exists at all --
+                // so gating data2's cast on data1's concrete class threw ClassCastException
+                // whenever the two sides happened to use different representations.
+                GenericMap map1 = toGenericMap((InternalMap) data1, mapType);
+                GenericMap map2 = toGenericMap((InternalMap) data2, mapType);
                 InternalArray keyArray1 = map1.keyArray();
+                InternalArray keyArray2 = map2.keyArray();
+                InternalArray valueArray1 = map1.valueArray();
+                InternalArray valueArray2 = map2.valueArray();
+                boolean[] matched = new boolean[map2.size()];
                 for (int i = 0; i < map1.size(); i++) {
-                    Object key = get(keyArray1, i, mapType.getKeyType());
-                    if (!map2.contains(key)
-                            || !equals(map1.get(key), map2.get(key), mapType.getValueType())) {
+                    if (!hasEqualMapEntry(
+                            keyArray1,
+                            valueArray1,
+                            i,
+                            keyArray2,
+                            valueArray2,
+                            matched,
+                            mapType.getKeyType(),
+                            mapType.getValueType())) {
                         return false;
                     }
                 }
@@ -134,6 +136,33 @@ public class InternalRowUtils {
         return true;
     }
 
+    private static boolean hasEqualMapEntry(
+            InternalArray keyArray1,
+            InternalArray valueArray1,
+            int pos1,
+            InternalArray keyArray2,
+            InternalArray valueArray2,
+            boolean[] matched,
+            DataType keyType,
+            DataType valueType) {
+        Object key1 = get(keyArray1, pos1, keyType);
+        Object value1 = get(valueArray1, pos1, valueType);
+        for (int j = 0; j < keyArray2.size(); j++) {
+            if (matched[j]) {
+                continue;
+            }
+            Object key2 = get(keyArray2, j, keyType);
+            if (equals(key1, key2, keyType)) {
+                Object value2 = get(valueArray2, j, valueType);
+                if (equals(value1, value2, valueType)) {
+                    matched[j] = true;
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     public static int hash(Object data, DataType dataType) {
         if (data == null) {
             return 0;
@@ -147,11 +176,11 @@ public class InternalRowUtils {
                 result = 37 * result + hash(v, rowType.getTypeAt(i));
             }
         } else if (data instanceof InternalArray) {
-            ArrayType arrayType = (ArrayType) dataType;
+            DataType elementType = arrayOrVectorElementType(dataType);
             int len = ((InternalArray) data).size();
             for (int i = 0; i < len; i++) {
-                Object v = get((InternalArray) data, i, arrayType.getElementType());
-                result = 37 * result + hash(v, arrayType.getElementType());
+                Object v = get((InternalArray) data, i, elementType);
+                result = 37 * result + hash(v, elementType);
             }
         } else if (data instanceof InternalMap) {
             MapType mapType = (MapType) dataType;
@@ -164,10 +193,12 @@ public class InternalRowUtils {
                                 (InternalMap) data, mapType.getKeyType(), mapType.getValueType());
             }
             InternalArray keyArray = map.keyArray();
+            InternalArray valueArray = map.valueArray();
             for (int i = 0; i < map.size(); i++) {
                 Object key = get(keyArray, i, mapType.getKeyType());
-                result = 37 * result + hash(key, mapType.getKeyType());
-                result = 37 * result + hash(map.get(key), mapType.getValueType());
+                Object value = get(valueArray, i, mapType.getValueType());
+                result +=
+                        37 * hash(key, mapType.getKeyType()) + hash(value, mapType.getValueType());
             }
         } else if (data instanceof byte[]) {
             result = Arrays.hashCode((byte[]) data);
@@ -242,6 +273,12 @@ public class InternalRowUtils {
         return copyToGenericMap(map, keyType, valueType);
     }
 
+    private static GenericMap toGenericMap(InternalMap map, MapType mapType) {
+        return map instanceof GenericMap
+                ? (GenericMap) map
+                : copyToGenericMap(map, mapType.getKeyType(), mapType.getValueType());
+    }
+
     private static GenericMap copyToGenericMap(
             InternalMap map, DataType keyType, DataType valueType) {
         Map<Object, Object> javaMap = new HashMap<>();
@@ -261,6 +298,9 @@ public class InternalRowUtils {
         } else if (o instanceof InternalRow) {
             return copyInternalRow((InternalRow) o, (RowType) type);
         } else if (o instanceof InternalArray) {
+            if (type instanceof VectorType) {
+                return copyVector((InternalVector) o, (VectorType) type);
+            }
             return copyArray((InternalArray) o, ((ArrayType) type).getElementType());
         } else if (o instanceof InternalMap) {
             if (type instanceof MapType) {
@@ -280,6 +320,20 @@ public class InternalRowUtils {
             return ((Decimal) o).copy();
         }
         return o;
+    }
+
+    private static DataType arrayOrVectorElementType(DataType dataType) {
+        return dataType instanceof VectorType
+                ? ((VectorType) dataType).getElementType()
+                : ((ArrayType) dataType).getElementType();
+    }
+
+    private static InternalVector copyVector(InternalVector from, VectorType vectorType) {
+        if (from instanceof BinaryVector) {
+            return ((BinaryVector) from).copy();
+        }
+
+        return BinaryVector.fromInternalArray(from, vectorType.getElementType());
     }
 
     public static Object get(DataGetters dataGetters, int pos, DataType fieldType) {
@@ -318,6 +372,8 @@ public class InternalRowUtils {
                         pos, decimalType.getPrecision(), decimalType.getScale());
             case ARRAY:
                 return dataGetters.getArray(pos);
+            case VECTOR:
+                return dataGetters.getVector(pos);
             case MAP:
             case MULTISET:
                 return dataGetters.getMap(pos);
@@ -328,6 +384,8 @@ public class InternalRowUtils {
                 return dataGetters.getBinary(pos);
             case VARIANT:
                 return dataGetters.getVariant(pos);
+            case BLOB:
+                return dataGetters.getBlob(pos);
             default:
                 throw new UnsupportedOperationException("Unsupported type: " + fieldType);
         }
@@ -383,6 +441,9 @@ public class InternalRowUtils {
     public static int compare(Object x, Object y, DataTypeRoot type) {
         int ret;
         switch (type) {
+            case BOOLEAN:
+                ret = Boolean.compare((boolean) x, (boolean) y);
+                break;
             case DECIMAL:
                 Decimal xDD = (Decimal) x;
                 Decimal yDD = (Decimal) y;

@@ -26,14 +26,15 @@ import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.CloseShieldOutputStream;
 import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.List;
 
 /** JSON {@link FileFormat}. */
@@ -41,22 +42,24 @@ public class JsonFileFormat extends FileFormat {
 
     public static final String IDENTIFIER = "json";
 
-    private final Options options;
+    private final JsonOptions options;
 
     public JsonFileFormat(FormatContext context) {
         super(IDENTIFIER);
-        this.options = getIdentifierPrefixOptions(context.options());
+        this.options = new JsonOptions(context.options());
     }
 
     @Override
     public FormatReaderFactory createReaderFactory(
-            RowType projectedRowType, @Nullable List<Predicate> filters) {
-        return new JsonReaderFactory(projectedRowType, new JsonOptions(options));
+            RowType dataSchemaRowType,
+            RowType projectedRowType,
+            @Nullable List<Predicate> filters) {
+        return new JsonReaderFactory(projectedRowType, options);
     }
 
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
-        return new JsonWriterFactory(type, new JsonOptions(options));
+        return new JsonWriterFactory(type, options);
     }
 
     @Override
@@ -88,6 +91,7 @@ public class JsonFileFormat extends FileFormat {
             case TIMESTAMP_WITHOUT_TIME_ZONE:
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
             case ARRAY:
+            case VECTOR:
             case MAP:
             case ROW:
                 // All types are supported in JSON
@@ -95,6 +99,36 @@ public class JsonFileFormat extends FileFormat {
             default:
                 throw new UnsupportedOperationException(
                         "Unsupported data type for JSON format: " + dataType);
+        }
+    }
+
+    /** Factory to create {@link JsonFileReader}. */
+    private static class JsonReaderFactory implements FormatReaderFactory {
+
+        private final RowType projectedRowType;
+        private final JsonOptions options;
+
+        public JsonReaderFactory(RowType projectedRowType, JsonOptions options) {
+            this.projectedRowType = projectedRowType;
+            this.options = options;
+        }
+
+        @Override
+        public FileRecordReader<InternalRow> createReader(Context context) throws IOException {
+            return new JsonFileReader(
+                    context.fileIO(), context.filePath(), projectedRowType, options, 0, null);
+        }
+
+        @Override
+        public FileRecordReader<InternalRow> createReader(Context context, long offset, long length)
+                throws IOException {
+            return new JsonFileReader(
+                    context.fileIO(),
+                    context.filePath(),
+                    projectedRowType,
+                    options,
+                    offset,
+                    length);
         }
     }
 
@@ -110,8 +144,10 @@ public class JsonFileFormat extends FileFormat {
         }
 
         @Override
-        public FormatWriter create(PositionOutputStream out, String compression) {
-            return new JsonFormatWriter(new CloseShieldOutputStream(out), rowType, options);
+        public FormatWriter create(PositionOutputStream out, String compression)
+                throws IOException {
+            return new JsonFormatWriter(
+                    new CloseShieldOutputStream(out), rowType, options, compression);
         }
     }
 }

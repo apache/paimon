@@ -7,7 +7,7 @@ This is the cluster benchmark module for Paimon. Inspired by [Nexmark](https://g
 * This benchmark only runs on Linux. You'll need a Linux environment (preferably an EMR cluster). For a more reasonable result, we recommend this cluster to have:
   * One master node with 8 cores and 16GB RAM.
   * Two worker nodes with 16 cores and 64GB RAM.
-* This benchmark runs on a standalone Flink cluster. Download Flink >= 1.15 from the [Apache Flink's website](https://flink.apache.org/downloads.html#apache-flink-1160) and set up a standalone cluster. Flink's job manager must be on the master node of your EMR cluster. We recommend the following Flink configurations:
+* This benchmark runs on a standalone Flink cluster. Download Flink >= 1.16 from the [Apache Flink's website](https://flink.apache.org/downloads.html#apache-flink-1160) and set up a standalone cluster. Flink's job manager must be on the master node of your EMR cluster. We recommend the following Flink configurations:
     ```yaml
     jobmanager.memory.process.size: 4096m
     taskmanager.memory.process.size: 4096m

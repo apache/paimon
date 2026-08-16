@@ -20,11 +20,16 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.TableType;
+import org.apache.paimon.format.csv.CsvOptions;
+import org.apache.paimon.format.json.JsonOptions;
+import org.apache.paimon.format.text.TextOptions;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -33,25 +38,37 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.TableSnapshot;
+import org.apache.paimon.table.format.FormatTablePartitionManager;
 import org.apache.paimon.table.iceberg.IcebergTable;
 import org.apache.paimon.table.lance.LanceTable;
 import org.apache.paimon.table.object.ObjectTable;
+import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.table.system.AllPartitionsTable;
 import org.apache.paimon.table.system.AllTableOptionsTable;
+import org.apache.paimon.table.system.AllTablesTable;
 import org.apache.paimon.table.system.CatalogOptionsTable;
 import org.apache.paimon.table.system.SystemTableLoader;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 
 import static org.apache.paimon.CoreOptions.AUTO_CREATE;
+import static org.apache.paimon.CoreOptions.FORMAT_TABLE_IMPLEMENTATION;
 import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
 import static org.apache.paimon.CoreOptions.PARTITION_GENERATE_LEGACY_NAME;
 import static org.apache.paimon.CoreOptions.PATH;
@@ -59,8 +76,11 @@ import static org.apache.paimon.CoreOptions.PRIMARY_KEY;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.catalog.Catalog.TABLE_DEFAULT_OPTION_PREFIX;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
+import static org.apache.paimon.table.system.AllPartitionsTable.ALL_PARTITIONS;
 import static org.apache.paimon.table.system.AllTableOptionsTable.ALL_TABLE_OPTIONS;
+import static org.apache.paimon.table.system.AllTablesTable.ALL_TABLES;
 import static org.apache.paimon.table.system.CatalogOptionsTable.CATALOG_OPTIONS;
+import static org.apache.paimon.utils.DefaultValueUtils.validateDefaultValue;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Utils for {@link Catalog}. */
@@ -132,21 +152,105 @@ public class CatalogUtils {
         }
     }
 
-    public static void validateCreateTable(Schema schema) {
+    public static void validateCreateTable(Schema schema, boolean dataTokenEnabled) {
         Options options = Options.fromMap(schema.options());
         checkArgument(
                 !options.get(AUTO_CREATE),
                 "The value of %s property should be %s.",
                 AUTO_CREATE.key(),
                 Boolean.FALSE);
+        checkArgument(
+                options.get(CoreOptions.TARGET_FILE_ROW_NUM) > 0,
+                "%s should be at least 1.",
+                CoreOptions.TARGET_FILE_ROW_NUM.key());
 
         TableType tableType = options.get(CoreOptions.TYPE);
         if (tableType.equals(TableType.FORMAT_TABLE)) {
-            checkArgument(
-                    options.get(PRIMARY_KEY) == null,
-                    "Cannot define %s for format table.",
-                    PRIMARY_KEY.key());
+            validateFormatTableOptions(options, dataTokenEnabled);
         }
+        for (DataField field : schema.fields()) {
+            validateDefaultValue(field.type(), field.defaultValue());
+        }
+    }
+
+    private static void validateFormatTableOptions(Options options, boolean dataTokenEnabled) {
+        checkArgument(
+                options.get(PRIMARY_KEY) == null,
+                "Cannot define %s for format table.",
+                PRIMARY_KEY.key());
+        if (dataTokenEnabled && options.get(PATH) == null) {
+            checkArgument(
+                    options.get(FORMAT_TABLE_IMPLEMENTATION)
+                            != CoreOptions.FormatTableImplementation.ENGINE,
+                    "Cannot define %s is engine for format table when data token is enabled and not define %s.",
+                    FORMAT_TABLE_IMPLEMENTATION.key(),
+                    PATH.key());
+        }
+
+        String format = options.get(CoreOptions.FILE_FORMAT);
+        if ("csv".equalsIgnoreCase(format)) {
+            checkArgument(
+                    !options.get(CsvOptions.FIELD_DELIMITER).isEmpty(),
+                    "%s must not be empty.",
+                    CsvOptions.FIELD_DELIMITER.key());
+            checkArgument(
+                    !options.get(CsvOptions.LINE_DELIMITER).isEmpty(),
+                    "%s must not be empty.",
+                    CsvOptions.LINE_DELIMITER.key());
+            checkArgument(
+                    !options.get(CsvOptions.QUOTE_CHARACTER).isEmpty(),
+                    "%s must not be empty.",
+                    CsvOptions.QUOTE_CHARACTER.key());
+            checkArgument(
+                    !options.get(CsvOptions.ESCAPE_CHARACTER).isEmpty(),
+                    "%s must not be empty.",
+                    CsvOptions.ESCAPE_CHARACTER.key());
+        } else if ("json".equalsIgnoreCase(format)) {
+            checkArgument(
+                    !options.get(JsonOptions.LINE_DELIMITER).isEmpty(),
+                    "%s must not be empty.",
+                    JsonOptions.LINE_DELIMITER.key());
+        } else if ("text".equalsIgnoreCase(format)) {
+            checkArgument(
+                    !options.get(TextOptions.LINE_DELIMITER).isEmpty(),
+                    "%s must not be empty.",
+                    TextOptions.LINE_DELIMITER.key());
+        }
+    }
+
+    /** Validate options which are specific to a Format Table with catalog-managed partitions. */
+    public static void validateCatalogManagedPartitionOptions(Map<String, String> tableOptions) {
+        validateCatalogManagedPartitionOptions(Options.fromMap(tableOptions));
+    }
+
+    private static void validateCatalogManagedPartitionOptions(Options options) {
+        // The caller has already established that this is a format table with catalog-managed
+        // partitions; only the engine implementation is incompatible with them.
+        checkArgument(
+                options.get(FORMAT_TABLE_IMPLEMENTATION)
+                        != CoreOptions.FormatTableImplementation.ENGINE,
+                "Cannot combine catalog-managed partitions (%s=true) with %s=engine: the engine "
+                        + "implementation reads the table directory itself.",
+                CoreOptions.METASTORE_PARTITIONED_TABLE.key(),
+                FORMAT_TABLE_IMPLEMENTATION.key());
+    }
+
+    /**
+     * Validate a create or replace request that asks for catalog-managed partitions on a Format
+     * Table: the option combination must be valid and the table must be internal. Only the REST
+     * catalog calls this; other catalogs keep treating the option as inert.
+     */
+    public static void validateCatalogManagedFormatTablePartitions(
+            Identifier identifier, Map<String, String> tableOptions, boolean isExternal) {
+        CoreOptions options = CoreOptions.fromMap(tableOptions);
+        if (options.type() != TableType.FORMAT_TABLE || !options.partitionedTableInMetastore()) {
+            return;
+        }
+        validateCatalogManagedPartitionOptions(Options.fromMap(tableOptions));
+        checkArgument(
+                !isExternal,
+                "Catalog-managed partitions are only supported for internal tables, but format table %s is external.",
+                identifier.getFullName());
     }
 
     public static void validateNamePattern(Catalog catalog, String namePattern) {
@@ -158,7 +262,21 @@ public class CatalogUtils {
         }
     }
 
+    public static void validateTableType(Catalog catalog, String tableType) {
+        if (Objects.nonNull(tableType) && !catalog.supportsListTableByType()) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Current catalog %s does not support table type filter.",
+                            catalog.getClass().getSimpleName()));
+        }
+    }
+
     public static List<Partition> listPartitionsFromFileSystem(Table table) {
+        return listPartitionsFromFileSystem(table, null);
+    }
+
+    public static List<Partition> listPartitionsFromFileSystem(
+            Table table, @Nullable List<Map<String, String>> partitionSpecs) {
         Options options = Options.fromMap(table.options());
         InternalRowPartitionComputer computer =
                 new InternalRowPartitionComputer(
@@ -166,11 +284,29 @@ public class CatalogUtils {
                         table.rowType().project(table.partitionKeys()),
                         table.partitionKeys().toArray(new String[0]),
                         options.get(PARTITION_GENERATE_LEGACY_NAME));
-        List<PartitionEntry> partitionEntries =
-                table.newReadBuilder().newScan().listPartitionEntries();
+
+        TableScan scan = table.newReadBuilder().newScan();
+
+        // partitions should be seen even all files are level-0 when enable dv, see
+        // https://github.com/apache/paimon/pull/6531 for details
+        if (scan instanceof InnerTableScan) {
+            ((InnerTableScan) scan).withLevelFilter(level -> true);
+            if (partitionSpecs != null) {
+                ((InnerTableScan) scan).withPartitionsFilter(partitionSpecs);
+            }
+        }
+
+        List<PartitionEntry> partitionEntries = scan.listPartitionEntries();
+
         List<Partition> partitions = new ArrayList<>(partitionEntries.size());
+        Set<Map<String, String>> filterSet =
+                partitionSpecs == null ? null : new HashSet<>(partitionSpecs);
         for (PartitionEntry entry : partitionEntries) {
-            partitions.add(entry.toPartition(computer));
+            Partition partition = entry.toPartition(computer);
+            if (filterSet != null && !filterSet.contains(partition.spec())) {
+                continue;
+            }
+            partitions.add(partition);
         }
         return partitions;
     }
@@ -193,7 +329,9 @@ public class CatalogUtils {
             Function<Path, FileIO> externalFileIO,
             TableMetadata.Loader metadataLoader,
             @Nullable CatalogLockFactory lockFactory,
-            @Nullable CatalogLockContext lockContext)
+            @Nullable CatalogLockContext lockContext,
+            @Nullable CatalogContext catalogContext,
+            boolean isRestCatalog)
             throws Catalog.TableNotExistException {
         if (SYSTEM_DATABASE_NAME.equals(identifier.getDatabaseName())) {
             return CatalogUtils.createGlobalSystemTable(identifier.getTableName(), catalog);
@@ -206,7 +344,21 @@ public class CatalogUtils {
         Function<Path, FileIO> dataFileIO = metadata.isExternal() ? externalFileIO : internalFileIO;
 
         if (options.type() == TableType.FORMAT_TABLE) {
-            return toFormatTable(identifier, schema, dataFileIO);
+            FormatTablePartitionManager partitionManager = null;
+            if (options.partitionedTableInMetastore()) {
+                checkArgument(
+                        isRestCatalog,
+                        "Format table %s asks for catalog-managed partitions with %s=true, which "
+                                + "is only available in a REST catalog.",
+                        identifier.getFullName(),
+                        CoreOptions.METASTORE_PARTITIONED_TABLE.key());
+                validateCatalogManagedFormatTablePartitions(
+                        identifier, schema.options(), metadata.isExternal());
+                partitionManager =
+                        FormatTablePartitionManager.create(
+                                identifier, schema.partitionKeys(), catalog.catalogLoader());
+            }
+            return toFormatTable(identifier, schema, dataFileIO, catalogContext, partitionManager);
         }
 
         if (options.type() == TableType.OBJECT_TABLE) {
@@ -218,17 +370,28 @@ public class CatalogUtils {
         }
 
         if (options.type() == TableType.ICEBERG_TABLE) {
-            return toIcebergTable(identifier, schema, dataFileIO);
+            return toIcebergTable(identifier, schema, dataFileIO, metadata.uuid());
+        }
+
+        Identifier tableIdentifier = identifier;
+        if (identifier.isSystemTable()) {
+            tableIdentifier =
+                    new Identifier(
+                            identifier.getDatabaseName(),
+                            identifier.getTableName(),
+                            identifier.getBranchName());
         }
 
         CatalogEnvironment catalogEnv =
                 new CatalogEnvironment(
-                        identifier,
+                        tableIdentifier,
                         metadata.uuid(),
-                        catalog.catalogLoader(),
-                        lockFactory,
-                        lockContext,
-                        catalog.supportsVersionManagement());
+                        isRestCatalog && metadata.isExternal() ? null : catalog.catalogLoader(),
+                        isRestCatalog ? null : lockFactory,
+                        isRestCatalog ? null : lockContext,
+                        catalogContext,
+                        catalog.supportsVersionManagement(),
+                        catalog.supportsPartitionModification());
         Path path = new Path(schema.options().get(PATH.key()));
         FileStoreTable table =
                 FileStoreTableFactory.create(dataFileIO.apply(path), path, schema, catalogEnv);
@@ -244,25 +407,82 @@ public class CatalogUtils {
             throws Catalog.TableNotExistException {
         switch (tableName.toLowerCase()) {
             case ALL_TABLE_OPTIONS:
-                try {
-                    Map<Identifier, Map<String, String>> allOptions = new HashMap<>();
-                    for (String database : catalog.listDatabases()) {
-                        for (String name : catalog.listTables(database)) {
-                            Identifier identifier = Identifier.create(database, name);
-                            Table table = catalog.getTable(identifier);
-                            allOptions.put(identifier, table.options());
-                        }
-                    }
-                    return new AllTableOptionsTable(allOptions);
-                } catch (Catalog.DatabaseNotExistException | Catalog.TableNotExistException e) {
-                    throw new RuntimeException("Database is deleted while listing", e);
+                List<Table> tables = listAllTables(catalog);
+                Map<Identifier, Map<String, String>> allOptions = new HashMap<>();
+                for (Table table : tables) {
+                    allOptions.put(Identifier.fromString(table.fullName()), table.options());
                 }
+                return new AllTableOptionsTable(allOptions);
+            case ALL_TABLES:
+                return AllTablesTable.fromTables(
+                        toTableAndSnapshots(catalog, listAllTables(catalog)));
+            case ALL_PARTITIONS:
+                return AllPartitionsTable.fromPartitions(
+                        toAllPartitions(catalog, listAllTables(catalog)));
             case CATALOG_OPTIONS:
-                return new CatalogOptionsTable(Options.fromMap(catalog.options()));
+                Options catalogOptions = Options.fromMap(catalog.options());
+                if (!catalogOptions.get(CatalogOptions.CATALOG_OPTIONS_TABLE_ENABLED)) {
+                    throw new Catalog.TableNotExistException(
+                            Identifier.create(SYSTEM_DATABASE_NAME, tableName));
+                }
+                return new CatalogOptionsTable(catalogOptions);
             default:
                 throw new Catalog.TableNotExistException(
                         Identifier.create(SYSTEM_DATABASE_NAME, tableName));
         }
+    }
+
+    private static List<Table> listAllTables(Catalog catalog) {
+        List<Table> tables = new ArrayList<>();
+        for (String database : catalog.listDatabases()) {
+            try {
+                for (String name : catalog.listTables(database)) {
+                    tables.add(catalog.getTable(Identifier.create(database, name)));
+                }
+            } catch (Catalog.DatabaseNotExistException | Catalog.TableNotExistException ignored) {
+            }
+        }
+        return tables;
+    }
+
+    private static List<Pair<Table, TableSnapshot>> toTableAndSnapshots(
+            Catalog catalog, List<Table> tables) {
+        List<Pair<Table, TableSnapshot>> tableAndSnapshots = new ArrayList<>();
+        for (Table table : tables) {
+            TableSnapshot snapshot = null;
+            if (catalog.supportsVersionManagement()) {
+                try {
+                    Optional<TableSnapshot> optional =
+                            catalog.loadSnapshot(Identifier.fromString(table.fullName()));
+                    if (optional.isPresent()) {
+                        snapshot = optional.get();
+                    }
+                } catch (Catalog.TableNotExistException ignored) {
+                } catch (NotImplementedException ignored) {
+                    // does not support supportsVersionManagement for external paimon table
+                }
+            }
+            tableAndSnapshots.add(Pair.of(table, snapshot));
+        }
+        return tableAndSnapshots;
+    }
+
+    private static Map<Identifier, List<Partition>> toAllPartitions(
+            Catalog catalog, List<Table> tables) {
+        Map<Identifier, List<Partition>> allPartitions = new HashMap<>();
+        for (Table table : tables) {
+            if (table.partitionKeys().isEmpty()) {
+                continue;
+            }
+
+            Identifier identifier = Identifier.fromString(table.fullName());
+            try {
+                List<Partition> partitions = catalog.listPartitions(identifier);
+                allPartitions.put(identifier, partitions);
+            } catch (Catalog.TableNotExistException ignored) {
+            }
+        }
+        return allPartitions;
     }
 
     private static Table createSystemTable(Identifier identifier, Table originTable)
@@ -284,7 +504,11 @@ public class CatalogUtils {
     }
 
     private static FormatTable toFormatTable(
-            Identifier identifier, TableSchema schema, Function<Path, FileIO> fileIO) {
+            Identifier identifier,
+            TableSchema schema,
+            Function<Path, FileIO> fileIO,
+            CatalogContext catalogContext,
+            @Nullable FormatTablePartitionManager partitionManager) {
         Map<String, String> options = schema.options();
         FormatTable.Format format =
                 FormatTable.parseFormat(
@@ -301,6 +525,8 @@ public class CatalogUtils {
                 .format(format)
                 .options(options)
                 .comment(schema.comment())
+                .catalogContext(catalogContext)
+                .partitionManager(partitionManager)
                 .build();
     }
 
@@ -312,6 +538,7 @@ public class CatalogUtils {
                 .fileIO(fileIO.apply(new Path(location)))
                 .identifier(identifier)
                 .location(location)
+                .options(options)
                 .comment(schema.comment())
                 .build();
     }
@@ -331,7 +558,10 @@ public class CatalogUtils {
     }
 
     private static IcebergTable toIcebergTable(
-            Identifier identifier, TableSchema schema, Function<Path, FileIO> fileIO) {
+            Identifier identifier,
+            TableSchema schema,
+            Function<Path, FileIO> fileIO,
+            @Nullable String uuid) {
         Map<String, String> options = schema.options();
         String location = options.get(CoreOptions.PATH.key());
         return IcebergTable.builder()
@@ -342,6 +572,7 @@ public class CatalogUtils {
                 .partitionKeys(schema.partitionKeys())
                 .options(options)
                 .comment(schema.comment())
+                .uuid(uuid)
                 .build();
     }
 }

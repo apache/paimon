@@ -193,8 +193,18 @@ public final class GenericRow implements InternalRow, Serializable {
     }
 
     @Override
+    public Blob getBlob(int pos) {
+        return (Blob) this.fields[pos];
+    }
+
+    @Override
     public InternalArray getArray(int pos) {
         return (InternalArray) this.fields[pos];
+    }
+
+    @Override
+    public InternalVector getVector(int pos) {
+        return (InternalVector) this.fields[pos];
     }
 
     @Override

@@ -153,6 +153,8 @@ public interface InternalRow extends DataGetters {
                 return InternalMap.class;
             case ROW:
                 return InternalRow.class;
+            case BLOB:
+                return Blob.class;
             default:
                 throw new IllegalArgumentException("Illegal type: " + type);
         }
@@ -213,6 +215,9 @@ public interface InternalRow extends DataGetters {
             case ARRAY:
                 fieldGetter = row -> row.getArray(fieldPos);
                 break;
+            case VECTOR:
+                fieldGetter = row -> row.getVector(fieldPos);
+                break;
             case MULTISET:
             case MAP:
                 fieldGetter = row -> row.getMap(fieldPos);
@@ -223,6 +228,9 @@ public interface InternalRow extends DataGetters {
                 break;
             case VARIANT:
                 fieldGetter = row -> row.getVariant(fieldPos);
+                break;
+            case BLOB:
+                fieldGetter = row -> row.getBlob(fieldPos);
                 break;
             default:
                 String msg =

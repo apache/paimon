@@ -78,12 +78,6 @@ public class ManifestCommittableSerializerTest {
                             partition, bucket, totalBuckets, dataIncrement, compactIncrement);
             committable.addFileCommittable(commitMessage);
         }
-
-        if (!committable.logOffsets().containsKey(bucket)) {
-            int offset = ID.incrementAndGet();
-            committable.addLogOffset(bucket, offset, false);
-            assertThat(committable.logOffsets().get(bucket)).isEqualTo(offset);
-        }
     }
 
     public static DataIncrement randomNewFilesIncrement() {
@@ -101,7 +95,7 @@ public class ManifestCommittableSerializerTest {
     }
 
     public static DataFileMeta newFile(int name, int level) {
-        return new DataFileMeta(
+        return DataFileMeta.create(
                 String.valueOf(name),
                 0,
                 1,

@@ -23,7 +23,8 @@ import org.apache.paimon.append.MultiTableAppendCompactTask;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.flink.compact.AppendTableCompactBuilder;
+import org.apache.paimon.flink.FlinkConnectorOptions.CompactionBucketDistributionStrategy;
+import org.apache.paimon.flink.compact.AppendTableCompact;
 import org.apache.paimon.flink.sink.BucketsRowChannelComputer;
 import org.apache.paimon.flink.sink.CombinedTableCompactorSink;
 import org.apache.paimon.flink.sink.CompactorSinkBuilder;
@@ -266,10 +267,16 @@ public class CompactDatabaseAction extends ActionBase {
             table = table.copy(dynamicOptions);
         }
 
+        CompactionBucketDistributionStrategy bucketDistributionStrategy =
+                CompactAction.compactionBucketDistributionStrategy(
+                        table, fullCompaction, isStreaming);
         CompactorSourceBuilder sourceBuilder =
                 new CompactorSourceBuilder(fullName, table)
-                        .withPartitionIdleTime(partitionIdleTime);
-        CompactorSinkBuilder sinkBuilder = new CompactorSinkBuilder(table, fullCompaction);
+                        .withPartitionIdleTime(partitionIdleTime)
+                        .withBucketDistributionStrategy(bucketDistributionStrategy);
+        CompactorSinkBuilder sinkBuilder =
+                new CompactorSinkBuilder(table, fullCompaction)
+                        .withBucketDistributionStrategy(bucketDistributionStrategy);
 
         DataStreamSource<RowData> source =
                 sourceBuilder.withEnv(env).withContinuousMode(isStreaming).build();
@@ -278,8 +285,8 @@ public class CompactDatabaseAction extends ActionBase {
 
     private void buildForUnawareBucketCompaction(
             StreamExecutionEnvironment env, String fullName, FileStoreTable table) {
-        AppendTableCompactBuilder unawareBucketCompactionTopoBuilder =
-                new AppendTableCompactBuilder(env, fullName, table);
+        AppendTableCompact unawareBucketCompactionTopoBuilder =
+                new AppendTableCompact(env, fullName, table);
 
         unawareBucketCompactionTopoBuilder.withContinuousMode(isStreaming);
         unawareBucketCompactionTopoBuilder.withPartitionIdleTime(partitionIdleTime);

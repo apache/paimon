@@ -19,7 +19,6 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
@@ -29,11 +28,8 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.utils.FileStorePathFactory;
-import org.apache.paimon.utils.Pair;
 
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
 
@@ -51,7 +47,7 @@ public class SnapshotDeletion extends FileDeletionBase<Snapshot> {
             StatsFileHandler statsFileHandler,
             boolean produceChangelog,
             boolean cleanEmptyDirectories,
-            int deleteFileThreadNum) {
+            int fileOperationThreadNum) {
         super(
                 fileIO,
                 pathFactory,
@@ -60,41 +56,44 @@ public class SnapshotDeletion extends FileDeletionBase<Snapshot> {
                 indexFileHandler,
                 statsFileHandler,
                 cleanEmptyDirectories,
-                deleteFileThreadNum);
+                fileOperationThreadNum);
         this.produceChangelog = produceChangelog;
     }
 
     @Override
-    public void cleanUnusedDataFiles(Snapshot snapshot, Predicate<ExpireFileEntry> skipper) {
+    public void cleanDeletedDataFiles(Snapshot snapshot, Predicate<ExpireFileEntry> skipper) {
+        cleanDataFiles(planDeletedInDeltaManifest(snapshot, skipper));
+    }
+
+    @Override
+    public List<Path> planDeletedInDeltaManifest(
+            Snapshot snapshot, Predicate<ExpireFileEntry> skipper) {
+        Predicate<ExpireFileEntry> enriched = skipper;
         if (changelogDecoupled && !produceChangelog) {
             // Skip clean the 'APPEND' data files.If we do not have the file source information
             // eg: the old version table file, we just skip clean this here, let it done by
             // ExpireChangelogImpl
-            Predicate<ExpireFileEntry> enriched =
+            enriched =
                     manifestEntry ->
                             skipper.test(manifestEntry)
                                     || (manifestEntry.fileSource().orElse(FileSource.APPEND)
                                             == FileSource.APPEND);
-            cleanUnusedDataFiles(snapshot.deltaManifestList(), enriched);
-        } else {
-            cleanUnusedDataFiles(snapshot.deltaManifestList(), skipper);
         }
+        return super.planDeletedInDeltaManifest(snapshot, enriched);
     }
 
     @Override
     public void cleanUnusedManifests(Snapshot snapshot, Set<String> skippingSet) {
         // delay clean the base and delta manifest lists when changelog decoupled enabled
-        cleanUnusedManifests(
+        executeAll(planManifestsCleaner(snapshot, skippingSet));
+    }
+
+    public List<Runnable> planManifestsCleaner(Snapshot snapshot, Set<String> skippingSet) {
+        // delay clean the base and delta manifest lists when changelog decoupled enabled
+        return planManifestsCleaner(
                 snapshot,
                 skippingSet,
                 !changelogDecoupled || produceChangelog,
                 !changelogDecoupled);
-    }
-
-    @VisibleForTesting
-    void cleanUnusedDataFile(List<ExpireFileEntry> dataFileLog) {
-        Map<Path, Pair<ExpireFileEntry, List<Path>>> dataFileToDelete = new HashMap<>();
-        getDataFileToDelete(dataFileToDelete, dataFileLog);
-        doCleanUnusedDataFile(dataFileToDelete, f -> false);
     }
 }

@@ -46,6 +46,9 @@ public class ContinuousFileStoreSource extends FlinkSource {
     protected final Map<String, String> options;
     protected final boolean unordered;
 
+    /** refer to org.apache.flink.configuration.PipelineOptions.MAX_PARALLELISM. */
+    protected static final int MAX_PARALLELISM_OF_SOURCE = 32768;
+
     public ContinuousFileStoreSource(
             ReadBuilder readBuilder, Map<String, String> options, @Nullable Long limit) {
         this(readBuilder, options, limit, false, null);
@@ -57,7 +60,12 @@ public class ContinuousFileStoreSource extends FlinkSource {
             @Nullable Long limit,
             boolean unordered,
             @Nullable NestedProjectedRowData rowData) {
-        super(readBuilder, limit, rowData);
+        super(
+                readBuilder,
+                limit,
+                rowData,
+                Boolean.parseBoolean(
+                        options.getOrDefault(CoreOptions.BLOB_AS_DESCRIPTOR.key(), "false")));
         this.options = options;
         this.unordered = unordered;
     }
@@ -103,6 +111,9 @@ public class ContinuousFileStoreSource extends FlinkSource {
             @Nullable Long nextSnapshotId,
             StreamTableScan scan) {
         Options options = Options.fromMap(this.options);
+        int bucketNum = options.get(CoreOptions.BUCKET);
+        int sourceParallelismUpperBound = bucketNum < 0 ? MAX_PARALLELISM_OF_SOURCE : bucketNum;
+
         return new ContinuousFileSplitEnumerator(
                 context,
                 splits,
@@ -112,6 +123,7 @@ public class ContinuousFileStoreSource extends FlinkSource {
                 unordered,
                 options.get(CoreOptions.SCAN_MAX_SPLITS_PER_TASK),
                 options.get(FlinkConnectorOptions.READ_SHUFFLE_BUCKET_WITH_PARTITION),
-                options.get(FlinkConnectorOptions.SCAN_MAX_SNAPSHOT_COUNT));
+                options.get(FlinkConnectorOptions.SCAN_MAX_SNAPSHOT_COUNT),
+                sourceParallelismUpperBound);
     }
 }

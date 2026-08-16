@@ -102,7 +102,7 @@ public abstract class ProcedureBase implements Procedure, Factory {
         }
     }
 
-    protected Map<String, String> optionalConfigMap(String configStr) {
+    protected static Map<String, String> optionalConfigMap(String configStr) {
         if (StringUtils.isNullOrWhitespaceOnly(configStr)) {
             return Collections.emptyMap();
         }

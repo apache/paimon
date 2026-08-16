@@ -27,6 +27,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataField;
@@ -47,6 +48,7 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VectorType;
 
 import javax.annotation.Nullable;
 
@@ -68,7 +70,7 @@ public class LanceFileFormat extends FileFormat {
 
     @Override
     public FormatReaderFactory createReaderFactory(
-            RowType projectedRowType, @Nullable List<Predicate> list) {
+            RowType dataSchemaRowType, RowType projectedRowType, @Nullable List<Predicate> list) {
         return new LanceReaderFactory(projectedRowType, formatContext.readBatchSize());
     }
 
@@ -178,17 +180,29 @@ public class LanceFileFormat extends FileFormat {
 
         @Override
         public Void visit(VariantType variantType) {
-            return null;
+            throw new UnsupportedOperationException(
+                    "Lance file format does not support type VARIANT");
+        }
+
+        @Override
+        public Void visit(BlobType blobType) {
+            throw new UnsupportedOperationException("Lance file format does not support type BLOB");
         }
 
         @Override
         public Void visit(ArrayType arrayType) {
+            return arrayType.getElementType().accept(this);
+        }
+
+        @Override
+        public Void visit(VectorType vectorType) {
             return null;
         }
 
         @Override
         public Void visit(MultisetType multisetType) {
-            return null;
+            throw new UnsupportedOperationException(
+                    "Lance file format does not support type MULTISET");
         }
 
         @Override

@@ -38,8 +38,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.apache.paimon.utils.Preconditions.checkState;
-
 /** An external buffer for storing rows, it will spill the data to disk when the memory is full. */
 public class ExternalBuffer implements RowBuffer {
 
@@ -58,9 +56,7 @@ public class ExternalBuffer implements RowBuffer {
     private final List<ChannelWithMeta> spilledChannelIDs;
     private int numRows;
 
-    private boolean addCompleted;
-
-    ExternalBuffer(
+    public ExternalBuffer(
             IOManager ioManager,
             MemorySegmentPool pool,
             AbstractRowDataSerializer<?> serializer,
@@ -83,8 +79,6 @@ public class ExternalBuffer implements RowBuffer {
 
         this.numRows = 0;
 
-        this.addCompleted = false;
-
         //noinspection unchecked
         this.inMemoryBuffer =
                 new InMemoryBuffer(pool, (AbstractRowDataSerializer<InternalRow>) serializer);
@@ -95,7 +89,6 @@ public class ExternalBuffer implements RowBuffer {
         clearChannels();
         inMemoryBuffer.reset();
         numRows = 0;
-        addCompleted = false;
     }
 
     @Override
@@ -109,7 +102,8 @@ public class ExternalBuffer implements RowBuffer {
         }
     }
 
-    private long getDiskUsage() {
+    @VisibleForTesting
+    public long getDiskUsage() {
         long bytes = 0;
 
         for (ChannelWithMeta spillChannelID : spilledChannelIDs) {
@@ -120,7 +114,6 @@ public class ExternalBuffer implements RowBuffer {
 
     @Override
     public boolean put(InternalRow row) throws IOException {
-        checkState(!addCompleted, "This buffer has add completed.");
         if (!inMemoryBuffer.put(row)) {
             // Check if record is too big.
             if (inMemoryBuffer.getCurrentDataBufferOffset() == 0) {
@@ -137,13 +130,7 @@ public class ExternalBuffer implements RowBuffer {
     }
 
     @Override
-    public void complete() {
-        addCompleted = true;
-    }
-
-    @Override
     public RowBufferIterator newIterator() {
-        checkState(addCompleted, "This buffer has not add completed.");
         return new BufferIterator();
     }
 
@@ -175,11 +162,11 @@ public class ExternalBuffer implements RowBuffer {
                                 : segment.size();
                 channelWriterOutputView.write(segment, 0, bufferSize);
             }
+            channelWriterOutputView.close();
             LOG.info(
                     "here spill the reset buffer data with {} records {} bytes",
                     inMemoryBuffer.size(),
-                    channelWriterOutputView.getNumBytes());
-            channelWriterOutputView.close();
+                    channelWriterOutputView.getWriteBytes());
         } catch (IOException e) {
             channelWriterOutputView.closeAndDelete();
             throw e;
@@ -189,7 +176,7 @@ public class ExternalBuffer implements RowBuffer {
                 new ChannelWithMeta(
                         channel,
                         inMemoryBuffer.getNumRecordBuffers(),
-                        channelWriterOutputView.getNumBytes()));
+                        channelWriterOutputView.getWriteBytes()));
 
         inMemoryBuffer.reset();
     }

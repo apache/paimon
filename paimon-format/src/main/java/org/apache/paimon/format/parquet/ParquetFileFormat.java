@@ -24,30 +24,52 @@ import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleStatsExtractor;
+import org.apache.paimon.format.SupportsFieldMetadata;
 import org.apache.paimon.format.parquet.writer.RowDataParquetBuilder;
+import org.apache.paimon.format.shredding.ShreddingWritePlanFactory;
+import org.apache.paimon.format.shredding.ShreddingWritePlanType;
+import org.apache.paimon.format.shredding.ShreddingWritePlanWriterFactories;
+import org.apache.paimon.format.shredding.ShreddingWritePlanWriterFactory;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 
-import org.apache.parquet.filter2.predicate.ParquetFilters;
+import org.apache.parquet.ParquetReadOptions;
+import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.ParquetOutputFormat;
 
+import javax.annotation.Nullable;
+
+import java.io.IOException;
+import java.util.Collections;
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.apache.paimon.format.parquet.ParquetFileFormatFactory.IDENTIFIER;
 
 /** Parquet {@link FileFormat}. */
-public class ParquetFileFormat extends FileFormat {
+public class ParquetFileFormat extends FileFormat implements SupportsFieldMetadata {
 
+    private static final Set<ShreddingWritePlanType> SUPPORTED_SHREDDING_WRITE_PLANS =
+            Collections.unmodifiableSet(
+                    EnumSet.of(
+                            ShreddingWritePlanType.VARIANT,
+                            ShreddingWritePlanType.MAP_SHARED_SHREDDING));
+
+    private final FormatContext formatContext;
     private final Options options;
     private final int readBatchSize;
 
     public ParquetFileFormat(FormatContext formatContext) {
         super(IDENTIFIER);
 
+        this.formatContext = formatContext;
         this.options = getParquetConfiguration(formatContext);
         this.readBatchSize = formatContext.readBatchSize();
     }
@@ -59,14 +81,42 @@ public class ParquetFileFormat extends FileFormat {
 
     @Override
     public FormatReaderFactory createReaderFactory(
-            RowType projectedRowType, List<Predicate> filters) {
-        return new ParquetReaderFactory(
-                options, projectedRowType, readBatchSize, ParquetFilters.convert(filters));
+            RowType dataSchemaRowType,
+            RowType projectedRowType,
+            @Nullable List<Predicate> filters) {
+        return new ParquetReaderFactory(options, projectedRowType, readBatchSize, filters);
+    }
+
+    @Override
+    public Map<String, Map<String, String>> readFieldMetadata(FormatReaderFactory.Context context)
+            throws IOException {
+        ParquetReadOptions readOptions =
+                ParquetUtil.getParquetReadOptionsBuilder(options)
+                        .withRange(0, context.fileSize())
+                        .build();
+        ParquetFileReader reader =
+                new ParquetFileReader(
+                        ParquetInputFile.fromPath(
+                                context.fileIO(), context.filePath(), context.fileSize()),
+                        readOptions,
+                        context.selection());
+        try {
+            return ParquetReaderFactory.readFieldMetadata(reader);
+        } finally {
+            reader.close();
+        }
     }
 
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
-        return new ParquetWriterFactory(new RowDataParquetBuilder(type, options));
+        FormatWriterFactory rawFactory =
+                new ParquetWriterFactory(new RowDataParquetBuilder(type, options));
+        ShreddingWritePlanFactory writePlanFactory =
+                ShreddingWritePlanWriterFactories.createWritePlanFactory(
+                        type, formatContext.options(), SUPPORTED_SHREDDING_WRITE_PLANS, IDENTIFIER);
+        return writePlanFactory == null
+                ? rawFactory
+                : new ShreddingWritePlanWriterFactory(rawFactory, writePlanFactory);
     }
 
     @Override
@@ -77,7 +127,7 @@ public class ParquetFileFormat extends FileFormat {
     @Override
     public Optional<SimpleStatsExtractor> createStatsExtractor(
             RowType type, SimpleColStatsCollector.Factory[] statsCollectors) {
-        return Optional.of(new ParquetSimpleStatsExtractor(type, statsCollectors));
+        return Optional.of(new ParquetSimpleStatsExtractor(options, type, statsCollectors));
     }
 
     private Options getParquetConfiguration(FormatContext context) {
@@ -93,6 +143,10 @@ public class ParquetFileFormat extends FileFormat {
             parquetOptions.set(
                     ParquetOutputFormat.BLOCK_SIZE, String.valueOf(blockSize.getBytes()));
         }
+
+        // case-sensitive is not a parquet.* key, so it is dropped by getIdentifierPrefixOptions;
+        // carry the resolved value onto the reader options bus for ParquetReaderFactory to read.
+        parquetOptions.set(CatalogOptions.CASE_SENSITIVE, context.caseSensitive());
 
         return parquetOptions;
     }

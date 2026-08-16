@@ -66,7 +66,7 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
 
     @Override
     public DataFileMeta fromRow(InternalRow row) {
-        return new DataFileMeta(
+        return DataFileMeta.create(
                 row.getString(0).toString(),
                 row.getLong(1),
                 row.getLong(2),

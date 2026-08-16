@@ -62,6 +62,8 @@ public class KafkaSyncDatabaseActionFactory
                         + "[--including_tables <table_name|name_regular_expr>] \\\n"
                         + "[--excluding_tables <table_name|name_regular_expr>] \\\n"
                         + "[--type_mapping <option1,option2...>] \\\n"
+                        + "[--metadata_column <metadata_column>] \\\n"
+                        + "[--metadata_column_prefix <metadata_column_prefix>] \\\n"
                         + "[--kafka_conf <kafka_source_conf> [--kafka_conf <kafka_source_conf> ...]] \\\n"
                         + "[--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]] \\\n"
                         + "[--table_conf <paimon_table_sink_conf> [--table_conf <paimon_table_sink_conf> ...]]");

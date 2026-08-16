@@ -25,11 +25,16 @@ import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleStatsExtractor;
+import org.apache.paimon.format.SupportsFieldMetadata;
 import org.apache.paimon.format.orc.filter.OrcFilters;
 import org.apache.paimon.format.orc.filter.OrcPredicateFunctionVisitor;
 import org.apache.paimon.format.orc.filter.OrcSimpleStatsExtractor;
 import org.apache.paimon.format.orc.writer.RowDataVectorizer;
 import org.apache.paimon.format.orc.writer.Vectorizer;
+import org.apache.paimon.format.shredding.ShreddingWritePlanFactory;
+import org.apache.paimon.format.shredding.ShreddingWritePlanType;
+import org.apache.paimon.format.shredding.ShreddingWritePlanWriterFactories;
+import org.apache.paimon.format.shredding.ShreddingWritePlanWriterFactory;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
@@ -49,39 +54,51 @@ import org.apache.orc.TypeDescription;
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
+import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.format.OrcOptions.ORC_TIMESTAMP_LTZ_LEGACY_TYPE;
-import static org.apache.paimon.types.DataTypeChecks.getFieldTypes;
 
 /** Orc {@link FileFormat}. */
 @ThreadSafe
-public class OrcFileFormat extends FileFormat {
+public class OrcFileFormat extends FileFormat implements SupportsFieldMetadata {
 
     public static final String IDENTIFIER = "orc";
 
+    private static final Set<ShreddingWritePlanType> SUPPORTED_SHREDDING_WRITE_PLANS =
+            Collections.singleton(ShreddingWritePlanType.MAP_SHARED_SHREDDING);
+
     private final Properties orcProperties;
+    private final Options options;
     private final org.apache.hadoop.conf.Configuration readerConf;
     private final org.apache.hadoop.conf.Configuration writerConf;
     private final int readBatchSize;
     private final int writeBatchSize;
+    private final MemorySize writeBatchMemory;
     private final boolean deletionVectorsEnabled;
     private final boolean legacyTimestampLtzType;
 
     public OrcFileFormat(FormatContext formatContext) {
         super(IDENTIFIER);
+        this.options = formatContext.options();
         this.orcProperties = getOrcProperties(formatContext.options(), formatContext);
         this.readerConf = new org.apache.hadoop.conf.Configuration(false);
         this.orcProperties.forEach((k, v) -> readerConf.set(k.toString(), v.toString()));
+        OrcConf.IS_SCHEMA_EVOLUTION_CASE_SENSITIVE.setBoolean(
+                readerConf, formatContext.caseSensitive());
         this.writerConf = new org.apache.hadoop.conf.Configuration(false);
         this.orcProperties.forEach((k, v) -> writerConf.set(k.toString(), v.toString()));
         this.readBatchSize = formatContext.readBatchSize();
         this.writeBatchSize = formatContext.writeBatchSize();
+        this.writeBatchMemory = formatContext.writeBatchMemory();
         this.deletionVectorsEnabled = formatContext.options().get(DELETION_VECTORS_ENABLED);
         this.legacyTimestampLtzType = formatContext.options().get(ORC_TIMESTAMP_LTZ_LEGACY_TYPE);
     }
@@ -105,7 +122,9 @@ public class OrcFileFormat extends FileFormat {
 
     @Override
     public FormatReaderFactory createReaderFactory(
-            RowType projectedRowType, @Nullable List<Predicate> filters) {
+            RowType dataSchemaRowType,
+            RowType projectedRowType,
+            @Nullable List<Predicate> filters) {
         List<OrcFilters.Predicate> orcPredicates = new ArrayList<>();
         if (filters != null) {
             for (Predicate pred : filters) {
@@ -122,6 +141,19 @@ public class OrcFileFormat extends FileFormat {
                 readBatchSize,
                 deletionVectorsEnabled,
                 legacyTimestampLtzType);
+    }
+
+    @Override
+    public Map<String, Map<String, String>> readFieldMetadata(FormatReaderFactory.Context context)
+            throws IOException {
+        org.apache.orc.Reader reader =
+                OrcReaderFactory.createReader(
+                        readerConf, context.fileIO(), context.filePath(), context.selection());
+        try {
+            return OrcReaderFactory.readFieldMetadata(reader);
+        } finally {
+            reader.close();
+        }
     }
 
     @Override
@@ -142,14 +174,27 @@ public class OrcFileFormat extends FileFormat {
      */
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
-        DataType refinedType = refineDataType(type);
-        DataType[] orcTypes = getFieldTypes(refinedType).toArray(new DataType[0]);
+        ShreddingWritePlanFactory writePlanFactory =
+                ShreddingWritePlanWriterFactories.createWritePlanFactory(
+                        type, options, SUPPORTED_SHREDDING_WRITE_PLANS, IDENTIFIER);
 
-        TypeDescription typeDescription = OrcTypeUtil.convertToOrcSchema((RowType) refinedType);
+        RowType refinedType = (RowType) refineDataType(type);
+        TypeDescription typeDescription = OrcTypeUtil.convertToOrcSchema(refinedType);
         Vectorizer<InternalRow> vectorizer =
-                new RowDataVectorizer(typeDescription, orcTypes, legacyTimestampLtzType);
+                new RowDataVectorizer(
+                        typeDescription, refinedType.getFields(), legacyTimestampLtzType);
 
-        return new OrcWriterFactory(vectorizer, orcProperties, writerConf, writeBatchSize);
+        FormatWriterFactory rawFactory =
+                new OrcWriterFactory(
+                        vectorizer,
+                        orcProperties,
+                        writerConf,
+                        writeBatchSize,
+                        writeBatchMemory,
+                        legacyTimestampLtzType);
+        return writePlanFactory == null
+                ? rawFactory
+                : new ShreddingWritePlanWriterFactory(rawFactory, writePlanFactory);
     }
 
     private Properties getOrcProperties(Options options, FormatContext formatContext) {

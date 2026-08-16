@@ -1,34 +1,35 @@
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#    http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing,
-#  software distributed under the License is distributed on an
-#  "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-#  KIND, either express or implied.  See the License for the
-#  specific language governing permissions and limitations
-#  under the License.
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Dict, Optional
+from typing import Optional
 from urllib.parse import urljoin
 
 import requests
 from requests.adapters import HTTPAdapter
 from requests.exceptions import RequestException
 
-from pypaimon.common.config import CatalogOptions
-from pypaimon.common.rest_json import JSON, json_field
-
-from .client import ExponentialRetry
+from pypaimon.api.client import ExponentialRetry
+from pypaimon.common.options import Options
+from pypaimon.common.options.config import CatalogOptions
+from pypaimon.common.json_util import JSON, json_field
 
 
 @dataclass
@@ -60,8 +61,8 @@ class DLFToken:
             self.expiration_at_millis = self.parse_expiration_to_millis(expiration)
 
     @classmethod
-    def from_options(cls, options: Dict[str, str]) -> Optional['DLFToken']:
-        from pypaimon.common.config import CatalogOptions
+    def from_options(cls, options: Options) -> Optional['DLFToken']:
+        from pypaimon.common.options.config import CatalogOptions
         if (options.get(CatalogOptions.DLF_ACCESS_KEY_ID) is None
                 or options.get(CatalogOptions.DLF_ACCESS_KEY_SECRET) is None):
             return None
@@ -82,6 +83,49 @@ class DLFTokenLoader(ABC):
     @abstractmethod
     def description(self) -> str:
         pass
+
+
+class DLFLocalFileTokenLoader(DLFTokenLoader):
+    """Load temporary DLF credentials from a local JSON file."""
+
+    DEFAULT_MAX_RETRIES = 5
+
+    def __init__(self, token_file_path: str):
+        self.token_file_path = token_file_path
+
+    def load_token(self) -> DLFToken:
+        return self.read_token(self.token_file_path)
+
+    def description(self) -> str:
+        return self.token_file_path
+
+    @staticmethod
+    def read_token(token_file_path: str,
+                   max_retries: int = DEFAULT_MAX_RETRIES) -> DLFToken:
+        retry = 1
+        last_exception = None
+        while retry <= max_retries:
+            try:
+                with open(token_file_path, "r", encoding="utf-8") as token_file:
+                    token_json = token_file.read()
+            except Exception as e:
+                last_exception = RuntimeError(
+                    "Failed to read token file: {}".format(token_file_path)
+                )
+                last_exception.__cause__ = e
+            else:
+                try:
+                    return JSON.from_json(token_json, DLFToken)
+                except Exception:
+                    # The file contains AK/SK/STS. Do not retain the JSON
+                    # parser exception because it can include source content.
+                    last_exception = RuntimeError("Failed to parse token file.")
+
+            if retry < max_retries:
+                time.sleep(retry)
+            retry += 1
+
+        raise last_exception
 
 
 class HTTPClient:
@@ -153,7 +197,7 @@ class DLFECSTokenLoader(DLFTokenLoader):
             return self._get_token(token_url)
 
         except Exception as e:
-            raise RuntimeError(f"Token loading failed: {e}") from e
+            raise RuntimeError("Token loading failed: {}".format(e)) from e
 
     def description(self) -> str:
         return self.ecs_metadata_url
@@ -162,7 +206,7 @@ class DLFECSTokenLoader(DLFTokenLoader):
         try:
             return self._get_response_body(url)
         except Exception as e:
-            raise RuntimeError(f"Get role failed, error: {e}") from e
+            raise RuntimeError("Get role failed, error: {}".format(e)) from e
 
     def _get_token(self, url: str) -> DLFToken:
         try:
@@ -170,9 +214,9 @@ class DLFECSTokenLoader(DLFTokenLoader):
             return JSON.from_json(token_json, DLFToken)
         except OSError as e:
             # Python equivalent of UncheckedIOException
-            raise OSError(f"IO error while getting token: {e}") from e
+            raise OSError("IO error while getting token: {}".format(e)) from e
         except Exception as e:
-            raise RuntimeError(f"Get token failed, error: {e}") from e
+            raise RuntimeError("Get token failed, error: {}".format(e)) from e
 
     def _get_response_body(self, url: str) -> str:
         try:
@@ -183,7 +227,9 @@ class DLFECSTokenLoader(DLFTokenLoader):
                 raise RuntimeError("Get response failed, response is None")
 
             if not response.ok:
-                raise RuntimeError(f"Get response failed, response: {response.status_code} {response.reason}")
+                raise RuntimeError("Get response failed, response: {} {}".format(
+                    response.status_code, response.reason
+                ))
 
             response_body = response.text
             if response_body is None:
@@ -194,9 +240,9 @@ class DLFECSTokenLoader(DLFTokenLoader):
             # Re-raise RuntimeError as-is
             raise
         except RequestException as e:
-            raise RuntimeError(f"Request failed: {e}") from e
+            raise RuntimeError("Request failed: {}".format(e)) from e
         except Exception as e:
-            raise RuntimeError(f"Get response failed, error: {e}") from e
+            raise RuntimeError("Get response failed, error: {}".format(e)) from e
 
 
 # Factory and utility functions
@@ -204,8 +250,8 @@ class DLFTokenLoaderFactory:
     """Factory for creating DLF token loaders"""
 
     @staticmethod
-    def create_token_loader(options: Dict[str, str]) -> Optional['DLFTokenLoader']:
-        """Create ECS token loader"""
+    def create_token_loader(options: Options) -> Optional['DLFTokenLoader']:
+        """Create the configured token loader."""
         loader = options.get(CatalogOptions.DLF_TOKEN_LOADER)
         if loader == 'ecs':
             ecs_metadata_url = options.get(
@@ -214,4 +260,13 @@ class DLFTokenLoaderFactory:
             )
             role_name = options.get(CatalogOptions.DLF_TOKEN_ECS_ROLE_NAME)
             return DLFECSTokenLoader(ecs_metadata_url, role_name)
+        if loader == 'local_file':
+            return DLFLocalFileTokenLoader(
+                options.get(CatalogOptions.DLF_TOKEN_PATH)
+            )
+        if loader is not None:
+            raise ValueError("Unknown DLF token loader: {}".format(loader))
+        token_path = options.get(CatalogOptions.DLF_TOKEN_PATH)
+        if token_path is not None:
+            return DLFLocalFileTokenLoader(token_path)
         return None

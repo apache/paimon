@@ -169,10 +169,9 @@ public class TestCommitThread extends Thread {
         runWithRetry(
                 committable,
                 () ->
-                        commit.overwrite(
+                        commit.overwritePartition(
                                 TestKeyValueGenerator.toPartitionMap(partition, MULTI_PARTITIONED),
-                                committable,
-                                Collections.emptyMap()));
+                                committable));
     }
 
     private void doFinalCompact() {

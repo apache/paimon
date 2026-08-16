@@ -22,6 +22,7 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FunctionVisitor;
+import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.types.DataType;
 
 import org.apache.hadoop.hive.ql.io.sarg.PredicateLeaf;
@@ -60,6 +61,13 @@ public class OrcPredicateFunctionVisitor
     }
 
     @Override
+    public Optional<OrcFilters.Predicate> visitIsNaN(FieldRef fieldRef) {
+        // ORC SearchArgument has no isNaN leaf, so skip push-down and let the engine
+        // evaluate the filter (consistent with the Parquet path).
+        return Optional.empty();
+    }
+
+    @Override
     public Optional<OrcFilters.Predicate> visitStartsWith(FieldRef fieldRef, Object literal) {
         return Optional.empty();
     }
@@ -71,6 +79,11 @@ public class OrcPredicateFunctionVisitor
 
     @Override
     public Optional<OrcFilters.Predicate> visitContains(FieldRef fieldRef, Object literal) {
+        return Optional.empty();
+    }
+
+    @Override
+    public Optional<OrcFilters.Predicate> visitLike(FieldRef fieldRef, Object literal) {
         return Optional.empty();
     }
 
@@ -217,6 +230,7 @@ public class OrcPredicateFunctionVisitor
             case SMALLINT:
             case INTEGER:
             case BIGINT:
+            case TIME_WITHOUT_TIME_ZONE:
                 return PredicateLeaf.Type.LONG;
             case FLOAT:
             case DOUBLE:
@@ -236,6 +250,11 @@ public class OrcPredicateFunctionVisitor
             default:
                 return null;
         }
+    }
+
+    @Override
+    public Optional<OrcFilters.Predicate> visitNonFieldLeaf(LeafPredicate predicate) {
+        return Optional.empty();
     }
 
     /**

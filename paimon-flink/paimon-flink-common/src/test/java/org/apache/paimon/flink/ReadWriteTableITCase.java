@@ -237,6 +237,17 @@ public class ReadWriteTableITCase extends AbstractTestBase {
         checkExternalPathTestResult(options, externalPath1.toString());
     }
 
+    @Test
+    public void
+            testBatchReadWriteWithPartitionedRecordsWithPkWithExternalPathEntropyInjectStrategy()
+                    throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(), "file://" + externalPath1.toString());
+        options.put(CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY.key(), "entropy-inject");
+        checkExternalPathTestResult(options, externalPath1.toString());
+    }
+
     public void checkExternalPathTestResult(Map<String, String> options, String externalPath)
             throws Exception {
         List<Row> initialRecords =
@@ -1916,8 +1927,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                 new FlinkTableSink(
                         context.getObjectIdentifier(),
                         new FlinkTableFactory().buildPaimonTable(context),
-                        context,
-                        null);
+                        context);
         assertThat(tableSink).isInstanceOf(FlinkTableSink.class);
 
         // 2. get sink provider

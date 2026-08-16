@@ -1,5 +1,4 @@
 # Licensed to the Apache Software Foundation (ASF) under one
-# Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
 # regarding copyright ownership.  The ASF licenses this file
@@ -7,13 +6,14 @@
 # "License"); you may not use this file except in compliance
 # with the License.  You may obtain a copy of the License at
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 import shutil
 import tempfile
@@ -23,16 +23,13 @@ from pathlib import Path
 
 import pandas
 
-from pypaimon.api import ConfigResponse
+from pypaimon import PaimonVirtualFileSystem
+from pypaimon.api.api_response import ConfigResponse
 from pypaimon.api.auth import BearTokenAuthProvider
-from pypaimon.catalog.table_metadata import TableMetadata
-from pypaimon.pvfs import PaimonVirtualFileSystem
-from pypaimon.schema.data_types import AtomicType, DataField
-from pypaimon.schema.table_schema import TableSchema
-from pypaimon.tests.api_test import RESTCatalogServer
+from pypaimon.tests.rest.api_test import RESTCatalogServer
 
 
-class PVFSTestCase(unittest.TestCase):
+class PVFSTest(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp(prefix="unittest_")
@@ -67,17 +64,6 @@ class PVFSTestCase(unittest.TestCase):
         self.test_databases = {
             self.database: self.server.mock_database(self.database, {"k1": "v1", "k2": "v2"}),
         }
-        data_fields = [
-            DataField(0, "id", AtomicType('INT'), 'id'),
-            DataField(1, "name", AtomicType('STRING'), 'name')
-        ]
-        schema = TableSchema(TableSchema.CURRENT_VERSION, len(data_fields), data_fields, len(data_fields),
-                             [], [], {}, "")
-        self.server.database_store.update(self.test_databases)
-        self.test_tables = {
-            f"{self.database}.{self.table}": TableMetadata(uuid=str(uuid.uuid4()), is_external=True, schema=schema),
-        }
-        self.server.table_metadata_store.update(self.test_tables)
 
     def tearDown(self):
         if self.temp_path.exists():
@@ -165,7 +151,8 @@ class PVFSTestCase(unittest.TestCase):
         self.assertEqual(table_virtual_path, self.pvfs.info(table_virtual_path).get('name'))
         self.assertEqual(True, self.pvfs.exists(database_virtual_path))
         user_dirs = self.pvfs.ls(f"pvfs://{self.catalog}/{self.database}/{self.table}", detail=False)
-        self.assertSetEqual(set(user_dirs), {f'pvfs://{self.catalog}/{self.database}/{self.table}/{data_file_name}'})
+        self.assertSetEqual(set(user_dirs), {f'pvfs://{self.catalog}/{self.database}/{self.table}/{data_file_name}',
+                                             f'pvfs://{self.catalog}/{self.database}/{self.table}/schema'})
 
         data_file_name = 'data.txt'
         data_file_path = f'pvfs://{self.catalog}/{self.database}/{self.table}/{data_file_name}'
@@ -212,3 +199,47 @@ class PVFSTestCase(unittest.TestCase):
         self.assertTrue(self.pvfs.created(table_data_new_virtual_path) is not None)
         self.assertTrue(self.pvfs.modified(table_data_new_virtual_path) is not None)
         self.assertEqual('Hello World', self.pvfs.cat_file(date_file_new_virtual_path).decode('utf-8'))
+
+    def test_path_traversal_rejected_in_extract(self):
+        """Paths containing '..' components must be rejected at parse time."""
+        traversal_paths = [
+            f'pvfs://{self.catalog}/{self.database}/{self.table}/../other_table/secret.parquet',
+            f'pvfs://{self.catalog}/{self.database}/{self.table}/../../other_db/t/data',
+            f'pvfs://{self.catalog}/{self.database}/{self.table}/../../../etc/passwd',
+            f'pvfs://{self.catalog}/../{self.database}/{self.table}',
+        ]
+        for path in traversal_paths:
+            with self.assertRaises(ValueError, msg=f"Should reject: {path}"):
+                self.pvfs._extract_pvfs_identifier(path)
+
+    def test_path_traversal_rejected_in_get_actual_path(self):
+        """Even if '..' reaches get_actual_path, boundary check must block it."""
+        from pypaimon.filesystem.pvfs import PVFSTableIdentifier
+        identifier = PVFSTableIdentifier(
+            endpoint="http://localhost",
+            catalog="cat",
+            database="db",
+            table="tbl",
+            sub_path="../../other_table/secret.parquet"
+        )
+        with self.assertRaises(ValueError):
+            identifier.get_actual_path("/warehouse/cat/db/tbl")
+
+    def test_null_byte_rejected(self):
+        """Null bytes in path components must be rejected."""
+        path = f'pvfs://{self.catalog}/{self.database}/{self.table}/file\x00.parquet'
+        with self.assertRaises(ValueError):
+            self.pvfs._extract_pvfs_identifier(path)
+
+    def test_legitimate_subpaths_allowed(self):
+        """Normal sub-paths without traversal must still work."""
+        from pypaimon.filesystem.pvfs import PVFSTableIdentifier
+        identifier = PVFSTableIdentifier(
+            endpoint="http://localhost",
+            catalog="cat",
+            database="db",
+            table="tbl",
+            sub_path="partition=1/bucket-0/data.parquet"
+        )
+        result = identifier.get_actual_path("/warehouse/cat/db/tbl")
+        self.assertEqual(result, "/warehouse/cat/db/tbl/partition=1/bucket-0/data.parquet")

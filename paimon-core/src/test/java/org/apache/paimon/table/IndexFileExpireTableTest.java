@@ -52,7 +52,7 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
         return options;
     }
 
-    private Pair<GenericRow, Integer> createRow(int partition, int bucket, int key, int value) {
+    protected Pair<GenericRow, Integer> createRow(int partition, int bucket, int key, int value) {
         return Pair.of(GenericRow.of(partition, key, value), bucket);
     }
 
@@ -239,7 +239,7 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
                 .count();
     }
 
-    private void write(StreamTableWrite write, Pair<GenericRow, Integer> rowWithBucket)
+    protected void write(StreamTableWrite write, Pair<GenericRow, Integer> rowWithBucket)
             throws Exception {
         write.write(rowWithBucket.getKey(), rowWithBucket.getValue());
     }

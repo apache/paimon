@@ -29,8 +29,9 @@ import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.KeyValueTableRead;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FieldsComparator;
@@ -84,20 +85,21 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
     }
 
     @Override
-    public RecordReader<InternalRow> createReader(DataSplit split) throws IOException {
+    public RecordReader<InternalRow> createReader(Split s) throws IOException {
+        IncrementalSplit split = (IncrementalSplit) s;
         RecordReader<KeyValue> reader =
                 readDiff(
                         mergeRead.createMergeReader(
                                 split.partition(),
                                 split.bucket(),
                                 split.beforeFiles(),
-                                split.beforeDeletionFiles().orElse(null),
+                                split.beforeDeletionFiles(),
                                 forceKeepDelete),
                         mergeRead.createMergeReader(
                                 split.partition(),
                                 split.bucket(),
-                                split.dataFiles(),
-                                split.deletionFiles().orElse(null),
+                                split.afterFiles(),
+                                split.afterDeletionFiles(),
                                 forceKeepDelete),
                         mergeRead.keyComparator(),
                         mergeRead.createUdsComparator(),
@@ -108,7 +110,7 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
                     ProjectedRow.from(readType, mergeRead.tableSchema().logicalRowType());
             reader = reader.transform(kv -> kv.replaceValue(projectedRow.replaceRow(kv.value())));
         }
-        return KeyValueTableRead.unwrap(reader);
+        return KeyValueTableRead.unwrap(reader, mergeRead.tableSchema().options());
     }
 
     private static RecordReader<KeyValue> readDiff(
@@ -204,10 +206,8 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
             } else if (kvs.size() == 2) {
                 KeyValue before = kvs.get(0);
                 KeyValue after = kvs.get(1);
-                if (after.level() == AFTER_LEVEL) {
-                    if (!valueAndRowKindEquals(before, after)) {
-                        toReturn = after;
-                    }
+                if (!valueAndRowKindEquals(before, after)) {
+                    toReturn = after.level() == AFTER_LEVEL ? after : before;
                 }
             } else {
                 throw new IllegalArgumentException("Illegal kv number: " + kvs.size());

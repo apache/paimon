@@ -25,12 +25,9 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.hive.annotation.Minio;
 import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.privilege.NoPrivilegeException;
-import org.apache.paimon.s3.MinioTestContainer;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -51,11 +48,9 @@ import org.apache.flink.table.catalog.exceptions.TableAlreadyExistException;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
-import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.metastore.api.PartitionEventType;
 import org.junit.Rule;
 import org.junit.Test;
-import org.junit.jupiter.api.function.Executable;
 import org.junit.rules.TemporaryFolder;
 import org.junit.rules.TestRule;
 import org.junit.runner.RunWith;
@@ -73,7 +68,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -82,7 +76,6 @@ import java.util.stream.Collectors;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** IT cases for using Paimon {@link HiveCatalog} together with Paimon Hive connector. */
 @RunWith(PaimonEmbeddedHiveRunner.class)
@@ -99,15 +92,9 @@ public abstract class HiveCatalogITCaseBase {
     @HiveSQL(files = {})
     protected static HiveShell hiveShell;
 
-    @Minio private static MinioTestContainer minioTestContainer;
-
     private void before(boolean locationInProperties) throws Exception {
         this.locationInProperties = locationInProperties;
-        if (locationInProperties) {
-            path = minioTestContainer.getS3UriForDefaultBucket() + "/" + UUID.randomUUID();
-        } else {
-            path = folder.newFolder().toURI().toString();
-        }
+        path = folder.newFolder().toURI().toString();
         registerHiveCatalog("my_hive", new HashMap<>());
 
         tEnv.executeSql("USE CATALOG my_hive").await();
@@ -131,9 +118,6 @@ public abstract class HiveCatalogITCaseBase {
         catalogProperties.put("lock.enabled", "true");
         catalogProperties.put("location-in-properties", String.valueOf(locationInProperties));
         catalogProperties.put("warehouse", path);
-        if (locationInProperties) {
-            catalogProperties.putAll(minioTestContainer.getS3ConfigOptions());
-        }
 
         Options catalogOptions = new Options(catalogProperties);
         CatalogContext catalogContext = CatalogContext.create(catalogOptions);
@@ -194,24 +178,20 @@ public abstract class HiveCatalogITCaseBase {
                     };
 
     @Test
-    public void testDbLocation() {
-        String dbLocation = minioTestContainer.getS3UriForDefaultBucket() + "/" + UUID.randomUUID();
+    public void testDbLocation() throws Exception {
+        String dbLocation = folder.newFolder().toURI().toString();
         Catalog catalog =
                 ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get()).catalog();
         Map<String, String> properties = new HashMap<>();
         properties.put("location", dbLocation);
 
-        assertThatThrownBy(() -> catalog.createDatabase("location_test_db", false, properties))
-                .hasRootCauseInstanceOf(MetaException.class)
-                .hasRootCauseMessage(
-                        "Got exception: java.io.IOException No FileSystem for scheme: s3");
+        catalog.createDatabase("location_test_db", false, properties);
     }
 
     @Test
     @LocationInProperties
-    public void testDbLocationWithMetastoreLocationInProperties()
-            throws Catalog.DatabaseAlreadyExistException, Catalog.DatabaseNotExistException {
-        String dbLocation = minioTestContainer.getS3UriForDefaultBucket() + "/" + UUID.randomUUID();
+    public void testDbLocationWithMetastoreLocationInProperties() throws Exception {
+        String dbLocation = folder.newFolder().toURI().toString();
         Catalog catalog =
                 ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get()).catalog();
         Map<String, String> properties = new HashMap<>();
@@ -1397,32 +1377,6 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
-    public void testFileBasedPrivilege() throws Exception {
-        tEnv.executeSql("CREATE TABLE t ( a INT, b INT )");
-        tEnv.executeSql("INSERT INTO t VALUES (1, 10), (2, 20)").await();
-        tEnv.executeSql("CALL sys.init_file_based_privilege('root-passwd')");
-
-        Map<String, String> rootCatalogProperties = new HashMap<>();
-        rootCatalogProperties.put("user", "root");
-        rootCatalogProperties.put("password", "root-passwd");
-        registerHiveCatalog("my_hive_root", rootCatalogProperties);
-        tEnv.executeSql("USE CATALOG my_hive_root");
-        tEnv.executeSql("CALL sys.create_privileged_user('test', 'test-passwd')");
-        tEnv.executeSql("CALL sys.grant_privilege_to_user('test', 'SELECT', 'test_db')");
-
-        Map<String, String> testCatalogProperties = new HashMap<>();
-        testCatalogProperties.put("user", "test");
-        testCatalogProperties.put("password", "test-passwd");
-        registerHiveCatalog("my_hive_test", testCatalogProperties);
-        tEnv.executeSql("USE CATALOG my_hive_test");
-        tEnv.executeSql("USE test_db");
-        assertThat(collect("SELECT * FROM t ORDER BY a"))
-                .containsExactly(Row.of(1, 10), Row.of(2, 20));
-        assertNoPrivilege(() -> tEnv.executeSql("INSERT INTO t VALUES (3, 30)").await());
-        assertNoPrivilege(() -> tEnv.executeSql("DROP TABLE t").await());
-    }
-
-    @Test
     public void testMarkDone() throws Exception {
         sEnv.executeSql(
                 "CREATE TABLE mark_done_t1 (a INT, dt STRING) WITH ('continuous.discovery-interval' = '1s')");
@@ -1484,6 +1438,31 @@ public abstract class HiveCatalogITCaseBase {
         assertThat(successText).contains("creationTime").contains("modificationTime");
 
         insertSql.getJobClient().get().cancel();
+    }
+
+    @Test
+    public void testDonePartitionExpire() throws Exception {
+        tEnv.executeSql(
+                        "CREATE TABLE done_expire_t (a INT, dt STRING) PARTITIONED BY (dt) WITH ("
+                                + "'partition.timestamp-formatter'='yyyyMMdd',"
+                                + "'partition.timestamp-pattern'='$dt',"
+                                + "'metastore.partitioned-table'='true',"
+                                + "'partition.mark-done-action'='done-partition'"
+                                + ")")
+                .await();
+        tEnv.executeSql("INSERT INTO done_expire_t VALUES (1, '20240101')").await();
+        tEnv.executeSql("CALL sys.mark_partition_done('test_db.done_expire_t', 'dt=20240101')")
+                .await();
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS done_expire_t"))
+                .containsExactlyInAnyOrder("dt=20240101", "dt=20240101.done");
+
+        tEnv.executeSql(
+                        "CALL sys.expire_partitions("
+                                + "`table` => 'test_db.done_expire_t', "
+                                + "expiration_time => '1 d', "
+                                + "timestamp_formatter => 'yyyyMMdd')")
+                .await();
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS done_expire_t")).isEmpty();
     }
 
     @Test
@@ -1831,15 +1810,6 @@ public abstract class HiveCatalogITCaseBase {
                 .await();
         tEnv.executeSql("INSERT INTO t_repair_hive VALUES(1, 'login', '2020-01-02', '09')").await();
         return tEnv;
-    }
-
-    private void assertNoPrivilege(Executable executable) {
-        Exception e = assertThrows(Exception.class, executable);
-        if (e.getCause() != null) {
-            assertThat(e).hasRootCauseInstanceOf(NoPrivilegeException.class);
-        } else {
-            assertThat(e).isInstanceOf(NoPrivilegeException.class);
-        }
     }
 
     protected List<Row> collect(String sql) throws Exception {

@@ -36,7 +36,7 @@ public class LanceFileFormatTest {
         LanceFileFormat format =
                 new LanceFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
         RowType rowType = RowType.of(DataTypes.INT(), DataTypes.STRING());
-        assertDoesNotThrow(() -> format.createReaderFactory(rowType, null));
+        assertDoesNotThrow(() -> format.createReaderFactory(rowType, rowType, null));
     }
 
     @Test
@@ -53,6 +53,30 @@ public class LanceFileFormatTest {
                 new LanceFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
         RowType rowType = RowType.of(DataTypes.MAP(DataTypes.STRING(), DataTypes.INT()));
         assertThrows(UnsupportedOperationException.class, () -> format.validateDataFields(rowType));
+    }
+
+    @Test
+    public void testValidateDataFields_UnsupportedMultisetType() {
+        LanceFileFormat format =
+                new LanceFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
+        RowType rowType = RowType.of(DataTypes.MULTISET(DataTypes.STRING()));
+        assertThrows(UnsupportedOperationException.class, () -> format.validateDataFields(rowType));
+    }
+
+    @Test
+    public void testValidateDataFields_UnsupportedTypeNestedInArray() {
+        LanceFileFormat format =
+                new LanceFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
+        RowType rowType = RowType.of(DataTypes.ARRAY(DataTypes.MULTISET(DataTypes.STRING())));
+        assertThrows(UnsupportedOperationException.class, () -> format.validateDataFields(rowType));
+    }
+
+    @Test
+    public void testValidateDataFields_SupportedTypeNestedInArray() {
+        LanceFileFormat format =
+                new LanceFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
+        RowType rowType = RowType.of(DataTypes.ARRAY(DataTypes.ARRAY(DataTypes.INT())));
+        assertDoesNotThrow(() -> format.validateDataFields(rowType));
     }
 
     @Test
@@ -76,5 +100,21 @@ public class LanceFileFormatTest {
 
         // Validate that no exception is thrown for supported types
         assertDoesNotThrow(() -> format.validateDataFields(rowType));
+    }
+
+    @Test
+    public void testValidateDataFields_UnsupportedVariantType() {
+        LanceFileFormat format =
+                new LanceFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
+        RowType rowType = RowType.of(DataTypes.VARIANT());
+        assertThrows(UnsupportedOperationException.class, () -> format.validateDataFields(rowType));
+    }
+
+    @Test
+    public void testValidateDataFields_UnsupportedBlobType() {
+        LanceFileFormat format =
+                new LanceFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
+        RowType rowType = RowType.of(DataTypes.BLOB());
+        assertThrows(UnsupportedOperationException.class, () -> format.validateDataFields(rowType));
     }
 }

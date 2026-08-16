@@ -72,7 +72,7 @@ public class FileFormatTest {
 
         // read
         RecordReader<InternalRow> reader =
-                avro.createReaderFactory(rowType)
+                avro.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(
                                         LocalFileIO.create(),
@@ -128,6 +128,16 @@ public class FileFormatTest {
         OrcFileFormat orcFileFormat = (OrcFileFormat) fileFormat;
         assertThat(orcFileFormat.orcProperties().get("orc.hello")).isEqualTo("world");
         assertThat(orcFileFormat.readBatchSize()).isEqualTo(1024);
+    }
+
+    @Test
+    public void testManifestFormatIsAlwaysAvro() {
+        Options tableOptions = new Options();
+        tableOptions.set(CoreOptions.FILE_FORMAT, "orc");
+
+        FileFormat manifestFormat = FileFormat.manifestFormat(new CoreOptions(tableOptions));
+
+        assertThat(manifestFormat.getFormatIdentifier()).isEqualTo(CoreOptions.FILE_FORMAT_AVRO);
     }
 
     public FileFormat createFileFormat(String codec) {

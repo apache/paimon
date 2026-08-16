@@ -54,6 +54,7 @@ public class CdcSinkBuilder<T> {
     private TypeMapping typeMapping = null;
 
     @Nullable private Integer parallelism;
+    private boolean noShuffle = false;
 
     public CdcSinkBuilder<T> withInput(DataStream<T> input) {
         this.input = input;
@@ -87,6 +88,11 @@ public class CdcSinkBuilder<T> {
 
     public CdcSinkBuilder<T> withTypeMapping(TypeMapping typeMapping) {
         this.typeMapping = typeMapping;
+        return this;
+    }
+
+    public CdcSinkBuilder<T> withNoShuffle(boolean noShuffle) {
+        this.noShuffle = noShuffle;
         return this;
     }
 
@@ -160,6 +166,9 @@ public class CdcSinkBuilder<T> {
 
     private DataStreamSink<?> buildForUnawareBucket(DataStream<CdcRecord> parsed) {
         FileStoreTable dataTable = (FileStoreTable) table;
+        if (noShuffle) {
+            return new CdcAppendTableSink(dataTable, parallelism, true).sinkFrom(parsed);
+        }
         // rebalance it to make sure schema change work to avoid infinite loop
         return new CdcAppendTableSink(dataTable, parallelism).sinkFrom(parsed.rebalance());
     }

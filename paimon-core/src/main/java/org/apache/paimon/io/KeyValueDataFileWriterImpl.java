@@ -30,6 +30,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 
 import java.util.Arrays;
+import java.util.Set;
 import java.util.function.Function;
 
 /** Write data files containing {@link KeyValue}s. */
@@ -47,7 +48,8 @@ public class KeyValueDataFileWriterImpl extends KeyValueDataFileWriter {
             CoreOptions options,
             FileSource fileSource,
             FileIndexOptions fileIndexOptions,
-            boolean isExternalPath) {
+            boolean isExternalPath,
+            Set<String> managedBlobFields) {
         super(
                 fileIO,
                 context,
@@ -61,7 +63,8 @@ public class KeyValueDataFileWriterImpl extends KeyValueDataFileWriter {
                 options,
                 fileSource,
                 fileIndexOptions,
-                isExternalPath);
+                isExternalPath,
+                managedBlobFields);
     }
 
     @Override

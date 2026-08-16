@@ -19,10 +19,12 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.table.FileStoreTableFactory
 
 import org.apache.spark.SparkFunSuite
 import org.apache.spark.sql.{Row, SparkSession}
+import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.paimon.Utils
 import org.junit.jupiter.api.Assertions
 
@@ -55,6 +57,45 @@ class PaimonOptionTest extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon Option: create table with Iceberg compatibility options via DataFrame writer") {
+    Seq((1L, "x1"), (2L, "x2"))
+      .toDF("a", "b")
+      .write
+      .format("paimon")
+      .option("primary-key", "a")
+      .option("bucket", "-1")
+      .option("metadata.iceberg.database", "db_t")
+      .option("metadata.iceberg.table", "t_ib")
+      .option("metadata.iceberg.storage", "hadoop-catalog")
+      .option("metadata.iceberg.storage-location", "table-location")
+      .option("metadata.iceberg.manifest-legacy-version", "true")
+      .option("metadata.iceberg.manifest-compression", "snappy")
+      .option("metadata.iceberg.previous-versions-max", "5")
+      .option("metadata.iceberg.uri", "")
+      .saveAsTable("T_IB")
+
+    val table = loadTable("T_IB")
+
+    // Verify primary key is also stored (existing functionality still works)
+    Assertions.assertEquals(1, table.primaryKeys().size())
+    Assertions.assertEquals("a", table.primaryKeys().get(0))
+
+    // Verify bucket configuration
+    Assertions.assertEquals("-1", table.options().get("bucket"))
+
+    // Verify Iceberg compatibility options are stored permanently
+    Assertions.assertEquals("db_t", table.options().get("metadata.iceberg.database"))
+    Assertions.assertEquals("t_ib", table.options().get("metadata.iceberg.table"))
+    Assertions.assertEquals("hadoop-catalog", table.options().get("metadata.iceberg.storage"))
+    Assertions.assertEquals(
+      "table-location",
+      table.options().get("metadata.iceberg.storage-location"))
+    Assertions.assertEquals("true", table.options().get("metadata.iceberg.manifest-legacy-version"))
+    Assertions.assertEquals("snappy", table.options().get("metadata.iceberg.manifest-compression"))
+    Assertions.assertEquals("5", table.options().get("metadata.iceberg.previous-versions-max"))
+    Assertions.assertEquals("", table.options().get("metadata.iceberg.uri"))
+  }
+
   test("Paimon Option: query table with sql conf") {
     sql("CREATE TABLE T (id INT)")
     sql("INSERT INTO T VALUES 1")
@@ -76,6 +117,44 @@ class PaimonOptionTest extends PaimonSparkTestBase {
       assertThrows[UnsupportedOperationException] {
         spark.read.format("paimon").load(table.location().toString)
       }
+    }
+  }
+
+  test("Paimon Option: global deletion-vector merge-on-read supports mixed tables") {
+    withTable("non_dv", "dv") {
+      sql("CREATE TABLE non_dv (id INT, v STRING)")
+      sql("""
+            |CREATE TABLE dv (id INT, v STRING)
+            |TBLPROPERTIES (
+            |  'primary-key' = 'id',
+            |  'bucket' = '1',
+            |  'deletion-vectors.enabled' = 'true',
+            |  'write-only' = 'true'
+            |)
+            |""".stripMargin)
+
+      sql("INSERT INTO non_dv VALUES (1, 'append')")
+      sql("INSERT INTO dv VALUES (2, 'dv')")
+
+      checkAnswer(sql("SELECT * FROM dv"), Nil)
+      withSparkSQLConf("spark.paimon.deletion-vectors.merge-on-read" -> "true") {
+        checkAnswer(
+          sql("""
+                |SELECT * FROM non_dv
+                |UNION ALL
+                |SELECT * FROM dv
+                |ORDER BY id
+                |""".stripMargin),
+          Row(1, "append") :: Row(2, "dv") :: Nil
+        )
+      }
+
+      checkAnswer(
+        spark.read
+          .format("paimon")
+          .option("deletion-vectors.merge-on-read", "true")
+          .table("non_dv"),
+        Row(1, "append"))
     }
   }
 
@@ -224,6 +303,43 @@ class PaimonConfigCheckTest extends SparkFunSuite {
       } finally {
         spark.close()
       }
+    }
+  }
+
+  test("Paimon Option: required confs check with temporary SQLConf") {
+    val spark = SparkSession
+      .builder()
+      .master("local[2]")
+      .config("spark.sql.catalog.paimon", "org.apache.paimon.spark.SparkCatalog")
+      .config("spark.sql.catalog.paimon.warehouse", Utils.createTempDir.getCanonicalPath)
+      .config(
+        "spark.sql.extensions",
+        "org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions")
+      .config("spark.paimon.requiredSparkConfsCheck.enabled", "true")
+      .getOrCreate()
+    try {
+      SQLConf.withExistingConf(new SQLConf) {
+        OptionUtils.checkRequiredConfigurations(spark)
+      }
+    } finally {
+      spark.close()
+    }
+  }
+
+  test("Paimon Option: required confs switch with temporary SQLConf") {
+    val spark = SparkSession
+      .builder()
+      .master("local[2]")
+      .config("spark.sql.catalog.paimon", "org.apache.paimon.spark.SparkCatalog")
+      .config("spark.sql.catalog.paimon.warehouse", Utils.createTempDir.getCanonicalPath)
+      .config("spark.paimon.requiredSparkConfsCheck.enabled", "false")
+      .getOrCreate()
+    try {
+      SQLConf.withExistingConf(new SQLConf) {
+        OptionUtils.checkRequiredConfigurations(spark)
+      }
+    } finally {
+      spark.close()
     }
   }
 }

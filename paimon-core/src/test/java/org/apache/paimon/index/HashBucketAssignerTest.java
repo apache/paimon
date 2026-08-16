@@ -22,7 +22,6 @@ import org.apache.paimon.catalog.PrimaryKeyTableTestBase;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
-import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.StreamTableCommit;
@@ -33,12 +32,16 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.entry;
 
 /** Test for {@link HashBucketAssigner}. */
 public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
@@ -151,6 +154,24 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
+    public void testEachPartitionUsesAllBucketsWithUpperBound() {
+        HashBucketAssigner assigner = createAssigner(1, 1, 0, 4);
+
+        Map<Integer, Integer> firstPartition = new HashMap<>();
+        for (int hash = 0; hash < 20; hash++) {
+            firstPartition.merge(assigner.assign(row(1), hash), 1, Integer::sum);
+        }
+        assertThat(firstPartition).containsOnly(entry(0, 5), entry(1, 5), entry(2, 5), entry(3, 5));
+
+        Map<Integer, Integer> secondPartition = new HashMap<>();
+        for (int hash = 0; hash < 20; hash++) {
+            secondPartition.merge(assigner.assign(row(2), hash), 1, Integer::sum);
+        }
+        assertThat(secondPartition)
+                .containsOnly(entry(0, 5), entry(1, 5), entry(2, 5), entry(3, 5));
+    }
+
+    @Test
     public void testAssignWithUpperBoundMultiAssigners() {
         HashBucketAssigner assigner0 = createAssigner(2, 2, 0, 3);
         HashBucketAssigner assigner1 = createAssigner(2, 2, 1, 3);
@@ -215,21 +236,30 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
                 bucket,
                 totalBuckets,
                 new DataIncrement(
-                        Collections.emptyList(), Collections.emptyList(), Collections.emptyList()),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.singletonList(file),
+                        Collections.emptyList()),
                 new CompactIncrement(
-                        Collections.emptyList(), Collections.emptyList(), Collections.emptyList()),
-                new IndexIncrement(Collections.singletonList(file)));
+                        Collections.emptyList(), Collections.emptyList(), Collections.emptyList()));
     }
 
     @Test
-    public void testAssignRestore() {
-        IndexFileMeta bucket0 = fileHandler.writeHashIndex(new int[] {2, 5});
-        IndexFileMeta bucket2 = fileHandler.writeHashIndex(new int[] {4, 7});
+    public void testAssignRestore() throws IOException {
         commit.commit(
                 0,
                 Arrays.asList(
-                        createCommitMessage(row(1), 0, 3, bucket0),
-                        createCommitMessage(row(1), 2, 3, bucket2)));
+                        createCommitMessage(
+                                row(1),
+                                0,
+                                3,
+                                fileHandler.hashIndex(row(1), 0).write(new int[] {2, 5})),
+                        createCommitMessage(
+                                row(1),
+                                2,
+                                3,
+                                fileHandler.hashIndex(row(1), 2).write(new int[] {4, 7}))));
 
         HashBucketAssigner assigner0 = createAssigner(3, 3, 0);
         HashBucketAssigner assigner2 = createAssigner(3, 3, 2);
@@ -248,14 +278,20 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testAssignRestoreWithUpperBound() {
-        IndexFileMeta bucket0 = fileHandler.writeHashIndex(new int[] {2, 5});
-        IndexFileMeta bucket2 = fileHandler.writeHashIndex(new int[] {4, 7});
+    public void testAssignRestoreWithUpperBound() throws IOException {
         commit.commit(
                 0,
                 Arrays.asList(
-                        createCommitMessage(row(1), 0, 3, bucket0),
-                        createCommitMessage(row(1), 2, 3, bucket2)));
+                        createCommitMessage(
+                                row(1),
+                                0,
+                                3,
+                                fileHandler.hashIndex(row(1), 0).write(new int[] {2, 5})),
+                        createCommitMessage(
+                                row(1),
+                                2,
+                                3,
+                                fileHandler.hashIndex(row(1), 2).write(new int[] {4, 7}))));
 
         HashBucketAssigner assigner0 = createAssigner(3, 3, 0, 1);
         HashBucketAssigner assigner2 = createAssigner(3, 3, 2, 1);
@@ -303,7 +339,7 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testIndexEliminate() {
+    public void testIndexEliminate() throws IOException {
         HashBucketAssigner assigner = createAssigner(1, 1, 0);
 
         // checkpoint 0
@@ -314,9 +350,16 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
                 0,
                 Arrays.asList(
                         createCommitMessage(
-                                row(1), 0, 1, fileHandler.writeHashIndex(new int[] {0})),
+                                row(1),
+                                0,
+                                1,
+                                fileHandler.hashIndex(row(1), 0).write(new int[] {0})),
                         createCommitMessage(
-                                row(2), 0, 1, fileHandler.writeHashIndex(new int[] {0}))));
+                                row(2),
+                                0,
+                                1,
+                                fileHandler.hashIndex(row(2), 0).write(new int[] {0}))));
+
         assertThat(assigner.currentPartitions()).containsExactlyInAnyOrder(row(1), row(2));
 
         // checkpoint 1, but no commit
@@ -333,7 +376,11 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
                 1,
                 Collections.singletonList(
                         createCommitMessage(
-                                row(1), 0, 1, fileHandler.writeHashIndex(new int[] {1}))));
+                                row(1),
+                                0,
+                                1,
+                                fileHandler.hashIndex(row(1), 0).write(new int[] {1}))));
+
         assigner.prepareCommit(3);
         assertThat(assigner.currentPartitions()).isEmpty();
     }

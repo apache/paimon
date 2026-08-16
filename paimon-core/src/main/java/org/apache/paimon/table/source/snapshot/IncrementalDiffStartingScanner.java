@@ -20,7 +20,7 @@ package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.tag.Tag;
 import org.apache.paimon.tag.TagPeriodHandler;
 import org.apache.paimon.utils.Pair;
@@ -52,19 +52,17 @@ public class IncrementalDiffStartingScanner extends AbstractStartingScanner {
         this.start = start;
         this.end = end;
         this.startingSnapshotId = start.id();
-
-        TimeTravelUtil.checkRescaleBucketForIncrementalDiffQuery(
-                new SchemaManager(
-                        snapshotManager.fileIO(),
-                        snapshotManager.tablePath(),
-                        snapshotManager.branch()),
-                start,
-                end);
     }
 
     @Override
     public Result scan(SnapshotReader reader) {
         return StartingScanner.fromPlan(reader.withSnapshot(end).readIncrementalDiff(start));
+    }
+
+    @Override
+    public List<PartitionEntry> scanPartitions(SnapshotReader reader) {
+        // ignore start, just use end to read partition entries
+        return reader.withSnapshot(end).partitionEntries();
     }
 
     public static StartingScanner betweenTags(
@@ -103,16 +101,20 @@ public class IncrementalDiffStartingScanner extends AbstractStartingScanner {
         return new IncrementalDiffStartingScanner(snapshotManager, start, end);
     }
 
-    public static IncrementalDiffStartingScanner betweenTimestamps(
+    public static StartingScanner betweenTimestamps(
             long startTimestamp, long endTimestamp, SnapshotManager snapshotManager) {
         Snapshot startSnapshot = snapshotManager.earlierOrEqualTimeMills(startTimestamp);
-        if (startSnapshot == null) {
-            startSnapshot = snapshotManager.earliestSnapshot();
-        }
-
         Snapshot endSnapshot = snapshotManager.earlierOrEqualTimeMills(endTimestamp);
         if (endSnapshot == null) {
             endSnapshot = snapshotManager.latestSnapshot();
+        }
+
+        if (startSnapshot == null) {
+            Snapshot earliestSnapshot = snapshotManager.earliestSnapshot();
+            if (earliestSnapshot.id() == Snapshot.FIRST_SNAPSHOT_ID) {
+                return new StaticFromSnapshotStartingScanner(snapshotManager, endSnapshot.id());
+            }
+            startSnapshot = earliestSnapshot;
         }
 
         return new IncrementalDiffStartingScanner(snapshotManager, startSnapshot, endSnapshot);

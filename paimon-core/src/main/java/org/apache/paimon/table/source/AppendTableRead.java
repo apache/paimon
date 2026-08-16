@@ -40,14 +40,14 @@ import java.util.stream.Collectors;
 /**
  * An abstraction layer above {@link MergeFileSplitRead} to provide reading of {@link InternalRow}.
  */
-public final class AppendTableRead extends AbstractDataTableRead {
+public class AppendTableRead extends AbstractDataTableRead {
 
     private final List<SplitReadProvider> readProviders;
 
     @Nullable private RowType readType = null;
     private Predicate predicate = null;
-    private TopN topN = null;
-    private Integer limit = null;
+    protected TopN topN = null;
+    protected Integer limit = null;
 
     public AppendTableRead(
             List<Function<SplitReadConfig, SplitReadProvider>> providerFactories,
@@ -107,13 +107,12 @@ public final class AppendTableRead extends AbstractDataTableRead {
 
     @Override
     public RecordReader<InternalRow> reader(Split split) throws IOException {
-        DataSplit dataSplit = (DataSplit) split;
         for (SplitReadProvider readProvider : readProviders) {
-            if (readProvider.match(dataSplit, false)) {
-                return readProvider.get().get().createReader(dataSplit);
+            if (readProvider.match(split, new SplitReadProvider.Context(false))) {
+                return readProvider.get().get().createReader(split);
             }
         }
 
-        throw new RuntimeException("Should not happen.");
+        throw new RuntimeException("Unsupported split: " + split.getClass());
     }
 }

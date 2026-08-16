@@ -21,7 +21,7 @@ package org.apache.paimon.types;
 import org.apache.paimon.annotation.Public;
 
 /**
- * Data type of a date consisting of {@code year-month-day} with values ranging from {@code
+ * Data type of date consisting of {@code year-month-day} with values ranging from {@code
  * 0000-01-01} to {@code 9999-12-31}. Compared to the SQL standard, the range starts at year {@code
  * 0000}.
  *

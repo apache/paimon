@@ -28,4 +28,6 @@ public interface WritableByteVector extends WritableColumnVector, ByteColumnVect
 
     /** Fill the column vector with the provided value. */
     void fill(byte value);
+
+    void appendByte(byte v);
 }

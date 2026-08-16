@@ -122,7 +122,8 @@ public abstract class SortMergeReaderTestBase extends CombiningRecordReaderTestB
 
         @Override
         protected MergeFunction<KeyValue> createMergeFunction() {
-            return new LookupMergeFunction(new FirstRowMergeFunction(false));
+            return new LookupMergeFunction(
+                    new FirstRowMergeFunction(false), null, null, null, null);
         }
     }
 }

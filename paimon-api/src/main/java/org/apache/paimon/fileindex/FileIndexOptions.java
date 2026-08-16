@@ -22,6 +22,8 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.StringUtils;
 
+import javax.annotation.Nullable;
+
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
@@ -97,21 +99,27 @@ public class FileIndexOptions {
             String opkey = kv[2];
 
             // if reaches here, must be an option.
-            if (get(cname, indexType) != null) {
-                get(cname, indexType).set(opkey, optionEntry.getValue());
-            } else if (getMapTopLevelOptions(cname, indexType) != null) {
-                getMapTopLevelOptions(cname, indexType).set(opkey, optionEntry.getValue());
+            Options indexOptions = get(cname, indexType);
+            if (indexOptions == null) {
+                indexOptions = getMapTopLevelOptionsOrNull(cname, indexType);
+            }
+            if (indexOptions != null) {
+                indexOptions.set(opkey, optionEntry.getValue());
             } else {
                 throw new IllegalArgumentException(
-                        "Wrong option in \""
-                                + key
-                                + "\", can't found column \""
-                                + cname
-                                + "\" in \""
-                                + fileIndexPrefix
-                                + indexType
-                                + fileIndexColumnSuffix
-                                + "\"");
+                        String.format(
+                                "Wrong file index option '%s': column '%s' is not declared in '%s%s%s'. "
+                                        + "Please add '%s%s%s' = '%s' before setting column options. "
+                                        + "For map nested index, declare it like '<map-column>[<map-key>]'.",
+                                key,
+                                cname,
+                                fileIndexPrefix,
+                                indexType,
+                                fileIndexColumnSuffix,
+                                fileIndexPrefix,
+                                indexType,
+                                fileIndexColumnSuffix,
+                                cname));
             }
         }
     }
@@ -151,6 +159,13 @@ public class FileIndexOptions {
         }
 
         return Optional.ofNullable(indexTypeOptions.getOrDefault(columnKey, null))
+                .map(x -> x.get(indexType))
+                .orElse(null);
+    }
+
+    @Nullable
+    private Options getMapTopLevelOptionsOrNull(String column, String indexType) {
+        return Optional.ofNullable(topLevelMapColumnOptions.getOrDefault(new Column(column), null))
                 .map(x -> x.get(indexType))
                 .orElse(null);
     }

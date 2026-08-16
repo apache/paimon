@@ -21,6 +21,7 @@ package org.apache.paimon.data;
 import org.apache.paimon.data.serializer.InternalArraySerializer;
 import org.apache.paimon.data.serializer.InternalMapSerializer;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.data.serializer.InternalVectorSerializer;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentUtils;
@@ -68,7 +69,7 @@ abstract class AbstractBinaryWriter implements BinaryWriter {
                 byte[] bytes = MemorySegmentUtils.allocateReuseBytes(len);
                 MemorySegmentUtils.copyToBytes(
                         input.getSegments(), input.getOffset(), bytes, 0, len);
-                writeBytesToFixLenPart(segment, getFieldOffset(pos), bytes, len);
+                writeBytesToFixLenPart(segment, getFieldOffset(pos), bytes, 0, len);
             } else {
                 writeSegmentsToVarLenPart(pos, input.getSegments(), input.getOffset(), len);
             }
@@ -78,9 +79,9 @@ abstract class AbstractBinaryWriter implements BinaryWriter {
     private void writeBytes(int pos, byte[] bytes) {
         int len = bytes.length;
         if (len <= MAX_FIX_PART_DATA_SIZE) {
-            writeBytesToFixLenPart(segment, getFieldOffset(pos), bytes, len);
+            writeBytesToFixLenPart(segment, getFieldOffset(pos), bytes, 0, len);
         } else {
-            writeBytesToVarLenPart(pos, bytes, len);
+            writeBytesToVarLenPart(pos, bytes, 0, len);
         }
     }
 
@@ -89,6 +90,12 @@ abstract class AbstractBinaryWriter implements BinaryWriter {
         BinaryArray binary = serializer.toBinaryArray(input);
         writeSegmentsToVarLenPart(
                 pos, binary.getSegments(), binary.getOffset(), binary.getSizeInBytes());
+    }
+
+    @Override
+    public void writeVector(int pos, InternalVector input, InternalVectorSerializer serializer) {
+        BinaryVector binary = serializer.toBinaryVector(input);
+        writeVectorToVarLenPart(pos, binary);
     }
 
     @Override
@@ -112,12 +119,11 @@ abstract class AbstractBinaryWriter implements BinaryWriter {
     }
 
     @Override
-    public void writeBinary(int pos, byte[] bytes) {
-        int len = bytes.length;
+    public void writeBinary(int pos, byte[] bytes, int offset, int len) {
         if (len <= BinarySection.MAX_FIX_PART_DATA_SIZE) {
-            writeBytesToFixLenPart(segment, getFieldOffset(pos), bytes, len);
+            writeBytesToFixLenPart(segment, getFieldOffset(pos), bytes, offset, len);
         } else {
-            writeBytesToVarLenPart(pos, bytes, len);
+            writeBytesToVarLenPart(pos, bytes, offset, len);
         }
     }
 
@@ -195,6 +201,17 @@ abstract class AbstractBinaryWriter implements BinaryWriter {
         cursor += roundedSize;
     }
 
+    @Override
+    public void writeBlob(int pos, Blob blob) {
+        byte[] bytes;
+        if (blob instanceof BlobData) {
+            bytes = blob.toData();
+        } else {
+            bytes = Blob.serializeBlob(blob);
+        }
+        writeBinary(pos, bytes, 0, bytes.length);
+    }
+
     protected void zeroOutPaddingBytes(int numBytes) {
         if ((numBytes & 0x07) > 0) {
             segment.putLong(cursor + ((numBytes >> 3) << 3), 0L);
@@ -248,7 +265,7 @@ abstract class AbstractBinaryWriter implements BinaryWriter {
         }
     }
 
-    private void writeBytesToVarLenPart(int pos, byte[] bytes, int len) {
+    private void writeBytesToVarLenPart(int pos, byte[] bytes, int offset, int len) {
         final int roundedSize = roundNumberOfBytesToNearestWord(len);
 
         // grow the global buffer before writing data.
@@ -257,12 +274,41 @@ abstract class AbstractBinaryWriter implements BinaryWriter {
         zeroOutPaddingBytes(len);
 
         // Write the bytes to the variable length portion.
-        segment.put(cursor, bytes, 0, len);
+        segment.put(cursor, bytes, offset, len);
 
         setOffsetAndSize(pos, cursor, len);
 
         // move the cursor forward.
         cursor += roundedSize;
+    }
+
+    private void writeVectorToVarLenPart(int pos, BinaryVector vector) {
+        // Memory layout: [numElements][segments]
+        final int numElementsWidth = 4;
+        final int size = vector.getSizeInBytes();
+
+        final int roundedSize = roundNumberOfBytesToNearestWord(size + numElementsWidth);
+
+        // grow the global buffer before writing data.
+        ensureCapacity(roundedSize);
+
+        zeroOutPaddingBytes(size + numElementsWidth);
+
+        // write numElements value first
+        segment.putInt(cursor, vector.size());
+        cursor += numElementsWidth;
+
+        // then vector values
+        if (vector.getSegments().length == 1) {
+            vector.getSegments()[0].copyTo(vector.getOffset(), segment, cursor, size);
+        } else {
+            writeMultiSegmentsToVarLenPart(vector.getSegments(), vector.getOffset(), size);
+        }
+
+        setOffsetAndSize(pos, cursor - numElementsWidth, size + numElementsWidth);
+
+        // move the cursor forward.
+        cursor += (roundedSize - numElementsWidth);
     }
 
     /** Increases the capacity to ensure that it can hold at least the minimum capacity argument. */
@@ -286,16 +332,16 @@ abstract class AbstractBinaryWriter implements BinaryWriter {
     }
 
     private static void writeBytesToFixLenPart(
-            MemorySegment segment, int fieldOffset, byte[] bytes, int len) {
+            MemorySegment segment, int fieldOffset, byte[] bytes, int offset, int len) {
         long firstByte = len | 0x80; // first bit is 1, other bits is len
         long sevenBytes = 0L; // real data
         if (BinaryRow.LITTLE_ENDIAN) {
             for (int i = 0; i < len; i++) {
-                sevenBytes |= ((0x00000000000000FFL & bytes[i]) << (i * 8L));
+                sevenBytes |= ((0x00000000000000FFL & bytes[offset + i]) << (i * 8L));
             }
         } else {
             for (int i = 0; i < len; i++) {
-                sevenBytes |= ((0x00000000000000FFL & bytes[i]) << ((6 - i) * 8L));
+                sevenBytes |= ((0x00000000000000FFL & bytes[offset + i]) << ((6 - i) * 8L));
             }
         }
 

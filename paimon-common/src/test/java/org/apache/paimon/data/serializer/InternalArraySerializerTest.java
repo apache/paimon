@@ -21,16 +21,26 @@ package org.apache.paimon.data.serializer;
 import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.BinaryArrayWriter;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.columnar.ColumnarArray;
 import org.apache.paimon.data.columnar.heap.HeapBytesVector;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.types.DataTypes;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** A test for the {@link InternalArraySerializer}. */
 class InternalArraySerializerTest extends SerializerTestBase<InternalArray> {
@@ -80,6 +90,30 @@ class InternalArraySerializerTest extends SerializerTestBase<InternalArray> {
     protected InternalArray[] getSerializableTestData() {
         InternalArray[] testData = getTestData();
         return Arrays.copyOfRange(testData, 0, testData.length - 1);
+    }
+
+    @Test
+    void testCopyColumnarBlobArrayPreservesReader(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        FileIO fileIO = LocalFileIO.create();
+        byte[] payload = "blob-payload".getBytes(StandardCharsets.UTF_8);
+        Path path = new Path(tempDir.resolve("blob.data").toUri());
+        try (PositionOutputStream out = fileIO.newOutputStream(path, false)) {
+            out.write(payload);
+        }
+
+        byte[] descriptor = new BlobDescriptor(path.toString(), 0, payload.length).serialize();
+        HeapBytesVector vector = new HeapBytesVector(2);
+        vector.putByteArray(0, descriptor, 0, descriptor.length);
+        vector.setNullAt(1);
+        ColumnarArray array = new ColumnarArray(vector, 0, 2);
+        array.setFileIO(fileIO);
+
+        InternalArray copied = new InternalArraySerializer(DataTypes.BLOB()).copy(array);
+
+        assertThat(copied).isInstanceOf(GenericArray.class);
+        assertThat(copied.getBlob(0).toData()).isEqualTo(payload);
+        assertThat(copied.isNullAt(1)).isTrue();
     }
 
     static BinaryArray copyNewOffset(BinaryArray array) {

@@ -18,10 +18,13 @@
 
 package org.apache.paimon.table.sink;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.ManifestCommittable;
@@ -30,12 +33,15 @@ import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.metrics.CommitMetrics;
 import org.apache.paimon.stats.Statistics;
+import org.apache.paimon.tag.Tag;
 import org.apache.paimon.tag.TagAutoCreation;
 import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.tag.TagTimeExpire;
+import org.apache.paimon.utils.CompactedChangelogPathResolver;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.ExecutorThreadFactory;
-import org.apache.paimon.utils.PathFactory;
+import org.apache.paimon.utils.FileOperationThreadPool;
+import org.apache.paimon.utils.IndexFilePathFactories;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors;
@@ -50,7 +56,6 @@ import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -65,7 +70,6 @@ import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
 import static org.apache.paimon.CoreOptions.ExpireExecutionMode;
 import static org.apache.paimon.table.sink.BatchWriteBuilder.COMMIT_IDENTIFIER;
-import static org.apache.paimon.utils.ManifestReadThreadPool.getExecutorService;
 import static org.apache.paimon.utils.Preconditions.checkState;
 import static org.apache.paimon.utils.ThreadPoolUtils.randomlyExecuteSequentialReturn;
 
@@ -78,18 +82,17 @@ public class TableCommitImpl implements InnerTableCommit {
     @Nullable private final Runnable expireSnapshots;
     @Nullable private final PartitionExpire partitionExpire;
     @Nullable private final TagAutoManager tagAutoManager;
-
     @Nullable private final Duration consumerExpireTime;
     private final ConsumerManager consumerManager;
-
     private final ExecutorService maintainExecutor;
     private final AtomicReference<Throwable> maintainError;
-
     private final String tableName;
-
-    @Nullable private Map<String, String> overwritePartition = null;
-    private boolean batchCommitted = false;
     private final boolean forceCreatingSnapshot;
+    private final ExecutorService fileCheckExecutor;
+
+    @Nullable private Map<String, String> overwritePartitionSpec = null;
+    @Nullable private List<BinaryRow> overwriteStaticPartitions = null;
+    private boolean batchCommitted = false;
     private boolean expireForEmptyCommit = true;
 
     public TableCommitImpl(
@@ -101,7 +104,8 @@ public class TableCommitImpl implements InnerTableCommit {
             ConsumerManager consumerManager,
             ExpireExecutionMode expireExecutionMode,
             String tableName,
-            boolean forceCreatingSnapshot) {
+            boolean forceCreatingSnapshot,
+            int threadNum) {
         if (partitionExpire != null) {
             commit.withPartitionExpire(partitionExpire);
         }
@@ -124,13 +128,14 @@ public class TableCommitImpl implements InnerTableCommit {
 
         this.tableName = tableName;
         this.forceCreatingSnapshot = forceCreatingSnapshot;
+        this.fileCheckExecutor = FileOperationThreadPool.getExecutorService(threadNum);
     }
 
     public boolean forceCreatingSnapshot() {
         if (this.forceCreatingSnapshot) {
             return true;
         }
-        if (overwritePartition != null) {
+        if (overwritePartitionSpec != null || overwriteStaticPartitions != null) {
             return true;
         }
         return tagAutoManager != null
@@ -139,8 +144,16 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     @Override
-    public TableCommitImpl withOverwrite(@Nullable Map<String, String> overwritePartitions) {
-        this.overwritePartition = overwritePartitions;
+    public TableCommitImpl withOverwrite(@Nullable Map<String, String> spec) {
+        this.overwritePartitionSpec = spec;
+        this.overwriteStaticPartitions = null;
+        return this;
+    }
+
+    @Override
+    public TableCommitImpl withOverwriteStaticPartitions(List<BinaryRow> overwritePartitions) {
+        this.overwritePartitionSpec = null;
+        this.overwriteStaticPartitions = overwritePartitions;
         return this;
     }
 
@@ -153,6 +166,37 @@ public class TableCommitImpl implements InnerTableCommit {
     @Override
     public TableCommitImpl expireForEmptyCommit(boolean expireForEmptyCommit) {
         this.expireForEmptyCommit = expireForEmptyCommit;
+        return this;
+    }
+
+    @Override
+    public TableCommitImpl appendCommitCheckConflict(boolean appendCommitCheckConflict) {
+        commit.appendCommitCheckConflict(appendCommitCheckConflict);
+        return this;
+    }
+
+    @Override
+    public TableCommitImpl rowIdCheckConflict(@Nullable Long rowIdCheckFromSnapshot) {
+        commit.rowIdCheckConflict(rowIdCheckFromSnapshot);
+        return this;
+    }
+
+    @Override
+    public TableCommitImpl rowIdCheckConflictForMaterializeDvCompaction(
+            @Nullable Long rowIdCheckFromSnapshot) {
+        commit.rowIdCheckConflictForMaterializeDvCompaction(rowIdCheckFromSnapshot);
+        return this;
+    }
+
+    @Override
+    public TableCommitImpl withOperation(Snapshot.Operation operation) {
+        commit.withOperation(operation);
+        return this;
+    }
+
+    @Override
+    public TableCommitImpl withIOManager(IOManager ioManager) {
+        commit.withIOManager(ioManager);
         return this;
     }
 
@@ -171,11 +215,13 @@ public class TableCommitImpl implements InnerTableCommit {
     @Override
     public void truncateTable() {
         checkCommitted();
+        commit.withOperation(Snapshot.Operation.TRUNCATE);
         commit.truncateTable(COMMIT_IDENTIFIER);
     }
 
     @Override
     public void truncatePartitions(List<Map<String, String>> partitionSpecs) {
+        commit.withOperation(Snapshot.Operation.TRUNCATE);
         commit.dropPartitions(partitionSpecs, COMMIT_IDENTIFIER);
     }
 
@@ -187,6 +233,21 @@ public class TableCommitImpl implements InnerTableCommit {
     @Override
     public void compactManifests() {
         commit.compactManifest();
+    }
+
+    public boolean rollbackToAsLatest(Tag targetTag) {
+        checkCommitted();
+        boolean success = commit.rollbackToAsLatest(targetTag.trimToSnapshot());
+        if (success) {
+            // Skip automatic expiration for the rollback path. rollback_to_as_latest promises not
+            // to
+            // delete snapshots or tags whose snapshot id is larger than the target snapshot, but
+            // the newly committed latest snapshot would otherwise let expiration (e.g. a low
+            // snapshot.num-retained.max) immediately remove the rolled-back snapshot and the later
+            // snapshots/tags it is meant to preserve.
+            maintain(COMMIT_IDENTIFIER, maintainExecutor, false);
+        }
+        return success;
     }
 
     private void checkCommitted() {
@@ -221,7 +282,7 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     public void commitMultiple(List<ManifestCommittable> committables, boolean checkAppendFiles) {
-        if (overwritePartition == null) {
+        if (overwritePartitionSpec == null && overwriteStaticPartitions == null) {
             int newSnapshots = 0;
             for (ManifestCommittable committable : committables) {
                 newSnapshots += commit.commit(committable, checkAppendFiles);
@@ -247,7 +308,10 @@ public class TableCommitImpl implements InnerTableCommit {
                 committable = new ManifestCommittable(Long.MAX_VALUE);
             }
             int newSnapshots =
-                    commit.overwrite(overwritePartition, committable, Collections.emptyMap());
+                    overwriteStaticPartitions == null
+                            ? commit.overwritePartition(overwritePartitionSpec, committable)
+                            : commit.overwriteStaticPartitions(
+                                    overwriteStaticPartitions, committable);
             maintain(
                     committable.identifier(),
                     maintainExecutor,
@@ -278,27 +342,37 @@ public class TableCommitImpl implements InnerTableCommit {
     private void checkFilesExistence(List<ManifestCommittable> committables) {
         List<Path> files = new ArrayList<>();
         DataFilePathFactories factories = new DataFilePathFactories(commit.pathFactory());
-        PathFactory indexFileFactory = commit.pathFactory().indexFileFactory();
+        IndexFilePathFactories indexFactories = new IndexFilePathFactories(commit.pathFactory());
         for (ManifestCommittable committable : committables) {
             for (CommitMessage message : committable.fileCommittables()) {
                 CommitMessageImpl msg = (CommitMessageImpl) message;
                 DataFilePathFactory pathFactory =
                         factories.get(message.partition(), message.bucket());
+                IndexPathFactory indexFileFactory =
+                        indexFactories.get(message.partition(), message.bucket());
                 Consumer<DataFileMeta> collector = f -> files.addAll(f.collectFiles(pathFactory));
                 msg.newFilesIncrement().newFiles().forEach(collector);
                 msg.newFilesIncrement().changelogFiles().forEach(collector);
-                msg.compactIncrement().compactBefore().forEach(collector);
+                msg.newFilesIncrement().newIndexFiles().stream()
+                        .map(indexFileFactory::toPath)
+                        .forEach(files::add);
                 msg.compactIncrement().compactAfter().forEach(collector);
-                msg.indexIncrement().newIndexFiles().stream()
-                        .map(IndexFileMeta::fileName)
+                msg.compactIncrement().newIndexFiles().stream()
                         .map(indexFileFactory::toPath)
                         .forEach(files::add);
-                msg.indexIncrement().deletedIndexFiles().stream()
-                        .map(IndexFileMeta::fileName)
-                        .map(indexFileFactory::toPath)
-                        .forEach(files::add);
+
+                // skip compact before files, deleted index files
             }
         }
+
+        // Resolve compacted changelog files to their real file paths
+        List<Path> resolvedFiles = new ArrayList<>();
+        for (Path file : files) {
+            resolvedFiles.add(CompactedChangelogPathResolver.resolveCompactedChangelogPath(file));
+        }
+        // Deduplicate paths as multiple compacted changelog references may resolve to the same
+        // physical file
+        resolvedFiles = resolvedFiles.stream().distinct().collect(Collectors.toList());
 
         Predicate<Path> nonExists =
                 p -> {
@@ -312,9 +386,9 @@ public class TableCommitImpl implements InnerTableCommit {
         List<Path> nonExistFiles =
                 Lists.newArrayList(
                         randomlyExecuteSequentialReturn(
-                                getExecutorService(null),
+                                fileCheckExecutor,
                                 f -> nonExists.test(f) ? singletonList(f) : emptyList(),
-                                files));
+                                resolvedFiles));
 
         if (!nonExistFiles.isEmpty()) {
             String message =
@@ -337,31 +411,22 @@ public class TableCommitImpl implements InnerTableCommit {
             throw new RuntimeException(maintainError.get());
         }
 
-        executor.execute(
-                () -> {
-                    try {
-                        maintain(identifier, doExpire);
-                    } catch (Throwable t) {
-                        LOG.error("Executing maintain encountered an error.", t);
-                        maintainError.compareAndSet(null, t);
-                    }
-                });
+        if (batchCommitted) {
+            maintain(identifier, doExpire);
+        } else {
+            executor.execute(
+                    () -> {
+                        try {
+                            maintain(identifier, doExpire);
+                        } catch (Throwable t) {
+                            LOG.error("Executing maintain encountered an error.", t);
+                            maintainError.compareAndSet(null, t);
+                        }
+                    });
+        }
     }
 
     private void maintain(long identifier, boolean doExpire) {
-        // expire consumer first to avoid preventing snapshot expiration
-        if (doExpire && consumerExpireTime != null) {
-            consumerManager.expire(LocalDateTime.now().minus(consumerExpireTime));
-        }
-
-        if (doExpire && expireSnapshots != null) {
-            expireSnapshots.run();
-        }
-
-        if (doExpire && partitionExpire != null) {
-            partitionExpire.expire(identifier);
-        }
-
         if (tagAutoManager != null) {
             TagAutoCreation tagAutoCreation = tagAutoManager.getTagAutoCreation();
             if (tagAutoCreation != null) {
@@ -372,6 +437,20 @@ public class TableCommitImpl implements InnerTableCommit {
             if (doExpire && tagTimeExpire != null) {
                 tagTimeExpire.expire();
             }
+        }
+
+        if (doExpire && partitionExpire != null) {
+            partitionExpire.expire(identifier);
+        }
+
+        // expire consumer first to avoid preventing snapshot expiration
+        if (doExpire && consumerExpireTime != null) {
+            consumerManager.expire(LocalDateTime.now().minus(consumerExpireTime));
+        }
+
+        // snapshot expiration usually take the most time, so put it at the end
+        if (doExpire && expireSnapshots != null) {
+            expireSnapshots.run();
         }
     }
 

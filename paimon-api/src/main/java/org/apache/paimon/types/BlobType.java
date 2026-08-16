@@ -1,0 +1,126 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.types;
+
+import org.apache.paimon.annotation.Public;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+/**
+ * Data type of binary large object.
+ *
+ * @since 1.4.0
+ */
+@Public
+public final class BlobType extends DataType {
+
+    private static final long serialVersionUID = 1L;
+
+    public static final int DEFAULT_SIZE = 1024 * 1024;
+
+    private static final String FORMAT = "BLOB";
+
+    public BlobType(boolean isNullable) {
+        super(isNullable, DataTypeRoot.BLOB);
+    }
+
+    public BlobType() {
+        this(true);
+    }
+
+    @Override
+    public int defaultSize() {
+        return DEFAULT_SIZE;
+    }
+
+    @Override
+    public DataType copy(boolean isNullable) {
+        return new BlobType(isNullable);
+    }
+
+    @Override
+    public String asSQLString() {
+        return withNullability(FORMAT);
+    }
+
+    @Override
+    public <R> R accept(DataTypeVisitor<R> visitor) {
+        return visitor.visit(this);
+    }
+
+    /**
+     * Retrieve fields not stored in blob files.
+     *
+     * <p>Blob fields contained in {@code blobDescriptorField} are treated as normal fields (stored
+     * inline as serialized descriptor bytes), while other blob fields are treated as blob-file
+     * fields.
+     */
+    public static List<DataField> fieldsNotInBlobFile(
+            RowType rowType, Set<String> descriptorFields) {
+        Set<String> fieldsInBlobFile =
+                fieldsInBlobFile(rowType, descriptorFields).stream()
+                        .map(DataField::name)
+                        .collect(Collectors.toSet());
+        return rowType.getFields().stream()
+                .filter(field -> !fieldsInBlobFile.contains(field.name()))
+                .collect(Collectors.toList());
+    }
+
+    public static Set<String> fieldNamesInBlobFile(RowType rowType, Set<String> descriptorFields) {
+        return fieldsInBlobFile(rowType, descriptorFields).stream()
+                .map(DataField::name)
+                .collect(Collectors.toSet());
+    }
+
+    /**
+     * Retrieve fields stored in blob files.
+     *
+     * <p>Blob fields contained in {@code blobDescriptorField} are treated as normal fields (stored
+     * inline as serialized descriptor bytes), while other blob fields are treated as blob-file
+     * fields.
+     */
+    public static List<DataField> fieldsInBlobFile(RowType rowType, Set<String> descriptorFields) {
+        List<DataField> result = new ArrayList<>();
+        rowType.getFields()
+                .forEach(
+                        field -> {
+                            if (isBlobFileField(field.type())
+                                    && !descriptorFields.contains(field.name())) {
+                                result.add(field);
+                            }
+                        });
+        return result;
+    }
+
+    public static boolean isBlobFileField(DataType type) {
+        if (type.getTypeRoot() == DataTypeRoot.BLOB) {
+            return true;
+        }
+        if (type.getTypeRoot() == DataTypeRoot.ARRAY) {
+            return ((ArrayType) type).getElementType().getTypeRoot() == DataTypeRoot.BLOB;
+        }
+        if (type.getTypeRoot() == DataTypeRoot.MAP) {
+            return ((MapType) type).getValueType().getTypeRoot() == DataTypeRoot.BLOB;
+        }
+        return false;
+    }
+}

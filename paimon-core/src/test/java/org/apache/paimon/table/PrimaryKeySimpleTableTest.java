@@ -20,23 +20,26 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
-import org.apache.paimon.CoreOptions.LookupLocalFileType;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.FileIOFinder;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.metrics.TestMetricRegistry;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.operation.metrics.PartialLookupMetrics;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.postpone.PostponeBucketFileStoreWrite;
@@ -44,7 +47,6 @@ import org.apache.paimon.postpone.PostponeBucketWriter;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
-import org.apache.paimon.predicate.SortValue;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
@@ -58,6 +60,7 @@ import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.InnerTableCommit;
+import org.apache.paimon.table.sink.PostponeFixedBucketWriteBuilder;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
@@ -65,6 +68,7 @@ import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.sink.WriteSelector;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
@@ -81,10 +85,9 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ChangelogManager;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.RoaringBitmap32;
-
-import org.apache.paimon.shade.org.apache.parquet.hadoop.ParquetOutputFormat;
 
 import org.apache.commons.math3.random.RandomDataGenerator;
 import org.assertj.core.api.Assertions;
@@ -103,6 +106,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -125,7 +129,6 @@ import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT_PARQUET;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT_PER_LEVEL;
-import static org.apache.paimon.CoreOptions.LOOKUP_LOCAL_FILE_TYPE;
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 import static org.apache.paimon.CoreOptions.METADATA_STATS_MODE;
 import static org.apache.paimon.CoreOptions.METADATA_STATS_MODE_PER_LEVEL;
@@ -134,6 +137,7 @@ import static org.apache.paimon.CoreOptions.MergeEngine.AGGREGATE;
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
 import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
 import static org.apache.paimon.CoreOptions.MergeEngine.PARTIAL_UPDATE;
+import static org.apache.paimon.CoreOptions.PRIMARY_KEY_NULLABLE;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_EXPIRE_LIMIT;
 import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST;
 import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_TARGET_SIZE;
@@ -142,11 +146,86 @@ import static org.apache.paimon.Snapshot.CommitKind.COMPACT;
 import static org.apache.paimon.data.DataFormatTestUtil.internalRowToString;
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.apache.paimon.predicate.PredicateBuilder.and;
+import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
+import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
+import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
+import static org.apache.paimon.table.SpecialFields.KEY_FIELD_PREFIX;
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link PrimaryKeyFileStoreTable}. */
 public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
+
+    @Test
+    public void testNullablePrimaryKey() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set(BUCKET, 3);
+                            options.set(PRIMARY_KEY_NULLABLE, true);
+                        });
+        assertThat(table.rowType().getTypeAt(0).isNullable()).isTrue();
+        assertThat(table.rowType().getTypeAt(1).isNullable()).isTrue();
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(rowData(null, 1, 10L));
+            write.write(rowData(1, null, 20L));
+            write.write(rowData(null, null, 30L));
+            commit.commit(0, write.prepareCommit(true, 0));
+
+            write.write(rowData(null, 1, 11L));
+            write.write(rowData(1, null, 21L));
+            write.write(rowData(null, null, 31L));
+            write.write(rowData(1, 2, 22L));
+            commit.commit(1, write.prepareCommit(true, 1));
+        }
+
+        Function<InternalRow, String> toString =
+                row ->
+                        (row.isNullAt(0) ? "null" : String.valueOf(row.getInt(0)))
+                                + "|"
+                                + (row.isNullAt(1) ? "null" : String.valueOf(row.getInt(1)))
+                                + "|"
+                                + row.getLong(2);
+        assertThat(
+                        getResult(
+                                table.newRead(),
+                                toSplits(table.newSnapshotReader().read().dataSplits()),
+                                toString))
+                .containsExactlyInAnyOrder("null|null|31", "null|1|11", "1|null|21", "1|2|22");
+
+        List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (DataSplit split : splits) {
+                write.compact(split.partition(), split.bucket(), true);
+            }
+            commit.commit(write.prepareCommit());
+        }
+        assertThat(
+                        getResult(
+                                table.newRead(),
+                                toSplits(table.newSnapshotReader().read().dataSplits()),
+                                toString))
+                .containsExactlyInAnyOrder("null|null|31", "null|1|11", "1|null|21", "1|2|22");
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(rowDataWithKind(RowKind.DELETE, null, 1, 0L));
+            write.write(rowDataWithKind(RowKind.DELETE, 1, null, 0L));
+            write.write(rowDataWithKind(RowKind.DELETE, null, null, 0L));
+            commit.commit(2, write.prepareCommit(true, 2));
+        }
+        assertThat(
+                        getResult(
+                                table.newRead(),
+                                toSplits(table.newSnapshotReader().read().dataSplits()),
+                                toString))
+                .containsExactly("1|2|22");
+    }
 
     @Test
     public void testPostponeBucketWithManyPartitions() throws Exception {
@@ -205,6 +284,60 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         assertThat(file.valueStatsCols()).isEmpty();
     }
 
+    @Test
+    public void testPostponeFixedBucketWriteBuilder() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(options -> options.set(BUCKET, BucketMode.POSTPONE_BUCKET));
+        PostponeFixedBucketWriteBuilder builder = table.newPostponeFixedBucketWriteBuilder();
+
+        List<CommitMessage> conflictingMessages = new ArrayList<>();
+        try (TableWriteImpl<?> write = builder.newWrite()) {
+            write.writeAndReturn(rowData(1, 1, 1L), 0, 2);
+            conflictingMessages.addAll(write.prepareCommit());
+        }
+        try (TableWriteImpl<?> write = builder.newWrite()) {
+            write.writeAndReturn(rowData(1, 2, 2L), 1, 3);
+            conflictingMessages.addAll(write.prepareCommit());
+        }
+        try (BatchTableCommit commit = builder.newCommit()) {
+            assertThatThrownBy(() -> commit.commit(conflictingMessages))
+                    .hasMessageContaining("new bucket num 3")
+                    .hasMessageContaining("previous bucket num is 2");
+        }
+        assertThat(table.latestSnapshot()).isEmpty();
+
+        List<CommitMessage> messages;
+        try (TableWriteImpl<?> write = builder.newWrite();
+                BatchTableCommit commit = builder.newCommit()) {
+            assertThatThrownBy(() -> write.writeAndReturn(rowData(1, 1, 1L), 0, 0))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("must be positive");
+            assertThatThrownBy(() -> write.writeAndReturn(rowData(1, 1, 1L), 2, 2))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("out of range");
+            write.writeAndReturn(rowData(1, 1, 1L), 0, 2);
+            assertThatThrownBy(() -> write.writeAndReturn(rowData(1, 3, 3L), 1, 3))
+                    .hasMessageContaining("new bucket num 3")
+                    .hasMessageContaining("previous bucket num is 2");
+            write.writeAndReturn(rowData(2, 2, 2L), 2, 3);
+            messages = write.prepareCommit();
+            assertThat(messages)
+                    .extracting(message -> ((CommitMessageImpl) message).totalBuckets())
+                    .containsExactlyInAnyOrder(2, 3);
+            commit.commit(messages);
+        }
+
+        assertThat(PostponeUtils.getKnownNumBuckets(table))
+                .containsEntry(binaryRow(1), 2)
+                .containsEntry(binaryRow(2), 3);
+
+        try (TableWriteImpl<?> write = builder.newWrite()) {
+            assertThatThrownBy(() -> write.writeAndReturn(rowData(1, 3, 3L), 0, 3))
+                    .hasMessageContaining("new bucket num 3")
+                    .hasMessageContaining("previous bucket num is 2");
+        }
+    }
+
     @ParameterizedTest(name = "format-{0}")
     @ValueSource(strings = {"avro", "parquet"})
     public void testStatsModePerLevel(String format) throws Exception {
@@ -248,6 +381,33 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         file = ((DataSplit) table.newScan().plan().splits().get(0)).dataFiles().get(0);
         assertThat(file.level()).isEqualTo(5);
         assertThat(file.valueStats().maxValues().getFieldCount()).isGreaterThan(4);
+
+        if (file.valueStatsCols() == null) {
+            int expectedFieldCount = table.schema().fields().size();
+            int actualFieldCount = file.valueStats().minValues().getFieldCount();
+            assertThat(actualFieldCount)
+                    .as(
+                            "When value_stats_cols is null, value_stats field count should match table.fields count. "
+                                    + "This ensures value_stats does NOT contain system fields.")
+                    .isEqualTo(expectedFieldCount);
+        } else {
+            for (String fieldName : Objects.requireNonNull(file.valueStatsCols())) {
+                boolean isSystemField =
+                        fieldName.startsWith(KEY_FIELD_PREFIX)
+                                || SpecialFields.isSystemField(fieldName);
+                assertThat(isSystemField)
+                        .as("value_stats_cols should NOT contain system field: " + fieldName)
+                        .isFalse();
+            }
+            assertThat(file.valueStats().minValues().getFieldCount())
+                    .as("value_stats field count should match value_stats_cols size")
+                    .isEqualTo(Objects.requireNonNull(file.valueStatsCols()).size());
+        }
+
+        assertThat(file.valueStats().minValues().getFieldCount())
+                .isEqualTo(file.valueStats().maxValues().getFieldCount());
+        assertThat(file.valueStats().nullCounts().size())
+                .isEqualTo(file.valueStats().minValues().getFieldCount());
     }
 
     @Test
@@ -1109,9 +1269,9 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                             conf.set(BUCKET, 1);
                             conf.set(FILE_FORMAT, FILE_FORMAT_PARQUET);
                             conf.set(DELETION_VECTORS_ENABLED, true);
-                            conf.set(ParquetOutputFormat.BLOCK_SIZE, "524288");
-                            conf.set(ParquetOutputFormat.MIN_ROW_COUNT_FOR_PAGE_SIZE_CHECK, "100");
-                            conf.set(ParquetOutputFormat.PAGE_ROW_COUNT_LIMIT, "300");
+                            conf.set("parquet.block.size", "524288");
+                            conf.set("parquet.page.size.row.check.min", "100");
+                            conf.set("parquet.page.row.count.limit", "300");
                             conf.set("file-index.bitmap.columns", "b");
                         });
 
@@ -1218,9 +1378,9 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                             conf.set(BUCKET, 1);
                             conf.set(FILE_FORMAT, FILE_FORMAT_PARQUET);
                             conf.set(DELETION_VECTORS_ENABLED, true);
-                            conf.set(ParquetOutputFormat.BLOCK_SIZE, "524288");
-                            conf.set(ParquetOutputFormat.MIN_ROW_COUNT_FOR_PAGE_SIZE_CHECK, "100");
-                            conf.set(ParquetOutputFormat.PAGE_ROW_COUNT_LIMIT, "300");
+                            conf.set("parquet.block.size", "524288");
+                            conf.set("parquet.page.size.row.check.min", "100");
+                            conf.set("parquet.page.row.count.limit", "300");
                             conf.set("file-index.range-bitmap.columns", indexColumnName);
                         });
 
@@ -1256,12 +1416,8 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
             int k = new Random().nextInt(100);
             RoaringBitmap32 bitmap = RoaringBitmap32.bitmapOfRange(min, min + k);
             DataField field = table.schema().nameToFieldMap().get(indexColumnName);
-            SortValue sort =
-                    new SortValue(
-                            new FieldRef(field.id(), field.name(), field.type()),
-                            SortValue.SortDirection.ASCENDING,
-                            SortValue.NullOrdering.NULLS_LAST);
-            TopN topN = new TopN(Collections.singletonList(sort), k);
+            FieldRef ref = new FieldRef(field.id(), field.name(), field.type());
+            TopN topN = new TopN(ref, ASCENDING, NULLS_LAST, k);
             TableScan.Plan plan = table.newScan().plan();
             RecordReader<InternalRow> reader =
                     table.newRead().withTopN(topN).createReader(plan.splits());
@@ -1282,12 +1438,8 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
             int k = new Random().nextInt(100);
             RoaringBitmap32 bitmap = RoaringBitmap32.bitmapOfRange(max - k, max);
             DataField field = table.schema().nameToFieldMap().get(indexColumnName);
-            SortValue sort =
-                    new SortValue(
-                            new FieldRef(field.id(), field.name(), field.type()),
-                            SortValue.SortDirection.DESCENDING,
-                            SortValue.NullOrdering.NULLS_LAST);
-            TopN topN = new TopN(Collections.singletonList(sort), k);
+            FieldRef ref = new FieldRef(field.id(), field.name(), field.type());
+            TopN topN = new TopN(ref, DESCENDING, NULLS_LAST, k);
             TableScan.Plan plan = table.newScan().plan();
             RecordReader<InternalRow> reader =
                     table.newRead().withTopN(topN).createReader(plan.splits());
@@ -1313,9 +1465,9 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                             conf.set(FILE_FORMAT, FILE_FORMAT_PARQUET);
                             conf.set(DELETION_VECTORS_ENABLED, true);
                             conf.set(SOURCE_SPLIT_TARGET_SIZE, MemorySize.ofBytes(1));
-                            conf.set(ParquetOutputFormat.BLOCK_SIZE, "524288");
-                            conf.set(ParquetOutputFormat.MIN_ROW_COUNT_FOR_PAGE_SIZE_CHECK, "100");
-                            conf.set(ParquetOutputFormat.PAGE_ROW_COUNT_LIMIT, "300");
+                            conf.set("parquet.block.size", "524288");
+                            conf.set("parquet.page.size.row.check.min", "100");
+                            conf.set("parquet.page.row.count.limit", "300");
                         });
 
         int rowCount = 10000;
@@ -1690,18 +1842,19 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                             options.set("partial-update.remove-record-on-sequence-group", "seq2");
                         },
                         rowType);
-        FileStoreTable wrongTable =
-                createFileStoreTable(
-                        options -> {
-                            options.set("merge-engine", "partial-update");
-                            options.set("fields.seq1.sequence-group", "b");
-                            options.set("fields.seq2.sequence-group", "c,d");
-                            options.set("partial-update.remove-record-on-sequence-group", "b");
-                        },
-                        rowType);
-        Function<InternalRow, String> rowToString = row -> internalRowToString(row, rowType);
 
-        assertThatThrownBy(() -> wrongTable.newWrite(""))
+        assertThatThrownBy(
+                        () ->
+                                createFileStoreTable(
+                                        options -> {
+                                            options.set("merge-engine", "partial-update");
+                                            options.set("fields.seq1.sequence-group", "b");
+                                            options.set("fields.seq2.sequence-group", "c,d");
+                                            options.set(
+                                                    "partial-update.remove-record-on-sequence-group",
+                                                    "b");
+                                        },
+                                        rowType))
                 .hasMessageContaining(
                         "field 'b' defined in 'partial-update.remove-record-on-sequence-group' option must be part of sequence groups");
 
@@ -1709,6 +1862,8 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         TableRead read = table.newRead();
         StreamTableWrite write = table.newWrite("");
         StreamTableCommit commit = table.newCommit("");
+        Function<InternalRow, String> rowToString = row -> internalRowToString(row, rowType);
+
         // 1. Inserts
         write.write(GenericRow.of(1, 1, 10, 1, 20, 20, 1));
         write.write(GenericRow.of(1, 1, 11, 2, 25, 25, 0));
@@ -1763,7 +1918,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                 createFileStoreTable(
                         options -> {
                             options.set("merge-engine", "partial-update");
-                            options.set("fields.a.sequence-group", "c");
+                            options.set("fields.b.sequence-group", "c");
                             options.set("fields.c.aggregate-function", "sum");
                         },
                         rowType);
@@ -1772,32 +1927,32 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         TableRead read = table.newRead();
         StreamTableWrite write = table.newWrite("");
         StreamTableCommit commit = table.newCommit("");
-        // 1. inserts
+        // 1. inserts (b=3 is the sequence field, all rows have same b=3 so all accepted)
         write.write(GenericRow.of(1, 1, 3, 3));
-        write.write(GenericRow.of(1, 1, 1, 1));
-        write.write(GenericRow.of(1, 1, 2, 2));
+        write.write(GenericRow.of(1, 1, 3, 1));
+        write.write(GenericRow.of(1, 1, 3, 2));
         commit.commit(0, write.prepareCommit(true, 0));
         List<String> result =
                 getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
-        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 2, 6]");
+        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 3, 6]");
 
-        // 2. Update Before
-        write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 1, 2, 2));
+        // 2. Update Before (b=3, same sequence)
+        write.write(GenericRow.ofKind(RowKind.UPDATE_BEFORE, 1, 1, 3, 2));
         commit.commit(1, write.prepareCommit(true, 1));
         result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
-        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 2, 4]");
+        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 3, 4]");
 
-        // 3. Update After
-        write.write(GenericRow.ofKind(RowKind.UPDATE_AFTER, 1, 1, 2, 3));
+        // 3. Update After (b=3, same sequence)
+        write.write(GenericRow.ofKind(RowKind.UPDATE_AFTER, 1, 1, 3, 3));
         commit.commit(2, write.prepareCommit(true, 2));
         result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
-        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 2, 7]");
+        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 3, 7]");
 
-        // 4. Retracts
-        write.write(GenericRow.ofKind(RowKind.DELETE, 1, 1, 2, 3));
+        // 4. Retracts (b=3, same sequence)
+        write.write(GenericRow.ofKind(RowKind.DELETE, 1, 1, 3, 3));
         commit.commit(3, write.prepareCommit(true, 3));
         result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowToString);
-        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 2, 4]");
+        assertThat(result).containsExactlyInAnyOrder("+I[1, 1, 3, 4]");
         write.close();
         commit.close();
     }
@@ -2105,6 +2260,85 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     @Test
+    public void testForceUpLevel0CompactionConsidersLevel2() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set(CoreOptions.NUM_LEVELS, 3);
+                            options.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 10);
+                            options.set(CoreOptions.COMPACTION_FORCE_UP_LEVEL_0, true);
+                        });
+        FileStoreTable writeOnlyTable =
+                table.copy(singletonMap(CoreOptions.WRITE_ONLY.key(), "true"));
+
+        // Build a large level 2 file.
+        writeRowsWithoutCompaction(writeOnlyTable, 0, 0, 1000);
+        compactPartition(table, 1, true);
+
+        List<DataFileMeta> files = currentDataFiles(table);
+        assertThat(files).singleElement().satisfies(file -> assertThat(file.level()).isEqualTo(2));
+
+        // Build a slightly smaller level 1 file without including level 2.
+        writeRowsWithoutCompaction(writeOnlyTable, 2, 1000, 900);
+        compactPartition(table, 3, false);
+
+        files = currentDataFiles(table);
+        assertThat(files).extracting(DataFileMeta::level).containsExactlyInAnyOrder(1, 2);
+
+        // Add a small level 0 file. Level 0 alone cannot pick level 1, but level 0 and level 1
+        // together are large enough to pick level 2.
+        writeRowsWithoutCompaction(writeOnlyTable, 4, 1900, 200);
+
+        files = currentDataFiles(table);
+        assertThat(files).extracting(DataFileMeta::level).containsExactlyInAnyOrder(0, 1, 2);
+        Map<Integer, Long> fileSizeByLevel =
+                files.stream()
+                        .collect(Collectors.toMap(DataFileMeta::level, DataFileMeta::fileSize));
+        long level0Size = fileSizeByLevel.get(0);
+        long level1Size = fileSizeByLevel.get(1);
+        long level2Size = fileSizeByLevel.get(2);
+        assertThat(level0Size * 101).isLessThan(level1Size * 100);
+        assertThat((level0Size + level1Size) * 101).isGreaterThanOrEqualTo(level2Size * 100);
+
+        compactPartition(table, 5, false);
+
+        files = currentDataFiles(table);
+        assertThat(files)
+                .singleElement()
+                .satisfies(
+                        file -> {
+                            assertThat(file.level()).isEqualTo(2);
+                            assertThat(file.rowCount()).isEqualTo(2100);
+                        });
+    }
+
+    private void writeRowsWithoutCompaction(
+            FileStoreTable table, long commitIdentifier, int start, int count) throws Exception {
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            for (int i = start; i < start + count; i++) {
+                write.write(rowData(1, i, (long) i));
+            }
+            commit.commit(commitIdentifier, write.prepareCommit(true, commitIdentifier));
+        }
+    }
+
+    private void compactPartition(
+            FileStoreTable table, long commitIdentifier, boolean fullCompaction) throws Exception {
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.compact(binaryRow(1), 0, fullCompaction);
+            commit.commit(commitIdentifier, write.prepareCommit(true, commitIdentifier));
+        }
+    }
+
+    private List<DataFileMeta> currentDataFiles(FileStoreTable table) throws Exception {
+        return table.newSnapshotReader().read().dataSplits().stream()
+                .flatMap(split -> split.dataFiles().stream())
+                .collect(Collectors.toList());
+    }
+
+    @Test
     public void testStreamingReadOptimizedTable() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(options -> options.set(TARGET_FILE_SIZE, new MemorySize(1)));
@@ -2149,7 +2383,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
 
         FileStoreTable table = createFileStoreTable(optionsSetter);
         StreamTableWrite write = table.newWrite(commitUser);
-        IOManager ioManager = IOManager.create(tablePath.toString());
+        IOManager ioManager = IOManager.create(tempDir.toString());
         write.withIOManager(ioManager);
         StreamTableCommit commit = table.newCommit(commitUser);
 
@@ -2287,11 +2521,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     @Test
     public void testTableQueryForLookupLocalSortFile() throws Exception {
         FileStoreTable table =
-                createFileStoreTable(
-                        options -> {
-                            options.set(CHANGELOG_PRODUCER, LOOKUP);
-                            options.set(LOOKUP_LOCAL_FILE_TYPE, LookupLocalFileType.SORT);
-                        });
+                createFileStoreTable(options -> options.set(CHANGELOG_PRODUCER, LOOKUP));
         innerTestTableQuery(table);
     }
 
@@ -2299,6 +2529,118 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     public void testTableQueryForNormal() throws Exception {
         FileStoreTable table = createFileStoreTable();
         innerTestTableQuery(table);
+    }
+
+    @Test
+    public void testTableQueryDownloadsRemoteLookupFile() throws Exception {
+        // Writer persists remote lookup ssts (deletion-vectors off -> "value" processor).
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set(CHANGELOG_PRODUCER, LOOKUP);
+                            options.set(CoreOptions.LOOKUP_REMOTE_FILE_ENABLED, true);
+                        });
+        IOManager ioManager = IOManager.create(tempDir.toString());
+        StreamTableWrite write = table.newWrite(commitUser).withIOManager(ioManager);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowData(1, 10, 100L));
+        write.write(rowData(1, 20, 200L));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        // overwrite key 10 then fully compact so all data lands in a single high-level file that
+        // carries a remote lookup sst
+        write.write(rowData(1, 10, 110L));
+        write.compact(binaryRow(1), 0, true);
+        commit.commit(1, write.prepareCommit(true, 1));
+        write.close();
+        commit.close();
+
+        List<DataSplit> dataSplits = table.newSnapshotReader().read().dataSplits();
+        List<DataFileMeta> dataFiles = new ArrayList<>();
+        for (DataSplit split : dataSplits) {
+            dataFiles.addAll(split.dataFiles());
+        }
+        // every remaining data file must carry a remote lookup sst, otherwise deleting the data
+        // files below would make a lookup unanswerable regardless of the downloader
+        assertThat(dataFiles).isNotEmpty();
+        assertThat(dataFiles)
+                .allMatch(
+                        f -> f.extraFiles().stream().anyMatch(e -> e.endsWith(".value.v1.lookup")));
+
+        // back up then delete the underlying data files: now a lookup can only be answered by
+        // downloading the remote sst the writer persisted; a local rebuild (scan of the data file)
+        // would fail. The backups let us restore the data files later to exercise the rebuild path.
+        LocalFileIO fileIO = LocalFileIO.create();
+        Map<Path, Path> dataFileBackups = new HashMap<>();
+        for (DataSplit split : dataSplits) {
+            for (DataFileMeta f : split.dataFiles()) {
+                Path dataFilePath =
+                        table.store()
+                                .pathFactory()
+                                .createDataFilePathFactory(split.partition(), split.bucket())
+                                .toPath(f);
+                Path backupPath = new Path(dataFilePath.getParent(), f.fileName() + ".bak");
+                fileIO.copyFile(dataFilePath, backupPath, false);
+                dataFileBackups.put(dataFilePath, backupPath);
+                fileIO.deleteQuietly(dataFilePath);
+            }
+        }
+
+        // full value (no projection) -> downloader is wired -> lookup succeeds via download
+        PartialLookupMetrics metrics =
+                new PartialLookupMetrics(new TestMetricRegistry(), table.name());
+        LocalTableQuery query =
+                table.newLocalTableQuery().withIOManager(ioManager).withMetrics(metrics);
+        for (DataSplit split : dataSplits) {
+            query.refreshFiles(
+                    split.partition(), split.bucket(), Collections.emptyList(), split.dataFiles());
+        }
+        InternalRow value = query.lookup(row(1), 0, row(10));
+        assertThat(value).isNotNull();
+        assertThat(BATCH_ROW_TO_STRING.apply(value))
+                .isEqualTo("1|10|110|binary|varbinary|mapKey:mapVal|multiset");
+        value = query.lookup(row(1), 0, row(20));
+        assertThat(value).isNotNull();
+        assertThat(BATCH_ROW_TO_STRING.apply(value))
+                .isEqualTo("1|20|200|binary|varbinary|mapKey:mapVal|multiset");
+        assertThat(metrics.lookupCount()).isEqualTo(2);
+        assertThat(metrics.remoteAccessCount()).isEqualTo(1);
+        query.close();
+
+        // value projection -> remote sst (full value) is unsafe to reuse, so the downloader is
+        // NOT wired and the read path falls back to rebuilding from the (now deleted) data file
+        LocalTableQuery projected =
+                table.newLocalTableQuery()
+                        .withValueProjection(new int[] {2, 1, 0})
+                        .withIOManager(ioManager);
+        for (DataSplit split : dataSplits) {
+            projected.refreshFiles(
+                    split.partition(), split.bucket(), Collections.emptyList(), split.dataFiles());
+        }
+        assertThatThrownBy(() -> projected.lookup(row(1), 0, row(10)))
+                .isInstanceOf(Exception.class);
+        projected.close();
+
+        // restore the data files and confirm the same projected query (downloader still not wired)
+        // now answers the lookup by rebuilding the sst locally from the data file
+        for (Map.Entry<Path, Path> backup : dataFileBackups.entrySet()) {
+            fileIO.copyFile(backup.getValue(), backup.getKey(), false);
+        }
+        LocalTableQuery rebuilt =
+                table.newLocalTableQuery()
+                        .withValueProjection(new int[] {2, 1, 0})
+                        .withIOManager(ioManager);
+        for (DataSplit split : dataSplits) {
+            rebuilt.refreshFiles(
+                    split.partition(), split.bucket(), Collections.emptyList(), split.dataFiles());
+        }
+        InternalRow projectedValue = rebuilt.lookup(row(1), 0, row(10));
+        assertThat(projectedValue).isNotNull();
+        Function<InternalRow, String> projectToString =
+                r -> r.getLong(0) + "|" + r.getInt(1) + "|" + r.getInt(2);
+        assertThat(projectToString.apply(projectedValue)).isEqualTo("110|10|1");
+        rebuilt.close();
     }
 
     @ParameterizedTest
@@ -2316,7 +2658,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                                 conf.set(CHANGELOG_FILE_STATS_MODE, "none");
                             }
                         });
-        IOManager ioManager = IOManager.create(tablePath.toString());
+        IOManager ioManager = IOManager.create(tempDir.toString());
         StreamTableWrite write = table.newWrite(commitUser).withIOManager(ioManager);
         StreamTableCommit commit = table.newCommit(commitUser);
         write.write(rowData(1, 1, 100L));
@@ -2453,6 +2795,33 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                                 "1|10|100|binary|varbinary|mapKey:mapVal|multiset"));
     }
 
+    @Test
+    public void testEqualsAndHashCode() throws Exception {
+        // Test same table equals and hashCode consistency
+        FileStoreTable table1 = createFileStoreTable();
+        FileStoreTable table2 = table1.copy(table1.schema());
+        assertThat(table1.equals(table2)).isTrue();
+        assertThat(table1.hashCode()).isEqualTo(table2.hashCode());
+
+        // Test with different options
+        Map<String, String> optionsWithMock = new HashMap<>(table1.schema().options());
+        optionsWithMock.put("mockKey", "mockValue");
+        TableSchema schemaWithMock = table1.schema().copy(optionsWithMock);
+        FileStoreTable tableWithMock = table1.copy(schemaWithMock);
+
+        assertThat(table1.equals(tableWithMock)).isFalse();
+        assertThat(table1.hashCode()).isNotEqualTo(tableWithMock.hashCode());
+
+        // Test same options should be equal
+        Map<String, String> sameOptionsWithMock = new HashMap<>(table1.schema().options());
+        sameOptionsWithMock.put("mockKey", "mockValue");
+        TableSchema sameSchemaWithMock = table1.schema().copy(sameOptionsWithMock);
+        FileStoreTable sameTableWithMock = table1.copy(sameSchemaWithMock);
+
+        assertThat(tableWithMock.equals(sameTableWithMock)).isTrue();
+        assertThat(tableWithMock.hashCode()).isEqualTo(sameTableWithMock.hashCode());
+    }
+
     private void assertReadChangelog(int id, FileStoreTable table) throws Exception {
         // read the changelog at #{id}
         table = table.copy(singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), String.valueOf(id)));
@@ -2475,7 +2844,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     private void innerTestTableQuery(FileStoreTable table) throws Exception {
-        IOManager ioManager = IOManager.create(tablePath.toString());
+        IOManager ioManager = IOManager.create(tempDir.toString());
         StreamTableWrite write = table.newWrite(commitUser).withIOManager(ioManager);
         StreamTableCommit commit = table.newCommit(commitUser);
 
@@ -2561,6 +2930,17 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         testWritePreemptMemory(true);
     }
 
+    @Test
+    public void testSwitchBranch() throws Exception {
+        String branchName = "fallback";
+        FileStoreTable mainTable =
+                createFileStoreTable(options -> options.set(BUCKET, BucketMode.POSTPONE_BUCKET));
+        mainTable.createBranch(branchName);
+        FileStoreTable branchTable = mainTable.switchToBranch(branchName);
+        assertThat(branchTable.catalogEnvironment().identifier().getBranchName())
+                .isEqualTo(branchName);
+    }
+
     private void testWritePreemptMemory(boolean singlePartition) throws Exception {
         // write
         FileStoreTable table =
@@ -2613,5 +2993,817 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                                 options.toMap(),
                                 ""));
         return new PrimaryKeyFileStoreTable(FileIOFinder.find(tablePath), tablePath, tableSchema);
+    }
+
+    @Test
+    public void testMergeBranchPrimaryKeyTable() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(rowData(0, 0, 0L));
+            commit.commit(0, write.prepareCommit(false, 1));
+        }
+
+        table.createTag("tag1", 1);
+        table.createBranch(BRANCH_NAME, "tag1");
+
+        assertThatThrownBy(() -> table.mergeBranch(BRANCH_NAME, "main"))
+                .satisfies(anyCauseMatches(IllegalArgumentException.class, "append-only tables"));
+    }
+
+    @Test
+    public void testSnapshotSequenceOrdering() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING, true);
+                            conf.set(CoreOptions.WRITE_ONLY, true);
+                        });
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        // Snapshot 1: write pk=(1,10) many times so that the per-record sequence number is high.
+        for (int i = 0; i < 100; i++) {
+            write.write(rowData(1, 10, 999L));
+        }
+        commit.commit(0, write.prepareCommit(false, 0));
+
+        // Snapshot 2: write pk=(1,10) once with a lower value. Because the snapshot id (2)
+        // is larger than snapshot 1, this record should win even though its per-record sequence
+        // number is much lower.
+        write.write(rowData(1, 10, 1L));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        TableRead read = table.newReadBuilder().newRead();
+        Function<InternalRow, String> toString =
+                r -> r.getInt(0) + "|" + r.getInt(1) + "|" + r.getLong(2);
+        List<String> result = getResult(read, splits, toString);
+        assertThat(result).containsExactly("1|10|1");
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testSnapshotSequenceOrderingWithMinHeap() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING, true);
+                            conf.set(CoreOptions.WRITE_ONLY, true);
+                            conf.set(CoreOptions.SORT_ENGINE, CoreOptions.SortEngine.MIN_HEAP);
+                        });
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        for (int i = 0; i < 100; i++) {
+            write.write(rowData(1, 10, 999L));
+        }
+        commit.commit(0, write.prepareCommit(false, 0));
+
+        write.write(rowData(1, 10, 1L));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        TableRead read = table.newReadBuilder().newRead();
+        Function<InternalRow, String> toString =
+                r -> r.getInt(0) + "|" + r.getInt(1) + "|" + r.getLong(2);
+        List<String> result = getResult(read, splits, toString);
+        assertThat(result).containsExactly("1|10|1");
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testSnapshotSequenceOrderingFallsBackToSequenceWithinSnapshot() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING, true);
+                            conf.set(CoreOptions.WRITE_ONLY, true);
+                        });
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        // Within a single snapshot, sequence number is the tiebreaker. The later write (999)
+        // gets a higher sequence number and should win.
+        write.write(rowData(1, 10, 1L));
+        write.write(rowData(1, 10, 999L));
+        commit.commit(0, write.prepareCommit(false, 0));
+
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        TableRead read = table.newReadBuilder().newRead();
+        Function<InternalRow, String> toString =
+                r -> r.getInt(0) + "|" + r.getInt(1) + "|" + r.getLong(2);
+        List<String> result = getResult(read, splits, toString);
+        assertThat(result).containsExactly("1|10|999");
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testSnapshotSequenceOrderingCompactionPreservesInputSnapshotId() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING, true);
+                            conf.set(CoreOptions.WRITE_ONLY, true);
+                        });
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        // Snapshot 1: write pk=(1,10) with val=100
+        write.write(rowData(1, 10, 100L));
+        commit.commit(0, write.prepareCommit(false, 0));
+
+        // Snapshot 2: write pk=(1,10) with val=200 (this should win after compaction)
+        write.write(rowData(1, 10, 200L));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        // Snapshot 3: write a DIFFERENT key pk=(1,20)
+        write.write(rowData(1, 20, 300L));
+        commit.commit(2, write.prepareCommit(false, 2));
+
+        // Snapshot 4: compact using dedicated compact writer (simulates compact job)
+        write.close();
+        commit.close();
+        FileStoreTable compactTable =
+                table.copy(Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "false"));
+        StreamTableWrite compactWrite = compactTable.newWrite(commitUser);
+        StreamTableCommit compactCommit = compactTable.newCommit(commitUser);
+        compactWrite.compact(binaryRow(1), 0, true);
+        compactCommit.commit(3, compactWrite.prepareCommit(true, 3));
+        compactWrite.close();
+        compactCommit.close();
+
+        List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
+        for (DataSplit split : splits) {
+            for (DataFileMeta file : split.dataFiles()) {
+                // The compacted file's minSequenceNumber should reflect the min snapshot id
+                // of records inside (from per-record _SEQUENCE_NUMBER values written during
+                // compaction), NOT the compaction commit's snapshot id (4).
+                assertThat(file.minSequenceNumber())
+                        .as(
+                                "Compacted file %s should have minSequenceNumber from per-record "
+                                        + "snapshot ids, not the compaction commit's snapshot id",
+                                file.fileName())
+                        .isLessThanOrEqualTo(3);
+            }
+        }
+
+        // Also verify the read result is correct
+        TableRead read = table.newReadBuilder().newRead();
+        Function<InternalRow, String> toString =
+                r -> r.getInt(0) + "|" + r.getInt(1) + "|" + r.getLong(2);
+        List<String> result = getResult(read, toSplits(splits), toString);
+        assertThat(result).containsExactlyInAnyOrder("1|10|200", "1|20|300");
+    }
+
+    @Test
+    public void testSnapshotSequenceOrderingCompactionNoOrderingReversal() throws Exception {
+        // Reproduces the scenario from the PR review: compaction of files from
+        // snapshot 1 and 3 must NOT cause records from snapshot 1 to win over
+        // an uncompacted file from snapshot 2.
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING, true);
+                            conf.set(CoreOptions.WRITE_ONLY, true);
+                            conf.set(CoreOptions.BUCKET, 1);
+                        });
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        // Snapshot 1: write pk=(1,10) with val=100
+        write.write(rowData(1, 10, 100L));
+        commit.commit(0, write.prepareCommit(false, 0));
+
+        // Snapshot 2: write SAME key pk=(1,10) with val=200 — this should win
+        write.write(rowData(1, 10, 200L));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        // Snapshot 3: write DIFFERENT key pk=(1,20) with val=300
+        write.write(rowData(1, 20, 300L));
+        commit.commit(2, write.prepareCommit(false, 2));
+
+        // Compact all files using dedicated compact writer
+        write.close();
+        commit.close();
+        FileStoreTable compactTable =
+                table.copy(Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "false"));
+        StreamTableWrite compactWrite = compactTable.newWrite(commitUser);
+        StreamTableCommit compactCommit = compactTable.newCommit(commitUser);
+        compactWrite.compact(binaryRow(1), 0, true);
+        compactCommit.commit(3, compactWrite.prepareCommit(true, 3));
+        compactWrite.close();
+        compactCommit.close();
+
+        // Write pk=(1,10) again with val=999 — snapshot 5 should definitely win
+        write = table.newWrite(commitUser);
+        commit = table.newCommit(commitUser);
+        write.write(rowData(1, 10, 999L));
+        commit.commit(4, write.prepareCommit(false, 4));
+
+        write.close();
+        commit.close();
+
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        TableRead read = table.newReadBuilder().newRead();
+        Function<InternalRow, String> toString =
+                r -> r.getInt(0) + "|" + r.getInt(1) + "|" + r.getLong(2);
+        List<String> result = getResult(read, splits, toString);
+        // pk=(1,10): snapshot 5 (val=999) wins over snapshot 2 (val=200) and snapshot 1 (val=100)
+        // pk=(1,20): snapshot 3 (val=300) is the only version
+        assertThat(result).containsExactlyInAnyOrder("1|10|999", "1|20|300");
+    }
+
+    @Test
+    public void testSnapshotSequenceOrderingMultiRoundCompaction() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING, true);
+                            conf.set(CoreOptions.WRITE_ONLY, true);
+                            conf.set(CoreOptions.BUCKET, 1);
+                        });
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        // Snapshot 1: pk=(1,10) val=100
+        write.write(rowData(1, 10, 100L));
+        commit.commit(0, write.prepareCommit(false, 0));
+
+        // Snapshot 2: pk=(1,10) val=200 — should win over snapshot 1
+        write.write(rowData(1, 10, 200L));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        // Snapshot 3: pk=(1,20) val=300
+        write.write(rowData(1, 20, 300L));
+        commit.commit(2, write.prepareCommit(false, 2));
+
+        // First compaction (snapshot 4) using dedicated compact writer
+        write.close();
+        commit.close();
+        FileStoreTable compactTable =
+                table.copy(Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "false"));
+        StreamTableWrite compactWrite = compactTable.newWrite(commitUser);
+        StreamTableCommit compactCommit = compactTable.newCommit(commitUser);
+        compactWrite.compact(binaryRow(1), 0, true);
+        compactCommit.commit(3, compactWrite.prepareCommit(true, 3));
+        compactWrite.close();
+        compactCommit.close();
+
+        // Snapshot 5: pk=(1,10) val=500 — should win over everything
+        write = table.newWrite(commitUser);
+        commit = table.newCommit(commitUser);
+        write.write(rowData(1, 10, 500L));
+        commit.commit(4, write.prepareCommit(false, 4));
+
+        // Snapshot 6: pk=(1,30) val=600
+        write.write(rowData(1, 30, 600L));
+        commit.commit(5, write.prepareCommit(false, 5));
+
+        // Second compaction (snapshot 7) using dedicated compact writer
+        write.close();
+        commit.close();
+        compactWrite = compactTable.newWrite(commitUser);
+        compactCommit = compactTable.newCommit(commitUser);
+        compactWrite.compact(binaryRow(1), 0, true);
+        compactCommit.commit(6, compactWrite.prepareCommit(true, 6));
+        compactWrite.close();
+        compactCommit.close();
+
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        TableRead read = table.newReadBuilder().newRead();
+        Function<InternalRow, String> toString =
+                r -> r.getInt(0) + "|" + r.getInt(1) + "|" + r.getLong(2);
+        List<String> result = getResult(read, splits, toString);
+        assertThat(result).containsExactlyInAnyOrder("1|10|500", "1|20|300", "1|30|600");
+    }
+
+    @Test
+    public void testSnapshotSequenceOrderingWithChangelogInput() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING, true);
+                            conf.set(CoreOptions.WRITE_ONLY, true);
+                            conf.set(CHANGELOG_PRODUCER, ChangelogProducer.INPUT);
+                        });
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowData(1, 10, 100L));
+        commit.commit(0, write.prepareCommit(false, 0));
+
+        write.write(rowData(1, 10, 1L));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        TableRead read = table.newReadBuilder().newRead();
+        Function<InternalRow, String> toString =
+                r -> r.getInt(0) + "|" + r.getInt(1) + "|" + r.getLong(2);
+        List<String> result = getResult(read, splits, toString);
+        assertThat(result).containsExactly("1|10|1");
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testSnapshotSequenceOrderingWithChangelogLookup() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING, true);
+                            conf.set(CoreOptions.WRITE_ONLY, true);
+                            conf.set(CHANGELOG_PRODUCER, LOOKUP);
+                        });
+        StreamTableWrite write =
+                table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowData(1, 10, 100L));
+        commit.commit(0, write.prepareCommit(false, 0));
+
+        write.write(rowData(1, 10, 1L));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        TableRead read = table.newReadBuilder().newRead();
+        Function<InternalRow, String> toString =
+                r -> r.getInt(0) + "|" + r.getInt(1) + "|" + r.getLong(2);
+        List<String> result = getResult(read, splits, toString);
+        assertThat(result).containsExactly("1|10|1");
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testSnapshotSequenceOrderingDeleteFromLaterSnapshot() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING, true);
+                            conf.set(CoreOptions.WRITE_ONLY, true);
+                        });
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowData(1, 10, 100L));
+        commit.commit(0, write.prepareCommit(false, 0));
+
+        write.write(rowDataWithKind(RowKind.DELETE, 1, 10, 100L));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        TableRead read = table.newReadBuilder().newRead();
+        Function<InternalRow, String> toString =
+                r -> r.getInt(0) + "|" + r.getInt(1) + "|" + r.getLong(2);
+        List<String> result = getResult(read, splits, toString);
+        assertThat(result).isEmpty();
+
+        write.close();
+        commit.close();
+    }
+
+    /**
+     * Regression: with snapshot-ordering on, a partial-update merge function must keep its result's
+     * {@code sequenceNumber} equal to the snapshot id carried by its inputs. The compacted file's
+     * per-record {@code _SEQUENCE_NUMBER} (and therefore its file-level minSequenceNumber) must
+     * stay a real snapshot id (>= 0); a regression to -1 would break ordering against later
+     * snapshots.
+     */
+    @Test
+    public void testSnapshotSequenceOrderingPartialUpdateCompactionPreservesSnapshotId()
+            throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT()
+                        },
+                        new String[] {"pt", "a", "b", "c"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING, true);
+                            conf.set(CoreOptions.WRITE_ONLY, true);
+                            conf.set(MERGE_ENGINE, PARTIAL_UPDATE);
+                            conf.set(BUCKET, 1);
+                        },
+                        rowType);
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        // Snapshot 1: partial write of column b
+        write.write(GenericRow.of(1, 1, 100, null));
+        commit.commit(0, write.prepareCommit(false, 0));
+
+        // Snapshot 2: partial write of column c — partial-update merges with snapshot 1's row
+        write.write(GenericRow.of(1, 1, null, 200));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        // Snapshot 3: compact files from snapshots 1+2 using a dedicated compact writer. The
+        // compaction reader merges the two partial rows through PartialUpdateMergeFunction; the
+        // merged record's sequenceNumber must stay a real snapshot id.
+        write.close();
+        commit.close();
+        FileStoreTable compactTable =
+                table.copy(Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "false"));
+        StreamTableWrite compactWrite = compactTable.newWrite(commitUser);
+        StreamTableCommit compactCommit = compactTable.newCommit(commitUser);
+        compactWrite.compact(binaryRow(1), 0, true);
+        compactCommit.commit(2, compactWrite.prepareCommit(true, 2));
+        compactWrite.close();
+        compactCommit.close();
+
+        List<DataSplit> splitsAfterCompact = table.newSnapshotReader().read().dataSplits();
+        for (DataSplit split : splitsAfterCompact) {
+            for (DataFileMeta file : split.dataFiles()) {
+                assertThat(file.minSequenceNumber())
+                        .as(
+                                "Compacted file %s must carry a real snapshot id in"
+                                        + " minSequenceNumber (>= 0). A value of -1 means the"
+                                        + " partial-update merge result lost its snapshot id"
+                                        + " during compaction.",
+                                file.fileName())
+                        .isGreaterThanOrEqualTo(0L);
+            }
+        }
+
+        // Snapshot 4: write a fresh value of b — this snapshot must win.
+        write = table.newWrite(commitUser);
+        commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 1, 999, null));
+        commit.commit(3, write.prepareCommit(false, 3));
+
+        // Snapshot 5: another compaction using dedicated compact writer
+        write.close();
+        commit.close();
+        compactWrite = compactTable.newWrite(commitUser);
+        compactCommit = compactTable.newCommit(commitUser);
+        compactWrite.compact(binaryRow(1), 0, true);
+        compactCommit.commit(4, compactWrite.prepareCommit(true, 4));
+        compactWrite.close();
+        compactCommit.close();
+        for (DataSplit split : table.newSnapshotReader().read().dataSplits()) {
+            for (DataFileMeta file : split.dataFiles()) {
+                assertThat(file.minSequenceNumber())
+                        .as("Final compacted file %s minSequenceNumber", file.fileName())
+                        .isGreaterThanOrEqualTo(0L);
+                assertThat(file.maxSequenceNumber())
+                        .as("Final compacted file %s maxSequenceNumber", file.fileName())
+                        .isGreaterThanOrEqualTo(0L);
+            }
+        }
+
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        TableRead read = table.newReadBuilder().newRead();
+        Function<InternalRow, String> toString =
+                r ->
+                        r.getInt(0)
+                                + "|"
+                                + r.getInt(1)
+                                + "|"
+                                + (r.isNullAt(2) ? "null" : r.getInt(2))
+                                + "|"
+                                + (r.isNullAt(3) ? "null" : r.getInt(3));
+        List<String> result = getResult(read, splits, toString);
+        // b=999 (snapshot 4 wins over snapshot 1's 100), c=200 (only snapshot 2 wrote it)
+        assertThat(result).containsExactly("1|1|999|200");
+
+        write.close();
+        commit.close();
+    }
+
+    /**
+     * Regression: with snapshot-ordering on, an aggregate merge function must keep its result's
+     * {@code sequenceNumber} equal to the snapshot id carried by its inputs. Mirrors the
+     * partial-update regression — if the merged record loses the snapshot id, the compacted file's
+     * minSequenceNumber regresses to -1.
+     */
+    @Test
+    public void testSnapshotSequenceOrderingAggregateCompactionPreservesSnapshotId()
+            throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT()
+                        },
+                        new String[] {"pt", "a", "b", "c"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(CoreOptions.SEQUENCE_SNAPSHOT_ORDERING, true);
+                            conf.set(CoreOptions.WRITE_ONLY, true);
+                            conf.set(MERGE_ENGINE, AGGREGATE);
+                            conf.set(BUCKET, 1);
+                            conf.set("fields.b.aggregate-function", "sum");
+                            conf.set("fields.c.aggregate-function", "max");
+                        },
+                        rowType);
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        // Snapshot 1
+        write.write(GenericRow.of(1, 1, 10, 100));
+        commit.commit(0, write.prepareCommit(false, 0));
+
+        // Snapshot 2: aggregates with snapshot 1's row.
+        write.write(GenericRow.of(1, 1, 20, 50));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        // Snapshot 3: compact using dedicated compact writer
+        write.close();
+        commit.close();
+        FileStoreTable compactTable =
+                table.copy(Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "false"));
+        StreamTableWrite compactWrite = compactTable.newWrite(commitUser);
+        StreamTableCommit compactCommit = compactTable.newCommit(commitUser);
+        compactWrite.compact(binaryRow(1), 0, true);
+        compactCommit.commit(2, compactWrite.prepareCommit(true, 2));
+        compactWrite.close();
+        compactCommit.close();
+
+        for (DataSplit split : table.newSnapshotReader().read().dataSplits()) {
+            for (DataFileMeta file : split.dataFiles()) {
+                assertThat(file.minSequenceNumber())
+                        .as(
+                                "Aggregate-compacted file %s must carry a real snapshot id in"
+                                        + " minSequenceNumber (>= 0). A value of -1 means the"
+                                        + " aggregate merge result lost its snapshot id during"
+                                        + " compaction.",
+                                file.fileName())
+                        .isGreaterThanOrEqualTo(0L);
+            }
+        }
+
+        // Snapshot 4: another insert that must aggregate on top of the compacted result.
+        write = table.newWrite(commitUser);
+        commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 1, 5, 999));
+        commit.commit(3, write.prepareCommit(false, 3));
+
+        // Snapshot 5: final compaction using dedicated compact writer
+        write.close();
+        commit.close();
+        compactWrite = compactTable.newWrite(commitUser);
+        compactCommit = compactTable.newCommit(commitUser);
+        compactWrite.compact(binaryRow(1), 0, true);
+        compactCommit.commit(4, compactWrite.prepareCommit(true, 4));
+        compactWrite.close();
+        compactCommit.close();
+        for (DataSplit split : table.newSnapshotReader().read().dataSplits()) {
+            for (DataFileMeta file : split.dataFiles()) {
+                assertThat(file.minSequenceNumber())
+                        .as("Final compacted file %s minSequenceNumber", file.fileName())
+                        .isGreaterThanOrEqualTo(0L);
+                assertThat(file.maxSequenceNumber())
+                        .as("Final compacted file %s maxSequenceNumber", file.fileName())
+                        .isGreaterThanOrEqualTo(0L);
+            }
+        }
+
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        TableRead read = table.newReadBuilder().newRead();
+        Function<InternalRow, String> toString =
+                r -> r.getInt(0) + "|" + r.getInt(1) + "|" + r.getInt(2) + "|" + r.getInt(3);
+        List<String> result = getResult(read, splits, toString);
+        // b = sum(10, 20, 5) = 35, c = max(100, 50, 999) = 999
+        assertThat(result).containsExactly("1|1|35|999");
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testReadWithLimitOnEmptyPlan() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        TableScan.Plan plan = table.newScan().plan();
+        assertThat(plan.splits()).isEmpty();
+
+        RecordReader<InternalRow> reader =
+                table.newRead().withLimit(10).createReader(plan.splits());
+        AtomicInteger cnt = new AtomicInteger(0);
+        reader.forEachRemaining(row -> cnt.incrementAndGet());
+        assertThat(cnt.get()).isEqualTo(0);
+        reader.close();
+    }
+
+    @Test
+    public void testReadWithLimitThroughTableReadPath() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        // Write multiple times to create overlapping level-0 files in the same bucket.
+        int numRecords = 100;
+        for (int i = 0; i < numRecords; i++) {
+            write.write(rowData(1, i, (long) i));
+        }
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        for (int i = 0; i < numRecords; i++) {
+            write.write(rowData(1, i, (long) (i + 1)));
+        }
+        commit.commit(1, write.prepareCommit(true, 1));
+        write.close();
+        commit.close();
+
+        // Verify that withLimit takes effect through the table read path.
+        int limit = 10;
+        TableScan.Plan plan = table.newScan().plan();
+        RecordReader<InternalRow> reader =
+                table.newRead().withLimit(limit).createReader(plan.splits());
+        AtomicInteger cnt = new AtomicInteger(0);
+        reader.forEachRemaining(row -> cnt.incrementAndGet());
+        assertThat(cnt.get()).isEqualTo(limit);
+        reader.close();
+    }
+
+    @Test
+    public void testReadWithLimitThroughTableReadPathMultiSplit() throws Exception {
+        FileStoreTable table = createFileStoreTable(conf -> conf.set(BUCKET, 4));
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        int numRecords = 50;
+        for (int i = 0; i < numRecords; i++) {
+            write.write(rowData(1, i, (long) i));
+        }
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        for (int i = 0; i < numRecords; i++) {
+            write.write(rowData(1, i, (long) (i + 1)));
+        }
+        commit.commit(1, write.prepareCommit(true, 1));
+        write.close();
+        commit.close();
+
+        TableScan.Plan plan = table.newScan().plan();
+        assertThat(plan.splits().size()).isGreaterThan(1);
+
+        int limit = 10;
+        RecordReader<InternalRow> reader =
+                table.newRead().withLimit(limit).createReader(plan.splits());
+        AtomicInteger cnt = new AtomicInteger(0);
+        reader.forEachRemaining(row -> cnt.incrementAndGet());
+        assertThat(cnt.get()).isEqualTo(limit);
+        reader.close();
+    }
+
+    @Test
+    public void testReadWithLimitThroughTableReadPathWithNonPrimaryKeyFilter() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        int numRecords = 100;
+        for (int i = 0; i < numRecords; i++) {
+            write.write(rowData(1, i, (long) i));
+        }
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        for (int i = 0; i < numRecords; i++) {
+            write.write(rowData(1, i, (long) (i + 1)));
+        }
+        commit.commit(1, write.prepareCommit(true, 1));
+        write.close();
+        commit.close();
+
+        int limit = 10;
+        Predicate nonPrimaryKeyFilter = new PredicateBuilder(ROW_TYPE).isNotNull(2);
+        TableScan.Plan plan = table.newScan().withFilter(nonPrimaryKeyFilter).plan();
+        assertThat(plan.splits()).hasSize(1);
+
+        RecordReader<InternalRow> reader =
+                table.newRead()
+                        .withFilter(nonPrimaryKeyFilter)
+                        .withLimit(limit)
+                        .createReader(plan.splits());
+        AtomicInteger cnt = new AtomicInteger(0);
+        reader.forEachRemaining(row -> cnt.incrementAndGet());
+        assertThat(cnt.get()).isEqualTo(limit);
+        reader.close();
+    }
+
+    @Test
+    public void testReadWithLimitThroughTableReadPathWithQueryAuthFilter() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        writeOverlappingL0Records(table, 100);
+
+        int limit = 10;
+        Predicate authFilter = new PredicateBuilder(ROW_TYPE).greaterOrEqual(1, 90);
+        TableQueryAuthResult authResult = authResultWithFilter(authFilter);
+
+        TableScan.Plan plan = table.newScan().plan();
+        assertThat(plan.splits()).hasSize(1);
+        List<Split> authSplits = wrapWithAuth(plan.splits(), authResult);
+
+        RecordReader<InternalRow> reader =
+                table.newRead().withLimit(limit).createReader(authSplits);
+        AtomicInteger cnt = new AtomicInteger(0);
+        reader.forEachRemaining(row -> cnt.incrementAndGet());
+        assertThat(cnt.get()).isEqualTo(limit);
+        reader.close();
+    }
+
+    @Test
+    public void testReadWithLimitThroughSingleSplitCreateReaderWithQueryAuthFilter()
+            throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        writeOverlappingL0Records(table, 100);
+
+        int limit = 10;
+        Predicate authFilter = new PredicateBuilder(ROW_TYPE).greaterOrEqual(1, 50);
+        TableQueryAuthResult authResult = authResultWithFilter(authFilter);
+
+        TableScan.Plan plan = table.newScan().plan();
+        assertThat(plan.splits()).hasSize(1);
+        Split authSplit = wrapWithAuth(plan.splits(), authResult).get(0);
+
+        RecordReader<InternalRow> reader = table.newRead().withLimit(limit).createReader(authSplit);
+        AtomicInteger cnt = new AtomicInteger(0);
+        reader.forEachRemaining(row -> cnt.incrementAndGet());
+        assertThat(cnt.get()).isEqualTo(limit);
+        reader.close();
+    }
+
+    @Test
+    public void testReadWithLimitThroughSingleSplitCreateReaderWithNonPrimaryKeyFilter()
+            throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        writeOverlappingL0Records(table, 100);
+
+        int limit = 10;
+        Predicate nonPrimaryKeyFilter = new PredicateBuilder(ROW_TYPE).isNotNull(2);
+        TableScan.Plan plan = table.newScan().withFilter(nonPrimaryKeyFilter).plan();
+        assertThat(plan.splits()).hasSize(1);
+        Split split = plan.splits().get(0);
+
+        RecordReader<InternalRow> reader =
+                table.newRead()
+                        .withFilter(nonPrimaryKeyFilter)
+                        .withLimit(limit)
+                        .createReader(split);
+        AtomicInteger cnt = new AtomicInteger(0);
+        reader.forEachRemaining(row -> cnt.incrementAndGet());
+        assertThat(cnt.get()).isEqualTo(limit);
+        reader.close();
+    }
+
+    @Test
+    public void testReadWithLimitThroughTableReadPathMultiSplitWithQueryAuthFilter()
+            throws Exception {
+        FileStoreTable table = createFileStoreTable(conf -> conf.set(BUCKET, 4));
+        writeOverlappingL0Records(table, 50);
+
+        int limit = 10;
+        Predicate authFilter = new PredicateBuilder(ROW_TYPE).greaterOrEqual(1, 40);
+        TableQueryAuthResult authResult = authResultWithFilter(authFilter);
+
+        TableScan.Plan plan = table.newScan().plan();
+        assertThat(plan.splits().size()).isGreaterThan(1);
+        List<Split> authSplits = wrapWithAuth(plan.splits(), authResult);
+
+        RecordReader<InternalRow> reader =
+                table.newRead().withLimit(limit).createReader(authSplits);
+        AtomicInteger cnt = new AtomicInteger(0);
+        reader.forEachRemaining(row -> cnt.incrementAndGet());
+        assertThat(cnt.get()).isEqualTo(limit);
+        reader.close();
+    }
+
+    private void writeOverlappingL0Records(FileStoreTable table, int numRecords) throws Exception {
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        for (int i = 0; i < numRecords; i++) {
+            write.write(rowData(1, i, (long) i));
+        }
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        for (int i = 0; i < numRecords; i++) {
+            write.write(rowData(1, i, (long) (i + 1)));
+        }
+        commit.commit(1, write.prepareCommit(true, 1));
+        write.close();
+        commit.close();
+    }
+
+    private TableQueryAuthResult authResultWithFilter(Predicate predicate) {
+        return new TableQueryAuthResult(
+                Collections.singletonList(JsonSerdeUtil.toFlatJson(predicate)), null);
+    }
+
+    private List<Split> wrapWithAuth(List<Split> splits, TableQueryAuthResult authResult) {
+        return splits.stream()
+                .map(split -> new QueryAuthSplit(split, authResult))
+                .collect(Collectors.toList());
     }
 }

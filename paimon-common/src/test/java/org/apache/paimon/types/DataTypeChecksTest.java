@@ -62,4 +62,16 @@ class DataTypeChecksTest {
                                 new DataField(1, "f1", STRING_TYPE)));
         assertThat(DataTypeChecks.getFieldCount(dataType)).isEqualTo(2);
     }
+
+    @Test
+    void testVectorNestedTypesAndLength() {
+        DataType vectorType = DataTypes.VECTOR(4, DataTypes.FLOAT());
+        assertThat(DataTypeChecks.getNestedTypes(vectorType)).containsExactly(DataTypes.FLOAT());
+        assertThat(DataTypeChecks.getLength(vectorType)).isEqualTo(4);
+
+        vectorType = DataTypes.VECTOR(5, DataTypes.BIGINT().notNull());
+        assertThat(DataTypeChecks.getNestedTypes(vectorType))
+                .containsExactly(DataTypes.BIGINT().notNull());
+        assertThat(DataTypeChecks.getLength(vectorType)).isEqualTo(5);
+    }
 }

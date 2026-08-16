@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.SplitsParallelReadUtil;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
@@ -26,10 +27,13 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.table.ChainTableStreamScan;
+import org.apache.paimon.table.source.ChainSplit;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
-import org.apache.paimon.table.source.StreamTableScan;
+import org.apache.paimon.table.source.StreamDataTableScan;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.FunctionWithIOException;
@@ -50,6 +54,7 @@ import java.util.stream.IntStream;
 
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_BOOTSTRAP_PARALLELISM;
 import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A streaming reader to load data into {@link LookupTable}. */
 public class LookupStreamingReader {
@@ -61,14 +66,15 @@ public class LookupStreamingReader {
     @Nullable private final Filter<InternalRow> cacheRowFilter;
     private final ReadBuilder readBuilder;
     @Nullable private final Predicate projectedPredicate;
-    private final StreamTableScan scan;
+    private final StreamDataTableScan scan;
 
     public LookupStreamingReader(
             LookupFileStoreTable table,
             int[] projection,
             @Nullable Predicate predicate,
             Set<Integer> requireCachedBucketIds,
-            @Nullable Filter<InternalRow> cacheRowFilter) {
+            @Nullable Filter<InternalRow> cacheRowFilter,
+            @Nullable List<BinaryRow> scanPartitions) {
         this.table = table;
         this.projection = projection;
         this.cacheRowFilter = cacheRowFilter;
@@ -81,7 +87,17 @@ public class LookupStreamingReader {
                                 requireCachedBucketIds == null
                                         ? null
                                         : requireCachedBucketIds::contains);
-        scan = readBuilder.newStreamScan();
+        scan = (StreamDataTableScan) readBuilder.newStreamScan();
+        checkArgument(
+                scan instanceof LookupDataTableScan || scan instanceof ChainTableStreamScan,
+                "Unexpected scan type for lookup: %s",
+                scan.getClass().getName());
+        if (scan instanceof LookupDataTableScan) {
+            ((LookupDataTableScan) scan).setScanPartitions(scanPartitions);
+        }
+        // Note: ChainTableStreamScan does not support partition filters via setScanPartitions.
+        // Chain tables handle partitions through their own chain-merge logic across snapshot
+        // and delta branches, so partition-level filtering is not applicable in the same way.
 
         if (predicate != null) {
             List<String> fieldNames = table.rowType().getFieldNames();
@@ -153,11 +169,22 @@ public class LookupStreamingReader {
             return;
         }
 
-        DataSplit dataSplit = (DataSplit) splits.get(0);
+        Split split = splits.get(0);
+        String splitInfo;
+        if (split instanceof DataSplit) {
+            splitInfo = "snapshotId=" + ((DataSplit) split).snapshotId();
+        } else if (split instanceof IncrementalSplit) {
+            splitInfo = "snapshotId=" + ((IncrementalSplit) split).snapshotId();
+        } else if (split instanceof ChainSplit) {
+            splitInfo = split.toString();
+        } else {
+            splitInfo = split.getClass().getSimpleName();
+        }
         LOG.info(
-                "LookupStreamingReader get splits from {} with snapshotId {}.",
+                "LookupStreamingReader get {} splits from {} ({}).",
+                splits.size(),
                 table.name(),
-                dataSplit.snapshotId());
+                splitInfo);
     }
 
     @Nullable

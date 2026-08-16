@@ -19,10 +19,12 @@
 package org.apache.paimon.hive.objectinspector;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.ArrayType;
@@ -121,10 +123,20 @@ public class HivePaimonArray implements InternalArray {
     }
 
     @Override
+    public Blob getBlob(int pos) {
+        return getAs(pos);
+    }
+
+    @Override
     public InternalArray getArray(int i) {
         return new HivePaimonArray(
                 ((ArrayType) elementType).getElementType(),
                 ((HivePaimonArray) this.getAs(i)).getList());
+    }
+
+    @Override
+    public InternalVector getVector(int i) {
+        throw new UnsupportedOperationException("Not support VectorType yet.");
     }
 
     @Override

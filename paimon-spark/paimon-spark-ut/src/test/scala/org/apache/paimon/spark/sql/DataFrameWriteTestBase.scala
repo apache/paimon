@@ -22,10 +22,12 @@ import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.Row
-import org.apache.spark.sql.types.DecimalType
+import org.apache.spark.sql.types.{DecimalType, StructType}
 import org.junit.jupiter.api.Assertions
 
 import java.sql.{Date, Timestamp}
+
+import scala.collection.JavaConverters._
 
 abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
 
@@ -132,16 +134,33 @@ abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
             Seq(Row("pt=p1"), Row("pt=p2"), Row("pt=p3"))
           )
 
-          // saveAsTable with overwrite mode will call replace table internal,
-          // so here we set the props and partitions again.
-          Seq((5, "x5", "p1"))
-            .toDF("a", "b", "pt")
-            .write
-            .format("paimon")
-            .option("primary-key", "a,pt")
-            .partitionBy("pt")
-            .mode("overwrite")
-            .saveAsTable("t")
+          if (gteqSpark3_4) {
+            // On Spark 3.4+, saveAsTable with overwrite mode behaves as INSERT OVERWRITE,
+            // preserving the table definition (partitions, primary keys, properties).
+            // No need to re-specify partitionBy or primary-key.
+            Seq((5, "x5", "p1"))
+              .toDF("a", "b", "pt")
+              .write
+              .format("paimon")
+              .mode("overwrite")
+              .saveAsTable("t")
+
+            // Verify table definition is preserved
+            val table = loadTable("t")
+            Assertions.assertEquals(Seq("pt"), table.partitionKeys().asScala.toSeq)
+            Assertions.assertEquals(Seq("a", "pt"), table.primaryKeys().asScala.toSeq)
+          } else {
+            // On Spark 3.2/3.3, saveAsTable with overwrite still requires re-specifying
+            // partitionBy and primary-key as the insert-overwrite optimization is not available.
+            Seq((5, "x5", "p1"))
+              .toDF("a", "b", "pt")
+              .write
+              .format("paimon")
+              .option("primary-key", "a,pt")
+              .partitionBy("pt")
+              .mode("overwrite")
+              .saveAsTable("t")
+          }
           checkAnswer(
             spark.read.format("paimon").table("t").orderBy("a"),
             Seq(Row(5, "x5", "p1"))
@@ -152,6 +171,123 @@ abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
           )
         }
       }
+    }
+  }
+
+  test("Paimon dataframe: saveAsTable overwrite preserves table definition and snapshots") {
+    assume(gteqSpark3_4)
+    withTable("t") {
+      // Create a partitioned table with primary key and custom properties
+      spark.sql("""CREATE TABLE t (a INT, b STRING, pt STRING)
+                  |USING paimon
+                  |PARTITIONED BY (pt)
+                  |TBLPROPERTIES ('primary-key' = 'a,pt', 'bucket' = '2')
+                  |""".stripMargin)
+      spark.sql("INSERT INTO t VALUES (1, 'old1', 'p1'), (2, 'old2', 'p2')")
+
+      val oldLocation = loadTable("t").location().toString
+      val oldSnapshotId = loadTable("t").snapshotManager().latestSnapshotId()
+
+      // Overwrite without re-specifying partitionBy or primary-key
+      Seq((3, "new3", "p3"))
+        .toDF("a", "b", "pt")
+        .write
+        .format("paimon")
+        .mode("overwrite")
+        .saveAsTable("t")
+
+      // Verify table definition is fully preserved
+      val table = loadTable("t")
+      Assertions.assertEquals(Seq("pt"), table.partitionKeys().asScala.toSeq)
+      Assertions.assertEquals(Seq("a", "pt"), table.primaryKeys().asScala.toSeq)
+      Assertions.assertEquals("2", table.options().get("bucket"))
+      Assertions.assertEquals(oldLocation, table.location().toString)
+
+      // Verify data is replaced
+      checkAnswer(sql("SELECT * FROM t ORDER BY a"), Row(3, "new3", "p3") :: Nil)
+
+      // Verify old snapshots are still accessible via time travel
+      checkAnswer(
+        sql(s"SELECT * FROM t VERSION AS OF $oldSnapshotId ORDER BY a"),
+        Row(1, "old1", "p1") :: Row(2, "old2", "p2") :: Nil)
+    }
+  }
+
+  test("Paimon dataframe: saveAsTable overwrite on non-partitioned table") {
+    assume(gteqSpark3_4)
+    withTable("t") {
+      Seq((1, "x1"), (2, "x2"))
+        .toDF("a", "b")
+        .write
+        .format("paimon")
+        .mode("append")
+        .saveAsTable("t")
+
+      // Overwrite
+      Seq((3, "x3"))
+        .toDF("a", "b")
+        .write
+        .format("paimon")
+        .mode("overwrite")
+        .saveAsTable("t")
+
+      checkAnswer(sql("SELECT * FROM t ORDER BY a"), Row(3, "x3") :: Nil)
+      // Verify still non-partitioned
+      Assertions.assertTrue(loadTable("t").partitionKeys().isEmpty)
+    }
+  }
+
+  test("Paimon dataframe: saveAsTable overwrite creates table when not exists") {
+    assume(gteqSpark3_4)
+    withTable("new_tbl") {
+      Seq((1, "x1"))
+        .toDF("a", "b")
+        .write
+        .format("paimon")
+        .option("primary-key", "a")
+        .mode("overwrite")
+        .saveAsTable("new_tbl")
+
+      checkAnswer(sql("SELECT * FROM new_tbl"), Row(1, "x1") :: Nil)
+      Assertions.assertEquals(Seq("a"), loadTable("new_tbl").primaryKeys().asScala.toSeq)
+    }
+  }
+
+  test("Paimon dataframe: saveAsTable overwrite respects dynamic partition overwrite mode") {
+    assume(gteqSpark3_4)
+    withTable("t") {
+      spark.sql("""CREATE TABLE t (a INT, b STRING, pt STRING)
+                  |USING paimon
+                  |PARTITIONED BY (pt)
+                  |TBLPROPERTIES ('primary-key' = 'a,pt')
+                  |""".stripMargin)
+      spark.sql("INSERT INTO t VALUES (1, 'x1', 'p1'), (2, 'x2', 'p2'), (3, 'x3', 'p1')")
+
+      // Dynamic partition overwrite: only p1 should be replaced, p2 untouched
+      withSparkSQLConf("spark.sql.sources.partitionOverwriteMode" -> "dynamic") {
+        Seq((4, "x4", "p1"))
+          .toDF("a", "b", "pt")
+          .write
+          .format("paimon")
+          .mode("overwrite")
+          .saveAsTable("t")
+      }
+      checkAnswer(
+        sql("SELECT * FROM t ORDER BY a"),
+        Row(2, "x2", "p2") :: Row(4, "x4", "p1") :: Nil)
+
+      // Static overwrite (default): all partitions replaced
+      Seq((5, "x5", "p3"))
+        .toDF("a", "b", "pt")
+        .write
+        .format("paimon")
+        .mode("overwrite")
+        .saveAsTable("t")
+      checkAnswer(sql("SELECT * FROM t ORDER BY a"), Row(5, "x5", "p3") :: Nil)
+
+      // Verify table definition is preserved in both cases
+      Assertions.assertEquals(Seq("pt"), loadTable("t").partitionKeys().asScala.toSeq)
+      Assertions.assertEquals(Seq("a", "pt"), loadTable("t").primaryKeys().asScala.toSeq)
     }
   }
 
@@ -166,7 +302,6 @@ abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
         .option("bucket", "-1")
         .option("target-file-size", "256MB")
         .option("write.merge-schema", "true")
-        .option("write.merge-schema.explicit-cast", "true")
         .saveAsTable("test_ctas")
 
       val paimonTable = loadTable("test_ctas")
@@ -179,7 +314,92 @@ abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
 
       // non-core options should not be here.
       Assertions.assertFalse(paimonTable.options().containsKey("write.merge-schema"))
-      Assertions.assertFalse(paimonTable.options().containsKey("write.merge-schema.explicit-cast"))
+    }
+  }
+
+  test("Paimon dataframe: writer v2 replace") {
+    assume(gteqSpark3_4)
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (id BIGINT, data STRING)
+            |USING paimon
+            |TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '2')
+            |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 'old')")
+
+      val oldLocation = loadTable("t").location().toString
+      val oldSnapshotId = loadTable("t").snapshotManager().latestSnapshotId()
+
+      spark
+        .range(2, 4)
+        .selectExpr("id", "concat('v', cast(id as string)) AS data")
+        .writeTo("t")
+        .using("paimon")
+        .tableProperty("primary-key", "id")
+        .tableProperty("bucket", "3")
+        .replace()
+
+      val table = loadTable("t")
+      Assertions.assertEquals("3", table.options().get("bucket"))
+      Assertions.assertEquals(oldLocation, table.location().toString)
+      checkAnswer(sql("SELECT * FROM t ORDER BY id"), Row(2L, "v2") :: Row(3L, "v3") :: Nil)
+      checkAnswer(sql(s"SELECT * FROM t VERSION AS OF $oldSnapshotId"), Row(1L, "old") :: Nil)
+    }
+  }
+
+  test("Paimon dataframe: writer v2 create fails when table exists") {
+    assume(gteqSpark3_4)
+    withTable("t") {
+      sql("CREATE TABLE t (id BIGINT, data STRING) USING paimon")
+
+      val error = intercept[Exception] {
+        spark
+          .range(2)
+          .selectExpr("id", "concat('v', cast(id as string)) AS data")
+          .writeTo("t")
+          .using("paimon")
+          .create()
+      }.getMessage
+
+      Assertions.assertTrue(
+        error.contains("TABLE_OR_VIEW_ALREADY_EXISTS") || error.contains("already exists"))
+    }
+  }
+
+  test("Paimon dataframe: writer v2 create or replace") {
+    assume(gteqSpark3_4)
+    withTable("t") {
+      spark
+        .range(2)
+        .selectExpr("id", "concat('v', cast(id as string)) AS data")
+        .writeTo("t")
+        .using("paimon")
+        .tableProperty("primary-key", "id")
+        .tableProperty("bucket", "2")
+        .createOrReplace()
+
+      val createdLocation = loadTable("t").location().toString
+      checkAnswer(sql("SELECT * FROM t ORDER BY id"), Row(0L, "v0") :: Row(1L, "v1") :: Nil)
+
+      spark
+        .range(3, 5)
+        .selectExpr(
+          "id",
+          "concat('v', cast(id as string)) AS data",
+          "concat('n', cast(id as string)) AS note")
+        .writeTo("t")
+        .using("paimon")
+        .tableProperty("primary-key", "id")
+        .tableProperty("bucket", "4")
+        .createOrReplace()
+
+      val table = loadTable("t")
+      Assertions.assertEquals(Seq("id", "data", "note"), spark.table("t").schema.fieldNames.toSeq)
+      Assertions.assertEquals("4", table.options().get("bucket"))
+      Assertions.assertEquals(createdLocation, table.location().toString)
+      checkAnswer(
+        sql("SELECT * FROM t ORDER BY id"),
+        Row(3L, "v3", "n3") :: Row(4L, "v4", "n4") :: Nil)
     }
   }
 
@@ -278,6 +498,130 @@ abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
           )
         }
       }
+  }
+
+  test("Paimon: DataFrameWrite.saveAsTable should recursively align nested fields by name") {
+    for (useV2Write <- Seq("true", "false")) {
+      withSparkSQLConf("spark.paimon.write.use-v2-write" -> useV2Write) {
+        withTable("source", "target") {
+          sql("""
+                |CREATE TABLE source (
+                |  id INT,
+                |  outer STRUCT<inner_arr: ARRAY<STRUCT<flag: BOOLEAN, label: STRING>>>,
+                |  nested_arr ARRAY<ARRAY<STRUCT<flag: BOOLEAN, label: STRING>>>,
+                |  nested_map MAP<STRING, STRUCT<flag: BOOLEAN, label: STRING>>
+                |) USING paimon
+                |""".stripMargin)
+
+          sql("""
+                |CREATE TABLE target (
+                |  id INT,
+                |  outer STRUCT<inner_arr: ARRAY<STRUCT<label: STRING, flag: BOOLEAN>>>,
+                |  nested_arr ARRAY<ARRAY<STRUCT<label: STRING, flag: BOOLEAN>>>,
+                |  nested_map MAP<STRING, STRUCT<label: STRING, flag: BOOLEAN>>
+                |) USING paimon
+                |""".stripMargin)
+
+          sql("""
+                |INSERT INTO source VALUES (
+                |  1,
+                |  named_struct('inner_arr', array(named_struct('flag', true, 'label', 'outer'))),
+                |  array(array(named_struct('flag', false, 'label', 'array'))),
+                |  map('k', named_struct('flag', true, 'label', 'map'))
+                |)
+                |""".stripMargin)
+
+          spark.table("source").write.format("paimon").mode("append").saveAsTable("target")
+
+          checkAnswer(
+            sql("""
+                  |SELECT
+                  |  outer.inner_arr[0].label,
+                  |  outer.inner_arr[0].flag,
+                  |  nested_arr[0][0].label,
+                  |  nested_arr[0][0].flag,
+                  |  nested_map['k'].label,
+                  |  nested_map['k'].flag
+                  |FROM target
+                  |""".stripMargin),
+            Seq(Row("outer", true, "array", false, "map", true))
+          )
+        }
+      }
+    }
+  }
+
+  test("Paimon: SQL insert should recursively keep nested fields by-position semantics") {
+    withSparkSQLConf("spark.sql.ansi.enabled" -> "false") {
+      withTable("source", "target") {
+        sql("""
+              |CREATE TABLE source (
+              |  id INT,
+              |  outer STRUCT<inner_arr: ARRAY<STRUCT<flag: BOOLEAN, label: STRING>>>,
+              |  nested_arr ARRAY<ARRAY<STRUCT<flag: BOOLEAN, label: STRING>>>,
+              |  nested_map MAP<STRING, STRUCT<flag: BOOLEAN, label: STRING>>
+              |) USING paimon
+              |""".stripMargin)
+
+        sql("""
+              |CREATE TABLE target (
+              |  id INT,
+              |  outer STRUCT<inner_arr: ARRAY<STRUCT<label: STRING, flag: BOOLEAN>>>,
+              |  nested_arr ARRAY<ARRAY<STRUCT<label: STRING, flag: BOOLEAN>>>,
+              |  nested_map MAP<STRING, STRUCT<label: STRING, flag: BOOLEAN>>
+              |) USING paimon
+              |""".stripMargin)
+
+        sql("""
+              |INSERT INTO source VALUES (
+              |  1,
+              |  named_struct('inner_arr', array(named_struct('flag', true, 'label', 'outer'))),
+              |  array(array(named_struct('flag', false, 'label', 'array'))),
+              |  map('k', named_struct('flag', true, 'label', 'map'))
+              |)
+              |""".stripMargin)
+
+        sql("INSERT INTO target SELECT * FROM source")
+
+        checkAnswer(
+          sql("""
+                |SELECT
+                |  outer.inner_arr[0].label,
+                |  outer.inner_arr[0].flag,
+                |  nested_arr[0][0].label,
+                |  nested_arr[0][0].flag,
+                |  nested_map['k'].label,
+                |  nested_map['k'].flag
+                |FROM target
+                |""".stripMargin),
+          Seq(Row("true", null, "false", null, "true", null))
+        )
+      }
+    }
+  }
+
+  test("Paimon: DataFrameWrite.saveAsTable should reject incompatible struct casts") {
+    withTable("source", "target") {
+      sql("CREATE TABLE source (id INT, payload STRUCT<value: INT>) USING paimon")
+      sql("CREATE TABLE target (id INT, payload INT) USING paimon")
+      sql("INSERT INTO source VALUES (1, named_struct('value', 1))")
+
+      val message = intercept[Exception] {
+        spark.table("source").write.format("paimon").mode("append").saveAsTable("target")
+      }.getMessage
+      assert(message.toLowerCase.contains("cast"))
+    }
+
+    withTable("source", "target") {
+      sql("CREATE TABLE source (id INT, payload INT) USING paimon")
+      sql("CREATE TABLE target (id INT, payload STRUCT<value: INT>) USING paimon")
+      sql("INSERT INTO source VALUES (1, 1)")
+
+      val message = intercept[Exception] {
+        spark.table("source").write.format("paimon").mode("append").saveAsTable("target")
+      }.getMessage
+      assert(message.toLowerCase.contains("cast"))
+    }
   }
 
   withPk.foreach {
@@ -387,6 +731,7 @@ abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
                   .format("paimon")
                   .mode("append")
                   .option("write.merge-schema", "true")
+                  .option("write.merge-schema.type-widening", "true")
                   .save(location)
                 val expected3 = if (hasPk) {
                   Row(1L, "a2", BigDecimal.decimal(123), Map("k" -> 11.1)) :: Row(
@@ -431,6 +776,7 @@ abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
                   .format("paimon")
                   .mode("append")
                   .option("write.merge-schema", "true")
+                  .option("write.merge-schema.type-widening", "true")
                   .save(location)
                 val expected4 =
                   expected3 ++ Seq(Row(99L, "df4", BigDecimal.decimal(4.0), Map("4" -> 4.1)))
@@ -502,19 +848,21 @@ abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
               "c",
               "d")
 
-            // throw UnsupportedOperationException if write.merge-schema.explicit-cast = false
+            // throw UnsupportedOperationException when type-widening is on but explicit-cast = false
             assertThrows[UnsupportedOperationException] {
               df3.write
                 .format("paimon")
                 .mode("append")
                 .option("write.merge-schema", "true")
+                .option("write.merge-schema.type-widening", "true")
                 .save(location)
             }
-            // merge schema and write data when write.merge-schema.explicit-cast = true
+            // merge schema and write data when type-widening + explicit-cast = true
             df3.write
               .format("paimon")
               .mode("append")
               .option("write.merge-schema", "true")
+              .option("write.merge-schema.type-widening", "true")
               .option("write.merge-schema.explicit-cast", "true")
               .save(location)
             val expected3 = if (hasPk) {
@@ -654,48 +1002,184 @@ abstract class DataFrameWriteTestBase extends PaimonSparkTestBase {
   }
 
   test("Paimon Schema Evolution: some columns is absent in the coming data") {
+    withTable("T") {
+      spark.sql("CREATE TABLE T (a INT, b STRING)")
 
-    spark.sql(s"""
-                 |CREATE TABLE T (a INT, b STRING)
-                 |""".stripMargin)
+      val df1 = Seq((1, "2023-08-01"), (2, "2023-08-02")).toDF("a", "b")
+      df1.write.format("paimon").mode("append").saveAsTable("T")
+      checkAnswer(
+        spark.sql("SELECT * FROM T ORDER BY a, b"),
+        Row(1, "2023-08-01") :: Row(2, "2023-08-02") :: Nil)
 
-    val paimonTable = loadTable("T")
-    val location = paimonTable.location().toString
+      // Case 1: two additional fields: DoubleType and TimestampType
+      val ts = java.sql.Timestamp.valueOf("2023-08-01 10:00:00.0")
+      val df2 = Seq((1, "2023-08-01", 12.3d, ts), (3, "2023-08-03", 34.5d, ts))
+        .toDF("a", "b", "c", "d")
+      df2.write
+        .format("paimon")
+        .mode("append")
+        .option("write.merge-schema", "true")
+        .saveAsTable("T")
 
-    val df1 = Seq((1, "2023-08-01"), (2, "2023-08-02")).toDF("a", "b")
-    df1.write.format("paimon").mode("append").save(location)
-    checkAnswer(
-      spark.sql("SELECT * FROM T ORDER BY a, b"),
-      Row(1, "2023-08-01") :: Row(2, "2023-08-02") :: Nil)
+      // Case 2: column b and d are absent in the coming data
+      val df3 = Seq((4, 45.6d), (5, 56.7d))
+        .toDF("a", "c")
+      df3.write
+        .format("paimon")
+        .mode("append")
+        .option("write.merge-schema", "true")
+        .saveAsTable("T")
+      val expected3 =
+        Row(1, "2023-08-01", null, null) :: Row(1, "2023-08-01", 12.3d, ts) :: Row(
+          2,
+          "2023-08-02",
+          null,
+          null) :: Row(3, "2023-08-03", 34.5d, ts) :: Row(4, null, 45.6d, null) :: Row(
+          5,
+          null,
+          56.7d,
+          null) :: Nil
+      checkAnswer(spark.sql("SELECT * FROM T ORDER BY a, b"), expected3)
+    }
+  }
 
-    // Case 1: two additional fields: DoubleType and TimestampType
-    val ts = java.sql.Timestamp.valueOf("2023-08-01 10:00:00.0")
-    val df2 = Seq((1, "2023-08-01", 12.3d, ts), (3, "2023-08-03", 34.5d, ts))
-      .toDF("a", "b", "c", "d")
-    df2.write
-      .format("paimon")
-      .mode("append")
-      .option("write.merge-schema", "true")
-      .save(location)
+  test("Paimon write merge-schema conflict: deep nested array element bigint -> string") {
+    for (useV2Write <- Seq("true", "false")) {
+      withSparkSQLConf("spark.paimon.write.use-v2-write" -> useV2Write) {
+        withTable("target") {
+          sql("""
+                |CREATE TABLE target (
+                |  id STRING,
+                |  data STRUCT<wind: STRUCT<impactPrts: ARRAY<STRING>>>
+                |) USING paimon
+                |""".stripMargin)
+          sql("""
+                |INSERT INTO target VALUES (
+                |  'r0',
+                |  named_struct('wind', named_struct('impactPrts', array('p0', 'p1')))
+                |)
+                |""".stripMargin)
 
-    // Case 2: colum b and d are absent in the coming data
-    val df3 = Seq((4, 45.6d), (5, 56.7d))
-      .toDF("a", "c")
-    df3.write
-      .format("paimon")
-      .mode("append")
-      .option("write.merge-schema", "true")
-      .save(location)
-    val expected3 =
-      Row(1, "2023-08-01", null, null) :: Row(1, "2023-08-01", 12.3d, ts) :: Row(
-        2,
-        "2023-08-02",
-        null,
-        null) :: Row(3, "2023-08-03", 34.5d, ts) :: Row(4, null, 45.6d, null) :: Row(
-        5,
-        null,
-        56.7d,
-        null) :: Nil
-    checkAnswer(spark.sql("SELECT * FROM T ORDER BY a, b"), expected3)
+          val sourceSchema =
+            StructType.fromDDL("id STRING, data STRUCT<wind: STRUCT<impactPrts: ARRAY<BIGINT>>>")
+          val sourceDf = spark.createDataFrame(
+            java.util.Arrays.asList(Row("r1", Row(Row(java.util.Arrays.asList(10L, 20L))))),
+            sourceSchema)
+          sourceDf.write
+            .format("paimon")
+            .mode("append")
+            .option("write.merge-schema", "true")
+            .saveAsTable("target")
+
+          checkAnswer(
+            sql("SELECT id, data.wind.impactPrts FROM target ORDER BY id"),
+            Seq(
+              Row("r0", Array("p0", "p1")),
+              Row("r1", Array("10", "20"))
+            )
+          )
+        }
+      }
+    }
+  }
+
+  test("Paimon write merge-schema conflict: top-level same-name column string vs bigint") {
+    for (useV2Write <- Seq("true", "false")) {
+      withSparkSQLConf("spark.paimon.write.use-v2-write" -> useV2Write) {
+        withTable("target") {
+          sql("CREATE TABLE target (id STRING, value BIGINT) USING paimon")
+          sql("INSERT INTO target VALUES ('r0', 1000L)")
+
+          val sourceSchema = StructType.fromDDL("id STRING, value STRING")
+          val sourceDf =
+            spark.createDataFrame(java.util.Arrays.asList(Row("r1", "2000")), sourceSchema)
+          sourceDf.write
+            .format("paimon")
+            .mode("append")
+            .option("write.merge-schema", "true")
+            .saveAsTable("target")
+
+          checkAnswer(
+            sql("SELECT id, value FROM target ORDER BY id"),
+            Seq(Row("r0", 1000L), Row("r1", 2000L))
+          )
+        }
+      }
+    }
+  }
+
+  test("Paimon write merge-schema conflict: deep nested struct widening int -> bigint") {
+    for (useV2Write <- Seq("true", "false")) {
+      withSparkSQLConf("spark.paimon.write.use-v2-write" -> useV2Write) {
+        withTable("target") {
+          sql("""
+                |CREATE TABLE target (
+                |  id STRING,
+                |  payload STRUCT<
+                |    inner: STRUCT<
+                |      items: ARRAY<STRUCT<
+                |        prtId: BIGINT,
+                |        seqNum: BIGINT,
+                |        missing: ARRAY<STRUCT<
+                |          port: BIGINT,
+                |          terminal: BIGINT
+                |        >>
+                |      >>
+                |    >
+                |  >
+                |) USING paimon
+                |""".stripMargin)
+          sql("""
+                |INSERT INTO target VALUES (
+                |  'r0',
+                |  named_struct('inner', named_struct('items', array(named_struct(
+                |    'prtId', 10L,
+                |    'seqNum', 1L,
+                |    'missing', array(named_struct('port', 100L, 'terminal', 200L))
+                |  ))))
+                |)
+                |""".stripMargin)
+
+          val sourceSchema = StructType.fromDDL(
+            "id STRING, " +
+              "payload STRUCT<" +
+              "  inner: STRUCT<" +
+              "    items: ARRAY<STRUCT<" +
+              "      prtId: INT, " +
+              "      seqNum: INT, " +
+              "      missing: ARRAY<STRUCT<port: INT, terminal: INT>>" +
+              "    >>" +
+              "  >" +
+              ">")
+          val sourceDf = spark.createDataFrame(
+            java.util.Arrays.asList(Row(
+              "r1",
+              Row(
+                Row(java.util.Arrays.asList(Row(20, 2, java.util.Arrays.asList(Row(300, 400)))))))),
+            sourceSchema)
+          sourceDf.write
+            .format("paimon")
+            .mode("append")
+            .option("write.merge-schema", "true")
+            .saveAsTable("target")
+
+          checkAnswer(
+            sql("""
+                  |SELECT
+                  |  id,
+                  |  payload.inner.items[0].prtId,
+                  |  payload.inner.items[0].seqNum,
+                  |  payload.inner.items[0].missing[0].port,
+                  |  payload.inner.items[0].missing[0].terminal
+                  |FROM target ORDER BY id
+                  |""".stripMargin),
+            Seq(
+              Row("r0", 10L, 1L, 100L, 200L),
+              Row("r1", 20L, 2L, 300L, 400L)
+            )
+          )
+        }
+      }
+    }
   }
 }

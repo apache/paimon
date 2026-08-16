@@ -23,4 +23,6 @@ import org.apache.paimon.catalog.Catalog;
 /** With paimon catalog. */
 public interface WithPaimonCatalog {
     Catalog paimonCatalog();
+
+    String paimonCatalogName();
 }

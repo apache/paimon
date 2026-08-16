@@ -21,7 +21,8 @@ package org.apache.paimon.postpone;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
+import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.avro.AvroSchemaConverter;
 import org.apache.paimon.fs.FileIO;
@@ -29,6 +30,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
+import org.apache.paimon.mergetree.compact.LookupMergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.FileStoreWrite;
@@ -93,7 +95,7 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
             CoreOptions options,
             String tableName,
             @Nullable Integer writeId) {
-        super(snapshotManager, scan, options, partitionType, null, null, tableName);
+        super(snapshotManager, scan, options, partitionType, null, null, null, tableName);
         this.fileIO = fileIO;
         this.pathFactory = pathFactory;
         this.mfFactory = mfFactory;
@@ -148,6 +150,15 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
     }
 
     @Override
+    public PostponeBucketFileStoreWrite withIOManager(IOManager ioManager) {
+        super.withIOManager(ioManager);
+        if (mfFactory instanceof LookupMergeFunction.Factory) {
+            ((LookupMergeFunction.Factory) mfFactory).withIOManager(ioManager);
+        }
+        return this;
+    }
+
+    @Override
     protected void forceBufferSpill() throws Exception {
         if (ioManager == null) {
             return;
@@ -180,7 +191,8 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
             long restoredMaxSeqNumber,
             @Nullable CommitIncrement restoreIncrement,
             ExecutorService compactExecutor,
-            @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer) {
+            @Nullable BucketedDvMaintainer deletionVectorsMaintainer,
+            boolean ignorePreviousFiles) {
         Preconditions.checkArgument(bucket == BucketMode.POSTPONE_BUCKET);
         Preconditions.checkArgument(
                 restoreFiles.isEmpty(),
@@ -215,5 +227,28 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
     @Override
     protected Function<WriterContainer<KeyValue>, Boolean> createWriterCleanChecker() {
         return createNoConflictAwareWriterCleanChecker();
+    }
+
+    public static int getWriteId(String fileName) {
+        try {
+            String[] parts = fileName.split("-s-");
+            return Integer.parseInt(parts[1].substring(0, parts[1].indexOf('-')));
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    "Data file name "
+                            + fileName
+                            + " does not match the pattern. This is unexpected.",
+                    e);
+        }
+    }
+
+    /** Returns the unique prefix shared by files produced by the same postpone writer. */
+    public static String getWriterPrefix(String fileName) {
+        int separator = fileName.lastIndexOf("-w-");
+        if (separator < 0) {
+            throw new IllegalArgumentException(
+                    "Data file name " + fileName + " does not match the postpone writer pattern.");
+        }
+        return fileName.substring(0, separator + 3);
     }
 }

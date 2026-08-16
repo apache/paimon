@@ -69,7 +69,7 @@ public abstract class TableActionBase extends ActionBase {
      * Invoke {@code TableEnvironmentImpl#executeInternal(List<Transformation<?>>, List<String>)}
      * from a {@link StreamTableEnvironment} instance through reflecting.
      */
-    private TableResult executeInternal(
+    protected TableResult executeInternal(
             List<Transformation<?>> transformations, List<String> sinkIdentifierNames) {
         Class<?> clazz = batchTEnv.getClass().getSuperclass().getSuperclass();
         try {

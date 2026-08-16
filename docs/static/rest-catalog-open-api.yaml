@@ -122,7 +122,7 @@ paths:
       tags:
         - database
       summary: Get Database
-      operationId: getDatabases
+      operationId: getDatabase
       parameters:
         - name: prefix
           in: path
@@ -350,6 +350,11 @@ paths:
           in: query
           schema:
             type: string
+        - name: tableType
+          description: Filter tables by table type. All table types will be returned if not set or empty.
+          in: query
+          schema:
+            type: string
       responses:
         "200":
           description: OK
@@ -378,7 +383,7 @@ paths:
             type: string
         - name: databaseNamePattern
           description: A sql LIKE pattern (%) for database names. All databases will be returned if not set or empty. Currently, only prefix matching is supported.
-          in: path
+          in: query
           schema:
             type: string
         - name: tableNamePattern
@@ -405,6 +410,36 @@ paths:
                 $ref: '#/components/schemas/ListTablesGloballyResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/tables/id/{tableId}:
+    get:
+      tags:
+        - table
+      summary: Get table by id
+      operationId: getTableById
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: tableId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetTableResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}:
@@ -624,7 +659,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/responses/ResourceNotExistErrorResponse'
+                $ref: '#/components/schemas/ErrorResponse'
               examples:
                 TableNotExist:
                   $ref: '#/components/examples/TableNotExistError'
@@ -632,6 +667,42 @@ paths:
                   $ref: '#/components/examples/SnapshotNotExistError'
                 TagNotExist:
                   $ref: '#/components/examples/TagNotExistError'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/rollback-schema:
+    post:
+      tags:
+        - table
+      summary: Rollback table schema
+      operationId: rollbackSchema
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RollbackSchemaRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}/token:
@@ -714,7 +785,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/responses/ResourceNotExistErrorResponse'
+                $ref: '#/components/schemas/ErrorResponse'
               examples:
                 TableNotExist:
                   $ref: '#/components/examples/TableNotExistError'
@@ -759,7 +830,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/responses/ResourceNotExistErrorResponse'
+                $ref: '#/components/schemas/ErrorResponse'
               examples:
                 TableNotExist:
                   $ref: '#/components/examples/TableNotExistError'
@@ -811,7 +882,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/responses/ResourceNotExistErrorResponse'
+                $ref: '#/components/schemas/ErrorResponse'
               examples:
                 TableNotExist:
                   $ref: '#/components/examples/TableNotExistError'
@@ -912,6 +983,90 @@ paths:
           $ref: '#/components/responses/TableNotExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
+    post:
+      tags:
+        - partition
+      summary: Create partitions
+      operationId: createPartitions
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePartitionsRequest'
+      responses:
+        "200":
+          description: Partitions created or found to exist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatePartitionsResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
+        "409":
+          $ref: '#/components/responses/ResourceAlreadyExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/partitions/drop:
+    post:
+      tags:
+        - partition
+      summary: Drop partitions
+      description: Unregisters partitions from the catalog. The server never deletes data files; for a format table with catalog-managed partitions, data deletion is performed by the client afterwards.
+      operationId: dropPartitions
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DropPartitionsRequest'
+      responses:
+        "200":
+          description: Partitions dropped or found missing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DropPartitionsResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}/partitions/mark:
     post:
       tags:
@@ -942,6 +1097,92 @@ paths:
       responses:
         "200":
           description: Success, no content
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/partitions/list-by-names:
+    post:
+      tags:
+        - partition
+      summary: List partitions by names
+      operationId: listPartitionsByNames
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ListPartitionsByNamesRequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListPartitionsResponse'
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/partitions/list-by-filter:
+    post:
+      tags:
+        - partition
+      summary: List partitions by filter
+      description: Lists a page of partitions using a serialized Paimon partition predicate. The response may be a superset of the matching partitions, so clients must re-evaluate the predicate and continue pagination while nextPageToken is non-empty, even if the current page contains no partitions.
+      operationId: listPartitionsByFilter
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ListPartitionsByFilterRequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListPartitionsResponse'
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
@@ -1024,7 +1265,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/responses/ResourceNotExistErrorResponse'
+                $ref: '#/components/schemas/ErrorResponse'
               examples:
                 TableNotExist:
                   $ref: '#/components/examples/TableNotExistError'
@@ -1070,6 +1311,49 @@ paths:
           $ref: '#/components/responses/BranchNotExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/branches/{branch}/rename:
+    post:
+      tags:
+        - branch
+      summary: rename branch
+      operationId: renameBranch
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: branch
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RenameBranchRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/BranchNotExistErrorResponse'
+        "409":
+          description: Branch already exists
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}/branches/{branch}/forward:
     post:
       tags:
@@ -1109,6 +1393,261 @@ paths:
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "404":
           $ref: '#/components/responses/BranchNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/tags:
+    get:
+      tags:
+        - tag
+      summary: List tags
+      operationId: listTags
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: maxResults
+          in: query
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: query
+          schema:
+            type: string
+        - name: tagNamePrefix
+          description: A prefix for tag names. All tags will be returned if not set or empty.
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListTagsResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+    post:
+      tags:
+        - tag
+      summary: Create tag
+      operationId: createTag
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTagRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          description:
+            Not Found
+            - TableNotExistException, table does not exist
+            - SnapshotNotExistException, the requested snapshot does not exist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                TableNotExist:
+                  $ref: '#/components/examples/TableNotExistError'
+                SnapshotNotExist:
+                  $ref: '#/components/examples/SnapshotNotExistError'
+        "409":
+          $ref: '#/components/responses/TagAlreadyExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/tags/{tag}:
+    get:
+      tags:
+        - tag
+      summary: Get tag
+      operationId: getTag
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: tag
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetTagResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TagNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+    delete:
+      tags:
+        - tag
+      summary: Delete tag
+      operationId: deleteTag
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: tag
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success, no content
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TagNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/consumers:
+    get:
+      tags:
+        - table
+      summary: List consumers
+      operationId: listConsumers
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: maxResults
+          in: query
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListConsumersResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/consumers/reset:
+    post:
+      tags:
+        - table
+      summary: Reset consumer
+      operationId: resetConsumer
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResetConsumerRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/views:
@@ -1248,7 +1787,7 @@ paths:
             type: string
         - name: databaseNamePattern
           description: A sql LIKE pattern (%) for database names. All databases will be returned if not set or empty. Currently, only prefix matching is supported.
-          in: path
+          in: query
           schema:
             type: string
         - name: viewNamePattern
@@ -1546,7 +2085,7 @@ paths:
             type: string
         - name: databaseNamePattern
           description: A sql LIKE pattern (%) for database names. All databases will be returned if not set or empty. Currently, only prefix matching is supported.
-          in: path
+          in: query
           schema:
             type: string
         - name: functionNamePattern
@@ -1735,7 +2274,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceNotExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given database does not exist",
@@ -1749,7 +2288,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceNotExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given table does not exist",
@@ -1763,7 +2302,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceNotExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given snapshot does not exist",
@@ -1777,12 +2316,26 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceNotExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given branch does not exist",
               "resourceType": "BRANCH",
               "resourceName": "branch",
+              "code": 404
+            }
+    TagNotExistErrorResponse:
+      description:
+        Not Found - TagNotExistException, the tag does not exist
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            {
+              "message": "The given tag does not exist",
+              "resourceType": "TAG",
+              "resourceName": "tag1",
               "code": 404
             }
     ViewNotExistErrorResponse:
@@ -1791,7 +2344,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceNotExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given view does not exist",
@@ -1805,7 +2358,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceNotExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given function does not exist",
@@ -1831,7 +2384,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceAlreadyExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given database already exists",
@@ -1844,7 +2397,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceAlreadyExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given table already exists",
@@ -1857,7 +2410,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceAlreadyExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given branch already exists",
@@ -1865,12 +2418,25 @@ components:
               "resourceName": "branch",
               "code": 409
             }
+    TagAlreadyExistErrorResponse:
+      description: Conflict - The tag already exists
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            {
+              "message": "The given tag already exists",
+              "resourceType": "TAG",
+              "resourceName": "tag1",
+              "code": 409
+            }
     ViewAlreadyExistErrorResponse:
       description: Conflict - The view already exists
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceAlreadyExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given view already exists",
@@ -1883,7 +2449,7 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/responses/ResourceAlreadyExistErrorResponse'
+            $ref: '#/components/schemas/ErrorResponse'
           example:
             {
               "message": "The given function already exists",
@@ -1914,11 +2480,68 @@ components:
             type: string
     DropPartitionsRequest:
       type: object
+      required:
+        - partitionSpecs
       properties:
-        specs:
+        partitionSpecs:
           type: array
           items:
             type: object
+            additionalProperties:
+              type: string
+        ignoreIfNotExists:
+          type: boolean
+          default: true
+    DropPartitionsResponse:
+      type: object
+      required:
+        - dropped
+        - missing
+      properties:
+        dropped:
+          type: array
+          items:
+            type: object
+            additionalProperties:
+              type: string
+        missing:
+          type: array
+          items:
+            type: object
+            additionalProperties:
+              type: string
+    CreatePartitionsRequest:
+      type: object
+      required:
+        - partitionSpecs
+      properties:
+        partitionSpecs:
+          type: array
+          items:
+            type: object
+            additionalProperties:
+              type: string
+        ignoreIfExists:
+          type: boolean
+          default: true
+    CreatePartitionsResponse:
+      type: object
+      required:
+        - created
+        - existed
+      properties:
+        created:
+          type: array
+          items:
+            type: object
+            additionalProperties:
+              type: string
+        existed:
+          type: array
+          items:
+            type: object
+            additionalProperties:
+              type: string
     AlterTableRequest:
       type: object
       properties:
@@ -1933,6 +2556,34 @@ components:
           type: array
           items:
             type: object
+    ListPartitionsByNamesRequest:
+      type: object
+      properties:
+        specs:
+          type: array
+          description: List of partition specs to query
+          items:
+            type: object
+            additionalProperties:
+              type: string
+    ListPartitionsByFilterRequest:
+      type: object
+      required:
+        - filter
+      properties:
+        filter:
+          type: string
+          description: JSON serialization of a Paimon Predicate tree over the partition columns.
+        partitionNamePattern:
+          type: string
+          description: A SQL LIKE pattern (%) for partition names. Currently, only prefix matching is supported.
+        maxResults:
+          type: integer
+          format: int32
+          description: Maximum number of matching partitions to return in this page. A missing or zero value uses the server default.
+        pageToken:
+          type: string
+          description: Token returned by the previous page. Omit for the first page.
     CreateDatabaseResponse:
       type: object
       properties:
@@ -1950,7 +2601,7 @@ components:
         resourceType:
           type: string
           nullable: true
-          enum: [ "DATABASE", "TABLE", "COLUMN", "SNAPSHOT", "BRANCH", "TAG", "VIEW", "DIALECT", "UNKNOWN" ]
+          enum: [ "DATABASE", "TABLE", "PARTITION", "COLUMN", "SNAPSHOT", "BRANCH", "TAG", "VIEW", "DIALECT", "UNKNOWN" ]
         resourceName:
           type: string
           nullable: true
@@ -2341,6 +2992,8 @@ components:
       properties:
         id:
           type: string
+        database:
+          type: string
         name:
           type: string
         path:
@@ -2550,6 +3203,9 @@ components:
       properties:
         tableId:
           type: string
+        baseSnapshotUuid:
+          type: string
+          nullable: true
         snapshot:
           $ref: '#/components/schemas/Snapshot'
         statistics:
@@ -2561,6 +3217,18 @@ components:
       properties:
         instant:
           $ref: '#/components/schemas/Instant'
+        fromSnapshot:
+          type: integer
+          format: int64
+          nullable: true
+    RollbackSchemaRequest:
+      type: object
+      required:
+        - schemaId
+      properties:
+        schemaId:
+          type: integer
+          format: int64
     Instant:
       anyOf:
         - $ref: '#/components/schemas/SnapshotInstant'
@@ -2602,6 +3270,9 @@ components:
         version:
           type: integer
           format: int32
+          nullable: true
+        uuid:
+          type: string
           nullable: true
         id:
           type: integer
@@ -2711,6 +3382,11 @@ components:
         filter:
           type: array
           items:
+            type: string
+        columnMasking:
+          type: object
+          description: Column masking rules as a map from column name to transform entry JSON string.
+          additionalProperties:
             type: string
     AlterDatabaseRequest:
       type: object
@@ -2827,6 +3503,11 @@ components:
         fromTag:
           nullable: true
           type: string
+    RenameBranchRequest:
+      type: object
+      properties:
+        toBranch:
+          type: string
     ForwardBranchRequest:
       type: object
       properties:
@@ -2839,6 +3520,64 @@ components:
           type: array
           items:
             type: string
+    CreateTagRequest:
+      type: object
+      required:
+        - tagName
+      properties:
+        tagName:
+          type: string
+        snapshotId:
+          type: integer
+          format: int64
+          nullable: true
+          description: Optional snapshot id, if not provided uses latest snapshot
+        timeRetained:
+          type: string
+          nullable: true
+          description: Optional time retained as string (e.g., "1d", "12h", "30m")
+        ignoreIfExists:
+          type: boolean
+          default: false
+          description: If true, ignore if tag already exists
+    GetTagResponse:
+      type: object
+      properties:
+        tagName:
+          type: string
+        snapshot:
+          $ref: '#/components/schemas/Snapshot'
+        tagCreateTime:
+          type: integer
+          format: int64
+          nullable: true
+        tagTimeRetained:
+          type: string
+          nullable: true
+    ListTagsResponse:
+      type: object
+      properties:
+        tags:
+          type: array
+          items:
+            type: string
+        nextPageToken:
+          type: string
+    TagInfo:
+      type: object
+      properties:
+        tagName:
+          type: string
+        snapshotId:
+          type: integer
+          format: int64
+        tagCreateTime:
+          type: integer
+          format: int64
+          nullable: true
+        tagTimeRetained:
+          type: string
+          nullable: true
     GetViewResponse:
       type: object
       properties:
@@ -2947,6 +3686,38 @@ components:
           format: int64
         updatedBy:
           type: string
+    ConsumerInfo:
+      type: object
+      properties:
+        consumerId:
+          type: string
+          description: The consumer identifier
+        nextSnapshot:
+          type: integer
+          format: int64
+          description: The next snapshot id of the consumer
+    ListConsumersResponse:
+      type: object
+      properties:
+        consumers:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConsumerInfo'
+        nextPageToken:
+          type: string
+          description: Token for the next page of results
+    ResetConsumerRequest:
+      type: object
+      properties:
+        consumerId:
+          type: string
+          description: The consumer identifier to be reset or deleted
+        nextSnapshotId:
+          type: integer
+          format: int64
+          description: The new next snapshot id of the consumer. If not provided, the consumer will be deleted
+      required:
+        - consumerId
     ViewSchema:
       type: object
       properties:
@@ -2983,8 +3754,25 @@ components:
         lastFileCreationTime:
           type: integer
           format: int64
+        totalBuckets:
+          type: integer
+          format: int32
         done:
           type: boolean
+        createdAt:
+          type: integer
+          format: int64
+        createdBy:
+          type: string
+        updatedAt:
+          type: integer
+          format: int64
+        updatedBy:
+          type: string
+        options:
+          type: object
+          additionalProperties:
+            type: string
     PartitionStatistics:
       type: object
       properties:
@@ -3002,6 +3790,9 @@ components:
         lastFileCreationTime:
           type: integer
           format: int64
+        totalBuckets:
+          type: integer
+          format: int32
   #######################################
   # Examples of different values #
   #######################################

@@ -91,9 +91,10 @@ public class AlterViewDialectProcedure extends BaseProcedure {
     @Override
     public InternalRow[] call(InternalRow args) {
         Catalog paimonCatalog = ((WithPaimonCatalog) tableCatalog()).paimonCatalog();
+        String paimonCatalogName = ((WithPaimonCatalog) tableCatalog()).paimonCatalogName();
         org.apache.spark.sql.connector.catalog.Identifier ident =
                 toIdentifier(args.getString(0), PARAMETERS[0].name());
-        Identifier view = CatalogUtils.toIdentifier(ident);
+        Identifier view = CatalogUtils.toIdentifier(ident, paimonCatalogName);
         ViewChange viewChange;
         String dialect =
                 ((GenericInternalRow) args).genericGet(2) == null

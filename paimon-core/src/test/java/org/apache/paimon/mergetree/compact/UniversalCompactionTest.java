@@ -85,8 +85,8 @@ public class UniversalCompactionTest {
     @Test
     public void testOptimizedCompactionInterval() {
         AtomicLong time = new AtomicLong(0);
-        FullCompactTrigger fullCompactTrigger =
-                new FullCompactTrigger(1000L, null) {
+        EarlyFullCompaction fullCompactTrigger =
+                new EarlyFullCompaction(1000L, null, null) {
                     @Override
                     long currentTimeMillis() {
                         return time.get();
@@ -128,7 +128,7 @@ public class UniversalCompactionTest {
 
     @Test
     public void testTotalSizeThreshold() {
-        FullCompactTrigger fullCompactTrigger = new FullCompactTrigger(null, 10L);
+        EarlyFullCompaction fullCompactTrigger = new EarlyFullCompaction(null, 10L, null);
         UniversalCompaction compaction =
                 new UniversalCompaction(100, 1, 3, fullCompactTrigger, null);
 
@@ -166,6 +166,21 @@ public class UniversalCompactionTest {
         results = pick.get().files().stream().mapToLong(DataFileMeta::fileSize).toArray();
         // 3 should be in the candidate, by size ratio after picking by file num
         assertThat(results).isEqualTo(new long[] {1, 2, 3});
+    }
+
+    @Test
+    public void testFileNumCompactionConsidersLevel2() {
+        UniversalCompaction compaction = ofTesting(200, 1, 3);
+
+        // File count first picks the two level 0 runs. Together with level 1, they are large
+        // enough to pick level 2 as well.
+        Optional<CompactUnit> pick =
+                compaction.pick(
+                        3, Arrays.asList(level(0, 10), level(0, 20), level(1, 97), level(2, 100)));
+
+        assertThat(pick).isPresent();
+        assertThat(pick.get().files()).hasSize(4);
+        assertThat(pick.get().outputLevel()).isEqualTo(2);
     }
 
     @Test
@@ -442,7 +457,7 @@ public class UniversalCompactionTest {
     }
 
     static DataFileMeta file(long size) {
-        return new DataFileMeta(
+        return DataFileMeta.create(
                 "",
                 size,
                 1,

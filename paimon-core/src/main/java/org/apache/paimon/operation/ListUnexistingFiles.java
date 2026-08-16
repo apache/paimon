@@ -25,7 +25,9 @@ import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.utils.FileOperationThreadPool;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ThreadPoolUtils;
 
 import java.io.IOException;
@@ -36,29 +38,28 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ThreadPoolExecutor;
-
-import static org.apache.paimon.utils.ThreadPoolUtils.createCachedThreadPool;
+import java.util.concurrent.ExecutorService;
 
 /** List what data files recorded in manifests are missing from the filesystem. */
 public class ListUnexistingFiles {
 
     private final FileStoreTable table;
     private final FileStorePathFactory pathFactory;
-    private final ThreadPoolExecutor executor;
+    private final ExecutorService executor;
 
     public ListUnexistingFiles(FileStoreTable table) {
         this.table = table;
         this.pathFactory = table.store().pathFactory();
         this.executor =
-                createCachedThreadPool(
-                        table.coreOptions().deleteFileThreadNum(), "LIST_UNEXISTING_FILES");
+                FileOperationThreadPool.getExecutorService(
+                        table.coreOptions().fileOperationThreadNum());
     }
 
     public Map<Integer, Map<String, DataFileMeta>> list(BinaryRow partition) throws Exception {
         Map<Integer, Map<String, DataFileMeta>> result = new HashMap<>();
         List<Split> splits =
                 table.newScan()
+                        .withLevelFilter(Filter.alwaysTrue())
                         .withPartitionFilter(Collections.singletonList(partition))
                         .plan()
                         .splits();

@@ -1,142 +1,56 @@
-"""
-Licensed to the Apache Software Foundation (ASF) under one
-or more contributor license agreements.  See the NOTICE file
-distributed with this work for additional information
-regarding copyright ownership.  The ASF licenses this file
-to you under the Apache License, Version 2.0 (the
-"License"); you may not use this file except in compliance
-with the License.  You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-"""
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 import json
 import logging
 import time
-import traceback
 import urllib.parse
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, Optional, Type, TypeVar
+from typing import Callable, Dict, Optional, Type, TypeVar
 
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3 import Retry
 
-from pypaimon.common.rest_json import JSON
-
-from .api_response import ErrorResponse
-from .typedef import RESTAuthParameter
+from pypaimon.api.api_response import ErrorResponse
+from pypaimon.api.rest_exception import (AlreadyExistsException,
+                                         BadRequestException,
+                                         ForbiddenException,
+                                         NoSuchResourceException,
+                                         NotAuthorizedException,
+                                         NotImplementedException,
+                                         RESTException,
+                                         ServiceFailureException,
+                                         ServiceUnavailableException)
+from pypaimon.api.typedef import RESTAuthParameter
+from pypaimon.common.json_util import JSON
 
 T = TypeVar('T', bound='RESTResponse')
 
 
 class RESTRequest(ABC):
-    pass
-
-
-class RESTException(Exception):
-    def __init__(self, message: str = None, *args: Any, cause: Optional[Exception] = None):
-        if message and args:
-            try:
-                formatted_message = message % args
-            except (TypeError, ValueError):
-                formatted_message = f"{message} {' '.join(str(arg) for arg in args)}"
-        else:
-            formatted_message = message or "REST API error occurred"
-
-        super().__init__(formatted_message)
-        self.__cause__ = cause
-
-    def get_cause(self) -> Optional[Exception]:
-        return self.__cause__
-
-    def get_message(self) -> str:
-        return str(self)
-
-    def print_stack_trace(self) -> None:
-        traceback.print_exception(type(self), self, self.__traceback__)
-
-    def get_stack_trace(self) -> str:
-        return ''.join(traceback.format_exception(type(self), self, self.__traceback__))
-
-    def __repr__(self) -> str:
-        if self.__cause__:
-            return f"{self.__class__.__name__}('{self}', caused by {type(self.__cause__).__name__}: {self.__cause__})"
-        return f"{self.__class__.__name__}('{self}')"
-
-
-class BadRequestException(RESTException):
-
-    def __init__(self, message: str = None, *args: Any):
-        super().__init__(message, *args)
-
-
-class NotAuthorizedException(RESTException):
-    """Exception for not authorized (401)"""
-
-    def __init__(self, message: str, *args: Any):
-        super().__init__(message, *args)
-
-
-class ForbiddenException(RESTException):
-    """Exception for forbidden access (403)"""
-
-    def __init__(self, message: str, *args: Any):
-        super().__init__(message, *args)
-
-
-class NoSuchResourceException(RESTException):
-    """Exception for resource not found (404)"""
-
-    def __init__(self, resource_type: Optional[str], resource_name: Optional[str],
-                 message: str, *args: Any):
-        self.resource_type = resource_type
-        self.resource_name = resource_name
-        super().__init__(message, *args)
-
-
-class AlreadyExistsException(RESTException):
-    """Exception for resource already exists (409)"""
-
-    def __init__(self, resource_type: Optional[str], resource_name: Optional[str],
-                 message: str, *args: Any):
-        self.resource_type = resource_type
-        self.resource_name = resource_name
-        super().__init__(message, *args)
-
-
-class ServiceFailureException(RESTException):
-    """Exception for service failure (500)"""
-
-    def __init__(self, message: str, *args: Any):
-        super().__init__(message, *args)
-
-
-class NotImplementedException(RESTException):
-    """Exception for not implemented (501)"""
-
-    def __init__(self, message: str, *args: Any):
-        super().__init__(message, *args)
-
-
-class ServiceUnavailableException(RESTException):
-    """Exception for service unavailable (503)"""
-
-    def __init__(self, message: str, *args: Any):
-        super().__init__(message, *args)
+    """RESTRequest"""
 
 
 class ErrorHandler(ABC):
 
     @abstractmethod
     def accept(self, error: ErrorResponse, request_id: str) -> None:
-        pass
+        """accept"""
 
 
 # DefaultErrorHandler implementation
@@ -181,7 +95,7 @@ class DefaultErrorHandler(ErrorHandler):
             message = error.message
         else:
             # If we have a requestId, append it to the message
-            message = f"{error.message} requestId:{request_id}"
+            message = "{} requestId:{}".format(error.message, request_id)
 
         # Handle different error codes
         if code == 400:
@@ -240,12 +154,23 @@ class ExponentialRetry:
 
     @staticmethod
     def __create_retry_strategy(max_retries: int) -> Retry:
+        # Aligned with the Java client's retry triggers:
+        # - only 429 / 503 responses are retried; 502 / 504 are not,
+        #   because by then the gateway has consumed the request's
+        #   signature nonce, and retrying with the same signed headers is
+        #   rejected with "Specified signature nonce was used already"
+        # - read errors (including read timeouts) are not retried for the
+        #   same reason: the request has likely reached the server
+        # - connect failures are intentionally non-retriable: a connect
+        #   error usually means the host is wrong or the listener is down,
+        #   and burning the budget on it just delays the failure.
         retry_kwargs = {
             'total': max_retries,
-            'read': max_retries,
-            'connect': max_retries,
+            'read': 0,
+            'connect': 0,
+            'status': max_retries,
             'backoff_factor': 1,
-            'status_forcelist': [429, 502, 503, 504],
+            'status_forcelist': [429, 503],
             'raise_on_status': False,
             'raise_on_redirect': False,
         }
@@ -302,29 +227,29 @@ def _normalize_uri(uri: str) -> str:
         server_uri = server_uri[:-1]
 
     if not server_uri.startswith("http://") and not server_uri.startswith("https://"):
-        server_uri = f"http://{server_uri}"
+        server_uri = "http://{}".format(server_uri)
 
     return server_uri
 
 
 def _parse_error_response(response_body: Optional[str], status_code: int) -> ErrorResponse:
+    error = None
     if response_body:
         try:
-            return JSON.from_json(response_body, ErrorResponse)
-        except Exception:
-            return ErrorResponse(
-                resource_type=None,
-                resource_name=None,
-                message=response_body,
-                code=status_code
-            )
-    else:
+            error = JSON.from_json(response_body, ErrorResponse)
+        except json.JSONDecodeError:
+            # ignore exception
+            pass
+
+    if error is None or not error.message:
         return ErrorResponse(
-            resource_type=None,
-            resource_name=None,
-            message="response body is null",
-            code=status_code
+            resource_type=error.resource_type if error and error.resource_type else "",
+            resource_name=error.resource_name if error and error.resource_name else "",
+            message=response_body if response_body else "response body is null",
+            code=error.code if error and error.code else status_code
         )
+    
+    return error
 
 
 def _get_headers_with_params(path: str, query_params: Dict[str, str],
@@ -349,18 +274,29 @@ class HttpClient(RESTClient):
     REQUEST_ID_KEY = "x-request-id"
     DEFAULT_REQUEST_ID = "unknown"
 
+    # 3-minute connect / read timeouts and a retry budget of 5 are
+    # conservative defaults that work well across the cluster shapes
+    # we see in practice. Not exposed as ``CatalogOptions``: callers
+    # who need to tune them can subclass or override the class-level
+    # constants.
+    _CONNECT_TIMEOUT_SECONDS = 180
+    _READ_TIMEOUT_SECONDS = 180
+    _MAX_RETRIES = 5
+
     def __init__(self, uri: str):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.uri = _normalize_uri(uri)
         self.error_handler = DefaultErrorHandler.get_instance()
         self.session = requests.Session()
 
-        retry_interceptor = ExponentialRetry(max_retries=3)
-
+        retry_interceptor = ExponentialRetry(max_retries=self._MAX_RETRIES)
         self.session.mount("http://", retry_interceptor.adapter)
         self.session.mount("https://", retry_interceptor.adapter)
 
-        self.session.timeout = (180, 180)
+        # ``Session.timeout`` is not consulted by the requests library;
+        # only ``Session.request(timeout=...)`` is. Keep the value here
+        # and pass it explicitly on every call (see ``_execute_request``).
+        self._timeout = (self._CONNECT_TIMEOUT_SECONDS, self._READ_TIMEOUT_SECONDS)
 
         self.session.headers.update({
             'Accept': 'application/json'
@@ -429,7 +365,7 @@ class HttpClient(RESTClient):
 
         if query_params:
             query_string = urllib.parse.urlencode(query_params)
-            full_path = f"{full_path}?{query_string}"
+            full_path = "{}?{}".format(full_path, query_string)
 
         return full_path
 
@@ -441,14 +377,15 @@ class HttpClient(RESTClient):
                          headers: Optional[Dict[str, str]] = None,
                          response_type: Optional[Type[T]] = None) -> T:
         try:
-            start_time = time.time_ns()
+            start_time = int(time.time() * 1_000_000_000)
             response = self.session.request(
                 method=method,
                 url=url,
                 data=data.encode('utf-8') if data else None,
-                headers=headers
+                headers=headers,
+                timeout=self._timeout,
             )
-            duration_ms = (time.time_ns() - start_time) // 1_000_000
+            duration_ms = (int(time.time() * 1_000_000_000) - start_time) // 1_000_000
             response_request_id = response.headers.get(self.REQUEST_ID_KEY, self.DEFAULT_REQUEST_ID)
 
             self.logger.info(

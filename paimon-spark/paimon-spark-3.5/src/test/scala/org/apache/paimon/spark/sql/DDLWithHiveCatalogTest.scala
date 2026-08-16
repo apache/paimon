@@ -19,3 +19,5 @@
 package org.apache.paimon.spark.sql
 
 class DDLWithHiveCatalogTest extends DDLWithHiveCatalogTestBase {}
+
+class DefaultDatabaseTest extends DefaultDatabaseTestBase {}

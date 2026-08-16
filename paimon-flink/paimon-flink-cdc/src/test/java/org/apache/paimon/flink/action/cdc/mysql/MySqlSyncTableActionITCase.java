@@ -1301,7 +1301,6 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         Map<String, String> options = new HashMap<>();
         options.put("bucket", "1");
         options.put("sink.parallelism", "1");
-        options.put("sequence.field", "_timestamp");
 
         createFileStoreTable(
                 RowType.of(
@@ -1318,8 +1317,6 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         mySqlConfig.put("database-name", DATABASE_NAME);
         mySqlConfig.put("table-name", "test_exist_options_change");
         Map<String, String> tableConfig = new HashMap<>();
-        // update immutable options
-        tableConfig.put("sequence.field", "_date");
         // update existing options
         tableConfig.put("sink.parallelism", "2");
         // add new options
@@ -1335,7 +1332,6 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         FileStoreTable table = getFileStoreTable();
 
         assertThat(table.options().get("bucket")).isEqualTo("1");
-        assertThat(table.options().get("sequence.field")).isEqualTo("_timestamp");
         assertThat(table.options().get("sink.parallelism")).isEqualTo("2");
         assertThat(table.options().get("snapshot.expire.limit")).isEqualTo("1000");
     }

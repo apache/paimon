@@ -26,18 +26,20 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMap
 
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.streaming.connectors.kafka.KafkaDeserializationSchema;
+import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
+import org.apache.flink.util.Collector;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.Map;
 
 import static org.apache.flink.api.java.typeutils.TypeExtractor.getForClass;
 
 /** A simple deserialization schema for {@link CdcSourceRecord}. */
 public class KafkaDebeziumJsonDeserializationSchema
-        implements KafkaDeserializationSchema<CdcSourceRecord> {
+        implements KafkaRecordDeserializationSchema<CdcSourceRecord> {
 
     private static final long serialVersionUID = 1L;
 
@@ -57,30 +59,33 @@ public class KafkaDebeziumJsonDeserializationSchema
     }
 
     @Override
-    public CdcSourceRecord deserialize(ConsumerRecord<byte[], byte[]> message) throws IOException {
+    public void deserialize(ConsumerRecord<byte[], byte[]> message, Collector<CdcSourceRecord> out)
+            throws IOException {
         if (message.value() == null) {
             // skip tombstone messages
-            return null;
+            return;
         }
 
         try {
             byte[] key = message.key();
             JsonNode keyNode = null;
             if (key != null && key.length > 0) {
-                keyNode = objectMapper.readValue(key, JsonNode.class);
+                try {
+                    keyNode = objectMapper.readValue(key, JsonNode.class);
+                } catch (Exception ignore) {
+                    // If the key is not valid JSON, ignore it to avoid failing deserialization.
+                    // The CDC pipeline only relies on the JSON value payload.
+                }
             }
 
             JsonNode valueNode = objectMapper.readValue(message.value(), JsonNode.class);
-            return new CdcSourceRecord(null, keyNode, valueNode);
+
+            Map<String, Object> kafkaMetadata = KafkaActionUtils.extractKafkaMetadata(message);
+            out.collect(new CdcSourceRecord(message.topic(), keyNode, valueNode, kafkaMetadata));
         } catch (Exception e) {
             LOG.error("Invalid Json:\n{}", new String(message.value()));
             throw e;
         }
-    }
-
-    @Override
-    public boolean isEndOfStream(CdcSourceRecord nextElement) {
-        return false;
     }
 
     @Override

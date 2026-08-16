@@ -22,6 +22,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
@@ -29,6 +30,7 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
+import org.apache.spark.sql.execution.ui.SQLExecutionUIData;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
@@ -37,7 +39,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -45,6 +47,8 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
+
+import scala.collection.JavaConverters;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -339,15 +343,48 @@ public class SparkWriteITCase {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"order", "zorder", "hilbert"})
-    public void testWriteWithClustering(String clusterStrategy) {
-        spark.sql(
-                "CREATE TABLE T (a INT, b INT) TBLPROPERTIES ("
-                        + "'clustering.columns'='a,b',"
-                        + String.format("'clustering.strategy'='%s')", clusterStrategy));
-        spark.sql("INSERT INTO T VALUES (2, 2), (1, 1), (3, 3)").collectAsList();
-        List<Row> rows = spark.sql("SELECT * FROM T").collectAsList();
-        assertThat(rows.toString()).isEqualTo("[[1,1], [2,2], [3,3]]");
+    @CsvSource({
+        "order, true",
+        "zorder, true",
+        "hilbert, true",
+        "order, false",
+        "zorder, false",
+        "hilbert, false"
+    })
+    public void testWriteWithClustering(String clusterStrategy, boolean useV2Write) {
+        try {
+            long currentTimeMillis = System.currentTimeMillis();
+            spark.conf().set("spark.paimon.write.use-v2-write", String.valueOf(useV2Write));
+            spark.sql(
+                    "CREATE TABLE T (a INT, b INT) TBLPROPERTIES ("
+                            + "'clustering.columns'='a,b',"
+                            + String.format("'clustering.strategy'='%s')", clusterStrategy));
+
+            spark.sql("INSERT INTO T VALUES (2, 2), (1, 1), (3, 3)").collectAsList();
+            scala.collection.Seq<SQLExecutionUIData> executionSeq =
+                    spark.sharedState().statusStore().executionsList();
+
+            java.util.List<SQLExecutionUIData> executionList =
+                    JavaConverters.seqAsJavaList(executionSeq);
+
+            boolean hasSort =
+                    executionList.stream()
+                            .anyMatch(
+                                    e -> {
+                                        if (e.submissionTime() <= currentTimeMillis) {
+                                            return false;
+                                        }
+                                        String description = e.physicalPlanDescription();
+                                        return description != null
+                                                && description.toLowerCase().contains("sort");
+                                    });
+            assertThat(hasSort).isEqualTo(true);
+
+            List<Row> rows = spark.sql("SELECT * FROM T").collectAsList();
+            assertThat(rows.toString()).isEqualTo("[[1,1], [2,2], [3,3]]");
+        } finally {
+            spark.conf().unset("spark.paimon.write.use-v2-write");
+        }
     }
 
     @Test
@@ -441,6 +478,18 @@ public class SparkWriteITCase {
         spark.sql("TRUNCATE TABLE T PARTITION (d = 'a')");
         List<Row> rows = spark.sql("SELECT * FROM T ORDER BY a").collectAsList();
         assertThat(rows.toString()).isEqualTo("[[2,22,222,b], [3,33,333,b]]");
+    }
+
+    @Test
+    public void testTruncatePartitionValueNull() {
+        spark.sql("CREATE TABLE TRUNC_T (pt STRING, data STRING) PARTITIONED BY (pt) ");
+
+        spark.sql("INSERT INTO TRUNC_T VALUES('1', 'a'), (null, 'b')");
+
+        spark.sql("TRUNCATE TABLE TRUNC_T PARTITION (pt = null)");
+
+        List<Row> rows = spark.sql("SELECT * FROM TRUNC_T ORDER BY pt").collectAsList();
+        assertThat(rows.toString()).isEqualTo("[[1,a]]");
     }
 
     @Test
@@ -595,6 +644,32 @@ public class SparkWriteITCase {
     }
 
     @Test
+    public void testInsertOverwriteDoesNotProduceLookupChangelogFiles() throws Exception {
+        spark.sql(
+                "CREATE TABLE T (a INT, b INT, c STRING) TBLPROPERTIES ('primary-key'='a', 'bucket' = '1', 'changelog-producer' = 'lookup', 'compaction.force-up-level-0' = 'true', 'file.format' = 'avro', 'file.compression' = 'null', 'manifest.compression' = 'null')");
+
+        FileStoreTable table = getTable("T");
+        Path bucketPath = new Path(table.location(), "bucket-0");
+
+        spark.sql("INSERT INTO T VALUES (1, 1, 'aa')");
+        long changelogFiles = dataFileCount(table.fileIO().listStatus(bucketPath), "changelog-");
+        Assertions.assertEquals(1, changelogFiles);
+
+        spark.sql("INSERT OVERWRITE T VALUES (2, 2, 'bb')");
+
+        Assertions.assertEquals(
+                changelogFiles, dataFileCount(table.fileIO().listStatus(bucketPath), "changelog-"));
+        Assertions.assertNull(table.latestSnapshot().get().changelogManifestList());
+        List<DataFileMeta> dataFiles =
+                table.newSnapshotReader().read().dataSplits().stream()
+                        .flatMap(split -> split.dataFiles().stream())
+                        .collect(Collectors.toList());
+        assertThat(dataFiles).isNotEmpty();
+        assertThat(dataFiles).allMatch(file -> file.level() > 0);
+        assertThat(spark.sql("SELECT * FROM T").collectAsList().toString()).isEqualTo("[[2,2,bb]]");
+    }
+
+    @Test
     public void testMarkDone() throws IOException {
         spark.sql(
                 "CREATE TABLE T (a INT, b INT, c STRING) PARTITIONED BY (c) TBLPROPERTIES ("
@@ -638,8 +713,8 @@ public class SparkWriteITCase {
         Assertions.assertEquals(4, files.size());
 
         String defaultExtension = "." + "parquet";
-        String newExtension = "." + "zstd" + "." + "parquet";
-        // two data files end with ".parquet", two data file end with ".zstd.parquet"
+        String newExtension = "." + "zst" + "." + "parquet";
+        // two data files end with ".parquet", two data file end with ".zst.parquet"
         Assertions.assertEquals(
                 2,
                 files.stream()
@@ -682,8 +757,8 @@ public class SparkWriteITCase {
                         .filter(name -> name.contains("changelog-"))
                         .collect(Collectors.toList());
         String defaultExtension = "." + "parquet";
-        String newExtension = "." + "zstd" + "." + "parquet";
-        // one changelog file end with ".parquet", one changelog file end with ".zstd.parquet"
+        String newExtension = "." + "zst" + "." + "parquet";
+        // one changelog file end with ".parquet", one changelog file end with ".zst.parquet"
         Assertions.assertEquals(
                 1,
                 files.stream()

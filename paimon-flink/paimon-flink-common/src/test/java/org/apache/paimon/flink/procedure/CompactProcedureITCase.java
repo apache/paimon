@@ -20,6 +20,7 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.flink.CatalogITCaseBase;
+import org.apache.paimon.flink.action.CompactAction;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
@@ -29,24 +30,69 @@ import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.StringUtils;
 
+import org.apache.flink.core.execution.JobClient;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT Case for {@link CompactProcedure}. */
 public class CompactProcedureITCase extends CatalogITCaseBase {
 
     // ----------------------- Non-sort Compact -----------------------
+    @Test
+    public void testCompactSpecifiedBucketRanges() throws Exception {
+        sql(
+                "CREATE TABLE T ("
+                        + " k INT,"
+                        + " v INT,"
+                        + " PRIMARY KEY (k) NOT ENFORCED"
+                        + ") WITH ("
+                        + " 'write-only' = 'true',"
+                        + " 'bucket' = '4'"
+                        + ")");
+        FileStoreTable table = paimonTable("T");
+
+        sql(
+                "INSERT INTO T VALUES "
+                        + IntStream.range(0, 40)
+                                .mapToObj(i -> String.format("(%d, 1)", i))
+                                .collect(Collectors.joining(",")));
+        sql(
+                "INSERT INTO T VALUES "
+                        + IntStream.range(40, 80)
+                                .mapToObj(i -> String.format("(%d, 2)", i))
+                                .collect(Collectors.joining(",")));
+
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        sql(
+                "CALL sys.compact(`table` => 'default.T', compact_strategy => 'full', "
+                        + "`buckets` => '0-1')");
+
+        Map<Integer, Integer> filesPerBucket =
+                table.newSnapshotReader().read().dataSplits().stream()
+                        .collect(
+                                Collectors.toMap(
+                                        DataSplit::bucket, split -> split.dataFiles().size()));
+        assertThat(filesPerBucket.get(0)).isEqualTo(1);
+        assertThat(filesPerBucket.get(1)).isEqualTo(1);
+        assertThat(filesPerBucket.get(2)).isEqualTo(2);
+        assertThat(filesPerBucket.get(3)).isEqualTo(2);
+    }
+
     @Test
     public void testBatchCompact() throws Exception {
         sql(
@@ -267,6 +313,7 @@ public class CompactProcedureITCase extends CatalogITCaseBase {
 
     @Test
     public void testDynamicBucketSortCompact() throws Exception {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
         sql(
                 "CREATE TABLE T ("
                         + " f0 BIGINT PRIMARY KEY NOT ENFORCED,"
@@ -279,9 +326,12 @@ public class CompactProcedureITCase extends CatalogITCaseBase {
                         + " 'dynamic-bucket.target-row-num' = '100',"
                         + " 'zorder.var-length-contribution' = '14'"
                         + ")");
+        boolean overwriteUpgrade = random.nextBoolean();
+        if (!overwriteUpgrade) {
+            sql("ALTER TABLE T SET ('overwrite-upgrade' = 'false')");
+        }
         FileStoreTable table = paimonTable("T");
 
-        ThreadLocalRandom random = ThreadLocalRandom.current();
         int commitTimes = 20;
         for (int i = 0; i < commitTimes; i++) {
             String value =
@@ -417,6 +467,52 @@ public class CompactProcedureITCase extends CatalogITCaseBase {
                                         .close())
                 .hasMessageContaining(
                         "The full compact strategy is only supported in batch mode. Please add -Dexecution.runtime-mode=BATCH.");
+    }
+
+    // ----------------------- Schema Evolution -----------------------
+
+    @Test
+    public void testFailWhenSchemaChanged() throws Exception {
+        tEnv.executeSql(
+                "CREATE TABLE T (\n"
+                        + "  pt INT,\n"
+                        + "  k INT,\n"
+                        + "  v INT,\n"
+                        + "  PRIMARY KEY (pt, k) NOT ENFORCED\n"
+                        + ") PARTITIONED BY (pt) WITH (\n"
+                        + "  'bucket' = '1',\n"
+                        + "  'deletion-vectors.enabled' = 'true',\n"
+                        + "  'write-only' = 'true'\n"
+                        + ")");
+        sql("INSERT INTO T VALUES (1, 0, 0), (2, 0, 0)");
+        StreamExecutionEnvironment env =
+                streamExecutionEnvironmentBuilder()
+                        .parallelism(1)
+                        .checkpointIntervalMs(100)
+                        .build();
+        Map<String, String> catalogOptions = new HashMap<>();
+        catalogOptions.put("warehouse", path);
+        CompactAction action = new CompactAction("default", "T", catalogOptions, new HashMap<>());
+        action.withStreamExecutionEnvironment(env);
+        action.build();
+        JobClient jobClient = env.executeAsync();
+        sqlAssertWithRetry(
+                "SELECT * FROM T",
+                result -> result.containsExactlyInAnyOrder(Row.of(1, 0, 0), Row.of(2, 0, 0)));
+
+        sql("ALTER TABLE T ADD v2 INT");
+        sql("INSERT INTO T VALUES (1, 0, 10, 10), (2, 2, 20, 20)");
+        // compact job should fail with new schema
+        assertThatThrownBy(() -> jobClient.getJobExecutionResult().get())
+                .rootCause()
+                .hasMessageContaining("has schema id");
+
+        sql("CALL sys.compact(`table` => 'default.T')");
+        sqlAssertWithRetry(
+                "SELECT * FROM T",
+                result ->
+                        result.containsExactlyInAnyOrder(
+                                Row.of(1, 0, 10, 10), Row.of(2, 0, 0, null), Row.of(2, 2, 20, 20)));
     }
 
     private void checkLatestSnapshot(

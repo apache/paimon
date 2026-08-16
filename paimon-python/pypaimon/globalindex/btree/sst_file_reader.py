@@ -1,0 +1,179 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+"""
+An SST File Reader which serves point queries and range queries.
+
+Users can call createIterator to create a file iterator and then use seek
+and read methods to do range queries.
+
+Thread-safe when the underlying stream supports position-based reads
+(PyArrow NativeFile.read_at or os.pread).
+"""
+
+import struct
+import threading
+from typing import Optional, Callable
+from typing import BinaryIO
+
+from pypaimon.common.file_io import pread
+from pypaimon.globalindex.block_compression import (
+    BLOCK_TRAILER_LENGTH,
+    crc32c,
+    decompress_block,
+)
+from pypaimon.globalindex.btree.block_handle import BlockHandle
+from pypaimon.globalindex.btree.block_entry import BlockEntry
+from pypaimon.globalindex.btree.block_reader import BlockReader, BlockIterator
+from pypaimon.globalindex.memory_slice_input import MemorySliceInput
+
+
+class SstFileIterator:
+    """
+    Iterator for range queries on SST file.
+    
+    Allows seeking to a position and reading batches of records.
+    """
+    
+    def __init__(self, read_block: Callable[[BlockHandle], BlockReader], index_block_iterator: BlockIterator):
+        self.read_block = read_block
+        self.index_iterator = index_block_iterator
+        self.sought_data_block: Optional[BlockIterator] = None
+    
+    @staticmethod
+    def _parse_block_handle(block_handle_bytes: bytes) -> BlockHandle:
+        handle_input = MemorySliceInput(block_handle_bytes)
+        return BlockHandle(
+            handle_input.read_var_len_long(),
+            handle_input.read_var_len_int()
+        )
+
+    def seek_to(self, key: bytes) -> None:
+        """
+        Seek to the position of the record whose key is exactly equal to or
+        greater than the specified key.
+
+        Args:
+            key: The key to seek to
+        """
+        self.index_iterator.seek_to(key)
+
+        if self.index_iterator.has_next():
+            index_entry: BlockEntry = self.index_iterator.__next__()
+            block_handle = self._parse_block_handle(index_entry.value)
+
+            # Create data block reader and seek
+            data_block_reader = self.read_block(block_handle)
+            self.sought_data_block = data_block_reader.iterator()
+            self.sought_data_block.seek_to(key)
+        else:
+            self.sought_data_block = None
+    
+    def read_batch(self) -> Optional[BlockIterator]:
+        """
+        Read a batch of records from this SST File and move current record
+        position to the next batch.
+        
+        Returns:
+            BlockIterator for the current batch, or None if at file end
+        """
+        if self.sought_data_block is not None:
+            result = self.sought_data_block
+            self.sought_data_block = None
+            return result
+        
+        if not self.index_iterator.has_next():
+            return None
+        
+        index_entry = self.index_iterator.__next__()
+        block_handle = self._parse_block_handle(index_entry.value)
+        
+        # Create data block reader
+        data_block_reader = self.read_block(block_handle)
+        return data_block_reader.iterator()
+
+
+class SstFileReader:
+    """
+    An SST File Reader which serves point queries and range queries.
+
+    Users can call createIterator to create a file iterator and then use seek
+    and read methods to do range queries.
+
+    Thread-safe when the underlying stream supports pread, or when an
+    io_lock is provided for seek+read fallback.
+    """
+
+    def __init__(
+        self,
+        input_stream: BinaryIO,
+        comparator: Callable[[bytes, bytes], int],
+        index_block_handle: BlockHandle,
+        use_pread: bool = False,
+        io_lock: Optional[threading.Lock] = None,
+    ):
+        self.comparator = comparator
+        self.input_stream = input_stream
+        self._supports_pread = use_pread
+        self._lock = io_lock or threading.Lock()
+        self.index_block = self._read_block(index_block_handle)
+
+    def _read_from(self, offset: int, length: int) -> bytes:
+        if self._supports_pread:
+            return pread(self.input_stream, length, offset)
+        with self._lock:
+            self.input_stream.seek(offset)
+            return self.input_stream.read(length)
+
+    def _read_block(self, block_handle: BlockHandle) -> BlockReader:
+        # Read block data + 5 bytes trailer (1 byte compression type + 4 bytes CRC32)
+        block_data = self._read_from(
+            block_handle.offset, block_handle.size + BLOCK_TRAILER_LENGTH)
+        # Parse block trailer (last 5 bytes: 1 byte compression type + 4 bytes CRC32)
+        if len(block_data) < BLOCK_TRAILER_LENGTH:
+            raise ValueError("Block data too short to contain trailer")
+
+        trailer_offset = len(block_data) - BLOCK_TRAILER_LENGTH
+        compression_type = block_data[trailer_offset]
+        crc32_value = struct.unpack(
+            '<I',
+            block_data[trailer_offset + 1:trailer_offset + BLOCK_TRAILER_LENGTH])[0]
+
+        # Extract block data (without trailer)
+        block_bytes = block_data[:trailer_offset]
+
+        # Verify CRC32
+        actual_crc32 = crc32c(block_bytes, compression_type)
+        if actual_crc32 != crc32_value:
+            raise ValueError(f"CRC32 mismatch: expected {crc32_value}, got {actual_crc32}")
+
+        block_bytes = decompress_block(block_bytes, compression_type)
+
+        return BlockReader.create(block_bytes, self.comparator)
+
+    def create_iterator(self) -> SstFileIterator:
+        def read_block(block: BlockHandle) -> BlockReader:
+            return self._read_block(block)
+
+        return SstFileIterator(
+            read_block,
+            self.index_block.iterator())
+
+    def close(self) -> None:
+        """Close the reader and release resources."""
+        # No resources to release in this implementation
+        pass

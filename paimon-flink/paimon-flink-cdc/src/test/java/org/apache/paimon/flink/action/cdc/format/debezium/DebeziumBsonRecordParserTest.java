@@ -18,14 +18,17 @@
 
 package org.apache.paimon.flink.action.cdc.format.debezium;
 
+import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.format.DataFormat;
+import org.apache.paimon.flink.action.cdc.kafka.KafkaMetadataConverter;
 import org.apache.paimon.flink.action.cdc.watermark.MessageQueueCdcTimestampExtractor;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.CdcSchema;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.StringUtils;
@@ -34,7 +37,8 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.TextNode;
 
-import org.apache.flink.streaming.connectors.kafka.KafkaDeserializationSchema;
+import org.apache.flink.api.common.functions.util.ListCollector;
+import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
@@ -50,6 +54,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /** Test for DebeziumBsonRecordParser. */
 public class DebeziumBsonRecordParserTest {
@@ -63,7 +68,8 @@ public class DebeziumBsonRecordParserTest {
 
     private static final Map<String, String> keyEvent = new HashMap<>();
 
-    private static KafkaDeserializationSchema<CdcSourceRecord> kafkaDeserializationSchema = null;
+    private static KafkaRecordDeserializationSchema<CdcSourceRecord> kafkaDeserializationSchema =
+            null;
 
     private static final Map<String, String> beforeEvent = new HashMap<>();
 
@@ -227,6 +233,38 @@ public class DebeziumBsonRecordParserTest {
     }
 
     @Test
+    public void extractRecordWithMetadataColumns() throws Exception {
+        DebeziumBsonRecordParser parser =
+                new DebeziumBsonRecordParser(TypeMapping.defaultMapping(), Collections.emptyList());
+        parser.withMetadataConverters(
+                new CdcMetadataConverter[] {
+                    new KafkaMetadataConverter.TopicConverter(),
+                    new KafkaMetadataConverter.OffsetConverter()
+                });
+
+        Assertions.assertFalse(insertList.isEmpty());
+        for (CdcSourceRecord cdcRecord : insertList) {
+            List<RichCdcMultiplexRecord> records = new ArrayList<>();
+            parser.flatMap(cdcRecord, new ListCollector<>(records));
+            Assertions.assertEquals(1, records.size());
+
+            Map<String, String> expected = new HashMap<>(beforeEvent);
+            expected.put("topic", "topic");
+            expected.put("offset", "0");
+
+            CdcRecord result = records.get(0).toRichCdcRecord().toCdcRecord();
+            Assertions.assertEquals(RowKind.INSERT, result.kind());
+            Assertions.assertEquals(expected, result.data());
+
+            List<String> fieldNames =
+                    records.get(0).buildSchema().fields().stream()
+                            .map(DataField::name)
+                            .collect(Collectors.toList());
+            Assertions.assertTrue(fieldNames.containsAll(Arrays.asList("topic", "offset")));
+        }
+    }
+
+    @Test
     public void bsonConvertJsonTest() throws Exception {
         DebeziumBsonRecordParser parser =
                 new DebeziumBsonRecordParser(TypeMapping.defaultMapping(), Collections.emptyList());
@@ -259,7 +297,10 @@ public class DebeziumBsonRecordParserTest {
 
     private static CdcSourceRecord deserializeKafkaSchema(String key, String value)
             throws Exception {
-        return kafkaDeserializationSchema.deserialize(
-                new ConsumerRecord<>("topic", 0, 0, key.getBytes(), value.getBytes()));
+        List<CdcSourceRecord> results = new ArrayList<>();
+        kafkaDeserializationSchema.deserialize(
+                new ConsumerRecord<>("topic", 0, 0, key.getBytes(), value.getBytes()),
+                new ListCollector<>(results));
+        return results.isEmpty() ? null : results.get(0);
     }
 }

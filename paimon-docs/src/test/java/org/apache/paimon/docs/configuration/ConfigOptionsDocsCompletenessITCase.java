@@ -212,8 +212,7 @@ public class ConfigOptionsDocsCompletenessITCase {
 
     private static Map<String, List<DocumentedOption>> parseDocumentedOptions() throws IOException {
         final String rootDir = ConfigOptionsDocGeneratorTest.getProjectRootDir();
-        Path includeFolder =
-                Paths.get(rootDir, "docs", "layouts", "shortcodes", "generated").toAbsolutePath();
+        Path includeFolder = Paths.get(rootDir, "docs", "generated").toAbsolutePath();
         return Files.list(includeFolder)
                 .filter(
                         (path) -> {

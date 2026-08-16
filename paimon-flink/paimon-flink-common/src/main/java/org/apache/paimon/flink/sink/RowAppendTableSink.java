@@ -19,10 +19,19 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.flink.sink.coordinator.CommittingWriteOperatorCoordinator;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 
+import org.apache.flink.runtime.jobgraph.OperatorID;
+import org.apache.flink.runtime.operators.coordination.OperatorCoordinator;
+import org.apache.flink.runtime.operators.coordination.OperatorEventGateway;
+import org.apache.flink.streaming.api.operators.CoordinatedOperatorFactory;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
+import org.apache.flink.streaming.api.operators.StreamOperator;
+import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 
 import java.util.Map;
 
@@ -32,22 +41,94 @@ public class RowAppendTableSink extends AppendTableSink<InternalRow> {
     private static final long serialVersionUID = 1L;
 
     public RowAppendTableSink(
-            FileStoreTable table,
-            Map<String, String> overwritePartitions,
-            LogSinkFunction logSinkFunction,
-            Integer parallelism) {
-        super(table, overwritePartitions, logSinkFunction, parallelism);
+            FileStoreTable table, Map<String, String> overwritePartitions, Integer parallelism) {
+        super(table, overwritePartitions, parallelism);
     }
 
     @Override
     protected OneInputStreamOperatorFactory<InternalRow, Committable> createWriteOperatorFactory(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return createNoStateRowWriteOperatorFactory(
-                table, logSinkFunction, writeProvider, commitUser);
+        if (coordinatorCommitEnabled()) {
+            return createCoordinatorCommittingRowWriteOperatorFactory(
+                    table,
+                    writeProvider,
+                    commitUser,
+                    // checkpointing on by default for the JM-side committer; bounded sources will
+                    // be handled by end-input support in a follow-up PR
+                    true,
+                    createCommitterFactory());
+        }
+        return createNoStateRowWriteOperatorFactory(table, writeProvider, commitUser);
+    }
+
+    @Override
+    protected boolean coordinatorCommitEnabled() {
+        return new Options(table.options())
+                .get(FlinkConnectorOptions.SINK_COORDINATOR_COMMIT_ENABLED);
     }
 
     @Override
     protected CommittableStateManager<ManifestCommittable> createCommittableStateManager() {
         return createRestoreOnlyCommittableStateManager(table);
+    }
+
+    /**
+     * Creates a writer factory whose committer runs in a JM-side {@link
+     * CommittingWriteOperatorCoordinator} instead of a downstream global committer.
+     */
+    private static OneInputStreamOperatorFactory<InternalRow, Committable>
+            createCoordinatorCommittingRowWriteOperatorFactory(
+                    FileStoreTable table,
+                    StoreSinkWrite.Provider writeProvider,
+                    String commitUser,
+                    boolean streamingCheckpointEnabled,
+                    Committer.Factory<Committable, ManifestCommittable> committerFactory) {
+        return new CoordinatorCommittingFactory(
+                table, writeProvider, commitUser, streamingCheckpointEnabled, committerFactory);
+    }
+
+    private static class CoordinatorCommittingFactory extends RowDataStoreWriteOperator.Factory
+            implements CoordinatedOperatorFactory<Committable> {
+
+        private static final long serialVersionUID = 1L;
+
+        private final boolean streamingCheckpointEnabled;
+        private final Committer.Factory<Committable, ManifestCommittable> committerFactory;
+
+        CoordinatorCommittingFactory(
+                FileStoreTable table,
+                StoreSinkWrite.Provider storeSinkWriteProvider,
+                String initialCommitUser,
+                boolean streamingCheckpointEnabled,
+                Committer.Factory<Committable, ManifestCommittable> committerFactory) {
+            super(table, storeSinkWriteProvider, initialCommitUser);
+            this.streamingCheckpointEnabled = streamingCheckpointEnabled;
+            this.committerFactory = committerFactory;
+        }
+
+        @Override
+        public OperatorCoordinator.Provider getCoordinatorProvider(
+                String operatorName, OperatorID operatorID) {
+            return new CommittingWriteOperatorCoordinator.Provider(
+                    operatorID, committerFactory, streamingCheckpointEnabled, initialCommitUser);
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public <T extends StreamOperator<Committable>> T createStreamOperator(
+                StreamOperatorParameters<Committable> parameters) {
+            OperatorID operatorId = parameters.getStreamConfig().getOperatorID();
+            OperatorEventGateway gateway =
+                    parameters.getOperatorEventDispatcher().getOperatorEventGateway(operatorId);
+            return (T)
+                    new CoordinatorCommittingRowDataStoreWriteOperator(
+                            parameters, table, storeSinkWriteProvider, initialCommitUser, gateway);
+        }
+
+        @Override
+        @SuppressWarnings("rawtypes")
+        public Class<? extends StreamOperator> getStreamOperatorClass(ClassLoader classLoader) {
+            return CoordinatorCommittingRowDataStoreWriteOperator.class;
+        }
     }
 }

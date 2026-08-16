@@ -1,30 +1,30 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
-import uuid
 from io import BytesIO
 from typing import List, Optional
 
 import fastavro
-
-from pypaimon.manifest.schema.manifest_file_meta import \
-    MANIFEST_FILE_META_SCHEMA
+from pypaimon.manifest.schema.manifest_file_meta import (
+    MANIFEST_FILE_META_SCHEMA, ManifestFileMeta)
+from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.snapshot.snapshot import Snapshot
+from pypaimon.table.row.binary_row import BinaryRow
+from pypaimon.table.row.generic_row import GenericRowSerializer
 
 
 class ManifestListManager:
@@ -32,62 +32,106 @@ class ManifestListManager:
 
     def __init__(self, table):
         from pypaimon.table.file_store_table import FileStoreTable
+        from pypaimon.manifest import avro_codec
 
         self.table: FileStoreTable = table
-        self.manifest_path = self.table.table_path / "manifest"
+        manifest_path = table.table_path.rstrip('/')
+        self.manifest_path = f"{manifest_path}/manifest"
         self.file_io = self.table.file_io
+        self._codec = avro_codec(table.options.manifest_compression())
 
-    def read_all_manifest_files(self, snapshot: Snapshot) -> List[str]:
+    def read_all(self, snapshot: Optional[Snapshot]) -> List[ManifestFileMeta]:
+        """Read base + delta manifest lists for full file state."""
+        if snapshot is None:
+            return []
         manifest_files = []
         base_manifests = self.read(snapshot.base_manifest_list)
         manifest_files.extend(base_manifests)
         delta_manifests = self.read(snapshot.delta_manifest_list)
         manifest_files.extend(delta_manifests)
-        return list(set(manifest_files))
+        return manifest_files
 
-    def read(self, manifest_list_name: str) -> List[str]:
-        manifest_list_path = self.manifest_path / manifest_list_name
-        manifest_paths = []
+    def read_base(self, snapshot: Snapshot) -> List[ManifestFileMeta]:
+        """Read only the base manifest list for the given snapshot."""
+        return self.read(snapshot.base_manifest_list)
 
+    def read_delta(self, snapshot: Snapshot) -> List[ManifestFileMeta]:
+        return self.read(snapshot.delta_manifest_list)
+
+    def read_changelog(self, snapshot: Snapshot) -> List[ManifestFileMeta]:
+        """Read changelog manifest files from snapshot, or empty list if none."""
+        if snapshot.changelog_manifest_list is None:
+            return []
+        return self.read(snapshot.changelog_manifest_list)
+
+    def read(self, manifest_list_name: str) -> List[ManifestFileMeta]:
+        return self._read_from_storage(manifest_list_name)
+
+    def _read_from_storage(self, manifest_list_name: str) -> List[ManifestFileMeta]:
+        """Read manifest list from storage."""
+        manifest_files = []
+
+        manifest_list_path = f"{self.manifest_path}/{manifest_list_name}"
         with self.file_io.new_input_stream(manifest_list_path) as input_stream:
             avro_bytes = input_stream.read()
         buffer = BytesIO(avro_bytes)
         reader = fastavro.reader(buffer)
         for record in reader:
-            file_name = record['_FILE_NAME']
-            manifest_paths.append(file_name)
+            stats_dict = dict(record['_PARTITION_STATS'])
+            partition_stats = SimpleStats(
+                min_values=BinaryRow(
+                    stats_dict['_MIN_VALUES'],
+                    self.table.partition_keys_fields
+                ),
+                max_values=BinaryRow(
+                    stats_dict['_MAX_VALUES'],
+                    self.table.partition_keys_fields
+                ),
+                null_counts=stats_dict['_NULL_COUNTS'],
+            )
+            manifest_file_meta = ManifestFileMeta(
+                file_name=record['_FILE_NAME'],
+                file_size=record['_FILE_SIZE'],
+                num_added_files=record['_NUM_ADDED_FILES'],
+                num_deleted_files=record['_NUM_DELETED_FILES'],
+                partition_stats=partition_stats,
+                schema_id=record['_SCHEMA_ID'],
+                min_row_id=record.get('_MIN_ROW_ID'),
+                max_row_id=record.get('_MAX_ROW_ID'),
+            )
+            manifest_files.append(manifest_file_meta)
 
-        return manifest_paths
+        return manifest_files
 
-    def write(self, manifest_file_names: List[str]) -> Optional[str]:
-        if not manifest_file_names:
-            return None
-
+    def write(self, file_name, manifest_file_metas: List[ManifestFileMeta]):
         avro_records = []
-        for manifest_file_name in manifest_file_names:
+        for meta in manifest_file_metas:
             avro_record = {
-                "_FILE_NAME": manifest_file_name,
-                "_FILE_SIZE": 0,  # TODO
-                "_NUM_ADDED_FILES": 0,
-                "_NUM_DELETED_FILES": 0,
+                "_VERSION": 2,
+                "_FILE_NAME": meta.file_name,
+                "_FILE_SIZE": meta.file_size,
+                "_NUM_ADDED_FILES": meta.num_added_files,
+                "_NUM_DELETED_FILES": meta.num_deleted_files,
                 "_PARTITION_STATS": {
-                    "_MIN_VALUES": None,
-                    "_MAX_VALUES": None,
-                    "_NULL_COUNTS": 0,
+                    "_MIN_VALUES": GenericRowSerializer.to_bytes(meta.partition_stats.min_values),
+                    "_MAX_VALUES": GenericRowSerializer.to_bytes(meta.partition_stats.max_values),
+                    "_NULL_COUNTS": meta.partition_stats.null_counts,
                 },
-                "_SCHEMA_ID": 0,
+                "_SCHEMA_ID": meta.schema_id,
+                "_MIN_ROW_ID": meta.min_row_id,
+                "_MAX_ROW_ID": meta.max_row_id,
             }
             avro_records.append(avro_record)
 
-        list_filename = f"manifest-list-{str(uuid.uuid4())}.avro"
-        list_path = self.manifest_path / list_filename
+        list_path = f"{self.manifest_path}/{file_name}"
         try:
             buffer = BytesIO()
-            fastavro.writer(buffer, MANIFEST_FILE_META_SCHEMA, avro_records)
+            fastavro.writer(
+                buffer, MANIFEST_FILE_META_SCHEMA, avro_records,
+                codec=self._codec)
             avro_bytes = buffer.getvalue()
             with self.file_io.new_output_stream(list_path) as output_stream:
                 output_stream.write(avro_bytes)
-            return list_filename
         except Exception as e:
             self.file_io.delete_quietly(list_path)
             raise RuntimeError(f"Failed to write manifest list file: {e}") from e

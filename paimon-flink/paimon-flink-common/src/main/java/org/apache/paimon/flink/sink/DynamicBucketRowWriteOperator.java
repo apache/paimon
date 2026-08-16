@@ -47,11 +47,6 @@ public class DynamicBucketRowWriteOperator
     }
 
     @Override
-    protected boolean containLogSystem() {
-        return false;
-    }
-
-    @Override
     public void processElement(StreamRecord<Tuple2<InternalRow, Integer>> element)
             throws Exception {
         write.write(element.getValue().f0, element.getValue().f1);

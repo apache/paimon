@@ -19,21 +19,24 @@
 package org.apache.paimon.casting;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.types.VarCharType;
 
 import javax.annotation.Nullable;
 
 import java.util.List;
+
+import static org.apache.paimon.utils.DefaultValueUtils.convertDefaultValue;
 
 /**
  * An implementation of {@link InternalRow} which provides a default value for the underlying {@link
@@ -175,6 +178,14 @@ public class DefaultValueRow implements InternalRow {
     }
 
     @Override
+    public InternalVector getVector(int pos) {
+        if (!row.isNullAt(pos)) {
+            return row.getVector(pos);
+        }
+        return defaultValueRow.getVector(pos);
+    }
+
+    @Override
     public InternalMap getMap(int pos) {
         if (!row.isNullAt(pos)) {
             return row.getMap(pos);
@@ -198,6 +209,14 @@ public class DefaultValueRow implements InternalRow {
         return defaultValueRow.getVariant(pos);
     }
 
+    @Override
+    public Blob getBlob(int pos) {
+        if (!row.isNullAt(pos)) {
+            return row.getBlob(pos);
+        }
+        return defaultValueRow.getBlob(pos);
+    }
+
     public static DefaultValueRow from(InternalRow defaultValueRow) {
         return new DefaultValueRow(defaultValueRow);
     }
@@ -215,21 +234,7 @@ public class DefaultValueRow implements InternalRow {
             }
 
             containsDefaultValue = true;
-            @SuppressWarnings("unchecked")
-            CastExecutor<Object, Object> resolve =
-                    (CastExecutor<Object, Object>)
-                            CastExecutors.resolve(VarCharType.STRING_TYPE, dataField.type());
-
-            if (resolve == null) {
-                throw new RuntimeException(
-                        "Default value do not support the type of " + dataField.type());
-            }
-
-            if (defaultValueStr.startsWith("'") && defaultValueStr.endsWith("'")) {
-                defaultValueStr = defaultValueStr.substring(1, defaultValueStr.length() - 1);
-            }
-
-            Object defaultValue = resolve.cast(BinaryString.fromString(defaultValueStr));
+            Object defaultValue = convertDefaultValue(dataField.type(), defaultValueStr);
             row.setField(i, defaultValue);
         }
 

@@ -37,6 +37,10 @@ public class CastedArrayColumnVector implements ArrayColumnVector {
         this.children = children;
     }
 
+    public CastedArrayColumnVector copy(ColumnVector child) {
+        return new CastedArrayColumnVector(heapArrayVector, new ColumnVector[] {child});
+    }
+
     @Override
     public InternalArray getArray(int i) {
         long offset = heapArrayVector.offsets[i];

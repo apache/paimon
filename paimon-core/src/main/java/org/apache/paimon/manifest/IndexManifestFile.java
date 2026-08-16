@@ -18,6 +18,7 @@
 
 package org.apache.paimon.manifest;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
@@ -25,21 +26,30 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.ObjectsFile;
 import org.apache.paimon.utils.PathFactory;
 import org.apache.paimon.utils.SegmentsCache;
-import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /** Index manifest file. */
 public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
 
+    private final FileFormat fileFormat;
+    private final RowType manifestType;
+
     private IndexManifestFile(
             FileIO fileIO,
+            FileFormat fileFormat,
             RowType schema,
             FormatReaderFactory readerFactory,
             FormatWriterFactory writerFactory,
@@ -55,6 +65,62 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
                 compression,
                 pathFactory,
                 cache);
+        this.fileFormat = fileFormat;
+        this.manifestType = schema;
+    }
+
+    public Path indexManifestFilePath(String fileName) {
+        return pathFactory.toPath(fileName);
+    }
+
+    /**
+     * Scans projected index manifest entries without materializing {@link IndexManifestEntry}s.
+     *
+     * <p>The returned iterator reuses the same mutable {@link BinaryIndexManifestEntry} for all
+     * records. An entry is only valid until the next call to {@link CloseableIterator#hasNext()},
+     * {@link CloseableIterator#next()}, or {@link CloseableIterator#close()}, and must not be
+     * retained. The caller must close the iterator.
+     *
+     * <p>This method intentionally bypasses the manifest cache because cached entries are
+     * materialized with the complete index manifest schema.
+     */
+    public CloseableIterator<BinaryIndexManifestEntry> scan(
+            String fileName, BinaryIndexManifestEntry.Projection projection) {
+        BinaryIndexManifestEntry entry = projection.createEntry();
+        try {
+            CloseableIterator<InternalRow> rows =
+                    FileUtils.createFormatReader(
+                                    fileIO,
+                                    fileFormat.createReaderFactory(
+                                            manifestType,
+                                            projection.projectedType(),
+                                            Collections.emptyList()),
+                                    pathFactory.toPath(fileName),
+                                    null)
+                            .toCloseableIterator();
+            return new CloseableIterator<BinaryIndexManifestEntry>() {
+                @Override
+                public boolean hasNext() {
+                    entry.clear();
+                    return rows.hasNext();
+                }
+
+                @Override
+                public BinaryIndexManifestEntry next() {
+                    entry.clear();
+                    InternalRow row = rows.next();
+                    return row == null ? null : entry.replace(row);
+                }
+
+                @Override
+                public void close() throws Exception {
+                    entry.clear();
+                    rows.close();
+                }
+            };
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to read index manifest " + fileName, e);
+        }
     }
 
     /** Write new index files to index manifest. */
@@ -93,11 +159,12 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
         }
 
         public IndexManifestFile create() {
-            RowType schema = VersionedObjectSerializer.versionType(IndexManifestEntry.SCHEMA);
+            RowType schema = IndexManifestEntry.MANIFEST_ROW_TYPE;
             return new IndexManifestFile(
                     fileIO,
+                    fileFormat,
                     schema,
-                    fileFormat.createReaderFactory(schema),
+                    fileFormat.createReaderFactory(schema, schema, new ArrayList<>()),
                     fileFormat.createWriterFactory(schema),
                     compression,
                     pathFactory.indexManifestFileFactory(),

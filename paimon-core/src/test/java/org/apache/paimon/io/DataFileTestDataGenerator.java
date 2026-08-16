@@ -150,7 +150,7 @@ public class DataFileTestDataGenerator {
         return new Data(
                 partition,
                 bucket,
-                new DataFileMeta(
+                DataFileMeta.create(
                         "data-" + UUID.randomUUID(),
                         totalSize,
                         kvs.size(),

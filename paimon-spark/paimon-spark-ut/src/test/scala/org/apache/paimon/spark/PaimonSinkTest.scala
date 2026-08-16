@@ -18,10 +18,12 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.Snapshot.CommitKind._
+
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.{Dataset, Row}
-import org.apache.spark.sql.execution.streaming.MemoryStream
 import org.apache.spark.sql.functions.{col, mean, window}
+import org.apache.spark.sql.paimon.shims.memstream.MemoryStream
 import org.apache.spark.sql.streaming.StreamTest
 
 import java.sql.Date
@@ -261,6 +263,7 @@ class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
             .writeStream
             .option("checkpointLocation", checkpointDir.getCanonicalPath)
             .option("write.merge-schema", "true")
+            .option("write.merge-schema.type-widening", "true")
             .option("write.merge-schema.explicit-cast", "true")
             .format("paimon")
             .start(location)
@@ -277,6 +280,133 @@ class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
                 3L,
                 date,
                 456) :: Nil)
+          } finally {
+            stream.stop()
+          }
+      }
+    }
+  }
+
+  test("Paimon SinK: set full-compaction.delta-commits with batch write") {
+    for (useV2Write <- Seq("true", "false")) {
+      withSparkSQLConf("spark.paimon.write.use-v2-write" -> useV2Write) {
+        withTable("t") {
+          sql("""
+                |CREATE TABLE t (
+                |  a INT,
+                |  b INT
+                |) TBLPROPERTIES (
+                |  'primary-key'='a',
+                |  'bucket'='1',
+                |  'full-compaction.delta-commits'='1'
+                |)
+                |""".stripMargin)
+
+          sql("INSERT INTO t VALUES (1, 1)")
+          sql("INSERT INTO t VALUES (2, 2)")
+          checkAnswer(sql("SELECT * FROM t ORDER BY a"), Seq(Row(1, 1), Row(2, 2)))
+          assert(loadTable("t").snapshotManager().latestSnapshot().commitKind == COMPACT)
+        }
+      }
+    }
+  }
+
+  test("Paimon SinK: set full-compaction.delta-commits with streaming write") {
+    failAfter(streamingTimeout) {
+      withTempDir {
+        checkpointDir =>
+          spark.sql(s"""
+                       |CREATE TABLE T (a INT, b INT)
+                       |TBLPROPERTIES (
+                       |  'primary-key'='a',
+                       |  'bucket'='1',
+                       |  'full-compaction.delta-commits'='2'
+                       |)
+                       |""".stripMargin)
+          val table = loadTable("T")
+          val location = table.location().toString
+
+          val inputData = MemoryStream[(Int, Int)]
+          val stream = inputData
+            .toDS()
+            .toDF("a", "b")
+            .writeStream
+            .option("checkpointLocation", checkpointDir.getCanonicalPath)
+            .format("paimon")
+            .start(location)
+
+          val query = () => spark.sql("SELECT * FROM T ORDER BY a")
+
+          try {
+            inputData.addData((1, 1))
+            stream.processAllAvailable()
+            checkAnswer(query(), Seq(Row(1, 1)))
+            assert(table.snapshotManager().latestSnapshot().commitKind == APPEND)
+
+            inputData.addData((2, 1))
+            stream.processAllAvailable()
+            checkAnswer(query(), Seq(Row(1, 1), Row(2, 1)))
+            assert(table.snapshotManager().latestSnapshot().commitKind == COMPACT)
+
+            inputData.addData((2, 2))
+            stream.processAllAvailable()
+            checkAnswer(query(), Seq(Row(1, 1), Row(2, 2)))
+            assert(table.snapshotManager().latestSnapshot().commitKind == APPEND)
+
+            inputData.addData((3, 1))
+            stream.processAllAvailable()
+            checkAnswer(query(), Seq(Row(1, 1), Row(2, 2), Row(3, 1)))
+            assert(table.snapshotManager().latestSnapshot().commitKind == COMPACT)
+          } finally {
+            stream.stop()
+          }
+      }
+    }
+  }
+
+  test("Paimon Sink: batch then stream should not overwrite batch data") {
+    failAfter(streamingTimeout) {
+      withTempDir {
+        checkpointDir =>
+          // create a primary key table
+          spark.sql(s"""
+                       |CREATE TABLE T (a INT, b STRING)
+                       |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
+                       |""".stripMargin)
+          val location = loadTable("T").location().toString
+
+          // Phase 1 - batch insert
+          spark.sql("INSERT INTO T VALUES (1, 'a'), (2, 'b'), (3, 'c')")
+          checkAnswer(
+            spark.sql("SELECT * FROM T ORDER BY a"),
+            Row(1, "a") :: Row(2, "b") :: Row(3, "c") :: Nil)
+
+          // Phase 2 - streaming should append, not overwrite
+          val inputData = MemoryStream[(Int, String)]
+          val stream = inputData
+            .toDS()
+            .toDF("a", "b")
+            .writeStream
+            .option("checkpointLocation", checkpointDir.getCanonicalPath)
+            .foreachBatch {
+              (batch: Dataset[Row], id: Long) =>
+                batch.write.format("paimon").mode("append").save(location)
+            }
+            .start()
+
+          try {
+            inputData.addData((4, "d"))
+            stream.processAllAvailable()
+            // batch data must still be present alongside stream data
+            checkAnswer(
+              spark.sql("SELECT * FROM T ORDER BY a"),
+              Row(1, "a") :: Row(2, "b") :: Row(3, "c") :: Row(4, "d") :: Nil)
+
+            inputData.addData((5, "e"))
+            stream.processAllAvailable()
+            checkAnswer(
+              spark.sql("SELECT * FROM T ORDER BY a"),
+              Row(1, "a") :: Row(2, "b") :: Row(3, "c") :: Row(4, "d") :: Row(5, "e") :: Nil)
           } finally {
             stream.stop()
           }

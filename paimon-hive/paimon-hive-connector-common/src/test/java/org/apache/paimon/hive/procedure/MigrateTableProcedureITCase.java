@@ -34,7 +34,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.HashMap;
 import java.util.List;
@@ -47,11 +46,12 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
 
     private static final TestHiveMetastore TEST_HIVE_METASTORE = new TestHiveMetastore();
 
-    private static final int PORT = 9084;
+    private static int port;
 
     @BeforeEach
     public void beforeEach() {
-        TEST_HIVE_METASTORE.start(PORT);
+        TEST_HIVE_METASTORE.start(0);
+        port = TEST_HIVE_METASTORE.getPort();
     }
 
     @AfterEach
@@ -59,12 +59,22 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
         TEST_HIVE_METASTORE.stop();
     }
 
-    private static Stream<Arguments> testArguments() {
+    private static Stream<Arguments> testProcedureArguments() {
         return Stream.of(Arguments.of("orc"), Arguments.of("avro"), Arguments.of("parquet"));
     }
 
+    private static Stream<Arguments> testActionArguments() {
+        return Stream.of(
+                Arguments.of("orc", false),
+                Arguments.of("avro", false),
+                Arguments.of("parquet", false),
+                Arguments.of("orc", true),
+                Arguments.of("avro", true),
+                Arguments.of("parquet", true));
+    }
+
     @ParameterizedTest
-    @MethodSource("testArguments")
+    @MethodSource("testProcedureArguments")
     public void testMigrateProcedure(String format) throws Exception {
         testUpgradeNonPartitionTable(format);
         resetMetastore();
@@ -74,7 +84,8 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
     private void resetMetastore() throws Exception {
         TEST_HIVE_METASTORE.stop();
         TEST_HIVE_METASTORE.reset();
-        TEST_HIVE_METASTORE.start(PORT);
+        TEST_HIVE_METASTORE.start(0);
+        port = TEST_HIVE_METASTORE.getPort();
     }
 
     public void testUpgradePartitionTable(String format) throws Exception {
@@ -95,7 +106,7 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
 
         tEnv.executeSql(
                 "CREATE CATALOG PAIMON WITH ('type'='paimon', 'metastore' = 'hive', 'uri' = 'thrift://localhost:"
-                        + PORT
+                        + port
                         + "' , 'warehouse' = '"
                         + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname)
                         + "')");
@@ -126,7 +137,7 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
 
         tEnv.executeSql(
                 "CREATE CATALOG PAIMON WITH ('type'='paimon', 'metastore' = 'hive', 'uri' = 'thrift://localhost:"
-                        + PORT
+                        + port
                         + "' , 'warehouse' = '"
                         + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname)
                         + "')");
@@ -142,8 +153,8 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"orc", "parquet", "avro"})
-    public void testMigrateAction(String format) throws Exception {
+    @MethodSource("testActionArguments")
+    public void testMigrateAction(String format, boolean forceStartFlinkJob) throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
         tEnv.useCatalog("HIVE");
@@ -160,16 +171,17 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
         List<Row> r1 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
         Map<String, String> catalogConf = new HashMap<>();
         catalogConf.put("metastore", "hive");
-        catalogConf.put("uri", "thrift://localhost:" + PORT);
+        catalogConf.put("uri", "thrift://localhost:" + port);
         catalogConf.put(
                 "warehouse", System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname));
         MigrateTableAction migrateTableAction =
                 new MigrateTableAction("hive", "default.hivetable", catalogConf, "", 6);
+        migrateTableAction.forceStartFlinkJob(forceStartFlinkJob);
         migrateTableAction.run();
 
         tEnv.executeSql(
                 "CREATE CATALOG PAIMON WITH ('type'='paimon', 'metastore' = 'hive', 'uri' = 'thrift://localhost:"
-                        + PORT
+                        + port
                         + "' , 'warehouse' = '"
                         + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname)
                         + "')");

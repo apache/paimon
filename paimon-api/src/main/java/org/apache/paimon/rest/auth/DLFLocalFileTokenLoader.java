@@ -18,8 +18,11 @@
 
 package org.apache.paimon.rest.auth;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.rest.RESTApi;
 import org.apache.paimon.utils.FileReadUtils;
+
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 
 import java.io.File;
 
@@ -43,14 +46,23 @@ public class DLFLocalFileTokenLoader implements DLFTokenLoader {
     }
 
     protected static DLFToken readToken(String tokenFilePath) {
+        return readToken(tokenFilePath, 5);
+    }
+
+    @VisibleForTesting
+    static DLFToken readToken(String tokenFilePath, int maxRetries) {
         int retry = 1;
-        Exception lastException = null;
-        while (retry <= 5) {
+        RuntimeException lastException = null;
+        while (retry <= maxRetries) {
             try {
                 String tokenStr = FileReadUtils.readFileUtf8(new File(tokenFilePath));
                 return RESTApi.fromJson(tokenStr, DLFToken.class);
+            } catch (JsonProcessingException e) {
+                // The token file carries AK/SK/STS; never keep the body or Jackson's snippet.
+                lastException = new RuntimeException("Failed to parse token file.");
             } catch (Exception e) {
-                lastException = e;
+                lastException =
+                        new RuntimeException("Failed to read token file: " + tokenFilePath, e);
             }
             try {
                 Thread.sleep(retry * 1000L);
@@ -60,6 +72,6 @@ public class DLFLocalFileTokenLoader implements DLFTokenLoader {
             }
             retry++;
         }
-        throw new RuntimeException(lastException);
+        throw lastException;
     }
 }

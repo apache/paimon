@@ -23,11 +23,18 @@ import org.apache.paimon.PagedList;
 import org.apache.paimon.TableType;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.format.HadoopCompressionType;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.ResolvingFileIO;
 import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
@@ -37,11 +44,14 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
-import org.apache.paimon.table.system.AllTableOptionsTable;
-import org.apache.paimon.table.system.CatalogOptionsTable;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewImpl;
 
@@ -54,15 +64,22 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
+import javax.annotation.Nullable;
+
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.stream.Collectors;
 
+import static java.util.Collections.singletonMap;
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.CoreOptions.METASTORE_TAG_TO_PARTITION;
 import static org.apache.paimon.CoreOptions.TYPE;
@@ -279,7 +296,8 @@ public abstract class CatalogTestBase {
         // List tables paged returns an empty list when there are no tables in the database
         String databaseName = "tables_paged_db";
         catalog.createDatabase(databaseName, false);
-        PagedList<String> pagedTables = catalog.listTablesPaged(databaseName, null, null, null);
+        PagedList<String> pagedTables =
+                catalog.listTablesPaged(databaseName, null, null, null, null);
         assertThat(pagedTables.getElements()).isEmpty();
         assertNull(pagedTables.getNextPageToken());
 
@@ -292,22 +310,22 @@ public abstract class CatalogTestBase {
         // List tables paged returns a list with the names of all tables in the database in all
         // catalogs except RestCatalog
         // even if the maxResults or pageToken is not null
-        pagedTables = catalog.listTablesPaged(databaseName, null, null, null);
+        pagedTables = catalog.listTablesPaged(databaseName, null, null, null, null);
         assertPagedTables(pagedTables, tableNames);
 
         int maxResults = 2;
-        pagedTables = catalog.listTablesPaged(databaseName, maxResults, null, null);
+        pagedTables = catalog.listTablesPaged(databaseName, maxResults, null, null, null);
         assertPagedTables(pagedTables, tableNames);
 
         String pageToken = "table1";
-        pagedTables = catalog.listTablesPaged(databaseName, maxResults, pageToken, null);
+        pagedTables = catalog.listTablesPaged(databaseName, maxResults, pageToken, null, null);
         assertPagedTables(pagedTables, tableNames);
 
         maxResults = 8;
-        pagedTables = catalog.listTablesPaged(databaseName, maxResults, null, null);
+        pagedTables = catalog.listTablesPaged(databaseName, maxResults, null, null, null);
         assertPagedTables(pagedTables, tableNames);
 
-        pagedTables = catalog.listTablesPaged(databaseName, maxResults, pageToken, null);
+        pagedTables = catalog.listTablesPaged(databaseName, maxResults, pageToken, null, null);
         assertPagedTables(pagedTables, tableNames);
 
         // List tables throws DatabaseNotExistException when the database does not exist
@@ -316,7 +334,7 @@ public abstract class CatalogTestBase {
                 .isThrownBy(
                         () ->
                                 catalog.listTablesPaged(
-                                        "non_existing_db", finalMaxResults, pageToken, null));
+                                        "non_existing_db", finalMaxResults, pageToken, null, null));
     }
 
     @Test
@@ -325,7 +343,7 @@ public abstract class CatalogTestBase {
         String databaseName = "table_details_paged_db";
         catalog.createDatabase(databaseName, false);
         PagedList<Table> pagedTableDetails =
-                catalog.listTableDetailsPaged(databaseName, null, null, null);
+                catalog.listTableDetailsPaged(databaseName, null, null, null, null);
         assertThat(pagedTableDetails.getElements()).isEmpty();
         assertNull(pagedTableDetails.getNextPageToken());
 
@@ -338,28 +356,30 @@ public abstract class CatalogTestBase {
                     Identifier.create(databaseName, tableName), DEFAULT_TABLE_SCHEMA, false);
         }
 
-        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null, null);
+        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, null, null, null, null);
         assertPagedTableDetails(pagedTableDetails, tableNames.length, tableNames);
         assertNull(pagedTableDetails.getNextPageToken());
 
         int maxResults = 2;
-        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, maxResults, null, null);
+        pagedTableDetails =
+                catalog.listTableDetailsPaged(databaseName, maxResults, null, null, null);
         assertPagedTableDetails(pagedTableDetails, tableNames.length, tableNames);
         assertNull(pagedTableDetails.getNextPageToken());
 
         String pageToken = "table1";
         pagedTableDetails =
-                catalog.listTableDetailsPaged(databaseName, maxResults, pageToken, null);
+                catalog.listTableDetailsPaged(databaseName, maxResults, pageToken, null, null);
         assertPagedTableDetails(pagedTableDetails, tableNames.length, tableNames);
         assertNull(pagedTableDetails.getNextPageToken());
 
         maxResults = 8;
-        pagedTableDetails = catalog.listTableDetailsPaged(databaseName, maxResults, null, null);
+        pagedTableDetails =
+                catalog.listTableDetailsPaged(databaseName, maxResults, null, null, null);
         assertPagedTableDetails(pagedTableDetails, tableNames.length, tableNames);
         assertNull(pagedTableDetails.getNextPageToken());
 
         pagedTableDetails =
-                catalog.listTableDetailsPaged(databaseName, maxResults, pageToken, null);
+                catalog.listTableDetailsPaged(databaseName, maxResults, pageToken, null, null);
         assertPagedTableDetails(pagedTableDetails, tableNames.length, tableNames);
         assertNull(pagedTableDetails.getNextPageToken());
 
@@ -369,7 +389,7 @@ public abstract class CatalogTestBase {
                 .isThrownBy(
                         () ->
                                 catalog.listTableDetailsPaged(
-                                        "non_existing_db", finalMaxResults, pageToken, null));
+                                        "non_existing_db", finalMaxResults, pageToken, null, null));
     }
 
     @Test
@@ -556,6 +576,402 @@ public abstract class CatalogTestBase {
     }
 
     @Test
+    public void testFormatTableFileCompression() throws Exception {
+        if (!supportsFormatTable()) {
+            return;
+        }
+        String dbName = "test_format_table_file_compression";
+        catalog.createDatabase(dbName, true);
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("f1", DataTypes.INT());
+        schemaBuilder.option("type", "format-table");
+        Pair[] format2ExpectDefaultFileCompression = {
+            Pair.of("csv", "none"),
+            Pair.of("parquet", "snappy"),
+            Pair.of("json", "none"),
+            Pair.of("orc", "zstd")
+        };
+        for (Pair<String, String> format2Compression : format2ExpectDefaultFileCompression) {
+            Identifier identifier =
+                    Identifier.create(
+                            dbName,
+                            "partition_table_file_compression_" + format2Compression.getKey());
+            schemaBuilder.option("file.format", format2Compression.getKey());
+            catalog.createTable(identifier, schemaBuilder.build(), true);
+            String fileCompression =
+                    new CoreOptions(catalog.getTable(identifier).options())
+                            .formatTableFileCompression();
+
+            assertEquals(fileCompression, format2Compression.getValue());
+        }
+        // table has option file.compression
+        String expectFileCompression = "gzip";
+        schemaBuilder.option("file.format", "csv");
+        schemaBuilder.option("file.compression", expectFileCompression);
+        Identifier identifier = Identifier.create(dbName, "partition_table_file_compression_a");
+        catalog.createTable(identifier, schemaBuilder.build(), true);
+        String fileCompression =
+                new CoreOptions(catalog.getTable(identifier).options())
+                        .formatTableFileCompression();
+        assertEquals(fileCompression, expectFileCompression);
+
+        // table has option format-table.file.compression
+        schemaBuilder.option("format-table.file.compression", expectFileCompression);
+        identifier = Identifier.create(dbName, "partition_table_file_compression_b");
+        catalog.createTable(identifier, schemaBuilder.build(), true);
+        fileCompression =
+                new CoreOptions(catalog.getTable(identifier).options())
+                        .formatTableFileCompression();
+        assertEquals(fileCompression, expectFileCompression);
+    }
+
+    @Test
+    public void testFormatTableOnlyPartitionValueRead() throws Exception {
+        if (!supportsFormatTable()) {
+            return;
+        }
+        Random random = new Random();
+        String dbName = "test_db";
+        catalog.createDatabase(dbName, true);
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("f1", DataTypes.INT());
+        schemaBuilder.column("f2", DataTypes.INT());
+        schemaBuilder.column("dt", DataTypes.INT());
+        schemaBuilder.column("dt2", DataTypes.VARCHAR(64));
+        schemaBuilder.partitionKeys("dt", "dt2");
+        schemaBuilder.option("type", "format-table");
+        schemaBuilder.option("format-table.partition-path-only-value", "true");
+        Pair[] format2Compressions = {
+            Pair.of("csv", HadoopCompressionType.GZIP),
+            Pair.of("parquet", HadoopCompressionType.ZSTD),
+            Pair.of("json", HadoopCompressionType.GZIP),
+            Pair.of("orc", HadoopCompressionType.ZSTD)
+        };
+        int dtPartitionValue = 10;
+        String dt2PartitionValue = "2022-01-01";
+        for (Pair<String, HadoopCompressionType> format2Compression : format2Compressions) {
+            Identifier identifier =
+                    Identifier.create(dbName, "partition_table_" + format2Compression.getKey());
+            schemaBuilder.option("file.compression", format2Compression.getValue().value());
+            schemaBuilder.option("file.format", format2Compression.getKey());
+            catalog.createTable(identifier, schemaBuilder.build(), true);
+            FormatTable table = (FormatTable) catalog.getTable(identifier);
+            int size = 5;
+            InternalRow[] datas = new InternalRow[size];
+            for (int j = 0; j < size; j++) {
+                datas[j] =
+                        GenericRow.of(
+                                random.nextInt(),
+                                random.nextInt(),
+                                dtPartitionValue,
+                                BinaryString.fromString(dt2PartitionValue));
+            }
+            writeAndCheckCommitFormatTable(table, datas, null);
+            List<InternalRow> readAllData = read(table, null, null, null, null);
+            assertThat(readAllData).containsExactlyInAnyOrder(datas);
+            Map<String, String> partitionSpec = new HashMap<>();
+            partitionSpec.put("dt", "" + dtPartitionValue + 1);
+            partitionSpec.put("dt2", dt2PartitionValue + 1);
+            List<InternalRow> readFilterData = read(table, null, null, partitionSpec, null);
+            assertThat(readFilterData).isEmpty();
+            catalog.dropTable(identifier, true);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testFormatTableReadAndWrite(boolean partitioned) throws Exception {
+        if (!supportsFormatTable()) {
+            return;
+        }
+        Random random = new Random();
+        String dbName = "test_db";
+        catalog.createDatabase(dbName, true);
+        int partitionValue = 10;
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("f1", DataTypes.INT());
+        schemaBuilder.column("f2", DataTypes.INT());
+        schemaBuilder.column("dt", DataTypes.INT());
+        schemaBuilder.option("type", "format-table");
+        schemaBuilder.option("target-file-size", "1 kb");
+        Pair[] format2Compressions = {
+            Pair.of("csv", HadoopCompressionType.GZIP),
+            Pair.of("parquet", HadoopCompressionType.ZSTD),
+            Pair.of("json", HadoopCompressionType.GZIP),
+            Pair.of("orc", HadoopCompressionType.ZSTD)
+        };
+        for (Pair<String, HadoopCompressionType> format2Compression : format2Compressions) {
+            if (partitioned) {
+                schemaBuilder.partitionKeys("dt");
+            }
+            Identifier identifier =
+                    Identifier.create(dbName, "table_" + format2Compression.getKey());
+            schemaBuilder.option("file.format", format2Compression.getKey());
+            schemaBuilder.option("file.compression", format2Compression.getValue().value());
+            catalog.createTable(identifier, schemaBuilder.build(), true);
+            FormatTable table = (FormatTable) catalog.getTable(identifier);
+            int[] projection = new int[] {1, 2};
+            PredicateBuilder builder = new PredicateBuilder(table.rowType());
+            Predicate predicate = builder.greaterOrEqual(1, 10);
+            int size = 2000;
+            int checkSize = 3;
+            InternalRow[] datas = new InternalRow[size];
+            InternalRow[] checkDatas = new InternalRow[checkSize];
+            for (int j = 0; j < size; j++) {
+                int f1 = random.nextInt();
+                int f2 = j < checkSize ? random.nextInt(10) + 10 : random.nextInt(10);
+                datas[j] = GenericRow.of(f1, f2, partitionValue);
+                if (j < checkSize) {
+                    checkDatas[j] = GenericRow.of(f2, partitionValue);
+                }
+            }
+            InternalRow dataWithDiffPartition =
+                    GenericRow.of(random.nextInt(), random.nextInt(), 11);
+            Map<String, String> partitionSpec = null;
+            int dataSize = size;
+            if (partitioned) {
+                writeAndCheckCommitFormatTable(table, datas, dataWithDiffPartition);
+                dataSize = size + 1;
+                partitionSpec = new HashMap<>();
+                partitionSpec.put("dt", "" + partitionValue);
+            } else {
+                writeAndCheckCommitFormatTable(table, datas, null);
+            }
+            List<InternalRow> readFilterData =
+                    read(table, predicate, projection, partitionSpec, null);
+            assertThat(readFilterData).containsExactlyInAnyOrder(checkDatas);
+            List<InternalRow> readallData = read(table, null, null, null, null);
+            assertThat(readallData).hasSize(dataSize);
+            int limit = checkSize - 1;
+            List<InternalRow> readLimitData =
+                    read(table, predicate, projection, partitionSpec, limit);
+            assertThat(readLimitData).hasSize(limit);
+            if (partitioned) {
+                List<InternalRow> readAllData = read(table, null, null, null, null);
+                assertThat(readAllData).hasSize(size + 1);
+                PredicateBuilder partitionFilterBuilder = new PredicateBuilder(table.rowType());
+                Predicate partitionFilterPredicate =
+                        partitionFilterBuilder.equal(2, partitionValue);
+                List<InternalRow> readPartitionAndNoPartitionFilterData =
+                        read(table, partitionFilterPredicate, projection, null, null);
+                assertThat(readPartitionAndNoPartitionFilterData).hasSize(size);
+            }
+            catalog.dropTable(identifier, true);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testFormatTableOverwrite(boolean partitionPathOnlyValue) throws Exception {
+        if (!supportsFormatTable()) {
+            return;
+        }
+        String dbName = "format_overwrite_db";
+        catalog.createDatabase(dbName, true);
+
+        Identifier id = Identifier.create(dbName, "format_overwrite_table");
+        Schema nonPartitionedSchema =
+                Schema.newBuilder()
+                        .column("a", DataTypes.INT())
+                        .column("b", DataTypes.INT())
+                        .options(getFormatTableOptions())
+                        .option("file.format", "csv")
+                        .option("file.compression", HadoopCompressionType.GZIP.value())
+                        .option(
+                                "format-table.partition-path-only-value",
+                                "" + partitionPathOnlyValue)
+                        .build();
+        catalog.createTable(id, nonPartitionedSchema, true);
+        FormatTable nonPartitionedTable = (FormatTable) catalog.getTable(id);
+        BatchWriteBuilder nonPartitionedTableWriteBuilder =
+                nonPartitionedTable.newBatchWriteBuilder();
+        try (BatchTableWrite write = nonPartitionedTableWriteBuilder.newWrite();
+                BatchTableCommit commit = nonPartitionedTableWriteBuilder.newCommit()) {
+            write.write(GenericRow.of(1, 10));
+            write.write(GenericRow.of(2, 20));
+            commit.commit(write.prepareCommit());
+        }
+
+        try (BatchTableWrite write = nonPartitionedTableWriteBuilder.newWrite();
+                BatchTableCommit commit =
+                        nonPartitionedTableWriteBuilder.withOverwrite().newCommit()) {
+            write.write(GenericRow.of(3, 30));
+            commit.commit(write.prepareCommit());
+        }
+
+        List<InternalRow> fullOverwriteRows = read(nonPartitionedTable, null, null, null, null);
+        assertThat(fullOverwriteRows).containsExactlyInAnyOrder(GenericRow.of(3, 30));
+        catalog.dropTable(id, true);
+
+        Identifier pid = Identifier.create(dbName, "format_overwrite_partitioned");
+        Schema partitionedSchema =
+                Schema.newBuilder()
+                        .column("a", DataTypes.INT())
+                        .column("b", DataTypes.INT())
+                        .column("year", DataTypes.INT())
+                        .column("month", DataTypes.INT())
+                        .partitionKeys("year", "month")
+                        .options(getFormatTableOptions())
+                        .option("file.format", "csv")
+                        .option("file.compression", HadoopCompressionType.GZIP.value())
+                        .option(
+                                "format-table.partition-path-only-value",
+                                "" + partitionPathOnlyValue)
+                        .build();
+        catalog.createTable(pid, partitionedSchema, true);
+        FormatTable partitionedTable = (FormatTable) catalog.getTable(pid);
+        BatchWriteBuilder partitionedTableWriteBuilder = partitionedTable.newBatchWriteBuilder();
+        try (BatchTableWrite write = partitionedTableWriteBuilder.newWrite();
+                BatchTableCommit commit = partitionedTableWriteBuilder.newCommit()) {
+            write.write(GenericRow.of(1, 100, 2024, 10));
+            write.write(GenericRow.of(2, 200, 2025, 10));
+            write.write(GenericRow.of(3, 300, 2025, 11));
+            commit.commit(write.prepareCommit());
+        }
+
+        Map<String, String> staticPartition = new HashMap<>();
+        staticPartition.put("year", "2024");
+        staticPartition.put("month", "10");
+        try (BatchTableWrite write = partitionedTableWriteBuilder.newWrite();
+                BatchTableCommit commit =
+                        partitionedTableWriteBuilder.withOverwrite(staticPartition).newCommit()) {
+            write.write(GenericRow.of(10, 1000, 2024, 10));
+            commit.commit(write.prepareCommit());
+        }
+
+        List<InternalRow> partitionOverwriteRows = read(partitionedTable, null, null, null, null);
+        assertThat(partitionOverwriteRows)
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(10, 1000, 2024, 10),
+                        GenericRow.of(2, 200, 2025, 10),
+                        GenericRow.of(3, 300, 2025, 11));
+
+        staticPartition = new HashMap<>();
+        staticPartition.put("year", "2025");
+        try (BatchTableWrite write = partitionedTableWriteBuilder.newWrite();
+                BatchTableCommit commit =
+                        partitionedTableWriteBuilder.withOverwrite(staticPartition).newCommit()) {
+            write.write(GenericRow.of(10, 1000, 2025, 10));
+            commit.commit(write.prepareCommit());
+        }
+
+        partitionOverwriteRows = read(partitionedTable, null, null, null, null);
+        assertThat(partitionOverwriteRows)
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(10, 1000, 2024, 10), GenericRow.of(10, 1000, 2025, 10));
+
+        try (BatchTableWrite write = partitionedTableWriteBuilder.newWrite()) {
+            write.write(GenericRow.of(10, 1000, 2025, 10));
+            assertThrows(
+                    RuntimeException.class,
+                    () -> {
+                        Map<String, String> staticOverwritePartition = new HashMap<>();
+                        staticOverwritePartition.put("month", "10");
+                        partitionedTableWriteBuilder
+                                .withOverwrite(staticOverwritePartition)
+                                .newCommit();
+                    });
+        }
+        catalog.dropTable(pid, true);
+    }
+
+    @Test
+    public void testFormatTableSplitRead() throws Exception {
+        if (!supportsFormatTable()) {
+            return;
+        }
+        Pair[] format2Compressions = {
+            Pair.of("csv", HadoopCompressionType.NONE),
+            Pair.of("json", HadoopCompressionType.NONE),
+            Pair.of("csv", HadoopCompressionType.GZIP),
+            Pair.of("json", HadoopCompressionType.GZIP),
+            Pair.of("parquet", HadoopCompressionType.ZSTD)
+        };
+        for (Pair<String, HadoopCompressionType> format2Compression : format2Compressions) {
+            String format = format2Compression.getKey();
+            String compression = format2Compression.getValue().value();
+            String dbName = format + "_split_db_" + compression;
+            catalog.createDatabase(dbName, true);
+
+            Identifier id = Identifier.create(dbName, format + "_split_table_" + compression);
+            Schema schema =
+                    Schema.newBuilder()
+                            .column("id", DataTypes.INT())
+                            .column("name", DataTypes.STRING())
+                            .column("score", DataTypes.DOUBLE())
+                            .options(getFormatTableOptions())
+                            .option("file.format", format)
+                            .option("source.split.target-size", "54 B")
+                            .option("file.compression", compression.toString())
+                            .build();
+            catalog.createTable(id, schema, true);
+            FormatTable table = (FormatTable) catalog.getTable(id);
+            int size = 50;
+            InternalRow[] datas = new InternalRow[size];
+            for (int i = 0; i < size; i++) {
+                datas[i] = GenericRow.of(i, BinaryString.fromString("User" + i), 85.5 + (i % 15));
+            }
+            writeAndCheckCommitFormatTable(table, datas, null);
+            List<InternalRow> allRows = read(table, null, null, null, null);
+            assertThat(allRows).containsExactlyInAnyOrder(datas);
+        }
+    }
+
+    private void writeAndCheckCommitFormatTable(
+            FormatTable table, InternalRow[] datas, InternalRow dataWithDiffPartition)
+            throws Exception {
+        try (BatchTableWrite write = table.newBatchWriteBuilder().newWrite();
+                BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            for (InternalRow row : datas) {
+                write.write(row);
+            }
+            if (dataWithDiffPartition != null) {
+                write.write(dataWithDiffPartition);
+            }
+            List<CommitMessage> committers = write.prepareCommit();
+            List<InternalRow> readData = read(table, null, null, null, null);
+            assertThat(readData).isEmpty();
+            commit.commit(committers);
+        }
+    }
+
+    @SafeVarargs
+    protected final List<InternalRow> read(
+            Table table,
+            Predicate predicate,
+            @Nullable int[] projection,
+            @Nullable Map<String, String> partitionSpec,
+            @Nullable Integer limit,
+            Pair<ConfigOption<?>, String>... dynamicOptions)
+            throws Exception {
+        Map<String, String> options = new HashMap<>();
+        for (Pair<ConfigOption<?>, String> pair : dynamicOptions) {
+            options.put(pair.getKey().key(), pair.getValue());
+        }
+        table = table.copy(options);
+        ReadBuilder readBuilder = table.newReadBuilder();
+        if (projection != null) {
+            readBuilder.withProjection(projection);
+        }
+        readBuilder.withPartitionFilter(partitionSpec);
+        readBuilder.withFilter(predicate);
+        if (limit != null) {
+            readBuilder.withLimit(limit);
+        }
+        TableScan scan = readBuilder.newScan();
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().executeFilter().createReader(scan.plan())) {
+            InternalRowSerializer serializer = new InternalRowSerializer(readBuilder.readType());
+            List<InternalRow> rows = new ArrayList<>();
+            reader.forEachRemaining(
+                    row -> {
+                        rows.add(serializer.copy(row));
+                    });
+            return rows;
+        }
+    }
+
+    @Test
     public void testGetTable() throws Exception {
         catalog.createDatabase("test_db", false);
 
@@ -569,6 +985,25 @@ public abstract class CatalogTestBase {
         assertThat(systemTableCheckWithBranch).isNotNull();
         Table dataTable = catalog.getTable(identifier);
         assertThat(dataTable).isNotNull();
+
+        // Get manifests system table and read it
+        Table table = catalog.getTable(Identifier.create("test_db", "test_table"));
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(
+                    GenericRow.of(1, BinaryString.fromString("2"), BinaryString.fromString("3")));
+            commit.commit(write.prepareCommit());
+        }
+        Table manifestsTable =
+                catalog.getTable(Identifier.create("test_db", "test_table$manifests"));
+        ReadBuilder readBuilder = manifestsTable.newReadBuilder();
+        List<String> manifestFiles = new ArrayList<>();
+        readBuilder
+                .newRead()
+                .createReader(readBuilder.newScan().plan())
+                .forEachRemaining(r -> manifestFiles.add(r.getString(0).toString()));
+        assertThat(manifestFiles).hasSize(1);
 
         // Get system table throws TableNotExistException when data table does not exist
         assertThatExceptionOfType(Catalog.TableNotExistException.class)
@@ -602,18 +1037,21 @@ public abstract class CatalogTestBase {
         Table allTableOptionsTable =
                 catalog.getTable(Identifier.create(SYSTEM_DATABASE_NAME, ALL_TABLE_OPTIONS));
         assertThat(allTableOptionsTable).isNotNull();
-        Table catalogOptionsTable =
-                catalog.getTable(Identifier.create(SYSTEM_DATABASE_NAME, CATALOG_OPTIONS));
-        assertThat(catalogOptionsTable).isNotNull();
+        assertThatExceptionOfType(Catalog.TableNotExistException.class)
+                .isThrownBy(
+                        () ->
+                                catalog.getTable(
+                                        Identifier.create(SYSTEM_DATABASE_NAME, CATALOG_OPTIONS)));
         assertThatExceptionOfType(Catalog.TableNotExistException.class)
                 .isThrownBy(
                         () -> catalog.getTable(Identifier.create(SYSTEM_DATABASE_NAME, "1111")));
 
         List<String> sysTables = catalog.listTables(SYSTEM_DATABASE_NAME);
         assertThat(sysTables)
-                .containsExactlyInAnyOrder(
-                        AllTableOptionsTable.ALL_TABLE_OPTIONS,
-                        CatalogOptionsTable.CATALOG_OPTIONS);
+                .containsExactlyInAnyOrderElementsOf(
+                        SystemTableLoader.loadGlobalTableNames(new Options()));
+
+        assertThat(catalog.listViews(SYSTEM_DATABASE_NAME)).isEmpty();
     }
 
     @Test
@@ -646,6 +1084,38 @@ public abstract class CatalogTestBase {
         // Drop table does not throw exception when table does not exist and ignoreIfNotExists is
         // true
         assertThatCode(() -> catalog.dropTable(nonExistingTable, true)).doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testDropTableWithExternalPaths() throws Exception {
+        catalog.createDatabase("test_db", false);
+        Identifier identifier = Identifier.create("test_db", "table_with_external_paths");
+        java.nio.file.Path dataExternalPath = tempFile.resolve("data-external-path");
+        java.nio.file.Path globalIndexExternalPath = tempFile.resolve("global-index-external-path");
+        Files.createDirectories(dataExternalPath.resolve("data"));
+        Files.createDirectories(globalIndexExternalPath.resolve("index"));
+
+        Map<String, String> options = new HashMap<>();
+        options.put(
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key(), dataExternalPath.toUri().toString());
+        options.put(
+                CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH.key(),
+                globalIndexExternalPath.toUri().toString());
+        Schema schema =
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "pk", DataTypes.INT()),
+                                new DataField(1, "col", DataTypes.STRING())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        "");
+
+        catalog.createTable(identifier, schema, false);
+        catalog.dropTable(identifier, false);
+
+        assertThat(Files.exists(dataExternalPath)).isFalse();
+        assertThat(Files.exists(globalIndexExternalPath)).isFalse();
     }
 
     @Test
@@ -703,6 +1173,96 @@ public abstract class CatalogTestBase {
         Map<String, String> initOptions = Maps.newHashMap();
         initOptions.put(CoreOptions.TYPE.key(), TableType.MATERIALIZED_TABLE.toString());
         baseAlterTable(initOptions);
+    }
+
+    @Test
+    public void testReplaceTable() throws Exception {
+        if (!supportsReplaceTable()) {
+            return;
+        }
+        catalog.createDatabase("replace_db", true);
+        Identifier identifier = Identifier.create("replace_db", "t");
+
+        Schema initialSchema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("data", DataTypes.STRING())
+                        .column("pt", DataTypes.STRING())
+                        .partitionKeys("pt")
+                        .primaryKey("id", "pt")
+                        .option("bucket", "2")
+                        .build();
+        catalog.createTable(identifier, initialSchema, false);
+
+        Table created = catalog.getTable(identifier);
+        String oldLocation = ((FileStoreTable) created).location().toString();
+        BatchWriteBuilder writeBuilder = created.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(
+                    GenericRow.of(1, BinaryString.fromString("old"), BinaryString.fromString("a")));
+            commit.commit(write.prepareCommit());
+        }
+
+        long oldSnapshotId =
+                ((FileStoreTable) catalog.getTable(identifier))
+                        .snapshotManager()
+                        .latestSnapshotId();
+
+        // Replace with new PK + bucket (partition keys unchanged)
+        Schema newSchema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("name", DataTypes.STRING())
+                        .column("pt", DataTypes.STRING())
+                        .partitionKeys("pt")
+                        .primaryKey("id", "pt")
+                        .option("bucket", "4")
+                        .build();
+        catalog.replaceTable(identifier, newSchema, false);
+
+        FileStoreTable replaced = (FileStoreTable) catalog.getTable(identifier);
+        assertThat(replaced.partitionKeys()).containsExactly("pt");
+        assertThat(replaced.primaryKeys()).containsExactly("id", "pt");
+        assertThat(replaced.options().get("bucket")).isEqualTo("4");
+        assertThat(replaced.location().toString()).isEqualTo(oldLocation);
+        assertThat(read(replaced, null, null, null, null)).isEmpty();
+
+        // Time-travel to old snapshot still returns old data with old schema
+        FileStoreTable oldView =
+                replaced.copy(Collections.singletonMap("scan.snapshot-id", "" + oldSnapshotId));
+        assertThat(oldView.schema().fieldNames()).containsExactly("id", "data", "pt");
+        assertThat(read(oldView, null, null, null, null)).hasSize(1);
+
+        // Changing partition keys is rejected
+        Schema changePartitionKeys =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("name", DataTypes.STRING())
+                        .column("pt", DataTypes.STRING())
+                        .primaryKey("id")
+                        .option("bucket", "4")
+                        .build();
+        assertThatExceptionOfType(UnsupportedOperationException.class)
+                .isThrownBy(() -> catalog.replaceTable(identifier, changePartitionKeys, false))
+                .withMessageContaining("partition keys");
+
+        // ignoreIfNotExists = true: missing table is silently skipped
+        Identifier missing = Identifier.create("replace_db", "missing");
+        catalog.replaceTable(missing, newSchema, true);
+
+        // ignoreIfNotExists = false: missing table throws
+        assertThatExceptionOfType(Catalog.TableNotExistException.class)
+                .isThrownBy(() -> catalog.replaceTable(missing, newSchema, false));
+
+        // System table is rejected
+        assertThatExceptionOfType(IllegalArgumentException.class)
+                .isThrownBy(
+                        () ->
+                                catalog.replaceTable(
+                                        Identifier.create("replace_db", "$system_table"),
+                                        newSchema,
+                                        false));
     }
 
     @Test
@@ -1113,6 +1673,65 @@ public abstract class CatalogTestBase {
                 () -> catalog.listPartitionsPaged(identifier, null, null, "dt=0101"));
     }
 
+    @Test
+    public void testListPartitionsByNames() throws Exception {
+        if (!supportPartitions()) {
+            return;
+        }
+
+        String databaseName = "partitions_by_names_db";
+        List<Map<String, String>> partitionSpecs =
+                Arrays.asList(
+                        singletonMap("dt", "20250101"),
+                        singletonMap("dt", "20250102"),
+                        singletonMap("dt", "20240102"),
+                        singletonMap("dt", "20260101"));
+
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        Identifier identifier = Identifier.create(databaseName, "table");
+
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(METASTORE_TAG_TO_PARTITION.key(), "dt")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build(),
+                true);
+
+        BatchWriteBuilder writeBuilder = catalog.getTable(identifier).newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (Map<String, String> partitionSpec : partitionSpecs) {
+                write.write(GenericRow.of(0, BinaryString.fromString(partitionSpec.get("dt"))));
+            }
+            commit.commit(write.prepareCommit());
+        }
+
+        // Test listing partitions by names
+        List<Map<String, String>> specsToQuery =
+                Arrays.asList(singletonMap("dt", "20250101"), singletonMap("dt", "20250102"));
+        List<Partition> partitions = catalog.listPartitionsByNames(identifier, specsToQuery);
+
+        assertThat(partitions.stream().map(Partition::spec).collect(Collectors.toList()))
+                .containsExactlyInAnyOrderElementsOf(specsToQuery);
+
+        // Test with non-existent partition spec
+        List<Map<String, String>> nonExistentSpecs =
+                Arrays.asList(singletonMap("dt", "20990101"), singletonMap("dt", "20990102"));
+        List<Partition> emptyPartitions =
+                catalog.listPartitionsByNames(identifier, nonExistentSpecs);
+        assertEquals(0, emptyPartitions.size());
+
+        // Test with empty partition specs
+        List<Partition> emptyResult =
+                catalog.listPartitionsByNames(identifier, Collections.emptyList());
+        assertEquals(0, emptyResult.size());
+    }
+
     protected boolean supportsAlterDatabase() {
         return false;
     }
@@ -1130,6 +1749,10 @@ public abstract class CatalogTestBase {
     }
 
     protected boolean supportsViewDialects() {
+        return true;
+    }
+
+    protected boolean supportsReplaceTable() {
         return true;
     }
 
@@ -1517,7 +2140,7 @@ public abstract class CatalogTestBase {
                 .satisfies(
                         anyCauseMatches(
                                 IllegalStateException.class,
-                                "Column type col1[DOUBLE] cannot be converted to DATE without loosing information."));
+                                "Column type col1[DOUBLE] cannot be converted to DATE without losing information."));
 
         // Alter table update a column type throws ColumnNotExistException when column does not
         // exist
@@ -1666,5 +2289,48 @@ public abstract class CatalogTestBase {
                                         false))
                 .satisfies(anyCauseMatches("Cannot change nullability of primary key"));
         catalog.dropTable(identifier, false);
+    }
+
+    @Test
+    void testTableDefaultPartitionOptionsOnNonPartitionedTable() throws Exception {
+        Catalog root =
+                catalog instanceof DelegateCatalog ? DelegateCatalog.rootCatalog(catalog) : catalog;
+        if (!(root instanceof AbstractCatalog)) {
+            return;
+        }
+        ((AbstractCatalog) root).tableDefaultOptions.put("partition.expiration-time", "7d");
+
+        catalog.createDatabase("test_db_default", false);
+        Identifier identifier = Identifier.create("test_db_default", "non_partitioned");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("name", DataTypes.STRING())
+                        .build();
+        assertThatCode(() -> catalog.createTable(identifier, schema, false))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void testTableDefaultPartitionOptionsOnPartitionedTable() throws Exception {
+        Catalog root =
+                catalog instanceof DelegateCatalog ? DelegateCatalog.rootCatalog(catalog) : catalog;
+        if (!(root instanceof AbstractCatalog)) {
+            return;
+        }
+        ((AbstractCatalog) root).tableDefaultOptions.put("partition.expiration-time", "7d");
+
+        catalog.createDatabase("test_db_default_partitioned", false);
+        Identifier identifier = Identifier.create("test_db_default_partitioned", "partitioned");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("pt", DataTypes.STRING())
+                        .partitionKeys("pt")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+
+        assertThat(catalog.getTable(identifier).options())
+                .containsEntry("partition.expiration-time", "7d");
     }
 }

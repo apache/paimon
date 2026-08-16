@@ -18,49 +18,98 @@
 
 package org.apache.paimon.manifest;
 
-import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
-import org.apache.paimon.index.IndexFileMetaSerializer;
-import org.apache.paimon.utils.VersionedObjectSerializer;
+import org.apache.paimon.utils.ObjectSerializer;
+import org.apache.paimon.utils.OffsetRow;
 
+import java.util.function.Function;
+
+import static org.apache.paimon.data.BinaryString.fromString;
+import static org.apache.paimon.index.IndexFileMetaSerializer.dvMetasToRowArrayData;
+import static org.apache.paimon.index.IndexFileMetaSerializer.rowArrayDataToDvMetas;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
-/** A {@link VersionedObjectSerializer} for {@link IndexManifestEntry}. */
-public class IndexManifestEntrySerializer extends VersionedObjectSerializer<IndexManifestEntry> {
+/** Serializer for {@link IndexManifestEntry}. */
+public class IndexManifestEntrySerializer extends ObjectSerializer<IndexManifestEntry> {
+
+    /**
+     * Permanent on-disk format identifier, not a schema version.
+     *
+     * <p>Do not change when adding nullable fields. Old manifest readers skip unknown fields.
+     */
+    private static final int FORMAT_IDENTIFIER = 1;
 
     public IndexManifestEntrySerializer() {
-        super(IndexManifestEntry.SCHEMA);
+        super(IndexManifestEntry.MANIFEST_ROW_TYPE);
     }
 
     @Override
-    public int getVersion() {
-        return 1;
-    }
-
-    @Override
-    public InternalRow convertTo(IndexManifestEntry record) {
+    public InternalRow toRow(IndexManifestEntry record) {
         IndexFileMeta indexFile = record.indexFile();
+        GlobalIndexMeta globalIndexMeta = indexFile.globalIndexMeta();
+        InternalRow globalIndexRow =
+                globalIndexMeta == null
+                        ? null
+                        : GenericRow.of(
+                                globalIndexMeta.rowRangeStart(),
+                                globalIndexMeta.rowRangeEnd(),
+                                globalIndexMeta.indexFieldId(),
+                                globalIndexMeta.extraFieldIds() == null
+                                        ? null
+                                        : new GenericArray(globalIndexMeta.extraFieldIds()),
+                                globalIndexMeta.indexMeta(),
+                                globalIndexMeta.sourceMeta());
         return GenericRow.of(
+                FORMAT_IDENTIFIER,
                 record.kind().toByteValue(),
                 serializeBinaryRow(record.partition()),
                 record.bucket(),
-                BinaryString.fromString(indexFile.indexType()),
-                BinaryString.fromString(indexFile.fileName()),
+                fromString(indexFile.indexType()),
+                fromString(indexFile.fileName()),
                 indexFile.fileSize(),
                 indexFile.rowCount(),
-                record.indexFile().deletionVectorMetas() == null
-                        ? null
-                        : IndexFileMetaSerializer.dvMetasToRowArrayData(
-                                record.indexFile().deletionVectorMetas().values()));
+                dvMetasToRowArrayData(indexFile.dvRanges()),
+                fromString(indexFile.externalPath()),
+                globalIndexRow);
     }
 
     @Override
-    public IndexManifestEntry convertFrom(int version, InternalRow row) {
-        if (version != 1) {
-            throw new UnsupportedOperationException("Unsupported version: " + version);
+    public IndexManifestEntry fromRow(InternalRow row) {
+        checkFormatIdentifier(row.getInt(0));
+        return fromDataRow(new OffsetRow(row.getFieldCount() - 1, 1).replace(row));
+    }
+
+    private void checkFormatIdentifier(int formatIdentifier) {
+        if (formatIdentifier != FORMAT_IDENTIFIER) {
+            throw new UnsupportedOperationException("Unsupported version: " + formatIdentifier);
+        }
+    }
+
+    private IndexManifestEntry fromDataRow(InternalRow row) {
+        GlobalIndexMeta globalIndexMeta = null;
+        if (!row.isNullAt(9)) {
+            InternalRow globalIndexRow = row.getRow(9, GlobalIndexMeta.SCHEMA.getFieldCount());
+            long rowRangeStart = globalIndexRow.getLong(0);
+            long rowRangeEnd = globalIndexRow.getLong(1);
+            int indexFieldId = globalIndexRow.getInt(2);
+            int[] extralFields =
+                    globalIndexRow.isNullAt(3) ? null : globalIndexRow.getArray(3).toIntArray();
+            byte[] indexMeta = globalIndexRow.isNullAt(4) ? null : globalIndexRow.getBinary(4);
+            byte[] sourceMeta = globalIndexRow.isNullAt(5) ? null : globalIndexRow.getBinary(5);
+            globalIndexMeta =
+                    new GlobalIndexMeta(
+                            rowRangeStart,
+                            rowRangeEnd,
+                            indexFieldId,
+                            extralFields,
+                            indexMeta,
+                            sourceMeta);
         }
 
         return new IndexManifestEntry(
@@ -72,8 +121,20 @@ public class IndexManifestEntrySerializer extends VersionedObjectSerializer<Inde
                         row.getString(4).toString(),
                         row.getLong(5),
                         row.getLong(6),
-                        row.isNullAt(7)
-                                ? null
-                                : IndexFileMetaSerializer.rowArrayDataToDvMetas(row.getArray(7))));
+                        row.isNullAt(7) ? null : rowArrayDataToDvMetas(row.getArray(7)),
+                        row.isNullAt(8) ? null : row.getString(8).toString(),
+                        globalIndexMeta));
+    }
+
+    public static Function<InternalRow, BinaryRow> partitionGetter() {
+        return row -> deserializeBinaryRow(row.getBinary(2));
+    }
+
+    public static Function<InternalRow, Integer> bucketGetter() {
+        return row -> row.getInt(3);
+    }
+
+    public static Function<InternalRow, String> indexTypeGetter() {
+        return row -> row.getString(4).toString();
     }
 }

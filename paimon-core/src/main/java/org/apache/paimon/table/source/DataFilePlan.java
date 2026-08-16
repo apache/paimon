@@ -25,11 +25,11 @@ import java.util.Collections;
 import java.util.List;
 
 /** Scanning plan containing snapshot ID and input splits. */
-public class DataFilePlan implements TableScan.Plan {
+public class DataFilePlan<T extends Split> implements TableScan.Plan {
 
-    private final List<DataSplit> splits;
+    private final List<T> splits;
 
-    public DataFilePlan(List<DataSplit> splits) {
+    public DataFilePlan(List<T> splits) {
         this.splits = splits;
     }
 

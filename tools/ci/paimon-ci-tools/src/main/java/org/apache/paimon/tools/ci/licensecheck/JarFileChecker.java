@@ -81,6 +81,8 @@ public class JarFileChecker {
                     getNumLicenseFilesOutsideMetaInfDirectory(file, fileSystem.getPath("/"));
 
             numSevereIssues += getFilesWithIncompatibleLicenses(file, fileSystem.getPath("/"));
+
+            numSevereIssues += getNumNestedMetaInfDirectories(file, fileSystem.getPath("/"));
         }
         return numSevereIssues;
     }
@@ -173,7 +175,7 @@ public class JarFileChecker {
                         // JSON License
                         "The Software shall be used for Good, not Evil.",
                         // can sometimes be found in "funny" licenses
-                        "Don’t be evil"));
+                        "Don't be evil"));
     }
 
     private static Collection<Pattern> asPatterns(String... texts) {
@@ -201,11 +203,20 @@ public class JarFileChecker {
                     .filter(path -> !getFileName(path).startsWith("notice"))
                     // dual-licensed under GPL 2 and CDDL 1.1
                     // contained in hadoop/presto S3 FS and paimon-dist
+                    .filter(path -> !pathStartsWith(path, "/javax/xml/bind"))
                     .filter(
                             path ->
                                     !path.toString()
                                             .contains("/META-INF/versions/11/javax/xml/bind"))
-                    .filter(path -> !isJavaxManifest(jar, path))
+                    .filter(
+                            path ->
+                                    !pathStartsWith(
+                                            path,
+                                            "/META-INF/maven/javax.activation/javax.activation-api"))
+                    .filter(
+                            path ->
+                                    !pathStartsWith(
+                                            path, "/META-INF/maven/javax.xml.bind/jaxb-api"))
                     // dual-licensed under GPL 2 and EPL 2.0
                     // contained in sql-avro-confluent-registry
                     .filter(path -> !pathStartsWith(path, "/org/glassfish/jersey/internal"))
@@ -296,6 +307,27 @@ public class JarFileChecker {
         }
     }
 
+    private static int getNumNestedMetaInfDirectories(Path jar, Path jarRoot) throws IOException {
+        // a nested META-INF below META-INF/versions indicates that another jar was
+        // unpacked/shaded as-is into the multi-release directory; the nested multi-release
+        // metadata is not resolvable at runtime and breaks tools scanning the unpacked
+        // classes (e.g., JaCoCo fails on duplicate class names)
+        final Pattern nestedMetaInf = Pattern.compile("^/?META-INF/versions/[^/]+/META-INF/?$");
+        try (Stream<Path> files = Files.walk(jarRoot)) {
+            final List<String> filesWithIssues =
+                    files.map(Path::toString)
+                            .filter(path -> nestedMetaInf.matcher(path).matches())
+                            .collect(Collectors.toList());
+            for (String fileWithIssue : filesWithIssues) {
+                LOG.error(
+                        "Jar file {} contains a nested META-INF directory in a multi-release directory: {}",
+                        jar,
+                        fileWithIssue);
+            }
+            return filesWithIssues.size();
+        }
+    }
+
     private static String getFileName(Path path) {
         return path.getFileName().toString().toLowerCase();
     }
@@ -304,24 +336,8 @@ public class JarFileChecker {
         return file.startsWith(file.getFileSystem().getPath(path));
     }
 
-    private static boolean equals(Path file, String path) {
-        return file.equals(file.getFileSystem().getPath(path));
-    }
-
     private static boolean isNoClassFile(Path file) {
         return !getFileName(file).endsWith(".class");
-    }
-
-    private static boolean isJavaxManifest(Path jar, Path potentialManifestFile) {
-        try {
-            return equals(potentialManifestFile, "/META-INF/versions/11/META-INF/MANIFEST.MF")
-                    && readFile(potentialManifestFile).contains("Specification-Title: jaxb-api");
-        } catch (IOException e) {
-            throw new RuntimeException(
-                    String.format(
-                            "Error while reading file %s from jar %s.", potentialManifestFile, jar),
-                    e);
-        }
     }
 
     private static String readFile(Path file) throws IOException {

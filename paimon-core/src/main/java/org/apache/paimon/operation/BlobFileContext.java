@@ -1,0 +1,128 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.operation;
+
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BlobConsumer;
+import org.apache.paimon.data.BlobFetchMetricReporter;
+import org.apache.paimon.types.BlobType;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowType;
+
+import javax.annotation.Nullable;
+
+import java.util.Set;
+
+/** Context for blob file. */
+public class BlobFileContext {
+
+    private final Set<String> blobDescriptorFields;
+    private final Set<String> blobInlineFields;
+    private final boolean writeNullOnMissingFile;
+    private final boolean writeNullOnFetchFailure;
+    private final int copyBufferSize;
+
+    private @Nullable BlobConsumer blobConsumer;
+    private BlobFetchMetricReporter blobFetchMetricReporter = BlobFetchMetricReporter.NOOP;
+
+    private BlobFileContext(
+            Set<String> blobDescriptorFields,
+            Set<String> blobInlineFields,
+            boolean writeNullOnMissingFile,
+            boolean writeNullOnFetchFailure,
+            int copyBufferSize) {
+        this.blobDescriptorFields = blobDescriptorFields;
+        this.blobInlineFields = blobInlineFields;
+        this.writeNullOnMissingFile = writeNullOnMissingFile;
+        this.writeNullOnFetchFailure = writeNullOnFetchFailure;
+        this.copyBufferSize = copyBufferSize;
+    }
+
+    @Nullable
+    public static BlobFileContext create(RowType rowType, CoreOptions options) {
+        if (rowType.getFieldTypes().stream().noneMatch(BlobType::isBlobFileField)) {
+            return null;
+        }
+        Set<String> descriptorFields = options.blobDescriptorField();
+        Set<String> inlineFields = options.blobInlineField();
+        boolean requireBlobFile = false;
+        for (DataField field : rowType.getFields()) {
+            if (BlobType.isBlobFileField(field.type()) && !inlineFields.contains(field.name())) {
+                requireBlobFile = true;
+                break;
+            }
+        }
+        if (!requireBlobFile) {
+            return null;
+        }
+        return new BlobFileContext(
+                descriptorFields,
+                inlineFields,
+                options.blobWriteNullOnMissingFile(),
+                options.blobWriteNullOnFetchFailure(),
+                options.blobCopyBufferSize());
+    }
+
+    public BlobFileContext withBlobConsumer(BlobConsumer blobConsumer) {
+        this.blobConsumer = blobConsumer;
+        return this;
+    }
+
+    public BlobFileContext withBlobFetchMetricReporter(
+            BlobFetchMetricReporter blobFetchMetricReporter) {
+        this.blobFetchMetricReporter = blobFetchMetricReporter;
+        return this;
+    }
+
+    public BlobFileContext withWriteType(RowType writeType) {
+        if (writeType.getFieldTypes().stream().noneMatch(BlobType::isBlobFileField)) {
+            return null;
+        }
+        return this;
+    }
+
+    public Set<String> blobDescriptorFields() {
+        return blobDescriptorFields;
+    }
+
+    public Set<String> blobInlineFields() {
+        return blobInlineFields;
+    }
+
+    @Nullable
+    public BlobConsumer blobConsumer() {
+        return blobConsumer;
+    }
+
+    public boolean writeNullOnMissingFile() {
+        return writeNullOnMissingFile;
+    }
+
+    public boolean writeNullOnFetchFailure() {
+        return writeNullOnFetchFailure;
+    }
+
+    public int copyBufferSize() {
+        return copyBufferSize;
+    }
+
+    public BlobFetchMetricReporter blobFetchMetricReporter() {
+        return blobFetchMetricReporter;
+    }
+}

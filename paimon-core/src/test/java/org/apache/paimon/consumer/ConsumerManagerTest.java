@@ -25,12 +25,15 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.File;
+import java.io.IOException;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.Optional;
 import java.util.OptionalLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link ConsumerManager}. */
 public class ConsumerManagerTest {
@@ -51,6 +54,15 @@ public class ConsumerManagerTest {
                         LocalFileIO.create(),
                         new org.apache.paimon.fs.Path(tempDir.toUri()),
                         "branch1");
+    }
+
+    @Test
+    public void testRetry() throws IOException {
+        File file = new File(tempDir.toFile(), "consumer/consumer-id1");
+        file.getParentFile().mkdir();
+        file.createNewFile();
+        assertThatThrownBy(() -> manager.consumer("id1"))
+                .hasMessageContaining("Retry fail after 10 times");
     }
 
     @Test

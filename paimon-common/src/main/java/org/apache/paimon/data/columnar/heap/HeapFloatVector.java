@@ -90,6 +90,13 @@ public class HeapFloatVector extends AbstractHeapVector implements WritableFloat
     }
 
     @Override
+    public void appendFloat(float v) {
+        reserve(elementsAppended + 1);
+        setFloat(elementsAppended, v);
+        elementsAppended++;
+    }
+
+    @Override
     public void fill(float value) {
         Arrays.fill(vector, value);
     }

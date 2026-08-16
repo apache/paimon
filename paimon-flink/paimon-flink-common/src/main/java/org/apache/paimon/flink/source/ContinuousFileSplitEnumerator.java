@@ -22,9 +22,14 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.source.assigners.FIFOSplitAssigner;
 import org.apache.paimon.flink.source.assigners.PreAssignSplitAssigner;
 import org.apache.paimon.flink.source.assigners.SplitAssigner;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.postpone.PostponeBucketFileStoreWrite;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.sink.ChannelComputer;
+import org.apache.paimon.table.source.ChainSplit;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
+import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.SnapshotNotExistPlan;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableScan;
@@ -89,6 +94,14 @@ public class ContinuousFileSplitEnumerator
 
     private final int maxSnapshotCount;
 
+    private final int sourceParallelismUpperBound;
+
+    /**
+     * Metric name for source scaling max parallelism. This metric provides a recommended upper
+     * bound of parallelism for auto-scaling systems.
+     */
+    public static final String SOURCE_PARALLELISM_UPPER_BOUND = "sourceParallelismUpperBound";
+
     public ContinuousFileSplitEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             Collection<FileStoreSourceSplit> remainSplits,
@@ -98,7 +111,8 @@ public class ContinuousFileSplitEnumerator
             boolean unordered,
             int splitMaxPerTask,
             boolean shuffleBucketWithPartition,
-            int maxSnapshotCount) {
+            int maxSnapshotCount,
+            int sourceParallelismUpperBound) {
         checkArgument(discoveryInterval > 0L);
         this.context = checkNotNull(context);
         this.nextSnapshotId = nextSnapshotId;
@@ -115,6 +129,7 @@ public class ContinuousFileSplitEnumerator
         this.consumerProgressCalculator =
                 new ConsumerProgressCalculator(context.currentParallelism());
         this.maxSnapshotCount = maxSnapshotCount;
+        this.sourceParallelismUpperBound = sourceParallelismUpperBound;
     }
 
     @VisibleForTesting
@@ -132,8 +147,18 @@ public class ContinuousFileSplitEnumerator
 
     @Override
     public void start() {
+        registerMetrics();
         context.callAsync(
                 this::scanNextSnapshot, this::processDiscoveredSplits, 0, discoveryInterval);
+    }
+
+    private void registerMetrics() {
+        try {
+            context.metricGroup()
+                    .gauge(SOURCE_PARALLELISM_UPPER_BOUND, () -> sourceParallelismUpperBound);
+        } catch (Exception e) {
+            LOG.warn("Failed to register enumerator metrics.", e);
+        }
     }
 
     @Override
@@ -303,12 +328,95 @@ public class ContinuousFileSplitEnumerator
     }
 
     protected int assignSuggestedTask(FileStoreSourceSplit split) {
-        DataSplit dataSplit = ((DataSplit) split.split());
-        if (shuffleBucketWithPartition) {
-            return ChannelComputer.select(
-                    dataSplit.partition(), dataSplit.bucket(), context.currentParallelism());
+        int task;
+        if (split.split() instanceof DataSplit) {
+            task = assignSuggestedTask((DataSplit) split.split());
+        } else if (split.split() instanceof ChainSplit) {
+            task = assignSuggestedTask((ChainSplit) split.split());
+        } else {
+            task = assignSuggestedTask((IncrementalSplit) split.split());
         }
-        return ChannelComputer.select(dataSplit.bucket(), context.currentParallelism());
+
+        // Split assigners keep splits in a map keyed by task, but only ever hand out splits for
+        // tasks within the parallelism, so a task outside of it silently strands the split instead
+        // of failing.
+        int parallelism = context.currentParallelism();
+        checkArgument(
+                task >= 0 && task < parallelism,
+                "Split %s is suggested to task %s, which is out of the parallelism [0, %s). This is unexpected.",
+                split.splitId(),
+                task,
+                parallelism);
+        return task;
+    }
+
+    protected int assignSuggestedTask(DataSplit split) {
+        int parallelism = context.currentParallelism();
+
+        int bucketId;
+        if (split.bucket() == BucketMode.POSTPONE_BUCKET) {
+            bucketId =
+                    PostponeBucketFileStoreWrite.getWriteId(split.dataFiles().get(0).fileName())
+                            % parallelism;
+        } else {
+            bucketId = split.bucket();
+        }
+
+        if (shuffleBucketWithPartition) {
+            return ChannelComputer.select(split.partition(), bucketId, parallelism);
+        } else {
+            return ChannelComputer.select(bucketId, parallelism);
+        }
+    }
+
+    protected int assignSuggestedTask(IncrementalSplit split) {
+        int parallelism = context.currentParallelism();
+
+        int bucketId;
+        if (split.bucket() == BucketMode.POSTPONE_BUCKET) {
+            // A diff which only removes files has no after files, so fall back to the before files.
+            List<DataFileMeta> files =
+                    split.afterFiles().isEmpty() ? split.beforeFiles() : split.afterFiles();
+            bucketId =
+                    PostponeBucketFileStoreWrite.getWriteId(files.get(0).fileName()) % parallelism;
+        } else {
+            bucketId = split.bucket();
+        }
+
+        if (shuffleBucketWithPartition) {
+            return ChannelComputer.select(split.partition(), bucketId, parallelism);
+        } else {
+            return ChannelComputer.select(bucketId, parallelism);
+        }
+    }
+
+    protected int assignSuggestedTask(ChainSplit split) {
+        int parallelism = context.currentParallelism();
+        // Extract bucket id from the bucket path stored in fileBucketPathMapping.
+        // The bucket path ends with "bucket-{id}".
+        int bucketId = 0;
+        if (!split.fileBucketPathMapping().isEmpty()) {
+            String bucketPath = split.fileBucketPathMapping().values().iterator().next();
+            int lastSlash = bucketPath.lastIndexOf('/');
+            if (lastSlash >= 0) {
+                String bucketDir = bucketPath.substring(lastSlash + 1);
+                if (bucketDir.startsWith("bucket-")) {
+                    try {
+                        bucketId = Integer.parseInt(bucketDir.substring("bucket-".length()));
+                    } catch (NumberFormatException e) {
+                        LOG.warn(
+                                "Failed to parse bucket id from path '{}', falling back to 0.",
+                                bucketPath,
+                                e);
+                    }
+                }
+            }
+        }
+        if (shuffleBucketWithPartition) {
+            return ChannelComputer.select(split.logicalPartition(), bucketId, parallelism);
+        } else {
+            return ChannelComputer.select(bucketId, parallelism);
+        }
     }
 
     protected SplitAssigner createSplitAssigner(boolean unordered) {

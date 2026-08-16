@@ -30,8 +30,6 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -85,7 +83,6 @@ class WrappedManifestCommittableSerializerTest {
 
     public static void addFileCommittables(
             ManifestCommittable committable, BinaryRow partition, int bucket, int totalBuckets) {
-        List<CommitMessage> commitMessages = new ArrayList<>();
         int length = ThreadLocalRandom.current().nextInt(10) + 1;
         for (int i = 0; i < length; i++) {
             DataIncrement dataIncrement = randomNewFilesIncrement();
@@ -93,14 +90,7 @@ class WrappedManifestCommittableSerializerTest {
             CommitMessage commitMessage =
                     new CommitMessageImpl(
                             partition, bucket, totalBuckets, dataIncrement, compactIncrement);
-            commitMessages.add(commitMessage);
             committable.addFileCommittable(commitMessage);
-        }
-
-        if (!committable.logOffsets().containsKey(bucket)) {
-            int offset = ID.incrementAndGet();
-            committable.addLogOffset(bucket, offset, false);
-            assertThat(committable.logOffsets().get(bucket)).isEqualTo(offset);
         }
     }
 }

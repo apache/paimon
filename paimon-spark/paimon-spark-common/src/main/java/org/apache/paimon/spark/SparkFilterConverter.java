@@ -23,6 +23,8 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 
+import org.apache.spark.sql.sources.AlwaysFalse;
+import org.apache.spark.sql.sources.AlwaysTrue;
 import org.apache.spark.sql.sources.And;
 import org.apache.spark.sql.sources.EqualNullSafe;
 import org.apache.spark.sql.sources.EqualTo;
@@ -54,6 +56,8 @@ public class SparkFilterConverter {
 
     public static final List<String> SUPPORT_FILTERS =
             Arrays.asList(
+                    "AlwaysTrue",
+                    "AlwaysFalse",
                     "EqualTo",
                     "EqualNullSafe",
                     "GreaterThan",
@@ -97,10 +101,16 @@ public class SparkFilterConverter {
     }
 
     public Predicate convert(Filter filter) {
-        if (filter instanceof EqualTo) {
+        if (filter instanceof AlwaysTrue) {
+            return PredicateBuilder.alwaysTrue();
+        } else if (filter instanceof AlwaysFalse) {
+            return PredicateBuilder.alwaysFalse();
+        } else if (filter instanceof EqualTo) {
             EqualTo eq = (EqualTo) filter;
-            // TODO deal with isNaN
             int index = fieldIndex(eq.attribute());
+            if (isNaN(eq.value())) {
+                return builder.isNaN(index);
+            }
             Object literal = convertLiteral(index, eq.value());
             return builder.equal(index, literal);
         } else if (filter instanceof EqualNullSafe) {
@@ -173,9 +183,18 @@ public class SparkFilterConverter {
             return builder.contains(index, literal);
         }
 
-        // TODO: AlwaysTrue, AlwaysFalse
         throw new UnsupportedOperationException(
                 filter + " is unsupported. Support Filters: " + SUPPORT_FILTERS);
+    }
+
+    private static boolean isNaN(Object value) {
+        if (value instanceof Float) {
+            return Float.isNaN((Float) value);
+        }
+        if (value instanceof Double) {
+            return Double.isNaN((Double) value);
+        }
+        return false;
     }
 
     public Object convertLiteral(String field, Object value) {

@@ -62,7 +62,7 @@ public class TagManager {
 
     private static final Logger LOG = LoggerFactory.getLogger(TagManager.class);
 
-    private static final String TAG_PREFIX = "tag-";
+    public static final String TAG_PREFIX = "tag-";
 
     private final FileIO fileIO;
     private final Path tablePath;
@@ -201,7 +201,7 @@ public class TagManager {
         checkArgument(
                 !StringUtils.isNullOrWhitespaceOnly(targetTagName),
                 "New tag name shouldn't be blank.");
-        checkArgument(!tagExists(targetTagName), "Tag '%s' already exists.", tagName);
+        checkArgument(!tagExists(targetTagName), "Tag '%s' already exists.", targetTagName);
 
         try {
             fileIO.rename(tagPath(tagName), tagPath(targetTagName));
@@ -365,6 +365,18 @@ public class TagManager {
     public long tagCount() {
         try {
             return listVersionedFileStatus(fileIO, tagDirectory(), TAG_PREFIX).count();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /** Get tag names without reading tag files. */
+    public List<String> tagNames(Predicate<String> filter) {
+        try {
+            return tagPaths(path -> true).stream()
+                    .map(path -> path.getName().substring(TAG_PREFIX.length()))
+                    .filter(filter)
+                    .collect(Collectors.toList());
         } catch (IOException e) {
             throw new RuntimeException(e);
         }

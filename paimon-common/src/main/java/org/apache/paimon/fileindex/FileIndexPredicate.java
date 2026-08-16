@@ -42,9 +42,9 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.apache.paimon.fileindex.FileIndexResult.REMAIN;
@@ -92,12 +92,6 @@ public class FileIndexPredicate implements Closeable {
             return result;
         }
 
-        // for now we only support single column.
-        List<SortValue> orders = topN.orders();
-        if (orders.size() != 1) {
-            return result;
-        }
-
         int k = topN.limit();
         if (result instanceof BitmapIndexResult) {
             long cardinality = ((BitmapIndexResult) result).get().getCardinality();
@@ -106,6 +100,7 @@ public class FileIndexPredicate implements Closeable {
             }
         }
 
+        List<SortValue> orders = topN.orders();
         String requiredName = orders.get(0).field().name();
         Set<FileIndexReader> readers = reader.readColumnIndex(requiredName);
         for (FileIndexReader reader : readers) {
@@ -119,24 +114,7 @@ public class FileIndexPredicate implements Closeable {
     }
 
     private Set<String> getRequiredNames(Predicate filePredicate) {
-        return filePredicate.visit(
-                new PredicateVisitor<Set<String>>() {
-                    final Set<String> names = new HashSet<>();
-
-                    @Override
-                    public Set<String> visit(LeafPredicate predicate) {
-                        names.add(predicate.fieldName());
-                        return names;
-                    }
-
-                    @Override
-                    public Set<String> visit(CompoundPredicate predicate) {
-                        for (Predicate child : predicate.children()) {
-                            child.visit(this);
-                        }
-                        return names;
-                    }
-                });
+        return PredicateVisitor.collectFieldNames(filePredicate);
     }
 
     @Override
@@ -159,10 +137,14 @@ public class FileIndexPredicate implements Closeable {
 
         @Override
         public FileIndexResult visit(LeafPredicate predicate) {
+            Optional<FieldRef> fieldRefOptional = predicate.fieldRefOptional();
+            if (!fieldRefOptional.isPresent()) {
+                return REMAIN;
+            }
+
             FileIndexResult compoundResult = REMAIN;
-            FieldRef fieldRef =
-                    new FieldRef(predicate.index(), predicate.fieldName(), predicate.type());
-            for (FileIndexReader fileIndexReader : columnIndexReaders.get(predicate.fieldName())) {
+            FieldRef fieldRef = fieldRefOptional.get();
+            for (FileIndexReader fileIndexReader : columnIndexReaders.get(fieldRef.name())) {
                 compoundResult =
                         compoundResult.and(
                                 predicate

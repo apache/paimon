@@ -36,6 +36,8 @@ public interface WritableLongVector extends WritableColumnVector, LongColumnVect
      */
     void setLongsFromBinary(int rowId, int count, byte[] src, int srcIndex);
 
+    void appendLong(long v);
+
     /** Fill the column vector with the provided value. */
     void fill(long value);
 }

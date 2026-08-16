@@ -18,6 +18,8 @@
 
 package org.apache.paimon.rest.interceptor;
 
+import org.apache.paimon.utils.SensitiveConfigUtils;
+
 import org.apache.hc.core5.http.EntityDetails;
 import org.apache.hc.core5.http.HttpRequest;
 import org.apache.hc.core5.http.HttpResponse;
@@ -40,7 +42,7 @@ public class LoggingInterceptor implements HttpResponseInterceptor {
     @Override
     public void process(
             HttpResponse httpResponse, EntityDetails entityDetails, HttpContext httpContext) {
-        HttpCoreContext coreContext = HttpCoreContext.adapt(httpContext);
+        HttpCoreContext coreContext = HttpCoreContext.cast(httpContext);
         HttpRequest request = coreContext.getRequest();
         Long startTime = (Long) coreContext.getAttribute(REQUEST_START_TIME_KEY);
         long durationMs = System.currentTimeMillis() - startTime;
@@ -55,10 +57,11 @@ public class LoggingInterceptor implements HttpResponseInterceptor {
                     "[rest] requestId:{} method:{} url:{} duration:{}ms",
                     requestId,
                     request.getMethod(),
-                    request.getUri(),
+                    SensitiveConfigUtils.sanitizeUri(request.getUri().toString()),
                     durationMs);
         } catch (URISyntaxException e) {
-            LOG.warn("Failed to log rest request: {}", e.getMessage());
+            // e.getMessage() echoes the raw URI (may carry credentials); log only the reason.
+            LOG.warn("Failed to log rest request: {}", e.getReason());
         }
     }
 }

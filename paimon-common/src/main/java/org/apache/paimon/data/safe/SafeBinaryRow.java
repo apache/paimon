@@ -20,10 +20,12 @@ package org.apache.paimon.data.safe;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.memory.BytesUtils;
@@ -159,6 +161,11 @@ public final class SafeBinaryRow implements InternalRow {
     }
 
     @Override
+    public Blob getBlob(int pos) {
+        return Blob.fromBytes(getBinary(pos), null, null);
+    }
+
+    @Override
     public InternalArray getArray(int pos) {
         return readArrayData(bytes, offset, getLong(pos));
     }
@@ -177,6 +184,11 @@ public final class SafeBinaryRow implements InternalRow {
             byte[] bytes, int numFields, int baseOffset, long offsetAndSize) {
         int offset = (int) (offsetAndSize >> 32);
         return new SafeBinaryRow(numFields, bytes, offset + baseOffset);
+    }
+
+    @Override
+    public InternalVector getVector(int pos) {
+        throw new UnsupportedOperationException();
     }
 
     @Override

@@ -21,6 +21,8 @@ package org.apache.paimon.flink;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.format.SimpleColStats;
+import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.SimpleColStatsTestUtils;
@@ -806,6 +808,70 @@ public class PredicateConverterTest {
         DataType structType = DataTypes.ROW(DataTypes.INT()).bridgedTo(Row.class);
         assertThatThrownBy(() -> field(0, structType).accept(converter))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+    }
+
+    // ==================== Nested OR Conversion Tests ====================
+    //
+    // When Flink expands IN(v1,...,vN) it produces a deeply nested binary OR tree:
+    //   OR(=(f,v1), OR(=(f,v2), OR(..., =(f,vN))))
+    // PredicateConverter iteratively flattens this tree into a list of predicates,
+    // which PredicateBuilder.or() combines into a binary tree.
+
+    @Test
+    public void testNestedOrOfEquals() {
+        // Build OR(=(long1, 0), OR(=(long1, 1), ...)) with 25 values
+        FieldReferenceExpression longRef =
+                new FieldReferenceExpression(
+                        "long1", DataTypes.BIGINT(), Integer.MAX_VALUE, Integer.MAX_VALUE);
+
+        ResolvedExpression orTree = null;
+        for (int i = 24; i >= 0; i--) {
+            CallExpression equal =
+                    call(BuiltInFunctionDefinitions.EQUALS, longRef, new ValueLiteralExpression(i));
+            if (orTree == null) {
+                orTree = equal;
+            } else {
+                orTree = call(BuiltInFunctionDefinitions.OR, equal, orTree);
+            }
+        }
+
+        Predicate result = CONVERTER.visit((CallExpression) orTree);
+
+        // OR-of-equals → flattened → PredicateBuilder.or() → binary tree
+        assertThat(result).isInstanceOf(CompoundPredicate.class);
+        CompoundPredicate compound = (CompoundPredicate) result;
+        assertThat(compound.function()).isEqualTo(Or.INSTANCE);
+        assertThat(compound.children()).hasSize(2);
+    }
+
+    @Test
+    public void testNestedOrOfDifferentPredicates() {
+        // Build OR(>(long1, 0), OR(>(long1, 1), ...)) with 25 values
+        FieldReferenceExpression longRef =
+                new FieldReferenceExpression(
+                        "long1", DataTypes.BIGINT(), Integer.MAX_VALUE, Integer.MAX_VALUE);
+
+        ResolvedExpression orTree = null;
+        for (int i = 24; i >= 0; i--) {
+            CallExpression greater =
+                    call(
+                            BuiltInFunctionDefinitions.GREATER_THAN,
+                            longRef,
+                            new ValueLiteralExpression(i));
+            if (orTree == null) {
+                orTree = greater;
+            } else {
+                orTree = call(BuiltInFunctionDefinitions.OR, greater, orTree);
+            }
+        }
+
+        Predicate result = CONVERTER.visit((CallExpression) orTree);
+
+        // General OR → binary tree (root has 2 children)
+        assertThat(result).isInstanceOf(CompoundPredicate.class);
+        CompoundPredicate compound = (CompoundPredicate) result;
+        assertThat(compound.function()).isEqualTo(Or.INSTANCE);
+        assertThat(compound.children()).hasSize(2);
     }
 
     private static FieldReferenceExpression field(int i, DataType type) {

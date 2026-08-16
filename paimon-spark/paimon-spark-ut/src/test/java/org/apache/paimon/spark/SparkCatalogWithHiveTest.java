@@ -42,13 +42,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class SparkCatalogWithHiveTest {
 
     private static TestHiveMetastore testHiveMetastore;
-    private static final int PORT = 9087;
+    private static int port;
     @TempDir java.nio.file.Path tempDir;
 
     @BeforeAll
     public static void startMetastore() {
         testHiveMetastore = new TestHiveMetastore();
-        testHiveMetastore.start(PORT);
+        testHiveMetastore.start(0);
+        port = testHiveMetastore.getPort();
     }
 
     @AfterAll
@@ -78,7 +79,7 @@ public class SparkCatalogWithHiveTest {
                                     .stream()
                                     .map(s -> s.get(0))
                                     .map(Object::toString)
-                                    .filter(s -> s.contains("OrcScan"))
+                                    .filter(s -> s.contains("PaimonFormatTableScan"))
                                     .count())
                     .isGreaterThan(0);
 
@@ -91,8 +92,8 @@ public class SparkCatalogWithHiveTest {
             spark.sql(
                     "CREATE TABLE IF NOT EXISTS table_csv (a INT, bb INT, c STRING) USING csv OPTIONS ('csv.field-delimiter' ',')");
             spark.sql("INSERT INTO table_csv VALUES (1, 1, '1'), (2, 2, '2')").collect();
-            assertThat(spark.sql("DESCRIBE FORMATTED table_csv").collectAsList().toString())
-                    .contains("sep=,");
+            String r = spark.sql("DESCRIBE FORMATTED table_csv").collectAsList().toString();
+            assertThat(r).contains("sep=,");
             assertThat(
                             spark.sql("SELECT * FROM table_csv").collectAsList().stream()
                                     .map(Row::toString)
@@ -101,7 +102,8 @@ public class SparkCatalogWithHiveTest {
 
             // test json table
 
-            spark.sql("CREATE TABLE IF NOT EXISTS table_json (a INT, bb INT, c STRING) USING json");
+            spark.sql(
+                    "CREATE TABLE IF NOT EXISTS table_json (a INT, bb INT, c STRING) USING json ");
             spark.sql("INSERT INTO table_json VALUES(1, 1, '1'), (2, 2, '2')");
             assertThat(
                             spark.sql("SELECT * FROM table_json").collectAsList().stream()
@@ -155,18 +157,42 @@ public class SparkCatalogWithHiveTest {
         }
     }
 
+    @Test
+    public void testDescribeExternalAndManagedTableType() throws IOException {
+        try (SparkSession spark = createSessionBuilder().getOrCreate()) {
+            spark.sql("CREATE DATABASE IF NOT EXISTS type_test_db");
+            spark.sql("USE spark_catalog.type_test_db");
+
+            spark.sql("CREATE EXTERNAL TABLE external_type_table (a INT, bb INT, c STRING)");
+            assertThat(
+                            spark.sql("DESC FORMATTED external_type_table")
+                                    .filter("col_name = 'Type'")
+                                    .head()
+                                    .getString(1))
+                    .isEqualTo("EXTERNAL");
+
+            spark.sql("CREATE TABLE managed_type_table (a INT)");
+            assertThat(
+                            spark.sql("DESC FORMATTED managed_type_table")
+                                    .filter("col_name = 'Type'")
+                                    .head()
+                                    .getString(1))
+                    .isEqualTo("MANAGED");
+        }
+    }
+
     private SparkSession.Builder createSessionBuilder() {
         Path warehousePath = new Path("file:" + tempDir.toString());
         return SparkSession.builder()
                 .config("spark.sql.warehouse.dir", warehousePath.toString())
                 // with hive metastore
                 .config("spark.sql.catalogImplementation", "hive")
-                .config("hive.metastore.uris", "thrift://localhost:" + PORT)
+                .config("hive.metastore.uris", "thrift://localhost:" + port)
                 .config("spark.sql.catalog.spark_catalog", SparkCatalog.class.getName())
                 .config("spark.sql.catalog.spark_catalog.metastore", "hive")
                 .config(
                         "spark.sql.catalog.spark_catalog.hive.metastore.uris",
-                        "thrift://localhost:" + PORT)
+                        "thrift://localhost:" + port)
                 .config("spark.sql.catalog.spark_catalog.warehouse", warehousePath.toString())
                 .config(
                         "spark.sql.extensions",

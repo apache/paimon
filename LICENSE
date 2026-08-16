@@ -213,8 +213,6 @@ paimon-common/src/main/java/org/apache/paimon/fs/FileRange.java
 paimon-common/src/main/java/org/apache/paimon/fs/VectoredReadUtils.java
 from http://hadoop.apache.org/ version 2.10.2
 
-paimon-common/src/main/java/org/apache/paimon/lookup/hash/HashLookupStoreWriter.java
-paimon-common/src/main/java/org/apache/paimon/lookup/hash/HashLookupStoreReader.java
 paimon-common/src/main/java/org/apache/paimon/utils/VarLengthIntUtils.java
 from https://github.com/linkedin/PalDB version 1.2.0
 
@@ -274,6 +272,9 @@ paimon-format/src/main/java/org/apache/parquet/hadoop/ParquetFileReader.java
 paimon-format/src/main/java/org/apache/parquet/hadoop/ParquetWriter.java
 from https://parquet.apache.org/ version 1.14.0
 
+paimon-format/src/main/java/org/apache/paimon/format/ArrowSchemaMetadata.java
+from https://arrow.apache.org/ version 15.0.0
+
 paimon-common/src/main/java/org/apache/paimon/data/variant/GenericVariant.java
 paimon-common/src/main/java/org/apache/paimon/data/variant/GenericVariantBuilder.java
 paimon-common/src/main/java/org/apache/paimon/data/variant/GenericVariantUtil.java
@@ -297,6 +298,7 @@ paimon-format/test/main/java/org/apache/paimon/format/parquet/newReader/DeltaLen
 paimon-common/src/main/java/org/apache/paimon/data/variant/ShreddingUtils.java
 paimon-common/src/main/java/org/apache/paimon/data/variant/VariantSchema.java
 paimon-common/src/main/java/org/apache/paimon/data/variant/VariantShreddingWriter.java
+paimon-common/src/main/java/org/apache/paimon/data/variant/BaseVariantReader.java
 from https://spark.apache.org/ version 4.0.0-preview2
 
 MIT License

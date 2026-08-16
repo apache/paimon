@@ -1,0 +1,337 @@
+---
+title: "Bitmap Index"
+sidebar_position: 2
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# Bitmap Index
+
+A bitmap index maps each distinct scalar value to a compressed 64-bit row-id bitmap.
+Use it for enum-like dimensions and tag columns where queries often use equality,
+`IN`, complement, or null predicates, for example `status`, `country`, `tenant_type`,
+or business tags.
+
+Compared with [BTree Index](./btree), bitmap index is optimized for set operations over
+exact row-id bitmaps. It is usually a better fit for low-cardinality or medium-cardinality
+dimensions, especially when `IN`, `NOT IN`, or `!=` predicates are common. BTree index is
+still better for range predicates and high-cardinality columns where each value has only a
+few rows and range pruning is important.
+
+Supported predicate shapes include:
+
+| Predicate | Example |
+|---|---|
+| Equality | `tag = 'vip'` |
+| IN | `tag IN ('vip', 'trial')` |
+| Not equal | `tag != 'blocked'` |
+| NOT IN | `tag NOT IN ('blocked', 'test')` |
+| Null checks | `tag IS NULL`, `tag IS NOT NULL` |
+| String predicates | `tag LIKE 'vip%'`, `tag LIKE '%vip%'`, `tag startsWith 'vip'`, `tag contains 'vip'` |
+| Range predicates | `tag >= 'a'`, `tag BETWEEN 'a' AND 'm'` |
+| AND / OR combinations | `tag = 'vip' OR tag = 'trial'` |
+
+Equality, `IN`, null checks, and string prefix predicates use direct dictionary lookup.
+Other predicates such as `endsWith`, `contains`, general `LIKE`, and range predicates
+fall back to scanning bitmap dictionary entries only when the total size of candidate
+bitmap index files is within the configured fallback scan budget. If the budget is
+exceeded, Paimon falls back to other matching indexes or regular table scans.
+
+## Build Bitmap Index
+
+<Tabs groupId="bitmap-build">
+
+<TabItem value="sql" label="SQL">
+
+```sql
+-- Create bitmap index on 'tag' column
+CALL sys.create_global_index(
+    table => 'db.my_table',
+    index_column => 'tag',
+    index_type => 'bitmap'
+);
+```
+
+You can build only selected partitions:
+
+```sql
+CALL sys.create_global_index(
+    table => 'db.my_table',
+    index_column => 'tag',
+    index_type => 'bitmap',
+    partitions => 'dt=2026-06-18;dt=2026-06-19'
+);
+```
+
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+table = catalog.get_table("db.my_table")
+
+# Create bitmap index on 'tag' column.
+added_files = table.create_global_index("tag", index_type="bitmap")
+print(added_files)
+```
+
+The API returns the number of committed index files. You can pass bitmap build
+options and restrict the build to selected partitions:
+
+```python
+added_files = table.create_global_index(
+    "tag",
+    index_type="bitmap",
+    partitions=[{"dt": "2026-06-18"}, {"dt": "2026-06-19"}],
+    options={
+        "sorted-index.records-per-range": "10000000",
+        "bitmap-index.dictionary-block-size": "16 kb",
+    },
+)
+print(added_files)
+```
+
+</TabItem>
+
+</Tabs>
+
+Bitmap indexes share the sorted index build path with BTree indexes. Use
+`sorted-index.records-per-range` to control the expected records per generated index
+file, and `sorted-index.build.max-parallelism` to cap Flink or Spark build
+parallelism. The legacy `btree-index.records-per-range` and
+`btree-index.build.max-parallelism` keys are still recognized as fallback keys.
+
+PyPaimon bitmap index build currently supports `bitmap-index.compression` set to
+`none`, which is also the default. Use SQL if you need to build bitmap index files
+with compressed dictionary blocks.
+
+## Drop Bitmap Index
+
+<Tabs groupId="bitmap-drop">
+
+<TabItem value="sql" label="SQL">
+
+```sql
+CALL sys.drop_global_index(
+    table => 'db.my_table',
+    index_column => 'tag',
+    index_type => 'bitmap'
+);
+```
+
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+table = catalog.get_table("db.my_table")
+
+dropped_files = table.drop_global_index("tag", index_type="bitmap")
+print(dropped_files)
+```
+
+You can also restrict the drop to selected partitions, or count matched files
+without committing:
+
+```python
+matched_files = table.drop_global_index(
+    "tag",
+    index_type="bitmap",
+    partitions=[{"dt": "2026-06-18"}, {"dt": "2026-06-19"}],
+    dry_run=True,
+)
+print(matched_files)
+```
+
+</TabItem>
+
+</Tabs>
+
+## Bitmap Options
+
+| Option | Default | Description |
+|---|---|---|
+| `sorted-index.records-per-range` | `10000000` | Expected number of records per sorted global index file for BTree and Bitmap builds. |
+| `sorted-index.build.max-parallelism` | `4096` | Maximum Flink or Spark parallelism for building sorted global indexes. |
+| `bitmap-index.dictionary-block-size` | `16 kb` | Target size of dictionary blocks in bitmap global index files. Smaller blocks reduce dictionary read amplification for high-cardinality columns; larger blocks reduce dictionary block index size. |
+| `bitmap-index.compression` | `none` | Compression algorithm for bitmap dictionary blocks and the dictionary block index. Supported values are the same block codecs as BTree index, such as `none`, `lz4`, `lzo`, and `zstd`. |
+| `bitmap-index.compression-level` | `1` | Compression level used by codecs that support levels, such as `zstd`. |
+| `bitmap-index.fallback-scan-max-size` | `256 mb` | Maximum total size of bitmap global index files in one reader to allow fallback dictionary scans for predicates that cannot use direct bitmap lookup. Set to `0 b` to disable fallback scans. |
+
+## Query with Bitmap Index
+
+Once a bitmap index is built, it is automatically used during scan when a filter
+predicate matches the indexed column.
+
+<Tabs groupId="bitmap-search">
+
+<TabItem value="sql" label="SQL">
+
+```sql
+SELECT * FROM my_table WHERE tag IN ('vip', 'trial');
+```
+
+</TabItem>
+
+<TabItem value="python-sdk" label="Python SDK">
+
+```python
+from pypaimon.common.predicate_builder import PredicateBuilder
+
+table = catalog.get_table("db.my_table")
+
+read_builder = table.new_read_builder()
+read_builder = read_builder.with_filter(
+    PredicateBuilder(table.fields)
+    .is_in("tag", ["vip", "trial"])
+)
+
+scan = read_builder.new_scan()
+read = read_builder.new_read()
+pa_table = read.to_arrow(scan.plan().splits())
+print(pa_table)
+```
+
+</TabItem>
+
+</Tabs>
+
+For complement predicates such as `tag != 'blocked'` or
+`tag NOT IN ('blocked', 'test')`, bitmap index evaluates the complement against each
+index file's own non-null row-id bitmap. This keeps results correct when one logical
+query unions multiple bitmap index files.
+
+## File Format
+
+A bitmap global index file stores exact row-id bitmaps and a block-indexed dictionary.
+The reader opens a file by reading only its fixed-length footer. Null row sets,
+non-null row sets, and the dictionary block index are loaded lazily when a matching
+predicate needs them. Point lookups then read the dictionary block containing the
+target value and the corresponding bitmap block. The format is footer-driven: the
+footer stores the version, magic number, and offsets to all metadata blocks.
+
+```text
++----------------------------------------------+
+| null rows bitmap block                       |
++----------------------------------------------+
+| non-null rows bitmap block                   |
++----------------------------------------------+
+| value bitmap and dictionary payload blocks   |
++----------------------------------------------+
+| ...                                          |
++----------------------------------------------+
+| dictionary block index                       |
++----------------------------------------------+
+| footer                                       |
++----------------------------------------------+
+```
+
+Each bitmap block is a serialized `RoaringNavigableMap64`. Bitmap blocks are not wrapped
+with an additional compression layer because Roaring already stores row ids compactly.
+Value bitmap blocks are written for non-null values in serialized-key order. Dictionary
+blocks are emitted as groups reach the configured target size, so the physical payload
+area can contain both value bitmap blocks and dictionary blocks. Readers use the stored
+`offset` and `length` fields and do not require value bitmap blocks or dictionary blocks
+to be physically contiguous.
+
+Each dictionary block stores sorted value entries. Keys are serialized with the same
+key serializer as BTree global index keys, and are ordered by serialized bytes:
+
+```text
++----------------------------------------------+
+| entry count (var-length int)                 |
++----------------------------------------------+
+| key length (var-length int), key bytes       |
+| bitmap block offset (var-length long)        |
+| bitmap block length (var-length int)         |
++----------------------------------------------+
+| ...                                          |
++----------------------------------------------+
+```
+
+The dictionary block body above is stored as a BTree-style compressed block. The
+configured dictionary compression is attempted when writing, and the uncompressed body is
+kept if compression does not save enough space. A 5-byte block trailer follows each
+dictionary block body and records the actual compression type and CRC. The stored
+dictionary block `length` is the block body length and does not include the trailer.
+
+The dictionary block index stores one entry per dictionary block and is small enough to
+load when the index file is opened:
+
+```text
++----------------------------------------------+
+| block count (var-length int)                 |
++----------------------------------------------+
+| first key length (var-length int), key bytes |
+| dictionary block offset (var-length long)    |
+| dictionary block length (var-length int)     |
++----------------------------------------------+
+| ...                                          |
++----------------------------------------------+
+```
+
+The dictionary block index uses the same compressed-block encoding and 5-byte trailer as
+dictionary blocks. The footer's dictionary block index `length` also excludes this
+trailer.
+
+The footer has fixed length and points to the main metadata blocks:
+
+```text
++----------------------------------------------+
+| null rows block offset (long)                |
+| null rows block length (int)                 |
+| non-null rows block offset (long)            |
+| non-null rows block length (int)             |
+| dictionary block index offset (long)         |
+| dictionary block index length (int)          |
+| value count (int)                            |
+| version (int) = 1                            |
+| magic (int)                                  |
++----------------------------------------------+
+```
+
+The sorted dictionary block index lets equality and `IN` predicates locate candidate
+values by binary search without deserializing every dictionary block or value bitmap in
+the file. Null checks can read only the needed null/non-null bitmap.
+
+Each bitmap index file also stores manifest-level metadata with the logical minimum
+non-null key, maximum non-null key, and whether the file contains null values. The scanner
+uses this metadata to skip impossible files before opening bitmap index files, similar to
+BTree global index file pruning.
+
+```text
++----------------------------------------------+
+| first key length (int), first key bytes      |
+| last key length (int), last key bytes        |
+| has nulls (byte)                             |
+| metadata version (byte) = 1                  |
+| null key flags (byte)                        |
++----------------------------------------------+
+```
+
+For predicates that cannot be resolved by point or prefix lookup, the reader may scan all
+dictionary blocks and read matching bitmap blocks. This fallback is guarded by
+`bitmap-index.fallback-scan-max-size`, which compares against the total size of candidate
+bitmap index files handled by the reader. This keeps point lookup read amplification
+bounded for high-cardinality tag or dimension columns while allowing small bitmap indexes
+to answer broader predicates directly.

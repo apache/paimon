@@ -50,7 +50,8 @@ public class InMemoryBuffer implements RowBuffer {
 
     private boolean isInitialized;
 
-    InMemoryBuffer(MemorySegmentPool pool, AbstractRowDataSerializer<InternalRow> serializer) {
+    public InMemoryBuffer(
+            MemorySegmentPool pool, AbstractRowDataSerializer<InternalRow> serializer) {
         // serializer has states, so we must duplicate
         this.serializer = (AbstractRowDataSerializer<InternalRow>) serializer.duplicate();
         this.pool = pool;
@@ -108,9 +109,6 @@ public class InMemoryBuffer implements RowBuffer {
     public int size() {
         return numRecords;
     }
-
-    @Override
-    public void complete() {}
 
     @Override
     public long memoryOccupancy() {

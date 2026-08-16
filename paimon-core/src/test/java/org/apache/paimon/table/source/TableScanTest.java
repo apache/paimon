@@ -18,21 +18,65 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryRowWriter;
+import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.stats.SimpleStatsEvolutions;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.source.snapshot.ScannerTestBase;
+import org.apache.paimon.tag.BatchReadTagCreator;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
+import static org.apache.paimon.data.BinaryArray.fromLongArray;
+import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_FIRST;
+import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
+import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
+import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link TableScan}. */
 public class TableScanTest extends ScannerTestBase {
+
+    @Test
+    public void testBatchScanTypes() throws Exception {
+        assertThat(AbstractBatchTableScan.class.getDeclaredMethods())
+                .noneMatch(method -> method.getName().equals("create"));
+        assertThat(AppendBatchTableScan.class.getDeclaredMethods())
+                .noneMatch(method -> method.getName().equals("create"));
+        assertThat(PrimaryKeyBatchScan.class.getDeclaredMethods())
+                .noneMatch(method -> method.getName().equals("create"));
+        assertThat(PrimaryKeyBatchScan.class.getDeclaredConstructors()).hasSize(1);
+
+        assertThat(table.newScan()).isInstanceOf(PrimaryKeyBatchScan.class);
+
+        createAppendOnlyTable();
+        assertThat(table.newScan()).isInstanceOf(AppendBatchTableScan.class);
+    }
 
     @Test
     public void testPlan() throws Exception {
@@ -97,5 +141,867 @@ public class TableScanTest extends ScannerTestBase {
 
         write.close();
         commit.close();
+    }
+
+    @Test
+    public void testLimitPushdownWithFilter() throws Exception {
+        createAppendOnlyTable();
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        // Write 50 files, each with 1 row. Rows 0-24 have 'a' = 10, rows 25-49 have 'a' = 20.
+        for (int i = 0; i < 25; i++) {
+            write.write(rowData(i, 10, (long) i * 100));
+            commit.commit(i, write.prepareCommit(true, i));
+        }
+        for (int i = 25; i < 50; i++) {
+            write.write(rowData(i, 20, (long) i * 100));
+            commit.commit(i, write.prepareCommit(true, i));
+        }
+
+        // Without limit, should read all 50 files
+        TableScan.Plan planWithoutLimit = table.newScan().plan();
+        int totalSplits = planWithoutLimit.splits().size();
+        assertThat(totalSplits).isEqualTo(50);
+
+        // With filter (a = 20) and limit (10)
+        // filterByStats has already been applied in baseIterator, so only files 25-49 will be
+        // returned
+        // To get 10 rows, it should read 10 files (from index 25 to 34)
+        Predicate filter =
+                new PredicateBuilder(table.schema().logicalRowType())
+                        .equal(1, 20); // Filter on 'a' = 20
+        TableScan.Plan planWithFilterAndLimit =
+                table.newScan().withFilter(filter).withLimit(10).plan();
+        int splitsWithFilterAndLimit = planWithFilterAndLimit.splits().size();
+
+        // With non-partition filter, limit pushdown should be disabled to avoid
+        // returning insufficient rows. All 25 matching files should be returned.
+        assertThat(splitsWithFilterAndLimit).isEqualTo(25);
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    void testLimitPushdownWithNonPartitionFilter() throws Exception {
+        createAppendOnlyTable();
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        int filesCount = 10;
+        int rowsPerFile = 100;
+        int filterValue = 50;
+
+        for (int fileIdx = 0; fileIdx < filesCount; fileIdx++) {
+            for (int i = 0; i < rowsPerFile; i++) {
+                write.write(rowData(fileIdx, i, (long) (fileIdx * rowsPerFile + i)));
+            }
+            commit.commit(fileIdx, write.prepareCommit(true, fileIdx));
+        }
+
+        TableScan.Plan planAll = table.newScan().plan();
+        assertThat(planAll.splits().size()).isEqualTo(filesCount);
+
+        Predicate filter =
+                new PredicateBuilder(table.schema().logicalRowType()).equal(1, filterValue);
+        TableScan.Plan planFilterOnly = table.newScan().withFilter(filter).plan();
+        assertThat(planFilterOnly.splits().size()).isEqualTo(filesCount);
+
+        List<String> allRows = getResult(table.newRead(), planFilterOnly.splits());
+        long totalMatchingRows =
+                allRows.stream().filter(r -> r.contains("|" + filterValue + "|")).count();
+        assertThat(totalMatchingRows).isEqualTo(filesCount);
+
+        int limit = 5;
+        TableScan.Plan planWithFilterAndLimit =
+                table.newScan().withFilter(filter).withLimit(limit).plan();
+
+        List<String> limitedAllRows = getResult(table.newRead(), planWithFilterAndLimit.splits());
+        long limitedMatchingRows =
+                limitedAllRows.stream().filter(r -> r.contains("|" + filterValue + "|")).count();
+
+        assertThat(limitedMatchingRows)
+                .as(
+                        "Filter+limit bug: scan returned %d splits, but only %d rows match "
+                                + "filter (expected >= %d). Total matching = %d",
+                        planWithFilterAndLimit.splits().size(),
+                        limitedMatchingRows,
+                        limit,
+                        totalMatchingRows)
+                .isGreaterThanOrEqualTo(limit);
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    void testLimitPushdownWithPartitionFilter() throws Exception {
+        createAppendOnlyTable();
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        for (int i = 0; i < 10; i++) {
+            write.write(rowData(i, i, (long) i * 100));
+            commit.commit(i, write.prepareCommit(true, i));
+        }
+
+        Predicate partitionFilter =
+                new PredicateBuilder(table.schema().logicalRowType()).lessOrEqual(0, 4);
+
+        TableScan.Plan planNoLimit = table.newScan().withFilter(partitionFilter).plan();
+        assertThat(planNoLimit.splits().size()).isEqualTo(5);
+
+        TableScan.Plan plan = table.newScan().withFilter(partitionFilter).withLimit(2).plan();
+
+        assertThat(plan.splits().size())
+                .as("Partition filter + limit: limit pushdown should not be disabled")
+                .isEqualTo(2);
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testLimitPushdownWhenDataLessThanLimit() throws Exception {
+        createAppendOnlyTable();
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        // Write only 3 rows
+        write.write(rowData(1, 10, 100L));
+        write.write(rowData(2, 20, 200L));
+        write.write(rowData(3, 30, 300L));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        // With limit 10, but only 3 rows exist
+        // Should return all 3 rows without throwing exception
+        TableScan.Plan plan = table.newScan().withLimit(10).plan();
+        assertThat(plan.splits().size()).isEqualTo(3);
+
+        // Verify we can read all data correctly
+        List<String> result = getResult(table.newRead(), plan.splits());
+        assertThat(result.size()).isEqualTo(3);
+        assertThat(result).containsExactlyInAnyOrder("+I 1|10|100", "+I 2|20|200", "+I 3|30|300");
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testLimitPushdownWithFilterWhenDataLessThanLimit() throws Exception {
+        createAppendOnlyTable();
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        // Write 10 rows, but only 3 rows have 'a' = 20
+        for (int i = 0; i < 7; i++) {
+            write.write(rowData(i, 10, (long) i * 100));
+            commit.commit(i, write.prepareCommit(true, i));
+        }
+        for (int i = 7; i < 10; i++) {
+            write.write(rowData(i, 20, (long) i * 100));
+            commit.commit(i, write.prepareCommit(true, i));
+        }
+
+        // With filter (a = 20) and limit (10), but only 3 rows match
+        // Should return all 3 matching rows without throwing exception
+        Predicate filter = new PredicateBuilder(table.schema().logicalRowType()).equal(1, 20);
+        TableScan.Plan plan = table.newScan().withFilter(filter).withLimit(10).plan();
+
+        // Should read all 3 files that match the filter
+        assertThat(plan.splits().size()).isEqualTo(3);
+
+        // Verify we can read all matching data correctly
+        List<String> result = getResult(table.newRead(), plan.splits());
+        assertThat(result.size()).isEqualTo(3);
+        assertThat(result).containsExactlyInAnyOrder("+I 7|20|700", "+I 8|20|800", "+I 9|20|900");
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testLimitPushdownEarlyStop() throws Exception {
+        createAppendOnlyTable();
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        // Write 100 files, each with 1 row
+        for (int i = 0; i < 100; i++) {
+            write.write(rowData(i, i, (long) i * 100));
+            commit.commit(i, write.prepareCommit(true, i));
+        }
+
+        // Without limit, should read all 100 files
+        TableScan.Plan planWithoutLimit = table.newScan().plan();
+        assertThat(planWithoutLimit.splits().size()).isEqualTo(100);
+
+        // With limit 10, should only read 10 files (early stop optimization)
+        TableScan.Plan planWithLimit = table.newScan().withLimit(10).plan();
+        assertThat(planWithLimit.splits().size()).isEqualTo(10);
+
+        // Verify the returned data is correct
+        List<String> result = getResult(table.newRead(), planWithLimit.splits());
+        assertThat(result.size()).isEqualTo(10);
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testLimitPushdownBoundaryCases() throws Exception {
+        createAppendOnlyTable();
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        // Write 5 rows
+        for (int i = 0; i < 5; i++) {
+            write.write(rowData(i, i, (long) i * 100));
+            commit.commit(i, write.prepareCommit(true, i));
+        }
+
+        // Test limit = 1
+        TableScan.Plan plan1 = table.newScan().withLimit(1).plan();
+        assertThat(plan1.splits().size()).isEqualTo(1);
+
+        // Test limit = 5 (exactly the number of rows)
+        TableScan.Plan plan5 = table.newScan().withLimit(5).plan();
+        assertThat(plan5.splits().size()).isEqualTo(5);
+
+        // Test limit = 10 (more than the number of rows, should return all 5)
+        TableScan.Plan plan10 = table.newScan().withLimit(10).plan();
+        assertThat(plan10.splits().size()).isEqualTo(5);
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testPostponeMergeReadBuilderAndPushDown() throws Exception {
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+        write.write(rowData(1, 10, 100L));
+        write.write(rowData(2, 20, 200L));
+        write.write(rowData(3, 30, 300L));
+        commit.commit(0, write.prepareCommit(true, 0));
+        write.close();
+        commit.close();
+
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(CoreOptions.BUCKET.key(), "-2");
+        dynamicOptions.put(CoreOptions.POSTPONE_MERGE_ON_READ.key(), "true");
+        FileStoreTable postponeTable = table.copy(dynamicOptions);
+        PredicateBuilder builder = new PredicateBuilder(postponeTable.rowType());
+
+        // The option must not change an ordinary Core scan.
+        assertThat(postponeTable.newScan().plan().splits()).hasSize(3);
+        assertThat(postponeTable.newScan().withLimit(1).plan().splits()).hasSize(1);
+        long realOnlySnapshotId = postponeTable.snapshotManager().latestSnapshotId();
+        PostponeMergeReadBuilder realOnlyBuilder =
+                PostponeMergeReadBuilder.createSnapshotBound(postponeTable, null).get();
+        assertThat(PostponeMergeReadBuilder.create(postponeTable, null)).isEmpty();
+
+        StreamTableWrite postponeWrite = postponeTable.newWrite(commitUser);
+        StreamTableCommit postponeCommit = postponeTable.newCommit(commitUser);
+        postponeWrite.write(rowData(1, 10, 101L));
+        postponeCommit.commit(1, postponeWrite.prepareCommit(true, 1));
+        postponeWrite.close();
+        postponeCommit.close();
+
+        // A snapshot-bound builder must not pick up postpone files committed after its selection.
+        PostponeMergePlan realOnlyPlan = realOnlyBuilder.plan();
+        assertThat(realOnlyPlan.postponeSplits()).isEmpty();
+        assertThatThrownBy(() -> realOnlyPlan.bucketRouter().numBuckets(BinaryRow.singleColumn(1)))
+                .hasMessageContaining("Missing postpone bucket number");
+        assertThat(realOnlyPlan.realSplits())
+                .allSatisfy(split -> assertThat(split.snapshotId()).isEqualTo(realOnlySnapshotId));
+
+        FileStoreTable compactedFullTable =
+                postponeTable.copy(
+                        Collections.singletonMap(CoreOptions.SCAN_MODE.key(), "compacted-full"));
+        assertThat(PostponeMergeReadBuilder.create(compactedFullTable, null)).isEmpty();
+        assertThat(PostponeMergeReadBuilder.createSnapshotBound(compactedFullTable, null))
+                .isEmpty();
+
+        // A postpone record may update any value, so real-file value statistics are unsafe.
+        Predicate valueFilter = builder.equal(2, 100L);
+        PostponeMergePlan mergePlan =
+                PostponeMergeReadBuilder.create(postponeTable, null)
+                        .get()
+                        .withFilter(valueFilter)
+                        .withReadType(postponeTable.rowType().project("b"))
+                        .plan();
+        assertThat(mergePlan.realSplits()).hasSize(3);
+        assertThat(mergePlan.postponeSplits()).hasSize(1);
+        assertThat(mergePlan.resultReadType().getFieldNames()).containsExactly("b");
+
+        // Partition and trimmed-primary-key filters remain safe.
+        Predicate partitionFilter = builder.equal(0, 1);
+        assertThat(
+                        PostponeMergeReadBuilder.create(postponeTable, null)
+                                .get()
+                                .withFilter(partitionFilter)
+                                .plan()
+                                .realSplits())
+                .hasSize(1);
+        Predicate primaryKeyFilter = builder.equal(1, 10);
+        assertThat(
+                        PostponeMergeReadBuilder.create(postponeTable, null)
+                                .get()
+                                .withFilter(primaryKeyFilter)
+                                .plan()
+                                .realSplits())
+                .hasSize(1);
+
+        // A builder remains bound to the snapshot selected during its probe.
+        PostponeMergeReadBuilder pinnedBuilder =
+                PostponeMergeReadBuilder.create(postponeTable, null).get();
+        long pinnedSnapshotId = postponeTable.snapshotManager().latestSnapshotId();
+        postponeWrite = postponeTable.newWrite(commitUser);
+        postponeCommit = postponeTable.newCommit(commitUser);
+        postponeWrite.write(rowData(2, 20, 201L));
+        postponeCommit.commit(2, postponeWrite.prepareCommit(true, 2));
+        postponeWrite.close();
+        postponeCommit.close();
+        PostponeMergePlan pinnedPlan = pinnedBuilder.plan();
+        assertThat(pinnedPlan.postponeSplits()).hasSize(1);
+        assertThat(pinnedPlan.realSplits())
+                .allSatisfy(split -> assertThat(split.snapshotId()).isEqualTo(pinnedSnapshotId));
+        assertThat(pinnedPlan.postponeSplits())
+                .allSatisfy(split -> assertThat(split.snapshotId()).isEqualTo(pinnedSnapshotId));
+
+        FileStoreTable protectedTable =
+                postponeTable.copy(
+                        Collections.singletonMap(
+                                CoreOptions.SCAN_PLAN_AUTO_TAG_FOR_READ_TIME_RETAINED.key(),
+                                "1 h"));
+        PostponeMergeReadBuilder protectedBuilder =
+                PostponeMergeReadBuilder.create(protectedTable, null).get();
+        protectedBuilder.plan();
+        String readProtectionTag = protectedBuilder.readProtectionTagName();
+        assertThat(readProtectionTag).isNotNull();
+        assertThat(protectedTable.tagManager().tagExists(readProtectionTag)).isTrue();
+        new BatchReadTagCreator(
+                        protectedTable.tagManager(),
+                        protectedTable.snapshotManager(),
+                        protectedTable.coreOptions().scanPlanAutoTagTimeRetained())
+                .deleteReadTag(readProtectionTag);
+    }
+
+    @Test
+    public void testPostponeMergeRejectsLatestDelta() {
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(CoreOptions.BUCKET.key(), "-2");
+        dynamicOptions.put(CoreOptions.POSTPONE_MERGE_ON_READ.key(), "true");
+        dynamicOptions.put(CoreOptions.SCAN_MODE.key(), "latest-delta");
+        FileStoreTable latestDeltaTable = table.copy(dynamicOptions);
+
+        assertThatThrownBy(
+                        () -> PostponeMergeReadBuilder.createSnapshotBound(latestDeltaTable, null))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("requires a full snapshot scan")
+                .hasMessageContaining("latest-delta");
+    }
+
+    @Test
+    public void testPostponeMergePlanAndRead() throws Exception {
+        StreamTableWrite realWrite = table.newWrite(commitUser);
+        StreamTableCommit realCommit = table.newCommit(commitUser);
+        realWrite.write(rowData(1, 10, 100L));
+        realWrite.write(rowData(1, 20, 200L));
+        realCommit.commit(0, realWrite.prepareCommit(true, 0));
+        realWrite.close();
+        realCommit.close();
+
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(CoreOptions.BUCKET.key(), "-2");
+        FileStoreTable postponeTable = table.copy(dynamicOptions);
+        StreamTableWrite postponeWrite = postponeTable.newWrite(commitUser);
+        StreamTableCommit postponeCommit = postponeTable.newCommit(commitUser);
+        postponeWrite.write(rowData(1, 10, 101L));
+        postponeWrite.write(rowData(1, 30, 300L));
+        postponeCommit.commit(1, postponeWrite.prepareCommit(true, 1));
+        postponeWrite.write(rowData(1, 10, 102L));
+        postponeCommit.commit(2, postponeWrite.prepareCommit(true, 2));
+        postponeWrite.close();
+        postponeCommit.close();
+
+        Predicate partitionFilter = new PredicateBuilder(postponeTable.rowType()).equal(0, 1);
+        PostponeMergeReadBuilder readBuilder =
+                PostponeMergeReadBuilder.create(postponeTable, null)
+                        .get()
+                        .withFilter(partitionFilter)
+                        .withReadType(postponeTable.rowType().project("b"));
+        PostponeMergePlan plan = readBuilder.plan();
+
+        assertThat(plan.realSplits()).hasSize(1);
+        assertThat(plan.postponeSplits()).hasSize(1);
+        assertThat(plan.postponeSplits().get(0).dataFiles()).hasSize(2);
+        assertThat(plan.mergeReadType().getFieldNames()).containsExactly("b");
+
+        List<Long> values = new ArrayList<>();
+        try (IOManager ioManager = IOManager.create(tempDir.resolve("postpone-merge").toString());
+                RecordReaderIterator<org.apache.paimon.data.InternalRow> rows =
+                        new RecordReaderIterator<>(
+                                readBuilder
+                                        .newRead()
+                                        .withIOManager(ioManager)
+                                        .createBucketMergeReader(
+                                                plan.realSplits().get(0),
+                                                readBuilder
+                                                        .newRead()
+                                                        .withIOManager(ioManager)
+                                                        .createPostponeReader(
+                                                                plan.postponeSplits().get(0))))) {
+            while (rows.hasNext()) {
+                values.add(rows.next().getLong(0));
+            }
+        }
+        assertThat(values).containsExactlyInAnyOrder(102L, 200L, 300L);
+    }
+
+    @Test
+    public void testPostponeMergePlanPotentialBuckets() throws Exception {
+        StreamTableWrite realWrite = table.newWrite(commitUser);
+        StreamTableCommit realCommit = table.newCommit(commitUser);
+        realWrite.write(rowData(1, 10, 100L));
+        realWrite.write(rowData(2, 20, 200L));
+        realCommit.commit(0, realWrite.prepareCommit(true, 0));
+        realWrite.close();
+        realCommit.close();
+
+        FileStoreTable postponeTable =
+                table.copy(Collections.singletonMap(CoreOptions.BUCKET.key(), "-2"));
+        StreamTableWrite postponeWrite = postponeTable.newWrite(commitUser);
+        StreamTableCommit postponeCommit = postponeTable.newCommit(commitUser);
+        postponeWrite.write(rowData(1, 10, 101L));
+        postponeWrite.write(rowData(3, 30, 300L));
+        postponeCommit.commit(1, postponeWrite.prepareCommit(true, 1));
+        postponeWrite.close();
+        postponeCommit.close();
+
+        PostponeMergeReadBuilder readBuilder =
+                PostponeMergeReadBuilder.create(postponeTable, null).get();
+        PostponeMergePlan initialPlan = readBuilder.plan();
+        assertThat(initialPlan.numPotentialBuckets()).isEqualTo(3);
+        assertThat(initialPlan.bucketRouter().numBuckets(BinaryRow.singleColumn(1))).isEqualTo(1);
+        assertThatThrownBy(() -> initialPlan.bucketRouter().numBuckets(BinaryRow.singleColumn(2)))
+                .hasMessageContaining("Missing postpone bucket number");
+
+        BinaryRow newPartition = BinaryRow.singleColumn(3);
+        long postponeFileSize =
+                initialPlan.postponeSplits().stream()
+                        .filter(split -> split.partition().equals(newPartition))
+                        .flatMap(split -> split.dataFiles().stream())
+                        .mapToLong(DataFileMeta::fileSize)
+                        .sum();
+        assertThat(postponeFileSize).isPositive();
+        FileStoreTable sizeEstimatedTable =
+                postponeTable.copy(
+                        Collections.singletonMap(
+                                CoreOptions.POSTPONE_TARGET_SIZE_PER_BUCKET.key(), "1 b"));
+        PostponeMergePlan sizeEstimatedPlan =
+                PostponeMergeReadBuilder.create(sizeEstimatedTable, null).get().plan();
+        assertThat(sizeEstimatedPlan.numPotentialBuckets()).isEqualTo(2L + postponeFileSize);
+
+        Map<String, String> explicitDefaultOptions = new HashMap<>();
+        explicitDefaultOptions.put(CoreOptions.POSTPONE_DEFAULT_BUCKET_NUM.key(), "2");
+        explicitDefaultOptions.put(CoreOptions.POSTPONE_TARGET_ROW_NUM_PER_BUCKET.key(), "100");
+        FileStoreTable explicitDefaultTable = postponeTable.copy(explicitDefaultOptions);
+        PostponeMergeReadBuilder explicitDefaultBuilder =
+                PostponeMergeReadBuilder.create(explicitDefaultTable, null).get();
+        PostponeMergePlan explicitDefaultPlan = explicitDefaultBuilder.plan();
+        assertThat(explicitDefaultPlan.numPotentialBuckets()).isEqualTo(4);
+    }
+
+    @Test
+    public void testPushDownTopN() throws Exception {
+        createAppendOnlyTable();
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowData(1, 10, 100L));
+        write.write(rowData(2, 20, 200L));
+        write.write(rowData(3, 30, 300L));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        write.write(rowData(4, 40, 400L));
+        write.write(rowData(5, 50, 500L));
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        write.write(rowData(6, null, 600L));
+        write.write(rowData(6, null, 600L));
+        write.write(rowData(6, 60, 600L));
+        write.write(rowData(7, null, 700L));
+        write.write(rowData(7, null, 700L));
+        write.write(rowData(7, 70, 700L));
+        commit.commit(2, write.prepareCommit(true, 2));
+        write.close();
+        commit.close();
+
+        // disable stats
+        FileStoreTable disableStatsTable =
+                table.copy(Collections.singletonMap("metadata.stats-mode", "none"));
+        write = disableStatsTable.newWrite(commitUser);
+        commit = disableStatsTable.newCommit(commitUser);
+
+        write.write(rowData(8, 80, 800L));
+        write.write(rowData(9, 90, 900L));
+        commit.commit(3, write.prepareCommit(true, 3));
+
+        // no TopN pushed down
+        TableScan.Plan plan1 = table.newScan().plan();
+        assertThat(plan1.splits().size()).isEqualTo(9);
+
+        DataField field = table.schema().fields().get(1);
+        FieldRef ref = new FieldRef(field.id(), field.name(), field.type());
+        SimpleStatsEvolutions evolutions =
+                new SimpleStatsEvolutions(
+                        (id) -> table.schemaManager().schema(id).fields(), table.schema().id());
+
+        // with bottom1 null first
+        TableScan.Plan plan2 =
+                table.newScan().withTopN(new TopN(ref, ASCENDING, NULLS_FIRST, 1)).plan();
+        List<Split> splits2 = plan2.splits();
+        assertThat(splits2.size()).isEqualTo(3);
+        assertThat(((DataSplit) splits2.get(0)).minValue(field.id(), field, evolutions))
+                .isEqualTo(null);
+        assertThat(((DataSplit) splits2.get(1)).minValue(field.id(), field, evolutions))
+                .isEqualTo(null);
+        assertThat(((DataSplit) splits2.get(2)).minValue(field.id(), field, evolutions))
+                .isEqualTo(60);
+        assertThat(((DataSplit) splits2.get(2)).nullCount(field.id(), evolutions)).isEqualTo(2);
+
+        // A non-partition filter must disable TopN pushdown, else it prunes splits by sort-column
+        // stats unaware the filter removes rows. "b" >= 0 matches every row, so all 9 splits are
+        // kept instead of pruned to 3.
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+        TableScan.Plan planWithFilter =
+                table.newScan()
+                        .withFilter(builder.greaterOrEqual(2, 0L))
+                        .withTopN(new TopN(ref, ASCENDING, NULLS_FIRST, 1))
+                        .plan();
+        assertThat(planWithFilter.splits().size()).isEqualTo(9);
+
+        // A partition-only filter keeps TopN pushdown enabled (surviving rows all pass): still 3.
+        TableScan.Plan planWithPartitionFilter =
+                table.newScan()
+                        .withFilter(builder.greaterOrEqual(0, 0))
+                        .withTopN(new TopN(ref, ASCENDING, NULLS_FIRST, 1))
+                        .plan();
+        assertThat(planWithPartitionFilter.splits().size()).isEqualTo(3);
+
+        // with bottom1 null last
+        TableScan.Plan plan3 =
+                table.newScan().withTopN(new TopN(ref, ASCENDING, NULLS_LAST, 1)).plan();
+        List<Split> splits3 = plan3.splits();
+        assertThat(splits3.size()).isEqualTo(3);
+        assertThat(((DataSplit) splits3.get(0)).minValue(field.id(), field, evolutions))
+                .isEqualTo(null);
+        assertThat(((DataSplit) splits3.get(1)).minValue(field.id(), field, evolutions))
+                .isEqualTo(null);
+        assertThat(((DataSplit) splits3.get(2)).minValue(field.id(), field, evolutions))
+                .isEqualTo(10);
+
+        // with bottom5 null first
+        TableScan.Plan plan4 =
+                table.newScan().withTopN(new TopN(ref, ASCENDING, NULLS_FIRST, 5)).plan();
+        List<Split> splits4 = plan4.splits();
+        assertThat(splits4.size()).isEqualTo(7);
+        assertThat(((DataSplit) splits4.get(0)).minValue(field.id(), field, evolutions))
+                .isEqualTo(null);
+        assertThat(((DataSplit) splits4.get(1)).minValue(field.id(), field, evolutions))
+                .isEqualTo(null);
+        assertThat(((DataSplit) splits4.get(2)).minValue(field.id(), field, evolutions))
+                .isEqualTo(60);
+        assertThat(((DataSplit) splits4.get(2)).nullCount(field.id(), evolutions)).isEqualTo(2);
+        assertThat(((DataSplit) splits4.get(3)).minValue(field.id(), field, evolutions))
+                .isEqualTo(70);
+        assertThat(((DataSplit) splits4.get(3)).nullCount(field.id(), evolutions)).isEqualTo(2);
+        assertThat(((DataSplit) splits4.get(4)).minValue(field.id(), field, evolutions))
+                .isEqualTo(10);
+
+        // with bottom5 null last
+        TableScan.Plan plan5 =
+                table.newScan().withTopN(new TopN(ref, ASCENDING, NULLS_LAST, 5)).plan();
+        List<Split> splits5 = plan5.splits();
+        assertThat(splits5.size()).isEqualTo(7);
+        assertThat(((DataSplit) splits5.get(0)).minValue(field.id(), field, evolutions))
+                .isEqualTo(null);
+        assertThat(((DataSplit) splits5.get(1)).minValue(field.id(), field, evolutions))
+                .isEqualTo(null);
+        assertThat(((DataSplit) splits5.get(2)).minValue(field.id(), field, evolutions))
+                .isEqualTo(10);
+        assertThat(((DataSplit) splits5.get(3)).minValue(field.id(), field, evolutions))
+                .isEqualTo(20);
+        assertThat(((DataSplit) splits5.get(4)).minValue(field.id(), field, evolutions))
+                .isEqualTo(30);
+        assertThat(((DataSplit) splits5.get(5)).minValue(field.id(), field, evolutions))
+                .isEqualTo(40);
+        assertThat(((DataSplit) splits5.get(6)).minValue(field.id(), field, evolutions))
+                .isEqualTo(50);
+
+        // with top1 null first
+        TableScan.Plan plan6 =
+                table.newScan().withTopN(new TopN(ref, DESCENDING, NULLS_FIRST, 1)).plan();
+        List<Split> splits6 = plan6.splits();
+        assertThat(splits6.size()).isEqualTo(3);
+        assertThat(((DataSplit) splits6.get(0)).maxValue(field.id(), field, evolutions))
+                .isEqualTo(null);
+        assertThat(((DataSplit) splits6.get(1)).maxValue(field.id(), field, evolutions))
+                .isEqualTo(null);
+        assertThat(((DataSplit) splits6.get(2)).maxValue(field.id(), field, evolutions))
+                .isEqualTo(70);
+        assertThat(((DataSplit) splits6.get(2)).nullCount(field.id(), evolutions)).isEqualTo(2);
+
+        // with top1 null last
+        TableScan.Plan plan7 =
+                table.newScan().withTopN(new TopN(ref, DESCENDING, NULLS_LAST, 1)).plan();
+        List<Split> splits7 = plan7.splits();
+        assertThat(splits7.size()).isEqualTo(3);
+        assertThat(((DataSplit) splits7.get(0)).maxValue(field.id(), field, evolutions))
+                .isEqualTo(null);
+        assertThat(((DataSplit) splits7.get(1)).maxValue(field.id(), field, evolutions))
+                .isEqualTo(null);
+        assertThat(((DataSplit) splits7.get(2)).maxValue(field.id(), field, evolutions))
+                .isEqualTo(70);
+
+        // with top5 null first
+        TableScan.Plan plan8 =
+                table.newScan().withTopN(new TopN(ref, DESCENDING, NULLS_FIRST, 5)).plan();
+        List<Split> splits8 = plan8.splits();
+        assertThat(splits8.size()).isEqualTo(7);
+        assertThat(((DataSplit) splits8.get(0)).maxValue(field.id(), field, evolutions))
+                .isEqualTo(null);
+        assertThat(((DataSplit) splits8.get(1)).maxValue(field.id(), field, evolutions))
+                .isEqualTo(null);
+        assertThat(((DataSplit) splits8.get(2)).maxValue(field.id(), field, evolutions))
+                .isEqualTo(70);
+        assertThat(((DataSplit) splits8.get(2)).nullCount(field.id(), evolutions)).isEqualTo(2);
+        assertThat(((DataSplit) splits8.get(3)).maxValue(field.id(), field, evolutions))
+                .isEqualTo(60);
+        assertThat(((DataSplit) splits8.get(3)).nullCount(field.id(), evolutions)).isEqualTo(2);
+        assertThat(((DataSplit) splits8.get(4)).maxValue(field.id(), field, evolutions))
+                .isEqualTo(50);
+
+        // with top5 null last
+        TableScan.Plan plan9 =
+                table.newScan().withTopN(new TopN(ref, DESCENDING, NULLS_LAST, 5)).plan();
+        List<Split> splits9 = plan9.splits();
+        assertThat(splits9.size()).isEqualTo(7);
+        assertThat(((DataSplit) splits9.get(0)).maxValue(field.id(), field, evolutions))
+                .isEqualTo(null);
+        assertThat(((DataSplit) splits9.get(1)).maxValue(field.id(), field, evolutions))
+                .isEqualTo(null);
+        assertThat(((DataSplit) splits9.get(2)).maxValue(field.id(), field, evolutions))
+                .isEqualTo(70);
+        assertThat(((DataSplit) splits9.get(3)).maxValue(field.id(), field, evolutions))
+                .isEqualTo(60);
+        assertThat(((DataSplit) splits9.get(4)).maxValue(field.id(), field, evolutions))
+                .isEqualTo(50);
+        assertThat(((DataSplit) splits9.get(5)).maxValue(field.id(), field, evolutions))
+                .isEqualTo(40);
+        assertThat(((DataSplit) splits9.get(6)).maxValue(field.id(), field, evolutions))
+                .isEqualTo(30);
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testPushDownTopNWithDeletionVectorsEnabled() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.DELETION_VECTORS_ENABLED, true);
+        createAppendOnlyTable(options);
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        for (int i = 1; i <= 5; i++) {
+            write.write(rowData(i, i * 10, i * 100L));
+            commit.commit(i, write.prepareCommit(true, i));
+        }
+        write.close();
+        commit.close();
+
+        assertThat(table.newScan().plan().splits()).hasSize(5);
+
+        DataField field = table.schema().fields().get(1);
+        FieldRef ref = new FieldRef(1, field.name(), field.type());
+        SimpleStatsEvolutions evolutions =
+                new SimpleStatsEvolutions(
+                        (id) -> table.schemaManager().schema(id).fields(), table.schema().id());
+
+        TableScan.Plan plan =
+                table.newScan().withTopN(new TopN(ref, ASCENDING, NULLS_LAST, 1)).plan();
+        assertThat(plan.splits()).hasSize(1);
+        assertThat(((DataSplit) plan.splits().get(0)).minValue(1, field, evolutions)).isEqualTo(10);
+    }
+
+    @Test
+    public void testPushDownTopNKeepsWideDeletionVectorSplits() throws Exception {
+        createAppendOnlyTable();
+
+        DataField field = table.schema().fields().get(1);
+        FieldRef ref = new FieldRef(1, field.name(), field.type());
+        TopN topN = new TopN(ref, ASCENDING, NULLS_LAST, 1);
+
+        DataSplit tightLowSplit = newTestSplit("tight-low", 10, 19, null);
+        DataSplit tightHighSplit = newTestSplit("tight-high", 100, 109, null);
+        DataSplit wideSplit = newTestSplit("wide", 1000, 1009, new DeletionFile("dv", 0, 0, 1L));
+
+        List<Split> result =
+                new TopNDataSplitEvaluator(table.schema(), table.schemaManager())
+                        .evaluate(
+                                topN.orders().get(0),
+                                topN.limit(),
+                                Arrays.asList(tightLowSplit, tightHighSplit, wideSplit));
+
+        assertThat(result).containsExactly(wideSplit, tightLowSplit);
+    }
+
+    @Test
+    public void testPushDownTopNSchemaEvolution() throws Exception {
+        createAppendOnlyTable();
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowData(1, 10, 100L));
+        write.write(rowData(2, 20, 200L));
+        write.write(rowData(3, 30, 300L));
+        commit.commit(0, write.prepareCommit(true, 0));
+        write.close();
+        commit.close();
+
+        // schema evolution
+        updateColumn("a", DataTypes.BIGINT());
+        write = table.newWrite(commitUser);
+        commit = table.newCommit(commitUser);
+        write.write(rowData(4, 40L, 400L));
+        write.write(rowData(5, 50L, 500L));
+        write.write(rowData(6, 60L, 600L));
+        commit.commit(1, write.prepareCommit(true, 1));
+        write.close();
+        commit.close();
+
+        DataField field = table.schema().fields().get(1);
+        FieldRef ref = new FieldRef(field.id(), field.name(), field.type());
+        SimpleStatsEvolutions evolutions =
+                new SimpleStatsEvolutions(
+                        (id) -> table.schemaManager().schema(id).fields(), table.schema().id());
+
+        TableScan.Plan plan1 =
+                table.newScan().withTopN(new TopN(ref, DESCENDING, NULLS_LAST, 1)).plan();
+        assertThat(plan1.splits().size()).isEqualTo(1);
+        assertThat(((DataSplit) plan1.splits().get(0)).maxValue(field.id(), field, evolutions))
+                .isEqualTo(60L);
+        assertThat(((DataSplit) plan1.splits().get(0)).minValue(field.id(), field, evolutions))
+                .isEqualTo(60L);
+
+        TableScan.Plan plan2 =
+                table.newScan().withTopN(new TopN(ref, ASCENDING, NULLS_FIRST, 1)).plan();
+        assertThat(plan2.splits().size()).isEqualTo(1);
+        assertThat(((DataSplit) plan2.splits().get(0)).maxValue(field.id(), field, evolutions))
+                .isEqualTo(10L);
+        assertThat(((DataSplit) plan2.splits().get(0)).minValue(field.id(), field, evolutions))
+                .isEqualTo(10L);
+    }
+
+    @Test
+    public void testPushDownTopNOnlyNull() throws Exception {
+        createAppendOnlyTable();
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowData(1, null, 100L));
+        write.write(rowData(2, null, 200L));
+        write.write(rowData(3, null, 300L));
+        commit.commit(0, write.prepareCommit(true, 0));
+        write.close();
+        commit.close();
+
+        DataField field = table.schema().fields().get(1);
+        FieldRef ref = new FieldRef(field.id(), field.name(), field.type());
+        SimpleStatsEvolutions evolutions =
+                new SimpleStatsEvolutions(
+                        (id) -> table.schemaManager().schema(id).fields(), table.schema().id());
+
+        // the min/max will be null, and the null count is not null.
+        TableScan.Plan plan1 =
+                table.newScan().withTopN(new TopN(ref, DESCENDING, NULLS_LAST, 1)).plan();
+        assertThat(plan1.splits().size()).isEqualTo(1);
+        assertThat(((DataSplit) plan1.splits().get(0)).nullCount(field.id(), evolutions))
+                .isEqualTo(1);
+        assertThat(((DataSplit) plan1.splits().get(0)).minValue(field.id(), field, evolutions))
+                .isNull();
+        assertThat(((DataSplit) plan1.splits().get(0)).maxValue(field.id(), field, evolutions))
+                .isNull();
+
+        TableScan.Plan plan2 =
+                table.newScan().withTopN(new TopN(ref, ASCENDING, NULLS_FIRST, 1)).plan();
+        assertThat(plan2.splits().size()).isEqualTo(1);
+        assertThat(((DataSplit) plan2.splits().get(0)).nullCount(field.id(), evolutions))
+                .isEqualTo(1);
+        assertThat(((DataSplit) plan2.splits().get(0)).minValue(field.id(), field, evolutions))
+                .isNull();
+        assertThat(((DataSplit) plan2.splits().get(0)).maxValue(field.id(), field, evolutions))
+                .isNull();
+    }
+
+    private DataSplit newTestSplit(
+            String name, int minValue, int maxValue, DeletionFile deletionFile) {
+        DataFileMeta file =
+                DataFileMeta.forAppend(
+                        name,
+                        0,
+                        maxValue - minValue + 1L,
+                        new SimpleStats(
+                                newStatsRow(0, minValue, 0L),
+                                newStatsRow(0, maxValue, 0L),
+                                fromLongArray(new Long[] {0L, 0L, 0L})),
+                        0,
+                        0,
+                        table.schema().id(),
+                        Collections.emptyList(),
+                        null,
+                        FileSource.APPEND,
+                        null,
+                        null,
+                        null,
+                        null);
+
+        DataSplit.Builder builder =
+                DataSplit.builder()
+                        .withSnapshot(1)
+                        .withPartition(BinaryRow.EMPTY_ROW)
+                        .withBucket(0)
+                        .withBucketPath("dummy")
+                        .rawConvertible(true)
+                        .withDataFiles(Collections.singletonList(file));
+        if (deletionFile != null) {
+            builder.withDataDeletionFiles(Collections.singletonList(deletionFile));
+        }
+        return builder.build();
+    }
+
+    private BinaryRow newStatsRow(int pt, int a, long b) {
+        BinaryRow row = new BinaryRow(3);
+        BinaryRowWriter writer = new BinaryRowWriter(row);
+        writer.writeInt(0, pt);
+        writer.writeInt(1, a);
+        writer.writeLong(2, b);
+        writer.complete();
+        return row;
     }
 }

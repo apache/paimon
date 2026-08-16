@@ -128,7 +128,7 @@ public class BitSliceIndexBitmapTest {
                     .map(Pair::getKey)
                     .limit(k)
                     .forEach(expected::add);
-            RoaringBitmap32 actual = bsi.topK(k, null);
+            RoaringBitmap32 actual = bsi.topK(k, null, true);
             assertThat(actual).isEqualTo(expected);
 
             // with found set
@@ -151,7 +151,7 @@ public class BitSliceIndexBitmapTest {
                     .map(Pair::getKey)
                     .limit(k)
                     .forEach(expected::add);
-            actual = bsi.topK(k, foundSet);
+            actual = bsi.topK(k, foundSet, true);
             assertThat(actual).isEqualTo(expected);
         }
 
@@ -172,7 +172,7 @@ public class BitSliceIndexBitmapTest {
                     .map(Pair::getKey)
                     .limit(k)
                     .forEach(expected::add);
-            RoaringBitmap32 actual = bsi.bottomK(k, null);
+            RoaringBitmap32 actual = bsi.bottomK(k, null, true);
             assertThat(actual).isEqualTo(expected);
 
             // with found set
@@ -195,7 +195,7 @@ public class BitSliceIndexBitmapTest {
                     .map(Pair::getKey)
                     .limit(k)
                     .forEach(expected::add);
-            actual = bsi.bottomK(k, foundSet);
+            actual = bsi.bottomK(k, foundSet, true);
             assertThat(actual).isEqualTo(expected);
         }
     }

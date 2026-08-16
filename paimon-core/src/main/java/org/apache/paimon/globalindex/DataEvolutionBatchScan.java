@@ -1,0 +1,465 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.globalindex;
+
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.Or;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.RowIdPredicateVisitor;
+import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.AppendBatchTableScan;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.DataTableScan;
+import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.Split;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RowRangeIndex;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.function.Function;
+
+import static org.apache.paimon.table.SpecialFields.ROW_ID;
+import static org.apache.paimon.utils.ManifestReadThreadPool.randomlyExecuteSequentialReturn;
+
+/** Scan for data evolution table. */
+public class DataEvolutionBatchScan implements DataTableScan {
+
+    private static final Logger LOG = LoggerFactory.getLogger(DataEvolutionBatchScan.class);
+
+    private final FileStoreTable table;
+    private final AppendBatchTableScan batchScan;
+
+    private Predicate filter;
+    private TopN topN;
+    private Integer pushDownLimit;
+    private RowRangeIndex pushedRowRangeIndex;
+    private GlobalIndexResult globalIndexResult;
+
+    public DataEvolutionBatchScan(FileStoreTable wrapped, AppendBatchTableScan batchScan) {
+        this.table = wrapped;
+        this.batchScan = batchScan;
+    }
+
+    @Override
+    public DataTableScan withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
+        batchScan.withShard(indexOfThisSubtask, numberOfParallelSubtasks);
+        return this;
+    }
+
+    @Override
+    public InnerTableScan withFilter(Predicate predicate) {
+        if (predicate == null) {
+            return this;
+        }
+
+        Optional<List<Range>> rowRanges = predicate.visit(new RowIdPredicateVisitor());
+        if (rowRanges.isPresent()) {
+            withRowRanges(rowRanges.get());
+        }
+        this.filter = predicate;
+
+        batchScan.snapshotReader().withFilter(predicate, rowIdSafeResidualFilter(predicate));
+        return this;
+    }
+
+    private Predicate rowIdSafeResidualFilter(Predicate filter) {
+        if (filter instanceof LeafPredicate
+                && ((LeafPredicate) filter).fieldNames().contains(ROW_ID.name())) {
+            return null;
+        } else if (filter instanceof CompoundPredicate) {
+            CompoundPredicate compoundPredicate = (CompoundPredicate) filter;
+            if (compoundPredicate.function() instanceof Or) {
+                return containsRowId(compoundPredicate) ? null : filter;
+            }
+
+            List<Predicate> newChildren = new ArrayList<>();
+            for (Predicate child : compoundPredicate.children()) {
+                Predicate newChild = rowIdSafeResidualFilter(child);
+                if (newChild != null) {
+                    newChildren.add(newChild);
+                }
+            }
+
+            return PredicateBuilder.andNullable(newChildren);
+        }
+        return filter;
+    }
+
+    private boolean containsRowId(Predicate filter) {
+        if (filter instanceof LeafPredicate) {
+            return ((LeafPredicate) filter).fieldNames().contains(ROW_ID.name());
+        } else if (filter instanceof CompoundPredicate) {
+            for (Predicate child : ((CompoundPredicate) filter).children()) {
+                if (containsRowId(child)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    @Override
+    public InnerTableScan withReadType(@Nullable RowType readType) {
+        batchScan.withReadType(readType);
+        return this;
+    }
+
+    @Override
+    public InnerTableScan withBucket(int bucket) {
+        batchScan.withBucket(bucket);
+        return this;
+    }
+
+    @Override
+    public InnerTableScan withTopN(TopN topN) {
+        this.topN = topN;
+        return this;
+    }
+
+    @Override
+    public InnerTableScan dropStats() {
+        batchScan.dropStats();
+        return this;
+    }
+
+    @Override
+    public InnerTableScan withMetricRegistry(MetricRegistry metricsRegistry) {
+        batchScan.withMetricRegistry(metricsRegistry);
+        return this;
+    }
+
+    @Override
+    public InnerTableScan withLimit(int limit) {
+        this.pushDownLimit = limit;
+        batchScan.withLimit(limit);
+        return this;
+    }
+
+    @Override
+    public InnerTableScan withPartitionFilter(Map<String, String> partitionSpec) {
+        batchScan.withPartitionFilter(partitionSpec);
+        return this;
+    }
+
+    @Override
+    public InnerTableScan withPartitionFilter(List<BinaryRow> partitions) {
+        batchScan.withPartitionFilter(partitions);
+        return this;
+    }
+
+    @Override
+    public InnerTableScan withPartitionsFilter(List<Map<String, String>> partitions) {
+        batchScan.withPartitionsFilter(partitions);
+        return this;
+    }
+
+    @Override
+    public InnerTableScan withPartitionFilter(PartitionPredicate partitionPredicate) {
+        batchScan.withPartitionFilter(partitionPredicate);
+        return this;
+    }
+
+    @Override
+    public InnerTableScan withBucketFilter(Filter<Integer> bucketFilter) {
+        batchScan.withBucketFilter(bucketFilter);
+        return this;
+    }
+
+    @Override
+    public InnerTableScan withLevelFilter(Filter<Integer> levelFilter) {
+        batchScan.withLevelFilter(levelFilter);
+        return this;
+    }
+
+    @Override
+    public InnerTableScan withRowRanges(List<Range> rowRanges) {
+        if (rowRanges == null) {
+            return this;
+        }
+
+        this.pushedRowRangeIndex = RowRangeIndex.create(rowRanges);
+        if (globalIndexResult != null) {
+            throw new IllegalStateException("Cannot push row ranges after global index eval.");
+        }
+        return this;
+    }
+
+    @Override
+    public InnerTableScan withRowRangeIndex(RowRangeIndex rowRangeIndex) {
+        if (rowRangeIndex == null) {
+            return this;
+        }
+
+        this.pushedRowRangeIndex = rowRangeIndex;
+        if (globalIndexResult != null) {
+            throw new IllegalStateException("Cannot push row ranges after global index eval.");
+        }
+        return this;
+    }
+
+    @Override
+    public DataEvolutionBatchScan withGlobalIndexResult(GlobalIndexResult globalIndexResult) {
+        if (globalIndexResult == null) {
+            return this;
+        }
+
+        this.globalIndexResult = globalIndexResult;
+        if (pushedRowRangeIndex != null) {
+            throw new IllegalStateException(
+                    "Can't set global index result after pushing down row ranges.");
+        }
+        return this;
+    }
+
+    @Override
+    public List<PartitionEntry> listPartitionEntries() {
+        return batchScan.listPartitionEntries();
+    }
+
+    @Override
+    public Plan plan() {
+        RowRangeIndex rowRangeIndex = this.pushedRowRangeIndex;
+        ScoreGetter scoreGetter = null;
+        boolean globalIndexTopNCandidatesFound = false;
+
+        if (rowRangeIndex == null) {
+            Optional<GlobalIndexResult> indexResult;
+            if (canPushDownGlobalIndexTopN()) {
+                indexResult = evalGlobalIndexTopN();
+                globalIndexTopNCandidatesFound = indexResult.isPresent();
+            } else {
+                indexResult = evalGlobalIndex();
+            }
+            if (indexResult.isPresent()) {
+                GlobalIndexResult result = indexResult.get();
+                rowRangeIndex = RowRangeIndex.create(result.results().toRangeList());
+                if (result instanceof ScoredGlobalIndexResult) {
+                    scoreGetter = ((ScoredGlobalIndexResult) result).scoreGetter();
+                }
+            } else if (filter != null) {
+                LOG.info("Scan table '{}' without global index.", table.name());
+            }
+        }
+
+        if (!globalIndexTopNCandidatesFound && topN != null) {
+            batchScan.withTopN(topN);
+        }
+
+        if (rowRangeIndex == null) {
+            return batchScan.plan();
+        }
+
+        List<Split> splits = batchScan.withRowRangeIndex(rowRangeIndex).plan().splits();
+        return wrapToIndexSplits(splits, rowRangeIndex, scoreGetter);
+    }
+
+    private Optional<GlobalIndexResult> evalGlobalIndex() {
+        if (this.globalIndexResult != null) {
+            return Optional.of(globalIndexResult);
+        }
+        if (filter == null) {
+            return Optional.empty();
+        }
+        CoreOptions options = table.coreOptions();
+        if (!options.globalIndexEnabled()) {
+            return Optional.empty();
+        }
+        Predicate globalIndexFilter = rowIdSafeResidualFilter(filter);
+        if (globalIndexFilter == null) {
+            return Optional.empty();
+        }
+        PartitionPredicate partitionFilter =
+                batchScan.snapshotReader().manifestsReader().partitionFilter();
+        long totalStart = System.nanoTime();
+        Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
+                DataEvolutionGlobalIndexScanner.create(table, partitionFilter, globalIndexFilter);
+        long metadataDuration = System.nanoTime() - totalStart;
+        if (!optionalScanner.isPresent()) {
+            return Optional.empty();
+        }
+
+        try (DataEvolutionGlobalIndexScanner scanner = optionalScanner.get()) {
+            long lookupStart = System.nanoTime();
+            Optional<GlobalIndexEvaluator.Evaluation> result =
+                    scanner.scanWithCoverage(globalIndexFilter);
+            long lookupDuration = System.nanoTime() - lookupStart;
+            if (result.isPresent()) {
+                long coverageStart = System.nanoTime();
+                GlobalIndexResult finalResult =
+                        result.get()
+                                .result()
+                                .or(
+                                        scanner.unindexedRowsForContributingFields(
+                                                result.get().contributingFieldIds()));
+                long coverageDuration = System.nanoTime() - coverageStart;
+                long totalDuration = System.nanoTime() - totalStart;
+                LOG.info(
+                        "Scan table '{}' with global index. searchMode='{}', total={} ms, metadata={} ms, lookup={} ms, coverage={} ms.",
+                        table.name(),
+                        options.scalarIndexSearchMode(),
+                        totalDuration / 1_000_000,
+                        metadataDuration / 1_000_000,
+                        lookupDuration / 1_000_000,
+                        coverageDuration / 1_000_000);
+                return Optional.of(finalResult);
+            }
+            return Optional.empty();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private Optional<GlobalIndexResult> evalGlobalIndexTopN() {
+        CoreOptions options = table.coreOptions();
+        PartitionPredicate partitionFilter =
+                batchScan.snapshotReader().manifestsReader().partitionFilter();
+        long totalStart = System.nanoTime();
+        Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
+                DataEvolutionGlobalIndexScanner.createForTopN(table, partitionFilter, topN);
+        long metadataDuration = System.nanoTime() - totalStart;
+        if (!optionalScanner.isPresent()) {
+            return Optional.empty();
+        }
+
+        try (DataEvolutionGlobalIndexScanner scanner = optionalScanner.get()) {
+            long lookupStart = System.nanoTime();
+            Optional<GlobalIndexResult> result = scanner.scan(topN);
+            long lookupDuration = System.nanoTime() - lookupStart;
+            if (!result.isPresent()) {
+                return Optional.empty();
+            }
+
+            long coverageStart = System.nanoTime();
+            GlobalIndexResult finalResult = result.get().or(scanner.unindexedRows(topN));
+            long coverageDuration = System.nanoTime() - coverageStart;
+            long totalDuration = System.nanoTime() - totalStart;
+            LOG.info(
+                    "Scan table '{}' with BTree global index TopN. searchMode='{}', topN='{}', total={} ms, metadata={} ms, lookup={} ms, coverage={} ms.",
+                    table.name(),
+                    options.scalarIndexSearchMode(),
+                    topN,
+                    totalDuration / 1_000_000,
+                    metadataDuration / 1_000_000,
+                    lookupDuration / 1_000_000,
+                    coverageDuration / 1_000_000);
+            return Optional.of(finalResult);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private boolean canPushDownGlobalIndexTopN() {
+        if (topN == null
+                || pushDownLimit != null
+                || globalIndexResult != null
+                || !table.rowType().containsField(topN.orders().get(0).field().name())) {
+            return false;
+        }
+        CoreOptions options = table.coreOptions();
+        return supportsGlobalIndexTopN(options)
+                && options.globalIndexEnabled()
+                && !options.deletionVectorsEnabled()
+                && !options.queryAuthEnabled()
+                && !batchScan.snapshotReader().hasNonPartitionFilter();
+    }
+
+    private boolean supportsGlobalIndexTopN(CoreOptions options) {
+        switch (options.startupMode()) {
+            case LATEST_FULL:
+            case LATEST:
+            case FROM_TIMESTAMP:
+            case FROM_SNAPSHOT:
+            case FROM_SNAPSHOT_FULL:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    @VisibleForTesting
+    public static Plan wrapToIndexSplits(
+            List<Split> splits, RowRangeIndex rowRangeIndex, ScoreGetter scoreGetter) {
+        List<Split> indexedSplits = new ArrayList<>();
+        Function<Split, List<IndexedSplit>> process =
+                split ->
+                        Collections.singletonList(
+                                split instanceof IndexedSplit
+                                        ? (IndexedSplit) split
+                                        : wrap((DataSplit) split, rowRangeIndex, scoreGetter));
+        randomlyExecuteSequentialReturn(process, splits, null).forEachRemaining(indexedSplits::add);
+        return () -> indexedSplits;
+    }
+
+    private static IndexedSplit wrap(
+            DataSplit dataSplit, final RowRangeIndex rowRangeIndex, ScoreGetter scoreGetter) {
+        List<DataFileMeta> files = dataSplit.dataFiles();
+
+        List<Range> expected = new ArrayList<>();
+        for (DataFileMeta file : files) {
+            Range fileRange = file.nonNullRowIdRange();
+            expected.addAll(rowRangeIndex.intersectedRanges(fileRange.from, fileRange.to));
+        }
+        expected = Range.sortAndMergeOverlap(expected, true);
+        if (expected.isEmpty()) {
+            long min = files.stream().mapToLong(f -> f.nonNullRowIdRange().from).min().orElse(-1L);
+            long max = files.stream().mapToLong(f -> f.nonNullRowIdRange().to).max().orElse(-1L);
+            throw new IllegalStateException(
+                    String.format(
+                            "This is a bug, there should be intersected ranges for split with min row id %d and max row id %d.",
+                            min, max));
+        }
+
+        float[] scores = null;
+        if (scoreGetter != null) {
+            int size = expected.stream().mapToInt(r -> (int) (r.count())).sum();
+            scores = new float[size];
+
+            int index = 0;
+            for (Range range : expected) {
+                for (long i = range.from; i <= range.to; i++) {
+                    scores[index++] = scoreGetter.score(i);
+                }
+            }
+        }
+
+        return new IndexedSplit(dataSplit, expected, scores);
+    }
+}

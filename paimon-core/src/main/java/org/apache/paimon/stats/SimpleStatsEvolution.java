@@ -21,12 +21,14 @@ package org.apache.paimon.stats;
 import org.apache.paimon.casting.CastFieldGetter;
 import org.apache.paimon.casting.CastedRow;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.format.SimpleColStats;
@@ -86,6 +88,32 @@ public class SimpleStatsEvolution {
         }
 
         return result;
+    }
+
+    public InternalArray evolution(
+            InternalArray array, Long rowCount, @Nullable List<String> denseFields) {
+        InternalArray nullCounts = array;
+
+        if (denseFields != null && denseFields.isEmpty()) {
+            // optimize for empty dense fields
+            nullCounts = emptyNullCounts;
+        } else if (denseFields != null) {
+            int[] denseIndexMapping =
+                    indexMappings.computeIfAbsent(
+                            denseFields,
+                            k -> fieldNames.stream().mapToInt(denseFields::indexOf).toArray());
+            nullCounts = ProjectedArray.from(denseIndexMapping).replaceArray(nullCounts);
+        }
+
+        if (indexMapping != null) {
+            if (rowCount == null) {
+                throw new RuntimeException("Schema Evolution for stats needs row count.");
+            }
+
+            nullCounts = new NullCountsEvoArray(indexMapping, nullCounts, rowCount);
+        }
+
+        return nullCounts;
     }
 
     public Result evolution(
@@ -245,7 +273,17 @@ public class SimpleStatsEvolution {
         }
 
         @Override
+        public Blob getBlob(int pos) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
         public InternalArray getArray(int pos) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public InternalVector getVector(int pos) {
             throw new UnsupportedOperationException();
         }
 

@@ -47,5 +47,5 @@ public class OrcOptions {
                     .booleanType()
                     .defaultValue(true)
                     .withDescription(
-                            "This option is used to be compatible with the paimon-orc‘s old behavior for the `timestamp_ltz` data type.");
+                            "This option is used to be compatible with the paimon-orc's old behavior for the `timestamp_ltz` data type.");
 }

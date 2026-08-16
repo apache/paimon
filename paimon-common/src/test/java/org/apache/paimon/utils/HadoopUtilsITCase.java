@@ -70,4 +70,24 @@ public class HadoopUtilsITCase {
             return LocalFileIO.create();
         }
     }
+
+    @Test
+    public void testReadHadoopXml() {
+        String xml =
+                "<configuration><property>"
+                        + "<name>paimon.test.key0</name>"
+                        + "</property>"
+                        + "<property>"
+                        + "<name>paimon.test.key1</name>"
+                        + "<value/>"
+                        + "</property>"
+                        + "<property>"
+                        + "<name>paimon.test.key2</name>"
+                        + "<value>test.value</value>"
+                        + "</property>"
+                        + "</configuration>";
+        Configuration conf = new Configuration();
+        HadoopUtils.readHadoopXml(xml, conf);
+        assertThat(conf.get("paimon.test.key2")).isEqualTo("test.value");
+    }
 }

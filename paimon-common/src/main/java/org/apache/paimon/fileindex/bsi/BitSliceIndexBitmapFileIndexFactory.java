@@ -35,6 +35,11 @@ public class BitSliceIndexBitmapFileIndexFactory implements FileIndexerFactory {
 
     @Override
     public FileIndexer create(DataType dataType, Options options) {
-        return new BitSliceIndexBitmapFileIndex(dataType, options);
+        return new BitSliceIndexBitmapFileIndex(dataType);
+    }
+
+    @Override
+    public void validate(DataType dataType) {
+        BitSliceIndexBitmapFileIndex.getValueMapper(dataType);
     }
 }

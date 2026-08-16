@@ -20,10 +20,12 @@ package org.apache.paimon;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.Variant;
@@ -162,10 +164,24 @@ public class PartitionSettedRow implements InternalRow {
     }
 
     @Override
+    public Blob getBlob(int pos) {
+        return partitionInfo.inPartitionRow(pos)
+                ? partition.getBlob(partitionInfo.getRealIndex(pos))
+                : row.getBlob(partitionInfo.getRealIndex(pos));
+    }
+
+    @Override
     public InternalArray getArray(int pos) {
         return partitionInfo.inPartitionRow(pos)
                 ? partition.getArray(partitionInfo.getRealIndex(pos))
                 : row.getArray(partitionInfo.getRealIndex(pos));
+    }
+
+    @Override
+    public InternalVector getVector(int pos) {
+        return partitionInfo.inPartitionRow(pos)
+                ? partition.getVector(partitionInfo.getRealIndex(pos))
+                : row.getVector(partitionInfo.getRealIndex(pos));
     }
 
     @Override

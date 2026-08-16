@@ -24,13 +24,20 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.table.CatalogTableType;
 import org.apache.paimon.utils.HadoopUtilsITCase.TestFileIOLoader;
 import org.apache.paimon.utils.InstantiationUtil;
+import org.apache.paimon.utils.TraceableFileIO;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hdfs.HdfsConfiguration;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
+import java.net.URL;
+import java.net.URLClassLoader;
+import java.util.Arrays;
 
 import static org.apache.paimon.options.CatalogOptions.TABLE_TYPE;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
@@ -88,6 +95,26 @@ public class CatalogFactoryTest {
     }
 
     @Test
+    public void testCreateCatalogWithoutHadoopClasses(@TempDir java.nio.file.Path path)
+            throws Exception {
+        try (URLClassLoader classLoader = new NoHadoopClassLoader(testClasspathWithoutHadoop())) {
+            Class<?> runner =
+                    Class.forName(NoHadoopCatalogContextRunner.class.getName(), true, classLoader);
+            runner.getMethod("run", String.class, ClassLoader.class)
+                    .invoke(
+                            null,
+                            new Path(path.toUri().toString(), "warehouse").toString(),
+                            classLoader);
+        } catch (InvocationTargetException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof Exception) {
+                throw (Exception) cause;
+            }
+            throw (Error) cause;
+        }
+    }
+
+    @Test
     public void testContextSerializable() throws IOException, ClassNotFoundException {
         Configuration conf = new Configuration(false);
         conf.set("my_key", "my_value");
@@ -96,5 +123,57 @@ public class CatalogFactoryTest {
                         new Options(), conf, new TestFileIOLoader(), new TestFileIOLoader());
         context = InstantiationUtil.clone(context);
         assertThat(context.hadoopConf().get("my_key")).isEqualTo(conf.get("my_key"));
+    }
+
+    private static URL[] testClasspathWithoutHadoop() {
+        return Arrays.stream(System.getProperty("java.class.path").split(File.pathSeparator))
+                .filter(path -> !path.contains("/hadoop-"))
+                .filter(path -> !path.contains("/htrace-core"))
+                .filter(path -> !path.contains("/woodstox-core"))
+                .filter(path -> !path.contains("/stax2-api"))
+                .map(
+                        path -> {
+                            try {
+                                return new File(path).toURI().toURL();
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
+                        })
+                .toArray(URL[]::new);
+    }
+
+    private static class NoHadoopClassLoader extends URLClassLoader {
+
+        private NoHadoopClassLoader(URL[] urls) {
+            super(urls, ClassLoader.getSystemClassLoader().getParent());
+        }
+
+        @Override
+        protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
+            if (name.startsWith("org.apache.hadoop.")) {
+                throw new ClassNotFoundException(name);
+            }
+            return super.loadClass(name, resolve);
+        }
+    }
+
+    /** Runner loaded by {@link NoHadoopClassLoader} to verify no-Hadoop catalog creation. */
+    public static class NoHadoopCatalogContextRunner {
+
+        public static void run(String warehouse, ClassLoader classLoader) throws Exception {
+            assertThatThrownBy(() -> classLoader.loadClass("org.apache.hadoop.conf.Configuration"))
+                    .isInstanceOf(ClassNotFoundException.class);
+
+            Options options = new Options();
+            options.set("warehouse", warehouse);
+            CatalogContext context =
+                    CatalogContext.create(options, new TraceableFileIO.Loader(), null);
+            Catalog catalog = CatalogFactory.createCatalog(context, classLoader);
+
+            assertThat(catalog.listDatabases()).isEmpty();
+            Field hadoopConfField = CatalogContext.class.getDeclaredField("hadoopConf");
+            hadoopConfField.setAccessible(true);
+            assertThat(hadoopConfField.get(context)).isNull();
+        }
     }
 }

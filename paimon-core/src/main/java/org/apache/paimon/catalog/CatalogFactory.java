@@ -24,7 +24,6 @@ import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.privilege.PrivilegedCatalog;
 import org.apache.paimon.utils.Preconditions;
 
 import java.io.IOException;
@@ -70,8 +69,7 @@ public interface CatalogFactory extends Factory {
     static Catalog createCatalog(CatalogContext context, ClassLoader classLoader) {
         Catalog catalog = createUnwrappedCatalog(context, classLoader);
         Options options = context.options();
-        catalog = CachingCatalog.tryToCreate(catalog, options);
-        return PrivilegedCatalog.tryToCreate(catalog, options);
+        return CachingCatalog.tryToCreate(catalog, options);
     }
 
     static Catalog createUnwrappedCatalog(CatalogContext context, ClassLoader classLoader) {
@@ -88,7 +86,7 @@ public interface CatalogFactory extends Factory {
         // manual validation
         // because different catalog types may have different options
         // we can't list them all in the optionalOptions() method
-        String warehouse = warehouse(context).toUri().toString();
+        String warehouse = warehouse(context).toString();
 
         Path warehousePath = new Path(warehouse);
         FileIO fileIO;

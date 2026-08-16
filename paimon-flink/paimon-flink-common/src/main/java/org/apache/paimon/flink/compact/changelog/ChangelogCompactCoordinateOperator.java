@@ -74,12 +74,7 @@ public class ChangelogCompactCoordinateOperator
     public void processElement(StreamRecord<Committable> record) {
         Committable committable = record.getValue();
         checkpointId = Math.max(checkpointId, committable.checkpointId());
-        if (committable.kind() != Committable.Kind.FILE) {
-            output.collect(new StreamRecord<>(Either.Left(record.getValue())));
-            return;
-        }
-
-        CommitMessageImpl message = (CommitMessageImpl) committable.wrappedCommittable();
+        CommitMessageImpl message = (CommitMessageImpl) committable.commitMessage();
         if (message.newFilesIncrement().changelogFiles().isEmpty()
                 && message.compactIncrement().changelogFiles().isEmpty()) {
             output.collect(new StreamRecord<>(Either.Left(record.getValue())));
@@ -138,14 +133,16 @@ public class ChangelogCompactCoordinateOperator
                         new DataIncrement(
                                 message.newFilesIncrement().newFiles(),
                                 message.newFilesIncrement().deletedFiles(),
-                                skippedNewChangelogs),
+                                skippedNewChangelogs,
+                                message.newFilesIncrement().newIndexFiles(),
+                                message.newFilesIncrement().deletedIndexFiles()),
                         new CompactIncrement(
                                 message.compactIncrement().compactBefore(),
                                 message.compactIncrement().compactAfter(),
-                                skippedCompactChangelogs),
-                        message.indexIncrement());
-        Committable newCommittable =
-                new Committable(committable.checkpointId(), Committable.Kind.FILE, newMessage);
+                                skippedCompactChangelogs,
+                                message.compactIncrement().newIndexFiles(),
+                                message.compactIncrement().deletedIndexFiles()));
+        Committable newCommittable = new Committable(committable.checkpointId(), newMessage);
         output.collect(new StreamRecord<>(Either.Left(newCommittable)));
     }
 
@@ -200,8 +197,7 @@ public class ChangelogCompactCoordinateOperator
                                         Collections.emptyList(),
                                         entry.getValue()));
             }
-            Committable newCommittable =
-                    new Committable(checkpointId, Committable.Kind.FILE, message);
+            Committable newCommittable = new Committable(checkpointId, message);
             output.collect(new StreamRecord<>(Either.Left(newCommittable)));
         } else {
             output.collect(

@@ -25,6 +25,8 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.UUID;
+
 import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -32,23 +34,40 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class SnapshotTest {
 
     @Test
+    public void testSnapshotUuid() {
+        Snapshot snapshot =
+                org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMillis(1L, 1000L);
+
+        assertThat(snapshot.uuid()).isNotNull();
+        assertThat(UUID.fromString(snapshot.uuid()).toString()).isEqualTo(snapshot.uuid());
+        assertThat(Snapshot.fromJson(snapshot.toJson()).uuid()).isEqualTo(snapshot.uuid());
+        assertThat(
+                        org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMillis(
+                                        2L, 2000L)
+                                .uuid())
+                .isNotEqualTo(snapshot.uuid());
+    }
+
+    @Test
     public void testJsonIgnoreProperties() {
-        Snapshot.fromJson(
-                "{\n"
-                        + "  \"version\" : 3,\n"
-                        + "  \"id\" : 5,\n"
-                        + "  \"schemaId\" : 0,\n"
-                        + "  \"baseManifestList\" : null,\n"
-                        + "  \"deltaManifestList\" : null,\n"
-                        + "  \"changelogManifestList\" : null,\n"
-                        + "  \"commitUser\" : null,\n"
-                        + "  \"commitIdentifier\" : 0,\n"
-                        + "  \"commitKind\" : \"APPEND\",\n"
-                        + "  \"timeMillis\" : 1234,\n"
-                        + "  \"totalRecordCount\" : null,\n"
-                        + "  \"deltaRecordCount\" : null,\n"
-                        + "  \"unknownKey\" : 22222\n"
-                        + "}");
+        Snapshot snapshot =
+                Snapshot.fromJson(
+                        "{\n"
+                                + "  \"version\" : 3,\n"
+                                + "  \"id\" : 5,\n"
+                                + "  \"schemaId\" : 0,\n"
+                                + "  \"baseManifestList\" : null,\n"
+                                + "  \"deltaManifestList\" : null,\n"
+                                + "  \"changelogManifestList\" : null,\n"
+                                + "  \"commitUser\" : null,\n"
+                                + "  \"commitIdentifier\" : 0,\n"
+                                + "  \"commitKind\" : \"APPEND\",\n"
+                                + "  \"timeMillis\" : 1234,\n"
+                                + "  \"totalRecordCount\" : null,\n"
+                                + "  \"deltaRecordCount\" : null,\n"
+                                + "  \"unknownKey\" : 22222\n"
+                                + "}");
+        assertThat(snapshot.uuid()).isNull();
     }
 
     @Test
@@ -76,6 +95,52 @@ public class SnapshotTest {
         assertThat(snapshot.deltaManifestListSize).isEqualTo(8);
         assertThat(snapshot.changelogManifestListSize).isEqualTo(10);
         assertThat(Snapshot.fromJson(snapshot.toJson())).isEqualTo(snapshot);
+    }
+
+    @Test
+    public void testSnapshotWithOperation() {
+        // Old snapshot without operation field: operation should be null
+        String oldJson =
+                "{\n"
+                        + "  \"version\" : 3,\n"
+                        + "  \"id\" : 1,\n"
+                        + "  \"schemaId\" : 0,\n"
+                        + "  \"baseManifestList\" : \"m-0\",\n"
+                        + "  \"deltaManifestList\" : \"m-1\",\n"
+                        + "  \"commitUser\" : \"user\",\n"
+                        + "  \"commitIdentifier\" : 0,\n"
+                        + "  \"commitKind\" : \"APPEND\",\n"
+                        + "  \"timeMillis\" : 1000,\n"
+                        + "  \"totalRecordCount\" : 10,\n"
+                        + "  \"deltaRecordCount\" : 5\n"
+                        + "}";
+        Snapshot old = Snapshot.fromJson(oldJson);
+        assertThat(old.operation()).isNull();
+
+        // New snapshot with operation field
+        String newJson =
+                "{\n"
+                        + "  \"version\" : 3,\n"
+                        + "  \"id\" : 2,\n"
+                        + "  \"schemaId\" : 0,\n"
+                        + "  \"baseManifestList\" : \"m-0\",\n"
+                        + "  \"deltaManifestList\" : \"m-1\",\n"
+                        + "  \"commitUser\" : \"user\",\n"
+                        + "  \"commitIdentifier\" : 1,\n"
+                        + "  \"commitKind\" : \"APPEND\",\n"
+                        + "  \"timeMillis\" : 2000,\n"
+                        + "  \"totalRecordCount\" : 20,\n"
+                        + "  \"deltaRecordCount\" : 10,\n"
+                        + "  \"operation\" : \"MERGE\"\n"
+                        + "}";
+        Snapshot withOp = Snapshot.fromJson(newJson);
+        assertThat(withOp.operation()).isEqualTo(Snapshot.Operation.MERGE);
+
+        // Round-trip: toJson -> fromJson preserves operation
+        assertThat(Snapshot.fromJson(withOp.toJson())).isEqualTo(withOp);
+
+        // Null operation is omitted in JSON
+        assertThat(old.toJson()).doesNotContain("operation");
     }
 
     public static SnapshotManager newSnapshotManager(FileIO fileIO, Path tablePath) {

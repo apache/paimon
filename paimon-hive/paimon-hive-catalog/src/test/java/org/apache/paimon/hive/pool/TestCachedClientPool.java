@@ -42,9 +42,22 @@ import java.util.UUID;
 
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTORECONNECTURLKEY;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link CachedClientPool}. */
 public class TestCachedClientPool {
+
+    @Test
+    public void testExtractKeyUnknownElementErrorMessage() {
+        assertThatThrownBy(
+                        () ->
+                                CachedClientPool.extractKey(
+                                        HiveMetaStoreClient.class.getName(),
+                                        "conf",
+                                        new Configuration()))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("Unknown key element conf");
+    }
 
     @Test
     public void testCacheKeyNotSame() {
@@ -417,12 +430,15 @@ public class TestCachedClientPool {
                                                 String metastoreClientClass =
                                                         "org.apache.hadoop.hive.metastore.HiveMetaStoreClient";
 
-                                                return new HiveCatalog(
-                                                        fileIO,
-                                                        hiveConf,
-                                                        metastoreClientClass,
-                                                        options,
-                                                        warehouse);
+                                                HiveCatalog hCata =
+                                                        new HiveCatalog(
+                                                                fileIO,
+                                                                hiveConf,
+                                                                metastoreClientClass,
+                                                                CatalogContext.create(options),
+                                                                warehouse);
+                                                hCata.listDatabases();
+                                                return hCata;
                                             } catch (Exception e) {
                                                 throw new RuntimeException(e);
                                             }

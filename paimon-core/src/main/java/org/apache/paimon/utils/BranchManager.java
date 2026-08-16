@@ -36,9 +36,32 @@ public interface BranchManager {
 
     void createBranch(String branchName, @Nullable String tagName);
 
+    /**
+     * Create a branch with option to ignore if the branch already exists.
+     *
+     * @param branchName the branch name
+     * @param ignoreIfExists if true, do nothing when branch already exists; if false, throw
+     *     exception
+     */
+    void createBranch(String branchName, boolean ignoreIfExists);
+
+    /**
+     * Create a branch from tag with option to ignore if the branch already exists.
+     *
+     * @param branchName the branch name
+     * @param tagName the tag name to create branch from
+     * @param ignoreIfExists if true, do nothing when branch already exists; if false, throw
+     *     exception
+     */
+    void createBranch(String branchName, @Nullable String tagName, boolean ignoreIfExists);
+
     void dropBranch(String branchName);
 
     void fastForward(String branchName);
+
+    void mergeBranch(String sourceBranch, String targetBranch);
+
+    void renameBranch(String fromBranch, String toBranch);
 
     List<String> branches();
 
@@ -75,6 +98,21 @@ public interface BranchManager {
                 !branchName.chars().allMatch(Character::isDigit),
                 "Branch name cannot be pure numeric string but is '%s'.",
                 branchName);
+    }
+
+    static void mergeValidate(String sourceBranch, String targetBranch) {
+        checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(sourceBranch),
+                "Source branch name '%s' is blank.",
+                sourceBranch);
+        checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(targetBranch),
+                "Target branch name '%s' is blank.",
+                targetBranch);
+        checkArgument(
+                !sourceBranch.equals(targetBranch),
+                "Cannot merge branch '%s' into itself.",
+                sourceBranch);
     }
 
     static void fastForwardValidate(String branchName, String currentBranch) {

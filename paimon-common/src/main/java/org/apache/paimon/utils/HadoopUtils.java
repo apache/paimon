@@ -140,11 +140,12 @@ public class HadoopUtils {
                     String newKey = key.substring(prefix.length());
                     String value = options.getString(key, null);
                     result.set(newKey, value);
+                    // Redact value: sensitive keys are masked, others printed as-is.
                     LOG.debug(
                             "Adding Paimon config entry for {} as {}={} to Hadoop config",
                             key,
                             newKey,
-                            value);
+                            SensitiveConfigUtils.redactValue(newKey, value));
                     foundHadoopConfiguration = true;
                 }
             }
@@ -221,13 +222,19 @@ public class HadoopUtils {
         }
         for (int i = 0; i < propertyNodes.getLength(); i++) {
             Node propertyNode = propertyNodes.item(i);
-            if (propertyNode.getNodeType() == 1) {
+            if (1 == propertyNode.getNodeType()) {
                 Element propertyElement = (Element) propertyNode;
-                String key = propertyElement.getElementsByTagName("name").item(0).getTextContent();
-                String value =
-                        propertyElement.getElementsByTagName("value").item(0).getTextContent();
-                if (!StringUtils.isNullOrWhitespaceOnly(value)) {
-                    conf.set(key, value);
+                if (null != propertyElement.getElementsByTagName("name")
+                        && null != propertyElement.getElementsByTagName("name").item(0)
+                        && null != propertyElement.getElementsByTagName("value")
+                        && null != propertyElement.getElementsByTagName("value").item(0)) {
+                    String name =
+                            propertyElement.getElementsByTagName("name").item(0).getTextContent();
+                    String value =
+                            propertyElement.getElementsByTagName("value").item(0).getTextContent();
+                    if (!StringUtils.isNullOrWhitespaceOnly(value)) {
+                        conf.set(name, value);
+                    }
                 }
             }
         }

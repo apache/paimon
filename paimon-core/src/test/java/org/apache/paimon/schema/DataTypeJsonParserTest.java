@@ -21,6 +21,7 @@ package org.apache.paimon.schema;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataField;
@@ -42,6 +43,7 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.types.VariantType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.junit.jupiter.api.Test;
@@ -110,6 +112,18 @@ public class DataTypeJsonParserTest {
                 TestSpec.forString("TIMESTAMP(3) WITH LOCAL TIME ZONE")
                         .expectType(new LocalZonedTimestampType(3)),
                 TestSpec.forString("TIMESTAMP_LTZ(3)").expectType(new LocalZonedTimestampType(3)),
+                TestSpec.forString("VARIANT").expectType(new VariantType()),
+                TestSpec.forString("BLOB").expectType(new BlobType()),
+                TestSpec.forString("VECTOR<FLOAT, 3>")
+                        .expectType(DataTypes.VECTOR(3, DataTypes.FLOAT())),
+                TestSpec.forString("VECTOR<INT, 5> NOT NULL")
+                        .expectType(DataTypes.VECTOR(5, DataTypes.INT()).notNull()),
+                TestSpec.forString(
+                                "{\"type\":\"VECTOR\",\"element\":\"BOOLEAN NOT NULL\",\"length\":7}")
+                        .expectType(DataTypes.VECTOR(7, DataTypes.BOOLEAN().notNull())),
+                TestSpec.forString(
+                                "{\"type\":\"VECTOR NOT NULL\",\"element\":\"TINYINT NOT NULL\",\"length\":11}")
+                        .expectType(DataTypes.VECTOR(11, DataTypes.TINYINT().notNull()).notNull()),
                 TestSpec.forString(
                                 "{\"type\":\"ARRAY\",\"element\":\"TIMESTAMP(3) WITH LOCAL TIME ZONE\"}")
                         .expectType(new ArrayType(new LocalZonedTimestampType(3))),

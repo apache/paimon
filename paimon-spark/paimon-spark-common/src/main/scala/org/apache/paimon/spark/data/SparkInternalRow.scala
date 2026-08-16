@@ -23,14 +23,30 @@ import org.apache.paimon.types.RowType
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
 
+import scala.collection.JavaConverters._
+
 abstract class SparkInternalRow extends InternalRow {
   def replace(row: org.apache.paimon.data.InternalRow): SparkInternalRow
+
+  def withBlobAsDescriptor(blobAsDescriptor: Boolean): SparkInternalRow
 }
 
 object SparkInternalRow {
 
   def create(rowType: RowType): SparkInternalRow = {
-    SparkShimLoader.shim.createSparkInternalRow(rowType)
+    create(rowType, blobAsDescriptor = false)
+  }
+
+  def create(rowType: RowType, blobAsDescriptor: Boolean): SparkInternalRow = {
+    val blobFieldIndices = rowType.getBlobFieldIndices
+    if (blobFieldIndices.isEmpty) {
+      SparkShimLoader.shim.createSparkInternalRow(rowType).withBlobAsDescriptor(blobAsDescriptor)
+    } else {
+      SparkShimLoader.shim.createSparkInternalRowWithBlob(
+        rowType,
+        blobFieldIndices.asScala.map(_.intValue()).toSet,
+        blobAsDescriptor)
+    }
   }
 
 }

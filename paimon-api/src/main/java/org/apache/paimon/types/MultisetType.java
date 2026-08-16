@@ -19,6 +19,7 @@
 package org.apache.paimon.types;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.utils.MathUtils;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonGenerator;
@@ -28,7 +29,7 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * Data type of a multiset (=bag). Unlike a set, it allows for multiple instances for each of its
+ * Data type of multiset (=bag). Unlike a set, it allows for multiple instances for each of its
  * elements with a common subtype. Each unique value (including {@code NULL}) is mapped to some
  * multiplicity. There is no restriction of element types; it is the responsibility of the user to
  * ensure uniqueness.
@@ -63,7 +64,7 @@ public class MultisetType extends DataType {
 
     @Override
     public int defaultSize() {
-        return elementType.defaultSize() + 4;
+        return MathUtils.addSafely(elementType.defaultSize(), 4);
     }
 
     @Override
@@ -98,6 +99,36 @@ public class MultisetType extends DataType {
         }
         MultisetType that = (MultisetType) o;
         return elementType.equals(that.elementType);
+    }
+
+    @Override
+    public boolean equalsIgnoreFieldId(DataType o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        if (!super.equals(o)) {
+            return false;
+        }
+        MultisetType that = (MultisetType) o;
+        return elementType.equalsIgnoreFieldId(that.elementType);
+    }
+
+    @Override
+    public boolean isPrunedFrom(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        if (!super.equals(o)) {
+            return false;
+        }
+        MultisetType that = (MultisetType) o;
+        return elementType.isPrunedFrom(that.elementType);
     }
 
     @Override

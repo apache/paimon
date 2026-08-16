@@ -52,6 +52,26 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     Assertions.assertTrue(stats.colStats().isEmpty)
   }
 
+  test("Paimon analyze: mergedRecordSize should not truncate to zero") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id STRING, name STRING)
+                 |USING PAIMON
+                 |TBLPROPERTIES ('primary-key'='id')
+                 |""".stripMargin)
+
+    spark.sql(s"INSERT INTO T VALUES ('1', 'a')")
+    spark.sql(s"INSERT INTO T VALUES ('1', 'bb')")
+    spark.sql(s"INSERT INTO T VALUES ('1', 'ccc')")
+
+    spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS")
+
+    val stats = loadTable("T").statistics().get()
+    Assertions.assertEquals(1L, stats.mergedRecordCount().getAsLong)
+
+    Assertions.assertTrue(stats.mergedRecordSize().isPresent)
+    Assertions.assertTrue(stats.mergedRecordSize().getAsLong > 0)
+  }
+
   test("Paimon analyze: test statistic system table") {
     spark.sql(s"""
                  |CREATE TABLE T (id STRING, name STRING, i INT, l LONG)
@@ -439,21 +459,17 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     // paimon will reserve partition filter and not return it to spark, we need to ensure stats are filtered correctly.
     // partition push down hit
     var sql = "SELECT * FROM T WHERE pt < 1"
-    Assertions.assertEquals(
-      if (gteqSpark3_4) 0L else 4L,
-      getScanStatistic(sql).rowCount.get.longValue)
+    Assertions.assertEquals(0L, getScanStatistic(sql).rowCount.get.longValue)
     checkAnswer(spark.sql(sql), Nil)
 
     // partition push down hit and select without it
     sql = "SELECT id FROM T WHERE pt < 1"
-    Assertions.assertEquals(
-      if (gteqSpark3_4) 0L else 4L,
-      getScanStatistic(sql).rowCount.get.longValue)
+    Assertions.assertEquals(0L, getScanStatistic(sql).rowCount.get.longValue)
     checkAnswer(spark.sql(sql), Nil)
 
     // partition push down not hit
     sql = "SELECT * FROM T WHERE id < 1"
-    Assertions.assertEquals(4L, getScanStatistic(sql).rowCount.get.longValue)
+    Assertions.assertEquals(0L, getScanStatistic(sql).rowCount.get.longValue)
     checkAnswer(spark.sql(sql), Nil)
   }
 
@@ -470,12 +486,17 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
           sql("INSERT INTO T VALUES (1, 'a', '1'), (2, 'b', '1'), (3, 'c', '2'), (4, 'd', '3')")
           sql(s"ANALYZE TABLE T COMPUTE STATISTICS FOR ALL COLUMNS")
 
-          // For col type such as char, varchar that don't have min and max, filter estimation on stats has no effect.
           var sqlText = "SELECT * FROM T WHERE pt < '1'"
-          Assertions.assertEquals(4L, getScanStatistic(sqlText).rowCount.get.longValue)
+          Assertions.assertEquals(
+            if (gteqSpark3_4 && partitionType == "char(10)") 4L else 0L,
+            getScanStatistic(sqlText).rowCount.get.longValue)
+          checkAnswer(sql(sqlText), Nil)
 
           sqlText = "SELECT id FROM T WHERE pt < '1'"
-          Assertions.assertEquals(4L, getScanStatistic(sqlText).rowCount.get.longValue)
+          Assertions.assertEquals(
+            if (gteqSpark3_4 && partitionType == "char(10)") 4L else 0L,
+            getScanStatistic(sqlText).rowCount.get.longValue)
+          checkAnswer(sql(sqlText), Nil)
         }
       })
   }
@@ -484,7 +505,6 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     spark.sql("""
                 |CREATE TABLE T (c1 INT, c2 INT, c3 LONG, c4 STRING)
                 |USING PAIMON
-                |TBLPROPERTIES ('primary-key'='c1')
                 |""".stripMargin)
     spark.sql("ANALYZE TABLE T COMPUTE STATISTICS")
 
@@ -495,9 +515,9 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     assert(metadataSize1.rowCount.get.toLong == 0)
     assert(metadataSize1.sizeInBytes.toLong == 0)
 
-    spark.sql(s"INSERT INTO T VALUES (1, 1, 100, '${UUID.randomUUID().toString()}')")
-    spark.sql(s"INSERT INTO T VALUES (2, 2, 200, '${UUID.randomUUID().toString()}')")
-    spark.sql(s"INSERT INTO T VALUES (3, 3, 300, '${UUID.randomUUID().toString()}')")
+    spark.sql(s"INSERT INTO T VALUES (1, 1, 100, '${UUID.randomUUID().toString}')")
+    spark.sql(s"INSERT INTO T VALUES (2, 2, 200, '${UUID.randomUUID().toString}')")
+    spark.sql(s"INSERT INTO T VALUES (3, 3, 300, '${UUID.randomUUID().toString}')")
 
     def checkStatistics(): Long = {
       val wholeSize2 = getScanStatistic("SELECT * FROM T")
@@ -526,7 +546,19 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     spark.sql("ANALYZE TABLE T COMPUTE STATISTICS FOR ALL COLUMNS")
     val withColStat = checkStatistics()
 
-    assert(withColStat == noColStat)
+    assert(withColStat != noColStat)
+  }
+
+  test("Query a non-existent catalog") {
+    assert(intercept[Exception] {
+      sql("SELECT * FROM paimon1.default.t")
+    }.getMessage.contains("Current catalog is paimon, catalog paimon1 does not exist"))
+  }
+
+  test("Query a table with multiple namespaces") {
+    assert(intercept[Exception] {
+      sql("SELECT * FROM paimon.x.default.t")
+    }.getMessage.contains("Paimon only support single namespace"))
   }
 
   protected def statsFileCount(tableLocation: Path, fileIO: FileIO): Int = {
@@ -542,5 +574,4 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
       .get
     relation.computeStats()
   }
-
 }

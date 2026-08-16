@@ -40,6 +40,10 @@ public class CastedRowColumnVector implements RowColumnVector {
         this.vectorizedColumnBatch = new VectorizedColumnBatch(children);
     }
 
+    public CastedRowColumnVector copy(ColumnVector[] children) {
+        return new CastedRowColumnVector(heapRowVector, children);
+    }
+
     @Override
     public InternalRow getRow(int i) {
         ColumnarRow columnarRow = new ColumnarRow(vectorizedColumnBatch);
@@ -60,6 +64,10 @@ public class CastedRowColumnVector implements RowColumnVector {
     @Override
     public int getCapacity() {
         return heapRowVector.getCapacity();
+    }
+
+    public int getElementsAppended() {
+        return heapRowVector.getElementsAppended();
     }
 
     @Override

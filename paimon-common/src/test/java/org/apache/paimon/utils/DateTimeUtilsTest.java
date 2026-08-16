@@ -24,9 +24,11 @@ import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.TimeZone;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link DateTimeUtils}. */
 public class DateTimeUtilsTest {
@@ -70,6 +72,29 @@ public class DateTimeUtilsTest {
     }
 
     @Test
+    public void testParseTimestampDataRejectsMissingSeparator() {
+        assertThatThrownBy(() -> DateTimeUtils.parseTimestampData("2024-01-0112:30", 3))
+                .isInstanceOf(DateTimeParseException.class);
+        assertThatThrownBy(() -> DateTimeUtils.parseTimestampData("2024-01-14 19:35", 3))
+                .isInstanceOf(DateTimeParseException.class);
+    }
+
+    @Test
+    public void testParseTimestampDataWrittenByToString() {
+        for (LocalDateTime time :
+                new LocalDateTime[] {
+                    LocalDateTime.of(2024, 1, 1, 12, 30),
+                    LocalDateTime.of(2024, 1, 1, 0, 0),
+                    LocalDateTime.of(2024, 1, 1, 1, 2, 3),
+                    LocalDateTime.of(2024, 1, 1, 1, 2, 3, 456_000),
+                    LocalDateTime.of(1, 1, 1, 0, 0)
+                }) {
+            String dt = Timestamp.fromLocalDateTime(time).toString();
+            assertThat(DateTimeUtils.parseTimestampData(dt, 6).toLocalDateTime()).isEqualTo(time);
+        }
+    }
+
+    @Test
     public void testTimestamp() {
         int nanos = 100;
         java.sql.Timestamp timestamp = new java.sql.Timestamp(System.currentTimeMillis());
@@ -98,5 +123,39 @@ public class DateTimeUtilsTest {
         } finally {
             TimeZone.setDefault(timeZone);
         }
+    }
+
+    @Test
+    public void testTruncateDropsSubPrecisionFraction() {
+        // A fractional second below 0.1s has leading zeros in its nano representation.
+        // The narrowing cast to precision 3 must drop all nanoseconds below the millisecond.
+        Timestamp nineNanos = Timestamp.fromLocalDateTime(LocalDateTime.of(1970, 1, 1, 0, 0, 0, 9));
+        assertThat(nineNanos.toLocalDateTime().getNano()).isEqualTo(9);
+        assertThat(DateTimeUtils.truncate(nineNanos, 3).toLocalDateTime().getNano()).isEqualTo(0);
+
+        // Truncating .000123456 to precision 6 must keep exactly 6 fractional digits (.000123).
+        Timestamp micros =
+                Timestamp.fromLocalDateTime(LocalDateTime.of(1970, 1, 1, 0, 0, 0, 123_456));
+        assertThat(micros.toLocalDateTime().getNano()).isEqualTo(123_456);
+        assertThat(DateTimeUtils.truncate(micros, 6).toLocalDateTime().getNano())
+                .isEqualTo(123_000);
+    }
+
+    @Test
+    public void testTruncateIsIdempotent() {
+        // An already-truncated value stays unchanged when truncated again to the same precision.
+        Timestamp truncated =
+                Timestamp.fromLocalDateTime(LocalDateTime.of(1970, 1, 1, 0, 0, 0, 123_000));
+        assertThat(DateTimeUtils.truncate(truncated, 6).toLocalDateTime().getNano())
+                .isEqualTo(123_000);
+    }
+
+    @Test
+    public void testTruncateNoOpAtMaxPrecision() {
+        // Precision 9 preserves all nanoseconds.
+        Timestamp full =
+                Timestamp.fromLocalDateTime(LocalDateTime.of(1970, 1, 1, 0, 0, 0, 123_456_789));
+        assertThat(DateTimeUtils.truncate(full, 9).toLocalDateTime().getNano())
+                .isEqualTo(123_456_789);
     }
 }

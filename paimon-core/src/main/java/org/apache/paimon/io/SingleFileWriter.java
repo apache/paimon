@@ -20,6 +20,7 @@ package org.apache.paimon.io;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.BundleFormatWriter;
+import org.apache.paimon.format.FileAwareFormatWriter;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SupportsDirectWrite;
@@ -32,9 +33,14 @@ import org.apache.paimon.utils.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.Optional;
 import java.util.function.Function;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * A {@link FileWriter} to produce a single file.
@@ -50,10 +56,12 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
     protected final Path path;
     private final Function<T, InternalRow> converter;
 
+    private boolean deleteFileUponAbort;
     private FormatWriter writer;
-    private PositionOutputStream out;
+    @Nullable private PositionOutputStream out;
 
-    protected long outputBytes;
+    @Nullable private Long outputBytes;
+    @Nullable private Object writerMetadata;
     private long recordCount;
     protected boolean closed;
 
@@ -67,7 +75,10 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
         this.fileIO = fileIO;
         this.path = path;
         this.converter = converter;
+        // true first to clean file in exception
+        this.deleteFileUponAbort = true;
 
+        boolean opened = false;
         try {
             if (factory instanceof SupportsDirectWrite) {
                 writer = ((SupportsDirectWrite) factory).create(fileIO, path, compression);
@@ -78,18 +89,47 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
                 }
                 writer = factory.create(out, compression);
             }
+
+            if (writer instanceof FileAwareFormatWriter) {
+                FileAwareFormatWriter fileAwareFormatWriter = (FileAwareFormatWriter) writer;
+                fileAwareFormatWriter.setFile(path);
+                deleteFileUponAbort = fileAwareFormatWriter.deleteFileUponAbort();
+            }
+            opened = true;
         } catch (IOException e) {
             LOG.warn(
                     "Failed to open the bulk writer, closing the output stream and throw the error.",
                     e);
-            if (out != null) {
-                abort();
-            }
             throw new UncheckedIOException(e);
+        } finally {
+            // only clean up what this writer managed to create, a failure before that (for example
+            // the file already exists) must not delete someone else's file
+            if (!opened && (out != null || writer != null)) {
+                cleanUpFailedOpen();
+            }
         }
 
         this.recordCount = 0;
         this.closed = false;
+    }
+
+    /**
+     * Cleans up after a failed open. This must not call the overridable {@link #abort()}, because
+     * subclass fields are still unassigned while the super constructor runs.
+     */
+    private void cleanUpFailedOpen() {
+        try {
+            IOUtils.closeQuietly(writer);
+            writer = null;
+            IOUtils.closeQuietly(out);
+            out = null;
+            if (deleteFileUponAbort) {
+                fileIO.deleteQuietly(path);
+            }
+        } catch (Throwable t) {
+            // never let the cleanup replace the failure that caused it
+            LOG.warn("Failed to clean up {} after the writer could not be opened.", path, t);
+        }
     }
 
     public Path path() {
@@ -107,6 +147,8 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
         }
 
         try {
+            long rowCount = bundle.rowCount();
+            checkArgument(rowCount >= 0, "Row count must not be negative.");
             if (writer instanceof BundleFormatWriter) {
                 ((BundleFormatWriter) writer).writeBundle(bundle);
             } else {
@@ -114,9 +156,9 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
                     writer.addElement(row);
                 }
             }
-            recordCount += bundle.rowCount();
+            recordCount += rowCount;
         } catch (Throwable e) {
-            LOG.warn("Exception occurs when writing file " + path + ". Cleaning up.", e);
+            LOG.warn("Exception occurs when writing file {}. Cleaning up.", path, e);
             abort();
             throw e;
         }
@@ -129,14 +171,34 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
 
         try {
             InternalRow rowData = converter.apply(record);
-            writer.addElement(rowData);
-            recordCount++;
+            writeRowInternal(rowData);
             return rowData;
         } catch (Throwable e) {
-            LOG.warn("Exception occurs when writing file " + path + ". Cleaning up.", e);
+            LOG.warn("Exception occurs when writing file {}. Cleaning up.", path, e);
             abort();
             throw e;
         }
+    }
+
+    /** Writes an already converted row without invoking this writer's record converter. */
+    protected InternalRow writeRow(InternalRow rowData) throws IOException {
+        if (closed) {
+            throw new RuntimeException("Writer has already closed!");
+        }
+
+        try {
+            writeRowInternal(rowData);
+            return rowData;
+        } catch (Throwable e) {
+            LOG.warn("Exception occurs when writing file {}. Cleaning up.", path, e);
+            abort();
+            throw e;
+        }
+    }
+
+    private void writeRowInternal(InternalRow rowData) throws IOException {
+        writer.addElement(rowData);
+        recordCount++;
     }
 
     @Override
@@ -158,15 +220,13 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
             IOUtils.closeQuietly(out);
             out = null;
         }
-        fileIO.deleteQuietly(path);
+        abortExecutor().ifPresent(FileWriterAbortExecutor::abort);
     }
 
-    public AbortExecutor abortExecutor() {
-        if (!closed) {
-            throw new RuntimeException("Writer should be closed!");
-        }
-
-        return new AbortExecutor(fileIO, path);
+    public Optional<FileWriterAbortExecutor> abortExecutor() {
+        return deleteFileUponAbort
+                ? Optional.of(new FileWriterAbortExecutor(fileIO, path))
+                : Optional.empty();
     }
 
     @Override
@@ -182,6 +242,7 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
         try {
             if (writer != null) {
                 writer.close();
+                writerMetadata = writer.writerMetadata();
                 writer = null;
             }
             if (out != null) {
@@ -190,28 +251,32 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
                 out.close();
                 out = null;
             }
-        } catch (IOException e) {
+        } catch (Throwable e) {
             LOG.warn("Exception occurs when closing file {}. Cleaning up.", path, e);
-            abort();
+            try {
+                abort();
+            } catch (Throwable t) {
+                e.addSuppressed(t);
+            }
             throw e;
         } finally {
             closed = true;
         }
     }
 
-    /** Abort executor to just have reference of path instead of whole writer. */
-    public static class AbortExecutor {
-
-        private final FileIO fileIO;
-        private final Path path;
-
-        private AbortExecutor(FileIO fileIO, Path path) {
-            this.fileIO = fileIO;
-            this.path = path;
+    protected long outputBytes() throws IOException {
+        if (outputBytes == null) {
+            outputBytes = fileIO.getFileSize(path);
         }
+        return outputBytes;
+    }
 
-        public void abort() {
-            fileIO.deleteQuietly(path);
-        }
+    /**
+     * Returns cached writer metadata from the format writer. Available after {@link #close()} is
+     * called. Can be used by stats extractors to avoid re-reading the file from object storage.
+     */
+    @Nullable
+    protected Object writerMetadata() {
+        return writerMetadata;
     }
 }

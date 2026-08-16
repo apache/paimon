@@ -30,6 +30,8 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -52,8 +54,9 @@ public class ExpirePartitionsActionITCase extends ActionITCaseBase {
         init(warehouse);
     }
 
-    @Test
-    public void testExpirePartitionsAction() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testExpirePartitionsAction(boolean forceStartFlinkJob) throws Exception {
         FileStoreTable table = prepareTable();
         TableScan.Plan plan = table.newReadBuilder().newScan().plan();
         List<String> actual = getResult(table.newReadBuilder().newRead(), plan.splits(), ROW_TYPE);
@@ -74,7 +77,9 @@ public class ExpirePartitionsActionITCase extends ActionITCaseBase {
                         "--expiration_time",
                         "1 d",
                         "--timestamp_formatter",
-                        "yyyy-MM-dd")
+                        "yyyy-MM-dd",
+                        "--force_start_flink_job",
+                        Boolean.toString(forceStartFlinkJob))
                 .run();
         SnapshotManager snapshotManager = getFileStoreTable(tableName).snapshotManager();
         Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());

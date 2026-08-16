@@ -23,6 +23,7 @@ import org.apache.paimon.spark.catalyst.plans.logical.{CreatePaimonView, DropPai
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.analysis.{CTESubstitution, ResolvedNamespace, UnresolvedDBObjectName, UnresolvedView}
+import org.apache.spark.sql.catalyst.analysis.SimpleAnalyzer.ResolveNamespace
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.connector.catalog.{CatalogManager, LookupCatalog}
@@ -59,17 +60,27 @@ case class RewritePaimonViewCommands(spark: SparkSession)
     case DropView(ResolvedIdent(resolved), ifExists: Boolean) =>
       DropPaimonView(resolved, ifExists)
 
-    case ShowViews(_, pattern, output) if catalogManager.currentCatalog.isInstanceOf[SupportView] =>
-      ShowPaimonViews(
-        ResolvedNamespace(catalogManager.currentCatalog, catalogManager.currentNamespace),
-        pattern,
-        output)
+    case ShowViews(namespace, pattern, output)
+        if catalogManager.currentCatalog.isInstanceOf[SupportView] =>
+      val resolvedNamespace = ResolveNamespace(catalogManager)(namespace).transform {
+        case r: ResolvedNamespace if r.namespace.isEmpty =>
+          r.copy(namespace = catalogManager.currentNamespace)
+      }
+      ShowPaimonViews(resolvedNamespace, pattern, output)
+  }
+
+  private def isTempView(nameParts: Seq[String]): Boolean = {
+    catalogManager.v1SessionCatalog.isTempView(nameParts)
   }
 
   private object ResolvedIdent {
     def unapply(unresolved: Any): Option[ResolvedIdentifier] = unresolved match {
+      case UnresolvedDBObjectName(ident, _) if isTempView(ident) =>
+        None
       case UnresolvedDBObjectName(CatalogAndIdentifier(viewCatalog: SupportView, ident), _) =>
         Some(ResolvedIdentifier(viewCatalog, ident))
+      case UnresolvedView(ident, _, true, _) if isTempView(ident) =>
+        None
       case UnresolvedView(CatalogAndIdentifier(viewCatalog: SupportView, ident), _, _, _) =>
         Some(ResolvedIdentifier(viewCatalog, ident))
       case _ =>

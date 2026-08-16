@@ -42,7 +42,7 @@ import java.util.Arrays;
  *  CALL sys.remove_unexisting_files(`table` => 'mydb.myt')
  *
  *  -- only check what files will be removed, but not really remove them (dry run)
- *  CALL sys.remove_unexisting_files(`table` => 'mydb.myt', `dry_run` = true)
+ *  CALL sys.remove_unexisting_files(`table` => 'mydb.myt', `dry_run` => true)
  * </code></pre>
  *
  * <p>Note that user is on his own risk using this procedure, which may cause data loss when used
@@ -85,7 +85,7 @@ public class RemoveUnexistingFilesProcedure extends BaseProcedure {
         Preconditions.checkArgument(
                 tableId != null && !tableId.isEmpty(),
                 "Cannot handle an empty tableId for argument %s",
-                tableId);
+                PARAMETERS[0].name());
         org.apache.paimon.catalog.Identifier identifier =
                 org.apache.paimon.catalog.Identifier.fromString(
                         toIdentifier(args.getString(0), PARAMETERS[0].name()).toString());

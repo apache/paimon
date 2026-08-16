@@ -18,6 +18,7 @@
 
 package org.apache.paimon.partition;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.factories.FactoryUtil;
@@ -26,13 +27,18 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.shade.guava30.com.google.common.base.Supplier;
 import org.apache.paimon.shade.guava30.com.google.common.base.Suppliers;
 
+import java.util.Optional;
+
 /** Factory to create a {@link PartitionExpireStrategy}. */
 public interface PartitionExpireStrategyFactory {
 
     PartitionExpireStrategy create(
-            CatalogLoader catalogLoader, Identifier identifier, RowType partitionType);
+            CatalogLoader catalogLoader,
+            Identifier identifier,
+            CoreOptions options,
+            RowType partitionType);
 
-    Supplier<PartitionExpireStrategyFactory> INSTANCE =
+    Supplier<Optional<PartitionExpireStrategyFactory>> INSTANCE =
             Suppliers.memoize(
                     () ->
                             FactoryUtil.discoverSingletonFactory(

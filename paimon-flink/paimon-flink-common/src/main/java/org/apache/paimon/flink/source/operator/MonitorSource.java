@@ -21,9 +21,12 @@ package org.apache.paimon.flink.source.operator;
 import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.source.AbstractNonCoordinatedSource;
 import org.apache.paimon.flink.source.AbstractNonCoordinatedSourceReader;
+import org.apache.paimon.flink.source.NoOpEnumState;
+import org.apache.paimon.flink.source.PaimonDataStreamSource;
 import org.apache.paimon.flink.source.SimpleSourceSplit;
 import org.apache.paimon.flink.source.SplitListState;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
@@ -31,12 +34,14 @@ import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.types.RowType;
 
 import org.apache.flink.api.common.eventtime.Watermark;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.ReaderOutput;
+import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.api.connector.source.SourceReader;
 import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.api.java.tuple.Tuple2;
@@ -56,6 +61,7 @@ import java.util.List;
 import java.util.NavigableMap;
 import java.util.OptionalLong;
 import java.util.TreeMap;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * This is the single (non-parallel) monitoring task, it is responsible for:
@@ -130,6 +136,7 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
                                         Long.parseLong(x.split(":")[0]),
                                         Long.parseLong(x.split(":")[1])));
         private final TreeMap<Long, Long> nextSnapshotPerCheckpoint = new TreeMap<>();
+        private CompletableFuture<Void> availableFuture = CompletableFuture.completedFuture(null);
 
         @Override
         public void notifyCheckpointComplete(long checkpointId) {
@@ -186,6 +193,11 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
         }
 
         @Override
+        public CompletableFuture<Void> isAvailable() {
+            return availableFuture;
+        }
+
+        @Override
         public InputStatus pollNext(ReaderOutput<Split> readerOutput) throws Exception {
             boolean isEmpty;
             try {
@@ -209,7 +221,15 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
             }
 
             if (isEmpty) {
-                Thread.sleep(monitorInterval);
+                availableFuture =
+                        CompletableFuture.runAsync(
+                                () -> {
+                                    try {
+                                        Thread.sleep(monitorInterval);
+                                    } catch (InterruptedException ignored) {
+                                    }
+                                });
+                return InputStatus.NOTHING_AVAILABLE;
             }
             return InputStatus.MORE_AVAILABLE;
         }
@@ -227,13 +247,75 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
             NestedProjectedRowData nestedProjectedRowData,
             boolean isBounded,
             @Nullable Long limit) {
+        return buildSource(
+                env,
+                name,
+                typeInfo,
+                readBuilder,
+                monitorInterval,
+                emitSnapshotWatermark,
+                shuffleBucketWithPartition,
+                unordered,
+                nestedProjectedRowData,
+                isBounded,
+                limit,
+                null);
+    }
+
+    public static DataStream<RowData> buildSource(
+            StreamExecutionEnvironment env,
+            String name,
+            TypeInformation<RowData> typeInfo,
+            ReadBuilder readBuilder,
+            long monitorInterval,
+            boolean emitSnapshotWatermark,
+            boolean shuffleBucketWithPartition,
+            boolean unordered,
+            NestedProjectedRowData nestedProjectedRowData,
+            boolean isBounded,
+            @Nullable Long limit,
+            @Nullable Table table) {
+        return buildSource(
+                env,
+                name,
+                typeInfo,
+                readBuilder,
+                monitorInterval,
+                emitSnapshotWatermark,
+                shuffleBucketWithPartition,
+                unordered,
+                nestedProjectedRowData,
+                isBounded,
+                limit,
+                table,
+                readBuilder.readType(),
+                false);
+    }
+
+    public static DataStream<RowData> buildSource(
+            StreamExecutionEnvironment env,
+            String name,
+            TypeInformation<RowData> typeInfo,
+            ReadBuilder readBuilder,
+            long monitorInterval,
+            boolean emitSnapshotWatermark,
+            boolean shuffleBucketWithPartition,
+            boolean unordered,
+            NestedProjectedRowData nestedProjectedRowData,
+            boolean isBounded,
+            @Nullable Long limit,
+            @Nullable Table table,
+            RowType readType,
+            boolean blobAsDescriptor) {
+        MonitorSource monitorSource =
+                new MonitorSource(readBuilder, monitorInterval, emitSnapshotWatermark, isBounded);
+        Source<Split, SimpleSourceSplit, NoOpEnumState> source = monitorSource;
+        if (table != null) {
+            source = new PaimonDataStreamSource<>(monitorSource, table);
+        }
         SingleOutputStreamOperator<Split> operator =
                 env.fromSource(
-                                new MonitorSource(
-                                        readBuilder,
-                                        monitorInterval,
-                                        emitSnapshotWatermark,
-                                        isBounded),
+                                source,
                                 WatermarkStrategy.noWatermarks(),
                                 name + "-Monitor",
                                 new JavaTypeInfo<>(Split.class))
@@ -247,7 +329,12 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
         return sourceDataStream.transform(
                 name + "-Reader",
                 typeInfo,
-                new ReadOperator(readBuilder::newRead, nestedProjectedRowData, limit));
+                new ReadOperator(
+                        readBuilder::newRead,
+                        nestedProjectedRowData,
+                        limit,
+                        readType,
+                        blobAsDescriptor));
     }
 
     private static DataStream<Split> shuffleUnordered(

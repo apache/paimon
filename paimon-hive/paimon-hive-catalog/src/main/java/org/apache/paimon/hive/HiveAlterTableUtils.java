@@ -29,22 +29,34 @@ import org.apache.thrift.TException;
 /** Utils for hive alter table. */
 public class HiveAlterTableUtils {
 
-    public static void alterTable(IMetaStoreClient client, Identifier identifier, Table table)
+    public static void alterTable(
+            IMetaStoreClient client,
+            Identifier identifier,
+            Table table,
+            boolean skipUpdateStats,
+            boolean cascade)
             throws TException {
         try {
-            alterTableWithEnv(client, identifier, table);
+            alterTableWithEnv(client, identifier, table, skipUpdateStats, cascade);
         } catch (NoClassDefFoundError | NoSuchMethodError e) {
-            alterTableWithoutEnv(client, identifier, table);
+            alterTableWithoutEnv(client, identifier, table, cascade);
         }
     }
 
     private static void alterTableWithEnv(
-            IMetaStoreClient client, Identifier identifier, Table table) throws TException {
+            IMetaStoreClient client,
+            Identifier identifier,
+            Table table,
+            boolean skipUpdateStats,
+            boolean cascade)
+            throws TException {
         boolean skipHiveUpdateStats =
-                Boolean.parseBoolean(
-                        table.getParameters().get(StatsSetupConst.DO_NOT_UPDATE_STATS));
+                Boolean.parseBoolean(table.getParameters().get(StatsSetupConst.DO_NOT_UPDATE_STATS))
+                        || skipUpdateStats;
         EnvironmentContext environmentContext = new EnvironmentContext();
-        environmentContext.putToProperties(StatsSetupConst.CASCADE, "true");
+        if (cascade) {
+            environmentContext.putToProperties(StatsSetupConst.CASCADE, "true");
+        }
         environmentContext.putToProperties(
                 StatsSetupConst.DO_NOT_UPDATE_STATS, Boolean.toString(skipHiveUpdateStats));
         client.alter_table_with_environmentContext(
@@ -52,7 +64,8 @@ public class HiveAlterTableUtils {
     }
 
     private static void alterTableWithoutEnv(
-            IMetaStoreClient client, Identifier identifier, Table table) throws TException {
-        client.alter_table(identifier.getDatabaseName(), identifier.getTableName(), table, true);
+            IMetaStoreClient client, Identifier identifier, Table table, boolean cascade)
+            throws TException {
+        client.alter_table(identifier.getDatabaseName(), identifier.getTableName(), table, cascade);
     }
 }

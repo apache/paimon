@@ -1012,4 +1012,108 @@ public final class BinaryString extends BinarySection implements Comparable<Bina
     public static String defaultDecodeUTF8(byte[] bytes, int offset, int len) {
         return new String(bytes, offset, len, StandardCharsets.UTF_8);
     }
+
+    /**
+     * Concatenates input strings together into a single string. Returns NULL if any argument is
+     * NULL.
+     */
+    public static BinaryString concat(BinaryString... inputs) {
+        return concat(Arrays.asList(inputs));
+    }
+
+    /**
+     * Concatenates input strings together into a single string. Returns NULL if any argument is
+     * NULL.
+     */
+    public static BinaryString concat(Iterable<BinaryString> inputs) {
+        // Compute the total length of the result.
+        int totalLength = 0;
+        for (BinaryString input : inputs) {
+            if (input == null) {
+                return null;
+            }
+
+            totalLength += input.getSizeInBytes();
+        }
+
+        // Allocate a new byte array, and copy the inputs one by one into it.
+        final byte[] result = new byte[totalLength];
+        int offset = 0;
+        for (BinaryString input : inputs) {
+            if (input != null) {
+                int len = input.getSizeInBytes();
+                MemorySegmentUtils.copyToBytes(
+                        input.getSegments(), input.getOffset(), result, offset, len);
+                offset += len;
+            }
+        }
+        return fromBytes(result);
+    }
+
+    /**
+     * Concatenates input strings together into a single string using the separator. Returns NULL If
+     * the separator is NULL.
+     *
+     * <p>Note: CONCAT_WS() does not skip any empty strings, however it does skip any NULL values
+     * after the separator. For example, concat_ws(",", "a", null, "c") would yield "a,c".
+     */
+    public static BinaryString concatWs(BinaryString separator, BinaryString... inputs) {
+        return concatWs(separator, Arrays.asList(inputs));
+    }
+
+    /**
+     * Concatenates input strings together into a single string using the separator. Returns NULL If
+     * the separator is NULL.
+     *
+     * <p>Note: CONCAT_WS() does not skip any empty strings, however it does skip any NULL values
+     * after the separator. For example, concat_ws(",", "a", null, "c") would yield "a,c".
+     */
+    public static BinaryString concatWs(BinaryString separator, Iterable<BinaryString> inputs) {
+        if (null == separator) {
+            return null;
+        }
+
+        int numInputBytes = 0; // total number of bytes from the inputs
+        int numInputs = 0; // number of non-null inputs
+        for (BinaryString input : inputs) {
+            if (input != null) {
+                numInputBytes += input.getSizeInBytes();
+                numInputs++;
+            }
+        }
+
+        if (numInputs == 0) {
+            // Return an empty string if there is no input, or all the inputs are null.
+            return EMPTY_UTF8;
+        }
+
+        // Allocate a new byte array, and copy the inputs one by one into it.
+        // The size of the new array is the size of all inputs, plus the separators.
+        final byte[] result =
+                new byte[numInputBytes + (numInputs - 1) * separator.getSizeInBytes()];
+        int offset = 0;
+
+        int j = 0;
+        for (BinaryString input : inputs) {
+            if (input != null) {
+                int len = input.getSizeInBytes();
+                MemorySegmentUtils.copyToBytes(
+                        input.getSegments(), input.getOffset(), result, offset, len);
+                offset += len;
+
+                j++;
+                // Add separator if this is not the last input.
+                if (j < numInputs) {
+                    MemorySegmentUtils.copyToBytes(
+                            separator.getSegments(),
+                            separator.getOffset(),
+                            result,
+                            offset,
+                            separator.getSizeInBytes());
+                    offset += separator.getSizeInBytes();
+                }
+            }
+        }
+        return fromBytes(result);
+    }
 }

@@ -19,6 +19,8 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.operation.metrics.CommitMetrics;
@@ -26,15 +28,28 @@ import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.utils.FileStorePathFactory;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 import java.util.Map;
 
 /** Commit operation which provides commit and overwrite. */
 public interface FileStoreCommit extends AutoCloseable {
 
+    FileStoreCommit withIOManager(IOManager ioManager);
+
     FileStoreCommit ignoreEmptyCommit(boolean ignoreEmptyCommit);
 
     FileStoreCommit withPartitionExpire(PartitionExpire partitionExpire);
+
+    FileStoreCommit appendCommitCheckConflict(boolean appendCommitCheckConflict);
+
+    FileStoreCommit rowIdCheckConflict(@Nullable Long rowIdCheckFromSnapshot);
+
+    FileStoreCommit rowIdCheckConflictForMaterializeDvCompaction(
+            @Nullable Long rowIdCheckFromSnapshot);
+
+    FileStoreCommit withOperation(Snapshot.Operation operation);
 
     /** Find out which committables need to be retried when recovering from the failure. */
     List<ManifestCommittable> filterCommitted(List<ManifestCommittable> committables);
@@ -50,10 +65,10 @@ public interface FileStoreCommit extends AutoCloseable {
      *     note that this partition does not necessarily equal to the partitions of the newly added
      *     key-values. This is just the partition to be cleaned up.
      */
-    int overwrite(
-            Map<String, String> partition,
-            ManifestCommittable committable,
-            Map<String, String> properties);
+    int overwritePartition(Map<String, String> partition, ManifestCommittable committable);
+
+    /** Overwrite from manifest committable and specified partitions. */
+    int overwriteStaticPartitions(List<BinaryRow> partitions, ManifestCommittable committable);
 
     /**
      * Drop multiple partitions. The {@link Snapshot.CommitKind} of generated snapshot is {@link
@@ -67,6 +82,9 @@ public interface FileStoreCommit extends AutoCloseable {
 
     /** Compact the manifest entries only. */
     void compactManifest();
+
+    /** Roll back to the target snapshot and materialize it as the latest snapshot. */
+    boolean rollbackToAsLatest(Snapshot targetSnapshot);
 
     /** Abort an unsuccessful commit. The data files will be deleted. */
     void abort(List<CommitMessage> commitMessages);

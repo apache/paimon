@@ -1,20 +1,19 @@
-################################################################################
-#  Licensed to the Apache Software Foundation (ASF) under one
-#  or more contributor license agreements.  See the NOTICE file
-#  distributed with this work for additional information
-#  regarding copyright ownership.  The ASF licenses this file
-#  to you under the Apache License, Version 2.0 (the
-#  "License"); you may not use this file except in compliance
-#  with the License.  You may obtain a copy of the License at
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#   http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-# limitations under the License.
-################################################################################
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
 
 from typing import Any, List, Optional
 
@@ -101,8 +100,21 @@ class PredicateBuilder:
         """Create a between predicate."""
         return self._build_predicate('between', field, [included_lower_bound, included_upper_bound])
 
-    def and_predicates(self, predicates: List[Predicate]) -> Predicate:
+    def not_between(self, field: str, included_lower_bound: Any, included_upper_bound: Any) -> Predicate:
+        """Create a not-between predicate."""
+        return self._build_predicate('notBetween', field, [included_lower_bound, included_upper_bound])
+
+    def like(self, field: str, pattern_literal: Any) -> Predicate:
+        """Create a SQL LIKE predicate. Supports '%' (any sequence) and '_' (any single char)."""
+        return self._build_predicate('like', field, [pattern_literal])
+
+    @staticmethod
+    def and_predicates(predicates: List[Predicate]) -> Optional[Predicate]:
         """Create an AND predicate from multiple predicates."""
+        if len(predicates) == 0:
+            return None
+        if len(predicates) == 1:
+            return predicates[0]
         return Predicate(
             method='and',
             index=None,
@@ -110,8 +122,13 @@ class PredicateBuilder:
             literals=predicates
         )
 
-    def or_predicates(self, predicates: List[Predicate]) -> Predicate:
+    @staticmethod
+    def or_predicates(predicates: List[Predicate]) -> Optional[Predicate]:
         """Create an OR predicate from multiple predicates."""
+        if len(predicates) == 0:
+            return None
+        if len(predicates) == 1:
+            return predicates[0]
         return Predicate(
             method='or',
             index=None,

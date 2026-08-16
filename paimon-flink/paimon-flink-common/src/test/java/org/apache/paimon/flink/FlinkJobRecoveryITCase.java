@@ -254,7 +254,7 @@ public class FlinkJobRecoveryITCase extends CatalogITCaseBase {
                                 "CREATE TABLE IF NOT EXISTS `%s` (k INT, f1 STRING, pt STRING, PRIMARY KEY(k, pt) NOT ENFORCED) WITH ('bucket'='-1', 'commit.force-create-snapshot'='true')",
                                 tableName));
                 return;
-            case CROSS_PARTITION:
+            case KEY_DYNAMIC:
                 batchSql(
                         String.format(
                                 "CREATE TABLE IF NOT EXISTS `%s` (k INT, f1 STRING, pt STRING, PRIMARY KEY(k) NOT ENFORCED) WITH ('bucket'='-1', 'commit.force-create-snapshot'='true')",

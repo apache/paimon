@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.operation.ManifestCompactDryRun;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.utils.ProcedureUtils;
@@ -27,6 +28,8 @@ import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
 import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
+
+import javax.annotation.Nullable;
 
 import java.util.HashMap;
 
@@ -43,9 +46,29 @@ public class CompactManifestProcedure extends ProcedureBase {
     @ProcedureHint(
             argument = {
                 @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
-                @ArgumentHint(name = "options", type = @DataTypeHint("STRING"), isOptional = true)
+                @ArgumentHint(name = "options", type = @DataTypeHint("STRING"), isOptional = true),
+                @ArgumentHint(name = "dry_run", type = @DataTypeHint("BOOLEAN"), isOptional = true),
+                @ArgumentHint(
+                        name = "manifest_sort_enabled",
+                        type = @DataTypeHint("BOOLEAN"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "manifest_sort_partition_field",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "manifest_sort_max_rewrite_size",
+                        type = @DataTypeHint("STRING"),
+                        isOptional = true)
             })
-    public String[] call(ProcedureContext procedureContext, String tableId, String options)
+    public String[] call(
+            ProcedureContext procedureContext,
+            String tableId,
+            @Nullable String options,
+            @Nullable Boolean dryRun,
+            @Nullable Boolean manifestSortEnabled,
+            @Nullable String manifestSortPartitionField,
+            @Nullable String manifestSortMaxRewriteSize)
             throws Exception {
 
         FileStoreTable table = (FileStoreTable) table(tableId);
@@ -53,8 +76,24 @@ public class CompactManifestProcedure extends ProcedureBase {
         ProcedureUtils.putIfNotEmpty(
                 dynamicOptions, CoreOptions.COMMIT_USER_PREFIX.key(), COMMIT_USER);
         ProcedureUtils.putAllOptions(dynamicOptions, options);
+        if (manifestSortEnabled != null) {
+            dynamicOptions.put(
+                    CoreOptions.MANIFEST_SORT_ENABLED.key(), Boolean.toString(manifestSortEnabled));
+        }
+        if (manifestSortPartitionField != null) {
+            dynamicOptions.put(
+                    CoreOptions.MANIFEST_SORT_PARTITION_FIELD.key(), manifestSortPartitionField);
+        }
+        if (manifestSortMaxRewriteSize != null) {
+            dynamicOptions.put(
+                    CoreOptions.MANIFEST_SORT_MAX_REWRITE_SIZE.key(), manifestSortMaxRewriteSize);
+        }
 
         table = table.copy(dynamicOptions);
+
+        if (dryRun != null && dryRun) {
+            return new String[] {ManifestCompactDryRun.execute(table)};
+        }
 
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.compactManifests();

@@ -36,6 +36,8 @@ public interface WritableDoubleVector extends WritableColumnVector, DoubleColumn
      */
     void setDoublesFromBinary(int rowId, int count, byte[] src, int srcIndex);
 
+    void appendDouble(double v);
+
     /** Fill the column vector with the provided value. */
     void fill(double value);
 }

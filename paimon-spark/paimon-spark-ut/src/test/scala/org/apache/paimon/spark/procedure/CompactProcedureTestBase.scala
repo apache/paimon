@@ -18,21 +18,45 @@
 
 package org.apache.paimon.spark.procedure
 
+import org.apache.paimon.Snapshot
 import org.apache.paimon.Snapshot.CommitKind
+import org.apache.paimon.append.dataevolution.{DataEvolutionCompactTask, DataEvolutionNormalCompactTask}
+import org.apache.paimon.data.BinaryRow
+import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX
+import org.apache.paimon.format.blob.BlobFileFormat
 import org.apache.paimon.fs.Path
+import org.apache.paimon.io.DataFileMeta
+import org.apache.paimon.manifest.FileSource
+import org.apache.paimon.operation.commit.DataEvolutionRowRangeConflictException
+import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.spark.catalyst.analysis.PaimonRelation
+import org.apache.paimon.spark.commands.{DataEvolutionCompactMergeConflictRewriter, DataEvolutionPaimonWriter, PaimonSparkWriter}
+import org.apache.paimon.spark.commands.CompactRowIdRangeIndex
+import org.apache.paimon.spark.utils.SparkProcedureUtils
 import org.apache.paimon.table.FileStoreTable
-import org.apache.paimon.table.source.DataSplit
+import org.apache.paimon.table.source.{DataSplit, EndOfScanException, IncrementalSplit}
+import org.apache.paimon.table.source.snapshot.SnapshotReader
+import org.apache.paimon.utils.Range
 
-import org.apache.spark.scheduler.{SparkListener, SparkListenerJobEnd, SparkListenerStageCompleted, SparkListenerStageSubmitted}
+import org.apache.spark.api.java.JavaSparkContext
+import org.apache.spark.scheduler.{SparkListener, SparkListenerStageSubmitted}
 import org.apache.spark.sql.{Dataset, Row}
-import org.apache.spark.sql.execution.streaming.MemoryStream
+import org.apache.spark.sql.functions.{col, udf}
+import org.apache.spark.sql.paimon.shims.memstream.MemoryStream
 import org.apache.spark.sql.streaming.StreamTest
 import org.assertj.core.api.Assertions
+import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.scalatest.time.Span
 
+import java.lang.reflect.{InvocationHandler, Method, Proxy}
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import java.util
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicLong, AtomicReference}
 
 import scala.collection.JavaConverters._
+import scala.util.Random
 
 /** Test compact procedure. See [[CompactProcedure]]. */
 abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamTest {
@@ -40,6 +64,29 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
   import testImplicits._
 
   // ----------------------- Minor Compact -----------------------
+
+  test("Paimon Procedure: skip partition entries scan without partition idle time") {
+    val partitionEntriesScanned = new AtomicBoolean(false)
+    val snapshotReader = Proxy
+      .newProxyInstance(
+        classOf[SnapshotReader].getClassLoader,
+        Array(classOf[SnapshotReader]),
+        new InvocationHandler {
+          override def invoke(proxy: Any, method: Method, args: Array[AnyRef]): AnyRef = {
+            if (method.getName == "partitionEntries") {
+              partitionEntriesScanned.set(true)
+            }
+            null
+          }
+        }
+      )
+      .asInstanceOf[SnapshotReader]
+
+    val partitions = CompactProcedure.getPartitionsToCompact(snapshotReader, null)
+
+    Assertions.assertThat(partitions.isEmpty).isTrue
+    Assertions.assertThat(partitionEntriesScanned.get()).isFalse
+  }
 
   test("Paimon Procedure: compact aware bucket pk table with minor compact strategy") {
     withTable("T") {
@@ -342,6 +389,19 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     }
   }
 
+  test("Paimon Procedure: sort compact with partition filter") {
+    withTable("t") {
+      sql("CREATE TABLE t (a INT, pt INT) PARTITIONED BY (pt)")
+      sql("INSERT INTO t VALUES (1, 1)")
+      sql("INSERT INTO t VALUES (2, 1)")
+      sql(
+        "CALL sys.compact(table => 't', order_strategy => 'order', where => 'pt = 1', order_by => 'a')")
+      val table = loadTable("t")
+      assert(table.latestSnapshot().get().commitKind.equals(CommitKind.OVERWRITE))
+      checkAnswer(sql("SELECT * FROM t ORDER BY a"), Seq(Row(1, 1), Row(2, 1)))
+    }
+  }
+
   test("Paimon Procedure: compact for pk") {
     failAfter(streamingTimeout) {
       withTempDir {
@@ -427,6 +487,42 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
             Row(1, "a", "p1") :: Row(2, "b", "p2") :: Row(3, "c", "p1") :: Row(4, "d", "p2") :: Nil)
         }
       })
+  }
+
+  test("Paimon Procedure: compact specified bucket ranges") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT, value STRING)
+                  |TBLPROPERTIES ('primary-key'='id', 'bucket'='4', 'write-only'='true')
+                  |""".stripMargin)
+
+      val table = loadTable("T")
+      spark.sql("INSERT INTO T SELECT id, 'first' FROM range(0, 40)")
+      spark.sql("INSERT INTO T SELECT id, 'second' FROM range(40, 80)")
+
+      spark.sql("CALL sys.compact(table => 'T', compact_strategy => 'full', buckets => '0-1')")
+
+      val filesPerBucket = table.newSnapshotReader.read.dataSplits.asScala
+        .map(split => split.bucket -> split.dataFiles.size)
+        .toMap
+      Assertions.assertThat(filesPerBucket(0)).isEqualTo(1)
+      Assertions.assertThat(filesPerBucket(1)).isEqualTo(1)
+      Assertions.assertThat(filesPerBucket(2)).isEqualTo(2)
+      Assertions.assertThat(filesPerBucket(3)).isEqualTo(2)
+    }
+  }
+
+  test("Paimon Procedure: reject buckets for dynamic bucket table") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT, value STRING)
+                  |TBLPROPERTIES ('primary-key'='id', 'bucket'='-1', 'write-only'='true')
+                  |""".stripMargin)
+
+      assertThatThrownBy(
+        () => spark.sql("CALL sys.compact(table => 'T', buckets => '0')").collect())
+        .hasMessageContaining("Specifying buckets is only supported for fixed-bucket tables")
+    }
   }
 
   test("Paimon Procedure: compact aware bucket pk table with many small files") {
@@ -521,7 +617,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
 
     assert(intercept[IllegalArgumentException] {
       spark.sql("CALL sys.compact(table => 'T', partitions => 'id = 1')")
-    }.getMessage.contains("Only partition predicate is supported"))
+    }.getMessage.contains("Partition keys [id] are invalid"))
 
     assert(intercept[IllegalArgumentException] {
       spark.sql("CALL sys.compact(table => 'T', where => 'id > 1 AND pt = \"p1\"')")
@@ -576,7 +672,7 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
   test("Paimon test: toWhere method in CompactProcedure") {
     val conditions = "f0=0,f1=0,f2=0;f0=1,f1=1,f2=1;f0=1,f1=2,f2=2;f3=3"
 
-    val where = CompactProcedure.toWhere(conditions)
+    val where = SparkProcedureUtils.toWhere(conditions)
     val whereExpected =
       "(f0=0 AND f1=0 AND f2=0) OR (f0=1 AND f1=1 AND f2=1) OR (f0=1 AND f1=2 AND f2=2) OR (f3=3)"
 
@@ -613,6 +709,118 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       spark.sql(s"SELECT * FROM T ORDER BY id"),
       Row(1, "a", "p1") :: Row(2, "b", "p2") :: Row(3, "c", "p1") :: Row(4, "d", "p2") ::
         Row(5, "e", "p1") :: Row(6, "f", "p2") :: Nil)
+  }
+
+  test("Paimon Procedure: compact skips expired partitions for aware bucket table") {
+    Seq(1, -1).foreach {
+      bucket =>
+        withClue(s"bucket=$bucket") {
+          withTable("T") {
+            createPartitionExpireTable(bucket, "values-time", endInputCheck = false)
+            val table = loadTable("T")
+            val (expiredDt, activeDt) = writeExpiredAndActivePartitions()
+
+            spark.sql(
+              "CALL sys.compact(table => 'T', " +
+                "options => 'compaction.skip-expired-partitions=true')")
+
+            Assertions.assertThat(lastSnapshotCommand(table)).isEqualTo(CommitKind.COMPACT)
+            val fileCounts = partitionFileCounts(table)
+            Assertions.assertThat(fileCounts(expiredDt)).isEqualTo(2)
+            Assertions.assertThat(fileCounts(activeDt)).isEqualTo(1)
+          }
+        }
+    }
+  }
+
+  test("Paimon Procedure: compact does not skip expired partitions by default") {
+    withTable("T") {
+      createPartitionExpireTable(1, "values-time", endInputCheck = false)
+      val table = loadTable("T")
+      val (expiredDt, activeDt) = writeExpiredAndActivePartitions()
+
+      spark.sql("CALL sys.compact(table => 'T')")
+
+      val fileCounts = partitionFileCounts(table)
+      Assertions.assertThat(fileCounts(expiredDt)).isEqualTo(1)
+      Assertions.assertThat(fileCounts(activeDt)).isEqualTo(1)
+    }
+  }
+
+  test("Paimon Procedure: compact skip expired partitions ignores update-time strategy") {
+    withTable("T") {
+      createPartitionExpireTable(1, "update-time", endInputCheck = false)
+      val table = loadTable("T")
+      val (expiredDt, activeDt) = writeExpiredAndActivePartitions()
+
+      spark.sql(
+        "CALL sys.compact(table => 'T', " +
+          "options => 'compaction.skip-expired-partitions=true')")
+
+      val fileCounts = partitionFileCounts(table)
+      Assertions.assertThat(fileCounts(expiredDt)).isEqualTo(1)
+      Assertions.assertThat(fileCounts(activeDt)).isEqualTo(1)
+    }
+  }
+
+  test("Paimon Procedure: compact end input still expires skipped partitions") {
+    withTable("T") {
+      createPartitionExpireTable(1, "values-time", endInputCheck = false)
+      val table = loadTable("T")
+      val (_, activeDt) = writeExpiredAndActivePartitions()
+
+      spark.sql(
+        "ALTER TABLE T SET TBLPROPERTIES (" +
+          "'end-input.check-partition-expire'='true')")
+
+      spark.sql(
+        "CALL sys.compact(table => 'T', " +
+          "options => 'compaction.skip-expired-partitions=true')")
+
+      val fileCounts = partitionFileCounts(table)
+      Assertions.assertThat(fileCounts.asJava).containsOnlyKeys(activeDt)
+      Assertions.assertThat(fileCounts(activeDt)).isEqualTo(1)
+    }
+  }
+
+  private def createPartitionExpireTable(
+      bucket: Int,
+      expirationStrategy: String,
+      endInputCheck: Boolean): Unit = {
+    val dynamicBucketOption =
+      if (bucket == -1) ", 'dynamic-bucket.initial-buckets'='1'" else ""
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, value STRING, dt STRING)
+                 |TBLPROPERTIES (
+                 |  'primary-key'='id, dt',
+                 |  'bucket'='$bucket',
+                 |  'write-only'='true',
+                 |  'partition.expiration-time'='7 d',
+                 |  'partition.expiration-strategy'='$expirationStrategy',
+                 |  'partition.timestamp-formatter'='yyyyMMdd',
+                 |  'partition.expiration-check-interval'='999 d',
+                 |  'end-input.check-partition-expire'='$endInputCheck'
+                 |  $dynamicBucketOption)
+                 |PARTITIONED BY (dt)
+                 |""".stripMargin)
+  }
+
+  private def writeExpiredAndActivePartitions(): (String, String) = {
+    val formatter = DateTimeFormatter.ofPattern("yyyyMMdd")
+    val expiredDt = LocalDate.now.minusDays(30).format(formatter)
+    val activeDt = LocalDate.now.format(formatter)
+    spark.sql(s"INSERT INTO T VALUES (1, 'old', '$expiredDt'), (1, 'new', '$activeDt')")
+    spark.sql(s"INSERT INTO T VALUES (2, 'old', '$expiredDt'), (2, 'new', '$activeDt')")
+    (expiredDt, activeDt)
+  }
+
+  private def partitionFileCounts(table: FileStoreTable): Map[String, Int] = {
+    table.newSnapshotReader.read.dataSplits.asScala
+      .groupBy(_.partition().getString(0).toString)
+      .map {
+        case (partition, splits) =>
+          partition -> splits.map(_.dataFiles().size()).sum
+      }
   }
 
   test("Paimon Procedure: compact with partition_idle_time for pk table") {
@@ -795,11 +1003,1577 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     }
   }
 
+  test("Paimon Procedure: cluster for unpartitioned table") {
+    failAfter(streamingTimeout) {
+      withTempDir {
+        checkpointDir =>
+          spark.sql(
+            s"""
+               |CREATE TABLE T (a INT, b INT, c STRING)
+               |TBLPROPERTIES ('bucket'='-1','num-levels'='6', 'num-sorted-run.compaction-trigger'='2', 'clustering.columns'='a,b', 'clustering.strategy'='zorder', 'clustering.incremental' = 'true')
+               |""".stripMargin)
+          val location = loadTable("T").location().toString
+
+          val inputData = MemoryStream[(Int, Int, String)]
+          val stream = inputData
+            .toDS()
+            .toDF("a", "b", "c")
+            .writeStream
+            .option("checkpointLocation", checkpointDir.getCanonicalPath)
+            .foreachBatch {
+              (batch: Dataset[Row], _: Long) =>
+                batch.write.format("paimon").mode("append").save(location)
+            }
+            .start()
+
+          val query = () => spark.sql("SELECT * FROM T")
+
+          try {
+            val random = new Random()
+            val randomStr = random.nextString(40)
+            // first write
+            inputData.addData((0, 0, randomStr))
+            inputData.addData((0, 1, randomStr))
+            inputData.addData((0, 2, randomStr))
+            inputData.addData((1, 0, randomStr))
+            inputData.addData((1, 1, randomStr))
+            inputData.addData((1, 2, randomStr))
+            inputData.addData((2, 0, randomStr))
+            inputData.addData((2, 1, randomStr))
+            inputData.addData((2, 2, randomStr))
+            stream.processAllAvailable()
+
+            val result = new util.ArrayList[Row]()
+            for (a <- 0 until 3) {
+              for (b <- 0 until 3) {
+                result.add(Row(a, b, randomStr))
+              }
+            }
+            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result)
+
+            // first cluster, the outputLevel should be 5
+            checkAnswer(spark.sql("CALL paimon.sys.compact(table => 'T')"), Row(true) :: Nil)
+
+            // first cluster result
+            val result2 = new util.ArrayList[Row]()
+            result2.add(0, Row(0, 0, randomStr))
+            result2.add(1, Row(0, 1, randomStr))
+            result2.add(2, Row(1, 0, randomStr))
+            result2.add(3, Row(1, 1, randomStr))
+            result2.add(4, Row(0, 2, randomStr))
+            result2.add(5, Row(1, 2, randomStr))
+            result2.add(6, Row(2, 0, randomStr))
+            result2.add(7, Row(2, 1, randomStr))
+            result2.add(8, Row(2, 2, randomStr))
+
+            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result2)
+
+            var clusteredTable = loadTable("T")
+            checkSnapshot(clusteredTable)
+            var dataSplits = clusteredTable.newSnapshotReader().read().dataSplits()
+            Assertions.assertThat(dataSplits.size()).isEqualTo(1)
+            Assertions.assertThat(dataSplits.get(0).dataFiles().size()).isEqualTo(1)
+            Assertions.assertThat(dataSplits.get(0).dataFiles().get(0).level()).isEqualTo(5)
+
+            // second write
+            inputData.addData((0, 3, null), (1, 3, null), (2, 3, null))
+            inputData.addData((3, 0, null), (3, 1, null), (3, 2, null), (3, 3, null))
+            stream.processAllAvailable()
+
+            val result3 = new util.ArrayList[Row]()
+            result3.addAll(result2)
+            for (a <- 0 until 3) {
+              result3.add(Row(a, 3, null))
+            }
+            for (b <- 0 until 4) {
+              result3.add(Row(3, b, null))
+            }
+
+            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result3)
+
+            // second cluster, the outputLevel should be 4
+            checkAnswer(spark.sql("CALL paimon.sys.compact(table => 'T')"), Row(true) :: Nil)
+            // second cluster result, level-5 and level-4 are individually ordered
+            val result4 = new util.ArrayList[Row]()
+            result4.addAll(result2)
+            result4.add(Row(0, 3, null))
+            result4.add(Row(1, 3, null))
+            result4.add(Row(3, 0, null))
+            result4.add(Row(3, 1, null))
+            result4.add(Row(2, 3, null))
+            result4.add(Row(3, 2, null))
+            result4.add(Row(3, 3, null))
+            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result4)
+
+            clusteredTable = loadTable("T")
+            checkSnapshot(clusteredTable)
+            dataSplits = clusteredTable.newSnapshotReader().read().dataSplits()
+            Assertions.assertThat(dataSplits.size()).isEqualTo(1)
+            Assertions.assertThat(dataSplits.get(0).dataFiles().size()).isEqualTo(2)
+            Assertions.assertThat(dataSplits.get(0).dataFiles().get(0).level()).isEqualTo(5)
+            Assertions.assertThat(dataSplits.get(0).dataFiles().get(1).level()).isEqualTo(4)
+
+            // full cluster
+            checkAnswer(
+              spark.sql("CALL paimon.sys.compact(table => 'T', compact_strategy => 'full')"),
+              Row(true) :: Nil)
+            val result5 = new util.ArrayList[Row]()
+            result5.add(Row(0, 0, randomStr))
+            result5.add(Row(0, 1, randomStr))
+            result5.add(Row(1, 0, randomStr))
+            result5.add(Row(1, 1, randomStr))
+            result5.add(Row(0, 2, randomStr))
+            result5.add(Row(0, 3, null))
+            result5.add(Row(1, 2, randomStr))
+            result5.add(Row(1, 3, null))
+            result5.add(Row(2, 0, randomStr))
+            result5.add(Row(2, 1, randomStr))
+            result5.add(Row(3, 0, null))
+            result5.add(Row(3, 1, null))
+            result5.add(Row(2, 2, randomStr))
+            result5.add(Row(2, 3, null))
+            result5.add(Row(3, 2, null))
+            result5.add(Row(3, 3, null))
+            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result5)
+
+            clusteredTable = loadTable("T")
+            checkSnapshot(clusteredTable)
+            dataSplits = clusteredTable.newSnapshotReader().read().dataSplits()
+            Assertions.assertThat(dataSplits.size()).isEqualTo(1)
+            Assertions.assertThat(dataSplits.get(0).dataFiles().size()).isEqualTo(1)
+            Assertions.assertThat(dataSplits.get(0).dataFiles().get(0).level()).isEqualTo(5)
+
+          } finally {
+            stream.stop()
+          }
+      }
+    }
+  }
+
+  test("Paimon Procedure: cluster for partitioned table") {
+    failAfter(streamingTimeout) {
+      withTempDir {
+        checkpointDir =>
+          spark.sql(
+            s"""
+               |CREATE TABLE T (a INT, b INT, c STRING, pt INT)
+               |PARTITIONED BY (pt)
+               |TBLPROPERTIES ('bucket'='-1', 'num-levels'='6', 'num-sorted-run.compaction-trigger'='2', 'clustering.columns'='a,b', 'clustering.strategy'='zorder', 'clustering.incremental' = 'true')
+               |""".stripMargin)
+          val location = loadTable("T").location().toString
+
+          val inputData = MemoryStream[(Int, Int, String, Int)]
+          val stream = inputData
+            .toDS()
+            .toDF("a", "b", "c", "pt")
+            .writeStream
+            .option("checkpointLocation", checkpointDir.getCanonicalPath)
+            .foreachBatch {
+              (batch: Dataset[Row], _: Long) =>
+                batch.write.format("paimon").mode("append").save(location)
+            }
+            .start()
+
+          val query = () => spark.sql("SELECT * FROM T ORDER BY pt")
+
+          try {
+            val random = new Random()
+            val randomStr = random.nextString(50)
+            // first write
+            for (pt <- 0 until 2) {
+              val c = if (pt == 0) randomStr else null
+              inputData.addData((0, 0, c, pt))
+              inputData.addData((0, 1, c, pt))
+              inputData.addData((0, 2, c, pt))
+              inputData.addData((1, 0, c, pt))
+              inputData.addData((1, 1, c, pt))
+              inputData.addData((1, 2, c, pt))
+              inputData.addData((2, 0, c, pt))
+              inputData.addData((2, 1, c, pt))
+              inputData.addData((2, 2, c, pt))
+            }
+            stream.processAllAvailable()
+
+            val result = new util.ArrayList[Row]()
+            for (pt <- 0 until 2) {
+              for (a <- 0 until 3) {
+                for (b <- 0 until 3) {
+                  val c = if (pt == 0) randomStr else null
+                  result.add(Row(a, b, c, pt))
+                }
+              }
+            }
+            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result)
+
+            // first cluster, the outputLevel should be 5
+            checkAnswer(spark.sql("CALL paimon.sys.compact(table => 'T')"), Row(true) :: Nil)
+
+            // first cluster result
+            val result2 = new util.ArrayList[Row]()
+            for (pt <- 0 until 2) {
+              val c = if (pt == 0) randomStr else null
+              result2.add(Row(0, 0, c, pt))
+              result2.add(Row(0, 1, c, pt))
+              result2.add(Row(1, 0, c, pt))
+              result2.add(Row(1, 1, c, pt))
+              result2.add(Row(0, 2, c, pt))
+              result2.add(Row(1, 2, c, pt))
+              result2.add(Row(2, 0, c, pt))
+              result2.add(Row(2, 1, c, pt))
+              result2.add(Row(2, 2, c, pt))
+            }
+
+            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result2)
+
+            var clusteredTable = loadTable("T")
+            checkSnapshot(clusteredTable)
+            var dataSplits = clusteredTable.newSnapshotReader().read().dataSplits()
+            Assertions.assertThat(dataSplits.size()).isEqualTo(2)
+            dataSplits.forEach(
+              dataSplit => {
+                Assertions.assertThat(dataSplit.dataFiles().size()).isEqualTo(1)
+                Assertions.assertThat(dataSplit.dataFiles().get(0).level()).isEqualTo(5)
+              })
+
+            // second write
+            for (pt <- 0 until 2) {
+              inputData.addData((0, 3, null, pt), (1, 3, null, pt), (2, 3, null, pt))
+              inputData.addData(
+                (3, 0, null, pt),
+                (3, 1, null, pt),
+                (3, 2, null, pt),
+                (3, 3, null, pt))
+            }
+            stream.processAllAvailable()
+
+            val result3 = new util.ArrayList[Row]()
+            for (pt <- 0 until 2) {
+              val c = if (pt == 0) randomStr else null
+              result3.add(Row(0, 0, c, pt))
+              result3.add(Row(0, 1, c, pt))
+              result3.add(Row(1, 0, c, pt))
+              result3.add(Row(1, 1, c, pt))
+              result3.add(Row(0, 2, c, pt))
+              result3.add(Row(1, 2, c, pt))
+              result3.add(Row(2, 0, c, pt))
+              result3.add(Row(2, 1, c, pt))
+              result3.add(Row(2, 2, c, pt))
+              for (a <- 0 until 3) {
+                result3.add(Row(a, 3, null, pt))
+              }
+              for (b <- 0 until 4) {
+                result3.add(Row(3, b, null, pt))
+              }
+            }
+            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result3)
+
+            // second cluster
+            checkAnswer(spark.sql("CALL paimon.sys.compact(table => 'T')"), Row(true) :: Nil)
+            val result4 = new util.ArrayList[Row]()
+            // for partition-0: only file in level-0 will be picked for clustering, outputLevel is 4
+            result4.add(Row(0, 0, randomStr, 0))
+            result4.add(Row(0, 1, randomStr, 0))
+            result4.add(Row(1, 0, randomStr, 0))
+            result4.add(Row(1, 1, randomStr, 0))
+            result4.add(Row(0, 2, randomStr, 0))
+            result4.add(Row(1, 2, randomStr, 0))
+            result4.add(Row(2, 0, randomStr, 0))
+            result4.add(Row(2, 1, randomStr, 0))
+            result4.add(Row(2, 2, randomStr, 0))
+            result4.add(Row(0, 3, null, 0))
+            result4.add(Row(1, 3, null, 0))
+            result4.add(Row(3, 0, null, 0))
+            result4.add(Row(3, 1, null, 0))
+            result4.add(Row(2, 3, null, 0))
+            result4.add(Row(3, 2, null, 0))
+            result4.add(Row(3, 3, null, 0))
+            // for partition-1:all files will be picked for clustering, outputLevel is 5
+            result4.add(Row(0, 0, null, 1))
+            result4.add(Row(0, 1, null, 1))
+            result4.add(Row(1, 0, null, 1))
+            result4.add(Row(1, 1, null, 1))
+            result4.add(Row(0, 2, null, 1))
+            result4.add(Row(0, 3, null, 1))
+            result4.add(Row(1, 2, null, 1))
+            result4.add(Row(1, 3, null, 1))
+            result4.add(Row(2, 0, null, 1))
+            result4.add(Row(2, 1, null, 1))
+            result4.add(Row(3, 0, null, 1))
+            result4.add(Row(3, 1, null, 1))
+            result4.add(Row(2, 2, null, 1))
+            result4.add(Row(2, 3, null, 1))
+            result4.add(Row(3, 2, null, 1))
+            result4.add(Row(3, 3, null, 1))
+
+            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result4)
+
+            clusteredTable = loadTable("T")
+            checkSnapshot(clusteredTable)
+            dataSplits = clusteredTable.newSnapshotReader().read().dataSplits()
+            Assertions.assertThat(dataSplits.size()).isEqualTo(2)
+            dataSplits.forEach(
+              dataSplit => {
+                if (dataSplit.partition().getInt(0) == 1) {
+                  // partition-1
+                  Assertions.assertThat(dataSplit.dataFiles().size()).isEqualTo(1)
+                  Assertions.assertThat(dataSplit.dataFiles().get(0).level()).isEqualTo(5)
+                } else {
+                  // partition-0
+                  Assertions.assertThat(dataSplit.dataFiles().size()).isEqualTo(2)
+                  Assertions.assertThat(dataSplit.dataFiles().get(0).level()).isEqualTo(5)
+                  Assertions.assertThat(dataSplit.dataFiles().get(1).level()).isEqualTo(4)
+                }
+              })
+          } finally {
+            stream.stop()
+          }
+      }
+    }
+  }
+
+  test("Paimon Procedure: cluster for partitioned table with partition filter") {
+    sql(
+      """
+        |CREATE TABLE T (a INT, b INT, pt INT)
+        |PARTITIONED BY (pt)
+        |TBLPROPERTIES (
+        |  'bucket'='-1', 'num-levels'='6', 'num-sorted-run.compaction-trigger'='2',
+        |  'clustering.columns'='a,b', 'clustering.strategy'='zorder', 'clustering.incremental' = 'true'
+        |)
+        |""".stripMargin)
+
+    sql("INSERT INTO T VALUES (0, 0, 0), (0, 0, 1)")
+    sql("INSERT INTO T VALUES (0, 1, 0), (0, 1, 1)")
+    sql("INSERT INTO T VALUES (0, 2, 0), (0, 2, 1)")
+    sql("INSERT INTO T VALUES (1, 0, 0), (1, 0, 1)")
+    sql("INSERT INTO T VALUES (1, 1, 0), (1, 1, 1)")
+    sql("INSERT INTO T VALUES (1, 2, 0), (1, 2, 1)")
+    sql("INSERT INTO T VALUES (2, 0, 0), (2, 0, 1)")
+    sql("INSERT INTO T VALUES (2, 1, 0), (2, 1, 1)")
+    sql("INSERT INTO T VALUES (2, 2, 0), (2, 2, 1)")
+
+    sql("CALL sys.compact(table => 'T', where => 'pt = 0')")
+    checkAnswer(
+      sql("select distinct partition, level from `T$files` order by partition"),
+      Seq(Row("{0}", 5), Row("{1}", 0))
+    )
+
+    sql("CALL sys.compact(table => 'T', where => 'pt = 1')")
+    checkAnswer(
+      sql("select distinct partition, level from `T$files` order by partition"),
+      Seq(Row("{0}", 5), Row("{1}", 5))
+    )
+  }
+
+  test("Paimon Procedure: cluster with deletion vectors") {
+    failAfter(Span(5, org.scalatest.time.Minutes)) {
+      withTempDir {
+        checkpointDir =>
+          spark.sql(
+            s"""
+               |CREATE TABLE T (a INT, b INT, c STRING)
+               |TBLPROPERTIES ('bucket'='-1', 'deletion-vectors.enabled'='true','num-levels'='6', 'num-sorted-run.compaction-trigger'='2', 'clustering.columns'='a,b', 'clustering.strategy'='zorder', 'clustering.incremental' = 'true')
+               |""".stripMargin)
+          val location = loadTable("T").location().toString
+
+          val inputData = MemoryStream[(Int, Int, String)]
+          val stream = inputData
+            .toDS()
+            .toDF("a", "b", "c")
+            .writeStream
+            .option("checkpointLocation", checkpointDir.getCanonicalPath)
+            .foreachBatch {
+              (batch: Dataset[Row], _: Long) =>
+                batch.write.format("paimon").mode("append").save(location)
+            }
+            .start()
+
+          val query = () => spark.sql("SELECT * FROM T")
+
+          try {
+            val random = new Random()
+            val randomStr = random.nextString(40)
+            // first write
+            inputData.addData((0, 0, randomStr))
+            inputData.addData((0, 1, randomStr))
+            inputData.addData((0, 2, randomStr))
+            inputData.addData((1, 0, randomStr))
+            inputData.addData((1, 1, randomStr))
+            inputData.addData((1, 2, randomStr))
+            inputData.addData((2, 0, randomStr))
+            inputData.addData((2, 1, randomStr))
+            inputData.addData((2, 2, randomStr))
+            stream.processAllAvailable()
+
+            val result = new util.ArrayList[Row]()
+            for (a <- 0 until 3) {
+              for (b <- 0 until 3) {
+                result.add(Row(a, b, randomStr))
+              }
+            }
+            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result)
+
+            // first cluster, the outputLevel should be 5
+            checkAnswer(spark.sql("CALL paimon.sys.compact(table => 'T')"), Row(true) :: Nil)
+
+            // first cluster result
+            val result2 = new util.ArrayList[Row]()
+            result2.add(0, Row(0, 0, randomStr))
+            result2.add(1, Row(0, 1, randomStr))
+            result2.add(2, Row(1, 0, randomStr))
+            result2.add(3, Row(1, 1, randomStr))
+            result2.add(4, Row(0, 2, randomStr))
+            result2.add(5, Row(1, 2, randomStr))
+            result2.add(6, Row(2, 0, randomStr))
+            result2.add(7, Row(2, 1, randomStr))
+            result2.add(8, Row(2, 2, randomStr))
+
+            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result2)
+
+            var clusteredTable = loadTable("T")
+            checkSnapshot(clusteredTable)
+            var dataSplits = clusteredTable.newSnapshotReader().read().dataSplits()
+            Assertions.assertThat(dataSplits.size()).isEqualTo(1)
+            Assertions.assertThat(dataSplits.get(0).dataFiles().size()).isEqualTo(1)
+            Assertions.assertThat(dataSplits.get(0).dataFiles().get(0).level()).isEqualTo(5)
+
+            // second write
+            inputData.addData((0, 3, null), (1, 3, null), (2, 3, null))
+            inputData.addData((3, 0, null), (3, 1, null), (3, 2, null), (3, 3, null))
+            stream.processAllAvailable()
+
+            // delete (0,0), which is in level-5 file
+            spark.sql("DELETE FROM T WHERE a=0 and b=0;").collect()
+            // delete (0,3), which is in level-0 file
+            spark.sql("DELETE FROM T WHERE a=0 and b=3;").collect()
+
+            val result3 = new util.ArrayList[Row]()
+            result3.addAll(result2.subList(1, result2.size()))
+            for (a <- 1 until 3) {
+              result3.add(Row(a, 3, null))
+            }
+            for (b <- 0 until 4) {
+              result3.add(Row(3, b, null))
+            }
+
+            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result3)
+
+            // second cluster, the outputLevel should be 4. dv index for level-0 will be updated
+            // and dv index for level-5 will be retained
+            checkAnswer(spark.sql("CALL paimon.sys.compact(table => 'T')"), Row(true) :: Nil)
+            // second cluster result, level-5 and level-4 are individually ordered
+            val result4 = new util.ArrayList[Row]()
+            result4.addAll(result2.subList(1, result2.size()))
+            result4.add(Row(1, 3, null))
+            result4.add(Row(3, 0, null))
+            result4.add(Row(3, 1, null))
+            result4.add(Row(2, 3, null))
+            result4.add(Row(3, 2, null))
+            result4.add(Row(3, 3, null))
+            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result4)
+
+            clusteredTable = loadTable("T")
+            checkSnapshot(clusteredTable)
+            dataSplits = clusteredTable.newSnapshotReader().read().dataSplits()
+            Assertions.assertThat(dataSplits.size()).isEqualTo(1)
+            Assertions.assertThat(dataSplits.get(0).dataFiles().size()).isEqualTo(2)
+            Assertions.assertThat(dataSplits.get(0).dataFiles().get(0).level()).isEqualTo(5)
+            Assertions.assertThat(dataSplits.get(0).deletionFiles().get().get(0)).isNotNull
+            Assertions.assertThat(dataSplits.get(0).dataFiles().get(1).level()).isEqualTo(4)
+            Assertions.assertThat(dataSplits.get(0).deletionFiles().get().get(1)).isNull()
+
+            // full cluster
+            checkAnswer(
+              spark.sql("CALL paimon.sys.compact(table => 'T', compact_strategy => 'full')"),
+              Row(true) :: Nil)
+            clusteredTable = loadTable("T")
+            checkSnapshot(clusteredTable)
+            dataSplits = clusteredTable.newSnapshotReader().read().dataSplits()
+            Assertions.assertThat(dataSplits.size()).isEqualTo(1)
+            Assertions.assertThat(dataSplits.get(0).dataFiles().size()).isEqualTo(1)
+            Assertions.assertThat(dataSplits.get(0).deletionFiles().get().get(0)).isNull()
+
+          } finally {
+            stream.stop()
+          }
+      }
+    }
+  }
+
+  test("Paimon Procedure: sort compact with null values in string clustering column") {
+    withTable("T") {
+      spark.sql(s"""
+                   |CREATE TABLE T (a STRING, b INT)
+                   |TBLPROPERTIES ('bucket'='-1')
+                   |""".stripMargin)
+
+      spark.sql("INSERT INTO T VALUES (null, 1), ('abc', 2), (null, 3), ('def', 4)")
+      spark.sql("INSERT INTO T VALUES ('ghi', 5), (null, 6)")
+
+      // zorder compact with null string clustering column should not NPE
+      checkAnswer(
+        spark.sql(
+          "CALL paimon.sys.compact(table => 'T', order_strategy => 'zorder', order_by => 'a,b')"),
+        Row(true) :: Nil)
+
+      val zorderResult = spark.sql("SELECT * FROM T").collect()
+      Assertions.assertThat(zorderResult.length).isEqualTo(6)
+
+      // hilbert compact with null string clustering column should not NPE
+      spark.sql("INSERT INTO T VALUES (null, 7), ('jkl', 8)")
+      checkAnswer(
+        spark.sql(
+          "CALL paimon.sys.compact(table => 'T', order_strategy => 'hilbert', order_by => 'a,b')"),
+        Row(true) :: Nil)
+
+      val hilbertResult = spark.sql("SELECT * FROM T").collect()
+      Assertions.assertThat(hilbertResult.length).isEqualTo(8)
+    }
+  }
+
+  test("Paimon Procedure: incremental clustering with local-sort mode") {
+    withTable("T") {
+      spark.sql(s"""
+                   |CREATE TABLE T (a INT, b INT, c STRING)
+                   |TBLPROPERTIES (
+                   |  'bucket'='-1',
+                   |  'num-levels'='4',
+                   |  'num-sorted-run.compaction-trigger'='2',
+                   |  'clustering.columns'='a',
+                   |  'clustering.incremental'='true',
+                   |  'clustering.incremental.mode'='local-sort'
+                   |)
+                   |""".stripMargin)
+
+      // Insert data in multiple batches to create multiple files
+      spark.sql("INSERT INTO T VALUES (5, 1, 'a')")
+      spark.sql("INSERT INTO T VALUES (3, 2, 'b')")
+      spark.sql("INSERT INTO T VALUES (1, 3, 'c')")
+      spark.sql("INSERT INTO T VALUES (2, 3, 'd')")
+      spark.sql(
+        "INSERT INTO T SELECT /*+ COALESCE(1) */ col1, col2, col3 FROM VALUES (8, 3, 'e'), (1, 4, 'f'), (2, 5, 'g') AS t(col1, col2, col3);")
+
+      checkAnswer(
+        spark.sql("SELECT a, b, c FROM T"),
+        Seq(
+          Row(5, 1, "a"),
+          Row(3, 2, "b"),
+          Row(1, 3, "c"),
+          Row(2, 3, "d"),
+          Row(8, 3, "e"),
+          Row(1, 4, "f"),
+          Row(2, 5, "g"))
+      )
+
+      val filesBeforeCompact = spark.sql("SELECT count(*) FROM `T$files`").collect()(0).getLong(0)
+      Assertions.assertThat(filesBeforeCompact).isEqualTo(5)
+
+      // Run compaction to trigger incremental clustering
+      checkAnswer(spark.sql("CALL sys.compact(table => 'T')"), Row(true) :: Nil)
+
+      // Verify data integrity
+      checkAnswer(
+        spark.sql("SELECT a, b, c FROM T"),
+        Seq(
+          Row(5, 1, "a"),
+          Row(3, 2, "b"),
+          Row(1, 3, "c"),
+          Row(2, 3, "d"),
+          Row(1, 4, "f"),
+          Row(2, 5, "g"),
+          Row(8, 3, "e"))
+      )
+
+      // Verify files are clustered (level >= 1)
+      val files = spark.sql("SELECT level FROM `T$files`").collect()
+      files.foreach(row => Assertions.assertThat(row.getInt(0)).isGreaterThanOrEqualTo(1))
+      val filesAfterCompact = spark.sql("SELECT count(*) FROM `T$files`").collect()(0).getLong(0)
+      Assertions.assertThat(filesAfterCompact).isLessThanOrEqualTo(filesBeforeCompact)
+
+      // Verify local-sort effect: within each file, rows are physically sorted by column 'a'.
+      // file_path in T$files is an absolute path (bucketPath + "/" + fileName), so we can
+      // read each file directly as parquet (bypassing Paimon's scan) to check physical row order.
+      val fileRows =
+        spark.sql("SELECT file_path, record_count FROM `T$files`").collect()
+      fileRows.foreach {
+        row =>
+          val filePath = row.getString(0)
+          val recordCount = row.getLong(1)
+          if (recordCount > 1) {
+            // For multi-row files, verify rows are physically sorted by 'a'
+            val aValues =
+              spark.read.format("parquet").load(filePath).select("a").collect().map(_.getInt(0))
+            for (i <- 1 until aValues.length) {
+              Assertions
+                .assertThat(aValues(i))
+                .as(
+                  s"File $filePath: row $i (a=${aValues(i)}) should be >= row ${i - 1} (a=${aValues(i - 1)})")
+                .isGreaterThanOrEqualTo(aValues(i - 1))
+            }
+          }
+      }
+
+      val table = loadTable("T").asInstanceOf[FileStoreTable]
+      checkSnapshot(table)
+    }
+  }
+
+  test("Paimon Procedure: incremental clustering local-sort vs global-sort") {
+    withTable("T_local", "T_global") {
+      // Create table with local-sort
+      spark.sql(s"""
+                   |CREATE TABLE T_local (a INT, b INT)
+                   |TBLPROPERTIES (
+                   |  'bucket'='-1',
+                   |  'num-levels'='4',
+                   |  'num-sorted-run.compaction-trigger'='2',
+                   |  'clustering.columns'='a',
+                   |  'clustering.incremental'='true',
+                   |  'clustering.incremental.mode'='local-sort'
+                   |)
+                   |""".stripMargin)
+
+      // Create table with global-sort (default)
+      spark.sql(s"""
+                   |CREATE TABLE T_global (a INT, b INT)
+                   |TBLPROPERTIES (
+                   |  'bucket'='-1',
+                   |  'num-levels'='4',
+                   |  'num-sorted-run.compaction-trigger'='2',
+                   |  'clustering.columns'='a',
+                   |  'clustering.incremental'='true',
+                   |  'clustering.incremental.mode'='global-sort'
+                   |)
+                   |""".stripMargin)
+
+      // Insert same data into both tables
+      for (table <- Seq("T_local", "T_global")) {
+        spark.sql(s"INSERT INTO $table VALUES (5, 1), (3, 2)")
+        spark.sql(s"INSERT INTO $table VALUES (8, 3), (1, 4)")
+        spark.sql(s"INSERT INTO $table VALUES (7, 5), (2, 6)")
+        spark.sql(s"INSERT INTO $table VALUES (4, 7), (6, 8)")
+      }
+
+      // Run compact on both
+      spark.sql("CALL sys.compact(table => 'T_local')")
+      spark.sql("CALL sys.compact(table => 'T_global')")
+
+      // Both should have same data
+      checkAnswer(
+        spark.sql("SELECT a, b FROM T_local ORDER BY a"),
+        spark.sql("SELECT a, b FROM T_global ORDER BY a")
+      )
+
+      val localFileRows =
+        spark.sql("SELECT file_path, record_count FROM `T_local$files`").collect()
+      val globalFileRows =
+        spark.sql("SELECT file_path, record_count FROM `T_global$files`").collect()
+
+      // Global-sort uses repartitionByRange which shuffles all data into 1 sorted file.
+      // Reading multiple files in parallel gives non-deterministic cross-file ordering,
+      // so we must verify physical ordering by reading each parquet file directly.
+      Assertions.assertThat(globalFileRows.length).isEqualTo(1)
+      val globalAValues =
+        spark.read
+          .format("parquet")
+          .load(globalFileRows(0).getString(0))
+          .select("a")
+          .collect()
+          .map(_.getInt(0))
+      Assertions.assertThat(globalAValues).isEqualTo(Array(1, 2, 3, 4, 5, 6, 7, 8))
+
+      // Local-sort uses sortWithinPartitions only (no range shuffle), so multiple output
+      // files are produced. Each file is individually sorted by 'a', but ranges may overlap.
+      Assertions.assertThat(localFileRows.length.toLong).isGreaterThan(globalFileRows.length)
+      var localFilesWithMultiRows = 0
+      localFileRows.foreach {
+        row =>
+          val filePath = row.getString(0)
+          val recordCount = row.getLong(1)
+          if (recordCount > 1) {
+            localFilesWithMultiRows += 1
+            val aValues =
+              spark.read.format("parquet").load(filePath).select("a").collect().map(_.getInt(0))
+            for (i <- 1 until aValues.length) {
+              Assertions
+                .assertThat(aValues(i))
+                .as(
+                  s"local-sort file $filePath: a[$i]=${aValues(i)} should be >= a[${i - 1}]=${aValues(i - 1)}")
+                .isGreaterThanOrEqualTo(aValues(i - 1))
+            }
+          }
+      }
+      Assertions.assertThat(localFilesWithMultiRows).isGreaterThan(0)
+
+      val localFiles = spark.sql("SELECT count(*) FROM `T_local$files`").collect()(0).getLong(0)
+      val globalFiles = spark.sql("SELECT count(*) FROM `T_global$files`").collect()(0).getLong(0)
+      Assertions.assertThat(localFiles).isGreaterThanOrEqualTo(globalFiles)
+      Assertions.assertThat(globalFiles).isEqualTo(1)
+    }
+  }
+
+  def checkSnapshot(table: FileStoreTable): Unit = {
+    Assertions
+      .assertThat(table.latestSnapshot().get().commitKind().toString)
+      .isEqualTo(CommitKind.COMPACT.toString)
+  }
+
   def lastSnapshotCommand(table: FileStoreTable): CommitKind = {
     table.snapshotManager().latestSnapshot().commitKind()
   }
 
   def lastSnapshotId(table: FileStoreTable): Long = {
     table.snapshotManager().latestSnapshotId()
+  }
+
+  test("Paimon Procedure: compact partitions accept unquoted string values") {
+    withTable("T") {
+      spark.sql(s"""
+                   |CREATE TABLE T (id INT, value STRING, dt STRING, hh INT)
+                   |TBLPROPERTIES ('bucket'='-1', 'write-only'='true')
+                   |PARTITIONED BY (dt, hh)
+                   |""".stripMargin)
+
+      val table = loadTable("T")
+
+      spark.sql(s"INSERT INTO T VALUES (1, 'a', '2024-01-01', 0), (2, 'b', '2024-01-01', 0)")
+      spark.sql(s"INSERT INTO T VALUES (3, 'c', '2024-01-02', 0), (4, 'd', '2024-01-02', 0)")
+
+      val before = lastSnapshotId(table)
+      checkAnswer(
+        spark.sql(
+          "CALL sys.compact(table => 'T', partitions => 'dt=2024-01-01,hh=0', options => 'compaction.min.file-num=2')"),
+        Row(true) :: Nil)
+
+      Assertions.assertThat(lastSnapshotId(loadTable("T"))).isGreaterThan(before)
+    }
+  }
+
+  test("Paimon Procedure: compact with invalid partition key") {
+    withTable("T") {
+      spark.sql(s"""
+                   |CREATE TABLE T (id INT, value STRING, dt STRING, hh INT)
+                   |TBLPROPERTIES ('bucket'='-1', 'write-only'='true')
+                   |PARTITIONED BY (dt, hh)
+                   |""".stripMargin)
+
+      val e = intercept[IllegalArgumentException] {
+        spark.sql("CALL sys.compact(table => 'T', partitions => 'pt=2024-01-01')")
+      }
+      Assertions.assertThat(e.getMessage.contains("Partition keys [pt] are invalid"))
+    }
+  }
+
+  test("Paimon Procedure: materialize deletion vectors across planner batches") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, value STRING, pt STRING)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'write-only' = 'false',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'deletion-vectors.enabled' = 'true')
+            |PARTITIONED BY (pt)
+            |""".stripMargin)
+      sql(
+        "INSERT INTO T SELECT /*+ REPARTITION(1) */ id, concat('value-', id), 'p0' FROM range(0, 5)")
+      sql(
+        "INSERT INTO T SELECT /*+ REPARTITION(1) */ id, concat('value-', id), 'p1' FROM range(5, 10)")
+      sql(
+        "INSERT INTO T SELECT /*+ REPARTITION(1) */ id, concat('value-', id), 'p0' FROM range(10, 15)")
+      sql("DELETE FROM T WHERE pt = 'p0' AND id IN (1, 11)")
+
+      val table = loadTable("T")
+      Assertions.assertThat(deletionVectorIndexFileCount(table)).isEqualTo(1)
+      val snapshotBefore = lastSnapshotId(table)
+
+      executeDeletionVectorMaterialization(table, deletionFilesPerBatch = 1)
+
+      Assertions.assertThat(lastSnapshotId(table)).isEqualTo(snapshotBefore + 2)
+      Assertions.assertThat(deletionVectorCardinality(table)).isEqualTo(0)
+      checkAnswer(
+        sql("SELECT id, pt FROM T ORDER BY id"),
+        Seq(
+          Row(0, "p0"),
+          Row(2, "p0"),
+          Row(3, "p0"),
+          Row(4, "p0"),
+          Row(5, "p1"),
+          Row(6, "p1"),
+          Row(7, "p1"),
+          Row(8, "p1"),
+          Row(9, "p1"),
+          Row(10, "p0"),
+          Row(12, "p0"),
+          Row(13, "p0"),
+          Row(14, "p0")
+        )
+      )
+      assert(
+        sql("SELECT _ROW_ID FROM T WHERE pt = 'p0'")
+          .collect()
+          .map(_.getLong(0))
+          .sorted
+          .sameElements(15L to 22L))
+    }
+  }
+
+  test("Paimon Procedure: rebase data evolution compact after operation-less partial update") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, value INT)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'file.format' = 'avro',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'compaction.min.file-num' = '2')
+            |""".stripMargin)
+      sql("INSERT INTO T VALUES (1, 10)")
+      sql("INSERT INTO T VALUES (2, 20)")
+
+      val table = loadTable("T")
+      val relation =
+        PaimonRelation.getPaimonRelation(spark.table("T").queryExecution.analyzed)
+      val updated = new AtomicBoolean(false)
+
+      CompactProcedure.executeDataEvolutionCompaction(
+        table,
+        relation,
+        null,
+        null,
+        new JavaSparkContext(spark.sparkContext),
+        spark,
+        null,
+        _ => {
+          if (updated.compareAndSet(false, true)) {
+            // Python MERGE commits the same regular partial-column files without an operation.
+            val updateSnapshot = table.latestSnapshot().get()
+            val dataSplits = table
+              .newSnapshotReader()
+              .withSnapshot(updateSnapshot)
+              .read()
+              .splits()
+              .asScala
+              .collect { case split: DataSplit => split }
+              .toSeq
+            val firstRowIds = dataSplits
+              .flatMap(_.dataFiles().asScala)
+              .map(_.nonNullFirstRowId())
+              .sorted
+            val firstRowId = udf((rowId: Long) => firstRowIds.takeWhile(_ <= rowId).last)
+            val updateRows = sql("SELECT value + 1 AS value, _ROW_ID FROM T")
+              .withColumn("_FIRST_ROW_ID", firstRowId(col("_ROW_ID")))
+              .select("value", "_FIRST_ROW_ID", "_ROW_ID")
+            val updateMessages =
+              DataEvolutionPaimonWriter(table, dataSplits)
+                .writePartialFields(updateRows, Seq("value"))
+
+            val writer = PaimonSparkWriter(table)
+            writer.rowIdCheckConflict(updateSnapshot.id())
+            writer.commit(updateMessages)
+            assert(table.latestSnapshot().get().operation() == null)
+          }
+        }
+      )
+
+      checkAnswer(sql("SELECT id, value FROM T ORDER BY id"), Seq(Row(1, 11), Row(2, 21)))
+      val ranges = table
+        .newSnapshotReader()
+        .read()
+        .dataSplits()
+        .asScala
+        .flatMap(_.dataFiles().asScala)
+        .map(file => (file.nonNullFirstRowId(), file.rowCount()))
+        .distinct
+      assert(ranges == Seq((0L, 2L)), ranges)
+    }
+  }
+
+  test("Paimon Procedure: reject data evolution compact rebase after schema evolution") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, value INT)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'file.format' = 'avro',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'compaction.min.file-num' = '2')
+            |""".stripMargin)
+      sql("INSERT INTO T VALUES (1, 10)")
+      sql("INSERT INTO T VALUES (2, 20)")
+
+      val table = loadTable("T")
+      val relation =
+        PaimonRelation.getPaimonRelation(spark.table("T").queryExecution.analyzed)
+      val updated = new AtomicBoolean(false)
+
+      val exception = intercept[RuntimeException] {
+        CompactProcedure.executeDataEvolutionCompaction(
+          table,
+          relation,
+          null,
+          null,
+          new JavaSparkContext(spark.sparkContext),
+          spark,
+          null,
+          _ => {
+            if (updated.compareAndSet(false, true)) {
+              sql("ALTER TABLE T ADD COLUMN extra INT")
+              val evolvedTable = loadTable("T")
+              val updateSnapshot = evolvedTable.latestSnapshot().get()
+              val dataSplits = evolvedTable
+                .newSnapshotReader()
+                .withSnapshot(updateSnapshot)
+                .read()
+                .splits()
+                .asScala
+                .collect { case split: DataSplit => split }
+                .toSeq
+              val firstRowIds = dataSplits
+                .flatMap(_.dataFiles().asScala)
+                .map(_.nonNullFirstRowId())
+                .sorted
+              val firstRowId = udf((rowId: Long) => firstRowIds.takeWhile(_ <= rowId).last)
+              val updateRows =
+                sql("SELECT value + 1 AS value, 99 AS extra, _ROW_ID FROM T WHERE id = 1")
+                  .withColumn("_FIRST_ROW_ID", firstRowId(col("_ROW_ID")))
+                  .select("value", "extra", "_FIRST_ROW_ID", "_ROW_ID")
+              val updateMessages =
+                DataEvolutionPaimonWriter(evolvedTable, dataSplits)
+                  .writePartialFields(updateRows, Seq("value", "extra"))
+
+              val writer = PaimonSparkWriter(evolvedTable)
+              writer.rowIdCheckConflict(updateSnapshot.id())
+              writer.commit(updateMessages)
+            }
+          }
+        )
+      }
+
+      Assertions
+        .assertThat(exception)
+        .hasRootCauseInstanceOf(classOf[DataEvolutionRowRangeConflictException])
+      checkAnswer(
+        sql("SELECT id, value, extra FROM T ORDER BY id"),
+        Seq(Row(1, 11, 99), Row(2, 20, null)))
+    }
+  }
+
+  test("Paimon Procedure: retry rebased compact after same-boundary partial update") {
+    withTable("T") {
+      val table = createCompactMergeRaceTable()
+      val relation =
+        PaimonRelation.getPaimonRelation(spark.table("T").queryExecution.analyzed)
+      val javaSparkContext = new JavaSparkContext(spark.sparkContext)
+      val attempts = new AtomicInteger()
+      val rewriteSnapshotId = new AtomicLong(-1L)
+      val mergeFileAfterRewrite = new AtomicReference[DataFileMeta]()
+      partialUpdate(table, "SELECT * FROM VALUES (1, 10), (2, 20) AS S(id, value)")
+      val normalFiles = normalDataFiles(table)
+      assert(normalFiles.size == 2)
+      val stagedTask = new DataEvolutionNormalCompactTask(
+        BinaryRow.EMPTY_ROW,
+        normalFiles.asJava
+      )
+      val taskSnapshot = table.latestSnapshot().get()
+      val planned = new AtomicBoolean(false)
+      val rewriter = new DataEvolutionCompactMergeConflictRewriter(table, relation)
+
+      val planner: java.util.function.Function[Snapshot, util.List[DataEvolutionCompactTask]] =
+        _ => {
+          if (planned.compareAndSet(false, true)) {
+            util.Collections.singletonList(stagedTask)
+          } else {
+            throw new EndOfScanException()
+          }
+        }
+      val configurer: DataEvolutionRewriteExecutor.CommitConfigurer =
+        _ => {
+          attempts.getAndIncrement() match {
+            case 0 =>
+              partialUpdate(
+                table,
+                "SELECT * FROM VALUES (1, 10), (2, 20) AS S(id, value)"
+              )
+              throw new DataEvolutionRowRangeConflictException("Injected MERGE range conflict.")
+            case 1 =>
+              // This MERGE lands after the retry file has been rewritten. The retry file must
+              // preserve its source sequence so this newer update remains the winner.
+              rewriteSnapshotId.set(table.latestSnapshot().get().id())
+              val mergeFile = partialUpdate(
+                table,
+                "SELECT * FROM VALUES (1, 11), (2, 21) AS S(id, value)"
+              )
+              mergeFileAfterRewrite.set(mergeFile)
+              assert(mergeFile.nonNullFirstRowId() == 0L)
+              assert(mergeFile.rowCount() == 2L)
+            case _ =>
+          }
+        }
+      val messageRewriter: DataEvolutionRewriteExecutor.CommitMessageRewriter =
+        (session, base, latest, messages) => rewriter.rewrite(session, base, latest, messages)
+
+      DataEvolutionRewriteExecutor.execute(
+        table,
+        taskSnapshot,
+        planner,
+        javaSparkContext,
+        spark,
+        configurer,
+        messageRewriter
+      )
+
+      Assertions.assertThat(attempts.get()).isEqualTo(2)
+      checkAnswer(sql("SELECT id, value FROM T ORDER BY id"), Seq(Row(1, 11), Row(2, 21)))
+
+      val mergeFile = mergeFileAfterRewrite.get()
+      val bridgeFiles = normalDataFiles(table).filter(
+        file =>
+          file.fileSource().orElse(null) == FileSource.APPEND &&
+            file.fileName() != mergeFile.fileName())
+      assert(bridgeFiles.size == 1, bridgeFiles)
+      val bridgeFile = bridgeFiles.head
+      assert(bridgeFile.maxSequenceNumber() == rewriteSnapshotId.get())
+      assert(bridgeFile.maxSequenceNumber() < mergeFile.maxSequenceNumber())
+      assert(mergeFile.maxSequenceNumber() < table.latestSnapshot().get().id())
+    }
+  }
+
+  test("Paimon Procedure: reject compact rebase over concurrent compact") {
+    withTable("T") {
+      val table = createCompactMergeRaceTable()
+      val relation =
+        PaimonRelation.getPaimonRelation(spark.table("T").queryExecution.analyzed)
+      partialUpdate(table, "SELECT * FROM VALUES (1, 10), (2, 20) AS S(id, value)")
+      val normalFiles = normalDataFiles(table)
+      assert(normalFiles.size == 2)
+
+      val stagedTask = new DataEvolutionNormalCompactTask(
+        BinaryRow.EMPTY_ROW,
+        normalFiles.asJava
+      )
+      val stagedUser = "staged-compact"
+      val stagedMessage = stagedTask.doCompact(table, stagedUser)
+      val baseSnapshot = table.latestSnapshot().get()
+
+      val mergeFile = partialUpdate(
+        table,
+        "SELECT * FROM VALUES (1, 11), (2, 21) AS S(id, value)"
+      )
+      assert(mergeFile.fileSource().get() == FileSource.APPEND)
+
+      val concurrentTask = new DataEvolutionNormalCompactTask(
+        BinaryRow.EMPTY_ROW,
+        normalDataFiles(table).asJava
+      )
+      val concurrentUser = "concurrent-compact"
+      val concurrentMessage = concurrentTask.doCompact(table, concurrentUser)
+      val concurrentCommit = table.newCommit(concurrentUser)
+      try {
+        concurrentCommit.commit(util.Collections.singletonList(concurrentMessage))
+      } finally {
+        concurrentCommit.close()
+      }
+
+      val latestSnapshot = table.latestSnapshot().get()
+      assert(latestSnapshot.commitKind() == CommitKind.COMPACT)
+      assert(concurrentTask.compactAfter().get(0).fileSource().get() == FileSource.COMPACT)
+
+      val rewritten = new DataEvolutionCompactMergeConflictRewriter(table, relation)
+        .rewrite(
+          spark,
+          baseSnapshot,
+          latestSnapshot,
+          util.Collections.singletonList(stagedMessage)
+        )
+      assert(!rewritten.isPresent)
+      checkAnswer(sql("SELECT id, value FROM T ORDER BY id"), Seq(Row(1, 11), Row(2, 21)))
+    }
+  }
+
+  test("Paimon Procedure: reject compact rebase when compact lands after rewrite") {
+    withTable("T") {
+      val table = createCompactMergeRaceTable()
+      val relation =
+        PaimonRelation.getPaimonRelation(spark.table("T").queryExecution.analyzed)
+      val javaSparkContext = new JavaSparkContext(spark.sparkContext)
+      val attempts = new AtomicInteger()
+      partialUpdate(table, "SELECT * FROM VALUES (1, 10), (2, 20) AS S(id, value)")
+      val normalFiles = normalDataFiles(table)
+      assert(normalFiles.size == 2)
+      val stagedTask = new DataEvolutionNormalCompactTask(
+        BinaryRow.EMPTY_ROW,
+        normalFiles.asJava
+      )
+      val taskSnapshot = table.latestSnapshot().get()
+      val planned = new AtomicBoolean(false)
+      val rewriter = new DataEvolutionCompactMergeConflictRewriter(table, relation)
+
+      val planner: java.util.function.Function[Snapshot, util.List[DataEvolutionCompactTask]] =
+        _ => {
+          if (planned.compareAndSet(false, true)) {
+            util.Collections.singletonList(stagedTask)
+          } else {
+            throw new EndOfScanException()
+          }
+        }
+      val configurer: DataEvolutionRewriteExecutor.CommitConfigurer =
+        _ => {
+          attempts.getAndIncrement() match {
+            case 0 =>
+              partialUpdate(
+                table,
+                "SELECT * FROM VALUES (1, 10), (2, 20) AS S(id, value)"
+              )
+              throw new DataEvolutionRowRangeConflictException("Injected MERGE range conflict.")
+            case 1 =>
+              val concurrentTask = new DataEvolutionNormalCompactTask(
+                BinaryRow.EMPTY_ROW,
+                normalDataFiles(table).asJava
+              )
+              val compactUser = "concurrent-compact"
+              val compactMessage = concurrentTask.doCompact(table, compactUser)
+              val compactCommit = table.newCommit(compactUser)
+              try {
+                compactCommit.commit(util.Collections.singletonList(compactMessage))
+              } finally {
+                compactCommit.close()
+              }
+              val compactedFile = concurrentTask.compactAfter().get(0)
+              assert(table.latestSnapshot().get().commitKind() == CommitKind.COMPACT)
+              assert(compactedFile.fileSource().get() == FileSource.COMPACT)
+              assert(compactedFile.writeCols().asScala == Seq("id", "value"))
+
+              val mergeFile = partialUpdate(
+                table,
+                "SELECT * FROM VALUES (1, 11), (2, 21) AS S(id, value)"
+              )
+              assert(mergeFile.fileSource().get() == FileSource.APPEND)
+            case _ =>
+          }
+        }
+      val messageRewriter: DataEvolutionRewriteExecutor.CommitMessageRewriter =
+        (session, base, latest, messages) => rewriter.rewrite(session, base, latest, messages)
+
+      assertThatThrownBy(
+        () =>
+          DataEvolutionRewriteExecutor.execute(
+            table,
+            taskSnapshot,
+            planner,
+            javaSparkContext,
+            spark,
+            configurer,
+            messageRewriter
+          )).hasMessageContaining("Execute data evolution rewrite failed")
+
+      Assertions.assertThat(attempts.get()).isEqualTo(2)
+      checkAnswer(sql("SELECT id, value FROM T ORDER BY id"), Seq(Row(1, 11), Row(2, 21)))
+    }
+  }
+
+  test("Paimon Procedure: compact rebase range lookup handles high cardinality") {
+    val ranges = (0 until 100000).map {
+      index =>
+        val firstRowId = index.toLong * 3
+        new Range(firstRowId, firstRowId + 1)
+    }
+    val rangeIndex = new CompactRowIdRangeIndex(ranges)
+
+    assert(rangeIndex.firstRowId(0) == Long.box(0))
+    assert(rangeIndex.firstRowId(150001) == Long.box(150000))
+    assert(rangeIndex.firstRowId(299998) == Long.box(299997))
+    assert(rangeIndex.firstRowId(2) == null)
+    assert(rangeIndex.firstRowId(300000) == null)
+  }
+
+  test("Paimon Procedure: rebase later compact planner batch after partial update") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, value INT, pt STRING)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'file.format' = 'avro',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'compaction.min.file-num' = '2',
+            |  'snapshot.num-retained.min' = '1',
+            |  'snapshot.num-retained.max' = '1',
+            |  'snapshot.time-retained' = '0 ms',
+            |  'commit.max-retries' = '2',
+            |  'commit.min-retry-wait' = '1 ms',
+            |  'commit.max-retry-wait' = '1 ms')
+            |PARTITIONED BY (pt)
+            |""".stripMargin)
+      sql("INSERT INTO T VALUES (1, 10, 'p0')")
+      sql("INSERT INTO T VALUES (2, 20, 'p0')")
+      sql("INSERT INTO T VALUES (3, 30, 'p1')")
+      sql("INSERT INTO T VALUES (4, 40, 'p1')")
+
+      val table = loadTable("T")
+      val relation =
+        PaimonRelation.getPaimonRelation(spark.table("T").queryExecution.analyzed)
+      val updated = new AtomicBoolean(false)
+
+      CompactProcedure.executeDataEvolutionCompaction(
+        table,
+        relation,
+        null,
+        null,
+        new JavaSparkContext(spark.sparkContext),
+        spark,
+        Int.box(2),
+        _ => {
+          if (updated.compareAndSet(false, true)) {
+            val updateSnapshot = table.latestSnapshot().get()
+            val dataSplits = table
+              .newSnapshotReader()
+              .withSnapshot(updateSnapshot)
+              .read()
+              .splits()
+              .asScala
+              .collect { case split: DataSplit => split }
+              .toSeq
+            val stagedPartitions = dataSplits.filter {
+              split =>
+                val liveFiles = split.dataFiles().asScala.map(_.fileName()).toSet
+                val bucketPath = table
+                  .store()
+                  .pathFactory()
+                  .bucketPath(split.partition(), split.bucket())
+                table
+                  .fileIO()
+                  .listStatus(bucketPath)
+                  .filterNot(_.isDir)
+                  .map(_.getPath.getName)
+                  .exists(name => !liveFiles.contains(name))
+            }
+            Assertions.assertThat(stagedPartitions.size).isEqualTo(1)
+            val stagedPartition = stagedPartitions.head.partition().getString(0).toString
+            val updatePartition = if (stagedPartition == "p0") "p1" else "p0"
+            val updateId = if (updatePartition == "p0") 1 else 3
+            val firstRowIds = dataSplits
+              .flatMap(_.dataFiles().asScala)
+              .map(_.nonNullFirstRowId())
+              .sorted
+            val firstRowId = udf((rowId: Long) => firstRowIds.takeWhile(_ <= rowId).last)
+            val updateRows =
+              sql(s"SELECT value + 1 AS value, _ROW_ID FROM T WHERE id = $updateId")
+                .withColumn("_FIRST_ROW_ID", firstRowId(col("_ROW_ID")))
+                .select("value", "_FIRST_ROW_ID", "_ROW_ID")
+            val updateMessages =
+              DataEvolutionPaimonWriter(table, dataSplits)
+                .writePartialFields(updateRows, Seq("value"))
+
+            val writer = PaimonSparkWriter(table)
+            writer.rowIdCheckConflict(updateSnapshot.id())
+            writer.commit(updateMessages)
+          }
+        }
+      )
+
+      checkAnswer(sql("SELECT sum(value), count(*) FROM T"), Seq(Row(101L, 4L)))
+    }
+  }
+
+  test("Paimon Procedure: abort failed compact rebase files before retry") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, value INT)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'file.format' = 'avro',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'compaction.min.file-num' = '2',
+            |  'commit.max-retries' = '3',
+            |  'commit.min-retry-wait' = '1 ms',
+            |  'commit.max-retry-wait' = '1 ms')
+            |""".stripMargin)
+      sql("INSERT INTO T VALUES (1, 10)")
+      sql("INSERT INTO T VALUES (2, 20)")
+
+      val table = loadTable("T")
+      val relation =
+        PaimonRelation.getPaimonRelation(spark.table("T").queryExecution.analyzed)
+      val attempts = new AtomicInteger()
+      var originalStagedFiles = Set.empty[String]
+      var firstRetryFiles = Set.empty[String]
+
+      CompactProcedure.executeDataEvolutionCompaction(
+        table,
+        relation,
+        null,
+        null,
+        new JavaSparkContext(spark.sparkContext),
+        spark,
+        null,
+        _ => {
+          val attempt = attempts.getAndIncrement()
+          val updateSnapshot = table.latestSnapshot().get()
+          val dataSplits = table
+            .newSnapshotReader()
+            .withSnapshot(updateSnapshot)
+            .read()
+            .splits()
+            .asScala
+            .collect { case split: DataSplit => split }
+            .toSeq
+          val liveFiles =
+            dataSplits.flatMap(_.dataFiles().asScala).map(_.fileName()).toSet
+          val physicalFiles = dataSplits
+            .map(
+              split =>
+                table
+                  .store()
+                  .pathFactory()
+                  .bucketPath(split.partition(), split.bucket()))
+            .distinct
+            .flatMap(table.fileIO().listStatus)
+            .filterNot(_.isDir)
+            .map(_.getPath.getName)
+            .toSet
+          val stagedFiles = physicalFiles -- liveFiles
+          if (attempt == 0) {
+            originalStagedFiles = stagedFiles
+            assert(originalStagedFiles.nonEmpty)
+          } else if (attempt == 1) {
+            firstRetryFiles = stagedFiles -- originalStagedFiles
+            assert(firstRetryFiles.nonEmpty)
+          } else {
+            assert(firstRetryFiles.forall(file => !physicalFiles.contains(file)))
+          }
+
+          if (attempt < 2) {
+            val firstRowIds = dataSplits
+              .flatMap(_.dataFiles().asScala)
+              .map(_.nonNullFirstRowId())
+              .sorted
+            val firstRowId = udf((rowId: Long) => firstRowIds.takeWhile(_ <= rowId).last)
+            val updateRows = sql("SELECT value + 1 AS value, _ROW_ID FROM T WHERE id = 1")
+              .withColumn("_FIRST_ROW_ID", firstRowId(col("_ROW_ID")))
+              .select("value", "_FIRST_ROW_ID", "_ROW_ID")
+            val updateMessages =
+              DataEvolutionPaimonWriter(table, dataSplits)
+                .writePartialFields(updateRows, Seq("value"))
+
+            val writer = PaimonSparkWriter(table)
+            writer.rowIdCheckConflict(updateSnapshot.id())
+            writer.commit(updateMessages)
+          }
+        }
+      )
+
+      Assertions.assertThat(attempts.get()).isEqualTo(4)
+      Assertions.assertThat(firstRetryFiles.nonEmpty).isTrue
+      checkAnswer(sql("SELECT id, value FROM T ORDER BY id"), Seq(Row(1, 12), Row(2, 20)))
+    }
+  }
+
+  test("Paimon Procedure: reject legacy row id rewrite for empty data evolution table") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, value STRING)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'deletion-vectors.enabled' = 'true')
+            |""".stripMargin)
+
+      val exception = intercept[IllegalArgumentException] {
+        sql(
+          "CALL sys.compact(table => 'T', options => " +
+            "'data-evolution.compaction.rewrite-row-ids=true')").collect()
+      }
+      Assertions
+        .assertThat(exception.getMessage)
+        .contains("data-evolution.compaction.rewrite-row-ids=true")
+        .contains("materialize_deletion_vectors")
+    }
+  }
+
+  test("Paimon Procedure: materialize deletion vectors enables snapshot expiration") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, value STRING)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'write-only' = 'true',
+            |  'snapshot.num-retained.min' = '1',
+            |  'snapshot.num-retained.max' = '1',
+            |  'snapshot.time-retained' = '0 ms',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'deletion-vectors.enabled' = 'true')
+            |""".stripMargin)
+      sql("INSERT INTO T VALUES (1, 'one'), (2, 'two')")
+      sql("DELETE FROM T WHERE id = 1")
+
+      checkAnswer(sql("CALL sys.materialize_deletion_vectors(table => 'T')"), Row(true) :: Nil)
+
+      val table = loadTable("T")
+      Assertions
+        .assertThat(table.snapshotManager().earliestSnapshotId())
+        .isEqualTo(table.snapshotManager().latestSnapshotId())
+      Assertions.assertThat(deletionVectorCardinality(table)).isEqualTo(0)
+      checkAnswer(sql("SELECT id, value FROM T"), Row(2, "two") :: Nil)
+    }
+  }
+
+  test("Paimon Procedure: preserve deletion vectors across compact planner batches") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (id INT, value STRING, pt STRING)
+            |TBLPROPERTIES (
+            |  'bucket' = '-1',
+            |  'write-only' = 'false',
+            |  'snapshot.num-retained.min' = '1',
+            |  'snapshot.num-retained.max' = '1',
+            |  'snapshot.time-retained' = '0 ms',
+            |  'row-tracking.enabled' = 'true',
+            |  'data-evolution.enabled' = 'true',
+            |  'deletion-vectors.enabled' = 'true',
+            |  'compaction.min.file-num' = '2')
+            |PARTITIONED BY (pt)
+            |""".stripMargin)
+      sql("INSERT INTO T VALUES (0, 'value-0', 'p0')")
+      sql("INSERT INTO T VALUES (1, 'value-1', 'p0')")
+      sql("INSERT INTO T VALUES (2, 'value-2', 'p1')")
+      sql("INSERT INTO T VALUES (3, 'value-3', 'p0')")
+      sql("INSERT INTO T VALUES (4, 'value-4', 'p0')")
+      sql("DELETE FROM T WHERE pt = 'p0' AND id IN (0, 3)")
+
+      val table = loadTable("T")
+      Assertions.assertThat(deletionVectorIndexFileCount(table)).isEqualTo(1)
+      val snapshotBefore = lastSnapshotId(table)
+
+      executeDataEvolutionCompaction(table, candidateFilesPerBatch = 2)
+
+      Assertions.assertThat(lastSnapshotId(table)).isEqualTo(snapshotBefore + 2)
+      Assertions
+        .assertThat(table.snapshotManager().earliestSnapshotId())
+        .isEqualTo(table.snapshotManager().latestSnapshotId())
+      Assertions.assertThat(deletionVectorCardinality(table)).isEqualTo(2)
+      checkAnswer(
+        sql("SELECT id, pt, _ROW_ID FROM T ORDER BY id"),
+        Seq(Row(1, "p0", 1L), Row(2, "p1", 2L), Row(4, "p0", 4L))
+      )
+    }
+  }
+
+  private def createCompactMergeRaceTable(): FileStoreTable = {
+    sql("""
+          |CREATE TABLE T (id INT, value INT, picture BINARY)
+          |TBLPROPERTIES (
+          |  'bucket' = '-1',
+          |  'row-tracking.enabled' = 'true',
+          |  'data-evolution.enabled' = 'true',
+          |  'blob-field' = 'picture',
+          |  'compaction.min.file-num' = '2',
+          |  'commit.max-retries' = '3',
+          |  'commit.min-retry-wait' = '1 ms',
+          |  'commit.max-retry-wait' = '1 ms')
+          |""".stripMargin)
+    sql("""
+          |INSERT INTO T
+          |SELECT /*+ REPARTITION(1) */ id, value, CAST(NULL AS BINARY)
+          |FROM VALUES (1, 10), (2, 20) AS S(id, value)
+          |""".stripMargin)
+    loadTable("T")
+  }
+
+  private def partialUpdate(table: FileStoreTable, sourceQuery: String): DataFileMeta = {
+    val beforeMerge = table.latestSnapshot().get()
+    sql(sourceQuery).createOrReplaceTempView("merge_source")
+    try {
+      sql("""
+            |MERGE INTO T
+            |USING merge_source AS S
+            |ON T.id = S.id
+            |WHEN MATCHED THEN UPDATE SET T.id = S.id, T.value = S.value
+            |""".stripMargin)
+    } finally {
+      spark.catalog.dropTempView("merge_source")
+    }
+    table
+      .newSnapshotReader()
+      .withSnapshot(table.latestSnapshot().get())
+      .readIncrementalDiff(beforeMerge)
+      .splits()
+      .asScala
+      .collect { case split: IncrementalSplit => split }
+      .flatMap(_.afterFiles().asScala)
+      .find(file => !BlobFileFormat.isBlobFile(file.fileName()))
+      .get
+  }
+
+  private def normalDataFiles(table: FileStoreTable): Seq[DataFileMeta] = {
+    table
+      .newSnapshotReader()
+      .read()
+      .dataSplits()
+      .asScala
+      .flatMap(_.dataFiles().asScala)
+      .filterNot(file => BlobFileFormat.isBlobFile(file.fileName()))
+      .sortBy(_.maxSequenceNumber())
+      .toSeq
+  }
+
+  private def executeDataEvolutionCompaction(
+      table: FileStoreTable,
+      candidateFilesPerBatch: Int): Unit = {
+    CompactProcedure.executeDataEvolutionCompaction(
+      table,
+      p0PartitionPredicate(table),
+      null,
+      new JavaSparkContext(spark.sparkContext),
+      spark,
+      Int.box(candidateFilesPerBatch)
+    )
+  }
+
+  private def executeDeletionVectorMaterialization(
+      table: FileStoreTable,
+      deletionFilesPerBatch: Int): Unit = {
+    MaterializeDeletionVectorsProcedure.executeDeletionVectorMaterialization(
+      table,
+      p0PartitionPredicate(table),
+      new JavaSparkContext(spark.sparkContext),
+      spark,
+      Int.box(deletionFilesPerBatch)
+    )
+  }
+
+  private def p0PartitionPredicate(table: FileStoreTable): PartitionPredicate = {
+    val partitionPredicate = PartitionPredicate.fromMap(
+      table.schema().logicalPartitionType(),
+      util.Collections.singletonMap("pt", "p0"),
+      table.coreOptions().partitionDefaultName()
+    )
+    partitionPredicate
+  }
+
+  private def deletionVectorIndexFileCount(table: FileStoreTable): Int = {
+    table
+      .store()
+      .newIndexFileHandler()
+      .scan(table.latestSnapshot().get(), DELETION_VECTORS_INDEX)
+      .size()
+  }
+
+  private def deletionVectorCardinality(table: FileStoreTable): Long = {
+    table
+      .store()
+      .newIndexFileHandler()
+      .scan(table.latestSnapshot().get(), DELETION_VECTORS_INDEX)
+      .asScala
+      .flatMap(entry => Option(entry.indexFile().dvRanges()).toSeq)
+      .flatMap(_.values().asScala)
+      .flatMap(meta => Option(meta.cardinality()).map(_.longValue()))
+      .sum
   }
 }

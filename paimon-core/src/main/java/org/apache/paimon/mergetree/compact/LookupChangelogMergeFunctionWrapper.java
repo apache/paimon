@@ -21,19 +21,17 @@ package org.apache.paimon.mergetree.compact;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
+import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.lookup.LookupStrategy;
-import org.apache.paimon.mergetree.LookupLevels.PositionedKeyValue;
+import org.apache.paimon.mergetree.lookup.FilePosition;
+import org.apache.paimon.mergetree.lookup.PositionedKeyValue;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.LinkedList;
-import java.util.List;
 import java.util.function.Function;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -64,7 +62,7 @@ public class LookupChangelogMergeFunctionWrapper<T>
     private final KeyValue reusedAfter = new KeyValue();
     @Nullable private final RecordEqualiser valueEqualiser;
     private final LookupStrategy lookupStrategy;
-    private final @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer;
+    private final @Nullable BucketedDvMaintainer deletionVectorsMaintainer;
     private final Comparator<KeyValue> comparator;
 
     public LookupChangelogMergeFunctionWrapper(
@@ -72,7 +70,7 @@ public class LookupChangelogMergeFunctionWrapper<T>
             Function<InternalRow, T> lookup,
             @Nullable RecordEqualiser valueEqualiser,
             LookupStrategy lookupStrategy,
-            @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer,
+            @Nullable BucketedDvMaintainer deletionVectorsMaintainer,
             @Nullable UserDefinedSeqComparator userDefinedSeqComparator) {
         MergeFunction<KeyValue> mergeFunction = mergeFunctionFactory.create();
         checkArgument(
@@ -106,23 +104,32 @@ public class LookupChangelogMergeFunctionWrapper<T>
     public ChangelogResult getResult() {
         // 1. Find the latest high level record and compute containLevel0
         KeyValue highLevel = mergeFunction.pickHighLevel();
-        boolean containLevel0 = containLevel0();
+        boolean containLevel0 = mergeFunction.containLevel0();
 
         // 2. Lookup if latest high level record is absent
         if (highLevel == null) {
             T lookupResult = lookup.apply(mergeFunction.key());
             if (lookupResult != null) {
                 if (lookupStrategy.deletionVector) {
-                    PositionedKeyValue positionedKeyValue = (PositionedKeyValue) lookupResult;
-                    highLevel = positionedKeyValue.keyValue();
-                    deletionVectorsMaintainer.notifyNewDeletion(
-                            positionedKeyValue.fileName(), positionedKeyValue.rowPosition());
+                    String fileName;
+                    long rowPosition;
+                    if (lookupResult instanceof PositionedKeyValue) {
+                        PositionedKeyValue positionedKeyValue = (PositionedKeyValue) lookupResult;
+                        highLevel = positionedKeyValue.keyValue();
+                        fileName = positionedKeyValue.fileName();
+                        rowPosition = positionedKeyValue.rowPosition();
+                    } else {
+                        FilePosition position = (FilePosition) lookupResult;
+                        fileName = position.fileName();
+                        rowPosition = position.rowPosition();
+                    }
+                    deletionVectorsMaintainer.notifyNewDeletion(fileName, rowPosition);
                 } else {
                     highLevel = (KeyValue) lookupResult;
                 }
             }
             if (highLevel != null) {
-                insertInto(mergeFunction.candidates(), highLevel);
+                mergeFunction.insertInto(highLevel, comparator);
             }
         }
 
@@ -136,33 +143,6 @@ public class LookupChangelogMergeFunctionWrapper<T>
         }
 
         return reusedResult.setResult(result);
-    }
-
-    public boolean containLevel0() {
-        for (KeyValue kv : mergeFunction.candidates()) {
-            if (kv.level() == 0) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private void insertInto(LinkedList<KeyValue> candidates, KeyValue highLevel) {
-        List<KeyValue> newCandidates = new ArrayList<>();
-        for (KeyValue candidate : candidates) {
-            if (highLevel != null && comparator.compare(highLevel, candidate) < 0) {
-                newCandidates.add(highLevel);
-                newCandidates.add(candidate);
-                highLevel = null;
-            } else {
-                newCandidates.add(candidate);
-            }
-        }
-        if (highLevel != null) {
-            newCandidates.add(highLevel);
-        }
-        candidates.clear();
-        candidates.addAll(newCandidates);
     }
 
     private void setChangelog(@Nullable KeyValue before, KeyValue after) {

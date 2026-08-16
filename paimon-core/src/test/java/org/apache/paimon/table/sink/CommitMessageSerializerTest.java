@@ -20,7 +20,6 @@ package org.apache.paimon.table.sink;
 
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
-import org.apache.paimon.io.IndexIncrement;
 
 import org.junit.jupiter.api.Test;
 
@@ -41,22 +40,31 @@ public class CommitMessageSerializerTest {
         CommitMessageSerializer serializer = new CommitMessageSerializer();
 
         DataIncrement dataIncrement = randomNewFilesIncrement();
+        dataIncrement.newIndexFiles().addAll(Arrays.asList(randomIndexFile(), randomIndexFile()));
+        dataIncrement
+                .deletedIndexFiles()
+                .addAll(Arrays.asList(randomIndexFile(), randomIndexFile()));
+
         CompactIncrement compactIncrement = randomCompactIncrement();
-        IndexIncrement indexIncrement =
-                new IndexIncrement(
-                        Arrays.asList(randomIndexFile(), randomIndexFile()),
-                        Arrays.asList(randomIndexFile(), randomIndexFile()));
+        compactIncrement
+                .newIndexFiles()
+                .addAll(Arrays.asList(randomIndexFile(), randomIndexFile()));
+        compactIncrement
+                .deletedIndexFiles()
+                .addAll(Arrays.asList(randomIndexFile(), randomIndexFile()));
+
         CommitMessageImpl committable =
-                new CommitMessageImpl(
-                        row(0), 1, 2, dataIncrement, compactIncrement, indexIncrement);
+                new CommitMessageImpl(row(0), 1, 2, dataIncrement, compactIncrement);
 
         CommitMessageImpl newCommittable =
-                (CommitMessageImpl) serializer.deserialize(7, serializer.serialize(committable));
+                (CommitMessageImpl)
+                        serializer.deserialize(
+                                CommitMessageSerializer.CURRENT_VERSION,
+                                serializer.serialize(committable));
         assertThat(newCommittable.partition()).isEqualTo(committable.partition());
         assertThat(newCommittable.bucket()).isEqualTo(committable.bucket());
         assertThat(newCommittable.totalBuckets()).isEqualTo(committable.totalBuckets());
         assertThat(newCommittable.compactIncrement()).isEqualTo(committable.compactIncrement());
         assertThat(newCommittable.newFilesIncrement()).isEqualTo(committable.newFilesIncrement());
-        assertThat(newCommittable.indexIncrement()).isEqualTo(committable.indexIncrement());
     }
 }

@@ -76,11 +76,6 @@ public class CdcDynamicBucketWriteOperator extends TableWriteOperator<Tuple2<Cdc
     }
 
     @Override
-    protected boolean containLogSystem() {
-        return false;
-    }
-
-    @Override
     public void processElement(StreamRecord<Tuple2<CdcRecord, Integer>> element) throws Exception {
         Tuple2<CdcRecord, Integer> record = element.getValue();
         Optional<GenericRow> optionalConverted =

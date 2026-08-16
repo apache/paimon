@@ -20,9 +20,6 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.manifest.ManifestCommittable;
 
-import org.apache.flink.runtime.state.StateInitializationContext;
-import org.apache.flink.runtime.state.StateSnapshotContext;
-
 import java.util.List;
 
 /**
@@ -36,14 +33,13 @@ public class NoopCommittableStateManager implements CommittableStateManager<Mani
 
     @Override
     public void initializeState(
-            StateInitializationContext context, Committer<?, ManifestCommittable> committer)
+            Committer.Context context, Committer<?, ManifestCommittable> committer)
             throws Exception {
         // nothing to do
     }
 
     @Override
-    public void snapshotState(StateSnapshotContext context, List<ManifestCommittable> committables)
-            throws Exception {
+    public void snapshotState(List<ManifestCommittable> committables) throws Exception {
         // nothing to do
     }
 }

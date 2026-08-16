@@ -21,7 +21,7 @@ package org.apache.paimon.flink.action;
 import java.util.Map;
 
 /** Delete branch action for Flink. */
-public class DeleteBranchAction extends TableActionBase {
+public class DeleteBranchAction extends TableActionBase implements LocalAction {
 
     private final String branchNames;
 
@@ -35,7 +35,7 @@ public class DeleteBranchAction extends TableActionBase {
     }
 
     @Override
-    public void run() throws Exception {
+    public void executeLocally() {
         table.deleteBranches(branchNames);
     }
 }

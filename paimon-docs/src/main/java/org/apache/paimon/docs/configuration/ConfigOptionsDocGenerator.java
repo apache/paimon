@@ -74,7 +74,6 @@ public class ConfigOptionsDocGenerator {
             new OptionsClassLocation[] {
                 new OptionsClassLocation("paimon-api", "org.apache.paimon.options"),
                 new OptionsClassLocation("paimon-api", "org.apache.paimon"),
-                new OptionsClassLocation("paimon-core", "org.apache.paimon.lookup.rocksdb"),
                 new OptionsClassLocation("paimon-core", "org.apache.paimon.jdbc"),
                 new OptionsClassLocation("paimon-core", "org.apache.paimon.table"),
                 new OptionsClassLocation("paimon-core", "org.apache.paimon.iceberg"),
@@ -82,7 +81,7 @@ public class ConfigOptionsDocGenerator {
                 new OptionsClassLocation(
                         "paimon-flink/paimon-flink-common", "org.apache.paimon.flink"),
                 new OptionsClassLocation(
-                        "paimon-flink/paimon-flink-cdc", "org.apache.paimon.flink.kafka"),
+                        "paimon-flink/paimon-flink-cdc", "org.apache.paimon.flink.pipeline.cdc"),
                 new OptionsClassLocation(
                         "paimon-hive/paimon-hive-catalog", "org.apache.paimon.hive"),
                 new OptionsClassLocation(

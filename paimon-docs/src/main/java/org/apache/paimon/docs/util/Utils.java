@@ -29,13 +29,14 @@ public class Utils {
 
     public static String escapeCharacters(String value) {
         return value.replaceAll("<wbr>", TEMPORARY_PLACEHOLDER)
+                .replaceAll("&", "&amp;")
                 .replaceAll("<", "&lt;")
                 .replaceAll(">", "&gt;")
                 .replaceAll(TEMPORARY_PLACEHOLDER, "<wbr>");
     }
 
     public static String apacheHeaderToHtml() {
-        return "{{/*\n"
+        return "<!--\n"
                 + "Licensed to the Apache Software Foundation (ASF) under one\n"
                 + "or more contributor license agreements.  See the NOTICE file\n"
                 + "distributed with this work for additional information\n"
@@ -52,6 +53,6 @@ public class Utils {
                 + "KIND, either express or implied.  See the License for the\n"
                 + "specific language governing permissions and limitations\n"
                 + "under the License.\n"
-                + "*/}}\n";
+                + "-->\n";
     }
 }

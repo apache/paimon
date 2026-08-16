@@ -22,11 +22,20 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueSerializerTest;
 import org.apache.paimon.TestKeyValueGenerator;
+import org.apache.paimon.append.AppendOnlyWriter;
+import org.apache.paimon.append.BucketedAppendCompactManager;
+import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.deletionvectors.DeletionVector;
+import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.fileindex.FileIndexOptions;
+import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FlushingFileFormat;
+import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
@@ -34,14 +43,24 @@ import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.memory.HeapMemorySegmentPool;
+import org.apache.paimon.operation.BlobFileContext;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.table.SpecialFields;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.CloseableIterator;
+import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.StatsCollectorFactories;
 
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
@@ -50,11 +69,19 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
 import static org.apache.paimon.TestKeyValueGenerator.DEFAULT_ROW_TYPE;
@@ -86,6 +113,61 @@ public class KeyValueFileReadWriteTest {
                         "you can configure 'snapshot.time-retained' option with a larger value.");
     }
 
+    @Test
+    public void testConcurrentCreateRecordReaderBuildsFormatMappingOnce() throws Exception {
+        AtomicInteger readerFactoryCreations = new AtomicInteger();
+        CountDownLatch firstCreationStarted = new CountDownLatch(1);
+        CountDownLatch releaseCreation = new CountDownLatch(1);
+        FileFormat blockingFormat =
+                new FlushingFileFormat("avro") {
+                    @Override
+                    public FormatReaderFactory createReaderFactory(
+                            RowType dataSchemaRowType,
+                            RowType projectedRowType,
+                            List<Predicate> filters) {
+                        readerFactoryCreations.incrementAndGet();
+                        firstCreationStarted.countDown();
+                        try {
+                            releaseCreation.await(10, TimeUnit.SECONDS);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            throw new RuntimeException(e);
+                        }
+                        return super.createReaderFactory(
+                                dataSchemaRowType, projectedRowType, filters);
+                    }
+                };
+        KeyValueFileReaderFactory readerFactory =
+                createReaderFactory(tempDir.toString(), ignored -> blockingFormat, null, null);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        try {
+            Future<RecordReader<KeyValue>> first =
+                    executor.submit(
+                            () ->
+                                    readerFactory.createRecordReader(
+                                            newFile("concurrent-1.avro", 0, 0, 1, 0)));
+            assertThat(firstCreationStarted.await(10, TimeUnit.SECONDS)).isTrue();
+            Future<RecordReader<KeyValue>> second =
+                    executor.submit(
+                            () ->
+                                    readerFactory.createRecordReader(
+                                            newFile("concurrent-2.avro", 0, 0, 1, 0)));
+
+            Thread.sleep(500);
+            assertThat(readerFactoryCreations.get()).isEqualTo(1);
+
+            releaseCreation.countDown();
+            assertThatThrownBy(() -> first.get(10, TimeUnit.SECONDS))
+                    .hasCauseInstanceOf(java.io.FileNotFoundException.class);
+            assertThatThrownBy(() -> second.get(10, TimeUnit.SECONDS))
+                    .hasCauseInstanceOf(java.io.FileNotFoundException.class);
+        } finally {
+            releaseCreation.countDown();
+            executor.shutdownNow();
+        }
+    }
+
     @RepeatedTest(10)
     public void testWriteAndReadDataFileWithStatsCollectingRollingFile() throws Exception {
         testWriteAndReadDataFileImpl("avro");
@@ -96,13 +178,37 @@ public class KeyValueFileReadWriteTest {
         testWriteAndReadDataFileImpl("avro-extract");
     }
 
+    @Test
+    public void testMergeTreeCompactionIgnoresRowLimit() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.TARGET_FILE_ROW_NUM, 2L);
+        KeyValueFileWriterFactory writerFactory =
+                createWriterFactory(tempDir.toString(), "avro", options);
+        List<KeyValue> content = gen.next().content;
+
+        RollingFileWriter<KeyValue, DataFileMeta> appendWriter =
+                writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
+        appendWriter.write(CloseableIterator.fromList(content, kv -> {}));
+        appendWriter.close();
+
+        RollingFileWriter<KeyValue, DataFileMeta> compactWriter =
+                writerFactory.createRollingMergeTreeFileWriter(0, FileSource.COMPACT);
+        compactWriter.write(CloseableIterator.fromList(content, kv -> {}));
+        compactWriter.close();
+
+        // Writes roll by rows (cap=2); compaction output is size-only, so it is not row-split.
+        assertThat(appendWriter.result().size()).isGreaterThan(1);
+        assertThat(compactWriter.result()).hasSize(1);
+    }
+
     private void testWriteAndReadDataFileImpl(String format) throws Exception {
         DataFileTestDataGenerator.Data data = gen.next();
         KeyValueFileWriterFactory writerFactory = createWriterFactory(tempDir.toString(), format);
         DataFileMetaSerializer serializer = new DataFileMetaSerializer();
 
-        RollingFileWriter<KeyValue, DataFileMeta> writer =
-                writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
+        RollingFileWriterImpl<KeyValue, DataFileMeta> writer =
+                (RollingFileWriterImpl<KeyValue, DataFileMeta>)
+                        writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
         writer.write(CloseableIterator.fromList(data.content, kv -> {}));
         writer.close();
         List<DataFileMeta> actualMetas = writer.result();
@@ -223,44 +329,104 @@ public class KeyValueFileReadWriteTest {
                                                 kv.value().getInt(1))));
     }
 
-    protected KeyValueFileWriterFactory createWriterFactory(String pathStr, String format) {
-        Path path = new Path(pathStr);
-        FileStorePathFactory pathFactory =
-                new FileStorePathFactory(
-                        path,
-                        RowType.of(),
-                        CoreOptions.PARTITION_DEFAULT_NAME.defaultValue(),
+    @Test
+    public void testFileSuffix(@TempDir java.nio.file.Path tempDir) throws Exception {
+        RowType schema =
+                RowType.of(
+                        new DataType[] {new IntType(), new VarCharType(), new VarCharType()},
+                        new String[] {"id", "name", "dt"});
+
+        String format = "avro";
+        KeyValueFileWriterFactory writerFactory = createWriterFactory(tempDir.toString(), format);
+        Path path = writerFactory.pathFactory(0).newPath();
+        assertThat(path.toString().endsWith(format)).isTrue();
+
+        DataFilePathFactory dataFilePathFactory =
+                new DataFilePathFactory(
+                        new Path(tempDir + "/dt=1/bucket-1"),
                         format,
                         CoreOptions.DATA_FILE_PREFIX.defaultValue(),
                         CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
-                        CoreOptions.PARTITION_GENERATE_LEGACY_NAME.defaultValue(),
                         CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
-                        null,
                         null);
-        int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
-        FileIO fileIO = FileIOFinder.find(path);
+        FileFormat fileFormat = FileFormat.fromIdentifier(format, new Options());
+        LinkedList<DataFileMeta> toCompact = new LinkedList<>();
+        CoreOptions options =
+                new CoreOptions(Collections.singletonMap("metadata.stats-mode", "truncate(16)"));
+        AppendOnlyWriter appendOnlyWriter =
+                new AppendOnlyWriter(
+                        LocalFileIO.create(),
+                        IOManager.create(tempDir.toString()),
+                        0,
+                        fileFormat,
+                        null,
+                        10,
+                        10,
+                        10,
+                        Long.MAX_VALUE,
+                        schema,
+                        null,
+                        0,
+                        new BucketedAppendCompactManager(
+                                null, toCompact, null, 4, 10, 7, false, null, null), // not used
+                        null,
+                        false,
+                        dataFilePathFactory,
+                        null,
+                        false,
+                        false,
+                        CoreOptions.FILE_COMPRESSION.defaultValue(),
+                        CompressOptions.defaultOptions(),
+                        new StatsCollectorFactories(options),
+                        MemorySize.MAX_VALUE,
+                        new FileIndexOptions(),
+                        true,
+                        false,
+                        options.dataEvolutionEnabled(),
+                        null,
+                        BlobFileContext.create(schema, options));
+        appendOnlyWriter.setMemoryPool(
+                new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
+        appendOnlyWriter.write(
+                GenericRow.of(1, BinaryString.fromString("aaa"), BinaryString.fromString("1")));
+        CommitIncrement increment = appendOnlyWriter.prepareCommit(true);
+        appendOnlyWriter.close();
+
+        DataFileMeta meta = increment.newFilesIncrement().newFiles().get(0);
+        assertThat(meta.fileName().endsWith(format)).isTrue();
+    }
+
+    protected KeyValueFileWriterFactory createWriterFactory(String pathStr, String format) {
         Options options = new Options();
         options.set(CoreOptions.METADATA_STATS_MODE, "FULL");
+        return createWriterFactory(pathStr, format, options);
+    }
+
+    protected KeyValueFileWriterFactory createWriterFactory(
+            String pathStr, String format, Options options) {
+        Path path = new Path(pathStr);
+        int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
+        FileIO fileIO = FileIOFinder.find(path);
 
         Function<String, FileStorePathFactory> pathFactoryMap =
-                new Function<String, FileStorePathFactory>() {
-                    @Override
-                    public FileStorePathFactory apply(String format) {
-                        return new FileStorePathFactory(
+                format1 ->
+                        new FileStorePathFactory(
                                 path,
                                 RowType.of(),
                                 CoreOptions.PARTITION_DEFAULT_NAME.defaultValue(),
-                                format,
+                                format1,
                                 CoreOptions.DATA_FILE_PREFIX.defaultValue(),
                                 CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
                                 CoreOptions.PARTITION_GENERATE_LEGACY_NAME.defaultValue(),
                                 CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                                 CoreOptions.FILE_COMPRESSION.defaultValue(),
                                 null,
+                                null,
+                                CoreOptions.ExternalPathStrategy.NONE,
+                                null,
+                                false,
                                 null);
-                    }
-                };
 
         return KeyValueFileWriterFactory.builder(
                         fileIO,
@@ -278,6 +444,15 @@ public class KeyValueFileReadWriteTest {
 
     private KeyValueFileReaderFactory createReaderFactory(
             String pathStr, String format, RowType readKeyType, RowType readValueType) {
+        return createReaderFactory(
+                pathStr, ignore -> new FlushingFileFormat(format), readKeyType, readValueType);
+    }
+
+    private KeyValueFileReaderFactory createReaderFactory(
+            String pathStr,
+            FileFormatDiscover formatDiscover,
+            RowType readKeyType,
+            RowType readValueType) {
         Path path = new Path(pathStr);
         FileIO fileIO = FileIOFinder.find(path);
         FileStorePathFactory pathFactory = createNonPartFactory(path);
@@ -288,7 +463,7 @@ public class KeyValueFileReadWriteTest {
                         createTestSchemaManager(path).schema(0),
                         KEY_TYPE,
                         DEFAULT_ROW_TYPE,
-                        ignore -> new FlushingFileFormat(format),
+                        formatDiscover,
                         pathFactory,
                         new TestKeyValueGenerator.TestKeyValueFieldsExtractor(),
                         new CoreOptions(new HashMap<>()));
@@ -381,6 +556,49 @@ public class KeyValueFileReadWriteTest {
         // expected.level == eachFile.level
         for (DataFileMeta meta : actual) {
             assertThat(meta.level()).isEqualTo(expected.level());
+        }
+    }
+
+    @Test
+    void testChangelogFile() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.METADATA_STATS_MODE, "FULL");
+        options.setString("file-index.bloom-filter.columns", "comment");
+        options.setString("file-index.in-manifest-threshold", "1B");
+
+        KeyValueFileWriterFactory writerFactory =
+                createWriterFactory(tempDir.toString(), "avro", options);
+
+        DataFileTestDataGenerator.Data data = gen.next();
+        RollingFileWriter<KeyValue, DataFileMeta> dataWriter =
+                writerFactory.createRollingMergeTreeFileWriter(0, FileSource.APPEND);
+        dataWriter.write(CloseableIterator.fromList(data.content, kv -> {}));
+        dataWriter.close();
+        List<DataFileMeta> dataFileMetas = dataWriter.result();
+
+        assertThat(dataFileMetas).isNotEmpty();
+        assertThat(
+                        dataFileMetas.stream()
+                                .anyMatch(
+                                        meta ->
+                                                meta.extraFiles().stream()
+                                                        .anyMatch(
+                                                                f ->
+                                                                        f.endsWith(
+                                                                                DataFilePathFactory
+                                                                                        .INDEX_PATH_SUFFIX))))
+                .isTrue();
+
+        RollingFileWriter<KeyValue, DataFileMeta> changelogWriter =
+                writerFactory.createRollingChangelogFileWriter(0);
+        changelogWriter.write(CloseableIterator.fromList(data.content, kv -> {}));
+        changelogWriter.close();
+        List<DataFileMeta> changelogMetas = changelogWriter.result();
+
+        assertThat(changelogMetas).isNotEmpty();
+        for (DataFileMeta meta : changelogMetas) {
+            assertThat(meta.extraFiles())
+                    .noneMatch(f -> f.endsWith(DataFilePathFactory.INDEX_PATH_SUFFIX));
         }
     }
 

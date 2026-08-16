@@ -89,6 +89,11 @@ public class KeyValue {
         return sequenceNumber;
     }
 
+    public KeyValue setSequenceNumber(long sequenceNumber) {
+        this.sequenceNumber = sequenceNumber;
+        return this;
+    }
+
     public RowKind valueKind() {
         return valueKind;
     }

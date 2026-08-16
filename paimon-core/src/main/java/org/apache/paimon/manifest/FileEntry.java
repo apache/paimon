@@ -19,13 +19,17 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.io.ProjectedDataFileMeta;
+import org.apache.paimon.memory.MemorySegmentUtils;
+import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
-import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Iterator;
@@ -40,6 +44,8 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.ManifestReadThreadPool.randomlyExecuteSequentialReturn;
 import static org.apache.paimon.utils.ManifestReadThreadPool.sequentialBatchedExecute;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Entry representing a file. */
 public interface FileEntry {
@@ -67,17 +73,23 @@ public interface FileEntry {
 
     List<String> extraFiles();
 
+    long rowCount();
+
+    @Nullable
+    Long firstRowId();
+
     /**
      * The same {@link Identifier} indicates that the {@link ManifestEntry} refers to the same data
      * file.
      */
     class Identifier {
+
         public final BinaryRow partition;
         public final int bucket;
         public final int level;
         public final String fileName;
         public final List<String> extraFiles;
-        @Nullable private final byte[] embeddedIndex;
+        @Nullable public final byte[] embeddedIndex;
         @Nullable public final String externalPath;
 
         /* Cache the hash code for the string */
@@ -170,6 +182,124 @@ public interface FileEntry {
         }
     }
 
+    /**
+     * Reusable byte encoding of a binary manifest entry's {@link Identifier} fields.
+     *
+     * <p>The encoded identifier is the prefix of {@link #bytes()} ending at {@link #length()}. It
+     * is valid until the next call to {@link #replace(ProjectedManifestEntry)}, {@link
+     * #replaceWithPartition(ProjectedManifestEntry)}, or {@link #release()} and must not be
+     * modified by callers.
+     *
+     * <p>{@link #replace(ProjectedManifestEntry)} omits the partition so callers can represent it
+     * with a compact dictionary id. {@link #replaceWithPartition(ProjectedManifestEntry)} includes
+     * the serialized partition and represents the complete base {@link Identifier}.
+     */
+    final class ReusableIdentifier {
+
+        private byte[] bytes = new byte[256];
+        private int length;
+
+        public ReusableIdentifier replace(ProjectedManifestEntry entry) {
+            checkArgument(entry != null, "Binary manifest entry cannot be null.");
+            length = 0;
+            return appendEntryFields(entry);
+        }
+
+        /** Replaces this encoding with the entry's partition and identity fields. */
+        public ReusableIdentifier replaceWithPartition(ProjectedManifestEntry entry) {
+            checkArgument(entry != null, "Binary manifest entry cannot be null.");
+            length = 0;
+            putBytes(entry.partitionBytes());
+            return appendEntryFields(entry);
+        }
+
+        /** Replaces this encoding with an already serialized identifier. */
+        public ReusableIdentifier replace(byte[] value, int offset, int valueLength) {
+            checkArgument(value != null, "Serialized identifier cannot be null.");
+            checkArgument(
+                    offset >= 0 && valueLength >= 0 && offset <= value.length - valueLength,
+                    "Identifier byte range is invalid.");
+            length = 0;
+            ensureCapacity(valueLength);
+            System.arraycopy(value, offset, bytes, 0, valueLength);
+            length = valueLength;
+            return this;
+        }
+
+        private ReusableIdentifier appendEntryFields(ProjectedManifestEntry entry) {
+            putInt(entry.bucket());
+            ProjectedDataFileMeta file = entry.file();
+            putInt(file.level());
+            putString(file.fileNameBinary());
+
+            int extraFileCount = file.extraFileCount();
+            putInt(extraFileCount);
+            for (int i = 0; i < extraFileCount; i++) {
+                putString(file.extraFile(i));
+            }
+
+            if (!file.hasEmbeddedIndex()) {
+                putInt(-1);
+            } else {
+                putBytes(file.embeddedIndex());
+            }
+            if (!file.hasExternalPath()) {
+                putInt(-1);
+            } else {
+                putString(file.externalPathBinary());
+            }
+            return this;
+        }
+
+        public byte[] bytes() {
+            return bytes;
+        }
+
+        public int length() {
+            return length;
+        }
+
+        public void release() {
+            bytes = new byte[0];
+            length = 0;
+        }
+
+        private void putString(BinaryString value) {
+            checkState(value != null, "Manifest string field cannot be null.");
+            int valueLength = value.getSizeInBytes();
+            putInt(valueLength);
+            ensureCapacity(valueLength);
+            MemorySegmentUtils.copyToBytes(
+                    value.getSegments(), value.getOffset(), bytes, length, valueLength);
+            length += valueLength;
+        }
+
+        private void putBytes(byte[] value) {
+            checkState(value != null, "Manifest binary field cannot be null.");
+            putInt(value.length);
+            ensureCapacity(value.length);
+            System.arraycopy(value, 0, bytes, length, value.length);
+            length += value.length;
+        }
+
+        private void putInt(int value) {
+            ensureCapacity(Integer.BYTES);
+            bytes[length++] = (byte) (value >>> 24);
+            bytes[length++] = (byte) (value >>> 16);
+            bytes[length++] = (byte) (value >>> 8);
+            bytes[length++] = (byte) value;
+        }
+
+        private void ensureCapacity(int additional) {
+            int required = Math.addExact(length, additional);
+            if (required <= bytes.length) {
+                return;
+            }
+            int grown = Math.max(required, bytes.length + (bytes.length >>> 1));
+            bytes = Arrays.copyOf(bytes, grown);
+        }
+    }
+
     static <T extends FileEntry> Collection<T> mergeEntries(Iterable<T> entries) {
         LinkedHashMap<Identifier, T> map = new LinkedHashMap<>();
         mergeEntries(entries, map);
@@ -190,10 +320,12 @@ public interface FileEntry {
             Identifier identifier = entry.identifier();
             switch (entry.kind()) {
                 case ADD:
-                    Preconditions.checkState(
-                            !map.containsKey(identifier),
-                            "Trying to add file %s which is already added.",
-                            identifier);
+                    T old = map.get(identifier);
+                    checkState(
+                            old == null,
+                            "Trying to add file %s which is already in the the map: %s",
+                            identifier,
+                            old);
                     map.put(identifier, entry);
                     break;
                 case DELETE:
@@ -229,12 +361,40 @@ public interface FileEntry {
             ManifestFile manifestFile,
             List<ManifestFileMeta> manifestFiles,
             @Nullable Integer manifestReadParallelism) {
-        return readDeletedEntries(
-                m ->
-                        manifestFile.read(
-                                m.fileName(), m.fileSize(), deletedFilter(), Filter.alwaysTrue()),
-                manifestFiles,
-                manifestReadParallelism);
+        manifestFiles =
+                manifestFiles.stream()
+                        .filter(file -> file.numDeletedFiles() > 0)
+                        .collect(Collectors.toList());
+        Function<ManifestFileMeta, List<Identifier>> processor =
+                manifest -> {
+                    List<Identifier> identifiers =
+                            new ArrayList<>((int) Math.min(manifest.numDeletedFiles(), 1 << 20));
+                    try (CloseableIterator<ProjectedManifestEntry> entries =
+                            manifestFile.scan(
+                                    manifest.fileName(),
+                                    ProjectedManifestEntry.DELETE_ENTRY_PROJECTION)) {
+                        while (entries.hasNext()) {
+                            ProjectedManifestEntry entry = entries.next();
+                            if (entry.isDelete()) {
+                                identifiers.add(entry.identifier());
+                            }
+                        }
+                    } catch (Exception e) {
+                        throw new RuntimeException(
+                                String.format(
+                                        "Failed to scan deleted entries from manifest file '%s'.",
+                                        manifest.fileName()),
+                                e);
+                    }
+                    return identifiers;
+                };
+        Iterator<Identifier> identifiers =
+                randomlyExecuteSequentialReturn(processor, manifestFiles, manifestReadParallelism);
+        Set<Identifier> result = ConcurrentHashMap.newKeySet();
+        while (identifiers.hasNext()) {
+            result.add(identifiers.next());
+        }
+        return result;
     }
 
     static <T extends FileEntry> Set<Identifier> readDeletedEntries(

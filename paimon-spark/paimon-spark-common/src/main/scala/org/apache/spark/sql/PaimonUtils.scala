@@ -22,10 +22,12 @@ import org.apache.spark.executor.OutputMetrics
 import org.apache.spark.rdd.InputFileBlockHolder
 import org.apache.spark.sql.catalyst.analysis.Resolver
 import org.apache.spark.sql.catalyst.catalog.CatalogTypes.TablePartitionSpec
-import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression}
+import org.apache.spark.sql.catalyst.parser.ParserInterface
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.connector.expressions.FieldReference
 import org.apache.spark.sql.connector.expressions.filter.Predicate
+import org.apache.spark.sql.errors.QueryCompilationErrors
 import org.apache.spark.sql.execution.datasources.DataSourceStrategy
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Strategy.translateFilterV2WithMapping
 import org.apache.spark.sql.internal.connector.PredicateUtils
@@ -62,6 +64,21 @@ object PaimonUtils {
     SparkShimLoader.shim.classicApi.createDataset(sparkSession, logicalPlan)
   }
 
+  /**
+   * Parse a read-only query, preferring [[ParserInterface.parseQuery]] which rejects non-query
+   * statements at parse time. `parseQuery` was added in Spark 3.3, so on Spark 3.2 (where it is
+   * absent) we fall back to [[ParserInterface.parsePlan]]. Callers are responsible for handling any
+   * [[org.apache.spark.sql.catalyst.parser.ParseException]] and for any further validation of the
+   * returned plan.
+   */
+  def parseQueryCompat(parser: ParserInterface, sqlText: String): LogicalPlan = {
+    try {
+      parser.parseQuery(sqlText)
+    } catch {
+      case _: NoSuchMethodError => parser.parsePlan(sqlText)
+    }
+  }
+
   def normalizeExprs(exprs: Seq[Expression], attributes: Seq[Attribute]): Seq[Expression] = {
     DataSourceStrategy.normalizeExprs(exprs, attributes)
   }
@@ -90,6 +107,10 @@ object PaimonUtils {
 
   def bytesToString(size: Long): String = {
     SparkUtils.bytesToString(size)
+  }
+
+  def msDurationToString(size: Long): String = {
+    SparkUtils.msDurationToString(size)
   }
 
   def setInputFileName(inputFileName: String): Unit = {
@@ -127,11 +148,26 @@ object PaimonUtils {
     left.sameType(right)
   }
 
+  def equalsIgnoreCompatibleNullability(from: DataType, to: DataType): Boolean = {
+    DataType.equalsIgnoreCompatibleNullability(from, to)
+  }
+
+  /** `StructType` to fresh `AttributeReference`s (the `StructType.toAttributes` removed in 3.4+). */
+  def toAttributes(schema: StructType): Seq[AttributeReference] =
+    schema.map(f => AttributeReference(f.name, f.dataType, f.nullable, f.metadata)())
+
   def classIsLoadable(clazz: String): Boolean = {
     SparkUtils.classIsLoadable(clazz)
   }
 
   def classForName(clazz: String): Class[_] = {
     SparkUtils.classForName(clazz)
+  }
+
+  def invalidPartitionSpecError(
+      specKeys: String,
+      partitionColumnNames: Seq[String],
+      tableName: String): Throwable = {
+    QueryCompilationErrors.invalidPartitionSpecError(specKeys, partitionColumnNames, tableName)
   }
 }

@@ -183,4 +183,78 @@ trait MergeIntoNotMatchedBySourceTest extends PaimonSparkTestBase with PaimonTab
       )
     }
   }
+
+  test("Paimon MergeInto: merge-schema with not matched by source") {
+    withTable("source", "target") {
+      spark.conf.set("spark.paimon.write.merge-schema", "true")
+      try {
+        createTable("target", "a INT, b STRING", Seq("a"))
+        spark.sql("INSERT INTO target VALUES (1, 'v1'), (2, 'v2'), (3, 'v3')")
+
+        createTable("source", "a INT, b STRING, c INT", Seq("a"))
+        spark.sql("INSERT INTO source VALUES (1, 'u1', 10), (4, 'u4', 40)")
+
+        spark.sql("""
+                    |MERGE INTO target
+                    |USING source
+                    |ON target.a = source.a
+                    |WHEN MATCHED THEN
+                    |  UPDATE SET *
+                    |WHEN NOT MATCHED THEN
+                    |  INSERT *
+                    |WHEN NOT MATCHED BY SOURCE AND a = 2 THEN
+                    |  UPDATE SET b = 'updated'
+                    |WHEN NOT MATCHED BY SOURCE THEN
+                    |  DELETE
+                    |""".stripMargin)
+
+        // id=1: matched, UPDATE SET * => (1, 'u1', 10)
+        // id=2: not matched by source, a=2, UPDATE SET b='updated' => (2, 'updated', null)
+        // id=3: not matched by source, DELETE => removed
+        // id=4: not matched, INSERT * => (4, 'u4', 40)
+        checkAnswer(
+          spark.sql("SELECT * FROM target ORDER BY a"),
+          Seq(Row(1, "u1", 10), Row(2, "updated", null), Row(4, "u4", 40)))
+      } finally {
+        spark.conf.unset("spark.paimon.write.merge-schema")
+      }
+    }
+  }
+
+  test("Paimon MergeInto: not matched by source is not narrowed by target-only condition") {
+    withTable("source", "target") {
+
+      Seq((1, 100)).toDF("a", "b").createOrReplaceTempView("source")
+
+      createTable("target", "a INT, b INT, c STRING, pt STRING", Seq("a", "pt"), Seq("pt"))
+      spark.sql("""
+                  |INSERT INTO target VALUES
+                  |  (1, 10, 'c1', 'p1'), (2, 20, 'c2', 'p1'),
+                  |  (3, 30, 'c3', 'p2'), (4, 40, 'c4', 'p2')
+                  |""".stripMargin)
+
+      // `t.pt = 'p1'` only references the target, so it is a candidate for pruning the target
+      // before the join. Pruning it away would also drop the 'p2' rows from the population that
+      // WHEN NOT MATCHED BY SOURCE is defined over, silently skipping their update.
+      spark.sql("""
+                  |MERGE INTO target t
+                  |USING source s
+                  |ON t.a = s.a AND t.pt = 'p1'
+                  |WHEN MATCHED THEN
+                  |  UPDATE SET t.b = s.b
+                  |WHEN NOT MATCHED BY SOURCE THEN
+                  |  UPDATE SET t.c = 'stale'
+                  |""".stripMargin)
+
+      // a=1: matched (pt='p1')                      => b updated to 100
+      // a=2: not matched by source (pt='p1')        => c = 'stale'
+      // a=3, a=4: not matched by source (pt='p2', excluded by the target-only condition, so no
+      //           source row can ever match them)   => c = 'stale'
+      checkAnswer(
+        spark.sql("SELECT a, b, c, pt FROM target ORDER BY a"),
+        Row(1, 100, "c1", "p1") :: Row(2, 20, "stale", "p1") ::
+          Row(3, 30, "stale", "p2") :: Row(4, 40, "stale", "p2") :: Nil
+      )
+    }
+  }
 }

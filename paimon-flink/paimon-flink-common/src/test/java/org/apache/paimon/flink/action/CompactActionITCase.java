@@ -18,18 +18,38 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.operation.BaseAppendFileStoreWrite;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
+import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableScan;
-import org.apache.paimon.utils.CommonTestUtils;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CloseableIterator;
+import org.apache.paimon.utils.CommitIncrement;
+import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TraceableFileIO;
 
@@ -43,14 +63,20 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.Duration;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
+import static org.apache.paimon.utils.CommonTestUtils.waitUtil;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link CompactAction}. */
@@ -206,7 +232,7 @@ public class CompactActionITCase extends CompactActionITCaseBase {
 
         // assert dedicated compact job will expire snapshots
         SnapshotManager snapshotManager = table.snapshotManager();
-        CommonTestUtils.waitUtil(
+        waitUtil(
                 () ->
                         snapshotManager.latestSnapshotId() - 2
                                 == snapshotManager.earliestSnapshotId(),
@@ -368,6 +394,65 @@ public class CompactActionITCase extends CompactActionITCaseBase {
     }
 
     @Test
+    public void testStreamingCompactWithAddingColumns() throws Exception {
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put(CoreOptions.CHANGELOG_PRODUCER.key(), "full-compaction");
+        tableOptions.put(CoreOptions.FULL_COMPACTION_DELTA_COMMITS.key(), "1");
+        tableOptions.put(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key(), "1s");
+        tableOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
+
+        FileStoreTable table =
+                prepareTable(
+                        Arrays.asList("dt", "hh"),
+                        Arrays.asList("dt", "hh", "k"),
+                        Collections.emptyList(),
+                        tableOptions);
+
+        // base records
+        writeData(
+                rowData(1, 100, 15, BinaryString.fromString("20221208")),
+                rowData(1, 100, 16, BinaryString.fromString("20221208")),
+                rowData(1, 100, 15, BinaryString.fromString("20221209")));
+
+        checkLatestSnapshot(table, 1, Snapshot.CommitKind.APPEND);
+        runAction(true);
+        checkLatestSnapshot(table, 2, Snapshot.CommitKind.COMPACT, 60_000);
+
+        SchemaChange schemaChange = SchemaChange.addColumn("new_col", DataTypes.INT());
+        table.schemaManager().commitChanges(schemaChange);
+        // wait a checkpoint at least to wait the writer refresh
+        Thread.sleep(1000);
+
+        // incremental records
+        table = getFileStoreTable(tableName);
+        StreamWriteBuilder streamWriteBuilder =
+                table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = streamWriteBuilder.newWrite();
+        commit = streamWriteBuilder.newCommit();
+        writeData(
+                rowData(1, 101, 15, BinaryString.fromString("20221208"), 1),
+                rowData(1, 101, 16, BinaryString.fromString("20221208"), 1),
+                rowData(2, 101, 15, BinaryString.fromString("20221209"), 2));
+
+        // The old streaming compact job will fail because it detects files with a newer schema.
+        // Run a new compact action to compact with the new schema.
+        runAction(false);
+
+        table = getFileStoreTable(tableName);
+        List<String> res =
+                getResult(
+                        table.newRead(),
+                        table.newSnapshotReader().read().splits(),
+                        table.rowType());
+        assertThat(res)
+                .containsExactlyInAnyOrder(
+                        "+I[1, 101, 15, 20221208, 1]",
+                        "+I[1, 101, 16, 20221208, 1]",
+                        "+I[1, 100, 15, 20221209, NULL]",
+                        "+I[2, 101, 15, 20221209, 2]");
+    }
+
+    @Test
     public void testUnawareBucketStreamingCompact() throws Exception {
         Map<String, String> tableOptions = new HashMap<>();
         tableOptions.put(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key(), "1s");
@@ -475,6 +560,56 @@ public class CompactActionITCase extends CompactActionITCaseBase {
     }
 
     @Test
+    public void testUnawareBucketStreamingCompactWithWithAddingColumns() throws Exception {
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key(), "1s");
+        tableOptions.put(CoreOptions.BUCKET.key(), "-1");
+        tableOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+        tableOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
+
+        FileStoreTable table =
+                prepareTable(
+                        Collections.singletonList("k"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        tableOptions);
+
+        // base records
+        writeData(rowData(1, 100, 15, BinaryString.fromString("20221208")));
+        writeData(rowData(1, 100, 16, BinaryString.fromString("20221208")));
+
+        checkLatestSnapshot(table, 2, Snapshot.CommitKind.APPEND);
+        // repairing that the ut don't specify the real partition of table
+        runActionForUnawareTable(true);
+
+        checkLatestSnapshot(table, 3, Snapshot.CommitKind.COMPACT, 60_000);
+
+        SchemaChange schemaChange = SchemaChange.addColumn("new_col", DataTypes.INT());
+        table.schemaManager().commitChanges(schemaChange);
+        Thread.sleep(1000);
+
+        table = getFileStoreTable(tableName);
+        StreamWriteBuilder streamWriteBuilder =
+                table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = streamWriteBuilder.newWrite();
+        commit = streamWriteBuilder.newCommit();
+        writeData(rowData(1, 101, 15, BinaryString.fromString("20221208"), 1));
+        checkLatestSnapshot(table, 4, Snapshot.CommitKind.APPEND);
+        checkLatestSnapshot(table, 5, Snapshot.CommitKind.COMPACT, 60_000);
+
+        List<String> res =
+                getResult(
+                        table.newRead(),
+                        table.newSnapshotReader().read().splits(),
+                        table.rowType());
+        assertThat(res)
+                .containsExactlyInAnyOrder(
+                        "+I[1, 100, 15, 20221208, NULL]",
+                        "+I[1, 100, 16, 20221208, NULL]",
+                        "+I[1, 101, 15, 20221208, 1]");
+    }
+
+    @Test
     public void testUnawareBucketBatchCompact() throws Exception {
         Map<String, String> tableOptions = new HashMap<>();
         tableOptions.put(CoreOptions.BUCKET.key(), "-1");
@@ -572,6 +707,56 @@ public class CompactActionITCase extends CompactActionITCaseBase {
     }
 
     @Test
+    public void testCompactSpecifiedBucketRangesFromAction() throws Exception {
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
+        tableOptions.put(CoreOptions.BUCKET.key(), "4");
+        FileStoreTable table =
+                prepareTable(
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        Collections.emptyList(),
+                        tableOptions);
+
+        writeData(
+                IntStream.range(0, 40)
+                        .mapToObj(i -> rowData(i, 1, 0, BinaryString.fromString("first")))
+                        .toArray(GenericRow[]::new));
+        writeData(
+                IntStream.range(40, 80)
+                        .mapToObj(i -> rowData(i, 2, 0, BinaryString.fromString("second")))
+                        .toArray(GenericRow[]::new));
+
+        CompactAction action =
+                createAction(
+                        CompactAction.class,
+                        "compact",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName,
+                        "--compact_strategy",
+                        "full",
+                        "--buckets",
+                        "0-1");
+        StreamExecutionEnvironment env = streamExecutionEnvironmentBuilder().batchMode().build();
+        action.withStreamExecutionEnvironment(env).build();
+        env.execute();
+
+        Map<Integer, Integer> filesPerBucket =
+                table.newSnapshotReader().read().dataSplits().stream()
+                        .collect(
+                                Collectors.toMap(
+                                        DataSplit::bucket, split -> split.dataFiles().size()));
+        assertThat(filesPerBucket.get(0)).isEqualTo(1);
+        assertThat(filesPerBucket.get(1)).isEqualTo(1);
+        assertThat(filesPerBucket.get(2)).isEqualTo(2);
+        assertThat(filesPerBucket.get(3)).isEqualTo(2);
+    }
+
+    @Test
     public void testSpecifyNonPartitionField() throws Exception {
         Map<String, String> tableOptions = new HashMap<>();
         tableOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
@@ -625,6 +810,320 @@ public class CompactActionITCase extends CompactActionITCaseBase {
                                         "--order_by",
                                         "dt,hh"))
                 .hasMessage("sort compact do not support 'partition_idle_time'.");
+    }
+
+    @Test
+    public void testStreamingCompactWithEmptyOverwriteUpgrade() throws Exception {
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key(), "1s");
+        tableOptions.put(CoreOptions.COMPACTION_FORCE_UP_LEVEL_0.key(), "true");
+        tableOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
+
+        DataType[] fieldTypes = new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.INT()};
+        RowType rowType = RowType.of(fieldTypes, new String[] {"k", "v", "pt"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        rowType,
+                        Collections.singletonList("pt"),
+                        Arrays.asList("k", "pt"),
+                        Collections.emptyList(),
+                        tableOptions);
+        SnapshotManager snapshotManager = table.snapshotManager();
+
+        StreamExecutionEnvironment env =
+                streamExecutionEnvironmentBuilder().checkpointIntervalMs(500).build();
+        createAction(
+                        CompactAction.class,
+                        "compact",
+                        "--database",
+                        database,
+                        "--table",
+                        tableName,
+                        "--catalog_conf",
+                        "warehouse=" + warehouse)
+                .withStreamExecutionEnvironment(env)
+                .build();
+        env.executeAsync();
+
+        StreamWriteBuilder streamWriteBuilder =
+                table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = streamWriteBuilder.newWrite();
+        commit = streamWriteBuilder.newCommit();
+
+        writeData(rowData(1, 100, 1), rowData(2, 200, 1), rowData(1, 100, 2));
+
+        waitUtil(
+                () -> {
+                    Snapshot latest = snapshotManager.latestSnapshot();
+                    return latest != null && latest.commitKind() == Snapshot.CommitKind.COMPACT;
+                },
+                Duration.ofSeconds(10),
+                Duration.ofMillis(100));
+
+        long snapshotId1 = snapshotManager.latestSnapshotId();
+
+        // overwrite empty partition and let it upgrade
+        String newCommitUser = UUID.randomUUID().toString();
+        try (TableWriteImpl<?> newWrite = table.newWrite(newCommitUser);
+                TableCommitImpl newCommit =
+                        table.newCommit(newCommitUser)
+                                .withOverwrite(Collections.singletonMap("pt", "3"))) {
+            newWrite.write(rowData(1, 100, 3));
+            newWrite.write(rowData(2, 200, 3));
+            newCommit.commit(newWrite.prepareCommit(false, 1));
+        }
+        // write level 0 file to trigger compaction
+        writeData(rowData(1, 101, 3));
+
+        waitUtil(
+                () -> {
+                    Snapshot latest = snapshotManager.latestSnapshot();
+                    return latest.id() > snapshotId1
+                            && latest.commitKind() == Snapshot.CommitKind.COMPACT;
+                },
+                Duration.ofSeconds(10),
+                Duration.ofMillis(100));
+
+        validateResult(
+                table,
+                rowType,
+                table.newStreamScan(),
+                Arrays.asList(
+                        "+I[1, 100, 1]",
+                        "+I[1, 100, 2]",
+                        "+I[1, 101, 3]",
+                        "+I[2, 200, 1]",
+                        "+I[2, 200, 3]"),
+                60_000);
+    }
+
+    @Test
+    public void testDataEvolutionTableCompact() throws Exception {
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put(CoreOptions.BUCKET.key(), "-1");
+        tableOptions.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        tableOptions.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        tableOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
+
+        FileStoreTable table =
+                prepareTable(
+                        Collections.singletonList("k"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        tableOptions);
+
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        BatchTableWrite write = table.newBatchWriteBuilder().newWrite();
+
+        for (int i = 0; i < 10000; i++) {
+            write.write(rowData(1, i, i, BinaryString.fromString("xxxxoooo" + i)));
+        }
+
+        builder.newCommit().commit(write.prepareCommit());
+
+        BaseAppendFileStoreWrite storeWrite =
+                ((AppendOnlyFileStore) table.store()).newWrite("test-compact");
+        storeWrite.withWriteType(table.rowType().project(Arrays.asList("v")));
+        RecordWriter<InternalRow> writer = storeWrite.createWriter(BinaryRow.singleColumn(1), 0);
+        for (int i = 10000; i < 20000; i++) {
+            writer.write(rowData(i));
+        }
+        CommitIncrement commitIncrement = writer.prepareCommit(false);
+        List<CommitMessage> commitMessages =
+                Arrays.asList(
+                        new CommitMessageImpl(
+                                BinaryRow.singleColumn(1),
+                                0,
+                                1,
+                                commitIncrement.newFilesIncrement(),
+                                commitIncrement.compactIncrement()));
+        setFirstRowId(commitMessages, 0L);
+        builder.newCommit().commit(commitMessages);
+
+        writer = storeWrite.createWriter(BinaryRow.singleColumn(1), 0);
+        for (int i = 20000; i < 30000; i++) {
+            writer.write(rowData(i));
+        }
+        commitIncrement = writer.prepareCommit(false);
+        commitMessages =
+                Arrays.asList(
+                        new CommitMessageImpl(
+                                BinaryRow.singleColumn(1),
+                                0,
+                                1,
+                                commitIncrement.newFilesIncrement(),
+                                commitIncrement.compactIncrement()));
+        setFirstRowId(commitMessages, 0L);
+        builder.newCommit().commit(commitMessages);
+
+        checkLatestSnapshot(table, 3, Snapshot.CommitKind.APPEND);
+
+        runAction(false, true, Collections.emptyList());
+
+        checkLatestSnapshot(table, 4, Snapshot.CommitKind.COMPACT);
+
+        List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
+        assertThat(splits.size()).isEqualTo(1);
+        List<DataFileMeta> fileMetas = splits.get(0).dataFiles();
+        assertThat(fileMetas.size()).isEqualTo(1);
+        assertThat(fileMetas.get(0).nonNullFirstRowId()).isEqualTo(0);
+        assertThat(fileMetas.get(0).rowCount()).isEqualTo(10000);
+
+        ReadBuilder readBuilder = table.newReadBuilder();
+        RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan());
+
+        int value = 20000;
+        try (CloseableIterator<InternalRow> iterator = reader.toCloseableIterator()) {
+            while (iterator.hasNext()) {
+                InternalRow row = iterator.next();
+                assertThat(row.getInt(1)).isEqualTo(value++);
+            }
+        }
+
+        assertThat(value).isEqualTo(30000);
+    }
+
+    @Test
+    @Timeout(60)
+    public void testSkipExpiredPartitions() throws Exception {
+        // Use a date far in the past (expired) and today's date (not expired)
+        String expiredDt =
+                LocalDate.now().minusDays(30).format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+        String activeDt = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
+        tableOptions.put(CoreOptions.PARTITION_EXPIRATION_TIME.key(), "7 d");
+        tableOptions.put(
+                CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(),
+                CoreOptions.PartitionExpireStrategy.VALUES_TIME.toString());
+        tableOptions.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), "yyyyMMdd");
+        // Prevent partition expiration from running during the compact commit.
+        tableOptions.put(CoreOptions.PARTITION_EXPIRATION_CHECK_INTERVAL.key(), "999 d");
+
+        FileStoreTable table =
+                prepareTable(
+                        Collections.singletonList("dt"),
+                        Arrays.asList("dt", "k"),
+                        Collections.emptyList(),
+                        tableOptions);
+
+        // Write two batches to each partition so each has multiple files
+        writeData(
+                rowData(1, 100, 15, BinaryString.fromString(expiredDt)),
+                rowData(1, 100, 15, BinaryString.fromString(activeDt)));
+
+        writeData(
+                rowData(2, 100, 15, BinaryString.fromString(expiredDt)),
+                rowData(2, 100, 15, BinaryString.fromString(activeDt)));
+
+        checkLatestSnapshot(table, 2, Snapshot.CommitKind.APPEND);
+
+        CompactAction action =
+                createAction(
+                        CompactAction.class,
+                        "compact",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName,
+                        "--table_conf",
+                        CoreOptions.COMPACTION_SKIP_EXPIRED_PARTITIONS.key() + "=true");
+        StreamExecutionEnvironment env = streamExecutionEnvironmentBuilder().batchMode().build();
+        action.withStreamExecutionEnvironment(env).build();
+        env.execute();
+
+        checkLatestSnapshot(table, 3, Snapshot.CommitKind.COMPACT);
+
+        List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
+        for (DataSplit split : splits) {
+            String dt = split.partition().getString(0).toString();
+            if (dt.equals(activeDt)) {
+                // active partition should be compacted into 1 file
+                assertThat(split.dataFiles().size()).isEqualTo(1);
+            } else {
+                // expired partition should be skipped, still has 2 files
+                assertThat(split.dataFiles().size()).isEqualTo(2);
+            }
+        }
+    }
+
+    @Test
+    @Timeout(60)
+    public void testNotSkipExpiredPartitionsByDefault() throws Exception {
+        String expiredDt =
+                LocalDate.now().minusDays(30).format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+        String activeDt = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
+        tableOptions.put(CoreOptions.PARTITION_EXPIRATION_TIME.key(), "7 d");
+        tableOptions.put(
+                CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(),
+                CoreOptions.PartitionExpireStrategy.VALUES_TIME.toString());
+        tableOptions.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), "yyyyMMdd");
+        // COMPACTION_SKIP_EXPIRED_PARTITIONS is not set, default is false
+        // Prevent partition expiration from running during the compact commit.
+        tableOptions.put(CoreOptions.PARTITION_EXPIRATION_CHECK_INTERVAL.key(), "999 d");
+
+        FileStoreTable table =
+                prepareTable(
+                        Collections.singletonList("dt"),
+                        Arrays.asList("dt", "k"),
+                        Collections.emptyList(),
+                        tableOptions);
+
+        writeData(
+                rowData(1, 100, 15, BinaryString.fromString(expiredDt)),
+                rowData(1, 100, 15, BinaryString.fromString(activeDt)));
+
+        writeData(
+                rowData(2, 100, 15, BinaryString.fromString(expiredDt)),
+                rowData(2, 100, 15, BinaryString.fromString(activeDt)));
+
+        checkLatestSnapshot(table, 2, Snapshot.CommitKind.APPEND);
+
+        CompactAction action =
+                createAction(
+                        CompactAction.class,
+                        "compact",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName);
+        StreamExecutionEnvironment env = streamExecutionEnvironmentBuilder().batchMode().build();
+        action.withStreamExecutionEnvironment(env).build();
+        env.execute();
+
+        checkLatestSnapshot(table, 3, Snapshot.CommitKind.COMPACT);
+
+        // both expired and active partitions should be compacted into 1 file
+        List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
+        for (DataSplit split : splits) {
+            assertThat(split.dataFiles().size()).isEqualTo(1);
+        }
+    }
+
+    private void setFirstRowId(List<CommitMessage> commitables, long firstRowId) {
+        commitables.forEach(
+                c -> {
+                    CommitMessageImpl commitMessage = (CommitMessageImpl) c;
+                    List<DataFileMeta> newFiles =
+                            new ArrayList<>(commitMessage.newFilesIncrement().newFiles());
+                    commitMessage.newFilesIncrement().newFiles().clear();
+                    commitMessage
+                            .newFilesIncrement()
+                            .newFiles()
+                            .addAll(
+                                    newFiles.stream()
+                                            .map(s -> s.assignFirstRowId(firstRowId))
+                                            .collect(Collectors.toList()));
+                });
     }
 
     private void runAction(boolean isStreaming) throws Exception {

@@ -26,4 +26,9 @@ import java.util.Comparator;
 public interface FieldsComparator extends Comparator<InternalRow> {
 
     int[] compareFields();
+
+    /** Whether the comparison order is ascending. Default is true. */
+    default boolean isAscendingOrder() {
+        return true;
+    }
 }

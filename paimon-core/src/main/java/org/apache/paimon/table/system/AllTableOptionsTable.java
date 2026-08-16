@@ -44,11 +44,13 @@ import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.OptionalLong;
 
 /**
  * This is a system table to display all the database-table properties.
@@ -67,6 +69,15 @@ public class AllTableOptionsTable implements ReadonlyTable {
 
     public static final String ALL_TABLE_OPTIONS = "all_table_options";
 
+    public static final RowType TABLE_TYPE =
+            new RowType(
+                    Arrays.asList(
+                            new DataField(
+                                    0, "database_name", new VarCharType(VarCharType.MAX_LENGTH)),
+                            new DataField(1, "table_name", new VarCharType(VarCharType.MAX_LENGTH)),
+                            new DataField(2, "key", new VarCharType(VarCharType.MAX_LENGTH)),
+                            new DataField(3, "value", new VarCharType(VarCharType.MAX_LENGTH))));
+
     private final Map<Identifier, Map<String, String>> allOptions;
 
     public AllTableOptionsTable(Map<Identifier, Map<String, String>> allOptions) {
@@ -80,12 +91,7 @@ public class AllTableOptionsTable implements ReadonlyTable {
 
     @Override
     public RowType rowType() {
-        List<DataField> fields = new ArrayList<>();
-        fields.add(new DataField(0, "database_name", new VarCharType(VarCharType.MAX_LENGTH)));
-        fields.add(new DataField(1, "table_name", new VarCharType(VarCharType.MAX_LENGTH)));
-        fields.add(new DataField(2, "key", new VarCharType(VarCharType.MAX_LENGTH)));
-        fields.add(new DataField(3, "value", new VarCharType(VarCharType.MAX_LENGTH)));
-        return new RowType(fields);
+        return TABLE_TYPE;
     }
 
     @Override
@@ -153,6 +159,11 @@ public class AllTableOptionsTable implements ReadonlyTable {
         public int hashCode() {
             return Objects.hash(allOptions);
         }
+
+        @Override
+        public OptionalLong mergedRowCount() {
+            return OptionalLong.empty();
+        }
     }
 
     private static class AllTableOptionsRead implements InnerTableRead {
@@ -201,10 +212,7 @@ public class AllTableOptionsTable implements ReadonlyTable {
                 iterator =
                         Iterators.transform(
                                 iterator,
-                                row ->
-                                        ProjectedRow.from(
-                                                        readType, AggregationFieldsTable.TABLE_TYPE)
-                                                .replaceRow(row));
+                                row -> ProjectedRow.from(readType, TABLE_TYPE).replaceRow(row));
             }
             return new IteratorRecordReader<>(iterator);
         }

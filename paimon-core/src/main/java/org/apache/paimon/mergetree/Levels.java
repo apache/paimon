@@ -32,6 +32,7 @@ import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyList;
+import static org.apache.paimon.io.DataFileMeta.groupByLevel;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A class which stores all level files of merge tree. */
@@ -66,6 +67,17 @@ public class Levels {
                                 // possible that multiple files have the same maxSequenceNumber. In
                                 // this case we have to compare their file names so that files with
                                 // same maxSequenceNumber won't be "de-duplicated" by the tree set.
+                                int minSeqCompare =
+                                        Long.compare(a.minSequenceNumber(), b.minSequenceNumber());
+                                if (minSeqCompare != 0) {
+                                    return minSeqCompare;
+                                }
+                                // If minSequenceNumber is also the same, use creation time
+                                int timeCompare = a.creationTime().compareTo(b.creationTime());
+                                if (timeCompare != 0) {
+                                    return timeCompare;
+                                }
+                                // Final fallback: filename (to ensure uniqueness in TreeSet)
                                 return a.fileName().compareTo(b.fileName());
                             }
                         });
@@ -194,11 +206,6 @@ public class Levels {
             files.addAll(after);
             levels.set(level - 1, SortedRun.fromUnsorted(files, keyComparator));
         }
-    }
-
-    private Map<Integer, List<DataFileMeta>> groupByLevel(List<DataFileMeta> files) {
-        return files.stream()
-                .collect(Collectors.groupingBy(DataFileMeta::level, Collectors.toList()));
     }
 
     /** A callback to notify dropping file. */

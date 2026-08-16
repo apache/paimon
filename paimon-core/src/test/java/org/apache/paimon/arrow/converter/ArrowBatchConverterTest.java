@@ -39,6 +39,7 @@ import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.VectorizedRecordIterator;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
@@ -336,6 +337,61 @@ public class ArrowBatchConverterTest {
                     }
                 }
             }
+
+            arrowWriter.close();
+        }
+    }
+
+    @TestTemplate
+    public void testSchemaEvolutionWithMissingMapType() throws Exception {
+        assumeThat(testMode).isEqualTo("vectorized_without_dv");
+
+        RowType initialRowType = RowType.builder().field("id", DataTypes.INT()).build();
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.FILE_FORMAT.key(), "orc");
+        Schema schema =
+                new Schema(
+                        initialRowType.getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        "");
+        Identifier identifier = Identifier.create("default", UUID.randomUUID().toString());
+        catalog.createTable(identifier, schema, false);
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        try (StreamTableWrite write = table.newStreamWriteBuilder().newWrite();
+                StreamTableCommit commit = table.newStreamWriteBuilder().newCommit()) {
+            write.withIOManager(new IOManagerImpl(tempDir.toString()));
+            write.write(GenericRow.of(1));
+            commit.commit(0, write.prepareCommit(false, 0));
+        }
+
+        catalog.alterTable(
+                identifier,
+                SchemaChange.addColumn("map", DataTypes.MAP(DataTypes.STRING(), DataTypes.INT())),
+                false);
+        table = (FileStoreTable) catalog.getTable(identifier);
+        RowType evolvedRowType = table.rowType();
+
+        RecordReader.RecordIterator<InternalRow> iterator =
+                table.newRead().createReader(table.newReadBuilder().newScan().plan()).readBatch();
+        assertThat(iterator).isInstanceOf(VectorizedRecordIterator.class);
+
+        try (RootAllocator allocator = new RootAllocator()) {
+            VectorSchemaRoot vsr = ArrowUtils.createVectorSchemaRoot(evolvedRowType, allocator);
+            ArrowBatchConverter arrowWriter = createArrowWriter(iterator, evolvedRowType, vsr);
+            arrowWriter.next(1);
+
+            assertThat(vsr.getRowCount()).isEqualTo(1);
+            assertThat(((IntVector) vsr.getVector("id")).get(0)).isEqualTo(1);
+
+            MapVector mapVector = (MapVector) vsr.getVector("map");
+            assertThat(mapVector.isNull(0)).isTrue();
+            assertThat(mapVector.getDataVector().getValueCount()).isZero();
+            assertThat(mapVector.getDataVector().getChildrenFromFields())
+                    .allSatisfy(child -> assertThat(child.getValueCount()).isZero());
+            mapVector.getDataVector().validateFull();
 
             arrowWriter.close();
         }

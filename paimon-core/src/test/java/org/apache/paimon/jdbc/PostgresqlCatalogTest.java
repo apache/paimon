@@ -121,7 +121,7 @@ public class PostgresqlCatalogTest {
                 new JdbcCatalog(
                         fileIO,
                         "test-jdbc-postgres-catalog",
-                        Options.fromMap(properties),
+                        CatalogContext.create(Options.fromMap(properties)),
                         warehouse);
         assertThat(catalog.warehouse()).isEqualTo(warehouse);
         return catalog;

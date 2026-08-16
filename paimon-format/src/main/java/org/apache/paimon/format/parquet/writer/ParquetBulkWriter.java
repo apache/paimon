@@ -22,6 +22,9 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatWriter;
 
 import org.apache.parquet.hadoop.ParquetWriter;
+import org.apache.parquet.hadoop.metadata.ParquetMetadata;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 
@@ -32,6 +35,9 @@ public class ParquetBulkWriter implements FormatWriter {
 
     /** The ParquetWriter to write to. */
     private final ParquetWriter<InternalRow> parquetWriter;
+
+    /** Cached footer metadata after close, used to avoid re-reading the file for stats. */
+    @Nullable private ParquetMetadata footerMetadata;
 
     /**
      * Creates a new ParquetBulkWriter wrapping the given ParquetWriter.
@@ -50,10 +56,17 @@ public class ParquetBulkWriter implements FormatWriter {
     @Override
     public void close() throws IOException {
         parquetWriter.close();
+        this.footerMetadata = parquetWriter.getFooter();
     }
 
     @Override
     public boolean reachTargetSize(boolean suggestedCheck, long targetSize) throws IOException {
         return suggestedCheck && parquetWriter.getDataSize() >= targetSize;
+    }
+
+    @Nullable
+    @Override
+    public Object writerMetadata() {
+        return footerMetadata;
     }
 }

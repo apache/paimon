@@ -1,0 +1,88 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+import logging
+from typing import List, Optional
+
+from pypaimon.catalog.catalog import Catalog
+from pypaimon.common.identifier import Identifier
+from pypaimon.snapshot.snapshot import Snapshot
+from pypaimon.snapshot.snapshot_commit import (PartitionStatistics,
+                                               SnapshotCommit)
+
+logger = logging.getLogger(__name__)
+
+
+class CatalogSnapshotCommit(SnapshotCommit):
+    """A SnapshotCommit using Catalog to commit."""
+
+    def __init__(self, catalog: Catalog, identifier: Identifier, uuid: str):
+        """
+        Initialize CatalogSnapshotCommit.
+
+        Args:
+            catalog: The catalog instance to use for committing
+            identifier: The table identifier (already encodes branch in object name)
+            uuid: Optional table UUID for verification
+        """
+        self.catalog = catalog
+        self.identifier = identifier
+        self.uuid = uuid
+
+    def commit(
+            self,
+            base_snapshot_uuid: Optional[str],
+            snapshot: Snapshot,
+            statistics: List[PartitionStatistics],
+    ) -> bool:
+        """
+        Commit the snapshot using the catalog.
+
+        Args:
+            base_snapshot_uuid: UUID of the snapshot on which the commit is based
+            snapshot: The snapshot to commit
+            statistics: List of partition statistics
+
+        Returns:
+            True if commit was successful
+
+        Raises:
+            Exception: If commit fails
+        """
+        # Call catalog's commit_snapshot method
+        if hasattr(self.catalog, 'commit_snapshot'):
+            success = self.catalog.commit_snapshot(
+                self.identifier,
+                self.uuid,
+                base_snapshot_uuid,
+                snapshot,
+                statistics,
+            )
+            if success:
+                logger.info("Catalog snapshot commit succeeded for %s, snapshot id %d", self.identifier, snapshot.id)
+            return success
+        else:
+            # Fallback for catalogs that don't support snapshot commits
+            raise NotImplementedError(
+                "The catalog does not support snapshot commits. "
+                "The commit_snapshot method needs to be implemented in the catalog interface."
+            )
+
+    def close(self):
+        """Close the catalog and release resources."""
+        if hasattr(self.catalog, 'close'):
+            self.catalog.close()

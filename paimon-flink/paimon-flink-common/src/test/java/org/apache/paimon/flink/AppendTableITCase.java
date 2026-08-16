@@ -95,69 +95,69 @@ public class AppendTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testReadWriteWithLineage() {
-        batchSql("INSERT INTO append_table_lineage VALUES (1, 'AAA'), (2, 'BBB')");
-        List<Row> rows = batchSql("SELECT * FROM append_table_lineage$row_lineage");
+    public void testReadWriteWithRowTracking() {
+        batchSql("INSERT INTO append_table_tracking VALUES (1, 'AAA'), (2, 'BBB')");
+        List<Row> rows = batchSql("SELECT * FROM append_table_tracking$row_tracking");
         assertThat(rows.size()).isEqualTo(2);
         assertThat(rows)
                 .containsExactlyInAnyOrder(Row.of(1, "AAA", 0L, 1L), Row.of(2, "BBB", 1L, 1L));
 
-        rows = batchSql("SELECT * FROM append_table_lineage");
+        rows = batchSql("SELECT * FROM append_table_tracking");
         assertThat(rows.size()).isEqualTo(2);
         assertThat(rows).containsExactlyInAnyOrder(Row.of(1, "AAA"), Row.of(2, "BBB"));
     }
 
     @Test
-    public void testCompactionWithRowLineage() throws Exception {
-        batchSql("ALTER TABLE append_table_lineage SET ('compaction.max.file-num' = '4')");
+    public void testCompactionWithRowTracking() throws Exception {
+        batchSql("ALTER TABLE append_table_tracking SET ('compaction.max.file-num' = '4')");
 
         assertExecuteExpected(
-                "INSERT INTO append_table_lineage VALUES (1, 'AAA'), (2, 'BBB')",
+                "INSERT INTO append_table_tracking VALUES (1, 'AAA'), (2, 'BBB')",
                 1L,
                 Snapshot.CommitKind.APPEND,
-                "append_table_lineage");
+                "append_table_tracking");
         assertExecuteExpected(
-                "INSERT INTO append_table_lineage VALUES (3, 'CCC'), (4, 'DDD')",
+                "INSERT INTO append_table_tracking VALUES (3, 'CCC'), (4, 'DDD')",
                 2L,
                 Snapshot.CommitKind.APPEND,
-                "append_table_lineage");
+                "append_table_tracking");
         assertExecuteExpected(
-                "INSERT INTO append_table_lineage VALUES (1, 'AAA'), (2, 'BBB'), (3, 'CCC'), (4, 'DDD')",
+                "INSERT INTO append_table_tracking VALUES (1, 'AAA'), (2, 'BBB'), (3, 'CCC'), (4, 'DDD')",
                 3L,
                 Snapshot.CommitKind.APPEND,
-                "append_table_lineage");
+                "append_table_tracking");
         assertExecuteExpected(
-                "INSERT INTO append_table_lineage VALUES (5, 'EEE'), (6, 'FFF')",
+                "INSERT INTO append_table_tracking VALUES (5, 'EEE'), (6, 'FFF')",
                 4L,
                 Snapshot.CommitKind.APPEND,
-                "append_table_lineage");
+                "append_table_tracking");
         assertExecuteExpected(
-                "INSERT INTO append_table_lineage VALUES (7, 'HHH'), (8, 'III')",
+                "INSERT INTO append_table_tracking VALUES (7, 'HHH'), (8, 'III')",
                 5L,
                 Snapshot.CommitKind.APPEND,
-                "append_table_lineage");
+                "append_table_tracking");
         assertExecuteExpected(
-                "INSERT INTO append_table_lineage VALUES (9, 'JJJ'), (10, 'KKK')",
+                "INSERT INTO append_table_tracking VALUES (9, 'JJJ'), (10, 'KKK')",
                 6L,
                 Snapshot.CommitKind.APPEND,
-                "append_table_lineage");
+                "append_table_tracking");
         assertExecuteExpected(
-                "INSERT INTO append_table_lineage VALUES (11, 'LLL'), (12, 'MMM')",
+                "INSERT INTO append_table_tracking VALUES (11, 'LLL'), (12, 'MMM')",
                 7L,
                 Snapshot.CommitKind.APPEND,
-                "append_table_lineage");
+                "append_table_tracking");
         assertExecuteExpected(
-                "INSERT INTO append_table_lineage VALUES (13, 'NNN'), (14, 'OOO')",
+                "INSERT INTO append_table_tracking VALUES (13, 'NNN'), (14, 'OOO')",
                 8L,
                 Snapshot.CommitKind.APPEND,
-                "append_table_lineage");
+                "append_table_tracking");
 
-        List<Row> originRowsWithId2 = batchSql("SELECT * FROM append_table_lineage$row_lineage");
-        batchSql("call sys.compact('default.append_table_lineage')");
-        waitCompactSnapshot(60000L, "append_table_lineage");
-        List<Row> files = batchSql("SELECT * FROM append_table_lineage$files");
+        List<Row> originRowsWithId2 = batchSql("SELECT * FROM append_table_tracking$row_tracking");
+        batchSql("call sys.compact('default.append_table_tracking')");
+        waitCompactSnapshot(60000L, "append_table_tracking");
+        List<Row> files = batchSql("SELECT * FROM append_table_tracking$files");
         assertThat(files.size()).isEqualTo(1);
-        List<Row> rowsAfter2 = batchSql("SELECT * FROM append_table_lineage$row_lineage");
+        List<Row> rowsAfter2 = batchSql("SELECT * FROM append_table_tracking$row_tracking");
         assertThat(originRowsWithId2).containsExactlyInAnyOrderElementsOf(rowsAfter2);
 
         assertThat(rowsAfter2)
@@ -552,7 +552,12 @@ public class AppendTableITCase extends CatalogITCaseBase {
                 strategy == CoreOptions.PartitionSinkStrategy.HASH
                         ? hashStrategyResultFileCount
                         : largerSinkParallelism;
-        partitionEntriesLarger.forEach(x -> assertThat(x.fileCount()).isEqualTo(fileCountLarger));
+        if (strategy == CoreOptions.PartitionSinkStrategy.PARTITION_DYNAMIC) {
+            fileCountLarger = Math.min(largerSinkParallelism, 4);
+        }
+        final int expectedFileCountLarger = fileCountLarger;
+        partitionEntriesLarger.forEach(
+                x -> assertThat(x.fileCount()).isEqualTo(expectedFileCountLarger));
 
         FileStoreTable fileStoreTableLess = paimonTable("partition_strategy_table_less");
         List<PartitionEntry> partitionEntriesLess =
@@ -562,7 +567,206 @@ public class AppendTableITCase extends CatalogITCaseBase {
                 strategy == CoreOptions.PartitionSinkStrategy.HASH
                         ? hashStrategyResultFileCount
                         : lessSinkParallelism;
-        partitionEntriesLess.forEach(x -> assertThat(x.fileCount()).isEqualTo(fileCountLess));
+        if (strategy == CoreOptions.PartitionSinkStrategy.PARTITION_DYNAMIC) {
+            fileCountLess = Math.min(lessSinkParallelism, 4);
+        }
+        final int expectedFileCountLess = fileCountLess;
+        partitionEntriesLess.forEach(
+                x -> assertThat(x.fileCount()).isEqualTo(expectedFileCountLess));
+    }
+
+    @Test
+    public void testPartitionDynamicDataCorrectness() {
+        batchSql(
+                "CREATE TABLE IF NOT EXISTS dynamic_correctness ("
+                        + "id INT, data STRING, dt STRING) PARTITIONED BY (dt)"
+                        + " WITH ("
+                        + "'bucket' = '-1',"
+                        + "'partition.sink-strategy' = 'partition_dynamic',"
+                        + "'sink.parallelism' = '4')");
+
+        batchSql(
+                "INSERT INTO dynamic_correctness VALUES "
+                        + "(1, 'a', '20250301'), (2, 'b', '20250301'), "
+                        + "(3, 'c', '20250302'), (4, 'd', '20250302'), "
+                        + "(5, 'e', '20250303')");
+
+        List<Row> result = batchSql("SELECT * FROM dynamic_correctness ORDER BY id");
+        assertThat(result).hasSize(5);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, "a", "20250301"),
+                        Row.of(2, "b", "20250301"),
+                        Row.of(3, "c", "20250302"),
+                        Row.of(4, "d", "20250302"),
+                        Row.of(5, "e", "20250303"));
+    }
+
+    @Test
+    public void testPartitionDynamicWithSkewedData() {
+        batchSql(
+                "CREATE TABLE IF NOT EXISTS dynamic_skewed ("
+                        + "id INT, data STRING, dt STRING) PARTITIONED BY (dt)"
+                        + " WITH ("
+                        + "'bucket' = '-1',"
+                        + "'partition.sink-strategy' = 'partition_dynamic',"
+                        + "'sink.parallelism' = '4')");
+
+        // Heavily skewed: partition '20250301' gets most data
+        StringBuilder values = new StringBuilder();
+        for (int i = 1; i <= 100; i++) {
+            values.append(String.format("(%d, 'data%d', '20250301'),", i, i));
+        }
+        for (int i = 101; i <= 110; i++) {
+            values.append(String.format("(%d, 'data%d', '20250302'),", i, i));
+        }
+        for (int i = 111; i <= 115; i++) {
+            values.append(String.format("(%d, 'data%d', '20250303'),", i, i));
+        }
+
+        batchSql("INSERT INTO dynamic_skewed VALUES " + values.substring(0, values.length() - 1));
+
+        assertThat(batchSql("SELECT * FROM dynamic_skewed")).hasSize(115);
+        assertThat(batchSql("SELECT * FROM dynamic_skewed WHERE dt = '20250301'")).hasSize(100);
+        assertThat(batchSql("SELECT * FROM dynamic_skewed WHERE dt = '20250302'")).hasSize(10);
+        assertThat(batchSql("SELECT * FROM dynamic_skewed WHERE dt = '20250303'")).hasSize(5);
+    }
+
+    @Test
+    public void testPartitionDynamicWithManyPartitions() {
+        int partitionCount = 20;
+        int sinkParallelism = 4;
+        batchSql(
+                "CREATE TABLE IF NOT EXISTS dynamic_many_partitions ("
+                        + "id INT, data STRING, dt STRING) PARTITIONED BY (dt)"
+                        + " WITH ("
+                        + "'bucket' = '-1',"
+                        + "'partition.sink-strategy' = 'partition_dynamic',"
+                        + String.format("'sink.parallelism' = '%d')", sinkParallelism));
+
+        StringBuilder values = new StringBuilder();
+        int totalRows = 0;
+        for (int p = 1; p <= partitionCount; p++) {
+            for (int i = 1; i <= 5; i++) {
+                values.append(String.format("(%d, 'data', '2025030%02d'),", (p - 1) * 5 + i, p));
+                totalRows++;
+            }
+        }
+
+        batchSql(
+                "INSERT INTO dynamic_many_partitions VALUES "
+                        + values.substring(0, values.length() - 1));
+
+        List<Row> result = batchSql("SELECT * FROM dynamic_many_partitions");
+        assertThat(result).hasSize(totalRows);
+
+        // Verify all partitions are present
+        List<Row> partitions =
+                batchSql("SELECT DISTINCT dt FROM dynamic_many_partitions ORDER BY dt");
+        assertThat(partitions).hasSize(partitionCount);
+    }
+
+    @Test
+    public void testPartitionDynamicMultipleInserts() {
+        batchSql(
+                "CREATE TABLE IF NOT EXISTS dynamic_multi_insert ("
+                        + "id INT, data STRING, dt STRING) PARTITIONED BY (dt)"
+                        + " WITH ("
+                        + "'bucket' = '-1',"
+                        + "'partition.sink-strategy' = 'partition_dynamic',"
+                        + "'sink.parallelism' = '4')");
+
+        batchSql(
+                "INSERT INTO dynamic_multi_insert VALUES "
+                        + "(1, 'a', '20250301'), (2, 'b', '20250301'), (3, 'c', '20250302')");
+        batchSql(
+                "INSERT INTO dynamic_multi_insert VALUES "
+                        + "(4, 'd', '20250302'), (5, 'e', '20250303'), (6, 'f', '20250301')");
+
+        List<Row> result = batchSql("SELECT * FROM dynamic_multi_insert ORDER BY id");
+        assertThat(result).hasSize(6);
+        assertThat(batchSql("SELECT * FROM dynamic_multi_insert WHERE dt = '20250301'")).hasSize(3);
+        assertThat(batchSql("SELECT * FROM dynamic_multi_insert WHERE dt = '20250302'")).hasSize(2);
+        assertThat(batchSql("SELECT * FROM dynamic_multi_insert WHERE dt = '20250303'")).hasSize(1);
+    }
+
+    @Timeout(120)
+    @Test
+    public void testPartitionDynamicStreaming() throws Exception {
+        int sinkParallelism = 4;
+        batchSql(
+                "CREATE TABLE IF NOT EXISTS dynamic_streaming ("
+                        + "id INT, data STRING, dt STRING) PARTITIONED BY (dt)"
+                        + " WITH ("
+                        + "'bucket' = '-1',"
+                        + "'partition.sink-strategy' = 'partition_dynamic',"
+                        + "'sink.parallelism' = '%d')",
+                sinkParallelism);
+
+        // Write heavily skewed data: partition '20250301' gets most records.
+        // With streaming mode (sEnv has checkpoint interval 100ms), the
+        // DataStatisticsOperator sends local stats at checkpoint -> coordinator
+        // aggregates -> sends global stats back -> partitioner updates assignment.
+        // This verifies the full coordinator -> operator event -> partitioner update path.
+        StringBuilder values = new StringBuilder();
+        for (int i = 1; i <= 100; i++) {
+            values.append(String.format("(%d, 'data%d', '20250301'),", i, i));
+        }
+        for (int i = 101; i <= 110; i++) {
+            values.append(String.format("(%d, 'data%d', '20250302'),", i, i));
+        }
+        for (int i = 111; i <= 115; i++) {
+            values.append(String.format("(%d, 'data%d', '20250303'),", i, i));
+        }
+
+        sEnv.executeSql(
+                        "INSERT INTO dynamic_streaming VALUES "
+                                + values.substring(0, values.length() - 1))
+                .await();
+
+        // Verify data correctness
+        assertThat(batchSql("SELECT * FROM dynamic_streaming")).hasSize(115);
+        assertThat(batchSql("SELECT * FROM dynamic_streaming WHERE dt = '20250301'")).hasSize(100);
+        assertThat(batchSql("SELECT * FROM dynamic_streaming WHERE dt = '20250302'")).hasSize(10);
+        assertThat(batchSql("SELECT * FROM dynamic_streaming WHERE dt = '20250303'")).hasSize(5);
+
+        // Verify the hot partition is spread across multiple subtasks (file count > 1).
+        // If statistics were not applied, each partition would only go to min(parallelism, 4)
+        // subtasks with equal weight. With statistics, the hot partition ('20250301') should
+        // be spread across more subtasks proportionally to its weight.
+        FileStoreTable table = paimonTable("dynamic_streaming");
+        List<PartitionEntry> partitionEntries =
+                table.newReadBuilder().newScan().listPartitionEntries();
+        assertThat(partitionEntries).hasSize(3);
+
+        for (PartitionEntry entry : partitionEntries) {
+            assertThat(entry.fileCount()).isGreaterThanOrEqualTo(1);
+        }
+    }
+
+    @Test
+    public void testPartitionDynamicSinglePartition() {
+        batchSql(
+                "CREATE TABLE IF NOT EXISTS dynamic_single_partition ("
+                        + "id INT, data STRING, dt STRING) PARTITIONED BY (dt)"
+                        + " WITH ("
+                        + "'bucket' = '-1',"
+                        + "'partition.sink-strategy' = 'partition_dynamic',"
+                        + "'sink.parallelism' = '4')");
+
+        StringBuilder values = new StringBuilder();
+        for (int i = 1; i <= 50; i++) {
+            values.append(String.format("(%d, 'data%d', '20250301'),", i, i));
+        }
+
+        batchSql(
+                "INSERT INTO dynamic_single_partition VALUES "
+                        + values.substring(0, values.length() - 1));
+
+        List<Row> result = batchSql("SELECT * FROM dynamic_single_partition");
+        assertThat(result).hasSize(50);
+        assertThat(batchSql("SELECT DISTINCT dt FROM dynamic_single_partition"))
+                .containsExactly(Row.of("20250301"));
     }
 
     private static class TestStatelessWriterSource extends AbstractNonCoordinatedSource<Integer> {
@@ -639,7 +843,7 @@ public class AppendTableITCase extends CatalogITCaseBase {
     protected List<String> ddl() {
         return Arrays.asList(
                 "CREATE TABLE IF NOT EXISTS append_table (id INT, data STRING) WITH ('bucket' = '-1')",
-                "CREATE TABLE IF NOT EXISTS append_table_lineage (id INT, data STRING) WITH ('bucket' = '-1', 'row-tracking.enabled' = 'true')",
+                "CREATE TABLE IF NOT EXISTS append_table_tracking (id INT, data STRING) WITH ('bucket' = '-1', 'row-tracking.enabled' = 'true')",
                 "CREATE TABLE IF NOT EXISTS part_table (id INT, data STRING, dt STRING) PARTITIONED BY (dt) WITH ('bucket' = '-1')",
                 "CREATE TABLE IF NOT EXISTS complex_table (id INT, data MAP<INT, INT>) WITH ('bucket' = '-1')",
                 "CREATE TABLE IF NOT EXISTS index_table (id INT, indexc STRING, data STRING) WITH ('bucket' = '-1', 'file-index.bloom-filter.columns'='indexc', 'file-index.bloom-filter.indexc.items' = '500')");
@@ -719,6 +923,87 @@ public class AppendTableITCase extends CatalogITCaseBase {
                         "Time up for streaming execute, don't get expected result.");
             }
             Thread.sleep(1000);
+        }
+    }
+
+    @Test
+    public void testLimitPushdownPerformanceOptimization() {
+        // Create a table with many files to test that limit optimization is applied
+        for (int i = 0; i < 50; i++) {
+            batchSql(String.format("INSERT INTO append_table VALUES (%d, 'data_%d')", i, i));
+        }
+
+        // Without limit, should read all data
+        List<Row> allRows = batchSql("SELECT * FROM append_table");
+        assertThat(allRows.size()).isEqualTo(50);
+
+        // With limit, optimization should be applied
+        List<Row> limitedRows = batchSql("SELECT * FROM append_table LIMIT 10");
+        assertThat(limitedRows.size()).isEqualTo(10);
+
+        // Test with limit 1
+        List<Row> limitedRows1 = batchSql("SELECT * FROM append_table LIMIT 1");
+        assertThat(limitedRows1.size()).isEqualTo(1);
+    }
+
+    @Test
+    public void testLimitPushdownWithFilter() {
+        // Create a table with many files to test that limit optimization is applied
+        // when filter is present
+        for (int i = 0; i < 50; i++) {
+            batchSql(String.format("INSERT INTO append_table VALUES (%d, 'data_%d')", i, i));
+        }
+
+        // Without filter and without limit, should read all data
+        List<Row> allRows = batchSql("SELECT * FROM append_table");
+        assertThat(allRows.size()).isEqualTo(50);
+
+        // With filter (WHERE id > 20) and limit (10), optimization should be applied
+        // The early stop in LimitAwareManifestEntryIterator will now consider the filter's effect
+        // on row counts to ensure correctness.
+        List<Row> filteredAndLimitedRows =
+                batchSql("SELECT * FROM append_table WHERE id > 20 LIMIT 10");
+        assertThat(filteredAndLimitedRows.size()).isEqualTo(10);
+        // Verify all returned rows satisfy the filter
+        for (Row row : filteredAndLimitedRows) {
+            assertThat((Integer) row.getField(0)).isGreaterThan(20);
+        }
+
+        // Test with different filter
+        List<Row> filteredAndLimitedRows2 =
+                batchSql("SELECT * FROM append_table WHERE id < 30 LIMIT 5");
+        assertThat(filteredAndLimitedRows2.size()).isEqualTo(5);
+        // Verify all returned rows satisfy the filter
+        for (Row row : filteredAndLimitedRows2) {
+            assertThat((Integer) row.getField(0)).isLessThan(30);
+        }
+    }
+
+    @Test
+    public void testLimitPushdownWhenDataLessThanLimit() {
+        // Create a table with only 3 rows
+        for (int i = 0; i < 3; i++) {
+            batchSql(String.format("INSERT INTO append_table VALUES (%d, 'data_%d')", i, i));
+        }
+
+        // With limit 10, should return all 3 rows (less than limit)
+        List<Row> rows = batchSql("SELECT * FROM append_table LIMIT 10");
+        assertThat(rows.size()).isEqualTo(3);
+    }
+
+    @Test
+    public void testLimitPushdownWithFilterWhenDataLessThanLimit() {
+        // Create a table with 10 rows, rows 0-4 have id < 5, rows 5-9 have id >= 5
+        for (int i = 0; i < 10; i++) {
+            batchSql(String.format("INSERT INTO append_table VALUES (%d, 'data_%d')", i, i));
+        }
+
+        // With filter (id >= 5) and limit (10), should return all 5 matching rows
+        List<Row> rows = batchSql("SELECT * FROM append_table WHERE id >= 5 LIMIT 10");
+        assertThat(rows.size()).isEqualTo(5);
+        // Verify all returned rows satisfy the filter
+        for (Row row : rows) {
+            assertThat((Integer) row.getField(0)).isGreaterThanOrEqualTo(5);
         }
     }
 }

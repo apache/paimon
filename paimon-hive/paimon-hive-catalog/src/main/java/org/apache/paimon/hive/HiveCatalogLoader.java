@@ -19,36 +19,36 @@
 package org.apache.paimon.hive;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.options.Options;
 
 /** Loader to create {@link HiveCatalog}. */
 public class HiveCatalogLoader implements CatalogLoader {
 
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
 
     private final FileIO fileIO;
     private final SerializableHiveConf hiveConf;
     private final String clientClassName;
-    private final Options options;
+    private final CatalogContext context;
     private final String warehouse;
 
     public HiveCatalogLoader(
             FileIO fileIO,
             SerializableHiveConf hiveConf,
             String clientClassName,
-            Options options,
+            CatalogContext context,
             String warehouse) {
         this.fileIO = fileIO;
         this.hiveConf = hiveConf;
         this.clientClassName = clientClassName;
-        this.options = options;
+        this.context = context;
         this.warehouse = warehouse;
     }
 
     @Override
     public Catalog load() {
-        return new HiveCatalog(fileIO, hiveConf.conf(), clientClassName, options, warehouse);
+        return new HiveCatalog(fileIO, hiveConf.conf(), clientClassName, context, warehouse);
     }
 }

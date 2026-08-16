@@ -144,7 +144,7 @@ public class PaimonOutputCommitter extends OutputCommitter {
         if (table != null) {
             BatchWriteBuilder batchWriteBuilder = table.newBatchWriteBuilder();
             List<CommitMessage> commitMessagesList =
-                    getAllPreCommitMessage(table.location(), jobContext, table.fileIO());
+                    getAllPreCommitMessage(table.location(), jobContext, table.fileIO(), false);
             try (BatchTableCommit batchTableCommit = batchWriteBuilder.newCommit()) {
                 batchTableCommit.commit(commitMessagesList);
             } catch (Exception e) {
@@ -172,7 +172,7 @@ public class PaimonOutputCommitter extends OutputCommitter {
 
             LOG.info("AbortJob {} has started", jobContext.getJobID());
             List<CommitMessage> commitMessagesList =
-                    getAllPreCommitMessage(table.location(), jobContext, table.fileIO());
+                    getAllPreCommitMessage(table.location(), jobContext, table.fileIO(), true);
             BatchWriteBuilder batchWriteBuilder = table.newBatchWriteBuilder();
             try (BatchTableCommit batchTableCommit = batchWriteBuilder.newCommit()) {
                 batchTableCommit.abort(commitMessagesList);
@@ -214,7 +214,7 @@ public class PaimonOutputCommitter extends OutputCommitter {
      * @return The list of the committed data files
      */
     private static List<CommitMessage> getAllPreCommitMessage(
-            Path location, JobContext jobContext, FileIO io) {
+            Path location, JobContext jobContext, FileIO io, boolean ignoreMissing) {
         JobConf conf = jobContext.getJobConf();
 
         int totalCommitMessagesSize =
@@ -225,7 +225,7 @@ public class PaimonOutputCommitter extends OutputCommitter {
         for (int i = 0; i < totalCommitMessagesSize; i++) {
             Path commitFileLocation =
                     generatePreCommitFileLocation(location, jobContext.getJobID(), i);
-            commitMessagesList.addAll(readPreCommitFile(commitFileLocation, io));
+            commitMessagesList.addAll(readPreCommitFile(commitFileLocation, io, ignoreMissing));
         }
 
         return commitMessagesList;
@@ -270,10 +270,28 @@ public class PaimonOutputCommitter extends OutputCommitter {
         }
     }
 
-    private static List<CommitMessage> readPreCommitFile(Path location, FileIO io) {
-        try (ObjectInputStream objectInputStream =
-                new ObjectInputStream(io.newInputStream(location))) {
-            return (List<CommitMessage>) objectInputStream.readObject();
+    private static List<CommitMessage> readPreCommitFile(
+            Path location, FileIO io, boolean ignoreMissing) {
+        try {
+            if (!io.exists(location)) {
+                if (ignoreMissing) {
+                    LOG.warn(
+                            "preCommit file {} was not generated. The task did not "
+                                    + "reach prepareCommit, so there are no commit "
+                                    + "messages to abort. Skipping commit cleanup "
+                                    + "for this task slot.",
+                            location);
+                    return Collections.emptyList();
+                }
+                throw new RuntimeException(
+                        String.format(
+                                "preCommit file %s is missing during commit. Refusing to commit a partial result.",
+                                location));
+            }
+            try (ObjectInputStream objectInputStream =
+                    new ObjectInputStream(io.newInputStream(location))) {
+                return (List<CommitMessage>) objectInputStream.readObject();
+            }
         } catch (ClassNotFoundException | IOException e) {
             throw new RuntimeException(
                     String.format("Can not read or parse CommitMessage file: %s", location));

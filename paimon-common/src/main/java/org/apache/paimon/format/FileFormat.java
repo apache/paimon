@@ -28,7 +28,6 @@ import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -56,21 +55,18 @@ public abstract class FileFormat {
     /**
      * Create a {@link FormatReaderFactory} from the type, with projection pushed down.
      *
+     * @param dataSchemaRowType The full table schema type.
      * @param projectedRowType Type with projection.
      * @param filters A list of filters in conjunctive form for filtering on a best-effort basis.
      */
     public abstract FormatReaderFactory createReaderFactory(
-            RowType projectedRowType, @Nullable List<Predicate> filters);
+            RowType dataSchemaRowType, RowType projectedRowType, @Nullable List<Predicate> filters);
 
     /** Create a {@link FormatWriterFactory} from the type. */
     public abstract FormatWriterFactory createWriterFactory(RowType type);
 
     /** Validate data field type supported or not. */
     public abstract void validateDataFields(RowType rowType);
-
-    public FormatReaderFactory createReaderFactory(RowType rowType) {
-        return createReaderFactory(rowType, new ArrayList<>());
-    }
 
     public Optional<SimpleStatsExtractor> createStatsExtractor(
             RowType type, SimpleColStatsCollector.Factory[] statsCollectors) {
@@ -111,7 +107,16 @@ public abstract class FileFormat {
         return FileFormat.fromIdentifier(options.fileFormatString(), options.toConfiguration());
     }
 
+    @Nullable
+    public static FileFormat vectorFileFormat(CoreOptions options) {
+        String vectorFileFormat = options.vectorFileFormatString();
+        if (vectorFileFormat == null) {
+            return null;
+        }
+        return FileFormat.fromIdentifier(vectorFileFormat, options.toConfiguration());
+    }
+
     public static FileFormat manifestFormat(CoreOptions options) {
-        return FileFormat.fromIdentifier(options.manifestFormatString(), options.toConfiguration());
+        return FileFormat.fromIdentifier(CoreOptions.FILE_FORMAT_AVRO, options.toConfiguration());
     }
 }

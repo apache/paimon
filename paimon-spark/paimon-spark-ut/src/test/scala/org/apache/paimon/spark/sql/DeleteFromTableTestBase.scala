@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.CoreOptions
+import org.apache.paimon.{CoreOptions, Snapshot}
 import org.apache.paimon.CoreOptions.MergeEngine
 import org.apache.paimon.spark.PaimonSparkTestBase
 
@@ -49,6 +49,53 @@ abstract class DeleteFromTableTestBase extends PaimonSparkTestBase {
     checkAnswer(
       spark.sql("SELECT * FROM T ORDER BY id"),
       Seq((2, "b", "2024")).toDF()
+    )
+  }
+
+  test(s"Paimon Delete: append-only table, no match and full delete scenarios") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, name STRING, dt STRING)
+                 |""".stripMargin)
+
+    spark.sql("""
+                |INSERT INTO T
+                |VALUES (1, 'a', '2024'), (2, 'b', '2024'), (3, 'c', '2025'), (4, 'd', '2025')
+                |""".stripMargin)
+
+    spark.sql("DELETE FROM T WHERE name = 'e'")
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      Seq((1, "a", "2024"), (2, "b", "2024"), (3, "c", "2025"), (4, "d", "2025")).toDF()
+    )
+
+    spark.sql("DELETE FROM T")
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      spark.emptyDataFrame
+    )
+  }
+
+  test(
+    s"Paimon Delete: append-only table, no match and full delete scenarios with partitioned table") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, name STRING, dt STRING) PARTITIONED BY (dt)
+                 |""".stripMargin)
+
+    spark.sql("""
+                |INSERT INTO T
+                |VALUES (1, 'a', '2024'), (2, 'b', '2024'), (3, 'c', '2025'), (4, 'd', '2025')
+                |""".stripMargin)
+
+    spark.sql("DELETE FROM T WHERE name = 'e'")
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      Seq((1, "a", "2024"), (2, "b", "2024"), (3, "c", "2025"), (4, "d", "2025")).toDF()
+    )
+
+    spark.sql("DELETE FROM T")
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      spark.emptyDataFrame
     )
   }
 
@@ -203,6 +250,21 @@ abstract class DeleteFromTableTestBase extends PaimonSparkTestBase {
             .isEqualTo("[[2,b,null]]")
         }
       }
+  }
+
+  test("Paimon Delete: first-row table") {
+    withTable("t") {
+      sql("""CREATE TABLE t (id INT, name STRING)
+            |TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '1', 'merge-engine' = 'first-row')
+            |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 'a'), (2, 'b'), (3, 'c')")
+
+      checkAnswer(sql("SELECT * FROM t ORDER BY id"), Seq(Row(1, "a"), Row(2, "b"), Row(3, "c")))
+
+      sql("DELETE FROM t WHERE id = 3")
+
+      checkAnswer(sql("SELECT * FROM t ORDER BY id"), Seq(Row(1, "a"), Row(2, "b")))
+    }
   }
 
   test(s"test delete with primary key") {
@@ -434,5 +496,94 @@ abstract class DeleteFromTableTestBase extends PaimonSparkTestBase {
             .isEqualTo("[[2,b,null]]")
         }
       }
+  }
+
+  test("Paimon delete: non pk table commit kind") {
+    for (dvEnabled <- Seq(true, false)) {
+      withTable("t") {
+        sql(
+          s"CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('deletion-vectors.enabled' = '$dvEnabled')")
+        sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS data FROM range(1, 4)")
+
+        sql("DELETE FROM t WHERE id = 1")
+        checkAnswer(sql("SELECT * FROM t ORDER BY id"), Seq(Row(2, 2), Row(3, 3)))
+        val table = loadTable("t")
+        var latestSnapshot = table.latestSnapshot().get()
+        assert(latestSnapshot.id == 2)
+        assert(latestSnapshot.commitKind.equals(Snapshot.CommitKind.OVERWRITE))
+
+        sql("DELETE FROM t WHERE id = 2")
+        checkAnswer(sql("SELECT * FROM t ORDER BY id"), Seq(Row(3, 3)))
+        latestSnapshot = table.latestSnapshot().get()
+        assert(latestSnapshot.id == 3)
+        assert(latestSnapshot.commitKind.equals(Snapshot.CommitKind.OVERWRITE))
+      }
+    }
+  }
+
+  test("Paimon delete: pk dv table commit kind") {
+    withTable("t") {
+      sql(
+        s"CREATE TABLE t (id INT, data INT) TBLPROPERTIES ('deletion-vectors.enabled' = 'true', 'primary-key' = 'id')")
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS data FROM range(1, 4)")
+      sql("DELETE FROM t WHERE id = 1")
+      val table = loadTable("t")
+      val latestSnapshot = table.latestSnapshot().get()
+      assert(latestSnapshot.id == 4)
+      assert(latestSnapshot.commitKind.equals(Snapshot.CommitKind.COMPACT))
+    }
+  }
+
+  test("Paimon delete: delete with range condition") {
+    withTable("t") {
+      sql(s"CREATE TABLE t (id INT, v INT)")
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id FROM range (1, 50000)")
+      sql("DELETE FROM t WHERE id >= 111 and id <= 444")
+
+      checkAnswer(
+        sql("SELECT count(*) FROM t"),
+        Row(49665)
+      )
+    }
+  }
+
+  test("Paimon Delete: delete should not remove rows with NULL in condition column") {
+    // Verifies that DELETE WHERE col = value does not incorrectly remove rows
+    // where col IS NULL. This tests the fix for the NULL handling bug where
+    // Not(condition) was used instead of Not(EqualNullSafe(condition, true)).
+    for (dvEnabled <- Seq(true, false)) {
+      withTable("t") {
+        sql(
+          s"CREATE TABLE t (id INT, name STRING) TBLPROPERTIES ('deletion-vectors.enabled' = '$dvEnabled')")
+        sql("INSERT INTO t VALUES (1, 'a'), (2, 'b'), (3, NULL), (4, 'a'), (5, NULL), (6, 'c')")
+
+        sql("DELETE FROM t WHERE name = 'a'")
+
+        checkAnswer(
+          sql("SELECT * FROM t ORDER BY id"),
+          Seq(Row(2, "b"), Row(3, null), Row(5, null), Row(6, "c"))
+        )
+      }
+    }
+  }
+
+  test("Paimon Delete: delete with NULL in condition column for partitioned table") {
+    for (dvEnabled <- Seq(true, false)) {
+      withTable("t") {
+        sql(s"""CREATE TABLE t (id INT, name STRING, pt STRING)
+               |PARTITIONED BY (pt)
+               |TBLPROPERTIES ('deletion-vectors.enabled' = '$dvEnabled')
+               |""".stripMargin)
+        sql(
+          "INSERT INTO t VALUES (1, 'a', 'p1'), (2, NULL, 'p1'), (3, 'b', 'p1'), (4, NULL, 'p2'), (5, 'a', 'p2')")
+
+        sql("DELETE FROM t WHERE name = 'a'")
+
+        checkAnswer(
+          sql("SELECT * FROM t ORDER BY id"),
+          Seq(Row(2, null, "p1"), Row(3, "b", "p1"), Row(4, null, "p2"))
+        )
+      }
+    }
   }
 }

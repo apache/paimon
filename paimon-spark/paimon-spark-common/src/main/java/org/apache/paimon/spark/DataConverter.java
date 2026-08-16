@@ -19,9 +19,11 @@
 package org.apache.paimon.spark;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.spark.data.SparkArrayData;
 import org.apache.paimon.spark.data.SparkInternalRow;
@@ -32,6 +34,7 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VectorType;
 
 import org.apache.spark.sql.catalyst.util.ArrayBasedMapData;
 import org.apache.spark.sql.catalyst.util.ArrayData;
@@ -58,11 +61,15 @@ public class DataConverter {
                 return fromPaimon((org.apache.paimon.data.Decimal) o);
             case ARRAY:
                 return fromPaimon((InternalArray) o, (ArrayType) type);
+            case VECTOR:
+                return fromPaimon((InternalVector) o, (VectorType) type);
             case MAP:
             case MULTISET:
                 return fromPaimon((InternalMap) o, type);
             case ROW:
                 return fromPaimon((InternalRow) o, (RowType) type);
+            case BLOB:
+                return ((Blob) o).toData();
             default:
                 return o;
         }
@@ -90,14 +97,38 @@ public class DataConverter {
     }
 
     public static ArrayData fromPaimon(InternalArray array, ArrayType arrayType) {
-        return fromPaimonArrayElementType(array, arrayType.getElementType());
+        return fromPaimon(array, arrayType, false);
+    }
+
+    public static ArrayData fromPaimon(
+            InternalArray array, ArrayType arrayType, boolean blobAsDescriptor) {
+        return fromPaimonArrayElementType(array, arrayType.getElementType(), blobAsDescriptor);
+    }
+
+    public static ArrayData fromPaimon(InternalVector vector, VectorType vectorType) {
+        if (vector.size() != vectorType.getLength()) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Vector length mismatch. Expected %d but was %d.",
+                            vectorType.getLength(), vector.size()));
+        }
+        return fromPaimonArrayElementType(vector, vectorType.getElementType(), false);
     }
 
     private static ArrayData fromPaimonArrayElementType(InternalArray array, DataType elementType) {
-        return SparkArrayData.create(elementType).replace(array);
+        return fromPaimonArrayElementType(array, elementType, false);
+    }
+
+    private static ArrayData fromPaimonArrayElementType(
+            InternalArray array, DataType elementType, boolean blobAsDescriptor) {
+        return SparkArrayData.create(elementType, blobAsDescriptor).replace(array);
     }
 
     public static MapData fromPaimon(InternalMap map, DataType mapType) {
+        return fromPaimon(map, mapType, false);
+    }
+
+    public static MapData fromPaimon(InternalMap map, DataType mapType, boolean blobAsDescriptor) {
         DataType keyType;
         DataType valueType;
         if (mapType instanceof MapType) {
@@ -110,8 +141,18 @@ public class DataConverter {
             throw new UnsupportedOperationException("Unsupported type: " + mapType);
         }
 
+        if (valueType.getTypeRoot() == org.apache.paimon.types.DataTypeRoot.BLOB) {
+            InternalArray keys = map.keyArray();
+            for (int i = 0; i < keys.size(); i++) {
+                if (keys.isNullAt(i)) {
+                    throw new IllegalArgumentException(
+                            "Spark MAP<X, BLOB> does not support null keys.");
+                }
+            }
+        }
+
         return new ArrayBasedMapData(
                 fromPaimonArrayElementType(map.keyArray(), keyType),
-                fromPaimonArrayElementType(map.valueArray(), valueType));
+                fromPaimonArrayElementType(map.valueArray(), valueType, blobAsDescriptor));
     }
 }

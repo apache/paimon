@@ -23,33 +23,21 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
+import org.apache.paimon.fs.OffsetSeekableInputStream;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.reader.FileRecordReader;
+import org.apache.paimon.utils.CompactedChangelogPathResolver;
 import org.apache.paimon.utils.RoaringBitmap32;
 
-import java.io.EOFException;
 import java.io.IOException;
 
 /**
  * {@link FormatReaderFactory} for compacted changelog.
  *
- * <p><b>File Name Protocol</b>
- *
- * <p>There are two kinds of file name. In the following description, <code>bid1</code> and <code>
- * bid2</code> are bucket id, <code>off</code> is offset, <code>len1</code> and <code>len2</code>
- * are lengths.
- *
- * <ul>
- *   <li><code>bucket-bid1/compacted-changelog-xxx$bid1-len1</code>: This is the real file name. If
- *       this file name is recorded in manifest file meta, reader should read the bytes of this file
- *       starting from offset <code>0</code> with length <code>len1</code>.
- *   <li><code>bucket-bid2/compacted-changelog-xxx$bid1-len1-off-len2</code>: This is the fake file
- *       name. Reader should read the bytes of file <code>
- *       bucket-bid1/compacted-changelog-xxx$bid1-len1</code> starting from offset <code>off</code>
- *       with length <code>len2</code>.
- * </ul>
+ * <p>Uses {@link org.apache.paimon.utils.CompactedChangelogPathResolver} for file name protocol
+ * handling.
  */
 public class CompactedChangelogFormatReaderFactory implements FormatReaderFactory {
 
@@ -62,7 +50,7 @@ public class CompactedChangelogFormatReaderFactory implements FormatReaderFactor
     @Override
     public FileRecordReader<InternalRow> createReader(Context context) throws IOException {
         OffsetReadOnlyFileIO fileIO = new OffsetReadOnlyFileIO(context.fileIO());
-        long length = decodePath(context.filePath()).length;
+        long length = CompactedChangelogPathResolver.decodePath(context.filePath()).getLength();
 
         return wrapped.createReader(
                 new Context() {
@@ -89,43 +77,6 @@ public class CompactedChangelogFormatReaderFactory implements FormatReaderFactor
                 });
     }
 
-    private static DecodeResult decodePath(Path path) {
-        String[] nameAndFormat = path.getName().split("\\.");
-        String[] names = nameAndFormat[0].split("\\$");
-        String[] split = names[1].split("-");
-        if (split.length == 2) {
-            return new DecodeResult(path, 0, Long.parseLong(split[1]));
-        } else {
-            Path realPath =
-                    new Path(
-                            path.getParent().getParent(),
-                            "bucket-"
-                                    + split[0]
-                                    + "/"
-                                    + names[0]
-                                    + "$"
-                                    + split[0]
-                                    + "-"
-                                    + split[1]
-                                    + "."
-                                    + nameAndFormat[1]);
-            return new DecodeResult(realPath, Long.parseLong(split[2]), Long.parseLong(split[3]));
-        }
-    }
-
-    private static class DecodeResult {
-
-        private final Path path;
-        private final long offset;
-        private final long length;
-
-        private DecodeResult(Path path, long offset, long length) {
-            this.path = path;
-            this.offset = offset;
-            this.length = length;
-        }
-    }
-
     private static class OffsetReadOnlyFileIO implements FileIO {
 
         private final FileIO wrapped;
@@ -146,9 +97,12 @@ public class CompactedChangelogFormatReaderFactory implements FormatReaderFactor
 
         @Override
         public SeekableInputStream newInputStream(Path path) throws IOException {
-            DecodeResult result = decodePath(path);
+            CompactedChangelogPathResolver.DecodeResult result =
+                    CompactedChangelogPathResolver.decodePath(path);
             return new OffsetSeekableInputStream(
-                    wrapped.newInputStream(result.path), result.offset, result.length);
+                    wrapped.newInputStream(result.getPath()),
+                    result.getOffset(),
+                    result.getLength());
         }
 
         @Override
@@ -159,14 +113,15 @@ public class CompactedChangelogFormatReaderFactory implements FormatReaderFactor
 
         @Override
         public FileStatus getFileStatus(Path path) throws IOException {
-            DecodeResult result = decodePath(path);
-            FileStatus status = wrapped.getFileStatus(result.path);
+            CompactedChangelogPathResolver.DecodeResult result =
+                    CompactedChangelogPathResolver.decodePath(path);
+            FileStatus status = wrapped.getFileStatus(result.getPath());
 
             return new FileStatus() {
 
                 @Override
                 public long getLen() {
-                    return result.length;
+                    return result.getLength();
                 }
 
                 @Override
@@ -193,7 +148,7 @@ public class CompactedChangelogFormatReaderFactory implements FormatReaderFactor
 
         @Override
         public boolean exists(Path path) throws IOException {
-            return wrapped.exists(decodePath(path).path);
+            return wrapped.exists(CompactedChangelogPathResolver.decodePath(path).getPath());
         }
 
         @Override
@@ -209,50 +164,6 @@ public class CompactedChangelogFormatReaderFactory implements FormatReaderFactor
         @Override
         public boolean rename(Path src, Path dst) throws IOException {
             throw new UnsupportedOperationException();
-        }
-    }
-
-    private static class OffsetSeekableInputStream extends SeekableInputStream {
-
-        private final SeekableInputStream wrapped;
-        private final long offset;
-        private final long length;
-
-        private OffsetSeekableInputStream(SeekableInputStream wrapped, long offset, long length)
-                throws IOException {
-            this.wrapped = wrapped;
-            this.offset = offset;
-            this.length = length;
-            wrapped.seek(offset);
-        }
-
-        @Override
-        public void seek(long desired) throws IOException {
-            wrapped.seek(offset + desired);
-        }
-
-        @Override
-        public long getPos() throws IOException {
-            return wrapped.getPos() - offset;
-        }
-
-        @Override
-        public int read() throws IOException {
-            if (getPos() >= length) {
-                throw new EOFException();
-            }
-            return wrapped.read();
-        }
-
-        @Override
-        public int read(byte[] b, int off, int len) throws IOException {
-            long realLen = Math.min(len, length - getPos());
-            return wrapped.read(b, off, (int) realLen);
-        }
-
-        @Override
-        public void close() throws IOException {
-            wrapped.close();
         }
     }
 }

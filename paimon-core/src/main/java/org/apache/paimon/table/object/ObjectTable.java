@@ -24,6 +24,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import java.util.Collections;
 import java.util.Map;
 
 /**
@@ -61,6 +62,7 @@ public interface ObjectTable extends Table {
         private Identifier identifier;
         private FileIO fileIO;
         private String location;
+        private Map<String, String> options = Collections.emptyMap();
         private String comment;
 
         public ObjectTable.Builder identifier(Identifier identifier) {
@@ -78,13 +80,18 @@ public interface ObjectTable extends Table {
             return this;
         }
 
+        public ObjectTable.Builder options(Map<String, String> options) {
+            this.options = options;
+            return this;
+        }
+
         public ObjectTable.Builder comment(String comment) {
             this.comment = comment;
             return this;
         }
 
         public ObjectTable build() {
-            return new ObjectTableImpl(identifier, fileIO, location, comment);
+            return new ObjectTableImpl(identifier, fileIO, location, options, comment);
         }
     }
 }

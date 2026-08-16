@@ -74,6 +74,30 @@ statement
     | ALTER TABLE multipartIdentifier createReplaceTagClause                                #createOrReplaceTag
     | ALTER TABLE multipartIdentifier DELETE TAG (IF EXISTS)? identifier                    #deleteTag
     | ALTER TABLE multipartIdentifier RENAME TAG identifier TO identifier                   #renameTag
+    | COPY INTO multipartIdentifier ('(' columnList ')')?
+      FROM sourcePath=STRING
+      fileFormatClause
+      patternClause?
+      forceClause?
+      onErrorClause?                                                                        #copyIntoTable
+    | COPY INTO targetPath=STRING
+      FROM multipartIdentifier
+      fileFormatClause
+      overwriteClause?                                                                      #copyIntoLocation
+    | CREATE TABLE (IF NOT EXISTS)? target=multipartIdentifier
+        LIKE source=multipartIdentifier ( . )*?                                             #createTableLike
+    | COPY INTO targetPath=STRING
+      FROM query=parenBlock
+      fileFormatClause
+      overwriteClause?                                                                      #copyIntoLocationFromQuery
+  ;
+
+// A parenthesized block with balanced parentheses, used to capture an inline subquery verbatim,
+// e.g. the (SELECT ...) in `COPY INTO <location> FROM (SELECT ...)`. A recursive rule is required
+// (rather than '(' .*? ')') so that nested parentheses such as `WHERE x IN (1, 2)` are matched
+// correctly. The raw subquery text is later extracted from the token stream by the AST builder.
+parenBlock
+  : '(' ( parenBlock | ~('(' | ')') )* ')'
   ;
 
 callArgument
@@ -102,6 +126,42 @@ timeUnit
   : DAYS
   | HOURS
   | MINUTES
+  ;
+
+columnList
+  : identifier (',' identifier)*
+  ;
+
+fileFormatClause
+  : FILE_FORMAT '=' '(' fileFormatOption (',' fileFormatOption)* ')'
+  ;
+
+fileFormatOption
+  : key=identifier '=' fileFormatValue
+  ;
+
+fileFormatValue
+  : STRING                                                             #stringFormatValue
+  | identifier                                                         #identFormatValue
+  | booleanValue                                                       #boolFormatValue
+  | INTEGER_VALUE                                                      #intFormatValue
+  | '(' STRING (',' STRING)* ')'                                       #listFormatValue
+  ;
+
+patternClause
+  : PATTERN '=' STRING
+  ;
+
+forceClause
+  : FORCE '=' booleanValue
+  ;
+
+onErrorClause
+  : ON_ERROR '=' (ABORT_STATEMENT | CONTINUE | SKIP_FILE)
+  ;
+
+overwriteClause
+  : OVERWRITE '=' booleanValue
   ;
 
 expression
@@ -151,10 +211,14 @@ quotedIdentifier
     ;
 
 nonReserved
-    : ALTER | AS | CALL | CREATE | DAYS | DELETE | EXISTS | HOURS | IF | NOT | OF | OR | TABLE
-    | REPLACE | RETAIN | VERSION | TAG
+    : ALTER | AS | CALL | CREATE | DAYS | DELETE | EXISTS | HOURS | IF | LIKE
+    | NOT | OF | OR | TABLE | REPLACE | RETAIN | VERSION | TAG
     | TRUE | FALSE
     | MAP
+    | COPY | INTO | FROM | FILE_FORMAT | PATTERN | FORCE | ON_ERROR | ABORT_STATEMENT | CONTINUE | SKIP_FILE | OVERWRITE
+    | CSV
+    | JSON
+    | PARQUET
     ;
 
 ALTER: 'ALTER';
@@ -166,6 +230,7 @@ DELETE: 'DELETE';
 EXISTS: 'EXISTS';
 HOURS: 'HOURS';
 IF : 'IF';
+LIKE: 'LIKE';
 MINUTES: 'MINUTES';
 NOT: 'NOT';
 OF: 'OF';
@@ -184,6 +249,21 @@ TRUE: 'TRUE';
 FALSE: 'FALSE';
 
 MAP: 'MAP';
+
+COPY: 'COPY';
+INTO: 'INTO';
+FROM: 'FROM';
+FILE_FORMAT: 'FILE_FORMAT';
+PATTERN: 'PATTERN';
+FORCE: 'FORCE';
+ON_ERROR: 'ON_ERROR';
+ABORT_STATEMENT: 'ABORT_STATEMENT';
+CONTINUE: 'CONTINUE';
+SKIP_FILE: 'SKIP_FILE';
+OVERWRITE: 'OVERWRITE';
+CSV: 'CSV';
+JSON: 'JSON';
+PARQUET: 'PARQUET';
 
 PLUS: '+';
 MINUS: '-';

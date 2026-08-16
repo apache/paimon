@@ -18,7 +18,9 @@
 
 package org.apache.paimon.format.json;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -29,6 +31,7 @@ import org.apache.paimon.format.FormatReadWriteTest;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
+import org.apache.paimon.format.HadoopCompressionType;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.Options;
@@ -56,7 +59,14 @@ public class JsonFileFormatTest extends FormatReadWriteTest {
 
     @Override
     protected FileFormat fileFormat() {
-        return new JsonFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024, 1024));
+        Options options = new Options();
+        options.set(CoreOptions.FILE_COMPRESSION, compression());
+        return new JsonFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
+    }
+
+    @Override
+    public String compression() {
+        return HadoopCompressionType.NONE.value();
     }
 
     @Test
@@ -89,7 +99,7 @@ public class JsonFileFormatTest extends FormatReadWriteTest {
 
         // Read data - should skip malformed lines and return only valid ones
         try (RecordReader<InternalRow> reader =
-                format.createReaderFactory(rowType)
+                format.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(
                                         fileIO, testFile, fileIO.getFileSize(testFile)))) {
@@ -138,7 +148,7 @@ public class JsonFileFormatTest extends FormatReadWriteTest {
 
         // Read data - should throw exception on malformed JSON
         try (RecordReader<InternalRow> reader =
-                format.createReaderFactory(rowType)
+                format.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(
                                         fileIO, testFile, fileIO.getFileSize(testFile)))) {
@@ -198,7 +208,7 @@ public class JsonFileFormatTest extends FormatReadWriteTest {
 
         // Read data - should handle type conversion errors gracefully
         try (RecordReader<InternalRow> reader =
-                format.createReaderFactory(rowType)
+                format.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(
                                         fileIO, testFile, fileIO.getFileSize(testFile)))) {
@@ -324,14 +334,14 @@ public class JsonFileFormatTest extends FormatReadWriteTest {
     }
 
     @Test
-    public void testJsonWriteReadWithDifferentLineDelimiters() throws IOException {
+    public void testWithCustomLineDelimiters() throws IOException {
         RowType rowType =
                 DataTypes.ROW(
                         DataTypes.INT().notNull(),
                         DataTypes.STRING(),
                         DataTypes.MAP(DataTypes.STRING(), DataTypes.STRING()));
 
-        String[] delimiters = {"\n", "\r", "\r\n"};
+        String[] delimiters = {"\n", "\r", "\r\n", "||", "###", "@@", "\t", "::"};
 
         // Create test data once (reused for all delimiters)
         List<InternalRow> testData =
@@ -367,6 +377,21 @@ public class JsonFileFormatTest extends FormatReadWriteTest {
             assertThat(result.get(1).getString(1).toString()).isEqualTo("second");
             assertThat(result.get(1).getMap(2).size()).isEqualTo(2);
         }
+    }
+
+    @Test
+    public void testVectorTypeReadWrite() throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.INT(), DataTypes.VECTOR(3, DataTypes.FLOAT()));
+
+        float[] values = new float[] {1.0f, 2.0f, 3.0f};
+        List<InternalRow> testData =
+                Arrays.asList(GenericRow.of(1, BinaryVector.fromPrimitiveArray(values)));
+
+        List<InternalRow> result = writeThenRead(new Options(), rowType, testData, "test_vector");
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getInt(0)).isEqualTo(1);
+        assertThat(result.get(0).getVector(1).toFloatArray()).isEqualTo(values);
     }
 
     @Override
@@ -407,7 +432,7 @@ public class JsonFileFormatTest extends FormatReadWriteTest {
             }
         }
         try (RecordReader<InternalRow> reader =
-                format.createReaderFactory(rowType)
+                format.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(
                                         fileIO, testFile, fileIO.getFileSize(testFile)))) {

@@ -41,9 +41,11 @@ public class CompactedChangelogReadOnlyFormat extends FileFormat {
 
     @Override
     public FormatReaderFactory createReaderFactory(
-            RowType projectedRowType, @Nullable List<Predicate> filters) {
+            RowType dataSchemaRowType,
+            RowType projectedRowType,
+            @Nullable List<Predicate> filters) {
         return new CompactedChangelogFormatReaderFactory(
-                wrapped.createReaderFactory(projectedRowType, filters));
+                wrapped.createReaderFactory(dataSchemaRowType, projectedRowType, filters));
     }
 
     @Override

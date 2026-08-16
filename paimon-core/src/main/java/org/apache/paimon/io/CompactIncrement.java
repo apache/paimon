@@ -18,6 +18,9 @@
 
 package org.apache.paimon.io;
 
+import org.apache.paimon.index.IndexFileMeta;
+
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
@@ -29,14 +32,27 @@ public class CompactIncrement {
     private final List<DataFileMeta> compactBefore;
     private final List<DataFileMeta> compactAfter;
     private final List<DataFileMeta> changelogFiles;
+    private final List<IndexFileMeta> newIndexFiles;
+    private final List<IndexFileMeta> deletedIndexFiles;
 
     public CompactIncrement(
             List<DataFileMeta> compactBefore,
             List<DataFileMeta> compactAfter,
             List<DataFileMeta> changelogFiles) {
+        this(compactBefore, compactAfter, changelogFiles, new ArrayList<>(), new ArrayList<>());
+    }
+
+    public CompactIncrement(
+            List<DataFileMeta> compactBefore,
+            List<DataFileMeta> compactAfter,
+            List<DataFileMeta> changelogFiles,
+            List<IndexFileMeta> newIndexFiles,
+            List<IndexFileMeta> deletedIndexFiles) {
         this.compactBefore = compactBefore;
         this.compactAfter = compactAfter;
         this.changelogFiles = changelogFiles;
+        this.newIndexFiles = newIndexFiles;
+        this.deletedIndexFiles = deletedIndexFiles;
     }
 
     public List<DataFileMeta> compactBefore() {
@@ -51,8 +67,20 @@ public class CompactIncrement {
         return changelogFiles;
     }
 
+    public List<IndexFileMeta> newIndexFiles() {
+        return newIndexFiles;
+    }
+
+    public List<IndexFileMeta> deletedIndexFiles() {
+        return deletedIndexFiles;
+    }
+
     public boolean isEmpty() {
-        return compactBefore.isEmpty() && compactAfter.isEmpty() && changelogFiles.isEmpty();
+        return compactBefore.isEmpty()
+                && compactAfter.isEmpty()
+                && changelogFiles.isEmpty()
+                && newIndexFiles.isEmpty()
+                && deletedIndexFiles.isEmpty();
     }
 
     @Override
@@ -67,7 +95,9 @@ public class CompactIncrement {
         CompactIncrement that = (CompactIncrement) o;
         return Objects.equals(compactBefore, that.compactBefore)
                 && Objects.equals(compactAfter, that.compactAfter)
-                && Objects.equals(changelogFiles, that.changelogFiles);
+                && Objects.equals(changelogFiles, that.changelogFiles)
+                && Objects.equals(newIndexFiles, that.newIndexFiles)
+                && Objects.equals(deletedIndexFiles, that.deletedIndexFiles);
     }
 
     @Override
@@ -78,10 +108,14 @@ public class CompactIncrement {
     @Override
     public String toString() {
         return String.format(
-                "CompactIncrement {compactBefore = %s, compactAfter = %s, changelogFiles = %s}",
+                "CompactIncrement {compactBefore = %s, compactAfter = %s, changelogFiles = %s, newIndexFiles = %s, deletedIndexFiles = %s}",
                 compactBefore.stream().map(DataFileMeta::fileName).collect(Collectors.toList()),
                 compactAfter.stream().map(DataFileMeta::fileName).collect(Collectors.toList()),
-                changelogFiles.stream().map(DataFileMeta::fileName).collect(Collectors.toList()));
+                changelogFiles.stream().map(DataFileMeta::fileName).collect(Collectors.toList()),
+                newIndexFiles.stream().map(IndexFileMeta::fileName).collect(Collectors.toList()),
+                deletedIndexFiles.stream()
+                        .map(IndexFileMeta::fileName)
+                        .collect(Collectors.toList()));
     }
 
     public static CompactIncrement emptyIncrement() {

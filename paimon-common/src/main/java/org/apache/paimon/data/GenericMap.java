@@ -23,6 +23,10 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 
 import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -46,6 +50,7 @@ public final class GenericMap implements InternalMap, Serializable {
     private static final long serialVersionUID = 1L;
 
     private final Map<?, ?> map;
+    private final boolean binaryKeys;
 
     /**
      * Creates an instance of {@link GenericMap} using the given Java map.
@@ -53,7 +58,33 @@ public final class GenericMap implements InternalMap, Serializable {
      * <p>Note: All keys and values of the map must be internal data structures.
      */
     public GenericMap(Map<?, ?> map) {
-        this.map = map;
+        this(map, false);
+    }
+
+    private GenericMap(Map<?, ?> map, boolean binaryKeys) {
+        this.binaryKeys = binaryKeys;
+        this.map = binaryKeys ? normalizeBinaryKeys(map) : map;
+    }
+
+    /**
+     * Creates a map whose binary keys use content equality.
+     *
+     * @since 2.1
+     */
+    public static GenericMap fromBinaryKeyMap(Map<?, ?> map) {
+        return new GenericMap(map, true);
+    }
+
+    private static Map<BinaryKey, Object> normalizeBinaryKeys(Map<?, ?> map) {
+        Map<BinaryKey, Object> binaryMap = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : map.entrySet()) {
+            Object key = entry.getKey();
+            if (key != null && !(key instanceof byte[])) {
+                throw new IllegalArgumentException("Binary key must be byte[].");
+            }
+            binaryMap.put(copyBinaryKey(key), entry.getValue());
+        }
+        return binaryMap;
     }
 
     /**
@@ -61,10 +92,16 @@ public final class GenericMap implements InternalMap, Serializable {
      * no mapping for the key. The returned value is in internal data structure.
      */
     public Object get(Object key) {
+        if (binaryKeys) {
+            return isBinaryKey(key) ? map.get(lookupBinaryKey(key)) : null;
+        }
         return map.get(key);
     }
 
     public boolean contains(Object key) {
+        if (binaryKeys) {
+            return isBinaryKey(key) && map.containsKey(lookupBinaryKey(key));
+        }
         return map.containsKey(key);
     }
 
@@ -75,7 +112,11 @@ public final class GenericMap implements InternalMap, Serializable {
 
     @Override
     public InternalArray keyArray() {
-        Object[] keys = map.keySet().toArray();
+        Object[] keys = new Object[map.size()];
+        int index = 0;
+        for (Object key : map.keySet()) {
+            keys[index++] = copyUnwrappedBinaryKey(key);
+        }
         return new GenericArray(keys);
     }
 
@@ -94,18 +135,50 @@ public final class GenericMap implements InternalMap, Serializable {
             return false;
         }
         // deepEquals for values of byte[]
-        return deepEquals(map, ((GenericMap) o).map);
+        return deepEquals(this, (GenericMap) o);
     }
 
-    private static <K, V> boolean deepEquals(Map<K, V> m1, Map<?, ?> m2) {
+    private static boolean deepEquals(GenericMap m1, GenericMap m2) {
+        if (m1.map.size() != m2.map.size()) {
+            return false;
+        }
+        if ((m1.binaryKeys && m2.binaryKeys) || (!m1.hasBinaryKeys() && !m2.hasBinaryKeys())) {
+            return deepEquals(m1.map, m2.map);
+        }
+
+        List<Map.Entry<?, ?>> entries2 = new ArrayList<>(m2.map.entrySet());
+        boolean[] matched = new boolean[entries2.size()];
+        for (Map.Entry<?, ?> entry1 : m1.map.entrySet()) {
+            boolean found = false;
+            for (int i = 0; i < entries2.size(); i++) {
+                if (matched[i]) {
+                    continue;
+                }
+                Map.Entry<?, ?> entry2 = entries2.get(i);
+                if (Objects.deepEquals(
+                                unwrapBinaryKey(entry1.getKey()), unwrapBinaryKey(entry2.getKey()))
+                        && Objects.deepEquals(entry1.getValue(), entry2.getValue())) {
+                    matched[i] = true;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean deepEquals(Map<?, ?> m1, Map<?, ?> m2) {
         // copied from HashMap.equals but with deepEquals comparison
         if (m1.size() != m2.size()) {
             return false;
         }
         try {
-            for (Map.Entry<K, V> e : m1.entrySet()) {
-                K key = e.getKey();
-                V value = e.getValue();
+            for (Map.Entry<?, ?> entry : m1.entrySet()) {
+                Object key = entry.getKey();
+                Object value = entry.getValue();
                 if (value == null) {
                     if (!(m2.get(key) == null && m2.containsKey(key))) {
                         return false;
@@ -126,9 +199,76 @@ public final class GenericMap implements InternalMap, Serializable {
     public int hashCode() {
         int result = 0;
         for (Object key : map.keySet()) {
+            key = unwrapBinaryKey(key);
             // only include key because values can contain byte[]
-            result += 31 * Objects.hashCode(key);
+            result +=
+                    31
+                            * (key instanceof byte[]
+                                    ? Arrays.hashCode((byte[]) key)
+                                    : Objects.hashCode(key));
         }
         return result;
+    }
+
+    private boolean hasBinaryKeys() {
+        return binaryKeys || hasBinaryKey(map);
+    }
+
+    private static Object unwrapBinaryKey(Object key) {
+        return key instanceof BinaryKey ? ((BinaryKey) key).bytes : key;
+    }
+
+    private static Object copyUnwrappedBinaryKey(Object key) {
+        return key instanceof BinaryKey ? ((BinaryKey) key).copyBytes() : key;
+    }
+
+    private static boolean isBinaryKey(Object key) {
+        return key == null || key instanceof byte[];
+    }
+
+    private static BinaryKey copyBinaryKey(Object key) {
+        return key == null ? null : new BinaryKey((byte[]) key, true);
+    }
+
+    private static BinaryKey lookupBinaryKey(Object key) {
+        return key == null ? null : new BinaryKey((byte[]) key, false);
+    }
+
+    private static boolean hasBinaryKey(Map<?, ?> map) {
+        for (Object key : map.keySet()) {
+            if (key instanceof byte[]) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static final class BinaryKey implements Serializable {
+
+        private static final long serialVersionUID = 1L;
+
+        private final byte[] bytes;
+        private final int hash;
+
+        private BinaryKey(byte[] bytes, boolean copy) {
+            this.bytes = copy ? Arrays.copyOf(bytes, bytes.length) : bytes;
+            this.hash = Arrays.hashCode(this.bytes);
+        }
+
+        private byte[] copyBytes() {
+            return Arrays.copyOf(bytes, bytes.length);
+        }
+
+        @Override
+        public boolean equals(Object object) {
+            return object == this
+                    || (object instanceof BinaryKey
+                            && Arrays.equals(bytes, ((BinaryKey) object).bytes));
+        }
+
+        @Override
+        public int hashCode() {
+            return hash;
+        }
     }
 }

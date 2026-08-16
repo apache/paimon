@@ -21,6 +21,7 @@ package org.apache.paimon.fileindex.bitmap;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataTypeVisitor;
@@ -40,6 +41,7 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VectorType;
 
 /** Simplified visitor for bitmap index. */
 public abstract class BitmapTypeVisitor<R> implements DataTypeVisitor<R> {
@@ -146,6 +148,11 @@ public abstract class BitmapTypeVisitor<R> implements DataTypeVisitor<R> {
     }
 
     @Override
+    public final R visit(VectorType vectorType) {
+        throw new UnsupportedOperationException("Does not support type vector");
+    }
+
+    @Override
     public final R visit(MultisetType multisetType) {
         throw new UnsupportedOperationException("Does not support type mutiset");
     }
@@ -163,5 +170,10 @@ public abstract class BitmapTypeVisitor<R> implements DataTypeVisitor<R> {
     @Override
     public final R visit(VariantType rowType) {
         throw new UnsupportedOperationException("Does not support type variant");
+    }
+
+    @Override
+    public final R visit(BlobType blobType) {
+        throw new UnsupportedOperationException("Does not support type blob");
     }
 }

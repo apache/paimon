@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.data.BlobDescriptor
 import org.apache.paimon.spark.PaimonHiveTestBase
 import org.apache.paimon.spark.catalog.functions.PaimonFunctions
 import org.apache.paimon.spark.function.FunctionResources.MyIntSumClass
@@ -69,7 +70,7 @@ class PaimonFunctionTest extends PaimonHiveTestBase {
     Seq("paimon", paimonHiveCatalogName).foreach {
       catalogName =>
         sql(s"use $catalogName")
-        val functions = sql("show user functions").collect()
+        val functions = sql("show user functions in sys").collect()
         assert(functions.exists(_.getString(0).contains("max_pt")), catalogName)
     }
   }
@@ -114,15 +115,73 @@ class PaimonFunctionTest extends PaimonHiveTestBase {
     checkAnswer(sql(s"SHOW FUNCTIONS FROM $hiveDbName LIKE 'myIntSum'"), Seq.empty)
   }
 
+  test("Paimon function: descriptor to presigned URL") {
+    sql(s"USE paimon.$dbName0")
+    withTable("url_source", "url_other") {
+      sql("CREATE TABLE url_source (id INT) USING paimon")
+      sql("CREATE TABLE url_other (id INT) USING paimon")
+
+      val descriptor = new BlobDescriptor("file:/tmp/source.blob", 0, 1).serialize()
+      val descriptorHex = descriptor.map(b => f"${b & 0xff}%02X").mkString
+
+      checkAnswer(
+        sql(
+          s"SELECT sys.try_descriptor_to_presigned_url(" +
+            s"'$dbName0.url_source', CAST(NULL AS BINARY), INTERVAL '1' SECOND)"),
+        Row(null))
+      checkAnswer(
+        sql(
+          s"SELECT sys.try_descriptor_to_presigned_url(" +
+            s"'paimon.$dbName0.url_source', X'00', INTERVAL '1' HOUR)"),
+        Row(null))
+
+      intercept[Exception] {
+        sql(
+          s"SELECT sys.descriptor_to_presigned_url(" +
+            s"'$dbName0.url_source', X'00', INTERVAL '1' SECOND)").collect()
+      }
+      intercept[Exception] {
+        sql(
+          s"SELECT sys.descriptor_to_presigned_url(" +
+            s"'$dbName0.url_source', X'$descriptorHex', " +
+            "INTERVAL '1.000001' SECOND)").collect()
+      }
+      intercept[Exception] {
+        sql(
+          s"SELECT sys.try_descriptor_to_presigned_url(" +
+            s"source_table, X'00', INTERVAL '1' SECOND) " +
+            s"FROM VALUES ('$dbName0.url_source') AS t(source_table)").collect()
+      }
+      intercept[Exception] {
+        sql(
+          s"SELECT sys.try_descriptor_to_presigned_url(" +
+            s"CASE WHEN id = 1 THEN '$dbName0.url_source' " +
+            s"ELSE '$dbName0.url_other' END, X'00', INTERVAL '1' SECOND) " +
+            "FROM VALUES (1) AS t(id)").collect()
+      }
+      intercept[Exception] {
+        sql(
+          "SELECT sys.try_descriptor_to_presigned_url(" +
+            "CAST(NULL AS STRING), X'00', INTERVAL '1' SECOND)").collect()
+      }
+      intercept[Exception] {
+        sql(
+          s"SELECT sys.try_descriptor_to_presigned_url(" +
+            s"'spark_catalog.$dbName0.url_source', X'00', " +
+            "INTERVAL '1' SECOND)").collect()
+      }
+    }
+  }
+
   test("Add max_pt function") {
     Seq("paimon", sparkCatalogName, paimonHiveCatalogName).foreach {
       catalogName =>
         {
           sql(s"use $catalogName")
           val maxPt = if (catalogName == sparkCatalogName) {
-            "paimon.max_pt"
+            "paimon.sys.max_pt"
           } else {
-            "max_pt"
+            "sys.max_pt"
           }
 
           intercept[Exception] {

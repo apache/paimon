@@ -19,7 +19,7 @@
 package org.apache.paimon.mergetree.compact;
 
 import org.apache.paimon.compact.CompactUnit;
-import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
+import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.RecordLevelExpire;
 import org.apache.paimon.mergetree.LevelSortedRun;
@@ -54,7 +54,7 @@ public interface CompactStrategy {
             int numLevels,
             List<LevelSortedRun> runs,
             @Nullable RecordLevelExpire recordLevelExpire,
-            @Nullable DeletionVectorsMaintainer dvMaintainer,
+            @Nullable BucketedDvMaintainer dvMaintainer,
             boolean forceRewriteAllFiles) {
         int maxLevel = numLevels - 1;
         if (runs.isEmpty()) {

@@ -24,9 +24,8 @@ import org.apache.hc.client5.http.classic.methods.HttpGet;
 import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.classic.methods.HttpUriRequestBase;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
-import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
+import org.apache.hc.core5.http.ContentType;
 import org.apache.hc.core5.http.Header;
-import org.apache.hc.core5.http.ParseException;
 import org.apache.hc.core5.http.io.entity.StringEntity;
 import org.apache.hc.core5.http.message.BasicHeader;
 
@@ -48,7 +47,7 @@ public class SimpleHttpClient implements Closeable {
     }
 
     public String post(String url, Object body, Map<String, String> headers) throws IOException {
-        HttpPost httpPost = new HttpPost(url);
+        HttpPost httpPost = HttpClientUtils.newHttpPost(url);
         if (headers != null) {
             httpPost.setHeaders(
                     headers.entrySet().stream()
@@ -57,7 +56,11 @@ public class SimpleHttpClient implements Closeable {
         }
         String encodedBody = RESTUtil.encodedBody(body);
         if (encodedBody != null) {
-            httpPost.setEntity(new StringEntity(encodedBody));
+            ContentType contentType =
+                    body instanceof Map
+                            ? ContentType.APPLICATION_FORM_URLENCODED
+                            : ContentType.APPLICATION_JSON;
+            httpPost.setEntity(new StringEntity(encodedBody, contentType));
         }
 
         return exec(httpPost);
@@ -65,7 +68,7 @@ public class SimpleHttpClient implements Closeable {
 
     public String get(String url, Map<String, String> queryParams, Map<String, String> headers)
             throws IOException {
-        HttpGet httpGet = new HttpGet(RESTUtil.buildRequestUrl(url, queryParams));
+        HttpGet httpGet = HttpClientUtils.newHttpGet(RESTUtil.buildRequestUrl(url, queryParams));
         if (headers != null) {
             httpGet.setHeaders(
                     headers.entrySet().stream()
@@ -80,21 +83,26 @@ public class SimpleHttpClient implements Closeable {
     }
 
     private String exec(HttpUriRequestBase request) {
-        try (CloseableHttpResponse response = client.execute(request)) {
-            String responseBodyStr = RESTUtil.extractResponseBodyAsString(response);
+        try {
+            return client.execute(
+                    request,
+                    response -> {
+                        String responseBodyStr = RESTUtil.extractResponseBodyAsString(response);
 
-            if (StringUtils.isNullOrWhitespaceOnly(responseBodyStr)
-                    || !RESTUtil.isSuccessful(response)) {
-                throw new RuntimeException(
-                        RESTUtil.isSuccessful(response)
-                                ? "ResponseBody is null or empty."
-                                : String.format(
-                                        "Response is not successful, response is %s", response));
-            }
-            return responseBodyStr;
-        } catch (IOException | ParseException e) {
-            throw new RuntimeException(
-                    "Failed to convert HTTP response body to string, error : " + e.getMessage());
+                        if (StringUtils.isNullOrWhitespaceOnly(responseBodyStr)
+                                || !RESTUtil.isSuccessful(response)) {
+                            throw new RuntimeException(
+                                    RESTUtil.isSuccessful(response)
+                                            ? "ResponseBody is null or empty."
+                                            : String.format(
+                                                    "Response is not successful, response is %s",
+                                                    response));
+                        }
+                        return responseBodyStr;
+                    });
+        } catch (IOException e) {
+            // No message from e: a redirect/protocol error can echo the target URL (a signed URL).
+            throw new RuntimeException("Failed to convert HTTP response body to string.");
         }
     }
 

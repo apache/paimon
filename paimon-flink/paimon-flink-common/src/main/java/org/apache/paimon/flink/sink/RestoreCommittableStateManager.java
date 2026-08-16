@@ -26,8 +26,6 @@ import org.apache.paimon.utils.SerializableSupplier;
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.api.common.typeutils.base.array.BytePrimitiveArraySerializer;
-import org.apache.flink.runtime.state.StateInitializationContext;
-import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.streaming.api.operators.util.SimpleVersionedListState;
 
 import java.util.ArrayList;
@@ -59,12 +57,11 @@ public class RestoreCommittableStateManager<GlobalCommitT>
     }
 
     @Override
-    public void initializeState(
-            StateInitializationContext context, Committer<?, GlobalCommitT> committer)
+    public void initializeState(Committer.Context context, Committer<?, GlobalCommitT> committer)
             throws Exception {
         streamingCommitterState =
                 new SimpleVersionedListState<>(
-                        context.getOperatorStateStore()
+                        context.stateStore()
                                 .getListState(
                                         new ListStateDescriptor<>(
                                                 "streaming_committer_raw_states",
@@ -82,8 +79,7 @@ public class RestoreCommittableStateManager<GlobalCommitT>
     }
 
     @Override
-    public void snapshotState(StateSnapshotContext context, List<GlobalCommitT> committables)
-            throws Exception {
+    public void snapshotState(List<GlobalCommitT> committables) throws Exception {
         streamingCommitterState.update(committables);
     }
 }

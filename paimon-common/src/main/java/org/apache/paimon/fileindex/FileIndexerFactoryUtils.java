@@ -46,7 +46,7 @@ public class FileIndexerFactoryUtils {
         }
     }
 
-    static FileIndexerFactory load(String type) {
+    public static FileIndexerFactory load(String type) {
         FileIndexerFactory fileIndexerFactory = factories.get(type);
         if (fileIndexerFactory == null) {
             throw new RuntimeException("Can't find file index for type: " + type);

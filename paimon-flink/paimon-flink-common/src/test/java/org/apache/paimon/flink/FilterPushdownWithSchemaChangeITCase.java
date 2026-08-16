@@ -247,13 +247,12 @@ public class FilterPushdownWithSchemaChangeITCase extends CatalogITCaseBase {
         sql("INSERT INTO T VALUES ('9', '9'), ('10', '10'), ('11', '11')");
 
         // key filter
-        sql("ALTER TABLE T MODIFY (pk INT)");
         assertThat(sql("SELECT * FROM T WHERE pk > 9"))
-                .containsExactlyInAnyOrder(Row.of(10, "10"), Row.of(11, "11"));
+                .containsExactlyInAnyOrder(Row.of("10", "10"), Row.of("11", "11"));
 
         // value filter
         sql("ALTER TABLE T MODIFY (v INT)");
         assertThat(sql("SELECT * FROM T WHERE v > 9"))
-                .containsExactlyInAnyOrder(Row.of(10, 10), Row.of(11, 11));
+                .containsExactlyInAnyOrder(Row.of("10", 10), Row.of("11", 11));
     }
 }

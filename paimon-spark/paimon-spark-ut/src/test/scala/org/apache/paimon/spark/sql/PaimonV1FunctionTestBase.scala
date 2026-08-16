@@ -24,6 +24,8 @@ import org.apache.paimon.spark.function.FunctionResources._
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.Row
 
+import java.io.File
+
 abstract class PaimonV1FunctionTestBase extends PaimonSparkTestWithRestCatalogBase {
 
   test("Paimon V1 Function: create or replace function") {
@@ -95,7 +97,7 @@ abstract class PaimonV1FunctionTestBase extends PaimonSparkTestWithRestCatalogBa
     }
   }
 
-  test("Paimon V1 Function: select with build-in function") {
+  test("Paimon V1 Function: select with built-in function") {
     withUserDefinedFunction("udf_add2" -> false) {
       sql(s"""
              |CREATE FUNCTION udf_add2 AS '$UDFExampleAdd2Class'
@@ -106,7 +108,7 @@ abstract class PaimonV1FunctionTestBase extends PaimonSparkTestWithRestCatalogBa
         sql("INSERT INTO t VALUES (1, 2), (3, 4)")
         checkAnswer(
           sql(
-            "SELECT a, udf_add2(pow(a, pt), max_pt('t')), pow(a, udf_add2(a, pt)) FROM t ORDER BY a"),
+            "SELECT a, udf_add2(pow(a, pt), sys.max_pt('t')), pow(a, udf_add2(a, pt)) FROM t ORDER BY a"),
           Seq(Row(1, 5.0d, 1.0d), Row(3, 85.0d, 2187.0d))
         )
       }
@@ -144,18 +146,18 @@ abstract class PaimonV1FunctionTestBase extends PaimonSparkTestWithRestCatalogBa
   }
 
   test("Paimon V1 Function: unsupported operation") {
-    // create a build-in function
-    intercept[Exception] {
+    // create a built-in function
+    assert(intercept[Exception] {
       sql(s"""
-             |CREATE FUNCTION max_pt AS '$UDFExampleAdd2Class'
+             |CREATE FUNCTION sys.max_pt AS '$UDFExampleAdd2Class'
              |USING JAR '$testUDFJarPath'
              |""".stripMargin)
-    }
+    }.getMessage.contains("Can't create built-in function"))
 
-    // drop a build-in function
-    intercept[Exception] {
-      sql("DROP FUNCTION max_pt")
-    }
+    // drop a built-in function
+    assert(intercept[Exception] {
+      sql("DROP FUNCTION sys.max_pt")
+    }.getMessage.contains("Can't drop built-in function"))
   }
 
   test("Paimon V1 Function: user defined aggregate function") {
@@ -170,6 +172,127 @@ abstract class PaimonV1FunctionTestBase extends PaimonSparkTestWithRestCatalogBa
           sql("CREATE TABLE t (id INT) USING paimon")
           sql("INSERT INTO t VALUES (1), (2), (3)")
           checkAnswer(sql("SELECT myIntSum(id) FROM t"), Row(6))
+        }
+      }
+    }
+  }
+
+  test("Paimon V1 Function: select with CTE and subquery") {
+    withUserDefinedFunction("udf_add2" -> false) {
+      sql(s"""
+             |CREATE FUNCTION udf_add2 AS '$UDFExampleAdd2Class'
+             |USING JAR '$testUDFJarPath'
+             |""".stripMargin)
+      withTable("t") {
+        sql("CREATE TABLE t (a INT, b INT)")
+        sql("INSERT INTO t VALUES (1, 2), (3, 4)")
+
+        checkAnswer(
+          sql("""
+                |WITH tmp_view AS (
+                |  SELECT udf_add2(a, b) AS c1 FROM t
+                |)
+                |SELECT * FROM tmp_view
+                |""".stripMargin),
+          Seq(Row(3), Row(7))
+        )
+
+        checkAnswer(
+          sql("""
+                |WITH tmp_view AS (
+                |  SELECT udf_add2(1, 2)
+                |)
+                |SELECT * FROM tmp_view
+                |""".stripMargin),
+          Seq(Row(3))
+        )
+
+        checkAnswer(
+          sql("""
+                |SELECT * FROM (SELECT udf_add2(a, b) AS c1 FROM t)
+                |""".stripMargin),
+          Seq(Row(3), Row(7))
+        )
+      }
+    }
+  }
+
+  test("Paimon V1 Function: select with view") {
+    withUserDefinedFunction("udf_add2" -> false) {
+      sql(s"""
+             |CREATE FUNCTION udf_add2 AS '$UDFExampleAdd2Class'
+             |USING JAR '$testUDFJarPath'
+             |""".stripMargin)
+      withTable("t") {
+        withView("v") {
+          sql("CREATE TABLE t (a INT, b INT)")
+          sql("INSERT INTO t VALUES (1, 2), (3, 4)")
+          sql("CREATE VIEW v AS SELECT udf_add2(a, b) AS c1 FROM t")
+          checkAnswer(sql("SELECT * FROM v"), Seq(Row(3), Row(7)))
+        }
+      }
+    }
+  }
+
+  test("Paimon V1 Function: create or drop function on an existing temporary function") {
+    withUserDefinedFunction("udf_add2" -> true) {
+      sql(s"""
+             |CREATE TEMPORARY FUNCTION udf_add2 AS '$UDFExampleAdd2Class'
+             |USING JAR '$testUDFJarPath'
+             |""".stripMargin)
+
+      assert(intercept[Exception] {
+        sql(s"""
+               |CREATE FUNCTION udf_add2 AS '$UDFExampleAdd2Class'
+               |USING JAR '$testUDFJarPath'
+               |""".stripMargin)
+      }.getMessage.contains("udf_add2 is a temporary function and already exists"))
+
+      assert(intercept[Exception] {
+        sql(s"""
+               |CREATE OR REPLACE FUNCTION udf_add2 AS '$UDFExampleAdd2Class'
+               |USING JAR '$testUDFJarPath'
+               |""".stripMargin)
+      }.getMessage.contains(
+        "udf_add2 is a temporary function, you should use `CREATE OR REPLACE TEMPORARY FUNCTION udf_add2`"))
+
+      sql(s"""
+             |CREATE OR REPLACE TEMPORARY FUNCTION udf_add2 AS '$UDFExampleAdd2Class'
+             |USING JAR '$testUDFJarPath'
+             |""".stripMargin)
+
+      assert(intercept[Exception] {
+        sql(s"""
+               |DROP FUNCTION udf_add2
+               |""".stripMargin)
+      }.getMessage.contains("udf_add2 is a built-in/temporary function"))
+    }
+  }
+
+  test("Paimon V1 Function: COPY INTO location FROM (SELECT udf(...))") {
+    withUserDefinedFunction("udf_add2" -> false) {
+      sql(s"""
+             |CREATE FUNCTION udf_add2 AS '$UDFExampleAdd2Class'
+             |USING JAR '$testUDFJarPath'
+             |""".stripMargin)
+      withTable("t") {
+        sql("CREATE TABLE t (a INT, b INT)")
+        sql("INSERT INTO t VALUES (1, 2), (3, 4)")
+
+        withTempDir {
+          dir =>
+            val exportPath = new File(dir, "udf_export").getAbsolutePath
+            // The inline query references a Paimon v1 function. This only resolves if the query is
+            // parsed through the session (Paimon) parser, which applies the v1 function rewrite.
+            val result = sql(s"""
+                                |COPY INTO '$exportPath'
+                                |FROM (SELECT udf_add2(a, b) AS c FROM t)
+                                |FILE_FORMAT = (TYPE = CSV)
+                                |""".stripMargin)
+            checkAnswer(result.selectExpr("rows_written"), Row(2L))
+            checkAnswer(
+              spark.read.csv(exportPath).selectExpr("CAST(_c0 AS INT)"),
+              Seq(Row(3), Row(7)))
         }
       }
     }

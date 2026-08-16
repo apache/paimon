@@ -62,6 +62,9 @@ public abstract class ArrowBatchConverter {
         return root;
     }
 
+    public abstract ArrowBatchConverter copy(
+            VectorSchemaRoot root, ArrowFieldWriter[] fieldWriters);
+
     protected abstract void doWrite(int maxBatchRows);
 
     public void close() {

@@ -22,11 +22,56 @@ import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.utils.ObjectSerializer;
 import org.apache.paimon.utils.ObjectSerializerTestBase;
 
+import org.junit.jupiter.api.Test;
+
 import java.util.LinkedHashMap;
 import java.util.Random;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 /** Test for {@link org.apache.paimon.index.IndexFileMetaSerializer}. */
 public class IndexFileMetaSerializerTest extends ObjectSerializerTestBase<IndexFileMeta> {
+
+    @Test
+    void testGlobalIndexSourceMetaRoundTrip() {
+        IndexFileMetaSerializer serializer = new IndexFileMetaSerializer();
+        IndexFileMeta indexFile =
+                new IndexFileMeta(
+                        "ivf-pq",
+                        "index-file",
+                        100,
+                        10,
+                        new GlobalIndexMeta(0, 9, 7, null, new byte[] {3, 4}, new byte[] {1, 2}),
+                        null);
+
+        GlobalIndexMeta restored =
+                serializer.fromRow(serializer.toRow(indexFile)).globalIndexMeta();
+
+        assertThat(restored.sourceMeta()).containsExactly(1, 2);
+        assertThat(restored.indexMeta()).containsExactly(3, 4);
+    }
+
+    @Test
+    void testEqualityIncludesGlobalIndexMeta() {
+        IndexFileMeta first =
+                globalIndexFile(
+                        new GlobalIndexMeta(
+                                0, 9, 7, new int[] {8}, new byte[] {3}, new byte[] {1}));
+        IndexFileMeta equal =
+                globalIndexFile(
+                        new GlobalIndexMeta(
+                                0, 9, 7, new int[] {8}, new byte[] {3}, new byte[] {1}));
+        IndexFileMeta different =
+                globalIndexFile(
+                        new GlobalIndexMeta(
+                                0, 9, 7, new int[] {8}, new byte[] {3}, new byte[] {2}));
+
+        assertThat(first).isEqualTo(equal).hasSameHashCodeAs(equal).isNotEqualTo(different);
+    }
+
+    private static IndexFileMeta globalIndexFile(GlobalIndexMeta globalIndexMeta) {
+        return new IndexFileMeta("ivf-pq", "index-file", 100, 10, globalIndexMeta, null);
+    }
 
     @Override
     protected ObjectSerializer<IndexFileMeta> serializer() {
@@ -53,17 +98,20 @@ public class IndexFileMetaSerializerTest extends ObjectSerializerTestBase<IndexF
                 HashIndexFile.HASH_INDEX,
                 "my_file_name" + rnd.nextLong(),
                 rnd.nextInt(),
-                rnd.nextInt());
+                rnd.nextInt(),
+                null,
+                null,
+                null);
     }
 
     public static IndexFileMeta randomDeletionVectorIndexFile() {
         Random rnd = new Random();
-        LinkedHashMap<String, DeletionVectorMeta> deletionVectorMetas = new LinkedHashMap<>();
-        deletionVectorMetas.put(
+        LinkedHashMap<String, DeletionVectorMeta> dvRanges = new LinkedHashMap<>();
+        dvRanges.put(
                 "my_file_name1",
                 new DeletionVectorMeta(
                         "my_file_name1", rnd.nextInt(), rnd.nextInt(), rnd.nextLong()));
-        deletionVectorMetas.put(
+        dvRanges.put(
                 "my_file_name2",
                 new DeletionVectorMeta(
                         "my_file_name2", rnd.nextInt(), rnd.nextInt(), rnd.nextLong()));
@@ -72,6 +120,7 @@ public class IndexFileMetaSerializerTest extends ObjectSerializerTestBase<IndexF
                 "deletion_vectors_index_file_name" + rnd.nextLong(),
                 rnd.nextInt(),
                 rnd.nextInt(),
-                deletionVectorMetas);
+                dvRanges,
+                null);
     }
 }

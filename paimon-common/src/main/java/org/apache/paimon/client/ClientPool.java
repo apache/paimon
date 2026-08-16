@@ -65,11 +65,25 @@ public interface ClientPool<C, E extends Exception> {
                     continue;
                 }
                 try {
+                    client = ensureActiveClient(client);
                     return action.run(client);
                 } finally {
+                    // Return client to the deque, then check if close() raced us.
+                    // The deque's lock ensures either drainTo or remove sees the client.
                     clients.addFirst(client);
+                    if (this.clients == null && clients.remove(client)) {
+                        close(client);
+                    }
                 }
             }
+        }
+
+        /**
+         * Validates that the client is still active before use. Subclasses should override this
+         * method to provide protocol-specific validation and reconnection logic.
+         */
+        protected C ensureActiveClient(C client) {
+            return client;
         }
 
         @Override

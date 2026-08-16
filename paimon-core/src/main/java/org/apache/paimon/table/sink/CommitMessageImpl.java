@@ -18,20 +18,17 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
-import org.apache.paimon.io.IndexIncrement;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
-import java.util.Collections;
 import java.util.Objects;
 
 import static org.apache.paimon.utils.SerializationUtils.deserializedBytes;
@@ -50,37 +47,18 @@ public class CommitMessageImpl implements CommitMessage {
     private transient @Nullable Integer totalBuckets;
     private transient DataIncrement dataIncrement;
     private transient CompactIncrement compactIncrement;
-    private transient IndexIncrement indexIncrement;
 
-    @VisibleForTesting
     public CommitMessageImpl(
             BinaryRow partition,
             int bucket,
             @Nullable Integer totalBuckets,
             DataIncrement dataIncrement,
             CompactIncrement compactIncrement) {
-        this(
-                partition,
-                bucket,
-                totalBuckets,
-                dataIncrement,
-                compactIncrement,
-                new IndexIncrement(Collections.emptyList()));
-    }
-
-    public CommitMessageImpl(
-            BinaryRow partition,
-            int bucket,
-            @Nullable Integer totalBuckets,
-            DataIncrement dataIncrement,
-            CompactIncrement compactIncrement,
-            IndexIncrement indexIncrement) {
         this.partition = partition;
         this.bucket = bucket;
         this.totalBuckets = totalBuckets;
         this.dataIncrement = dataIncrement;
         this.compactIncrement = compactIncrement;
-        this.indexIncrement = indexIncrement;
     }
 
     @Override
@@ -106,12 +84,8 @@ public class CommitMessageImpl implements CommitMessage {
         return compactIncrement;
     }
 
-    public IndexIncrement indexIncrement() {
-        return indexIncrement;
-    }
-
     public boolean isEmpty() {
-        return dataIncrement.isEmpty() && compactIncrement.isEmpty() && indexIncrement.isEmpty();
+        return dataIncrement.isEmpty() && compactIncrement.isEmpty();
     }
 
     private void writeObject(ObjectOutputStream out) throws IOException {
@@ -131,7 +105,6 @@ public class CommitMessageImpl implements CommitMessage {
         this.totalBuckets = message.totalBuckets;
         this.dataIncrement = message.dataIncrement;
         this.compactIncrement = message.compactIncrement;
-        this.indexIncrement = message.indexIncrement;
     }
 
     @Override
@@ -148,14 +121,12 @@ public class CommitMessageImpl implements CommitMessage {
                 && Objects.equals(partition, that.partition)
                 && Objects.equals(totalBuckets, that.totalBuckets)
                 && Objects.equals(dataIncrement, that.dataIncrement)
-                && Objects.equals(compactIncrement, that.compactIncrement)
-                && Objects.equals(indexIncrement, that.indexIncrement);
+                && Objects.equals(compactIncrement, that.compactIncrement);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(
-                partition, bucket, totalBuckets, dataIncrement, compactIncrement, indexIncrement);
+        return Objects.hash(partition, bucket, totalBuckets, dataIncrement, compactIncrement);
     }
 
     @Override
@@ -166,8 +137,7 @@ public class CommitMessageImpl implements CommitMessage {
                         + "bucket = %d, "
                         + "totalBuckets = %s, "
                         + "newFilesIncrement = %s, "
-                        + "compactIncrement = %s, "
-                        + "indexIncrement = %s}",
-                partition, bucket, totalBuckets, dataIncrement, compactIncrement, indexIncrement);
+                        + "compactIncrement = %s}",
+                partition, bucket, totalBuckets, dataIncrement, compactIncrement);
     }
 }

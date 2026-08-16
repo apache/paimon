@@ -19,9 +19,10 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
 
 import java.util.List;
@@ -33,19 +34,27 @@ import java.util.Map;
 public class KnownSplitsTable implements ReadonlyTable {
 
     private final InnerTable origin;
-    private final DataSplit[] splits;
+    private final Split[] splits;
 
-    KnownSplitsTable(InnerTable origin, DataSplit[] splits) {
+    KnownSplitsTable(InnerTable origin, Split[] splits) {
         this.origin = origin;
         this.splits = splits;
     }
 
-    public static KnownSplitsTable create(InnerTable origin, DataSplit[] splits) {
+    public static KnownSplitsTable create(InnerTable origin, Split[] splits) {
         return new KnownSplitsTable(origin, splits);
     }
 
-    public DataSplit[] splits() {
+    public Split[] splits() {
         return splits;
+    }
+
+    @Override
+    public ReadBuilder newReadBuilder() {
+        // ReadonlyTable's default implementation creates ReadBuilderImpl(this), which makes the
+        // ReadBuilder capture this KnownSplitsTable. ReadBuilder should not carry all splits, so
+        // delegate to origin.
+        return origin.newReadBuilder();
     }
 
     @Override

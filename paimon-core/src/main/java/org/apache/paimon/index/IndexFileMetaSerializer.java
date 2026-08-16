@@ -18,18 +18,18 @@
 
 package org.apache.paimon.index;
 
-import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.utils.ObjectSerializer;
-import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import java.util.Collection;
 import java.util.LinkedHashMap;
 
-/** A {@link VersionedObjectSerializer} for {@link IndexFileMeta}. */
+import static org.apache.paimon.data.BinaryString.fromString;
+
+/** Serializer for {@link IndexFileMeta}. */
 public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
 
     public IndexFileMetaSerializer() {
@@ -38,24 +38,66 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
 
     @Override
     public InternalRow toRow(IndexFileMeta record) {
+        GlobalIndexMeta globalIndexMeta = record.globalIndexMeta();
+        InternalRow globalIndexRow =
+                globalIndexMeta == null
+                        ? null
+                        : GenericRow.of(
+                                globalIndexMeta.rowRangeStart(),
+                                globalIndexMeta.rowRangeEnd(),
+                                globalIndexMeta.indexFieldId(),
+                                globalIndexMeta.extraFieldIds() == null
+                                        ? null
+                                        : new GenericArray(globalIndexMeta.extraFieldIds()),
+                                globalIndexMeta.indexMeta(),
+                                globalIndexMeta.sourceMeta());
         return GenericRow.of(
-                BinaryString.fromString(record.indexType()),
-                BinaryString.fromString(record.fileName()),
+                fromString(record.indexType()),
+                fromString(record.fileName()),
                 record.fileSize(),
                 record.rowCount(),
-                record.deletionVectorMetas() == null
-                        ? null
-                        : dvMetasToRowArrayData(record.deletionVectorMetas().values()));
+                dvMetasToRowArrayData(record.dvRanges()),
+                fromString(record.externalPath()),
+                globalIndexRow);
     }
 
     @Override
     public IndexFileMeta fromRow(InternalRow row) {
+        GlobalIndexMeta globalIndexMeta = null;
+        if (!row.isNullAt(6)) {
+            InternalRow globalIndexRow = row.getRow(6, 6);
+            Long rowRangeStart = globalIndexRow.getLong(0);
+            Long rowRangeEnd = globalIndexRow.getLong(1);
+            Integer indexFieldId = globalIndexRow.getInt(2);
+            int[] extralFields =
+                    globalIndexRow.isNullAt(3) ? null : globalIndexRow.getArray(3).toIntArray();
+            byte[] indexMeta = globalIndexRow.isNullAt(4) ? null : globalIndexRow.getBinary(4);
+            byte[] sourceMeta = globalIndexRow.isNullAt(5) ? null : globalIndexRow.getBinary(5);
+            globalIndexMeta =
+                    new GlobalIndexMeta(
+                            rowRangeStart,
+                            rowRangeEnd,
+                            indexFieldId,
+                            extralFields,
+                            indexMeta,
+                            sourceMeta);
+        }
         return new IndexFileMeta(
                 row.getString(0).toString(),
                 row.getString(1).toString(),
                 row.getLong(2),
                 row.getLong(3),
-                row.isNullAt(4) ? null : rowArrayDataToDvMetas(row.getArray(4)));
+                row.isNullAt(4) ? null : rowArrayDataToDvMetas(row.getArray(4)),
+                row.isNullAt(5) ? null : row.getString(5).toString(),
+                globalIndexMeta);
+    }
+
+    public static InternalArray dvMetasToRowArrayData(
+            LinkedHashMap<String, DeletionVectorMeta> dvRanges) {
+        if (dvRanges == null) {
+            return null;
+        }
+        return dvMetasToRowArrayData(dvRanges.values());
     }
 
     public static InternalArray dvMetasToRowArrayData(Collection<DeletionVectorMeta> dvMetas) {
@@ -64,7 +106,7 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
                         .map(
                                 dvMeta ->
                                         GenericRow.of(
-                                                BinaryString.fromString(dvMeta.dataFileName()),
+                                                fromString(dvMeta.dataFileName()),
                                                 dvMeta.offset(),
                                                 dvMeta.length(),
                                                 dvMeta.cardinality()))
@@ -76,10 +118,11 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
         LinkedHashMap<String, DeletionVectorMeta> dvMetas = new LinkedHashMap<>(arrayData.size());
         for (int i = 0; i < arrayData.size(); i++) {
             InternalRow row = arrayData.getRow(i, DeletionVectorMeta.SCHEMA.getFieldCount());
+            String dataFileName = row.getString(0).toString();
             dvMetas.put(
-                    row.getString(0).toString(),
+                    dataFileName,
                     new DeletionVectorMeta(
-                            row.getString(0).toString(),
+                            dataFileName,
                             row.getInt(1),
                             row.getInt(2),
                             row.isNullAt(3) ? null : row.getLong(3)));

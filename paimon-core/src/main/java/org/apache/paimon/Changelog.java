@@ -44,6 +44,7 @@ public class Changelog extends Snapshot {
     public Changelog(Snapshot snapshot) {
         this(
                 snapshot.version(),
+                snapshot.uuid(),
                 snapshot.id(),
                 snapshot.schemaId(),
                 snapshot.baseManifestList(),
@@ -57,19 +58,20 @@ public class Changelog extends Snapshot {
                 snapshot.commitIdentifier(),
                 snapshot.commitKind(),
                 snapshot.timeMillis(),
-                snapshot.logOffsets(),
                 snapshot.totalRecordCount(),
                 snapshot.deltaRecordCount(),
                 snapshot.changelogRecordCount(),
                 snapshot.watermark(),
                 snapshot.statistics(),
                 snapshot.properties,
-                snapshot.nextRowId);
+                snapshot.nextRowId,
+                snapshot.operation);
     }
 
     @JsonCreator
     public Changelog(
-            @JsonProperty(FIELD_VERSION) @Nullable Integer version,
+            @JsonProperty(FIELD_VERSION) int version,
+            @JsonProperty(FIELD_UUID) @Nullable String uuid,
             @JsonProperty(FIELD_ID) long id,
             @JsonProperty(FIELD_SCHEMA_ID) long schemaId,
             @JsonProperty(FIELD_BASE_MANIFEST_LIST) String baseManifestList,
@@ -84,16 +86,17 @@ public class Changelog extends Snapshot {
             @JsonProperty(FIELD_COMMIT_IDENTIFIER) long commitIdentifier,
             @JsonProperty(FIELD_COMMIT_KIND) CommitKind commitKind,
             @JsonProperty(FIELD_TIME_MILLIS) long timeMillis,
-            @JsonProperty(FIELD_LOG_OFFSETS) Map<Integer, Long> logOffsets,
-            @JsonProperty(FIELD_TOTAL_RECORD_COUNT) @Nullable Long totalRecordCount,
-            @JsonProperty(FIELD_DELTA_RECORD_COUNT) @Nullable Long deltaRecordCount,
+            @JsonProperty(FIELD_TOTAL_RECORD_COUNT) long totalRecordCount,
+            @JsonProperty(FIELD_DELTA_RECORD_COUNT) long deltaRecordCount,
             @JsonProperty(FIELD_CHANGELOG_RECORD_COUNT) @Nullable Long changelogRecordCount,
             @JsonProperty(FIELD_WATERMARK) @Nullable Long watermark,
             @JsonProperty(FIELD_STATISTICS) @Nullable String statistics,
             @JsonProperty(FIELD_PROPERTIES) Map<String, String> properties,
-            @JsonProperty(FIELD_NEXT_ROW_ID) @Nullable Long nextRowId) {
+            @JsonProperty(FIELD_NEXT_ROW_ID) @Nullable Long nextRowId,
+            @JsonProperty(FIELD_OPERATION) @Nullable Operation operation) {
         super(
                 version,
+                uuid,
                 id,
                 schemaId,
                 baseManifestList,
@@ -107,14 +110,14 @@ public class Changelog extends Snapshot {
                 commitIdentifier,
                 commitKind,
                 timeMillis,
-                logOffsets,
                 totalRecordCount,
                 deltaRecordCount,
                 changelogRecordCount,
                 watermark,
                 statistics,
                 properties,
-                nextRowId);
+                nextRowId,
+                operation);
     }
 
     public static Changelog fromJson(String json) {

@@ -28,7 +28,6 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.FileStorePathFactory;
-import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
@@ -113,13 +112,13 @@ public class ManifestListTest {
     private ManifestList createLegacyManifestListPaimon10() {
         FileStorePathFactory pathFactory = createPathFactory(tempDir.toString());
         RowType legacyMetaType =
-                VersionedObjectSerializer.versionType(
+                ManifestSchemaUtils.withFormatIdentifier(
                         LegacyManifestFileMetaSerializerPaimon10.SCHEMA);
         return new ManifestList(
                 LocalFileIO.create(),
                 new LegacyManifestFileMetaSerializerPaimon10(),
                 legacyMetaType,
-                avro.createReaderFactory(legacyMetaType),
+                avro.createReaderFactory(legacyMetaType, legacyMetaType, new ArrayList<>()),
                 avro.createWriterFactory(legacyMetaType),
                 "zstd",
                 pathFactory.manifestListFactory(),
@@ -137,6 +136,8 @@ public class ManifestListTest {
                             meta.numDeletedFiles(),
                             meta.partitionStats(),
                             meta.schemaId(),
+                            null,
+                            null,
                             null,
                             null,
                             null,
@@ -172,6 +173,10 @@ public class ManifestListTest {
                 CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                 CoreOptions.FILE_COMPRESSION.defaultValue(),
                 null,
+                null,
+                CoreOptions.ExternalPathStrategy.NONE,
+                null,
+                false,
                 null);
     }
 

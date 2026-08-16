@@ -19,23 +19,48 @@
 package org.apache.paimon.arrow.vector;
 
 import org.apache.paimon.arrow.ArrowBundleRecords;
+import org.apache.paimon.arrow.ArrowFieldTypeConversion;
+import org.apache.paimon.arrow.converter.Arrow2PaimonVectorConverter;
 import org.apache.paimon.arrow.reader.ArrowBatchReader;
+import org.apache.paimon.arrow.writer.ArrowFieldWriterFactoryVisitor;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.columnar.AllNullColumnVector;
+import org.apache.paimon.data.columnar.ColumnarRow;
+import org.apache.paimon.data.variant.GenericVariant;
+import org.apache.paimon.data.variant.PaimonShreddingUtils;
+import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.OutOfMemoryException;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.FieldVector;
+import org.apache.arrow.vector.FixedSizeBinaryVector;
+import org.apache.arrow.vector.IntVector;
+import org.apache.arrow.vector.TimeMicroVector;
+import org.apache.arrow.vector.TimeNanoVector;
+import org.apache.arrow.vector.TimeSecVector;
+import org.apache.arrow.vector.VarBinaryVector;
+import org.apache.arrow.vector.VarCharVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
-import org.assertj.core.api.Assertions;
+import org.apache.arrow.vector.complex.ListVector;
+import org.apache.arrow.vector.complex.MapVector;
+import org.apache.arrow.vector.complex.StructVector;
+import org.apache.arrow.vector.types.pojo.ArrowType;
+import org.apache.arrow.vector.types.pojo.FieldType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -43,10 +68,15 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link org.apache.paimon.arrow.vector.ArrowFormatWriter}. */
 public class ArrowFormatWriterTest {
@@ -115,11 +145,265 @@ public class ArrowFormatWriterTest {
                 InternalRow expectec = list.get(i);
 
                 for (InternalRow.FieldGetter fieldGetter : fieldGetters) {
-                    Assertions.assertThat(fieldGetter.getFieldOrNull(actual))
+                    assertThat(fieldGetter.getFieldOrNull(actual))
                             .isEqualTo(fieldGetter.getFieldOrNull(expectec));
                 }
             }
             vectorSchemaRoot.close();
+        }
+    }
+
+    @Test
+    public void testMissingMapColumnVectorizedRoundTrip() {
+        RowType inputRowType = RowType.builder().field("id", DataTypes.INT()).build();
+        RowType projectedRowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("map", DataTypes.MAP(DataTypes.STRING(), DataTypes.INT()))
+                        .build();
+
+        try (ArrowFormatWriter inputWriter = new ArrowFormatWriter(inputRowType, 3, true);
+                ArrowFormatWriter outputWriter = new ArrowFormatWriter(projectedRowType, 3, true)) {
+            inputWriter.write(GenericRow.of(1));
+            inputWriter.write(GenericRow.of(2));
+            inputWriter.write(GenericRow.of(3));
+            inputWriter.flush();
+
+            ArrowBatchReader reader = new ArrowBatchReader(projectedRowType, true);
+            ColumnarRow row =
+                    (ColumnarRow)
+                            reader.readBatch(inputWriter.getVectorSchemaRoot()).iterator().next();
+            assertThat(row.batch().columns[1]).isSameAs(AllNullColumnVector.INSTANCE);
+
+            outputWriter.write(row.batch().columns, null, 0, 3);
+            outputWriter.flush();
+
+            VectorSchemaRoot output = outputWriter.getVectorSchemaRoot();
+            assertThat(output.getRowCount()).isEqualTo(3);
+            IntVector idVector = (IntVector) output.getVector("id");
+            assertThat(idVector.get(0)).isEqualTo(1);
+            assertThat(idVector.get(1)).isEqualTo(2);
+            assertThat(idVector.get(2)).isEqualTo(3);
+
+            MapVector mapVector = (MapVector) output.getVector("map");
+            assertThat(mapVector.isNull(0)).isTrue();
+            assertThat(mapVector.isNull(1)).isTrue();
+            assertThat(mapVector.isNull(2)).isTrue();
+            assertThat(mapVector.getDataVector().getValueCount()).isZero();
+            assertThat(mapVector.getDataVector().getChildrenFromFields())
+                    .allSatisfy(child -> assertThat(child.getValueCount()).isZero());
+            mapVector.getDataVector().validateFull();
+        }
+    }
+
+    @Test
+    public void testWriteNullElementInNotNullArrayColumn() {
+        // the array column is NOT NULL, but its element type is nullable
+        RowType rowType = RowType.of(DataTypes.ARRAY(DataTypes.INT()).notNull());
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            writer.write(GenericRow.of(new GenericArray(new Object[] {1, null, 3})));
+            writer.flush();
+
+            VectorSchemaRoot vectorSchemaRoot = writer.getVectorSchemaRoot();
+            ArrowBatchReader arrowBatchReader = new ArrowBatchReader(rowType, true);
+            InternalRow row = arrowBatchReader.readBatch(vectorSchemaRoot).iterator().next();
+
+            InternalArray array = row.getArray(0);
+            assertThat(array.size()).isEqualTo(3);
+            assertThat(array.isNullAt(0)).isFalse();
+            assertThat(array.getInt(0)).isEqualTo(1);
+            assertThat(array.isNullAt(1)).isTrue();
+            assertThat(array.isNullAt(2)).isFalse();
+            assertThat(array.getInt(2)).isEqualTo(3);
+        }
+    }
+
+    @Test
+    public void testWriteNullElementInNotNullElementArrayColumn() {
+        // the array column is nullable, but its element type is NOT NULL
+        RowType rowType = RowType.of(DataTypes.ARRAY(DataTypes.INT().notNull()));
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            InternalRow row = GenericRow.of(new GenericArray(new Object[] {1, null}));
+            assertThatThrownBy(() -> writer.write(row))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("expected not null but found null value");
+        }
+    }
+
+    @Test
+    public void testWriteNullValueInNotNullMapColumn() {
+        // the map column is NOT NULL, but its value type is nullable
+        RowType rowType = RowType.of(DataTypes.MAP(DataTypes.INT(), DataTypes.INT()).notNull());
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            Map<Integer, Integer> map = new HashMap<>();
+            map.put(1, null);
+            writer.write(GenericRow.of(new GenericMap(map)));
+            writer.flush();
+
+            VectorSchemaRoot vectorSchemaRoot = writer.getVectorSchemaRoot();
+            ArrowBatchReader arrowBatchReader = new ArrowBatchReader(rowType, true);
+            InternalRow row = arrowBatchReader.readBatch(vectorSchemaRoot).iterator().next();
+
+            InternalMap actualMap = row.getMap(0);
+            assertThat(actualMap.size()).isEqualTo(1);
+            assertThat(actualMap.keyArray().getInt(0)).isEqualTo(1);
+            assertThat(actualMap.valueArray().isNullAt(0)).isTrue();
+        }
+    }
+
+    @Test
+    public void testWriteNullKeyInMapColumnFailsLoud() {
+        // the map key type is nullable, but the Arrow map key is always NOT NULL by spec, so a null
+        // key must fail loud rather than be written into a schema that forbids it
+        RowType rowType = RowType.of(DataTypes.MAP(DataTypes.INT(), DataTypes.INT()));
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            Map<Integer, Integer> map = new HashMap<>();
+            map.put(null, 1);
+            InternalRow row = GenericRow.of(new GenericMap(map));
+            assertThatThrownBy(() -> writer.write(row))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("expected not null but found null value");
+        }
+    }
+
+    @Test
+    public void testWriteNullFieldInNotNullNestedRowField() {
+        // the row column is nullable, but its nested field is NOT NULL
+        RowType rowType =
+                RowType.of(DataTypes.ROW(DataTypes.FIELD(0, "a", DataTypes.INT().notNull())));
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            InternalRow row = GenericRow.of(GenericRow.of((Object) null));
+            assertThatThrownBy(() -> writer.write(row))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("expected not null but found null value");
+        }
+    }
+
+    @Test
+    public void testWriteVector() {
+        RowType rowType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(1, "embed", DataTypes.VECTOR(3, DataTypes.FLOAT()))));
+        float[] values = new float[] {1.0f, 2.0f, 3.0f};
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            writer.write(GenericRow.of(1, BinaryVector.fromPrimitiveArray(values)));
+
+            writer.flush();
+            VectorSchemaRoot vectorSchemaRoot = writer.getVectorSchemaRoot();
+
+            ArrowBatchReader arrowBatchReader = new ArrowBatchReader(rowType, true);
+            Iterable<InternalRow> rows = arrowBatchReader.readBatch(vectorSchemaRoot);
+
+            Iterator<InternalRow> iterator = rows.iterator();
+            InternalRow row = iterator.next();
+
+            assertThat(row.getInt(0)).isEqualTo(1);
+            assertThat(row.getVector(1).toFloatArray()).isEqualTo(values);
+            vectorSchemaRoot.close();
+        }
+    }
+
+    @Test
+    public void testWriteVectorWithNulls() {
+        // Arrow2ColumnarVecFactory needs to handle bit-level checks on the validity buffer.
+        // Different lengths can cover validation across multiple bytes.
+        for (int length = 1; length <= 18; ++length) {
+            VectorType vectorType = DataTypes.VECTOR(length, DataTypes.FLOAT());
+            RowType rowType =
+                    new RowType(
+                            Arrays.asList(
+                                    new DataField(0, "id", DataTypes.INT()),
+                                    new DataField(1, "embed", vectorType)));
+            float[] values = new float[length];
+            for (int i = 0; i < length; ++i) {
+                values[i] = RND.nextInt(256);
+            }
+            try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 1024, true)) {
+                writer.write(GenericRow.of(1, BinaryVector.fromPrimitiveArray(values)));
+                writer.write(GenericRow.of(2, null));
+                writer.write(GenericRow.of(3, BinaryVector.fromPrimitiveArray(values)));
+                writer.write(GenericRow.of(4, null));
+
+                writer.flush();
+                VectorSchemaRoot vectorSchemaRoot = writer.getVectorSchemaRoot();
+
+                ArrowBatchReader arrowBatchReader = new ArrowBatchReader(rowType, true);
+                Iterable<InternalRow> rows = arrowBatchReader.readBatch(vectorSchemaRoot);
+                Iterator<InternalRow> iterator = rows.iterator();
+
+                {
+                    InternalRow row = iterator.next();
+                    assertThat(row.getInt(0)).isEqualTo(1);
+                    assertThat(row.isNullAt(1)).isEqualTo(false);
+                    assertThat(row.getVector(1).toFloatArray()).isEqualTo(values);
+                }
+                {
+                    InternalRow row = iterator.next();
+                    assertThat(row.getInt(0)).isEqualTo(2);
+                    assertThat(row.isNullAt(1)).isEqualTo(true);
+                }
+                {
+                    InternalRow row = iterator.next();
+                    assertThat(row.getInt(0)).isEqualTo(3);
+                    assertThat(row.isNullAt(1)).isEqualTo(false);
+                    assertThat(row.getVector(1).toFloatArray()).isEqualTo(values);
+                }
+                {
+                    InternalRow row = iterator.next();
+                    assertThat(row.getInt(0)).isEqualTo(4);
+                    assertThat(row.isNullAt(1)).isEqualTo(true);
+                }
+                vectorSchemaRoot.close();
+            }
+        }
+    }
+
+    @Test
+    public void testWriteVariant() {
+        RowType rowType = new RowType(Arrays.asList(new DataField(0, "v", DataTypes.VARIANT())));
+        GenericVariant variant = GenericVariant.fromJson("{\"a\": 1, \"b\": \"x\"}");
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            writer.write(GenericRow.of(variant));
+            writer.flush();
+
+            StructVector variantVector = (StructVector) writer.getVectorSchemaRoot().getVector("v");
+            assertThat(variantVector.isNull(0)).isFalse();
+            VarBinaryVector valueVector = (VarBinaryVector) variantVector.getChild(Variant.VALUE);
+            VarBinaryVector metadataVector =
+                    (VarBinaryVector) variantVector.getChild(Variant.METADATA);
+            assertThat(valueVector.getObject(0)).isEqualTo(variant.value());
+            assertThat(metadataVector.getObject(0)).isEqualTo(variant.metadata());
+        }
+    }
+
+    @Test
+    public void testWriteVariantWithShreddingSchema() {
+        RowType rowType = new RowType(Arrays.asList(new DataField(0, "v", DataTypes.VARIANT())));
+        RowType expectedSchema =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "a", DataTypes.INT()),
+                        DataTypes.FIELD(1, "b", DataTypes.STRING()));
+        RowType shreddingSchemas =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(
+                                        0,
+                                        "v",
+                                        PaimonShreddingUtils.variantShreddingSchema(
+                                                expectedSchema))));
+        GenericVariant variant = GenericVariant.fromJson("{\"a\": 1, \"b\": \"x\"}");
+
+        try (ArrowFormatWriter writer =
+                new ArrowFormatWriter(rowType, 16, true, null, shreddingSchemas)) {
+            writer.write(GenericRow.of(variant));
+            writer.flush();
+
+            StructVector variantVector = (StructVector) writer.getVectorSchemaRoot().getVector("v");
+            assertThat(variantVector.isNull(0)).isFalse();
+            assertThat(variantVector.getChild(PaimonShreddingUtils.TYPED_VALUE_FIELD_NAME))
+                    .isNotNull();
         }
     }
 
@@ -158,7 +442,7 @@ public class ArrowFormatWriterTest {
                 InternalRow expectec = list.get(i);
 
                 for (InternalRow.FieldGetter fieldGetter : fieldGetters) {
-                    Assertions.assertThat(fieldGetter.getFieldOrNull(actual))
+                    assertThat(fieldGetter.getFieldOrNull(actual))
                             .isEqualTo(fieldGetter.getFieldOrNull(expectec));
                 }
             }
@@ -194,9 +478,9 @@ public class ArrowFormatWriterTest {
 
             if (limitMemory) {
                 for (int i = 0; i < 64; i++) {
-                    Assertions.assertThat(writer.write(genericRow)).isTrue();
+                    assertThat(writer.write(genericRow)).isTrue();
                 }
-                Assertions.assertThat(writer.write(genericRow)).isFalse();
+                assertThat(writer.write(genericRow)).isFalse();
             }
             writer.reset();
 
@@ -211,8 +495,8 @@ public class ArrowFormatWriterTest {
             }
 
             if (limitMemory) {
-                Assertions.assertThat(writer.memoryUsed()).isLessThan(memoryLimit);
-                Assertions.assertThat(writer.getAllocator().getAllocatedMemory())
+                assertThat(writer.memoryUsed()).isLessThan(memoryLimit);
+                assertThat(writer.getAllocator().getAllocatedMemory())
                         .isGreaterThan(memoryLimit)
                         .isLessThan(2 * memoryLimit);
             }
@@ -244,7 +528,7 @@ public class ArrowFormatWriterTest {
                 InternalRow expectec = list.get(i);
 
                 for (InternalRow.FieldGetter fieldGetter : fieldGetters) {
-                    Assertions.assertThat(fieldGetter.getFieldOrNull(actual))
+                    assertThat(fieldGetter.getFieldOrNull(actual))
                             .isEqualTo(fieldGetter.getFieldOrNull(expectec));
                 }
             }
@@ -253,9 +537,118 @@ public class ArrowFormatWriterTest {
     }
 
     @Test
+    public void testArrowBundleRecordsWithTimeAndFixedBinaryVectors() {
+        // Arrow batches from external producers may use these vector types even though Paimon's
+        // Arrow writer currently defaults to TimeMilliVector and VarBinaryVector.
+        RowType rowType =
+                RowType.of(
+                        new DataField(0, "time_sec", DataTypes.TIME(0)),
+                        new DataField(1, "time_micro", DataTypes.TIME(6)),
+                        new DataField(2, "time_nano", DataTypes.TIME(9)),
+                        new DataField(3, "fixed_binary", DataTypes.BINARY(3)));
+
+        try (RootAllocator allocator = new RootAllocator()) {
+            TimeSecVector timeSecVector = new TimeSecVector("time_sec", allocator);
+            timeSecVector.allocateNew(1);
+            timeSecVector.setSafe(0, 12);
+            timeSecVector.setValueCount(1);
+
+            TimeMicroVector timeMicroVector = new TimeMicroVector("time_micro", allocator);
+            timeMicroVector.allocateNew(1);
+            timeMicroVector.setSafe(0, 12345678L);
+            timeMicroVector.setValueCount(1);
+
+            TimeNanoVector timeNanoVector = new TimeNanoVector("time_nano", allocator);
+            timeNanoVector.allocateNew(1);
+            timeNanoVector.setSafe(0, 12345678901L);
+            timeNanoVector.setValueCount(1);
+
+            byte[] binary = new byte[] {1, 2, 3};
+            FixedSizeBinaryVector fixedBinaryVector =
+                    new FixedSizeBinaryVector("fixed_binary", allocator, binary.length);
+            fixedBinaryVector.allocateNew(1);
+            fixedBinaryVector.setSafe(0, binary);
+            fixedBinaryVector.setValueCount(1);
+
+            List<FieldVector> vectors =
+                    Arrays.asList(
+                            timeSecVector, timeMicroVector, timeNanoVector, fixedBinaryVector);
+            try (VectorSchemaRoot vectorSchemaRoot = new VectorSchemaRoot(vectors)) {
+                vectorSchemaRoot.setRowCount(1);
+
+                Iterator<InternalRow> iterator =
+                        new ArrowBundleRecords(vectorSchemaRoot, rowType, true).iterator();
+                InternalRow row = iterator.next();
+                assertThat(row.getInt(0)).isEqualTo(12000);
+                assertThat(row.getInt(1)).isEqualTo(12345);
+                assertThat(row.getInt(2)).isEqualTo(12345);
+                assertThat(row.getBinary(3)).containsExactly(binary);
+            }
+        }
+    }
+
+    @Test
     public void testCWriter() {
         try (ArrowFormatCWriter writer = new ArrowFormatCWriter(PRIMITIVE_TYPE, 4096, true)) {
             writeAndCheck(writer);
+        }
+    }
+
+    @Test
+    public void testWriterClosesExternalAllocatorByDefault() {
+        CloseCountingRootAllocator allocator = new CloseCountingRootAllocator();
+        try {
+            ArrowFormatWriter writer =
+                    new ArrowFormatWriter(PRIMITIVE_TYPE, 4096, true, allocator, null);
+            writer.close();
+            assertThat(allocator.closeCount()).isEqualTo(1);
+        } finally {
+            if (allocator.closeCount() == 0) {
+                allocator.close();
+            }
+        }
+    }
+
+    @Test
+    public void testWriterWithBorrowedAllocatorDoesNotCloseAllocator() {
+        CloseCountingRootAllocator allocator = new CloseCountingRootAllocator();
+        try {
+            ArrowFormatWriter writer =
+                    ArrowFormatWriter.forBorrowedAllocator(
+                            PRIMITIVE_TYPE, 4096, true, allocator, null);
+            writer.close();
+            assertThat(allocator.closeCount()).isZero();
+        } finally {
+            allocator.close();
+        }
+    }
+
+    @Test
+    public void testArrowBundleSchemaCompatibilityIgnoresFieldDescription() {
+        RowType writerType = RowType.builder().field("value", DataTypes.INT()).build();
+        RowType bundleType =
+                RowType.builder().field("value", DataTypes.INT(), "different description").build();
+
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(writerType, 1, true)) {
+            assertThat(
+                            writer.isArrowBundleSchemaCompatible(
+                                    new ArrowBundleRecords(
+                                            writer.getVectorSchemaRoot(), bundleType, true)))
+                    .isTrue();
+        }
+    }
+
+    @Test
+    public void testArrowBundleSchemaCompatibilityRequiresLogicalType() {
+        RowType writerType = RowType.builder().field("value", DataTypes.VARCHAR(10)).build();
+        RowType bundleType = RowType.builder().field("value", DataTypes.CHAR(10)).build();
+
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(writerType, 1, true)) {
+            assertThat(
+                            writer.isArrowBundleSchemaCompatible(
+                                    new ArrowBundleRecords(
+                                            writer.getVectorSchemaRoot(), bundleType, true)))
+                    .isFalse();
         }
     }
 
@@ -274,6 +667,172 @@ public class ArrowFormatWriterTest {
                 throw e;
             }
         }
+    }
+
+    @Test
+    public void testArrowFormatCWriterWithEmptySchema() {
+        RowType emptyschema = new RowType(new ArrayList<>());
+
+        try (RootAllocator rootAllocator = new RootAllocator();
+                BufferAllocator allocator =
+                        rootAllocator.newChildAllocator("paimonWriter", 0, Long.MAX_VALUE);
+                ArrowFormatCWriter writer =
+                        new ArrowFormatCWriter(emptyschema, 4096, true, allocator)) {
+            for (int i = 0; i < 100; i++) {
+                writer.write(GenericRow.of());
+            }
+            writer.flush();
+            ArrowCStruct cStruct = writer.toCStruct();
+            assertThat(cStruct).isNotNull();
+            writer.release();
+        }
+    }
+
+    @Test
+    public void testWriteArrayMapTwice() {
+        try (ArrowFormatWriter arrowFormatWriter =
+                new ArrowFormatWriter(
+                        RowType.of(
+                                DataTypes.ARRAY(
+                                        DataTypes.MAP(DataTypes.STRING(), DataTypes.STRING()))),
+                        1,
+                        true)) {
+            writeAndCheckArrayMap(arrowFormatWriter);
+            writeAndCheckArrayMap(arrowFormatWriter);
+        }
+    }
+
+    @Test
+    public void testCustomArrowFormatCWriter() {
+        // Create custom field type visitor that converts decimals to binary
+        ArrowFieldTypeConversion.ArrowFieldTypeVisitor customFieldTypeVisitor =
+                new CustomDecimalArrowConversion.CustomArrowFieldTypeFactory();
+
+        // Create custom field writer factory visitor for decimal to binary conversion
+        ArrowFieldWriterFactoryVisitor customFieldWriterVisitor =
+                new CustomDecimalArrowConversion.CustomArrowFieldWriterFactory();
+
+        // Create custom vector converter visitor for binary to decimal conversion
+        Arrow2PaimonVectorConverter.Arrow2PaimonVectorConvertorVisitor customConverterVisitor =
+                new CustomDecimalArrowConversion.CustomArrow2PaimonVectorConvertorVisitor();
+
+        try (RootAllocator allocator = new RootAllocator()) {
+            // Create writer with custom visitors
+            try (ArrowFormatCWriter writer =
+                    new ArrowFormatCWriter(
+                            new ArrowFormatWriter(
+                                    PRIMITIVE_TYPE,
+                                    4096,
+                                    true,
+                                    allocator,
+                                    null,
+                                    null,
+                                    customFieldTypeVisitor,
+                                    customFieldWriterVisitor))) {
+                writeAndCheckCustom(writer, customConverterVisitor);
+            }
+        }
+    }
+
+    private void writeAndCheckArrayMap(ArrowFormatWriter arrowFormatWriter) {
+        GenericRow genericRow = new GenericRow(1);
+        Map<BinaryString, BinaryString> map = new HashMap<>();
+        map.put(BinaryString.fromString("a"), BinaryString.fromString("b"));
+        map.put(BinaryString.fromString("c"), BinaryString.fromString("d"));
+        GenericArray array = new GenericArray(new Object[] {new GenericMap(map)});
+        genericRow.setField(0, array);
+        arrowFormatWriter.write(genericRow);
+        arrowFormatWriter.flush();
+
+        VectorSchemaRoot vsr = arrowFormatWriter.getVectorSchemaRoot();
+        ListVector listVector = (ListVector) vsr.getVector(0);
+        MapVector mapVector = (MapVector) listVector.getDataVector();
+        assertThat(mapVector.getValueCount()).isEqualTo(1);
+        VarCharVector keyVector =
+                (VarCharVector) mapVector.getDataVector().getChildrenFromFields().get(0);
+        assertThat(keyVector.getValueCount()).isEqualTo(2);
+        assertThat(new String(keyVector.get(0))).isEqualTo("a");
+        assertThat(new String(keyVector.get(1))).isEqualTo("c");
+        VarCharVector valueVector =
+                (VarCharVector) mapVector.getDataVector().getChildrenFromFields().get(1);
+        assertThat(valueVector.getValueCount()).isEqualTo(2);
+        assertThat(new String(valueVector.get(0))).isEqualTo("b");
+        assertThat(new String(valueVector.get(1))).isEqualTo("d");
+        arrowFormatWriter.reset();
+    }
+
+    @Test
+    public void testWriteMapArrayTwice() {
+        try (ArrowFormatWriter arrowFormatWriter =
+                new ArrowFormatWriter(
+                        RowType.of(
+                                DataTypes.MAP(DataTypes.INT(), DataTypes.ARRAY(DataTypes.INT()))),
+                        1,
+                        true)) {
+            writeAndCheckMapArray(arrowFormatWriter);
+            writeAndCheckMapArray(arrowFormatWriter);
+        }
+    }
+
+    private void writeAndCheckMapArray(ArrowFormatWriter arrowFormatWriter) {
+        GenericRow genericRow = new GenericRow(1);
+        GenericArray array1 = new GenericArray(new Object[] {1, 2});
+        GenericArray array2 = new GenericArray(new Object[] {3, 4});
+        Map<Integer, GenericArray> map = new HashMap<>();
+        map.put(1, array1);
+        map.put(2, array2);
+        GenericMap genericMap = new GenericMap(map);
+        genericRow.setField(0, genericMap);
+        arrowFormatWriter.write(genericRow);
+        arrowFormatWriter.flush();
+
+        VectorSchemaRoot vsr = arrowFormatWriter.getVectorSchemaRoot();
+        MapVector mapVector = (MapVector) vsr.getVector(0);
+        IntVector keyVector = (IntVector) mapVector.getDataVector().getChildrenFromFields().get(0);
+        assertThat(keyVector.getValueCount()).isEqualTo(2);
+        assertThat(keyVector.get(0)).isEqualTo(1);
+        assertThat(keyVector.get(1)).isEqualTo(2);
+        ListVector valueVector =
+                (ListVector) mapVector.getDataVector().getChildrenFromFields().get(1);
+        assertThat(valueVector.getValueCount()).isEqualTo(2);
+        IntVector innerValueVector = (IntVector) valueVector.getDataVector();
+        assertThat(innerValueVector.getValueCount()).isEqualTo(4);
+        assertThat(innerValueVector.get(0)).isEqualTo(1);
+        assertThat(innerValueVector.get(1)).isEqualTo(2);
+        assertThat(innerValueVector.get(2)).isEqualTo(3);
+        assertThat(innerValueVector.get(3)).isEqualTo(4);
+        arrowFormatWriter.reset();
+    }
+
+    @Test
+    public void testWriteRowArrayTwice() {
+        try (ArrowFormatWriter arrowFormatWriter =
+                new ArrowFormatWriter(
+                        RowType.of(DataTypes.ROW(DataTypes.ARRAY(DataTypes.INT()))), 1, true)) {
+            writeAndCheckRowArray(arrowFormatWriter);
+            writeAndCheckRowArray(arrowFormatWriter);
+        }
+    }
+
+    private void writeAndCheckRowArray(ArrowFormatWriter arrowFormatWriter) {
+        GenericRow genericRow = new GenericRow(1);
+        GenericRow innerRow = new GenericRow(1);
+        GenericArray array = new GenericArray(new Object[] {1, 2});
+        innerRow.setField(0, array);
+        genericRow.setField(0, innerRow);
+        arrowFormatWriter.write(genericRow);
+        arrowFormatWriter.flush();
+
+        VectorSchemaRoot vsr = arrowFormatWriter.getVectorSchemaRoot();
+        assertThat(vsr.getRowCount()).isEqualTo(1);
+        StructVector structVector = (StructVector) vsr.getVector(0);
+        ListVector listVector = (ListVector) structVector.getChildrenFromFields().get(0);
+        assertThat(listVector.getValueCount()).isEqualTo(1);
+        IntVector dataVector = (IntVector) listVector.getDataVector();
+        assertThat(dataVector.getValueCount()).isEqualTo(2);
+        assertThat(dataVector.get(0)).isEqualTo(1);
+        assertThat(dataVector.get(1)).isEqualTo(2);
+        arrowFormatWriter.reset();
     }
 
     private void writeAndCheck(ArrowFormatCWriter writer) {
@@ -301,7 +860,41 @@ public class ArrowFormatWriterTest {
             InternalRow expectec = list.get(i);
 
             for (InternalRow.FieldGetter fieldGetter : fieldGetters) {
-                Assertions.assertThat(fieldGetter.getFieldOrNull(actual))
+                assertThat(fieldGetter.getFieldOrNull(actual))
+                        .isEqualTo(fieldGetter.getFieldOrNull(expectec));
+            }
+        }
+        vectorSchemaRoot.close();
+    }
+
+    private void writeAndCheckCustom(
+            ArrowFormatCWriter writer,
+            Arrow2PaimonVectorConverter.Arrow2PaimonVectorConvertorVisitor visitor) {
+        List<InternalRow> list = new ArrayList<>();
+        List<InternalRow.FieldGetter> fieldGetters = new ArrayList<>();
+
+        for (int i = 0; i < PRIMITIVE_TYPE.getFieldCount(); i++) {
+            fieldGetters.add(InternalRow.createFieldGetter(PRIMITIVE_TYPE.getTypeAt(i), i));
+        }
+        for (int i = 0; i < 1000; i++) {
+            list.add(GenericRow.of(randomRowValues(null)));
+        }
+
+        list.forEach(writer::write);
+
+        writer.flush();
+        VectorSchemaRoot vectorSchemaRoot = writer.getVectorSchemaRoot();
+
+        ArrowBatchReader arrowBatchReader = new ArrowBatchReader(PRIMITIVE_TYPE, true, visitor);
+        Iterable<InternalRow> rows = arrowBatchReader.readBatch(vectorSchemaRoot);
+
+        Iterator<InternalRow> iterator = rows.iterator();
+        for (int i = 0; i < 1000; i++) {
+            InternalRow actual = iterator.next();
+            InternalRow expectec = list.get(i);
+
+            for (InternalRow.FieldGetter fieldGetter : fieldGetters) {
+                assertThat(fieldGetter.getFieldOrNull(actual))
                         .isEqualTo(fieldGetter.getFieldOrNull(expectec));
             }
         }
@@ -345,5 +938,39 @@ public class ArrowFormatWriterTest {
             bytes[i] = (byte) RND.nextInt(10);
         }
         return bytes;
+    }
+
+    @Test
+    public void testTimestampArrowFieldTypeTimezone() {
+        for (int precision : new int[] {0, 3, 6, 9}) {
+            // TIMESTAMP_LTZ should use UTC
+            FieldType ltzFieldType =
+                    DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(precision)
+                            .accept(ArrowFieldTypeConversion.ARROW_FIELD_TYPE_VISITOR);
+            ArrowType.Timestamp ltzType = (ArrowType.Timestamp) ltzFieldType.getType();
+            assertThat(ltzType.getTimezone()).isEqualTo("UTC");
+
+            // TIMESTAMP should have no timezone
+            FieldType tsFieldType =
+                    DataTypes.TIMESTAMP(precision)
+                            .accept(ArrowFieldTypeConversion.ARROW_FIELD_TYPE_VISITOR);
+            ArrowType.Timestamp tsType = (ArrowType.Timestamp) tsFieldType.getType();
+            assertThat(tsType.getTimezone()).isNull();
+        }
+    }
+
+    private static class CloseCountingRootAllocator extends RootAllocator {
+
+        private int closeCount;
+
+        @Override
+        public void close() {
+            closeCount++;
+            super.close();
+        }
+
+        int closeCount() {
+            return closeCount;
+        }
     }
 }

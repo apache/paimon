@@ -1,0 +1,453 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.spark.read;
+
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.globalindex.GlobalIndexIOMeta;
+import org.apache.paimon.globalindex.GlobalIndexReader;
+import org.apache.paimon.globalindex.GlobalIndexResult;
+import org.apache.paimon.globalindex.GlobalIndexResultSerializer;
+import org.apache.paimon.globalindex.GlobalIndexWriter;
+import org.apache.paimon.globalindex.GlobalIndexer;
+import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
+import org.apache.paimon.globalindex.VectorGlobalIndexer;
+import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
+import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
+import org.apache.paimon.index.GlobalIndexMeta;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.IndexPathFactory;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.SchemaUtils;
+import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.source.IndexVectorSearchSplit;
+import org.apache.paimon.table.source.RawVectorSearchSplit;
+import org.apache.paimon.table.source.VectorScan;
+import org.apache.paimon.table.source.VectorSearchSplit;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.InstantiationUtil;
+import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RoaringNavigableMap64;
+import org.apache.paimon.utils.SerializableFunction;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import javax.annotation.Nullable;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/** Tests for {@link SparkDataEvolutionVectorRead}. */
+public class SparkDataEvolutionVectorReadTest {
+
+    @TempDir java.nio.file.Path tempDir;
+
+    @Test
+    public void testRawSearchUsesSparkPath() throws Exception {
+        TestingSparkVectorRead read = new TestingSparkVectorRead();
+        Snapshot snapshot = snapshot(1L);
+        RawVectorSearchSplit rawSplit =
+                new RawVectorSearchSplit(
+                        Collections.singletonList(new Range(42, 42)),
+                        Collections.emptyList(),
+                        null);
+        VectorScan.Plan plan =
+                new VectorScan.Plan() {
+                    @Override
+                    public List<VectorSearchSplit> splits() {
+                        return Collections.singletonList(rawSplit);
+                    }
+
+                    @Override
+                    public Snapshot snapshot() {
+                        return snapshot;
+                    }
+                };
+
+        GlobalIndexResult result = read.read(plan);
+
+        assertThat(read.rawSparkPathUsed).isTrue();
+        assertThat(read.plannedSnapshot()).isSameAs(snapshot);
+        assertThat(result.results().contains(42L)).isTrue();
+
+        byte[] serialized = InstantiationUtil.serializeObject(read);
+        TestingSparkVectorRead restored =
+                InstantiationUtil.deserializeObject(
+                        serialized, Thread.currentThread().getContextClassLoader());
+        assertThat(restored.plannedSnapshot().id()).isEqualTo(snapshot.id());
+    }
+
+    private static Snapshot snapshot(long id) {
+        return new Snapshot(
+                id,
+                0L,
+                "base-manifest-list",
+                null,
+                "delta-manifest-list",
+                null,
+                null,
+                null,
+                null,
+                "user",
+                0L,
+                Snapshot.CommitKind.APPEND,
+                0L,
+                0L,
+                0L,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null);
+    }
+
+    @Test
+    public void testRawSearchSplitsRangesAcrossSparkTasks() {
+        RecordingSparkVectorRead read = new RecordingSparkVectorRead();
+        RawVectorSearchSplit rawSplit =
+                new RawVectorSearchSplit(
+                        Collections.singletonList(new Range(0, 63)), Collections.emptyList(), null);
+
+        ScoredGlobalIndexResult result =
+                read.readRawSplitsInSpark(Collections.singletonList(rawSplit), null, null);
+
+        assertThat(read.rawSearchRanges).containsExactly(new Range(0, 31), new Range(32, 63));
+        assertThat(read.sparkParallelism).isEqualTo(2);
+        assertThat(result.results().getLongCardinality()).isEqualTo(64);
+    }
+
+    @Test
+    public void testDistributedIndexRefinesAfterGlobalMerge() {
+        DistributedRefineSparkVectorRead read = new DistributedRefineSparkVectorRead();
+
+        ScoredGlobalIndexResult result =
+                read.readIndexSplitsInSpark(indexSplits("test-vector-ann", 4), new L2Indexer());
+
+        assertThat(read.sparkParallelism).isEqualTo(2);
+        assertThat(read.rawSearchCandidateRows).containsExactly(0L, 2L);
+        assertThat(result.results().getLongCardinality()).isEqualTo(1);
+        assertThat(result.results().contains(0L)).isTrue();
+    }
+
+    @Test
+    public void testDistributedIndexMaterializesManySplitsInSingleTask() throws Exception {
+        int splitCount = 5000;
+        SingleTaskSparkVectorRead read = new SingleTaskSparkVectorRead(createTable());
+
+        ScoredGlobalIndexResult result =
+                read.readIndexSplitsInSpark(
+                        indexSplits("test-vector-ann", splitCount), new L2Indexer());
+
+        assertThat(read.sparkParallelism).isEqualTo(1);
+        assertThat(read.scoreCalls).hasValue(splitCount);
+        assertThat(result.results().getLongCardinality()).isEqualTo(1);
+        assertThat(result.results()).contains(splitCount - 1L);
+    }
+
+    private FileStoreTable createTable() throws Exception {
+        Path tablePath = new Path(tempDir.toUri());
+        Options options = new Options();
+        options.set(CoreOptions.PATH, tablePath.toString());
+        options.set(CoreOptions.GLOBAL_INDEX_THREAD_NUM, 1);
+        Schema schema =
+                Schema.newBuilder()
+                        .column("vec", new ArrayType(DataTypes.FLOAT()))
+                        .options(options.toMap())
+                        .build();
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(new SchemaManager(LocalFileIO.create(), tablePath), schema);
+        return FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
+    }
+
+    private static List<IndexVectorSearchSplit> indexSplits(String indexType, int count) {
+        List<IndexVectorSearchSplit> splits = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            GlobalIndexMeta globalIndexMeta = new GlobalIndexMeta(i, i, 0, null, new byte[0]);
+            IndexFileMeta indexFile =
+                    new IndexFileMeta(indexType, "index-" + i, 1L, 1L, globalIndexMeta, null);
+            splits.add(
+                    new IndexVectorSearchSplit(
+                            i, i, Collections.singletonList(indexFile), Collections.emptyList()));
+        }
+        return splits;
+    }
+
+    private static class TestingSparkVectorRead extends SparkDataEvolutionVectorRead {
+
+        private boolean rawSparkPathUsed;
+
+        private TestingSparkVectorRead() {
+            super(
+                    null,
+                    null,
+                    null,
+                    10,
+                    new DataField(0, "vec", new ArrayType(DataTypes.FLOAT())),
+                    new float[] {1.0f},
+                    null);
+        }
+
+        private Snapshot plannedSnapshot() {
+            return planSnapshot;
+        }
+
+        @Override
+        protected GlobalIndexResult readSplits(List<? extends VectorSearchSplit> splits) {
+            throw new AssertionError("Raw search should not fall back to local vector read.");
+        }
+
+        @Override
+        protected ScoredGlobalIndexResult readIndexSplitsInSpark(
+                List<IndexVectorSearchSplit> splits, @Nullable GlobalIndexer globalIndexer) {
+            throw new AssertionError("Index search is not part of this test.");
+        }
+
+        @Override
+        protected ScoredGlobalIndexResult readRawSplitsInSpark(
+                List<RawVectorSearchSplit> splits,
+                @Nullable GlobalIndexer globalIndexer,
+                @Nullable RoaringNavigableMap64 preFilter) {
+            rawSparkPathUsed = true;
+            assertThat(splits).hasSize(1);
+            assertThat(globalIndexer).isNull();
+            assertThat(preFilter).isNull();
+
+            RoaringNavigableMap64 rows = new RoaringNavigableMap64();
+            rows.add(42L);
+            return ScoredGlobalIndexResult.create(rows, rowId -> 1.0f);
+        }
+    }
+
+    private static class DistributedRefineSparkVectorRead extends SparkDataEvolutionVectorRead {
+
+        private int sparkParallelism;
+        private List<Long> rawSearchCandidateRows = Collections.emptyList();
+
+        private DistributedRefineSparkVectorRead() {
+            super(
+                    null,
+                    null,
+                    null,
+                    1,
+                    new DataField(0, "vec", new ArrayType(DataTypes.FLOAT())),
+                    new float[] {0.0f},
+                    Collections.singletonMap("refine_factor", "2"));
+        }
+
+        @Override
+        protected int sparkParallelism() {
+            return 2;
+        }
+
+        @Override
+        protected <I, O> List<O> mapInSpark(
+                List<I> data, SerializableFunction<I, O> func, int parallelism) {
+            sparkParallelism = parallelism;
+            assertThat(data).hasSize(2);
+            try {
+                GlobalIndexResultSerializer serializer = new GlobalIndexResultSerializer();
+                return Arrays.asList(
+                        uncheckedCast(serializer.serialize(scoredResult(2L, 100.0f))),
+                        uncheckedCast(serializer.serialize(scoredResult(0L, 1.0f))));
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        @Override
+        protected ScoredGlobalIndexResult readRawRefineSearch(
+                RoaringNavigableMap64 candidates,
+                @Nullable GlobalIndexer globalIndexer,
+                float[] queryVector) {
+            assertThat(globalIndexer).isInstanceOf(VectorGlobalIndexer.class);
+            assertThat(((VectorGlobalIndexer) globalIndexer).metric()).isEqualTo("l2");
+            assertThat(queryVector).containsExactly(0.0f);
+            rawSearchCandidateRows = new ArrayList<>();
+            for (long rowId : candidates) {
+                rawSearchCandidateRows.add(rowId);
+            }
+
+            RoaringNavigableMap64 rows = new RoaringNavigableMap64();
+            for (long rowId : candidates) {
+                rows.add(rowId);
+            }
+            return ScoredGlobalIndexResult.create(
+                            rows, rowId -> rowId == 0L ? 1.0f : 1.0f / (1.0f + rowId * rowId))
+                    .topK(1);
+        }
+
+        @SuppressWarnings("unchecked")
+        private <O> O uncheckedCast(byte[] value) {
+            return (O) value;
+        }
+
+        private static ScoredGlobalIndexResult scoredResult(long rowId, float score) {
+            RoaringNavigableMap64 rows = new RoaringNavigableMap64();
+            rows.add(rowId);
+            return ScoredGlobalIndexResult.create(rows, candidate -> score);
+        }
+    }
+
+    private static class SingleTaskSparkVectorRead extends SparkDataEvolutionVectorRead {
+
+        private final AtomicInteger scoreCalls = new AtomicInteger();
+        private int sparkParallelism;
+
+        private SingleTaskSparkVectorRead(FileStoreTable table) {
+            super(
+                    table,
+                    null,
+                    null,
+                    1,
+                    new DataField(0, "vec", new ArrayType(DataTypes.FLOAT())),
+                    new float[] {0.0f},
+                    null);
+        }
+
+        @Override
+        protected List<RoaringNavigableMap64> preFilters(List<IndexVectorSearchSplit> splits) {
+            return Collections.emptyList();
+        }
+
+        @Override
+        protected <I, O> List<O> mapInSpark(
+                List<I> data, SerializableFunction<I, O> func, int parallelism) {
+            sparkParallelism = parallelism;
+            assertThat(data).hasSize(1);
+            return data.stream().map(func::apply).collect(Collectors.toList());
+        }
+
+        @Override
+        protected CompletableFuture<Optional<ScoredGlobalIndexResult>> eval(
+                GlobalIndexer globalIndexer,
+                IndexPathFactory indexPathFactory,
+                long rowRangeStart,
+                long rowRangeEnd,
+                List<IndexFileMeta> vectorIndexFiles,
+                float[] vector,
+                int searchLimit,
+                @Nullable RoaringNavigableMap64 includeRowIds,
+                ExecutorService executor) {
+            RoaringNavigableMap64 rows = new RoaringNavigableMap64();
+            rows.add(rowRangeStart);
+            return CompletableFuture.completedFuture(
+                    Optional.of(
+                            ScoredGlobalIndexResult.create(
+                                    rows,
+                                    rowId -> {
+                                        scoreCalls.incrementAndGet();
+                                        return rowId;
+                                    })));
+        }
+    }
+
+    private static class RecordingSparkVectorRead extends SparkDataEvolutionVectorRead {
+
+        private final AtomicInteger nextTask = new AtomicInteger();
+        private final List<Range> rawSearchRanges =
+                Collections.synchronizedList(new java.util.ArrayList<>());
+        private int sparkParallelism;
+
+        private RecordingSparkVectorRead() {
+            super(
+                    null,
+                    null,
+                    null,
+                    100,
+                    new DataField(0, "vec", new ArrayType(DataTypes.FLOAT())),
+                    new float[] {1.0f},
+                    Collections.singletonMap("test.vector.metric", "l2"));
+        }
+
+        @Override
+        protected int sparkParallelism() {
+            return 2;
+        }
+
+        @Override
+        protected <I, O> List<O> mapInSpark(
+                List<I> data,
+                org.apache.paimon.utils.SerializableFunction<I, O> func,
+                int parallelism) {
+            sparkParallelism = parallelism;
+            return data.stream().map(func::apply).collect(Collectors.toList());
+        }
+
+        @Override
+        protected ScoredGlobalIndexResult readRawSearch(
+                List<Range> rawRowRanges,
+                @Nullable RoaringNavigableMap64 preFilter,
+                String metric,
+                float[] queryVector) {
+            assertThat(preFilter).isNull();
+            assertThat(metric).isEqualTo("l2");
+            assertThat(queryVector).containsExactly(1.0f);
+            rawSearchRanges.addAll(rawRowRanges);
+
+            RoaringNavigableMap64 rows = new RoaringNavigableMap64();
+            int scoreBase = nextTask.getAndIncrement();
+            for (Range range : rawRowRanges) {
+                rows.addRange(range);
+            }
+            return ScoredGlobalIndexResult.create(rows, rowId -> scoreBase + (float) rowId);
+        }
+    }
+
+    private static class L2Indexer implements VectorGlobalIndexer {
+
+        @Override
+        public GlobalIndexWriter createWriter(GlobalIndexFileWriter fileWriter) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public GlobalIndexReader createReader(
+                GlobalIndexFileReader fileReader,
+                List<GlobalIndexIOMeta> files,
+                long totalRowCount,
+                ExecutorService executor) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public String metric() {
+            return "l2";
+        }
+    }
+}

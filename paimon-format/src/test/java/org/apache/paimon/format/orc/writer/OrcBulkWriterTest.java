@@ -27,6 +27,7 @@ import org.apache.paimon.format.orc.OrcWriterFactory;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -43,6 +44,7 @@ class OrcBulkWriterTest {
     void testRowBatch(@TempDir java.nio.file.Path tempDir) throws IOException {
         Options options = new Options();
         options.set(CoreOptions.WRITE_BATCH_SIZE, 1);
+        options.set(CoreOptions.WRITE_BATCH_MEMORY, MemorySize.parse("1 Kb"));
         FileFormat orc = FileFormat.fromIdentifier("orc", options);
         Assertions.assertThat(orc).isInstanceOf(OrcFileFormat.class);
 
@@ -62,5 +64,6 @@ class OrcBulkWriterTest {
 
         OrcBulkWriter orcBulkWriter = (OrcBulkWriter) formatWriter;
         Assertions.assertThat(orcBulkWriter.getRowBatch().getMaxSize()).isEqualTo(1);
+        Assertions.assertThat(orcBulkWriter.getMemoryLimit()).isEqualTo(1024);
     }
 }

@@ -18,83 +18,28 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.CoreOptions
+import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate._
 import org.apache.paimon.predicate.SortValue.{NullOrdering, SortDirection}
-import org.apache.paimon.spark.aggregate.{AggregatePushDownUtils, LocalAggregator}
-import org.apache.paimon.table.{AppendOnlyFileStoreTable, FileStoreTable, InnerTable}
-import org.apache.paimon.table.source.DataSplit
+import org.apache.paimon.spark.aggregate.AggregatePushDownUtils.tryPushdownAggregation
+import org.apache.paimon.spark.read.{PaimonLocalScan, PaimonSupportsPushDownVariantExtractions, VectorSearchResultUtils}
+import org.apache.paimon.table.{FileStoreTable, InnerTable}
 
-import org.apache.spark.sql.PaimonUtils
 import org.apache.spark.sql.connector.expressions
 import org.apache.spark.sql.connector.expressions.{NamedReference, SortOrder}
 import org.apache.spark.sql.connector.expressions.aggregate.Aggregation
-import org.apache.spark.sql.connector.expressions.filter.{Predicate => SparkPredicate}
 import org.apache.spark.sql.connector.read._
-import org.apache.spark.sql.sources.Filter
-
-import java.util.Collections
 
 import scala.collection.JavaConverters._
-import scala.collection.mutable
 
-class PaimonScanBuilder(table: InnerTable)
-  extends PaimonBaseScanBuilder(table)
-  with SupportsPushDownV2Filters
-  with SupportsPushDownLimit
+class PaimonScanBuilder(val table: InnerTable)
+  extends PaimonBaseScanBuilder
   with SupportsPushDownAggregates
-  with SupportsPushDownTopN {
+  with SupportsPushDownTopN
+  with PaimonSupportsPushDownVariantExtractions {
 
   private var localScan: Option[Scan] = None
-
-  private var pushedSparkPredicates = Array.empty[SparkPredicate]
-
-  /** Pushes down filters, and returns filters that need to be evaluated after scanning. */
-  override def pushPredicates(predicates: Array[SparkPredicate]): Array[SparkPredicate] = {
-    val pushable = mutable.ArrayBuffer.empty[(SparkPredicate, Predicate)]
-    val postScan = mutable.ArrayBuffer.empty[SparkPredicate]
-    val reserved = mutable.ArrayBuffer.empty[Filter]
-
-    val converter = SparkV2FilterConverter(table.rowType)
-    val visitor = new PartitionPredicateVisitor(table.partitionKeys())
-    predicates.foreach {
-      predicate =>
-        converter.convert(predicate) match {
-          case Some(paimonPredicate) =>
-            pushable.append((predicate, paimonPredicate))
-            if (paimonPredicate.visit(visitor)) {
-              // We need to filter the stats using filter instead of predicate.
-              reserved.append(PaimonUtils.filterV2ToV1(predicate).get)
-            } else {
-              postScan.append(predicate)
-            }
-          case None =>
-            postScan.append(predicate)
-        }
-    }
-
-    if (pushable.nonEmpty) {
-      this.pushedSparkPredicates = pushable.map(_._1).toArray
-      this.pushedPaimonPredicates = pushable.map(_._2).toArray
-    }
-    if (reserved.nonEmpty) {
-      this.reservedFilters = reserved.toArray
-    }
-    if (postScan.nonEmpty) {
-      this.hasPostScanPredicates = true
-    }
-    postScan.toArray
-  }
-
-  override def pushedPredicates: Array[SparkPredicate] = {
-    pushedSparkPredicates
-  }
-
-  override def pushLimit(limit: Int): Boolean = {
-    // It is safe, since we will do nothing if it is the primary table and the split is not `rawConvertible`
-    pushDownLimit = Some(limit)
-    // just make the best effort to push down limit
-    false
-  }
 
   override def pushTopN(orders: Array[SortOrder], limit: Int): Boolean = {
     if (hasPostScanPredicates) {
@@ -105,37 +50,39 @@ class PaimonScanBuilder(table: InnerTable)
       return false
     }
 
-    if (orders.length != 1) {
-      return false
-    }
+    val sorts: List[SortValue] = orders
+      .map(
+        order => {
+          val fieldName = order.expression() match {
+            case nr: NamedReference => nr.fieldNames.mkString(".")
+            case _ => return false
+          }
 
-    val fieldName = orders.head.expression() match {
-      case nr: NamedReference => nr.fieldNames.mkString(".")
-      case _ => return false
-    }
+          val rowType = table.rowType()
+          if (rowType.notContainsField(fieldName)) {
+            return false
+          }
 
-    val rowType = table.rowType()
-    if (rowType.notContainsField(fieldName)) {
-      return false
-    }
+          val field = rowType.getField(fieldName)
+          val ref = new FieldRef(field.id(), field.name(), field.`type`())
 
-    val field = rowType.getField(fieldName)
-    val ref = new FieldRef(field.id(), field.name(), field.`type`())
+          val nullOrdering = order.nullOrdering() match {
+            case expressions.NullOrdering.NULLS_LAST => NullOrdering.NULLS_LAST
+            case expressions.NullOrdering.NULLS_FIRST => NullOrdering.NULLS_FIRST
+            case _ => return false
+          }
 
-    val nullOrdering = orders.head.nullOrdering() match {
-      case expressions.NullOrdering.NULLS_LAST => NullOrdering.NULLS_LAST
-      case expressions.NullOrdering.NULLS_FIRST => NullOrdering.NULLS_FIRST
-      case _ => return false
-    }
+          val direction = order.direction() match {
+            case expressions.SortDirection.DESCENDING => SortDirection.DESCENDING
+            case expressions.SortDirection.ASCENDING => SortDirection.ASCENDING
+            case _ => return false
+          }
 
-    val direction = orders.head.direction() match {
-      case expressions.SortDirection.DESCENDING => SortDirection.DESCENDING
-      case expressions.SortDirection.ASCENDING => SortDirection.ASCENDING
-      case _ => return false
-    }
+          new SortValue(ref, direction, nullOrdering)
+        })
+      .toList
 
-    val sort = new SortValue(ref, direction, nullOrdering)
-    pushDownTopN = Some(new TopN(Collections.singletonList(sort), limit))
+    pushedTopN = Some(new TopN(sorts.asJava, limit))
 
     // just make the best effort to push down TopN
     false
@@ -150,6 +97,10 @@ class PaimonScanBuilder(table: InnerTable)
 
   // Spark does not support push down aggregation for streaming scan.
   override def pushAggregation(aggregation: Aggregation): Boolean = {
+    if (PostponeMergeOnRead.usesCustomSource(table)) {
+      return false
+    }
+
     if (localScan.isDefined) {
       return true
     }
@@ -164,37 +115,67 @@ class PaimonScanBuilder(table: InnerTable)
     }
 
     val readBuilder = table.newReadBuilder
-    if (pushedPaimonPredicates.nonEmpty) {
-      val pushedPartitionPredicate = PredicateBuilder.and(pushedPaimonPredicates.toList.asJava)
-      readBuilder.withFilter(pushedPartitionPredicate)
+    if (pushedPartitionFilters.nonEmpty) {
+      readBuilder.withPartitionFilter(PartitionPredicate.and(pushedPartitionFilters.toList.asJava))
     }
-    val dataSplits = if (AggregatePushDownUtils.hasMinMaxAggregation(aggregation)) {
-      readBuilder.newScan().plan().splits().asScala.map(_.asInstanceOf[DataSplit])
-    } else {
-      readBuilder.dropStats().newScan().plan().splits().asScala.map(_.asInstanceOf[DataSplit])
-    }
-    if (AggregatePushDownUtils.canPushdownAggregation(table, aggregation, dataSplits.toSeq)) {
-      val aggregator = new LocalAggregator(table.asInstanceOf[FileStoreTable])
-      aggregator.initialize(aggregation)
-      dataSplits.foreach(aggregator.update)
-      localScan = Some(
-        PaimonLocalScan(
-          aggregator.result(),
-          aggregator.resultSchema(),
-          table,
-          pushedPaimonPredicates)
-      )
-      true
-    } else {
-      false
+    assert(pushedDataFilters.isEmpty)
+
+    tryPushdownAggregation(table.asInstanceOf[FileStoreTable], aggregation, readBuilder) match {
+      case Some(agg) =>
+        localScan = Some(
+          PaimonLocalScan(agg.result(), agg.resultSchema(), table, pushedPartitionFilters)
+        )
+        true
+      case None => false
     }
   }
 
   override def build(): Scan = {
-    if (localScan.isDefined) {
-      localScan.get
-    } else {
-      super.build()
+    localScan match {
+      case Some(scan) => scan
+      case None =>
+        val (actualTable, vectorSearch, hybridSearch, fullTextSearch) = table match {
+          case vst: org.apache.paimon.table.VectorSearchTable =>
+            (vst.origin(), Option(vst.vectorSearch()), None, None)
+          case hst: org.apache.paimon.table.HybridSearchTable =>
+            (hst.origin(), None, Option(hst.hybridSearch()), None)
+          case ftst: org.apache.paimon.table.FullTextSearchTable =>
+            (ftst.origin(), None, None, Option(ftst.fullTextSearch()))
+          case _ => (table, pushedVectorSearch, None, pushedFullTextSearch)
+        }
+
+        if (
+          vectorSearch.isDefined &&
+          !CoreOptions
+            .fromMap(actualTable.options)
+            .primaryKeyVectorIndexColumns()
+            .contains(vectorSearch.get.fieldName()) &&
+          VectorSearchResultUtils.isVectorSearchMetaOnly(requiredSchema.fieldNames.toSeq)
+        ) {
+          val result = PaimonBaseScan.evalVectorSearch(
+            actualTable,
+            vectorSearch.get,
+            pushedPartitionFilters,
+            pushedDataFilters)
+          return PaimonLocalScan(
+            VectorSearchResultUtils.toRows(result, requiredSchema),
+            requiredSchema,
+            actualTable,
+            pushedPartitionFilters)
+        }
+
+        PaimonScan(
+          actualTable,
+          requiredSchema,
+          pushedPartitionFilters,
+          pushedDataFilters,
+          pushedLimit,
+          pushedTopN,
+          vectorSearch,
+          hybridSearch,
+          fullTextSearch,
+          acceptedVariantExtractions
+        )
     }
   }
 }

@@ -23,7 +23,8 @@ import org.apache.paimon.utils.TagManager;
 
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.bEnv;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
@@ -37,8 +38,9 @@ public class ReplaceTagActionTest extends ActionITCaseBase {
         init(warehouse);
     }
 
-    @Test
-    public void testReplaceTag() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testReplaceTag(boolean forceStartFlinkJob) throws Exception {
         bEnv.executeSql(
                 "CREATE TABLE T (id INT, name STRING,"
                         + " PRIMARY KEY (id) NOT ENFORCED)"
@@ -75,7 +77,9 @@ public class ReplaceTagActionTest extends ActionITCaseBase {
                         "--tag_name",
                         "test_tag",
                         "--time_retained",
-                        "1 d")
+                        "1 d",
+                        "--force_start_flink_job",
+                        Boolean.toString(forceStartFlinkJob))
                 .run();
         assertThat(tagManager.getOrThrow("test_tag").getTagTimeRetained().toHours()).isEqualTo(24);
 
@@ -94,7 +98,9 @@ public class ReplaceTagActionTest extends ActionITCaseBase {
                         "--snapshot",
                         "1",
                         "--time_retained",
-                        "2 d")
+                        "2 d",
+                        "--force_start_flink_job",
+                        Boolean.toString(forceStartFlinkJob))
                 .run();
         assertThat(tagManager.getOrThrow("test_tag").id()).isEqualTo(1);
         assertThat(tagManager.getOrThrow("test_tag").getTagTimeRetained().toHours()).isEqualTo(48);

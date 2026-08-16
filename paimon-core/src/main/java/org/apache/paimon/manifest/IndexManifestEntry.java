@@ -21,6 +21,7 @@ package org.apache.paimon.manifest;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.DeletionVectorMeta;
+import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
@@ -44,21 +45,37 @@ import static org.apache.paimon.utils.SerializationUtils.newStringType;
 @Public
 public class IndexManifestEntry {
 
+    public static final String KIND = "_KIND";
+    public static final String PARTITION = "_PARTITION";
+    public static final String BUCKET = "_BUCKET";
+    public static final String INDEX_TYPE = "_INDEX_TYPE";
+    public static final String FILE_NAME = "_FILE_NAME";
+    public static final String FILE_SIZE = "_FILE_SIZE";
+    public static final String ROW_COUNT = "_ROW_COUNT";
+    public static final String DELETION_VECTORS_RANGES = "_DELETIONS_VECTORS_RANGES";
+    public static final String EXTERNAL_PATH = "_EXTERNAL_PATH";
+    public static final String GLOBAL_INDEX = "_GLOBAL_INDEX";
+
     public static final RowType SCHEMA =
             new RowType(
                     false,
                     Arrays.asList(
-                            new DataField(0, "_KIND", new TinyIntType(false)),
-                            new DataField(1, "_PARTITION", newBytesType(false)),
-                            new DataField(2, "_BUCKET", new IntType(false)),
-                            new DataField(3, "_INDEX_TYPE", newStringType(false)),
-                            new DataField(4, "_FILE_NAME", newStringType(false)),
-                            new DataField(5, "_FILE_SIZE", new BigIntType(false)),
-                            new DataField(6, "_ROW_COUNT", new BigIntType(false)),
+                            new DataField(0, KIND, new TinyIntType(false)),
+                            new DataField(1, PARTITION, newBytesType(false)),
+                            new DataField(2, BUCKET, new IntType(false)),
+                            new DataField(3, INDEX_TYPE, newStringType(false)),
+                            new DataField(4, FILE_NAME, newStringType(false)),
+                            new DataField(5, FILE_SIZE, new BigIntType(false)),
+                            new DataField(6, ROW_COUNT, new BigIntType(false)),
                             new DataField(
                                     7,
-                                    "_DELETIONS_VECTORS_RANGES",
-                                    new ArrayType(true, DeletionVectorMeta.SCHEMA))));
+                                    DELETION_VECTORS_RANGES,
+                                    new ArrayType(true, DeletionVectorMeta.SCHEMA)),
+                            new DataField(8, EXTERNAL_PATH, newStringType(true)),
+                            new DataField(9, GLOBAL_INDEX, GlobalIndexMeta.SCHEMA)));
+
+    public static final RowType MANIFEST_ROW_TYPE =
+            ManifestSchemaUtils.withFormatIdentifier(SCHEMA);
 
     private final FileKind kind;
     private final BinaryRow partition;

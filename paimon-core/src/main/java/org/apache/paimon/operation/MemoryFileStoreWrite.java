@@ -19,8 +19,9 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
+import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.index.DynamicBucketIndexMaintainer;
+import org.apache.paimon.index.pk.BucketedPrimaryKeyIndexMaintainer;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemoryOwner;
@@ -65,13 +66,15 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
             CoreOptions options,
             RowType partitionType,
             @Nullable DynamicBucketIndexMaintainer.Factory dbMaintainerFactory,
-            @Nullable DeletionVectorsMaintainer.Factory dvMaintainerFactory,
+            @Nullable BucketedDvMaintainer.Factory dvMaintainerFactory,
+            @Nullable BucketedPrimaryKeyIndexMaintainer.Factory primaryKeyIndexMaintainerFactory,
             String tableName) {
         super(
                 snapshotManager,
                 scan,
                 dbMaintainerFactory,
                 dvMaintainerFactory,
+                primaryKeyIndexMaintainerFactory,
                 tableName,
                 options,
                 partitionType);

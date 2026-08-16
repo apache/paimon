@@ -19,6 +19,8 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.table.api.Table;
@@ -30,18 +32,22 @@ import org.apache.flink.types.RowKind;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
 
-/** Delete from table action for Flink. */
+/** Delete from table action for Flink, dispatching by table type. */
 public class DeleteAction extends TableActionBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(DeleteAction.class);
 
     private final String filter;
+    @Nullable private final DataEvolutionDelete dataEvolutionDelete;
+    @Nullable private String[] sourceSqls;
 
     public DeleteAction(
             String databaseName,
@@ -49,11 +55,54 @@ public class DeleteAction extends TableActionBase {
             String filter,
             Map<String, String> catalogConfig) {
         super(databaseName, tableName, catalogConfig);
+        Preconditions.checkArgument(
+                filter != null && !filter.trim().isEmpty(),
+                "Deletion filter must not be null or blank.");
         this.filter = filter;
+
+        if (table instanceof FileStoreTable
+                && ((FileStoreTable) table).coreOptions().dataEvolutionEnabled()) {
+            dataEvolutionDelete = new DataEvolutionDelete(this, filter);
+        } else {
+            dataEvolutionDelete = null;
+        }
+    }
+
+    /** SQL statements used to configure the batch environment and register external sources. */
+    public DeleteAction withSourceSqls(String... sourceSqls) {
+        this.sourceSqls = sourceSqls;
+        return this;
+    }
+
+    /** Configures deletion-vector aggregation and writing parallelism for Data Evolution tables. */
+    public DeleteAction withSinkParallelism(int sinkParallelism) {
+        if (dataEvolutionDelete == null) {
+            throw new UnsupportedOperationException(
+                    "Sink parallelism is only supported when deleting from a Data Evolution table.");
+        }
+        dataEvolutionDelete.withSinkParallelism(sinkParallelism);
+        return this;
     }
 
     @Override
     public void run() throws Exception {
+        handleSqls();
+        if (dataEvolutionDelete != null) {
+            dataEvolutionDelete.runInternal().await();
+            return;
+        }
+
+        runPrimaryKeyDelete();
+    }
+
+    private void runPrimaryKeyDelete() throws Exception {
+        if (!(table instanceof FileStoreTable)
+                || ((FileStoreTable) table).schema().primaryKeys().isEmpty()) {
+            throw new UnsupportedOperationException(
+                    "Delete does not support regular append-only tables. "
+                            + "Only primary-key tables and Data Evolution append tables are supported.");
+        }
+
         CoreOptions.MergeEngine mergeEngine = CoreOptions.fromMap(table.options()).mergeEngine();
         if (mergeEngine != DEDUPLICATE) {
             throw new UnsupportedOperationException(
@@ -67,8 +116,11 @@ public class DeleteAction extends TableActionBase {
         Table queriedTable =
                 batchTEnv.sqlQuery(
                         String.format(
-                                "SELECT * FROM %s WHERE %s",
-                                identifier.getEscapedFullName(), filter));
+                                "SELECT * FROM `%s`.`%s`.`%s` WHERE %s",
+                                catalogName,
+                                identifier.getDatabaseName(),
+                                identifier.getObjectName(),
+                                filter));
 
         List<DataStructureConverter<Object, Object>> converters =
                 queriedTable.getResolvedSchema().getColumnDataTypes().stream()
@@ -94,5 +146,29 @@ public class DeleteAction extends TableActionBase {
                                 });
 
         batchSink(dataStream).await();
+    }
+
+    private void handleSqls() {
+        // NOTE: a source SQL statement may change the current catalog and database. Both target
+        // query paths therefore use fully-qualified target identifiers.
+        if (sourceSqls != null) {
+            for (int i = 0; i < sourceSqls.length; i++) {
+                try {
+                    batchTEnv.executeSql(sourceSqls[i]).await();
+                } catch (Exception e) {
+                    // Source DDL may contain JDBC credentials. Do not include the SQL or the
+                    // original exception (whose message may echo the SQL) in logs or the wrapper.
+                    if (e instanceof InterruptedException) {
+                        Thread.currentThread().interrupt();
+                    }
+                    String message =
+                            String.format(
+                                    "Failed to execute source SQL statement %s (cause type: %s).",
+                                    i + 1, e.getClass().getName());
+                    LOG.error(message);
+                    throw new RuntimeException(message);
+                }
+            }
+        }
     }
 }

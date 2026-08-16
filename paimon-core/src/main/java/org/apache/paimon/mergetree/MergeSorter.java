@@ -66,7 +66,7 @@ public class MergeSorter {
     private final int spillThreshold;
     private final CompressOptions compression;
 
-    private final MemorySegmentPool memoryPool;
+    private final CachelessSegmentPool memoryPool;
 
     @Nullable private IOManager ioManager;
 
@@ -83,6 +83,14 @@ public class MergeSorter {
         this.memoryPool =
                 new CachelessSegmentPool(options.sortSpillBufferSize(), options.pageSize());
         this.ioManager = ioManager;
+    }
+
+    public long sortBufferTotalBytes() {
+        return (long) memoryPool.maxPages() * memoryPool.pageSize();
+    }
+
+    public long sortBufferUsedBytes() {
+        return (long) (memoryPool.maxPages() - memoryPool.freePages()) * memoryPool.pageSize();
     }
 
     public MemorySegmentPool memoryPool() {

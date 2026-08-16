@@ -21,6 +21,7 @@ package org.apache.paimon.format.avro;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.avro.FieldReaderFactory.RowReader;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.UriReader;
 
 import org.apache.avro.Schema;
 import org.apache.avro.io.DatumReader;
@@ -32,12 +33,18 @@ import java.io.IOException;
 public class AvroRowDatumReader implements DatumReader<InternalRow> {
 
     private final RowType projectedRowType;
+    private final UriReader uriReader;
 
     private RowReader reader;
     private boolean isUnion;
 
     public AvroRowDatumReader(RowType projectedRowType) {
+        this(projectedRowType, null);
+    }
+
+    public AvroRowDatumReader(RowType projectedRowType, UriReader uriReader) {
         this.projectedRowType = projectedRowType;
+        this.uriReader = uriReader;
     }
 
     @Override
@@ -48,7 +55,8 @@ public class AvroRowDatumReader implements DatumReader<InternalRow> {
             schema = schema.getTypes().get(1);
         }
         this.reader =
-                new FieldReaderFactory().createRowReader(schema, projectedRowType.getFields());
+                new FieldReaderFactory(uriReader)
+                        .createRowReader(schema, projectedRowType.getFields());
     }
 
     @Override

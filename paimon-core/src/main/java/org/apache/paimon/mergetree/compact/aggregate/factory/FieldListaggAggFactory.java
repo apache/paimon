@@ -36,7 +36,12 @@ public class FieldListaggAggFactory implements FieldAggregatorFactory {
                 fieldType instanceof VarCharType,
                 "Data type for list agg column must be 'VarCharType' but was '%s'.",
                 fieldType);
-        return new FieldListaggAgg(identifier(), (VarCharType) fieldType, options, field);
+        VarCharType varCharType = (VarCharType) fieldType;
+        checkArgument(
+                varCharType.getLength() == VarCharType.MAX_LENGTH,
+                "Data type for list agg column must be STRING (unbounded VARCHAR), but was VARCHAR(%s).",
+                varCharType.getLength());
+        return new FieldListaggAgg(identifier(), varCharType, options, field);
     }
 
     @Override

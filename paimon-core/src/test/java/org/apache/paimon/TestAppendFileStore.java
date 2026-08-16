@@ -19,7 +19,7 @@
 package org.apache.paimon;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
+import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.deletionvectors.append.AppendDeleteFileMaintainer;
 import org.apache.paimon.deletionvectors.append.AppendDeletionFileMaintainerHelper;
 import org.apache.paimon.fs.FileIO;
@@ -29,14 +29,15 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
-import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
@@ -44,6 +45,8 @@ import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.TraceableFileIO;
 
+import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -92,6 +95,10 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
         return this.fileIO;
     }
 
+    public TableSchema schema() {
+        return schema;
+    }
+
     public FileStoreCommitImpl newCommit() {
         return super.newCommit(commitUser, null);
     }
@@ -110,9 +117,13 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
                 partition,
                 bucket,
                 options().bucket(),
-                DataIncrement.emptyIncrement(),
-                CompactIncrement.emptyIncrement(),
-                new IndexIncrement(Collections.emptyList(), indexFileMetas));
+                new DataIncrement(
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        indexFileMetas),
+                CompactIncrement.emptyIncrement());
     }
 
     public List<IndexFileMeta> scanDVIndexFiles(BinaryRow partition, int bucket) {
@@ -126,30 +137,67 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
                 fileHandler, partition, dataFileToDeletionFiles);
     }
 
-    public DeletionVectorsMaintainer createOrRestoreDVMaintainer(BinaryRow partition, int bucket) {
+    public BucketedDvMaintainer createOrRestoreDVMaintainer(BinaryRow partition, int bucket) {
         Snapshot latestSnapshot = snapshotManager().latestSnapshot();
-        DeletionVectorsMaintainer.Factory factory =
-                new DeletionVectorsMaintainer.Factory(fileHandler);
+        BucketedDvMaintainer.Factory factory = BucketedDvMaintainer.factory(fileHandler);
         List<IndexFileMeta> indexFiles =
                 fileHandler.scan(latestSnapshot, DELETION_VECTORS_INDEX, partition, bucket);
-        return factory.create(indexFiles);
+        return factory.create(partition, bucket, indexFiles);
     }
 
-    public CommitMessageImpl writeDVIndexFiles(
-            BinaryRow partition, int bucket, Map<String, List<Integer>> dataFileToPositions) {
-        DeletionVectorsMaintainer dvMaintainer = createOrRestoreDVMaintainer(partition, bucket);
-        for (Map.Entry<String, List<Integer>> entry : dataFileToPositions.entrySet()) {
-            for (Integer pos : entry.getValue()) {
-                dvMaintainer.notifyNewDeletion(entry.getKey(), pos);
-            }
+    public CommitMessageImpl writeDataFiles(
+            BinaryRow partition, int bucket, List<String> dataFileNames) throws IOException {
+        List<DataFileMeta> fileMetas = new ArrayList<>();
+        Path bucketPath = pathFactory().bucketPath(partition, bucket);
+        for (String dataFileName : dataFileNames) {
+            Path path = new Path(bucketPath, dataFileName);
+            fileIO.newOutputStream(path, false).close();
+            fileMetas.add(
+                    DataFileMeta.forAppend(
+                            path.getName(),
+                            10L,
+                            10L,
+                            SimpleStats.EMPTY_STATS,
+                            0L,
+                            0L,
+                            schema.id(),
+                            Collections.emptyList(),
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null));
         }
         return new CommitMessageImpl(
                 partition,
                 bucket,
                 options().bucket(),
-                DataIncrement.emptyIncrement(),
-                CompactIncrement.emptyIncrement(),
-                new IndexIncrement(dvMaintainer.writeDeletionVectorsIndex()));
+                new DataIncrement(fileMetas, Collections.emptyList(), Collections.emptyList()),
+                CompactIncrement.emptyIncrement());
+    }
+
+    public CommitMessageImpl writeDVIndexFiles(
+            BinaryRow partition, int bucket, Map<String, List<Integer>> dataFileToPositions) {
+        BucketedDvMaintainer dvMaintainer = createOrRestoreDVMaintainer(partition, bucket);
+        for (Map.Entry<String, List<Integer>> entry : dataFileToPositions.entrySet()) {
+            for (Integer pos : entry.getValue()) {
+                dvMaintainer.notifyNewDeletion(entry.getKey(), pos);
+            }
+        }
+        List<IndexFileMeta> indexFiles = new ArrayList<>();
+        dvMaintainer.writeDeletionVectorsIndex().ifPresent(indexFiles::add);
+        return new CommitMessageImpl(
+                partition,
+                bucket,
+                options().bucket(),
+                new DataIncrement(
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        indexFiles,
+                        Collections.emptyList()),
+                CompactIncrement.emptyIncrement());
     }
 
     public static TestAppendFileStore createAppendStore(

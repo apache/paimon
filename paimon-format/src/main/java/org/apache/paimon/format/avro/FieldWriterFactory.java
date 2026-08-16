@@ -18,18 +18,23 @@
 
 package org.apache.paimon.format.avro;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.DataGetters;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 
 import org.apache.avro.AvroRuntimeException;
 import org.apache.avro.Schema;
+import org.apache.avro.io.BinaryEncoder;
 import org.apache.avro.io.Encoder;
 import org.apache.avro.util.Utf8;
 import org.jetbrains.annotations.NotNull;
@@ -67,6 +72,35 @@ public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
 
     private static final FieldWriter DOUBLE_WRITER =
             (container, i, encoder) -> encoder.writeDouble(container.getDouble(i));
+
+    private static final FieldWriter BLOB_DESCRIPTOR_BYTES_WRITER =
+            (container, i, encoder) -> {
+                Blob blob = container.getBlob(i);
+                if (blob == null) {
+                    // Nullable handling is done by NullableWriter for UNION schemas.
+                    // For required bytes, writing null is a bug.
+                    throw new IllegalArgumentException("Null blob is not allowed.");
+                }
+                try {
+                    encoder.writeBytes(Blob.serializeBlob(blob));
+                } catch (Throwable t) {
+                    throw new IllegalArgumentException(
+                            "BLOB inline fields configured by blob-descriptor-field or "
+                                    + "blob-view-field require values to be a BlobDescriptor or "
+                                    + "BlobViewStruct.",
+                            t);
+                }
+            };
+
+    @Override
+    public FieldWriter primitive(Schema primitive, DataType type) {
+        if (primitive.getType() == Schema.Type.BYTES
+                && type != null
+                && type.getTypeRoot() == DataTypeRoot.BLOB) {
+            return BLOB_DESCRIPTOR_BYTES_WRITER;
+        }
+        return AvroSchemaVisitor.super.primitive(primitive, type);
+    }
 
     @Override
     public FieldWriter visitUnion(Schema schema, DataType type) {
@@ -164,6 +198,22 @@ public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
     }
 
     @Override
+    public FieldWriter visitArrayVector(Schema schema, DataType elementType) {
+        FieldWriter elementWriter = visit(schema.getElementType(), elementType);
+        return (container, index, encoder) -> {
+            InternalVector vector = container.getVector(index);
+            encoder.writeArrayStart();
+            int numElements = vector.size();
+            encoder.setItemCount(numElements);
+            for (int i = 0; i < numElements; i += 1) {
+                encoder.startItem();
+                elementWriter.write(vector, i, encoder);
+            }
+            encoder.writeArrayEnd();
+        };
+    }
+
+    @Override
     public FieldWriter visitArrayMap(Schema schema, DataType keyType, DataType valueType) {
         RowWriter entryWriter =
                 new RowWriter(
@@ -198,15 +248,21 @@ public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
         FieldWriter valueWriter = visit(schema.getValueType(), valueType);
         return (container, index, encoder) -> {
             InternalMap map = container.getMap(index);
-            encoder.writeMapStart();
             int numElements = map.size();
+
+            encoder.writeMapStart();
             encoder.setItemCount(numElements);
-            InternalArray keyArray = map.keyArray();
-            InternalArray valueArray = map.valueArray();
-            for (int i = 0; i < numElements; i += 1) {
-                encoder.startItem();
-                STRING_WRITER.write(keyArray, i, encoder);
-                valueWriter.write(valueArray, i, encoder);
+            if (map instanceof AvroBytesStringMap && encoder instanceof BinaryEncoder) {
+                AvroBytesStringMap casted = (AvroBytesStringMap) map;
+                encoder.writeFixed(casted.bytes(), 0, casted.lengthInBytes());
+            } else {
+                InternalArray keyArray = map.keyArray();
+                InternalArray valueArray = map.valueArray();
+                for (int i = 0; i < numElements; i += 1) {
+                    encoder.startItem();
+                    STRING_WRITER.write(keyArray, i, encoder);
+                    valueWriter.write(valueArray, i, encoder);
+                }
             }
             encoder.writeMapEnd();
         };
@@ -240,14 +296,20 @@ public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
     public class RowWriter implements FieldWriter {
 
         private final FieldWriter[] fieldWriters;
+        private final String[] fieldNames;
+        private final boolean[] isNullable;
 
         private RowWriter(Schema schema, List<DataField> fields) {
             List<Schema.Field> schemaFields = schema.getFields();
             this.fieldWriters = new FieldWriter[schemaFields.size()];
+            this.fieldNames = new String[schemaFields.size()];
+            this.isNullable = new boolean[schemaFields.size()];
             for (int i = 0, fieldsSize = schemaFields.size(); i < fieldsSize; i++) {
                 Schema.Field field = schemaFields.get(i);
                 DataType type = fields.get(i).type();
                 fieldWriters[i] = visit(field.schema(), type);
+                fieldNames[i] = field.name();
+                isNullable[i] = type.isNullable();
             }
         }
 
@@ -258,8 +320,24 @@ public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
         }
 
         public void writeRow(InternalRow row, Encoder encoder) throws IOException {
-            for (int i = 0; i < fieldWriters.length; i += 1) {
-                fieldWriters[i].write(row, i, encoder);
+            int i = 0;
+            try {
+                for (; i < fieldWriters.length; i += 1) {
+                    fieldWriters[i].write(row, i, encoder);
+                }
+            } catch (NullPointerException npe) {
+                if (!isNullable[i] && row.isNullAt(i)) {
+                    throw new IllegalArgumentException(
+                            String.format(
+                                    "Field '%s' expected not null but found null value. A possible cause is that the "
+                                            + "table used %s or %s merge-engine and the aggregate function produced "
+                                            + "null value when retracting.",
+                                    fieldNames[i],
+                                    CoreOptions.MergeEngine.PARTIAL_UPDATE,
+                                    CoreOptions.MergeEngine.AGGREGATE));
+                } else {
+                    throw npe;
+                }
             }
         }
     }

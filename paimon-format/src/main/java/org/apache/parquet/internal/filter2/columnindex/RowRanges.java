@@ -74,7 +74,6 @@ public class RowRanges {
 
         // Creates a range of [from, to] (from and to are inclusive; empty ranges are not valid)
         Range(long from, long to) {
-            assert from <= to;
             this.from = from;
             this.to = to;
         }

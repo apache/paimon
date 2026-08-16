@@ -35,7 +35,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.HashMap;
 import java.util.List;
@@ -49,11 +48,12 @@ public class MigrateDatabaseProcedureITCase extends ActionITCaseBase {
 
     private static final TestHiveMetastore TEST_HIVE_METASTORE = new TestHiveMetastore();
 
-    private static final int PORT = 9086;
+    private static int port;
 
     @BeforeEach
     public void beforeEach() {
-        TEST_HIVE_METASTORE.start(PORT);
+        TEST_HIVE_METASTORE.start(0);
+        port = TEST_HIVE_METASTORE.getPort();
     }
 
     @AfterEach
@@ -83,7 +83,8 @@ public class MigrateDatabaseProcedureITCase extends ActionITCaseBase {
     private void resetMetastore() throws Exception {
         TEST_HIVE_METASTORE.stop();
         TEST_HIVE_METASTORE.reset();
-        TEST_HIVE_METASTORE.start(PORT);
+        TEST_HIVE_METASTORE.start(0);
+        port = TEST_HIVE_METASTORE.getPort();
     }
 
     public void testUpgradePartitionTable(String format, boolean isNamedArgument) throws Exception {
@@ -121,7 +122,7 @@ public class MigrateDatabaseProcedureITCase extends ActionITCaseBase {
 
         tEnv.executeSql(
                 "CREATE CATALOG PAIMON WITH ('type'='paimon', 'metastore' = 'hive', 'uri' = 'thrift://localhost:"
-                        + PORT
+                        + port
                         + "' , 'warehouse' = '"
                         + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname)
                         + "')");
@@ -184,7 +185,7 @@ public class MigrateDatabaseProcedureITCase extends ActionITCaseBase {
 
         tEnv.executeSql(
                 "CREATE CATALOG PAIMON WITH ('type'='paimon', 'metastore' = 'hive', 'uri' = 'thrift://localhost:"
-                        + PORT
+                        + port
                         + "' , 'warehouse' = '"
                         + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname)
                         + "')");
@@ -214,8 +215,9 @@ public class MigrateDatabaseProcedureITCase extends ActionITCaseBase {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"orc", "parquet", "avro"})
-    public void testMigrateDatabaseAction(String format) throws Exception {
+    @MethodSource("testArguments")
+    public void testMigrateDatabaseAction(String format, boolean forceStartFlinkJob)
+            throws Exception {
         TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
         tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
         tEnv.useCatalog("HIVE");
@@ -250,16 +252,17 @@ public class MigrateDatabaseProcedureITCase extends ActionITCaseBase {
 
         Map<String, String> catalogConf = new HashMap<>();
         catalogConf.put("metastore", "hive");
-        catalogConf.put("uri", "thrift://localhost:" + PORT);
+        catalogConf.put("uri", "thrift://localhost:" + port);
         catalogConf.put(
                 "warehouse", System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname));
         MigrateDatabaseAction migrateDatabaseAction =
                 new MigrateDatabaseAction("hive", "my_database", catalogConf, "", 6);
+        migrateDatabaseAction.forceStartFlinkJob(forceStartFlinkJob);
         migrateDatabaseAction.run();
 
         tEnv.executeSql(
                 "CREATE CATALOG PAIMON WITH ('type'='paimon', 'metastore' = 'hive', 'uri' = 'thrift://localhost:"
-                        + PORT
+                        + port
                         + "' , 'warehouse' = '"
                         + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname)
                         + "')");

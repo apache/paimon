@@ -30,12 +30,11 @@ import org.apache.paimon.table.FileStoreTable
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.QueryTest
 import org.apache.spark.sql.connector.catalog.{Identifier => SparkIdentifier}
+import org.apache.spark.sql.connector.read.Scan
 import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, DataSourceV2ScanRelation}
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.paimon.Utils
 import org.apache.spark.sql.test.SharedSparkSession
-import org.scalactic.source.Position
-import org.scalatest.Tag
 
 import java.io.File
 import java.util.{TimeZone, UUID}
@@ -93,11 +92,6 @@ class PaimonSparkTestBase
     } finally {
       super.afterAll()
     }
-  }
-
-  protected def reset(): Unit = {
-    afterAll()
-    beforeAll()
   }
 
   /** Default is paimon catalog */
@@ -158,14 +152,6 @@ class PaimonSparkTestBase
     }
   }
 
-  override def test(testName: String, testTags: Tag*)(testFun: => Any)(implicit
-      pos: Position): Unit = {
-    super.test(testName, testTags: _*) {
-      println(testName)
-      testFun
-    }(pos)
-  }
-
   def loadTable(tableName: String): FileStoreTable = {
     loadTable(dbName0, tableName)
   }
@@ -183,12 +169,19 @@ class PaimonSparkTestBase
     )
   }
 
-  protected def getPaimonScan(sqlText: String): PaimonScan = {
+  def getScan(sqlText: String): Scan = {
     sql(sqlText).queryExecution.optimizedPlan
       .collectFirst { case relation: DataSourceV2ScanRelation => relation }
       .get
       .scan
-      .asInstanceOf[PaimonScan]
+  }
+
+  protected def getPaimonScan(sqlText: String): PaimonScan = {
+    getScan(sqlText).asInstanceOf[PaimonScan]
+  }
+
+  protected def getFormatTableScan(sqlText: String): PaimonFormatTableScan = {
+    getScan(sqlText).asInstanceOf[PaimonFormatTableScan]
   }
 
   object GenericRow {

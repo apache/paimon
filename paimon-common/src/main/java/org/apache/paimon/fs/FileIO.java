@@ -20,6 +20,7 @@ package org.apache.paimon.fs;
 
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.hadoop.HadoopFileIOLoader;
 import org.apache.paimon.fs.local.LocalFileIO;
 
@@ -38,6 +39,7 @@ import java.io.OutputStreamWriter;
 import java.io.Serializable;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -92,6 +94,26 @@ public interface FileIO extends Serializable, Closeable {
      *     file already exists at that path and the write mode indicates to not overwrite the file.
      */
     PositionOutputStream newOutputStream(Path path, boolean overwrite) throws IOException;
+
+    /**
+     * Opens a TwoPhaseOutputStream at the indicated Path for transactional writing.
+     *
+     * <p>This method creates a stream that supports transactional writing operations. The written
+     * data becomes visible only after calling commit on the returned committer from closeForCommit
+     * method.
+     *
+     * @param path the file target path
+     * @param overwrite if a file with this name already exists, then if true, the file will be
+     *     overwritten, and if false an error will be thrown.
+     * @return a TwoPhaseOutputStream that supports transactional writes
+     * @throws IOException Thrown, if the stream could not be opened because of an I/O, or because a
+     *     file already exists at that path and the write mode indicates to not overwrite the file.
+     * @throws UnsupportedOperationException if the filesystem does not support transactional writes
+     */
+    default TwoPhaseOutputStream newTwoPhaseOutputStream(Path path, boolean overwrite)
+            throws IOException {
+        return new RenamingTwoPhaseOutputStream(this, path, overwrite);
+    }
 
     /**
      * Return a file status object that represents the path.
@@ -225,6 +247,27 @@ public interface FileIO extends Serializable, Closeable {
      * @return <code>true</code> if the renaming was successful, <code>false</code> otherwise
      */
     boolean rename(Path src, Path dst) throws IOException;
+
+    default Optional<Path> archive(Path path, StorageType type) throws IOException {
+        throw new UnsupportedOperationException(
+                getClass().getName() + " does not support archive.");
+    }
+
+    default void restoreArchive(Path path, Duration duration) throws IOException {
+        throw new UnsupportedOperationException(
+                getClass().getName() + " does not support restore archive.");
+    }
+
+    default Optional<Path> unarchive(Path path, StorageType type) throws IOException {
+        throw new UnsupportedOperationException(
+                getClass().getName() + " does not support unarchive.");
+    }
+
+    default String createBlobPresignedUrl(
+            Path tableRoot, BlobDescriptor descriptor, Duration validity) throws IOException {
+        throw new UnsupportedOperationException(
+                getClass().getName() + " does not support creating blob presigned URLs.");
+    }
 
     /**
      * Override this method to empty, many FileIO implementation classes rely on static variables

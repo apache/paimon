@@ -29,6 +29,8 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ObjectsFile;
 import org.apache.paimon.utils.PathFactory;
 
+import java.util.ArrayList;
+
 /**
  * This file includes several Iceberg {@link IcebergManifestFileMeta}s, representing the additional
  * changes since last snapshot.
@@ -45,7 +47,7 @@ public class IcebergManifestList extends ObjectsFile<IcebergManifestFileMeta> {
                 fileIO,
                 new IcebergManifestFileMetaSerializer(manifestType),
                 manifestType,
-                fileFormat.createReaderFactory(manifestType),
+                fileFormat.createReaderFactory(manifestType, manifestType, new ArrayList<>()),
                 fileFormat.createWriterFactory(manifestType),
                 compression,
                 pathFactory,

@@ -22,12 +22,15 @@ import org.apache.paimon.arrow.vector.ArrowCStruct;
 import org.apache.paimon.arrow.writer.ArrowFieldWriter;
 import org.apache.paimon.arrow.writer.ArrowFieldWriterFactoryVisitor;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VectorType;
 
 import org.apache.arrow.c.ArrowArray;
 import org.apache.arrow.c.ArrowSchema;
@@ -45,6 +48,7 @@ import org.apache.arrow.vector.types.pojo.Schema;
 
 import javax.annotation.Nullable;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.time.Instant;
@@ -64,11 +68,15 @@ public class ArrowUtils {
 
     public static VectorSchemaRoot createVectorSchemaRoot(
             RowType rowType, BufferAllocator allocator) {
-        return createVectorSchemaRoot(rowType, allocator, true);
+        return createVectorSchemaRoot(
+                rowType, allocator, true, ArrowFieldTypeConversion.ARROW_FIELD_TYPE_VISITOR);
     }
 
     public static VectorSchemaRoot createVectorSchemaRoot(
-            RowType rowType, BufferAllocator allocator, boolean caseSensitive) {
+            RowType rowType,
+            BufferAllocator allocator,
+            boolean caseSensitive,
+            ArrowFieldTypeConversion.ArrowFieldTypeVisitor visitor) {
         List<Field> fields =
                 rowType.getFields().stream()
                         .map(
@@ -77,9 +85,24 @@ public class ArrowUtils {
                                                 toLowerCaseIfNeed(f.name(), caseSensitive),
                                                 f.id(),
                                                 f.type(),
-                                                0))
+                                                0,
+                                                visitor))
                         .collect(Collectors.toList());
         return VectorSchemaRoot.create(new Schema(fields), allocator);
+    }
+
+    public static FieldVector createVector(
+            DataField dataField,
+            BufferAllocator allocator,
+            boolean caseSensitive,
+            ArrowFieldTypeConversion.ArrowFieldTypeVisitor visitor) {
+        return toArrowField(
+                        toLowerCaseIfNeed(dataField.name(), caseSensitive),
+                        dataField.id(),
+                        dataField.type(),
+                        0,
+                        visitor)
+                .createVector(allocator);
     }
 
     public static FieldVector createVector(
@@ -88,12 +111,27 @@ public class ArrowUtils {
                         toLowerCaseIfNeed(dataField.name(), caseSensitive),
                         dataField.id(),
                         dataField.type(),
-                        0)
+                        0,
+                        ArrowFieldTypeConversion.ARROW_FIELD_TYPE_VISITOR)
                 .createVector(allocator);
     }
 
     public static Field toArrowField(String fieldName, int fieldId, DataType dataType, int depth) {
-        FieldType fieldType = dataType.accept(ArrowFieldTypeConversion.ARROW_FIELD_TYPE_VISITOR);
+        return toArrowField(
+                fieldName,
+                fieldId,
+                dataType,
+                depth,
+                ArrowFieldTypeConversion.ARROW_FIELD_TYPE_VISITOR);
+    }
+
+    public static Field toArrowField(
+            String fieldName,
+            int fieldId,
+            DataType dataType,
+            int depth,
+            ArrowFieldTypeConversion.ArrowFieldTypeVisitor visitor) {
+        FieldType fieldType = dataType.accept(visitor);
         fieldType =
                 new FieldType(
                         fieldType.isNullable(),
@@ -101,13 +139,16 @@ public class ArrowUtils {
                         fieldType.getDictionary(),
                         Collections.singletonMap(PARQUET_FIELD_ID, String.valueOf(fieldId)));
         List<Field> children = null;
-        if (dataType instanceof ArrayType) {
+        if (dataType instanceof ArrayType || dataType instanceof VectorType) {
+            final DataType elementType;
+            if (dataType instanceof VectorType) {
+                elementType = ((VectorType) dataType).getElementType();
+            } else {
+                elementType = ((ArrayType) dataType).getElementType();
+            }
             Field field =
                     toArrowField(
-                            ListVector.DATA_VECTOR_NAME,
-                            fieldId,
-                            ((ArrayType) dataType).getElementType(),
-                            depth + 1);
+                            ListVector.DATA_VECTOR_NAME, fieldId, elementType, depth + 1, visitor);
             FieldType typeInner = field.getFieldType();
             field =
                     new Field(
@@ -128,7 +169,11 @@ public class ArrowUtils {
 
             Field keyField =
                     toArrowField(
-                            MapVector.KEY_NAME, fieldId, mapType.getKeyType().notNull(), depth + 1);
+                            MapVector.KEY_NAME,
+                            fieldId,
+                            mapType.getKeyType().notNull(),
+                            depth + 1,
+                            visitor);
             FieldType keyType = keyField.getFieldType();
             keyField =
                     new Field(
@@ -145,7 +190,12 @@ public class ArrowUtils {
                             keyField.getChildren());
 
             Field valueField =
-                    toArrowField(MapVector.VALUE_NAME, fieldId, mapType.getValueType(), depth + 1);
+                    toArrowField(
+                            MapVector.VALUE_NAME,
+                            fieldId,
+                            mapType.getValueType(),
+                            depth + 1,
+                            visitor);
             FieldType valueType = valueField.getFieldType();
             valueField =
                     new Field(
@@ -175,11 +225,22 @@ public class ArrowUtils {
                             Arrays.asList(keyField, valueField));
 
             children = Collections.singletonList(mapField);
+        } else if (dataType instanceof VariantType) {
+            children =
+                    Arrays.asList(
+                            new Field(
+                                    Variant.VALUE,
+                                    new FieldType(false, Types.MinorType.VARBINARY.getType(), null),
+                                    null),
+                            new Field(
+                                    Variant.METADATA,
+                                    new FieldType(false, Types.MinorType.VARBINARY.getType(), null),
+                                    null));
         } else if (dataType instanceof RowType) {
             RowType rowType = (RowType) dataType;
             children = new ArrayList<>();
             for (DataField field : rowType.getFields()) {
-                children.add(toArrowField(field.name(), field.id(), field.type(), 0));
+                children.add(toArrowField(field.name(), field.id(), field.type(), 0, visitor));
             }
         }
         return new Field(fieldName, fieldType, children);
@@ -194,7 +255,7 @@ public class ArrowUtils {
             fieldWriters[i] =
                     rowType.getTypeAt(i)
                             .accept(ArrowFieldWriterFactoryVisitor.INSTANCE)
-                            .create(vectors.get(i), rowType.isNullable());
+                            .create(vectors.get(i), rowType.getTypeAt(i).isNullable());
         }
 
         return fieldWriters;
@@ -208,17 +269,46 @@ public class ArrowUtils {
     }
 
     public static ArrowCStruct serializeToCStruct(
-            VectorSchemaRoot vsr, ArrowArray array, ArrowSchema schema) {
-        BufferAllocator bufferAllocator = vsr.getVector(0).getAllocator();
+            VectorSchemaRoot vsr,
+            ArrowArray array,
+            ArrowSchema schema,
+            BufferAllocator bufferAllocator) {
         Data.exportVectorSchemaRoot(bufferAllocator, vsr, null, array, schema);
         return ArrowCStruct.of(array, schema);
     }
 
+    /** Releases Arrow C Data callbacks that have not already been consumed by native code. */
+    public static void releaseCDataIfNeeded(ArrowArray array, ArrowSchema schema) {
+        try {
+            if (array.snapshot().release != 0) {
+                array.release();
+            }
+        } finally {
+            if (schema.snapshot().release != 0) {
+                schema.release();
+            }
+        }
+    }
+
+    public static byte[] serializeToIpc(VectorSchemaRoot vsr) {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        serializeToIpc(vsr, out);
+        return out.toByteArray();
+    }
+
+    /**
+     * Returns whether the schema root contains at least one vector and all top-level and nested
+     * vectors share the root allocator of the supplied allocator.
+     */
+    public static boolean hasSameRootAllocator(
+            VectorSchemaRoot vectorSchemaRoot, BufferAllocator allocator) {
+        List<FieldVector> vectors = vectorSchemaRoot.getFieldVectors();
+        return !vectors.isEmpty() && allVectorsShareRootWith(vectors, allocator.getRoot());
+    }
+
     public static void serializeToIpc(VectorSchemaRoot vsr, OutputStream out) {
         try (ArrowStreamWriter writer = new ArrowStreamWriter(vsr, null, out)) {
-            writer.start();
             writer.writeBatch();
-            writer.end();
         } catch (IOException e) {
             throw new RuntimeException("Failed to serialize VectorSchemaRoot to IPC", e);
         }
@@ -248,5 +338,16 @@ public class ArrowUtils {
         } else {
             return instant.getEpochSecond() * 1_000_000_000 + instant.getNano();
         }
+    }
+
+    private static boolean allVectorsShareRootWith(
+            List<FieldVector> vectors, BufferAllocator expectedRoot) {
+        for (FieldVector vector : vectors) {
+            if (vector.getAllocator().getRoot() != expectedRoot
+                    || !allVectorsShareRootWith(vector.getChildrenFromFields(), expectedRoot)) {
+                return false;
+            }
+        }
+        return true;
     }
 }

@@ -19,21 +19,26 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.index.GlobalIndexMeta;
+import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
-import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.ManifestCommittable;
-import org.apache.paimon.manifest.ManifestEntry;
-import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
@@ -46,6 +51,8 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -61,8 +68,10 @@ import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
 import static java.util.Collections.singletonMap;
+import static org.apache.paimon.CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT;
 import static org.apache.paimon.utils.FileStorePathFactoryTest.createNonPartFactory;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link TableCommit}. */
@@ -184,12 +193,8 @@ public class TableCommitTest {
         }
 
         @Override
-        public void call(
-                List<SimpleFileEntry> baseFiles,
-                List<ManifestEntry> deltaFiles,
-                List<IndexManifestEntry> indexFiles,
-                Snapshot snapshot) {
-            commitCallbackResult.get(testId).add(snapshot.commitIdentifier());
+        public void call(Context context) {
+            commitCallbackResult.get(testId).add(context.snapshot.commitIdentifier());
         }
 
         @Override
@@ -318,8 +323,682 @@ public class TableCommitTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testGiveUpCommitWhenAppendFoundTotalBucketsChanged(boolean checkAppend)
+            throws Exception {
+        String path = tempDir.toString();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"k", "v"});
+
+        Options options = new Options();
+        options.set(CoreOptions.PATH, path);
+        options.set(CoreOptions.BUCKET, 1);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.emptyList(),
+                                Collections.singletonList("k"),
+                                options.toMap(),
+                                ""));
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(),
+                        new Path(path),
+                        tableSchema,
+                        CatalogEnvironment.empty());
+
+        String commitUser1 = UUID.randomUUID().toString();
+        TableWriteImpl<?> write1 = table.newWrite(commitUser1);
+        TableCommitImpl commit1 = table.newCommit(commitUser1);
+        for (int i = 1; i < 10; i++) {
+            write1.write(GenericRow.of(i, (long) i));
+        }
+
+        // mock rescale
+        String commitUser2 = UUID.randomUUID().toString();
+        options = new Options(table.options());
+        options.set(CoreOptions.BUCKET, 2);
+        FileStoreTable rescaleTable = table.copy(tableSchema.copy(options.toMap()));
+        try (TableWriteImpl<?> write = rescaleTable.newWrite(commitUser2);
+                TableCommitImpl commit =
+                        rescaleTable.newCommit(commitUser2).withOverwrite(Collections.emptyMap())) {
+            for (int i = 1; i < 10; i++) {
+                write.write(GenericRow.of(i, (long) i));
+            }
+            commit.commit(1, write.prepareCommit(false, 1));
+        }
+
+        if (checkAppend) {
+            commit1.appendCommitCheckConflict(true);
+            assertThatThrownBy(() -> commit1.commit(1, write1.prepareCommit(false, 1)))
+                    .isInstanceOf(RuntimeException.class)
+                    .hasMessageContaining("changed from 2 to 1 without overwrite");
+        } else {
+            // the commit result is error, but here verify that no check if
+            // appendCommitCheckConflict was not set
+            assertThatCode(() -> commit1.commit(1, write1.prepareCommit(false, 1)))
+                    .doesNotThrowAnyException();
+        }
+        write1.close();
+        commit1.close();
+    }
+
     @Test
-    public void testStrictMode() throws Exception {
+    public void testStrictModeForCompact() throws Exception {
+        String path = tempDir.toString();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"pt", "k", "v"});
+
+        Options options = new Options();
+        options.set(CoreOptions.PATH, path);
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 10);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.singletonList("pt"),
+                                Arrays.asList("pt", "k"),
+                                options.toMap(),
+                                ""));
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(),
+                        new Path(path),
+                        tableSchema,
+                        CatalogEnvironment.empty());
+        BinaryRow pt1 = partitionRow(1);
+        BinaryRow pt2 = partitionRow(2);
+
+        String user1 = UUID.randomUUID().toString();
+        TableWriteImpl<?> write1 = table.newWrite(user1);
+        TableCommitImpl commit1 = table.newCommit(user1);
+
+        write1.write(GenericRow.of(1, 0, 0L));
+        write1.compact(pt1, 0, true);
+        commit1.commit(1, write1.prepareCommit(true, 1));
+
+        // test skip this commit check
+        String user2 = UUID.randomUUID().toString();
+        table = table.copy(singletonMap(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "2"));
+        TableWriteImpl<?> write2 = table.newWrite(user2);
+        TableCommitImpl commit2 = table.newCommit(user2);
+
+        write2.write(GenericRow.of(2, 1, 1L));
+        commit2.commit(1, write2.prepareCommit(false, 1));
+
+        // COMPACT on a different partition should be ignored
+        write1.write(GenericRow.of(1, 4, 4L));
+        write1.compact(pt1, 0, true);
+        commit1.commit(2, write1.prepareCommit(true, 2));
+
+        write2.write(GenericRow.of(2, 5, 5L));
+        assertThatCode(() -> commit2.commit(2, write2.prepareCommit(false, 2)))
+                .doesNotThrowAnyException();
+
+        // COMPACT on the same partition should be checked and fail
+        write1.write(GenericRow.of(2, 6, 6L));
+        write1.compact(pt2, 0, true);
+        commit1.commit(3, write1.prepareCommit(true, 3));
+
+        write2.write(GenericRow.of(2, 7, 7L));
+        assertThatThrownBy(() -> commit2.commit(3, write2.prepareCommit(false, 3)))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining(
+                        "Giving up committing as commit.strict-mode.last-safe-snapshot is set.");
+
+        write1.close();
+        commit1.close();
+        write2.close();
+        commit2.close();
+    }
+
+    @Test
+    public void testStrictModeForOverwrite() throws Exception {
+        String path = tempDir.toString();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"pt", "k", "v"});
+
+        Options options = new Options();
+        options.set(CoreOptions.PATH, path);
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 10);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.singletonList("pt"),
+                                Arrays.asList("pt", "k"),
+                                options.toMap(),
+                                ""));
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(),
+                        new Path(path),
+                        tableSchema,
+                        CatalogEnvironment.empty());
+        BinaryRow pt1 = partitionRow(1);
+        BinaryRow pt2 = partitionRow(2);
+
+        // user1 writes pt=1 and pt=2
+        String user1 = UUID.randomUUID().toString();
+        TableWriteImpl<?> write1 = table.newWrite(user1);
+        TableCommitImpl commit1 = table.newCommit(user1);
+        write1.write(GenericRow.of(1, 0, 0L));
+        write1.write(GenericRow.of(2, 0, 0L));
+        commit1.commit(1, write1.prepareCommit(false, 1));
+
+        // test skip this commit check
+        String user2 = UUID.randomUUID().toString();
+        FileStoreTable tableWithStrict =
+                table.copy(singletonMap(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "2"));
+        TableWriteImpl<?> write2 = tableWithStrict.newWrite(user2);
+        TableCommitImpl commit2 = tableWithStrict.newCommit(user2);
+
+        write2.write(GenericRow.of(1, 1, 1L));
+        write2.compact(pt1, 0, true);
+        commit2.commit(1, write2.prepareCommit(true, 1));
+
+        // user1 OVERWRITE on pt=1, snapshot 3
+        TableCommitImpl commit1Ow1 = table.newCommit(user1).withOverwrite(singletonMap("pt", "1"));
+        write1.write(GenericRow.of(1, 4, 4L));
+        commit1Ow1.commit(2, write1.prepareCommit(false, 2));
+
+        // user2 COMPACT on pt=2: OVERWRITE pt=1 does not overlap so no error
+        write2.write(GenericRow.of(2, 5, 5L));
+        write2.compact(pt2, 0, true);
+        assertThatCode(() -> commit2.commit(2, write2.prepareCommit(true, 2)))
+                .doesNotThrowAnyException();
+
+        // user1 OVERWRITE on pt=1 again, snapshot 5
+        TableCommitImpl commit1Ow2 = table.newCommit(user1).withOverwrite(singletonMap("pt", "1"));
+        write1.write(GenericRow.of(1, 6, 6L));
+        commit1Ow2.commit(3, write1.prepareCommit(false, 3));
+
+        // user2 COMPACT on pt=1: OVERWRITE pt=1 overlaps, should throw
+        write2.write(GenericRow.of(1, 7, 7L));
+        write2.compact(pt1, 0, true);
+        assertThatThrownBy(() -> commit2.commit(3, write2.prepareCommit(true, 3)))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining(
+                        "Giving up committing as commit.strict-mode.last-safe-snapshot is set.");
+
+        write1.close();
+        commit1.close();
+        commit1Ow1.close();
+        commit1Ow2.close();
+        write2.close();
+        commit2.close();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testStrictModeForIndexOnlyCompact(boolean dataEvolutionEnabled) throws Exception {
+        String path = tempDir.toString();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"pt", "k", "v"});
+
+        Options options = new Options();
+        options.set(CoreOptions.PATH, path);
+        options.set(CoreOptions.BUCKET, dataEvolutionEnabled ? -1 : 1);
+        if (!dataEvolutionEnabled) {
+            options.set(CoreOptions.BUCKET_KEY, "k");
+        }
+        options.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 10);
+        options.set(CoreOptions.ROW_TRACKING_ENABLED, dataEvolutionEnabled);
+        options.set(CoreOptions.DATA_EVOLUTION_ENABLED, dataEvolutionEnabled);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.singletonList("pt"),
+                                Collections.emptyList(),
+                                options.toMap(),
+                                ""));
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(),
+                        new Path(path),
+                        tableSchema,
+                        CatalogEnvironment.empty());
+        BinaryRow pt1 = partitionRow(1);
+
+        String user1 = UUID.randomUUID().toString();
+        TableWriteImpl<?> write1 = table.newWrite(user1);
+        TableCommitImpl commit1 = table.newCommit(user1);
+        write1.write(GenericRow.of(1, 0, 0L));
+        commit1.commit(1, write1.prepareCommit(false, 1));
+
+        String user2 = UUID.randomUUID().toString();
+        FileStoreTable tableWithStrict =
+                table.copy(singletonMap(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "1"));
+        TableWriteImpl<?> write2 = tableWithStrict.newWrite(user2);
+        TableCommitImpl commit2 = tableWithStrict.newCommit(user2);
+        write2.write(GenericRow.of(1, 1, 1L));
+
+        IndexFileMeta btreeIndex =
+                new IndexFileMeta(
+                        "btree",
+                        "index-only-compact",
+                        1,
+                        1,
+                        new GlobalIndexMeta(0, 0, 1, null, null),
+                        null);
+        commit1.commit(
+                2,
+                Collections.singletonList(
+                        new CommitMessageImpl(
+                                pt1,
+                                0,
+                                1,
+                                DataIncrement.emptyIncrement(),
+                                new CompactIncrement(
+                                        Collections.emptyList(),
+                                        Collections.emptyList(),
+                                        Collections.emptyList(),
+                                        Collections.singletonList(btreeIndex),
+                                        Collections.emptyList()))));
+
+        if (dataEvolutionEnabled) {
+            assertThatCode(() -> commit2.commit(1, write2.prepareCommit(true, 1)))
+                    .doesNotThrowAnyException();
+        } else {
+            assertThatThrownBy(() -> commit2.commit(1, write2.prepareCommit(true, 1)))
+                    .isInstanceOf(RuntimeException.class)
+                    .hasMessageContaining(
+                            "Giving up committing as commit.strict-mode.last-safe-snapshot is set.");
+        }
+
+        write1.close();
+        commit1.close();
+        write2.close();
+        commit2.close();
+    }
+
+    @Test
+    public void testStrictModeForDvOnlyOverwrite() throws Exception {
+        // Regression test for the partition-overlap check on DV-only OVERWRITE
+        // snapshots: such snapshots have no data-file delta, so the check must
+        // also look at index-manifest delta.
+        String path = tempDir.toString();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"pt", "k", "v"});
+
+        Options options = new Options();
+        options.set(CoreOptions.PATH, path);
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.BUCKET_KEY, "k");
+        options.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 10);
+        options.set(CoreOptions.DELETION_VECTORS_ENABLED, true);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.singletonList("pt"),
+                                Collections.emptyList(),
+                                options.toMap(),
+                                ""));
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(),
+                        new Path(path),
+                        tableSchema,
+                        CatalogEnvironment.empty());
+        BinaryRow pt1 = partitionRow(1);
+        BinaryRow pt2 = partitionRow(2);
+
+        // user1 writes pt=1 and pt=2 -> snapshot 1 (APPEND)
+        String user1 = UUID.randomUUID().toString();
+        TableWriteImpl<?> write1 = table.newWrite(user1);
+        TableCommitImpl commit1 = table.newCommit(user1);
+        write1.write(GenericRow.of(1, 0, 0L));
+        write1.write(GenericRow.of(2, 0, 0L));
+        commit1.commit(1, write1.prepareCommit(false, 1));
+
+        // user2 with strict mode, last-safe-snapshot=2 (skip its own snapshot 2)
+        String user2 = UUID.randomUUID().toString();
+        FileStoreTable tableWithStrict =
+                table.copy(singletonMap(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "2"));
+        TableWriteImpl<?> write2 = tableWithStrict.newWrite(user2);
+        TableCommitImpl commit2 = tableWithStrict.newCommit(user2);
+        write2.write(GenericRow.of(1, 1, 1L));
+        commit2.commit(1, write2.prepareCommit(false, 1));
+
+        // user1 DV-only OVERWRITE on pt=2 -> snapshot 3 (OVERWRITE, no data-file delta)
+        commitDvOnly(table, user1, pt2, 2);
+
+        // user2 COMPACT on pt=1: DV-only on pt=2 does not overlap -> no error
+        write2.write(GenericRow.of(1, 5, 5L));
+        write2.compact(pt1, 0, true);
+        assertThatCode(() -> commit2.commit(2, write2.prepareCommit(true, 2)))
+                .doesNotThrowAnyException();
+
+        // user1 DV-only OVERWRITE on pt=1 -> snapshot 5 (OVERWRITE, no data-file delta)
+        commitDvOnly(table, user1, pt1, 3);
+
+        // user2 COMPACT on pt=1: DV-only on pt=1 overlaps -> must throw
+        write2.write(GenericRow.of(1, 7, 7L));
+        write2.compact(pt1, 0, true);
+        assertThatThrownBy(() -> commit2.commit(3, write2.prepareCommit(true, 3)))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining(
+                        "Giving up committing as commit.strict-mode.last-safe-snapshot is set.");
+
+        write1.close();
+        commit1.close();
+        write2.close();
+        commit2.close();
+    }
+
+    @Test
+    public void testStrictModeShortCircuitsWhenIndexManifestUnchanged() throws Exception {
+        String path = tempDir.toString();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"pt", "k", "v"});
+
+        Options options = new Options();
+        options.set(CoreOptions.PATH, path);
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.BUCKET_KEY, "k");
+        options.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 10);
+        options.set(CoreOptions.DELETION_VECTORS_ENABLED, true);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.singletonList("pt"),
+                                Collections.emptyList(),
+                                options.toMap(),
+                                ""));
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(),
+                        new Path(path),
+                        tableSchema,
+                        CatalogEnvironment.empty());
+        BinaryRow pt3 = partitionRow(3);
+
+        // user1 writes pt=1 and pt=3 -> snapshot 1 (APPEND)
+        String user1 = UUID.randomUUID().toString();
+        TableWriteImpl<?> write1 = table.newWrite(user1);
+        TableCommitImpl commit1 = table.newCommit(user1);
+        write1.write(GenericRow.of(1, 0, 0L));
+        write1.write(GenericRow.of(3, 0, 0L));
+        commit1.commit(1, write1.prepareCommit(false, 1));
+
+        // user1 commits a DV on pt=3 -> snapshot 2 (OVERWRITE, dv-only).
+        // indexManifest now records pt=3.
+        commitDvOnly(table, user1, pt3, 2);
+
+        // user1 OVERWRITE on pt=1 -> snapshot 3 (OVERWRITE).
+        // pt=1 has no DV, so writeIndexFiles produces no new index file and
+        // snapshot 3 reuses snapshot 2's indexManifest file name.
+        TableCommitImpl commit1Ow = table.newCommit(user1).withOverwrite(singletonMap("pt", "1"));
+        write1.write(GenericRow.of(1, 9, 9L));
+        commit1Ow.commit(3, write1.prepareCommit(false, 3));
+
+        // user2 with last-safe=2 writes pt=3 -> APPEND.
+        // Snapshot 3 is OVERWRITE on pt=1, its data delta does not touch pt=3,
+        // and although its indexManifest still contains pt=3 (inherited from
+        // snapshot 2), the short-circuit must skip the full-set intersection
+        // and avoid throwing.
+        String user2 = UUID.randomUUID().toString();
+        FileStoreTable tableWithStrict =
+                table.copy(singletonMap(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "2"));
+        TableWriteImpl<?> write2 = tableWithStrict.newWrite(user2);
+        TableCommitImpl commit2 = tableWithStrict.newCommit(user2);
+        write2.write(GenericRow.of(3, 1, 1L));
+        assertThatCode(() -> commit2.commit(1, write2.prepareCommit(false, 1)))
+                .doesNotThrowAnyException();
+
+        write1.close();
+        commit1.close();
+        commit1Ow.close();
+        write2.close();
+        commit2.close();
+    }
+
+    private void commitDvOnly(FileStoreTable table, String user, BinaryRow partition, long commitId)
+            throws Exception {
+        // Pick a real data file in the partition; ConflictDetection requires the
+        // DV to reference an existing data file name.
+        String dataFileName =
+                table.store().newScan().withPartitionFilter(Collections.singletonList(partition))
+                        .plan().files().stream()
+                        .findFirst()
+                        .map(e -> e.file().fileName())
+                        .orElseThrow(
+                                () ->
+                                        new IllegalStateException(
+                                                "No data file in partition for DV commit"));
+        IndexFileHandler indexFileHandler = table.store().newIndexFileHandler();
+        BucketedDvMaintainer dvMaintainer =
+                BucketedDvMaintainer.factory(indexFileHandler)
+                        .create(partition, 0, Collections.emptyList());
+        dvMaintainer.notifyNewDeletion(dataFileName, 0);
+        IndexFileMeta dvIndex = dvMaintainer.writeDeletionVectorsIndex().get();
+        try (TableCommitImpl commit = table.newCommit(user)) {
+            commit.commit(
+                    commitId,
+                    Collections.singletonList(
+                            new CommitMessageImpl(
+                                    partition,
+                                    0,
+                                    1,
+                                    DataIncrement.indexIncrement(
+                                            Collections.singletonList(dvIndex)),
+                                    CompactIncrement.emptyIncrement())));
+        }
+    }
+
+    @Test
+    public void testStrictModeForOverwriteCheckAppend() throws Exception {
+        String path = tempDir.toString();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"pt", "k", "v"});
+
+        Options options = new Options();
+        options.set(CoreOptions.PATH, path);
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 10);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.singletonList("pt"),
+                                Arrays.asList("pt", "k"),
+                                options.toMap(),
+                                ""));
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(),
+                        new Path(path),
+                        tableSchema,
+                        CatalogEnvironment.empty());
+        BinaryRow pt1 = partitionRow(1);
+
+        String user1 = UUID.randomUUID().toString();
+        FileStoreTable fixedBucketWriteTable = table;
+        TableWriteImpl<?> write1 = fixedBucketWriteTable.newWrite(user1);
+        TableCommitImpl commit1 = fixedBucketWriteTable.newCommit(user1);
+
+        write1.write(GenericRow.of(1, 0, 0L));
+        write1.compact(pt1, 0, true);
+        commit1.commit(1, write1.prepareCommit(true, 1));
+
+        // test skip this commit check
+
+        String user2 = UUID.randomUUID().toString();
+        table = table.copy(singletonMap(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "2"));
+        TableWriteImpl<?> write2 = table.newWrite(user2);
+        TableCommitImpl commit2 = table.newCommit(user2).withOverwrite(singletonMap("pt", "1"));
+
+        write2.write(GenericRow.of(1, 1, 1L));
+        commit2.commit(1, write2.prepareCommit(false, 1));
+
+        // APPEND with postpone bucket files should be ignored
+        write1.close();
+        commit1.close();
+        Map<String, String> postponeWriteOptions = new HashMap<>();
+        postponeWriteOptions.put(CoreOptions.BUCKET.key(), "-2");
+        postponeWriteOptions.put(CoreOptions.POSTPONE_BATCH_WRITE_FIXED_BUCKET.key(), "false");
+        FileStoreTable postponeWriteTable = fixedBucketWriteTable.copy(postponeWriteOptions);
+        write1 = postponeWriteTable.newWrite(user1);
+        commit1 = postponeWriteTable.newCommit(user1);
+        write1.write(GenericRow.of(1, 2, 2L));
+        commit1.commit(2, write1.prepareCommit(false, 2));
+
+        write2.write(GenericRow.of(1, 3, 3L));
+        commit2.commit(2, write2.prepareCommit(false, 2));
+
+        // APPEND with fixed bucket files on a different partition should be ignored
+        write1.close();
+        commit1.close();
+        write1 = fixedBucketWriteTable.newWrite(user1);
+        commit1 = fixedBucketWriteTable.newCommit(user1);
+        write1.write(GenericRow.of(2, 4, 4L));
+        commit1.commit(3, write1.prepareCommit(false, 3));
+
+        write2.write(GenericRow.of(1, 5, 5L));
+        assertThatCode(() -> commit2.commit(3, write2.prepareCommit(false, 3)))
+                .doesNotThrowAnyException();
+
+        // APPEND with fixed bucket files on the overwritten partition should be checked
+        write1.close();
+        commit1.close();
+        write1 = fixedBucketWriteTable.newWrite(user1);
+        commit1 = fixedBucketWriteTable.newCommit(user1);
+        write1.write(GenericRow.of(1, 6, 6L));
+        commit1.commit(4, write1.prepareCommit(false, 4));
+
+        write2.write(GenericRow.of(1, 7, 7L));
+        assertThatThrownBy(() -> commit2.commit(4, write2.prepareCommit(false, 4)))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining(
+                        "Giving up committing as commit.strict-mode.last-safe-snapshot is set.");
+
+        write1.close();
+        commit1.close();
+        write2.close();
+        commit2.close();
+    }
+
+    private static BinaryRow partitionRow(int pt) {
+        BinaryRow row = new BinaryRow(1);
+        BinaryRowWriter writer = new BinaryRowWriter(row);
+        writer.writeInt(0, pt);
+        writer.complete();
+        return row;
+    }
+
+    @Test
+    public void testStrictModeScanStateNotLeakedAcrossSnapshots() throws Exception {
+        // Regression test: the FileStoreScan used by StrictModeChecker is mutable.
+        // When the APPEND branch (for an earlier APPEND snapshot) calls
+        // onlyReadRealBuckets(), the flag is latched on the shared scan instance and
+        // must not leak into the later COMPACT/OVERWRITE branch, otherwise entries
+        // whose bucket < 0 (e.g. postpone bucket) are silently filtered out and an
+        // overlapping OVERWRITE snapshot can be missed.
+        String path = tempDir.toString();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"pt", "k", "v"});
+
+        Options options = new Options();
+        options.set(CoreOptions.PATH, path);
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 10);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.singletonList("pt"),
+                                Arrays.asList("pt", "k"),
+                                options.toMap(),
+                                ""));
+        FileStoreTable fixedTable =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(),
+                        new Path(path),
+                        tableSchema,
+                        CatalogEnvironment.empty());
+
+        // Switch to postpone bucket so that APPEND/OVERWRITE files land in bucket=-2.
+        Map<String, String> postponeOptions = new HashMap<>();
+        postponeOptions.put(CoreOptions.BUCKET.key(), "-2");
+        postponeOptions.put(CoreOptions.POSTPONE_BATCH_WRITE_FIXED_BUCKET.key(), "false");
+        FileStoreTable postponeTable = fixedTable.copy(postponeOptions);
+
+        String user1 = UUID.randomUUID().toString();
+
+        // snapshot 1: APPEND on pt=1 with postpone bucket (bucket=-2).
+        // When later checked in the APPEND branch, onlyReadRealBuckets() will filter
+        // these entries out, so this snapshot alone does not throw; but it DOES
+        // latch onlyReadRealBuckets=true onto the shared scan instance.
+        TableWriteImpl<?> write1 = postponeTable.newWrite(user1);
+        TableCommitImpl commit1 = postponeTable.newCommit(user1);
+        write1.write(GenericRow.of(1, 0, 0L));
+        commit1.commit(1, write1.prepareCommit(false, 1));
+        write1.close();
+        commit1.close();
+
+        // snapshot 2: OVERWRITE on pt=1, also writing postpone bucket files.
+        // The OVERWRITE branch should detect the partition overlap against a later
+        // user's OVERWRITE on pt=1.
+        write1 = postponeTable.newWrite(user1);
+        commit1 = postponeTable.newCommit(user1).withOverwrite(singletonMap("pt", "1"));
+        write1.write(GenericRow.of(1, 1, 1L));
+        commit1.commit(2, write1.prepareCommit(false, 2));
+        write1.close();
+        commit1.close();
+
+        // user2 commits OVERWRITE on pt=1 with strict mode enabled.
+        // Expected: throw because snapshot 2 (another user's OVERWRITE) touches pt=1.
+        // With the leaking onlyReadRealBuckets flag, snapshot 2's bucket=-2 entries
+        // get filtered out and the conflict is silently missed.
+        String user2 = UUID.randomUUID().toString();
+        FileStoreTable tableWithStrict =
+                fixedTable.copy(singletonMap(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "0"));
+        TableWriteImpl<?> write2 = tableWithStrict.newWrite(user2);
+        TableCommitImpl commit2 =
+                tableWithStrict.newCommit(user2).withOverwrite(singletonMap("pt", "1"));
+        write2.write(GenericRow.of(1, 2, 2L));
+        assertThatThrownBy(() -> commit2.commit(3, write2.prepareCommit(false, 3)))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining(
+                        "Giving up committing as commit.strict-mode.last-safe-snapshot is set.");
+
+        write2.close();
+        commit2.close();
+    }
+
+    @Test
+    public void testStrictModeForNonOverwriteNoCheckAppend() throws Exception {
         String path = tempDir.toString();
         RowType rowType =
                 RowType.of(
@@ -346,44 +1025,119 @@ public class TableCommitTest {
                         tableSchema,
                         CatalogEnvironment.empty());
         String user1 = UUID.randomUUID().toString();
-        TableWriteImpl<?> write1 = table.newWrite(user1);
-        TableCommitImpl commit1 = table.newCommit(user1);
-
-        Map<String, String> newOptions = new HashMap<>();
-        newOptions.put(CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "-1");
-        table = table.copy(newOptions);
-        String user2 = UUID.randomUUID().toString();
-        TableWriteImpl<?> write2 = table.newWrite(user2);
-        TableCommitImpl commit2 = table.newCommit(user2);
-
-        // by default, first commit is not checked
+        FileStoreTable fixedBucketWriteTable = table;
+        TableWriteImpl<?> write1 = fixedBucketWriteTable.newWrite(user1);
+        TableCommitImpl commit1 = fixedBucketWriteTable.newCommit(user1);
 
         write1.write(GenericRow.of(0, 0L));
         write1.compact(BinaryRow.EMPTY_ROW, 0, true);
         commit1.commit(1, write1.prepareCommit(true, 1));
 
+        // test skip this commit check
+
+        String user2 = UUID.randomUUID().toString();
+        table = table.copy(singletonMap(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "2"));
+        TableWriteImpl<?> write2 = table.newWrite(user2);
+        TableCommitImpl commit2 = table.newCommit(user2);
+
         write2.write(GenericRow.of(1, 1L));
         commit2.commit(1, write2.prepareCommit(false, 1));
 
-        // APPEND commit is ignored
-
+        // Non overwrite doesn't check APPEND with fixed bucket files
+        write1 = fixedBucketWriteTable.newWrite(user1);
+        commit1 = fixedBucketWriteTable.newCommit(user1);
         write1.write(GenericRow.of(2, 2L));
         commit1.commit(2, write1.prepareCommit(false, 2));
 
         write2.write(GenericRow.of(3, 3L));
-        commit2.commit(2, write2.prepareCommit(false, 2));
+        commit2.commit(2, write2.prepareCommit(false, 3));
+    }
 
-        // COMPACT commit should be checked
+    @Test
+    public void testStrictModeForNonPartitionedTable() throws Exception {
+        String path = tempDir.toString();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"k", "v"});
 
-        write1.write(GenericRow.of(4, 4L));
+        Options options = new Options();
+        options.set(CoreOptions.PATH, path);
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 10);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.emptyList(),
+                                Collections.singletonList("k"),
+                                options.toMap(),
+                                ""));
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(),
+                        new Path(path),
+                        tableSchema,
+                        CatalogEnvironment.empty());
+
+        String user1 = UUID.randomUUID().toString();
+        TableWriteImpl<?> write1 = table.newWrite(user1);
+        TableCommitImpl commit1 = table.newCommit(user1);
+        write1.write(GenericRow.of(0, 0L));
         write1.compact(BinaryRow.EMPTY_ROW, 0, true);
-        commit1.commit(3, write1.prepareCommit(true, 3));
+        commit1.commit(1, write1.prepareCommit(true, 1));
 
-        write2.write(GenericRow.of(5, 5L));
-        assertThatThrownBy(() -> commit2.commit(3, write2.prepareCommit(false, 3)))
+        // test skip this commit check
+        String user2 = UUID.randomUUID().toString();
+        FileStoreTable tableWithStrict =
+                table.copy(singletonMap(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "2"));
+        TableWriteImpl<?> write2 = tableWithStrict.newWrite(user2);
+        TableCommitImpl commit2 = tableWithStrict.newCommit(user2);
+
+        write2.write(GenericRow.of(1, 1L));
+        commit2.commit(1, write2.prepareCommit(false, 1));
+
+        // For a non-partitioned table, any COMPACT snapshot from another user must be
+        // detected as a conflict since all entries share BinaryRow.EMPTY_ROW.
+        write1.write(GenericRow.of(2, 2L));
+        write1.compact(BinaryRow.EMPTY_ROW, 0, true);
+        commit1.commit(2, write1.prepareCommit(true, 2));
+
+        write2.write(GenericRow.of(3, 3L));
+        assertThatThrownBy(() -> commit2.commit(2, write2.prepareCommit(false, 2)))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining(
                         "Giving up committing as commit.strict-mode.last-safe-snapshot is set.");
+
+        // APPEND with fixed bucket files should be caught when user2 commits OVERWRITE,
+        // since non-partitioned table entries share BinaryRow.EMPTY_ROW so they always
+        // overlap with user2's OVERWRITE target.
+        TableWriteImpl<?> write1Append = table.newWrite(user1);
+        TableCommitImpl commit1Append = table.newCommit(user1);
+        write1Append.write(GenericRow.of(4, 4L));
+        commit1Append.commit(3, write1Append.prepareCommit(false, 3));
+
+        FileStoreTable tableWithStrict2 =
+                table.copy(singletonMap(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "3"));
+        TableWriteImpl<?> write2Ow = tableWithStrict2.newWrite(user2);
+        TableCommitImpl commit2Ow =
+                tableWithStrict2.newCommit(user2).withOverwrite(Collections.emptyMap());
+        write2Ow.write(GenericRow.of(5, 5L));
+        assertThatThrownBy(() -> commit2Ow.commit(4, write2Ow.prepareCommit(false, 4)))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining(
+                        "Giving up committing as commit.strict-mode.last-safe-snapshot is set.");
+
+        write1Append.close();
+        commit1Append.close();
+        write2Ow.close();
+        commit2Ow.close();
+
+        write1.close();
+        commit1.close();
+        write2.close();
+        commit2.close();
     }
 
     @Test
@@ -437,5 +1191,232 @@ public class TableCommitTest {
         commit.commit(7, write.prepareCommit(true, 7));
         assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(5);
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(6);
+    }
+
+    @Test
+    public void testRecoverCompactedChangelogFiles() throws Exception {
+        String path = tempDir.toString();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"k", "v"});
+
+        Options options = new Options();
+        options.set(CoreOptions.PATH, path);
+        options.set(CoreOptions.BUCKET, 3);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.emptyList(),
+                                Collections.singletonList("k"),
+                                options.toMap(),
+                                ""));
+
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(),
+                        new Path(path),
+                        tableSchema,
+                        CatalogEnvironment.empty());
+
+        // Create fake compacted changelog files that should resolve to real files
+        String realChangelogFile =
+                "compacted-changelog-8e049c65-5ce4-4ce7-b1b0-78ce694ab351$0-39253.cc-parquet";
+        String fakeChangelogFile1 =
+                "compacted-changelog-8e049c65-5ce4-4ce7-b1b0-78ce694ab351$0-39253-39253-35699.cc-parquet";
+        String fakeChangelogFile2 =
+                "compacted-changelog-8e049c65-5ce4-4ce7-b1b0-78ce694ab351$0-39253-74952-37725.cc-parquet";
+
+        // Create directory structure
+        Path bucket0Dir = new Path(path, "bucket-0");
+        Path bucket1Dir = new Path(path, "bucket-1");
+        Path bucket2Dir = new Path(path, "bucket-2");
+        LocalFileIO.create().mkdirs(bucket0Dir);
+        LocalFileIO.create().mkdirs(bucket1Dir);
+        LocalFileIO.create().mkdirs(bucket2Dir);
+
+        // Create the real compacted changelog file
+        Path realFilePath = new Path(bucket0Dir, realChangelogFile);
+        LocalFileIO.create().newOutputStream(realFilePath, false).close();
+
+        DataFileMeta realFileMeta =
+                DataFileMeta.forAppend(
+                        realChangelogFile,
+                        3000L,
+                        300L,
+                        SimpleStats.EMPTY_STATS,
+                        0L,
+                        0L,
+                        1L,
+                        Collections.emptyList(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null);
+
+        // Create fake DataFileMeta for compacted changelog files
+        DataFileMeta fakeFileMeta1 =
+                DataFileMeta.forAppend(
+                        fakeChangelogFile1,
+                        1000L,
+                        100L,
+                        SimpleStats.EMPTY_STATS,
+                        0L,
+                        0L,
+                        1L,
+                        Collections.emptyList(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null);
+
+        DataFileMeta fakeFileMeta2 =
+                DataFileMeta.forAppend(
+                        fakeChangelogFile2,
+                        2000L,
+                        200L,
+                        SimpleStats.EMPTY_STATS,
+                        0L,
+                        0L,
+                        1L,
+                        Collections.emptyList(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null);
+
+        // Create commit message with fake compacted changelog files
+        BinaryRow partition = BinaryRow.EMPTY_ROW;
+        CommitMessageImpl commitMessage0 =
+                new CommitMessageImpl(
+                        partition,
+                        0,
+                        3,
+                        new DataIncrement(
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.singletonList(realFileMeta)),
+                        new CompactIncrement(
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.emptyList()));
+        CommitMessageImpl commitMessage1 =
+                new CommitMessageImpl(
+                        partition,
+                        1,
+                        3,
+                        new DataIncrement(
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.singletonList(fakeFileMeta1)),
+                        new CompactIncrement(
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.emptyList()));
+        CommitMessageImpl commitMessage2 =
+                new CommitMessageImpl(
+                        partition,
+                        2,
+                        3,
+                        new DataIncrement(
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.singletonList(fakeFileMeta2)),
+                        new CompactIncrement(
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.emptyList()));
+
+        ManifestCommittable committable = new ManifestCommittable(1L);
+        committable.addFileCommittable(commitMessage0);
+        committable.addFileCommittable(commitMessage1);
+        committable.addFileCommittable(commitMessage2);
+
+        String commitUser = UUID.randomUUID().toString();
+        try (TableCommitImpl commit = table.newCommit(commitUser)) {
+            // This should succeed because fake files resolve to the existing real file
+            commit.filterAndCommitMultiple(Collections.singletonList(committable), false);
+        }
+
+        // Now delete the real file and test that the check fails
+        LocalFileIO.create().delete(realFilePath, false);
+
+        // Create a new committable with a larger identifier to simulate recovery from checkpoint
+        // This identifier must be larger than the previously committed identifier (1L)
+        ManifestCommittable newCommittable = new ManifestCommittable(2L);
+        newCommittable.addFileCommittable(commitMessage0);
+        newCommittable.addFileCommittable(commitMessage1);
+        newCommittable.addFileCommittable(commitMessage2);
+
+        try (TableCommitImpl commit = table.newCommit(commitUser)) {
+            assertThatThrownBy(
+                            () ->
+                                    commit.filterAndCommitMultiple(
+                                            Collections.singletonList(newCommittable), false))
+                    .hasMessageContaining(
+                            "Cannot recover from this checkpoint because some files in the"
+                                    + " snapshot that need to be resubmitted have been deleted");
+        }
+    }
+
+    @Test
+    public void testCompactConflictWithUpgrade() throws Exception {
+        String path = tempDir.toString();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+
+        Options options = new Options();
+        options.set(CoreOptions.PATH, path);
+        options.set(CoreOptions.BUCKET, 1);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.emptyList(),
+                                Collections.singletonList("k"),
+                                options.toMap(),
+                                ""));
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(),
+                        new Path(path),
+                        tableSchema,
+                        CatalogEnvironment.empty());
+        String user1 = UUID.randomUUID().toString();
+        FileStoreTable overwriteUpgrade = table.copy(singletonMap("write-only", "true"));
+        TableWriteImpl<?> write1 = overwriteUpgrade.newWrite(user1);
+        TableCommitImpl commit1 =
+                overwriteUpgrade.newCommit(user1).withOverwrite(Collections.emptyMap());
+
+        String user2 = UUID.randomUUID().toString();
+        FileStoreTable compactTable =
+                table.copy(singletonMap("compaction.force-up-level-0", "true"));
+        TableWriteImpl<?> write2 = compactTable.newWrite(user2);
+        TableCommitImpl commit2 = compactTable.newCommit(user2);
+
+        write1.write(GenericRow.of(1, 1));
+        write1.write(GenericRow.of(3, 3));
+
+        write2.write(GenericRow.of(2, 2));
+        write2.write(GenericRow.of(4, 4));
+
+        commit1.commit(1, write1.prepareCommit(false, 1));
+        assertThatThrownBy(() -> commit2.commit(1, write2.prepareCommit(true, 1)))
+                .hasMessageContaining("LSM conflicts detected! Give up committing.");
+
+        write1.close();
+        commit1.close();
+        write2.close();
+        commit2.close();
     }
 }

@@ -60,6 +60,13 @@ public interface ActionFactory extends Factory {
     String MINOR = "minor";
     String FULL = "full";
 
+    /**
+     * Forces the action to run as a Flink job instead of local execution. This parameter only
+     * affects {@link LocalAction} implementations. For non-LocalAction implementations, this
+     * parameter has no effect.
+     */
+    String FORCE_START_FLINK_JOB = "force_start_flink_job";
+
     Optional<Action> create(MultipleParameterToolAdapter params);
 
     static Optional<Action> createAction(String[] args) {
@@ -92,7 +99,32 @@ public interface ActionFactory extends Factory {
                             PATH, CATALOG_CONF, CatalogOptions.WAREHOUSE.key(), DATABASE, TABLE));
         }
 
-        return actionFactory.create(params);
+        Optional<Action> optionalAction = actionFactory.create(params);
+
+        if (params.has(FORCE_START_FLINK_JOB)) {
+            optionalAction =
+                    optionalAction.map(
+                            a -> {
+                                if (!(a instanceof ActionBase)) {
+                                    throw new UnsupportedOperationException(
+                                            String.format(
+                                                    "Action %s does not support %s.",
+                                                    action, FORCE_START_FLINK_JOB));
+                                }
+                                // Refer to Flink's AbstractParameterTool.NO_VALUE_KEY
+                                if ("__NO_VALUE_KEY".equals(params.get(FORCE_START_FLINK_JOB))) {
+                                    throw new IllegalArgumentException(
+                                            "Please specify the value for parameter "
+                                                    + FORCE_START_FLINK_JOB);
+                                }
+                                return ((ActionBase) a)
+                                        .forceStartFlinkJob(
+                                                Boolean.parseBoolean(
+                                                        params.get(FORCE_START_FLINK_JOB)));
+                            });
+        }
+
+        return optionalAction;
     }
 
     void printHelp();

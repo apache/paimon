@@ -29,21 +29,27 @@ import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import javax.annotation.Nullable;
 
+import java.io.Serializable;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /** Strategy for partition expiration. */
-public abstract class PartitionExpireStrategy {
+public abstract class PartitionExpireStrategy implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     protected final List<String> partitionKeys;
+    protected final String partitionDefaultName;
     private final RowDataToObjectArrayConverter toObjectArrayConverter;
 
-    public PartitionExpireStrategy(RowType partitionType) {
+    public PartitionExpireStrategy(RowType partitionType, String partitionDefaultName) {
         this.toObjectArrayConverter = new RowDataToObjectArrayConverter(partitionType);
         this.partitionKeys = partitionType.getFieldNames();
+        this.partitionDefaultName = partitionDefaultName;
     }
 
     public Map<String, String> toPartitionString(Object[] array) {
@@ -57,7 +63,11 @@ public abstract class PartitionExpireStrategy {
     public List<String> toPartitionValue(Object[] array) {
         List<String> list = new ArrayList<>(partitionKeys.size());
         for (int i = 0; i < partitionKeys.size(); i++) {
-            list.add(array[i].toString());
+            if (array[i] != null) {
+                list.add(array[i].toString());
+            } else {
+                list.add(partitionDefaultName);
+            }
         }
         return list;
     }
@@ -74,18 +84,23 @@ public abstract class PartitionExpireStrategy {
             RowType partitionType,
             @Nullable CatalogLoader catalogLoader,
             @Nullable Identifier identifier) {
-        switch (options.partitionExpireStrategy()) {
-            case UPDATE_TIME:
-                return new PartitionUpdateTimeExpireStrategy(partitionType);
-            case VALUES_TIME:
+        Optional<PartitionExpireStrategyFactory> custom =
+                PartitionExpireStrategyFactory.INSTANCE.get();
+        if (custom.isPresent()) {
+            try {
+                return custom.get().create(catalogLoader, identifier, options, partitionType);
+            } catch (UnsupportedOperationException ignored) {
+            }
+        }
+
+        String strategy = options.partitionExpireStrategy();
+        switch (strategy) {
+            case "update-time":
+                return new PartitionUpdateTimeExpireStrategy(options, partitionType);
+            case "values-time":
                 return new PartitionValuesTimeExpireStrategy(options, partitionType);
-            case CUSTOM:
-                return PartitionExpireStrategyFactory.INSTANCE
-                        .get()
-                        .create(catalogLoader, identifier, partitionType);
             default:
-                throw new IllegalArgumentException(
-                        "Unknown partitionExpireStrategy: " + options.partitionExpireStrategy());
+                throw new IllegalArgumentException("Unknown partitionExpireStrategy: " + strategy);
         }
     }
 }

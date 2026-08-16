@@ -85,6 +85,7 @@ public final class BinaryArray extends BinarySection implements InternalArray, D
             case MAP:
             case ROW:
             case VARIANT:
+            case BLOB:
                 // long and double are 8 bytes;
                 // otherwise it stores the length and offset of the variable-length part for types
                 // such as is string, map, etc.
@@ -245,9 +246,19 @@ public final class BinaryArray extends BinarySection implements InternalArray, D
     }
 
     @Override
+    public Blob getBlob(int pos) {
+        return Blob.fromBytes(getBinary(pos), null, null);
+    }
+
+    @Override
     public InternalArray getArray(int pos) {
         assertIndexIsValid(pos);
         return MemorySegmentUtils.readArrayData(segments, offset, getLong(pos));
+    }
+
+    @Override
+    public InternalVector getVector(int pos) {
+        throw new IllegalArgumentException("Unsupported type: VectorType");
     }
 
     @Override

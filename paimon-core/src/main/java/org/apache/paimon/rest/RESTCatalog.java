@@ -21,6 +21,7 @@ package org.apache.paimon.rest;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.TableType;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
@@ -29,59 +30,74 @@ import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.catalog.TableMetadata;
+import org.apache.paimon.catalog.TableQueryAuthResult;
+import org.apache.paimon.consumer.ConsumerInfo;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.ResolvingFileIO;
+import org.apache.paimon.fs.cache.CachingFileIO;
+import org.apache.paimon.fs.cache.LocalCacheManager;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.rest.exceptions.ServiceFailureException;
+import org.apache.paimon.rest.responses.AuthTableQueryResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
-import org.apache.paimon.rest.responses.GetTableTokenResponse;
+import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.system.SystemTableLoader;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.SnapshotNotExistException;
+import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewChange;
 import org.apache.paimon.view.ViewImpl;
 import org.apache.paimon.view.ViewSchema;
 
-import org.apache.paimon.shade.org.apache.commons.lang3.StringUtils;
-
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BRANCH;
 import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
+import static org.apache.paimon.catalog.CatalogUtils.validateCatalogManagedFormatTablePartitions;
+import static org.apache.paimon.catalog.CatalogUtils.validateCatalogManagedPartitionOptions;
 import static org.apache.paimon.catalog.CatalogUtils.validateCreateTable;
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
 
@@ -91,6 +107,8 @@ public class RESTCatalog implements Catalog {
     private final RESTApi api;
     private final CatalogContext context;
     private final boolean dataTokenEnabled;
+    protected final Map<String, String> tableDefaultOptions;
+    private final @Nullable LocalCacheManager cacheManager;
 
     public RESTCatalog(CatalogContext context) {
         this(context, true);
@@ -105,6 +123,8 @@ public class RESTCatalog implements Catalog {
                         context.preferIO(),
                         context.fallbackIO());
         this.dataTokenEnabled = api.options().get(RESTTokenFileIO.DATA_TOKEN_ENABLED);
+        this.tableDefaultOptions = CatalogUtils.tableDefaultOptions(this.context.options().toMap());
+        this.cacheManager = CachingFileIO.createCacheManager(this.context);
     }
 
     @Override
@@ -208,7 +228,7 @@ public class RESTCatalog implements Catalog {
     public List<String> listTables(String databaseName) throws DatabaseNotExistException {
         try {
             if (isSystemDatabase(databaseName)) {
-                return SystemTableLoader.loadGlobalTableNames();
+                return SystemTableLoader.loadGlobalTableNames(context.options());
             }
             return api.listTables(databaseName);
         } catch (NoSuchResourceException e) {
@@ -223,10 +243,17 @@ public class RESTCatalog implements Catalog {
             String databaseName,
             @Nullable Integer maxResults,
             @Nullable String pageToken,
-            @Nullable String tableNamePattern)
+            @Nullable String tableNamePattern,
+            @Nullable String tableType)
             throws DatabaseNotExistException {
         try {
-            return api.listTablesPaged(databaseName, maxResults, pageToken, tableNamePattern);
+            if (isSystemDatabase(databaseName)) {
+                CatalogUtils.validateNamePattern(this, tableNamePattern);
+                CatalogUtils.validateTableType(this, tableType);
+                return listSystemTablesPaged(maxResults, pageToken, tableNamePattern, tableType);
+            }
+            return api.listTablesPaged(
+                    databaseName, maxResults, pageToken, tableNamePattern, tableType);
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(databaseName);
         }
@@ -237,11 +264,32 @@ public class RESTCatalog implements Catalog {
             String db,
             @Nullable Integer maxResults,
             @Nullable String pageToken,
-            @Nullable String tableNamePattern)
+            @Nullable String tableNamePattern,
+            @Nullable String tableType)
             throws DatabaseNotExistException {
         try {
+            if (isSystemDatabase(db)) {
+                CatalogUtils.validateNamePattern(this, tableNamePattern);
+                CatalogUtils.validateTableType(this, tableType);
+                PagedList<String> pagedSystemTableNames =
+                        listSystemTablesPaged(maxResults, pageToken, tableNamePattern, tableType);
+                List<Table> systemTables =
+                        pagedSystemTableNames.getElements().stream()
+                                .map(
+                                        tableName -> {
+                                            try {
+                                                return getTable(Identifier.create(db, tableName));
+                                            } catch (TableNotExistException ignored) {
+                                                return null;
+                                            }
+                                        })
+                                .filter(Objects::nonNull)
+                                .collect(Collectors.toList());
+                return new PagedList<>(systemTables, pagedSystemTableNames.getNextPageToken());
+            }
             PagedList<GetTableResponse> tables =
-                    api.listTableDetailsPaged(db, maxResults, pageToken, tableNamePattern);
+                    api.listTableDetailsPaged(
+                            db, maxResults, pageToken, tableNamePattern, tableType);
             return new PagedList<>(
                     tables.getElements().stream()
                             .map(t -> toTable(db, t))
@@ -249,6 +297,40 @@ public class RESTCatalog implements Catalog {
                     tables.getNextPageToken());
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(db);
+        }
+    }
+
+    private PagedList<String> listSystemTablesPaged(
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String tableNamePattern,
+            @Nullable String tableType) {
+        try {
+            return SystemTableLoader.loadGlobalTableNamesPaged(
+                    context.options(), maxResults, pageToken, tableNamePattern, tableType);
+        } catch (IllegalArgumentException e) {
+            throw new BadRequestException(e.getMessage());
+        }
+    }
+
+    @Override
+    public List<Table> listTableDetails(String databaseName) throws DatabaseNotExistException {
+        try {
+            if (isSystemDatabase(databaseName)) {
+                List<Table> result = new ArrayList<>();
+                for (String tableName : SystemTableLoader.loadGlobalTableNames(context.options())) {
+                    try {
+                        result.add(getTable(Identifier.create(databaseName, tableName)));
+                    } catch (TableNotExistException ignored) {
+                        // ignore
+                    }
+                }
+                return result;
+            }
+            List<GetTableResponse> tables = api.listTableDetails(databaseName);
+            return tables.stream().map(t -> toTable(databaseName, t)).collect(Collectors.toList());
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(databaseName);
         }
     }
 
@@ -265,6 +347,19 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
+    public Table getTableById(String tableId) throws TableIdNotExistException {
+        try {
+            GetTableResponse response = api.getTableById(tableId);
+            String database = response.getDatabase();
+            return toTable(database, response);
+        } catch (NoSuchResourceException e) {
+            throw new TableIdNotExistException(tableId, e);
+        } catch (ForbiddenException e) {
+            throw new TableIdNoPermissionException(tableId, e);
+        }
+    }
+
+    @Override
     public Table getTable(Identifier identifier) throws TableNotExistException {
         return CatalogUtils.loadTable(
                 this,
@@ -273,7 +368,9 @@ public class RESTCatalog implements Catalog {
                 this::fileIOFromOptions,
                 this::loadTableMetadata,
                 null,
-                null);
+                null,
+                context,
+                true);
     }
 
     @Override
@@ -320,12 +417,43 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
+    public PagedList<ConsumerInfo> listConsumersPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+            throws TableNotExistException {
+        try {
+            return api.listConsumersPaged(identifier, maxResults, pageToken);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+    }
+
+    @Override
+    public void resetConsumer(
+            Identifier identifier, String consumerId, @Nullable Long nextSnapshotId)
+            throws TableNotExistException {
+        try {
+            api.resetConsumer(identifier, consumerId, nextSnapshotId);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+    }
+
+    @Override
     public boolean supportsListObjectsPaged() {
         return true;
     }
 
     @Override
     public boolean supportsListByPattern() {
+        return true;
+    }
+
+    @Override
+    public boolean supportsListTableByType() {
         return true;
     }
 
@@ -338,13 +466,15 @@ public class RESTCatalog implements Catalog {
     public boolean commitSnapshot(
             Identifier identifier,
             @Nullable String tableUuid,
+            @Nullable String baseSnapshotUuid,
             Snapshot snapshot,
             List<PartitionStatistics> statistics)
             throws TableNotExistException {
         try {
-            return api.commitSnapshot(identifier, tableUuid, snapshot, statistics);
+            return api.commitSnapshot(
+                    identifier, tableUuid, baseSnapshotUuid, snapshot, statistics);
         } catch (NoSuchResourceException e) {
-            throw new TableNotExistException(identifier);
+            throw new TableNotExistException(identifier, e);
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
         } catch (BadRequestException e) {
@@ -353,10 +483,10 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public void rollbackTo(Identifier identifier, Instant instant)
+    public void rollbackTo(Identifier identifier, Instant instant, @Nullable Long fromSnapshot)
             throws Catalog.TableNotExistException {
         try {
-            api.rollbackTo(identifier, instant);
+            api.rollbackTo(identifier, instant, fromSnapshot);
         } catch (NoSuchResourceException e) {
             if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_SNAPSHOT)) {
                 throw new IllegalArgumentException(
@@ -365,6 +495,18 @@ public class RESTCatalog implements Catalog {
                 throw new IllegalArgumentException(
                         String.format("Rollback tag '%s' doesn't exist.", e.resourceName()));
             }
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+    }
+
+    @Override
+    public void rollbackSchema(Identifier identifier, long schemaId)
+            throws Catalog.TableNotExistException {
+        try {
+            api.rollbackSchema(identifier, schemaId);
+        } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
@@ -416,7 +558,9 @@ public class RESTCatalog implements Catalog {
                     this::fileIOFromOptions,
                     i -> toTableMetadata(db, response),
                     null,
-                    null);
+                    null,
+                    context,
+                    true);
         } catch (TableNotExistException e) {
             throw new RuntimeException(e);
         }
@@ -428,9 +572,16 @@ public class RESTCatalog implements Catalog {
         try {
             checkNotBranch(identifier, "createTable");
             checkNotSystemTable(identifier, "createTable");
-            validateCreateTable(schema);
+            validateCreateTable(schema, dataTokenEnabled);
+            tableDefaultOptions.forEach(schema.options()::putIfAbsent);
+            validateCreateTable(schema, dataTokenEnabled);
+            // Defaults participate in the catalog-managed partition combination, so validate
+            // the effective options rather than only the explicit ones.
+            validateCatalogManagedFormatTablePartitions(
+                    identifier, schema.options(), schema.options().containsKey(PATH.key()));
             createExternalTablePathIfNotExist(schema);
-            api.createTable(identifier, schema);
+            Schema newSchema = inferSchemaIfExternalPaimonTable(schema);
+            api.createTable(identifier, newSchema);
         } catch (AlreadyExistsException e) {
             if (!ignoreIfExists) {
                 throw new TableAlreadyExistException(identifier);
@@ -500,11 +651,40 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public List<String> authTableQuery(Identifier identifier, @Nullable List<String> select)
+    public void replaceTable(Identifier identifier, Schema newSchema, boolean ignoreIfNotExists)
+            throws TableNotExistException {
+        checkNotBranch(identifier, "replaceTable");
+        checkNotSystemTable(identifier, "replaceTable");
+        validateCreateTable(newSchema, dataTokenEnabled);
+        tableDefaultOptions.forEach(newSchema.options()::putIfAbsent);
+        validateCreateTable(newSchema, dataTokenEnabled);
+        // Defaults participate in the catalog-managed partition combination, so validate the
+        // effective options rather than only the explicit ones. Externality is not validated
+        // client-side here: a round-tripped schema of an internal table may carry the synthetic
+        // path option, and the server remains the authority for replace semantics.
+        validateCatalogManagedPartitionOptions(newSchema.options());
+        try {
+            api.replaceTable(identifier, newSchema);
+        } catch (NoSuchResourceException e) {
+            if (!ignoreIfNotExists) {
+                throw new TableNotExistException(identifier);
+            }
+        } catch (NotImplementedException e) {
+            throw new UnsupportedOperationException(e.getMessage());
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        } catch (BadRequestException e) {
+            throw new IllegalArgumentException(e.getMessage());
+        }
+    }
+
+    @Override
+    public TableQueryAuthResult authTableQuery(Identifier identifier, @Nullable List<String> select)
             throws TableNotExistException {
         checkNotSystemTable(identifier, "authTable");
         try {
-            return api.authTableQuery(identifier, select);
+            AuthTableQueryResponse response = api.authTableQuery(identifier, select);
+            return new TableQueryAuthResult(response.filter(), response.columnMasking());
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {
@@ -565,6 +745,59 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
+    public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        createPartitions(identifier, partitions, true);
+    }
+
+    @Override
+    public void createPartitions(
+            Identifier identifier, List<Map<String, String>> partitions, boolean ignoreIfExists)
+            throws TableNotExistException {
+        try {
+            api.createPartitions(identifier, partitions, ignoreIfExists);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        } catch (AlreadyExistsException e) {
+            // Server contract: with ignoreIfExists=false the whole batch is rejected atomically.
+            throw new IllegalStateException(
+                    String.format(
+                            "Some partitions of table %s already exist: %s",
+                            identifier, e.getMessage()));
+        } catch (BadRequestException e) {
+            throw new IllegalArgumentException(e.getMessage());
+        }
+    }
+
+    @Override
+    public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        Table table = getTable(identifier);
+        if (hasCatalogManagedPartitions(table)) {
+            // Unregistering is metadata-only on the server; deleting the data is the caller's
+            // job, done with the table FileIO afterwards.
+            try {
+                api.dropPartitions(identifier, partitions, true);
+            } catch (NoSuchResourceException e) {
+                throw new TableNotExistException(identifier);
+            } catch (ForbiddenException e) {
+                throw new TableNoPermissionException(identifier, e);
+            } catch (BadRequestException e) {
+                throw new IllegalArgumentException(e.getMessage());
+            }
+            return;
+        }
+        // Every other table keeps the default truncate-based data semantics.
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.truncatePartitions(partitions);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Override
     public List<Partition> listPartitions(Identifier identifier) throws TableNotExistException {
         try {
             return api.listPartitions(identifier);
@@ -573,8 +806,11 @@ public class RESTCatalog implements Catalog {
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
         } catch (NotImplementedException e) {
-            // not a metastore partitioned table
-            return listPartitionsFromFileSystem(getTable(identifier));
+            Table table = getTable(identifier);
+            if (hasCatalogManagedPartitions(table)) {
+                throw e;
+            }
+            return listPartitionsFromFileSystem(table);
         }
     }
 
@@ -592,8 +828,56 @@ public class RESTCatalog implements Catalog {
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
         } catch (NotImplementedException e) {
-            // not a metastore partitioned table
-            return new PagedList<>(listPartitionsFromFileSystem(getTable(identifier)), null);
+            Table table = getTable(identifier);
+            if (hasCatalogManagedPartitions(table)) {
+                throw e;
+            }
+            return new PagedList<>(listPartitionsFromFileSystem(table), null);
+        }
+    }
+
+    @Override
+    public PagedList<Partition> listPartitionsByFilterPaged(
+            Identifier identifier,
+            Predicate predicate,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String partitionNamePattern)
+            throws TableNotExistException {
+        try {
+            return api.listPartitionsByFilterPaged(
+                    identifier,
+                    JsonSerdeUtil.toFlatJson(predicate),
+                    maxResults,
+                    pageToken,
+                    partitionNamePattern);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        } catch (NotImplementedException e) {
+            // HTTP 501 is transport detail; callers only see the Catalog-level capability.
+            throw new UnsupportedOperationException(
+                    "The REST server does not support listing partitions by filter.", e);
+        }
+    }
+
+    @Override
+    public List<Partition> listPartitionsByNames(
+            Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        try {
+            return api.listPartitionsByNames(identifier, partitions);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        } catch (NotImplementedException e) {
+            Table table = getTable(identifier);
+            if (hasCatalogManagedPartitions(table)) {
+                throw e;
+            }
+            return listPartitionsFromFileSystem(table, partitions);
         }
     }
 
@@ -631,6 +915,12 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
+    public void renameBranch(Identifier identifier, String fromBranch, String toBranch)
+            throws BranchNotExistException, BranchAlreadyExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     public void fastForward(Identifier identifier, String branch) throws BranchNotExistException {
         try {
             api.fastForward(identifier, branch);
@@ -653,28 +943,9 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
-            throws TableNotExistException {
-        // partitions of the REST Catalog server are automatically calculated and do not require
-        // special creating.
-    }
-
-    @Override
-    public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
-            throws TableNotExistException {
-        Table table = getTable(identifier);
-        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
-            commit.truncatePartitions(partitions);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    @Override
-    public void alterPartitions(Identifier identifier, List<PartitionStatistics> partitions)
-            throws TableNotExistException {
-        // The partition statistics of the REST Catalog server are automatically calculated and do
-        // not require special reporting.
+    public boolean supportsPartitionModification() {
+        // Paimon tables use commit-based partition maintenance.
+        return false;
     }
 
     @Override
@@ -803,6 +1074,8 @@ public class RESTCatalog implements Catalog {
             return toView(identifier.getDatabaseName(), response);
         } catch (NoSuchResourceException e) {
             throw new ViewNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new ViewNoPermissionException(identifier, e);
         }
     }
 
@@ -815,6 +1088,8 @@ public class RESTCatalog implements Catalog {
             if (!ignoreIfNotExists) {
                 throw new ViewNotExistException(identifier);
             }
+        } catch (ForbiddenException e) {
+            throw new ViewNoPermissionException(identifier, e);
         }
     }
 
@@ -838,15 +1113,21 @@ public class RESTCatalog implements Catalog {
             }
         } catch (BadRequestException e) {
             throw new IllegalArgumentException(e.getMessage());
+        } catch (ForbiddenException e) {
+            throw new ViewNoPermissionException(identifier, e);
         }
     }
 
     @Override
     public List<String> listViews(String databaseName) throws DatabaseNotExistException {
         try {
-            return api.listViews(databaseName);
+            return CatalogUtils.isSystemDatabase(databaseName)
+                    ? Collections.emptyList()
+                    : api.listViews(databaseName);
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(databaseName);
+        } catch (ForbiddenException e) {
+            throw new DatabaseNoPermissionException(databaseName, e);
         }
     }
 
@@ -861,6 +1142,8 @@ public class RESTCatalog implements Catalog {
             return api.listViewsPaged(databaseName, maxResults, pageToken, viewNamePattern);
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(databaseName);
+        } catch (ForbiddenException e) {
+            throw new DatabaseNoPermissionException(databaseName, e);
         }
     }
 
@@ -881,6 +1164,8 @@ public class RESTCatalog implements Catalog {
                     views.getNextPageToken());
         } catch (NoSuchResourceException e) {
             throw new DatabaseNotExistException(db);
+        } catch (ForbiddenException e) {
+            throw new DatabaseNoPermissionException(db, e);
         }
     }
 
@@ -922,6 +1207,8 @@ public class RESTCatalog implements Catalog {
             throw new ViewAlreadyExistException(toView);
         } catch (BadRequestException e) {
             throw new IllegalArgumentException(e.getMessage());
+        } catch (ForbiddenException e) {
+            throw new ViewNoPermissionException(fromView, e);
         }
     }
 
@@ -942,6 +1229,127 @@ public class RESTCatalog implements Catalog {
             }
         } catch (BadRequestException e) {
             throw new IllegalArgumentException(e.getMessage());
+        } catch (ForbiddenException e) {
+            throw new ViewNoPermissionException(identifier, e);
+        }
+    }
+
+    /**
+     * Get tag for table.
+     *
+     * @param identifier database name and table name.
+     * @param tagName tag name
+     * @return {@link GetTagResponse}
+     * @throws TableNotExistException if the table does not exist
+     * @throws TagNotExistException if the tag does not exist
+     * @throws TableNoPermissionException if don't have the permission for this table
+     */
+    @Override
+    public GetTagResponse getTag(Identifier identifier, String tagName)
+            throws TableNotExistException, TagNotExistException {
+        try {
+            return api.getTag(identifier, tagName);
+        } catch (NoSuchResourceException e) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_TAG)) {
+                throw new TagNotExistException(identifier, tagName);
+            }
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+    }
+
+    /**
+     * Create tag for table.
+     *
+     * @param identifier database name and table name.
+     * @param tagName tag name
+     * @param snapshotId optional snapshot id, if not provided uses latest snapshot
+     * @param timeRetained optional time retained as string (e.g., "1d", "12h", "30m")
+     * @param ignoreIfExists if true, ignore if tag already exists
+     * @throws TableNotExistException if the table does not exist
+     * @throws SnapshotNotExistException if the snapshot does not exist
+     * @throws TagAlreadyExistException if the tag already exists and ignoreIfExists is false
+     * @throws TableNoPermissionException if don't have the permission for this table
+     */
+    @Override
+    public void createTag(
+            Identifier identifier,
+            String tagName,
+            @Nullable Long snapshotId,
+            @Nullable String timeRetained,
+            boolean ignoreIfExists)
+            throws TableNotExistException, SnapshotNotExistException, TagAlreadyExistException {
+        try {
+            api.createTag(identifier, tagName, snapshotId, timeRetained);
+        } catch (AlreadyExistsException e) {
+            if (!ignoreIfExists) {
+                throw new TagAlreadyExistException(identifier, tagName);
+            }
+        } catch (NoSuchResourceException e) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_SNAPSHOT)) {
+                throw new SnapshotNotExistException(
+                        String.format(
+                                "Snapshot %s in table %s doesn't exist.",
+                                e.resourceName(), identifier.getFullName()));
+            }
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        } catch (BadRequestException e) {
+            throw new IllegalArgumentException(e.getMessage());
+        }
+    }
+
+    /**
+     * Get paged list names of tags under this table. An empty list is returned if none tag exists.
+     *
+     * @param identifier database name and table name.
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @return a list of the names of tags with provided page size in this table and next page token
+     * @throws TableNotExistException if the table does not exist
+     * @throws TableNoPermissionException if don't have the permission for this table
+     */
+    @Override
+    public PagedList<String> listTagsPaged(
+            Identifier identifier,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String tagNamePrefix)
+            throws TableNotExistException {
+        try {
+            return api.listTagsPaged(identifier, maxResults, pageToken, tagNamePrefix);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+    }
+
+    /**
+     * Delete tag for table.
+     *
+     * @param identifier database name and table name.
+     * @param tagName tag name
+     * @throws TableNotExistException if the table does not exist
+     * @throws TagNotExistException if the tag does not exist
+     * @throws TableNoPermissionException if don't have the permission for this table
+     */
+    public void deleteTag(Identifier identifier, String tagName)
+            throws TableNotExistException, TagNotExistException {
+        try {
+            api.deleteTag(identifier, tagName);
+        } catch (NoSuchResourceException e) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_TAG)) {
+                throw new TagNotExistException(identifier, tagName);
+            }
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
         }
     }
 
@@ -958,29 +1366,30 @@ public class RESTCatalog implements Catalog {
         return api;
     }
 
-    protected GetTableTokenResponse loadTableToken(Identifier identifier)
-            throws TableNotExistException {
-        try {
-            return api.loadTableToken(identifier);
-        } catch (NoSuchResourceException e) {
-            throw new TableNotExistException(identifier);
-        } catch (ForbiddenException e) {
-            throw new TableNoPermissionException(identifier, e);
-        }
+    /**
+     * Whether the catalog owns this table's partitions, which is exactly whether loading it
+     * produced a partition manager. Reading the option instead would be a second answer to the same
+     * question, and the two can disagree on a table built outside the catalog.
+     */
+    private static boolean hasCatalogManagedPartitions(Table table) {
+        return table instanceof FormatTable && ((FormatTable) table).partitionManager() != null;
     }
 
     private FileIO fileIOForData(Path path, Identifier identifier) {
-        return dataTokenEnabled
-                ? new RESTTokenFileIO(context, api, identifier, path)
-                : fileIOFromOptions(path);
+        return CachingFileIO.wrapWithCachingIfNeeded(
+                dataTokenEnabled
+                        ? new RESTTokenFileIO(context, api, identifier, path)
+                        : fileIOFromOptions(path),
+                context,
+                cacheManager);
     }
 
     private FileIO fileIOFromOptions(Path path) {
-        try {
-            return FileIO.get(path, context);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+        // In some cases we only need to get the table object but won't need to access data, using
+        // ResolvingFileIO to avoid permission issue.
+        FileIO fileIO = new ResolvingFileIO();
+        fileIO.configure(context);
+        return fileIO;
     }
 
     private void createExternalTablePathIfNotExist(Schema schema) throws IOException {
@@ -993,5 +1402,31 @@ public class RESTCatalog implements Catalog {
                 }
             }
         }
+    }
+
+    private Schema inferSchemaIfExternalPaimonTable(Schema schema) throws Exception {
+        TableType tableType = Options.fromMap(schema.options()).get(TYPE);
+        String externalLocation = schema.options().get(PATH.key());
+
+        if (TableType.TABLE.equals(tableType) && Objects.nonNull(externalLocation)) {
+            Path externalPath = new Path(externalLocation);
+            SchemaManager schemaManager =
+                    new SchemaManager(fileIOFromOptions(externalPath), externalPath);
+            Optional<TableSchema> latest = schemaManager.latest();
+            if (latest.isPresent()) {
+                // Note we just validate schema here, will not create a new table
+                schemaManager.createTable(schema, true);
+                Schema existsSchema = latest.get().toSchema();
+                // use `owner` and `path` from the user provide schema
+                if (Objects.nonNull(schema.options().get(Catalog.OWNER_PROP))) {
+                    existsSchema
+                            .options()
+                            .put(Catalog.OWNER_PROP, schema.options().get(Catalog.OWNER_PROP));
+                }
+                existsSchema.options().put(PATH.key(), schema.options().get(PATH.key()));
+                return existsSchema;
+            }
+        }
+        return schema;
     }
 }
