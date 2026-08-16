@@ -24,6 +24,7 @@ import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.FileRecordReader;
+import org.apache.paimon.reader.ReadBatchSizeController;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.PrimaryKeyIndexPositionReader;
@@ -71,6 +72,12 @@ public class PrimaryKeyIndexedSplitRead implements SplitRead<InternalRow> {
     @Override
     public SplitRead<InternalRow> withFilter(@Nullable Predicate predicate) {
         rawRead.withFilter(predicate);
+        return this;
+    }
+
+    @Override
+    public SplitRead<InternalRow> withReadBatchSizeController(ReadBatchSizeController controller) {
+        rawRead.withReadBatchSizeController(controller);
         return this;
     }
 

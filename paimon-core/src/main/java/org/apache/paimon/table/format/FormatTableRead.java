@@ -24,11 +24,14 @@ import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateProjectionConverter;
 import org.apache.paimon.reader.LimitRecordReader;
+import org.apache.paimon.reader.ReadBatchSizeController;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowType;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Optional;
@@ -43,6 +46,7 @@ public class FormatTableRead implements TableRead {
     private final Integer limit;
 
     private boolean executeFilter = false;
+    @Nullable private ReadBatchSizeController readBatchSizeController;
 
     public FormatTableRead(
             RowType readType,
@@ -74,9 +78,18 @@ public class FormatTableRead implements TableRead {
     }
 
     @Override
+    public TableRead withReadBatchSizeController(ReadBatchSizeController controller) {
+        this.readBatchSizeController = controller;
+        return this;
+    }
+
+    @Override
     public RecordReader<InternalRow> createReader(Split split) throws IOException {
         FormatDataSplit dataSplit = (FormatDataSplit) split;
-        RecordReader<InternalRow> reader = read.createReader(dataSplit);
+        // Capture the binding per TableRead so lazy file suppliers cannot observe another read's
+        // controller.
+        ReadBatchSizeController controller = this.readBatchSizeController;
+        RecordReader<InternalRow> reader = read.createReader(dataSplit, controller);
         if (executeFilter) {
             reader = executeFilter(reader);
         }

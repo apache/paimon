@@ -28,6 +28,7 @@ import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.columnar.ColumnarRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatWriter;
@@ -36,6 +37,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.ReadBatchSizeController;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
@@ -202,6 +204,141 @@ public class ParquetReadWriteTest {
 
     public static Collection<Integer> parameters() {
         return Arrays.asList(10, 1000);
+    }
+
+    @Test
+    void testDynamicReadBatchSize() throws IOException {
+        List<InternalRow> records = new ArrayList<>();
+        for (int i = 0; i < 20; i++) {
+            records.add(newRow(i));
+        }
+        Path path = createTempParquetFileByPaimon(folder, records, 10_000, ROW_TYPE);
+
+        ParquetReaderFactory factory =
+                new ParquetReaderFactory(
+                        new Options(),
+                        RowType.builder().field("f4", new IntType()).build(),
+                        4,
+                        null);
+        ReadBatchSizeController controller = new ReadBatchSizeController(8, 5);
+        LocalFileIO fileIO = new LocalFileIO();
+        try (RecordReader<InternalRow> reader =
+                factory.createReader(
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), null, controller))) {
+            BatchResult firstBatch = readIntBatch(reader);
+            assertThat(firstBatch.values).containsExactly(0, 1, 2, 3, 4);
+            assertThat(firstBatch.capacity).isEqualTo(5);
+
+            controller.setRequestedBatchSize(3);
+            controller.setRequestedBatchSize(2);
+            BatchResult secondBatch = readIntBatch(reader);
+            assertThat(secondBatch.values).containsExactly(5, 6);
+            assertThat(secondBatch.capacity).isEqualTo(2);
+
+            controller.setRequestedBatchSize(8);
+            BatchResult thirdBatch = readIntBatch(reader);
+            assertThat(thirdBatch.values).containsExactly(7, 8, 9, 10, 11, 12, 13, 14);
+            assertThat(thirdBatch.capacity).isEqualTo(8);
+        }
+    }
+
+    @Test
+    void testDynamicReadBatchSizeForNestedTypes() throws IOException {
+        List<InternalRow> records = prepareNestedData(20);
+        Path path = createTempParquetFileByPaimon(folder, records, 10, NESTED_ARRAY_MAP_TYPE);
+        ParquetReaderFactory factory =
+                new ParquetReaderFactory(new Options(), NESTED_ARRAY_MAP_TYPE, 4, null);
+        ReadBatchSizeController controller = new ReadBatchSizeController(8, 5);
+        InternalRowSerializer serializer = new InternalRowSerializer(NESTED_ARRAY_MAP_TYPE);
+        List<InternalRow> results = new ArrayList<>();
+        LocalFileIO fileIO = new LocalFileIO();
+
+        try (RecordReader<InternalRow> reader =
+                factory.createReader(
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), null, controller))) {
+            assertThat(readNestedBatch(reader, serializer, results)).isEqualTo(5);
+
+            controller.setRequestedBatchSize(2);
+            assertThat(readNestedBatch(reader, serializer, results)).isEqualTo(2);
+
+            controller.setRequestedBatchSize(8);
+            assertThat(readNestedBatch(reader, serializer, results)).isEqualTo(8);
+            assertThat(readNestedBatch(reader, serializer, results)).isEqualTo(8);
+        }
+
+        compareNestedRow(records, results);
+    }
+
+    @Test
+    void testStaticReadBatchSizeKeepsConfiguredVectorCapacity() throws IOException {
+        List<InternalRow> records = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            records.add(newRow(i));
+        }
+        Path path = createTempParquetFileByPaimon(folder, records, 10_000, ROW_TYPE);
+        ParquetReaderFactory factory =
+                new ParquetReaderFactory(
+                        new Options(),
+                        RowType.builder().field("f4", new IntType()).build(),
+                        4,
+                        null);
+        LocalFileIO fileIO = new LocalFileIO();
+
+        try (RecordReader<InternalRow> reader =
+                factory.createReader(
+                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)))) {
+            BatchResult batch = readIntBatch(reader);
+            assertThat(batch.values).containsExactly(0, 1, 2, 3);
+            assertThat(batch.capacity).isEqualTo(4);
+        }
+    }
+
+    private static BatchResult readIntBatch(RecordReader<InternalRow> reader) throws IOException {
+        RecordReader.RecordIterator<InternalRow> batch = reader.readBatch();
+        assertThat(batch).isNotNull();
+        List<Integer> values = new ArrayList<>();
+        int capacity = -1;
+        InternalRow row;
+        while ((row = batch.next()) != null) {
+            if (capacity < 0) {
+                capacity = ((ColumnarRow) row).batch().columns[0].getCapacity();
+            }
+            values.add(row.getInt(0));
+        }
+        batch.releaseBatch();
+        return new BatchResult(values, capacity);
+    }
+
+    private static int readNestedBatch(
+            RecordReader<InternalRow> reader,
+            InternalRowSerializer serializer,
+            List<InternalRow> results)
+            throws IOException {
+        RecordReader.RecordIterator<InternalRow> batch = reader.readBatch();
+        assertThat(batch).isNotNull();
+        int capacity = -1;
+        InternalRow row;
+        while ((row = batch.next()) != null) {
+            if (capacity < 0) {
+                capacity = ((ColumnarRow) row).batch().columns[0].getCapacity();
+            }
+            results.add(serializer.copy(row));
+        }
+        batch.releaseBatch();
+        return capacity;
+    }
+
+    private static class BatchResult {
+
+        private final List<Integer> values;
+        private final int capacity;
+
+        private BatchResult(List<Integer> values, int capacity) {
+            this.values = values;
+            this.capacity = capacity;
+        }
     }
 
     @ParameterizedTest

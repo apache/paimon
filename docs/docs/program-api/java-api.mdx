@@ -212,6 +212,47 @@ public class ReadTable {
 }
 ```
 
+### Adjust Read Batch Size at Runtime
+
+Parquet and ORC readers can share a `ReadBatchSizeController` to adjust the row count and vector
+capacity of future physical batches without recreating readers:
+
+```java
+import org.apache.paimon.reader.ReadBatchSizeController;
+import org.apache.paimon.table.source.TableRead;
+
+ReadBatchSizeController controller = new ReadBatchSizeController(1024, 1024);
+TableRead read = readBuilder.newRead().withReadBatchSizeController(controller);
+RecordReader<InternalRow> reader = read.createReader(splits);
+
+controller.setRequestedBatchSize(256);
+```
+
+Configure the controller on `TableRead` before creating readers. The first constructor argument is
+an immutable safety limit; it does not preallocate vectors of that size. The second argument is the
+initial requested size. Every requested size must be between `1` and the safety limit.
+
+A supporting reader snapshots the requested size before starting a physical batch. If the size has
+changed, it replaces an idle reusable batch with vectors sized for the new value and then starts the
+read. The allocation is reused until the requested size changes again. Consequently, lowering the
+requested size reduces the vector capacity of future batches instead of only changing their logical
+row count.
+
+An update never mutates a batch that has already started or is still owned by a consumer.
+Asynchronously prefetched batches may therefore retain the previous size. For a pooled ORC reader,
+each idle pool entry adopts the current size the next time it is acquired, while in-flight entries
+keep their old vectors until released. During such a transition, old and new vectors can coexist.
+
+The controller uses latest-value semantics: when updates happen faster than physical batches start,
+readers may skip intermediate requested sizes. Engines should avoid changing the size too frequently
+because each observed size change reallocates vectors and can add allocation and garbage-collection
+overhead. A hysteresis interval or minimum adjustment period is recommended.
+
+For concurrent scans, estimate memory using the requested size multiplied by the number of active
+and prefetched batches. The maximum limits an accidental or unsafe request, but it is not reserved
+up front. This allows an engine to reduce future batch capacities under memory pressure and grow
+them again when more memory is available.
+
 ## Batch Write
 
 The writing is divided into two stages:

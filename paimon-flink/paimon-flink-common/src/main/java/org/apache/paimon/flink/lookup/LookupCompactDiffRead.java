@@ -23,6 +23,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.reader.ReadBatchSizeController;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.AbstractDataTableRead;
@@ -85,6 +86,14 @@ public class LookupCompactDiffRead extends AbstractDataTableRead {
     public TableRead withIOManager(IOManager ioManager) {
         fullPhaseMergeRead.withIOManager(ioManager);
         incrementalDiffRead.withIOManager(ioManager);
+        return this;
+    }
+
+    @Override
+    public InnerTableRead withReadBatchSizeController(ReadBatchSizeController controller) {
+        // Both lookup phases can reach physical files and must share memory control.
+        fullPhaseMergeRead.withReadBatchSizeController(controller);
+        incrementalDiffRead.withReadBatchSizeController(controller);
         return this;
     }
 }

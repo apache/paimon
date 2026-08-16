@@ -22,6 +22,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.FileRecordReader;
+import org.apache.paimon.reader.ReadBatchSizeController;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.utils.RoaringBitmap32;
 
@@ -53,5 +54,11 @@ public interface FormatReaderFactory {
 
         @Nullable
         RoaringBitmap32 selection();
+
+        /** Controller shared by readers that support dynamic read batch sizing. */
+        @Nullable
+        default ReadBatchSizeController readBatchSizeController() {
+            return null;
+        }
     }
 }

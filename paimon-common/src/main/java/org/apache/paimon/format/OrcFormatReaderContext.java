@@ -20,7 +20,10 @@ package org.apache.paimon.format;
 
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.reader.ReadBatchSizeController;
 import org.apache.paimon.reader.RecordReader;
+
+import javax.annotation.Nullable;
 
 /** The context for creating orc {@link RecordReader}. */
 public class OrcFormatReaderContext extends FormatReaderContext {
@@ -29,6 +32,16 @@ public class OrcFormatReaderContext extends FormatReaderContext {
 
     public OrcFormatReaderContext(FileIO fileIO, Path filePath, long fileSize, int poolSize) {
         super(fileIO, filePath, fileSize);
+        this.poolSize = poolSize;
+    }
+
+    public OrcFormatReaderContext(
+            FileIO fileIO,
+            Path filePath,
+            long fileSize,
+            int poolSize,
+            @Nullable ReadBatchSizeController readBatchSizeController) {
+        super(fileIO, filePath, fileSize, null, readBatchSizeController);
         this.poolSize = poolSize;
     }
 
