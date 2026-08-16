@@ -59,8 +59,9 @@ def _abort_commit_messages(table, commit_messages: List[CommitMessage]):
     """Delete files created by messages known to be uncommitted."""
     for message in commit_messages:
         for file in list(message.new_files) + list(message.changelog_files):
-            path = file.external_path or file.file_path
+            path = None
             try:
+                path = file.external_path or file.file_path
                 if path:
                     table.file_io.delete_quietly(str(path))
             except Exception as error:
@@ -70,14 +71,16 @@ def _abort_commit_messages(table, commit_messages: List[CommitMessage]):
                     error,
                 )
         for entry in message.index_adds:
-            file_name = entry.index_file.file_name
-            path = (
-                entry.index_file.external_path
-                or table.path_factory()
-                .global_index_path_factory()
-                .to_path(file_name)
-            )
+            file_name = None
             try:
+                index_file = entry.index_file
+                file_name = index_file.file_name
+                path = (
+                    index_file.external_path
+                    or table.path_factory()
+                    .global_index_path_factory()
+                    .to_path(file_name)
+                )
                 table.file_io.delete_quietly(path)
             except Exception as error:
                 logger.warning(
