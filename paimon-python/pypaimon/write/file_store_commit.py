@@ -59,24 +59,17 @@ def _abort_commit_messages(table, commit_messages: List[CommitMessage]):
     """Delete files created by messages known to be uncommitted."""
     for message in commit_messages:
         for file in list(message.new_files) + list(message.changelog_files):
+            path = None
             try:
-                paths = file.collect_files()
+                path = file.external_path or file.file_path
+                if path:
+                    table.file_io.delete_quietly(str(path))
             except Exception as error:
                 logger.warning(
-                    "Failed to collect files for %s during abort: %s",
-                    file.file_name,
+                    "Failed to clean up file %s during abort: %s",
+                    path,
                     error,
                 )
-                continue
-            for path in paths:
-                try:
-                    table.file_io.delete_quietly(path)
-                except Exception as error:
-                    logger.warning(
-                        "Failed to clean up file %s during abort: %s",
-                        path,
-                        error,
-                    )
         for entry in message.index_adds:
             file_name = None
             try:

@@ -66,21 +66,6 @@ class DataFileMeta:
             raise ValueError(f"First row id of '{self.file_name}' should not be null.")
         return Range(self.first_row_id, self.first_row_id + self.row_count - 1)
 
-    def collect_files(self) -> List[str]:
-        """Return this data file and its aligned extra files."""
-        file_path = self.external_path or self.file_path
-        paths = [str(file_path)] if file_path else []
-        for extra_file in self.extra_files or []:
-            if "://" in extra_file or extra_file.startswith("/"):
-                paths.append(extra_file)
-            elif file_path and "/" in str(file_path):
-                paths.append(
-                    f"{str(file_path).rsplit('/', 1)[0]}/{extra_file}"
-                )
-            else:
-                paths.append(extra_file)
-        return paths
-
     def get_creation_time(self) -> Optional[Timestamp]:
         return self.creation_time
 

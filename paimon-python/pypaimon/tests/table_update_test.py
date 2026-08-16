@@ -294,11 +294,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
     def test_predicate_update_aborts_groups_after_later_failure(self):
         from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 
-        table = self._create_seeded_table(options={
-            'row-tracking.enabled': 'true',
-            'data-evolution.enabled': 'true',
-            'data-evolution.row-sidecar.enabled': 'true',
-        })
+        table = self._create_seeded_table()
         self._do_update(
             table,
             pa.Table.from_pydict({'_ROW_ID': [0], 'age': [26]}),
@@ -314,10 +310,6 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             if calls == 2:
                 raise RuntimeError("second group failed")
             messages = original(updater, data, columns)
-            self.assertTrue(any(
-                file.extra_files
-                for message in messages for file in message.new_files
-            ))
             return messages
 
         with mock.patch.object(
