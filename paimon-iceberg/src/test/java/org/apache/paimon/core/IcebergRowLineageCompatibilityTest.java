@@ -26,6 +26,9 @@ import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.iceberg.IcebergOptions;
+import org.apache.paimon.iceberg.IcebergPathFactory;
+import org.apache.paimon.iceberg.manifest.IcebergManifestFileMeta;
+import org.apache.paimon.iceberg.manifest.IcebergManifestList;
 import org.apache.paimon.iceberg.metadata.IcebergMetadata;
 import org.apache.paimon.iceberg.metadata.IcebergSnapshot;
 import org.apache.paimon.options.MemorySize;
@@ -45,6 +48,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -205,6 +209,70 @@ public class IcebergRowLineageCompatibilityTest {
         IcebergMetadata metadata = readIcebergMetadata(table, 2);
         assertThat(metadata.refs()).containsKey("t1");
         assertThat(metadata.nextRowId()).isEqualTo(3L);
+    }
+
+    @Test
+    public void testManifestListCarriesFirstRowIdColumn() throws Exception {
+        FileStoreTable table = createPaimonTable(defaultRowType(), formatVersionOptions(3), "avro");
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.close();
+        commit.close();
+
+        // the v3 manifest list must round-trip the first_row_id column
+        IcebergPathFactory paths = new IcebergPathFactory(new Path(table.location(), "metadata"));
+        IcebergManifestList manifestList = IcebergManifestList.create(table, paths);
+        List<IcebergManifestFileMeta> metas =
+                manifestList.read(
+                        new Path(readIcebergMetadata(table, 1).currentSnapshot().manifestList())
+                                .getName());
+        assertThat(metas).isNotEmpty();
+        // Task 2 only adds the column; assignment arrives in Task 4 — value still null here
+        for (IcebergManifestFileMeta meta : metas) {
+            assertThat(meta.firstRowId()).isNull();
+        }
+    }
+
+    @Test
+    public void testReadsManifestListWrittenWithoutFirstRowIdColumn() throws Exception {
+        // A Layer-1 manifest list physically lacks column 520. The v3 reader must resolve
+        // the missing column to null (Avro schema resolution), not fail.
+        FileStoreTable table = createPaimonTable(defaultRowType(), formatVersionOptions(3), "avro");
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.close();
+        commit.close();
+
+        IcebergPathFactory paths = new IcebergPathFactory(new Path(table.location(), "metadata"));
+        String listName =
+                new Path(readIcebergMetadata(table, 1).currentSnapshot().manifestList()).getName();
+
+        // rewrite the manifest list through the OLD (14-column) serializer to simulate Layer 1
+        FileStoreTable v2SchemaView =
+                table.copy(Collections.singletonMap(IcebergOptions.FORMAT_VERSION.key(), "2"));
+        IcebergManifestList oldWriter = IcebergManifestList.create(v2SchemaView, paths);
+        IcebergManifestList newReader = IcebergManifestList.create(table, paths);
+        List<IcebergManifestFileMeta> metas = newReader.read(listName);
+        String rewritten = oldWriter.writeWithoutRolling(metas);
+        LocalFileIO.create().deleteQuietly(paths.toManifestListPath(listName));
+        LocalFileIO.create()
+                .rename(paths.toManifestListPath(rewritten), paths.toManifestListPath(listName));
+
+        // the v3 reader resolves the absent column to null for every meta
+        for (IcebergManifestFileMeta meta : newReader.read(listName)) {
+            assertThat(meta.firstRowId()).isNull();
+        }
     }
 
     // ------------------------------------------------------------------------

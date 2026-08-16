@@ -36,14 +36,37 @@ public class IcebergManifestFileMetaSerializer extends ObjectSerializer<IcebergM
     private static final long serialVersionUID = 1L;
 
     private final IcebergPartitionSummarySerializer partitionSummarySerializer;
+    private final boolean withFirstRowId;
 
     public IcebergManifestFileMetaSerializer(RowType schema) {
         super(schema);
         this.partitionSummarySerializer = new IcebergPartitionSummarySerializer();
+        this.withFirstRowId = schema.getFieldCount() == 15;
     }
 
     @Override
     public InternalRow toRow(IcebergManifestFileMeta file) {
+        if (withFirstRowId) {
+            return GenericRow.of(
+                    BinaryString.fromString(file.manifestPath()),
+                    file.manifestLength(),
+                    file.partitionSpecId(),
+                    file.content().id(),
+                    file.sequenceNumber(),
+                    file.minSequenceNumber(),
+                    file.addedSnapshotId(),
+                    file.addedFilesCount(),
+                    file.existingFilesCount(),
+                    file.deletedFilesCount(),
+                    file.addedRowsCount(),
+                    file.existingRowsCount(),
+                    file.deletedRowsCount(),
+                    new GenericArray(
+                            file.partitions().stream()
+                                    .map(partitionSummarySerializer::toRow)
+                                    .toArray(InternalRow[]::new)),
+                    file.firstRowId());
+        }
         return GenericRow.of(
                 BinaryString.fromString(file.manifestPath()),
                 file.manifestLength(),
@@ -80,7 +103,8 @@ public class IcebergManifestFileMetaSerializer extends ObjectSerializer<IcebergM
                 row.getLong(10),
                 row.getLong(11),
                 row.getLong(12),
-                toPartitionSummaries(row.getArray(13)));
+                toPartitionSummaries(row.getArray(13)),
+                withFirstRowId && !row.isNullAt(14) ? row.getLong(14) : null);
     }
 
     private List<IcebergPartitionSummary> toPartitionSummaries(InternalArray array) {
