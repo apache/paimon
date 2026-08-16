@@ -106,6 +106,105 @@ class AtomicType(DataType):
         return "{}{}".format(self.type, null_suffix)
 
 
+class EdgeAlgorithm(Enum):
+    SPHERICAL = "spherical"
+    VINCENTY = "vincenty"
+    THOMAS = "thomas"
+    ANDOYER = "andoyer"
+    KARNEY = "karney"
+
+    @classmethod
+    def from_name(cls, name: str) -> "EdgeAlgorithm":
+        if name is None:
+            raise ValueError("Invalid edge interpolation algorithm: null")
+        try:
+            return cls(name.lower())
+        except ValueError as exc:
+            raise ValueError(
+                "Invalid edge interpolation algorithm: {}".format(name)) from exc
+
+    def __str__(self) -> str:
+        return self.value
+
+
+@dataclass
+class GeometryType(DataType):
+    crs: str
+
+    DEFAULT_CRS = "OGC:CRS84"
+
+    def __init__(self, crs: str = DEFAULT_CRS, nullable: bool = True):
+        super().__init__(nullable)
+        self.crs = self._validate_crs(crs)
+
+    @staticmethod
+    def _validate_crs(crs: str) -> str:
+        if not crs:
+            raise ValueError("Invalid CRS: {}".format(crs))
+        return crs
+
+    @staticmethod
+    def _format_crs(crs: str) -> str:
+        if (crs[0].isdigit()
+                or any(character.isspace() or character in "<>().,'`"
+                       for character in crs)):
+            return "'{}'".format(crs.replace("'", "''"))
+        return crs
+
+    def __eq__(self, other):
+        return (isinstance(other, GeometryType)
+                and self.nullable == other.nullable
+                and self.crs.lower() == other.crs.lower())
+
+    def __hash__(self):
+        return hash((self.crs.upper(), self.nullable))
+
+    def to_dict(self) -> str:
+        return str(self)
+
+    def __str__(self) -> str:
+        null_suffix = "" if self.nullable else " NOT NULL"
+        return "GEOMETRY({}){}".format(
+            self._format_crs(self.crs), null_suffix)
+
+
+@dataclass
+class GeographyType(DataType):
+    crs: str
+    algorithm: EdgeAlgorithm
+
+    DEFAULT_CRS = "OGC:CRS84"
+    DEFAULT_ALGORITHM = EdgeAlgorithm.SPHERICAL
+
+    def __init__(self, crs: str = DEFAULT_CRS,
+                 algorithm: EdgeAlgorithm = DEFAULT_ALGORITHM,
+                 nullable: bool = True):
+        super().__init__(nullable)
+        self.crs = GeometryType._validate_crs(crs)
+        if algorithm is None:
+            algorithm = self.DEFAULT_ALGORITHM
+        if not isinstance(algorithm, EdgeAlgorithm):
+            algorithm = EdgeAlgorithm.from_name(algorithm)
+        self.algorithm = algorithm
+
+    def __eq__(self, other):
+        return (isinstance(other, GeographyType)
+                and self.nullable == other.nullable
+                and self.crs.lower() == other.crs.lower()
+                and self.algorithm == other.algorithm)
+
+    def __hash__(self):
+        return hash((self.crs.upper(), self.algorithm, self.nullable))
+
+    def to_dict(self) -> str:
+        return str(self)
+
+    def __str__(self) -> str:
+        null_suffix = "" if self.nullable else " NOT NULL"
+        return "GEOGRAPHY({}, {}){}".format(
+            GeometryType._format_crs(self.crs), self.algorithm, null_suffix)
+
+
 @dataclass
 class ArrayType(DataType):
     element: DataType
@@ -500,6 +599,8 @@ class Keyword(Enum):
     TIMESTAMP = "TIMESTAMP"
     TIMESTAMP_LTZ = "TIMESTAMP_LTZ"
     VARIANT = "VARIANT"
+    GEOMETRY = "GEOMETRY"
+    GEOGRAPHY = "GEOGRAPHY"
 
 
 class DataTypeParser:
@@ -515,7 +616,7 @@ class DataTypeParser:
     @staticmethod
     def parse_atomic_type_sql_string(type_string: str) -> DataType:
         nullable = DataTypeParser.parse_nullability(type_string)
-        type_upper = type_string.upper().strip()
+        type_text = type_string.strip()
         # Strip the trailing nullability suffix so it is stored only in
         # ``nullable``, not baked into the atomic type string. The space-split
         # branch below drops it for plain types ("BIGINT NOT NULL"), but a
@@ -523,9 +624,34 @@ class DataTypeParser:
         # takes the paren branch and would otherwise keep the suffix in
         # ``AtomicType.type`` -- doubling it on the next ``to_dict()``.
         for suffix in (" NOT NULL", " NULL"):
-            if type_upper.endswith(suffix):
-                type_upper = type_upper[: -len(suffix)].rstrip()
+            if type_text.upper().endswith(suffix):
+                type_text = type_text[: -len(suffix)].rstrip()
                 break
+
+        geometry_match = re.fullmatch(
+            r"GEOMETRY(?:\(\s*(?:'((?:''|[^'])*)'|([^)]*?))\s*\))?",
+            type_text, re.IGNORECASE)
+        if geometry_match:
+            quoted_crs, raw_crs = geometry_match.groups()
+            crs = quoted_crs.replace("''", "'") if quoted_crs is not None else raw_crs
+            return GeometryType(crs or GeometryType.DEFAULT_CRS, nullable)
+        if type_text.upper().startswith("GEOMETRY"):
+            raise ValueError("Invalid geometry type: {}".format(type_text))
+
+        geography_match = re.fullmatch(
+            r"GEOGRAPHY(?:\(\s*(?:'((?:''|[^'])*)'|([^,]*?))\s*"
+            r"(?:,\s*([^(),]+?)\s*)?\))?", type_text, re.IGNORECASE)
+        if geography_match:
+            quoted_crs, raw_crs, raw_algorithm = geography_match.groups()
+            crs = quoted_crs.replace("''", "'") if quoted_crs is not None else raw_crs
+            crs = crs or GeographyType.DEFAULT_CRS
+            algorithm = EdgeAlgorithm.from_name(
+                raw_algorithm or GeographyType.DEFAULT_ALGORITHM.value)
+            return GeographyType(crs, algorithm, nullable)
+        if type_text.upper().startswith("GEOGRAPHY"):
+            raise ValueError("Invalid geography type: {}".format(type_text))
+
+        type_upper = type_text.upper()
 
         if "(" in type_upper:
             base_type = type_upper.split("(")[0]
@@ -658,8 +784,29 @@ def is_variant_struct(pa_type: pyarrow.StructType) -> bool:
 class PyarrowFieldParser:
 
     @staticmethod
+    def _field_metadata(data_type: DataType,
+                        description: Optional[str] = None) -> Dict[bytes, bytes]:
+        metadata = {}
+        if isinstance(data_type, (GeometryType, GeographyType)):
+            metadata[b'paimon.type'] = str(data_type).encode('utf-8')
+        if description:
+            metadata[b'description'] = description.encode('utf-8')
+        return metadata
+
+    @staticmethod
+    def _from_paimon_named_type(name: str, data_type: DataType,
+                                description: Optional[str] = None) -> pyarrow.Field:
+        return pyarrow.field(
+            name,
+            PyarrowFieldParser.from_paimon_type(data_type),
+            nullable=data_type.nullable,
+            metadata=PyarrowFieldParser._field_metadata(data_type, description))
+
+    @staticmethod
     def from_paimon_type(data_type: DataType) -> pyarrow.DataType:
         # Based on Paimon DataTypes Doc: https://paimon.apache.org/docs/master/concepts/data-types/
+        if isinstance(data_type, (GeometryType, GeographyType)):
+            return pyarrow.binary()
         if isinstance(data_type, AtomicType):
             type_name = data_type.type.upper()
             if type_name == 'TINYINT':
@@ -720,42 +867,32 @@ class PyarrowFieldParser:
             if type_name.startswith('TIME'):
                 return pyarrow.time32('ms')
         elif isinstance(data_type, ArrayType):
-            element_type = PyarrowFieldParser.from_paimon_type(data_type.element)
             return pyarrow.list_(
-                pyarrow.field(
-                    "item",
-                    element_type,
-                    nullable=data_type.element.nullable,
-                )
+                PyarrowFieldParser._from_paimon_named_type("item", data_type.element)
             )
         elif isinstance(data_type, VectorType):
             return pyarrow.list_(PyarrowFieldParser.from_paimon_type(data_type.element), data_type.length)
         elif isinstance(data_type, MapType):
-            key_type = PyarrowFieldParser.from_paimon_type(data_type.key)
-            value_type = PyarrowFieldParser.from_paimon_type(data_type.value)
             return pyarrow.map_(
-                pyarrow.field("key", key_type, nullable=False),
                 pyarrow.field(
-                    "value",
-                    value_type,
-                    nullable=data_type.value.nullable,
-                ),
+                    "key",
+                    PyarrowFieldParser.from_paimon_type(data_type.key),
+                    nullable=False,
+                    metadata=PyarrowFieldParser._field_metadata(data_type.key)),
+                PyarrowFieldParser._from_paimon_named_type(
+                    "value", data_type.value),
             )
         elif isinstance(data_type, RowType):
             pa_fields = []
             for field in data_type.fields:
-                pa_field_type = PyarrowFieldParser.from_paimon_type(field.type)
-                pa_fields.append(pyarrow.field(field.name, pa_field_type, nullable=field.type.nullable))
+                pa_fields.append(PyarrowFieldParser.from_paimon_field(field))
             return pyarrow.struct(pa_fields)
         raise ValueError("Unsupported data type: {}".format(data_type))
 
     @staticmethod
     def from_paimon_field(data_field: DataField) -> pyarrow.Field:
-        pa_field_type = PyarrowFieldParser.from_paimon_type(data_field.type)
-        metadata = {}
-        if data_field.description:
-            metadata[b'description'] = data_field.description.encode('utf-8')
-        return pyarrow.field(data_field.name, pa_field_type, nullable=data_field.type.nullable, metadata=metadata)
+        return PyarrowFieldParser._from_paimon_named_type(
+            data_field.name, data_field.type, data_field.description)
 
     @staticmethod
     def from_paimon_schema(data_fields: List[DataField]):
@@ -806,19 +943,16 @@ class PyarrowFieldParser:
             type_name = 'TIME(0)'
         elif types.is_fixed_size_list(pa_type):
             pa_type: pyarrow.FixedSizeListType
-            element_type = PyarrowFieldParser.to_paimon_type(pa_type.value_type, pa_type.value_field.nullable)
+            element_type = PyarrowFieldParser._to_paimon_field_type(pa_type.value_field)
             return VectorType(nullable, element_type, pa_type.list_size)
         elif types.is_list(pa_type) or types.is_large_list(pa_type):
             pa_type: pyarrow.ListType
-            element_type = PyarrowFieldParser.to_paimon_type(
-                pa_type.value_type, pa_type.value_field.nullable)
+            element_type = PyarrowFieldParser._to_paimon_field_type(pa_type.value_field)
             return ArrayType(nullable, element_type)
         elif types.is_map(pa_type):
             pa_type: pyarrow.MapType
-            key_type = PyarrowFieldParser.to_paimon_type(
-                pa_type.key_type, pa_type.key_field.nullable)
-            value_type = PyarrowFieldParser.to_paimon_type(
-                pa_type.item_type, pa_type.item_field.nullable)
+            key_type = PyarrowFieldParser._to_paimon_field_type(pa_type.key_field)
+            value_type = PyarrowFieldParser._to_paimon_field_type(pa_type.item_field)
             return MapType(nullable, key_type, value_type)
         elif types.is_struct(pa_type) and is_variant_struct(pa_type):
             return AtomicType('VARIANT', nullable)
@@ -826,7 +960,7 @@ class PyarrowFieldParser:
             pa_type: pyarrow.StructType
             fields = []
             for i, pa_field in enumerate(pa_type):
-                field_type = PyarrowFieldParser.to_paimon_type(pa_field.type, pa_field.nullable)
+                field_type = PyarrowFieldParser._to_paimon_field_type(pa_field)
                 fields.append(DataField(
                     id=i,
                     name=pa_field.name,
@@ -839,7 +973,7 @@ class PyarrowFieldParser:
 
     @staticmethod
     def to_paimon_field(field_idx: int, pa_field: pyarrow.Field) -> DataField:
-        data_type = PyarrowFieldParser.to_paimon_type(pa_field.type, pa_field.nullable)
+        data_type = PyarrowFieldParser._to_paimon_field_type(pa_field)
         description = pa_field.metadata.get(b'description', b'').decode('utf-8') \
             if pa_field.metadata and b'description' in pa_field.metadata else None
         return DataField(
@@ -848,6 +982,23 @@ class PyarrowFieldParser:
             type=data_type,
             description=description
         )
+
+    @staticmethod
+    def _to_paimon_field_type(pa_field: pyarrow.Field) -> DataType:
+        if pa_field.metadata and b'paimon.type' in pa_field.metadata:
+            data_type = DataTypeParser.parse_atomic_type_sql_string(
+                pa_field.metadata[b'paimon.type'].decode('utf-8'))
+            if (isinstance(data_type, (GeometryType, GeographyType))
+                    and not (types.is_binary(pa_field.type)
+                             or types.is_fixed_size_binary(pa_field.type))):
+                raise ValueError(
+                    "Geospatial field metadata requires a binary Arrow type: {}"
+                    .format(pa_field))
+            data_type.nullable = pa_field.nullable
+            return data_type
+        else:
+            return PyarrowFieldParser.to_paimon_type(
+                pa_field.type, pa_field.nullable)
 
     @staticmethod
     def to_paimon_schema(pa_schema: pyarrow.Schema) -> List[DataField]:
@@ -861,7 +1012,7 @@ class PyarrowFieldParser:
         for pa_field in pa_schema:
             pa_field: pyarrow.Field
             top_id = field_id.increment_and_get()
-            data_type = PyarrowFieldParser.to_paimon_type(pa_field.type, pa_field.nullable)
+            data_type = PyarrowFieldParser._to_paimon_field_type(pa_field)
             data_type = reassign_field_id(data_type, field_id)
             description = pa_field.metadata.get(b'description', b'').decode('utf-8') \
                 if pa_field.metadata and b'description' in pa_field.metadata else None

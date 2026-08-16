@@ -33,6 +33,8 @@ import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.GeographyType;
+import org.apache.paimon.types.GeometryType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
@@ -70,6 +72,8 @@ import java.util.stream.Collectors;
  * Arrow runtime.
  */
 class ArrowSchemaMetadata {
+
+    private static final String PAIMON_TYPE = "paimon.type";
 
     private static final String LIST_DATA_VECTOR_NAME = "$data$";
     private static final String MAP_DATA_VECTOR_NAME = "entries";
@@ -396,7 +400,10 @@ class ArrowSchemaMetadata {
     private static ArrowField toArrowField(
             String fieldName, int fieldId, DataType dataType, int depth, String fieldIdKey) {
         ArrowTypeInfo type = dataType.accept(ArrowFieldTypeVisitor.INSTANCE);
-        Map<String, String> metadata = fieldIdMetadata(fieldId, fieldIdKey);
+        Map<String, String> metadata = new LinkedHashMap<>(fieldIdMetadata(fieldId, fieldIdKey));
+        if (dataType instanceof GeometryType || dataType instanceof GeographyType) {
+            metadata.put(PAIMON_TYPE, dataType.asSQLString());
+        }
         List<ArrowField> children = Collections.emptyList();
         if (dataType instanceof ArrayType || dataType instanceof VectorType) {
             DataType elementType =
@@ -562,6 +569,16 @@ class ArrowSchemaMetadata {
 
         @Override
         public ArrowTypeInfo visit(VarBinaryType varBinaryType) {
+            return ArrowTypeInfo.simple(TYPE_BINARY);
+        }
+
+        @Override
+        public ArrowTypeInfo visit(GeometryType geometryType) {
+            return ArrowTypeInfo.simple(TYPE_BINARY);
+        }
+
+        @Override
+        public ArrowTypeInfo visit(GeographyType geographyType) {
             return ArrowTypeInfo.simple(TYPE_BINARY);
         }
 

@@ -31,6 +31,8 @@ import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.GeographyType;
+import org.apache.paimon.types.GeometryType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
@@ -152,6 +154,24 @@ public class DataTypeToLogicalType implements DataTypeVisitor<LogicalType> {
     public LogicalType visit(BlobType blobType) {
         // TODO introduce blob type in Flink SQL?
         return new org.apache.flink.table.types.logical.VarBinaryType(
+                org.apache.flink.table.types.logical.VarBinaryType.MAX_LENGTH);
+    }
+
+    @Override
+    public LogicalType visit(GeometryType geometryType) {
+        // Flink has no native geospatial logical type. Expose WKB through SQL while preserving the
+        // geospatial type in the Paimon schema.
+        return new org.apache.flink.table.types.logical.VarBinaryType(
+                geometryType.isNullable(),
+                org.apache.flink.table.types.logical.VarBinaryType.MAX_LENGTH);
+    }
+
+    @Override
+    public LogicalType visit(GeographyType geographyType) {
+        // Flink has no native geospatial logical type. Expose WKB through SQL while preserving the
+        // geospatial type in the Paimon schema.
+        return new org.apache.flink.table.types.logical.VarBinaryType(
+                geographyType.isNullable(),
                 org.apache.flink.table.types.logical.VarBinaryType.MAX_LENGTH);
     }
 

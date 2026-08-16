@@ -19,6 +19,7 @@
 package org.apache.paimon.schema;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -1619,6 +1620,139 @@ class SchemaValidationTest {
 
         validateTableSchema(
                 new TableSchema(1, fields, 10, emptyList(), singletonList("k"), options, ""));
+    }
+
+    @Test
+    public void testGeospatialTypeValidation() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "geom", DataTypes.GEOMETRY()),
+                        new DataField(2, "geog", DataTypes.GEOGRAPHY()));
+
+        assertThatNoException()
+                .isThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        geospatialSchema(
+                                                fields,
+                                                emptyList(),
+                                                emptyList(),
+                                                new HashMap<>())));
+
+        Map<String, String> avroOptions = new HashMap<>();
+        avroOptions.put(CoreOptions.FILE_FORMAT.key(), "avro");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        geospatialSchema(
+                                                fields, emptyList(), emptyList(), avroOptions)))
+                .hasMessageContaining("require 'file.format'='parquet'");
+
+        Map<String, String> perLevelOptions = new HashMap<>();
+        perLevelOptions.put(CoreOptions.FILE_FORMAT_PER_LEVEL.key(), "0:orc");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        geospatialSchema(
+                                                fields, emptyList(), emptyList(), perLevelOptions)))
+                .hasMessageContaining("require parquet at every level");
+
+        Map<String, String> changelogOptions = new HashMap<>();
+        changelogOptions.put(CoreOptions.CHANGELOG_FILE_FORMAT.key(), "orc");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        geospatialSchema(
+                                                fields,
+                                                emptyList(),
+                                                emptyList(),
+                                                changelogOptions)))
+                .hasMessageContaining("require 'changelog-file.format' to be parquet");
+
+        Map<String, String> icebergV2Options = new HashMap<>();
+        icebergV2Options.put(IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "table-location");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        geospatialSchema(
+                                                fields,
+                                                emptyList(),
+                                                emptyList(),
+                                                icebergV2Options)))
+                .hasMessageContaining("require 'metadata.iceberg.format-version'='3'");
+
+        icebergV2Options.put(IcebergOptions.FORMAT_VERSION.key(), "3");
+        assertThatNoException()
+                .isThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        geospatialSchema(
+                                                fields,
+                                                emptyList(),
+                                                emptyList(),
+                                                icebergV2Options)));
+    }
+
+    @Test
+    public void testGeospatialTypeRejectsKeyAndOrderingSemantics() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "geom", DataTypes.GEOMETRY()),
+                        new DataField(2, "geog", DataTypes.GEOGRAPHY()));
+
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        geospatialSchema(
+                                                fields,
+                                                singletonList("geom"),
+                                                emptyList(),
+                                                new HashMap<>())))
+                .hasMessage("The type GeometryType in partition field geom is unsupported");
+
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        geospatialSchema(
+                                                fields,
+                                                emptyList(),
+                                                singletonList("geog"),
+                                                new HashMap<>())))
+                .hasMessage("The type GeographyType in primary key field geog is unsupported");
+
+        Map<String, String> bucketOptions = new HashMap<>();
+        bucketOptions.put(CoreOptions.BUCKET_KEY.key(), "geom");
+        bucketOptions.put(BUCKET.key(), "1");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        geospatialSchema(
+                                                fields, emptyList(), emptyList(), bucketOptions)))
+                .hasMessage("Geometry and geography columns cannot be bucket keys: [geom].");
+
+        Map<String, String> sequenceOptions = new HashMap<>();
+        sequenceOptions.put(CoreOptions.SEQUENCE_FIELD.key(), "geog");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        geospatialSchema(
+                                                fields,
+                                                emptyList(),
+                                                singletonList("id"),
+                                                sequenceOptions)))
+                .hasMessage("Geometry and geography columns cannot be sequence fields: [geog].");
+    }
+
+    private TableSchema geospatialSchema(
+            List<DataField> fields,
+            List<String> partitionKeys,
+            List<String> primaryKeys,
+            Map<String, String> options) {
+        options.putIfAbsent(BUCKET.key(), "-1");
+        return new TableSchema(
+                1, fields, 10, partitionKeys, primaryKeys, options, "geospatial test");
     }
 
     @Test

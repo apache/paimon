@@ -45,6 +45,8 @@ import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.GeographyType;
+import org.apache.paimon.types.GeometryType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
@@ -127,6 +129,16 @@ public class ParquetVectorUpdaterFactory {
                 }
                 return new BinaryUpdater();
             };
+        }
+
+        @Override
+        public UpdaterFactory visit(GeometryType geometryType) {
+            return c -> new BinaryUpdater();
+        }
+
+        @Override
+        public UpdaterFactory visit(GeographyType geographyType) {
+            return c -> new BinaryUpdater();
         }
 
         @Override

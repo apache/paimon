@@ -28,7 +28,10 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
+import org.apache.paimon.types.EdgeAlgorithm;
 import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.GeographyType;
+import org.apache.paimon.types.GeometryType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
@@ -151,6 +154,40 @@ class IcebergDataFieldTest {
         DataField varBinaryField = new DataField(12, "varbinary", new VarBinaryType(false, 32));
         IcebergDataField icebergVarBinary = new IcebergDataField(varBinaryField);
         assertThat(icebergVarBinary.type()).isEqualTo("binary");
+    }
+
+    @Test
+    @DisplayName("Test Iceberg v3 geospatial type conversions")
+    void testGeospatialTypeConversions() {
+        IcebergDataField geometry =
+                new IcebergDataField(
+                        new DataField(1, "geom", new GeometryType(false, "EPSG:3857")));
+        assertThat(geometry.type()).isEqualTo("geometry(EPSG:3857)");
+
+        IcebergDataField geography =
+                new IcebergDataField(
+                        new DataField(
+                                2,
+                                "geog",
+                                new GeographyType(true, "OGC:CRS84", EdgeAlgorithm.KARNEY)));
+        assertThat(geography.type()).isEqualTo("geography(OGC:CRS84, karney)");
+
+        assertThat(new IcebergDataField(3, "geom", true, "geometry(EPSG:3857)", null).dataType())
+                .isEqualTo(new GeometryType(false, "EPSG:3857"));
+        assertThat(
+                        new IcebergDataField(
+                                        4, "geog", false, "geography(OGC:CRS84, vincenty)", null)
+                                .dataType())
+                .isEqualTo(new GeographyType(true, "OGC:CRS84", EdgeAlgorithm.VINCENTY));
+
+        assertThat(new IcebergDataField(5, "geom", false, "geometry", null).dataType())
+                .isEqualTo(new GeometryType());
+        assertThat(new IcebergDataField(6, "geog", false, "geography", null).dataType())
+                .isEqualTo(new GeographyType());
+        assertThat(
+                        new IcebergDataField(7, "geom", false, "geometry(custom, definition)", null)
+                                .dataType())
+                .isEqualTo(new GeometryType("custom, definition"));
     }
 
     @Test

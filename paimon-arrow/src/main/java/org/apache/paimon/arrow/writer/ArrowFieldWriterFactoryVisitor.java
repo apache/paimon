@@ -29,6 +29,8 @@ import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.GeographyType;
+import org.apache.paimon.types.GeometryType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
@@ -78,6 +80,16 @@ public class ArrowFieldWriterFactoryVisitor implements DataTypeVisitor<ArrowFiel
 
     @Override
     public ArrowFieldWriterFactory visit(VarBinaryType varBinaryType) {
+        return ArrowFieldWriters.BinaryWriter::new;
+    }
+
+    @Override
+    public ArrowFieldWriterFactory visit(GeometryType geometryType) {
+        return ArrowFieldWriters.BinaryWriter::new;
+    }
+
+    @Override
+    public ArrowFieldWriterFactory visit(GeographyType geographyType) {
         return ArrowFieldWriters.BinaryWriter::new;
     }
 

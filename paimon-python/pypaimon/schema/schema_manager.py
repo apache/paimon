@@ -28,7 +28,8 @@ from pypaimon.schema.column_directive_utils import (
     remove_dropped_directive_options)
 from pypaimon.casting.data_type_casts import can_execute_cast, supports_cast
 from pypaimon.schema.data_types import (ArrayType, AtomicInteger, DataField,
-                                        DataType, MapType, MultisetType, RowType,
+                                        DataType, GeographyType, GeometryType,
+                                        MapType, MultisetType, RowType,
                                         is_array_blob_type, is_blob_file_field,
                                         is_blob_file_type, is_blob_type,
                                         is_map_blob_type, reassign_field_id)
@@ -467,6 +468,91 @@ def _validate_options(options: dict):
         )
 
 
+def _contains_geospatial_type(data_type: DataType) -> bool:
+    if isinstance(data_type, (GeometryType, GeographyType)):
+        return True
+    if isinstance(data_type, (ArrayType, MultisetType)):
+        return _contains_geospatial_type(data_type.element)
+    if isinstance(data_type, MapType):
+        return (_contains_geospatial_type(data_type.key)
+                or _contains_geospatial_type(data_type.value))
+    if isinstance(data_type, RowType):
+        return any(_contains_geospatial_type(field.type)
+                   for field in data_type.fields)
+    return False
+
+
+def _validate_geospatial_fields(
+    fields: List[DataField],
+    options: dict,
+    primary_keys: List[str],
+    partition_keys: List[str],
+):
+    if not any(_contains_geospatial_type(field.type) for field in fields):
+        return
+
+    options = options or {}
+    core_options = CoreOptions(Options(options))
+    file_format = (core_options.file_format('parquet') or '').lower()
+    if file_format != 'parquet':
+        raise ValueError(
+            "Geometry and geography columns require 'file.format'='parquet', "
+            "but was '{}'.".format(file_format))
+
+    per_level = core_options.file_format_per_level({}) or {}
+    if isinstance(per_level, str):
+        per_level = dict(
+            part.split(':', 1) for part in per_level.split(',') if part)
+    for level, level_format in per_level.items():
+        if str(level_format).lower() != 'parquet':
+            raise ValueError(
+                "Geometry and geography columns require parquet at every level, "
+                "but 'file.format.per.level' contains '{}:{}'."
+                .format(level, level_format))
+
+    changelog_format = core_options.changelog_file_format()
+    if changelog_format and changelog_format.lower() != 'parquet':
+        raise ValueError(
+            "Geometry and geography columns require 'changelog-file.format' "
+            "to be parquet, but was '{}'.".format(changelog_format))
+
+    iceberg_storage = options.get('metadata.iceberg.storage', 'disabled').lower()
+    if (iceberg_storage != 'disabled'
+            and str(options.get('metadata.iceberg.format-version', '2')) != '3'):
+        raise ValueError(
+            "Geometry and geography columns require "
+            "'metadata.iceberg.format-version'='3' when Iceberg metadata is enabled.")
+
+    geospatial_fields = {
+        field.name for field in fields
+        if isinstance(field.type, (GeometryType, GeographyType))
+    }
+    primary_geo = geospatial_fields.intersection(primary_keys)
+    if primary_geo:
+        raise ValueError(
+            "Geometry and geography columns cannot be primary keys: {}."
+            .format(sorted(primary_geo)))
+    partition_geo = geospatial_fields.intersection(partition_keys)
+    if partition_geo:
+        raise ValueError(
+            "Geometry and geography columns cannot be partition keys: {}."
+            .format(sorted(partition_geo)))
+
+    bucket_value = options.get(CoreOptions.BUCKET_KEY.key(), '')
+    bucket_keys = {key.strip() for key in bucket_value.split(',') if key.strip()}
+    bucket_geo = geospatial_fields.intersection(bucket_keys)
+    if bucket_geo:
+        raise ValueError(
+            "Geometry and geography columns cannot be bucket keys: {}."
+            .format(sorted(bucket_geo)))
+
+    sequence_geo = geospatial_fields.intersection(core_options.sequence_field())
+    if sequence_geo:
+        raise ValueError(
+            "Geometry and geography columns cannot be sequence fields: {}."
+            .format(sorted(sequence_geo)))
+
+
 def _contains_blob_type(data_type: DataType) -> bool:
     if is_blob_type(data_type):
         return True
@@ -658,6 +744,12 @@ class SchemaManager:
 
     def commit(self, new_schema: TableSchema) -> bool:
         _validate_options(new_schema.options)
+        _validate_geospatial_fields(
+            new_schema.fields,
+            new_schema.options,
+            new_schema.primary_keys,
+            new_schema.partition_keys,
+        )
         _validate_blob_fields(
             new_schema.fields,
             new_schema.options,

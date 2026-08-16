@@ -145,4 +145,24 @@ public class FormatMetadataUtilsTest {
         assertThat(metadata.get("name"))
                 .doesNotContainKey(FormatMetadataUtils.PARQUET_FIELD_ID_KEY);
     }
+
+    @Test
+    public void testBuildArrowSchemaWithGeospatialMetadata() {
+        RowType rowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "geom", DataTypes.GEOMETRY()),
+                        DataTypes.FIELD(1, "geog", DataTypes.GEOGRAPHY()));
+
+        byte[] schemaBytes =
+                FormatMetadataUtils.buildArrowSchemaMetadata(
+                        rowType,
+                        java.util.Collections.emptyMap(),
+                        FormatMetadataUtils.PARQUET_FIELD_ID_KEY);
+
+        Map<String, Map<String, String>> metadata =
+                FormatMetadataUtils.readFieldMetadata(schemaBytes);
+        assertThat(metadata.get("geom")).containsEntry("paimon.type", "GEOMETRY(OGC:CRS84)");
+        assertThat(metadata.get("geog"))
+                .containsEntry("paimon.type", "GEOGRAPHY(OGC:CRS84, spherical)");
+    }
 }

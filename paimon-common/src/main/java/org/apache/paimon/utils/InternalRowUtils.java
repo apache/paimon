@@ -381,6 +381,8 @@ public class InternalRowUtils {
                 return dataGetters.getRow(pos, ((RowType) fieldType).getFieldCount());
             case BINARY:
             case VARBINARY:
+            case GEOMETRY:
+            case GEOGRAPHY:
                 return dataGetters.getBinary(pos);
             case VARIANT:
                 return dataGetters.getVariant(pos);

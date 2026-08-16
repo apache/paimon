@@ -56,7 +56,9 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.StringUtils.toLowerCaseIfNeed;
@@ -132,12 +134,7 @@ public class ArrowUtils {
             int depth,
             ArrowFieldTypeConversion.ArrowFieldTypeVisitor visitor) {
         FieldType fieldType = dataType.accept(visitor);
-        fieldType =
-                new FieldType(
-                        fieldType.isNullable(),
-                        fieldType.getType(),
-                        fieldType.getDictionary(),
-                        Collections.singletonMap(PARQUET_FIELD_ID, String.valueOf(fieldId)));
+        fieldType = withFieldId(fieldType, fieldId);
         List<Field> children = null;
         if (dataType instanceof ArrayType || dataType instanceof VectorType) {
             final DataType elementType;
@@ -157,11 +154,10 @@ public class ArrowUtils {
                                     typeInner.isNullable(),
                                     typeInner.getType(),
                                     typeInner.getDictionary(),
-                                    Collections.singletonMap(
-                                            PARQUET_FIELD_ID,
-                                            String.valueOf(
-                                                    SpecialFields.getArrayElementFieldId(
-                                                            fieldId, depth + 1)))),
+                                    withFieldIdMetadata(
+                                            typeInner,
+                                            SpecialFields.getArrayElementFieldId(
+                                                    fieldId, depth + 1))),
                             field.getChildren());
             children = Collections.singletonList(field);
         } else if (dataType instanceof MapType) {
@@ -182,11 +178,9 @@ public class ArrowUtils {
                                     keyType.isNullable(),
                                     keyType.getType(),
                                     keyType.getDictionary(),
-                                    Collections.singletonMap(
-                                            PARQUET_FIELD_ID,
-                                            String.valueOf(
-                                                    SpecialFields.getMapKeyFieldId(
-                                                            fieldId, depth + 1)))),
+                                    withFieldIdMetadata(
+                                            keyType,
+                                            SpecialFields.getMapKeyFieldId(fieldId, depth + 1))),
                             keyField.getChildren());
 
             Field valueField =
@@ -204,11 +198,9 @@ public class ArrowUtils {
                                     valueType.isNullable(),
                                     valueType.getType(),
                                     valueType.getDictionary(),
-                                    Collections.singletonMap(
-                                            PARQUET_FIELD_ID,
-                                            String.valueOf(
-                                                    SpecialFields.getMapValueFieldId(
-                                                            fieldId, depth + 1)))),
+                                    withFieldIdMetadata(
+                                            valueType,
+                                            SpecialFields.getMapValueFieldId(fieldId, depth + 1))),
                             valueField.getChildren());
 
             FieldType structType =
@@ -244,6 +236,23 @@ public class ArrowUtils {
             }
         }
         return new Field(fieldName, fieldType, children);
+    }
+
+    private static FieldType withFieldId(FieldType fieldType, int fieldId) {
+        return new FieldType(
+                fieldType.isNullable(),
+                fieldType.getType(),
+                fieldType.getDictionary(),
+                withFieldIdMetadata(fieldType, fieldId));
+    }
+
+    private static Map<String, String> withFieldIdMetadata(FieldType fieldType, int fieldId) {
+        Map<String, String> metadata = new LinkedHashMap<>();
+        if (fieldType.getMetadata() != null) {
+            metadata.putAll(fieldType.getMetadata());
+        }
+        metadata.put(PARQUET_FIELD_ID, String.valueOf(fieldId));
+        return metadata;
     }
 
     public static ArrowFieldWriter[] createArrowFieldWriters(

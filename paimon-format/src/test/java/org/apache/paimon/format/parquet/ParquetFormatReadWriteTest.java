@@ -19,7 +19,11 @@
 package org.apache.paimon.format.parquet;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.FormatMetadataUtils;
@@ -30,6 +34,7 @@ import org.apache.paimon.format.SupportsFieldMetadata;
 import org.apache.paimon.format.SupportsWriterMetadata;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
@@ -66,6 +71,38 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
     @Test
     public void testArrayBlobDescriptors() throws Exception {
         testArrayBlobDescriptorRoundTrip();
+    }
+
+    @Test
+    public void testGeospatialWkbRoundTrip() throws Exception {
+        byte[] pointWkb =
+                new byte[] {
+                    1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, (byte) 0xf0, 0x3f, 0, 0, 0, 0, 0, 0, 0, 0x40
+                };
+        RowType rowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "geom", DataTypes.GEOMETRY()),
+                        DataTypes.FIELD(1, "geog", DataTypes.GEOGRAPHY()),
+                        DataTypes.FIELD(2, "geometries", DataTypes.ARRAY(DataTypes.GEOMETRY())));
+
+        write(
+                fileFormat().createWriterFactory(rowType),
+                file,
+                GenericRow.of(pointWkb, pointWkb, new GenericArray(new Object[] {pointWkb, null})));
+
+        try (RecordReader<InternalRow> reader =
+                fileFormat()
+                        .createReaderFactory(rowType, rowType, java.util.Collections.emptyList())
+                        .createReader(
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null))) {
+            InternalRow row = new InternalRowSerializer(rowType).copy(reader.readBatch().next());
+            Assertions.assertThat(row.getBinary(0)).isEqualTo(pointWkb);
+            Assertions.assertThat(row.getBinary(1)).isEqualTo(pointWkb);
+            InternalArray geometries = row.getArray(2);
+            Assertions.assertThat(geometries.getBinary(0)).isEqualTo(pointWkb);
+            Assertions.assertThat(geometries.isNullAt(1)).isTrue();
+        }
     }
 
     @Test

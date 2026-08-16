@@ -30,6 +30,8 @@ import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.GeographyType;
+import org.apache.paimon.types.GeometryType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
@@ -49,8 +51,12 @@ import org.apache.arrow.vector.types.Types;
 import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.FieldType;
 
+import java.util.Collections;
+
 /** Utils for conversion between Paimon {@link DataType} and Arrow {@link FieldType}. */
 public class ArrowFieldTypeConversion {
+
+    public static final String PAIMON_TYPE = "paimon.type";
 
     public static final ArrowFieldTypeVisitor ARROW_FIELD_TYPE_VISITOR =
             new ArrowFieldTypeVisitor();
@@ -83,6 +89,24 @@ public class ArrowFieldTypeConversion {
         public FieldType visit(VarBinaryType varBinaryType) {
             return new FieldType(
                     varBinaryType.isNullable(), Types.MinorType.VARBINARY.getType(), null);
+        }
+
+        @Override
+        public FieldType visit(GeometryType geometryType) {
+            return geospatialFieldType(geometryType);
+        }
+
+        @Override
+        public FieldType visit(GeographyType geographyType) {
+            return geospatialFieldType(geographyType);
+        }
+
+        private FieldType geospatialFieldType(DataType dataType) {
+            return new FieldType(
+                    dataType.isNullable(),
+                    Types.MinorType.VARBINARY.getType(),
+                    null,
+                    Collections.singletonMap(PAIMON_TYPE, dataType.asSQLString()));
         }
 
         @Override

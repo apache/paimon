@@ -26,7 +26,7 @@ from pypaimon.common.external_path_provider import ExternalPathProvider
 from pypaimon.data.timestamp import Timestamp
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
-from pypaimon.schema.data_types import PyarrowFieldParser
+from pypaimon.schema.data_types import GeographyType, GeometryType, PyarrowFieldParser
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.write.writer.mosaic_writer_options import create_mosaic_writer_options
@@ -273,12 +273,15 @@ class DataWriter(ABC):
         # key stats & value stats
         value_stats_enabled = self.options.metadata_stats_enabled()
         if value_stats_enabled:
-            stats_fields = self.table.fields if self.table.is_primary_key_table \
-                else PyarrowFieldParser.to_paimon_schema(data.schema)
+            if self.table.is_primary_key_table:
+                stats_fields = self.table.fields
+            else:
+                stats_fields = self._resolve_stats_fields(
+                    data.schema, self.table.fields)
         else:
             stats_fields = self.table.trimmed_primary_keys_fields
         column_stats = {
-            field.name: self._get_column_stats(data, field.name)
+            field.name: self._get_column_stats(data, field.name, field.type)
             for field in stats_fields
         }
         key_fields = self.trimmed_primary_keys_fields
@@ -451,7 +454,7 @@ class DataWriter(ABC):
         
         if column_stats is None or not column_stats:
             column_stats = {
-                field.name: self._get_column_stats(data, field.name)
+                field.name: self._get_column_stats(data, field.name, field.type)
                 for field in fields
             }
         
@@ -466,8 +469,24 @@ class DataWriter(ABC):
         )
 
     @staticmethod
-    def _get_column_stats(record_batch: pa.RecordBatch, column_name: str) -> Dict:
+    def _resolve_stats_fields(arrow_schema, table_fields: List) -> List:
+        inferred_fields = PyarrowFieldParser.to_paimon_schema(arrow_schema)
+        table_fields_by_name = {field.name: field for field in table_fields}
+        return [
+            table_fields_by_name.get(field.name, field)
+            for field in inferred_fields
+        ]
+
+    @staticmethod
+    def _get_column_stats(record_batch: pa.RecordBatch, column_name: str,
+                          data_type=None) -> Dict:
         column_array = record_batch.column(column_name)
+        if isinstance(data_type, (GeometryType, GeographyType)):
+            return {
+                "min_values": None,
+                "max_values": None,
+                "null_counts": column_array.null_count,
+            }
         if column_array.null_count == len(column_array):
             return {
                 "min_values": None,

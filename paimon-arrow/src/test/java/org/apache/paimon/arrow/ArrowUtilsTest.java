@@ -126,6 +126,24 @@ public class ArrowUtilsTest {
     }
 
     @Test
+    public void testGeospatialTypeMetadata() {
+        Field geometry = ArrowUtils.toArrowField("geom", 7, DataTypes.GEOMETRY(), 0);
+        Assertions.assertThat(geometry.getType()).isEqualTo(ArrowType.Binary.INSTANCE);
+        Assertions.assertThat(geometry.getMetadata())
+                .containsEntry(ArrowUtils.PARQUET_FIELD_ID, "7")
+                .containsEntry(ArrowFieldTypeConversion.PAIMON_TYPE, "GEOMETRY(OGC:CRS84)");
+
+        Field geography =
+                ArrowUtils.toArrowField("geographies", 8, DataTypes.ARRAY(DataTypes.GEOGRAPHY()), 0)
+                        .getChildren()
+                        .get(0);
+        Assertions.assertThat(geography.getType()).isEqualTo(ArrowType.Binary.INSTANCE);
+        Assertions.assertThat(geography.getMetadata())
+                .containsEntry(
+                        ArrowFieldTypeConversion.PAIMON_TYPE, "GEOGRAPHY(OGC:CRS84, spherical)");
+    }
+
+    @Test
     public void testSameRootAllocatorIncludesNestedVectors() {
         try (RootAllocator allocator = new RootAllocator();
                 BufferAllocator childAllocator =

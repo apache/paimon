@@ -98,6 +98,8 @@ Paimon Iceberg compatibility currently supports the following data types.
 | `TIMESTAMP_LTZ` (precision 3-6) | `timestamptz`     |
 | `TIMESTAMP` (precision 7-9)  | `timestamp_ns`    |
 | `TIMESTAMP_LTZ` (precision 7-9) | `timestamptz_ns`  |
+| `GEOMETRY(crs)` | `geometry(crs)` |
+| `GEOGRAPHY(crs, algorithm)` | `geography(crs, algorithm)` |
 | `ARRAY`        | `list`            |
 | `MAP`          | `map`             |
 | `ROW`          | `struct`          |
@@ -107,5 +109,10 @@ Paimon Iceberg compatibility currently supports the following data types.
 **Note on Timestamp Types:**
 - `TIMESTAMP` and `TIMESTAMP_LTZ` types with precision from 3 to 6 are mapped to standard Iceberg timestamp types
 - `TIMESTAMP` and `TIMESTAMP_LTZ` types with precision from 7 to 9 use nanosecond precision and require Iceberg v3 format
+
+**Note on Geospatial Types:**
+- `GEOMETRY` and `GEOGRAPHY` values use OGC Well-Known Binary (WKB). The default CRS is `OGC:CRS84`, and the default geography edge algorithm is `spherical`.
+- Geospatial columns require Parquet for data, per-level, and changelog files. When Iceberg metadata is enabled, set `metadata.iceberg.format-version` to `3`.
+- Geospatial columns cannot be primary, partition, bucket, or sequence keys. Paimon records null counts but does not publish byte-wise lower or upper bounds for WKB values.
 
 :::

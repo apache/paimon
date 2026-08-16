@@ -21,6 +21,7 @@ package org.apache.paimon.format.parquet;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.EdgeAlgorithm;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 
@@ -28,6 +29,7 @@ import org.apache.parquet.schema.LogicalTypeAnnotation;
 import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.Type;
 import org.apache.parquet.schema.Types;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -35,6 +37,7 @@ import java.util.Arrays;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.convertToPaimonRowType;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.convertToParquetMessageType;
 import static org.apache.paimon.types.DataTypesTest.assertThat;
+import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.BINARY;
 import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.INT64;
 
 /** Test for {@link ParquetSchemaConverter}. */
@@ -140,5 +143,38 @@ public class ParquetSchemaConverterTest {
         MessageType messageType = convertToParquetMessageType(ALL_TYPES);
         RowType rowType = convertToPaimonRowType(messageType);
         assertThat(ALL_TYPES).isEqualTo(rowType);
+    }
+
+    @Test
+    public void testGeospatialLogicalTypesRoundTrip() {
+        RowType expected =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "geom", DataTypes.GEOMETRY("EPSG:3857")),
+                                new DataField(
+                                        1,
+                                        "geog",
+                                        DataTypes.GEOGRAPHY("OGC:CRS84", EdgeAlgorithm.KARNEY)
+                                                .notNull())));
+
+        MessageType messageType = convertToParquetMessageType(expected);
+        Type geometry = messageType.getType("geom");
+        Type geography = messageType.getType("geog");
+
+        Assertions.assertThat(geometry.asPrimitiveType().getPrimitiveTypeName()).isEqualTo(BINARY);
+        Assertions.assertThat(geometry.getLogicalTypeAnnotation())
+                .isInstanceOf(LogicalTypeAnnotation.GeometryLogicalTypeAnnotation.class);
+        Assertions.assertThat(
+                        ((LogicalTypeAnnotation.GeometryLogicalTypeAnnotation)
+                                        geometry.getLogicalTypeAnnotation())
+                                .getCrs())
+                .isEqualTo("EPSG:3857");
+        Assertions.assertThat(
+                        ((LogicalTypeAnnotation.GeographyLogicalTypeAnnotation)
+                                        geography.getLogicalTypeAnnotation())
+                                .getAlgorithm()
+                                .name())
+                .isEqualTo("KARNEY");
+        assertThat(expected).isEqualTo(convertToPaimonRowType(messageType));
     }
 }
