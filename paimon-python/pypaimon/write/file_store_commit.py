@@ -51,6 +51,7 @@ from pypaimon.write.commit.overwrite_changes_provider import OverwriteChangesPro
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_callback import CommitCallback, CommitCallbackContext
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.writer.data_writer import DataWriter
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,19 @@ def _abort_commit_messages(table, commit_messages: List[CommitMessage]):
                     path,
                     error,
                 )
+            for extra_file in file.extra_files or []:
+                path = extra_file
+                try:
+                    path = DataWriter._aligned_extra_file_path(
+                        file, extra_file
+                    )
+                    table.file_io.delete_quietly(path)
+                except Exception as error:
+                    logger.warning(
+                        "Failed to clean up file %s during abort: %s",
+                        path,
+                        error,
+                    )
         for entry in message.index_adds:
             file_name = None
             try:
