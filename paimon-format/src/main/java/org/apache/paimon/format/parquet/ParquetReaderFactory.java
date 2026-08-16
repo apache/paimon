@@ -35,7 +35,7 @@ import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.FileRecordReader;
-import org.apache.paimon.reader.ReadBatchSizeController;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -174,11 +174,11 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 configuredBatchSize > 0,
                 "Parquet read batch size should be positive: %s",
                 configuredBatchSize);
-        ReadBatchSizeController readBatchSizeController = context.readBatchSizeController();
+        ReadBatchSizer readBatchSizer = context.readBatchSizer();
         int initialBatchSize =
-                readBatchSizeController == null
+                readBatchSizer == null
                         ? configuredBatchSize
-                        : readBatchSizeController.requestedBatchSize();
+                        : readBatchSizer.batchSize().orElse(configuredBatchSize);
         reader.setRequestedSchema(requestedSchema.messageType);
         WritableColumnVector[] writableVectors =
                 createWritableVectors(initialBatchSize, physicalReadFields);
@@ -193,8 +193,9 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                         requestedSchema.fields,
                         writableVectors,
                         initialBatchSize,
+                        configuredBatchSize,
                         context.fileIO(),
-                        readBatchSizeController,
+                        readBatchSizer,
                         vectorFactory);
         return readPlan.isIdentity()
                 ? parquetReader

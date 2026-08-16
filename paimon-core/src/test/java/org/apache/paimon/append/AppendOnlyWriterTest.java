@@ -1119,7 +1119,9 @@ public class AppendOnlyWriterTest {
                                 new FormatReaderContext(
                                         context.fileIO,
                                         context.pathFactory.toPath(file),
-                                        file.fileSize()));
+                                        file.fileSize(),
+                                        null,
+                                        null));
         return MapSharedShreddingUtils.deserializeMetadata(fieldMetadata.get(fieldName));
     }
 

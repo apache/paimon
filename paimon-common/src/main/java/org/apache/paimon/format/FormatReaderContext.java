@@ -20,7 +20,7 @@ package org.apache.paimon.format;
 
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.reader.ReadBatchSizeController;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.utils.RoaringBitmap32;
 
@@ -33,28 +33,19 @@ public class FormatReaderContext implements FormatReaderFactory.Context {
     private final Path file;
     private final long fileSize;
     @Nullable private final RoaringBitmap32 selection;
-    @Nullable private final ReadBatchSizeController readBatchSizeController;
-
-    public FormatReaderContext(FileIO fileIO, Path file, long fileSize) {
-        this(fileIO, file, fileSize, null, null);
-    }
-
-    public FormatReaderContext(
-            FileIO fileIO, Path file, long fileSize, @Nullable RoaringBitmap32 selection) {
-        this(fileIO, file, fileSize, selection, null);
-    }
+    @Nullable private final ReadBatchSizer readBatchSizer;
 
     public FormatReaderContext(
             FileIO fileIO,
             Path file,
             long fileSize,
             @Nullable RoaringBitmap32 selection,
-            @Nullable ReadBatchSizeController readBatchSizeController) {
+            @Nullable ReadBatchSizer readBatchSizer) {
         this.fileIO = fileIO;
         this.file = file;
         this.fileSize = fileSize;
         this.selection = selection;
-        this.readBatchSizeController = readBatchSizeController;
+        this.readBatchSizer = readBatchSizer;
     }
 
     @Override
@@ -80,7 +71,7 @@ public class FormatReaderContext implements FormatReaderFactory.Context {
 
     @Nullable
     @Override
-    public ReadBatchSizeController readBatchSizeController() {
-        return readBatchSizeController;
+    public ReadBatchSizer readBatchSizer() {
+        return readBatchSizer;
     }
 }

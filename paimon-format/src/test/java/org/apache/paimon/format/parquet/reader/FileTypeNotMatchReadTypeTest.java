@@ -107,7 +107,9 @@ public class FileTypeNotMatchReadTypeTest {
                             new FormatReaderContext(
                                     LocalFileIO.create(),
                                     new org.apache.paimon.fs.Path(tempDir.toString(), fileName),
-                                    file.length()));
+                                    file.length(),
+                                    null,
+                                    null));
 
             InternalRow row = fileRecordReader.readBatch().next();
             Timestamp getTimestamp = row.getTimestamp(0, readPrecision);
@@ -150,7 +152,9 @@ public class FileTypeNotMatchReadTypeTest {
                             new FormatReaderContext(
                                     LocalFileIO.create(),
                                     new org.apache.paimon.fs.Path(tempDir.toString(), fileName),
-                                    file.length()));
+                                    file.length(),
+                                    null,
+                                    null));
 
             InternalRow row = fileRecordReader.readBatch().next();
             Decimal getDecimal = row.getDecimal(0, readPrecision, 0);
@@ -189,7 +193,9 @@ public class FileTypeNotMatchReadTypeTest {
                         new FormatReaderContext(
                                 LocalFileIO.create(),
                                 new org.apache.paimon.fs.Path(tempDir.toString(), fileName),
-                                file.length()));
+                                file.length(),
+                                null,
+                                null));
 
         FileRecordIterator<InternalRow> batch = fileRecordReader.readBatch();
         for (int i = 0; i < 100; i++) {
@@ -228,7 +234,9 @@ public class FileTypeNotMatchReadTypeTest {
                         new FormatReaderContext(
                                 LocalFileIO.create(),
                                 new org.apache.paimon.fs.Path(tempDir.toString(), fileName),
-                                file.length()));
+                                file.length(),
+                                null,
+                                null));
 
         FileRecordIterator<InternalRow> batch = fileRecordReader.readBatch();
         for (int i = 0; i < 100; i++) {
@@ -267,7 +275,9 @@ public class FileTypeNotMatchReadTypeTest {
                         new FormatReaderContext(
                                 LocalFileIO.create(),
                                 new org.apache.paimon.fs.Path(tempDir.toString(), fileName),
-                                file.length()));
+                                file.length(),
+                                null,
+                                null));
 
         FileRecordIterator<InternalRow> batch = fileRecordReader.readBatch();
         for (int i = 0; i < 100; i++) {
@@ -306,7 +316,9 @@ public class FileTypeNotMatchReadTypeTest {
                         new FormatReaderContext(
                                 LocalFileIO.create(),
                                 new org.apache.paimon.fs.Path(tempDir.toString(), fileName),
-                                file.length()));
+                                file.length(),
+                                null,
+                                null));
 
         FileRecordIterator<InternalRow> batch = fileRecordReader.readBatch();
         for (int i = 0; i < 100; i++) {
@@ -342,7 +354,9 @@ public class FileTypeNotMatchReadTypeTest {
                         new FormatReaderContext(
                                 LocalFileIO.create(),
                                 new org.apache.paimon.fs.Path(tempDir.toString(), fileName),
-                                file.length()));
+                                file.length(),
+                                null,
+                                null));
 
         InternalRow row = fileRecordReader.readBatch().next();
         int i = row.getArray(0).getInt(0);
@@ -374,7 +388,9 @@ public class FileTypeNotMatchReadTypeTest {
                         new FormatReaderContext(
                                 LocalFileIO.create(),
                                 new org.apache.paimon.fs.Path(tempDir.toString(), fileName),
-                                file.length()));
+                                file.length(),
+                                null,
+                                null));
 
         FileRecordIterator<InternalRow> batch = fileRecordReader.readBatch();
         InternalRow row = batch.next();
@@ -425,7 +441,9 @@ public class FileTypeNotMatchReadTypeTest {
                         new FormatReaderContext(
                                 LocalFileIO.create(),
                                 new org.apache.paimon.fs.Path(tempDir.toString(), fileName),
-                                file.length()));
+                                file.length(),
+                                null,
+                                null));
 
         InternalRow row = fileRecordReader.readBatch().next();
         int i = row.getMap(0).valueArray().getMap(0).keyArray().getInt(0);

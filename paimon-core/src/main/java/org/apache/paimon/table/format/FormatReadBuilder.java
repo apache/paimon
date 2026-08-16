@@ -35,7 +35,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.FileRecordReader;
-import org.apache.paimon.reader.ReadBatchSizeController;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FormatTable;
@@ -187,8 +187,7 @@ public class FormatReadBuilder implements ReadBuilder {
     }
 
     protected RecordReader<InternalRow> createReader(
-            FormatDataSplit dataSplit, @Nullable ReadBatchSizeController readBatchSizeController)
-            throws IOException {
+            FormatDataSplit dataSplit, @Nullable ReadBatchSizer readBatchSizer) throws IOException {
         // Skip pushing down partition filters to reader.
         List<Predicate> readFilters =
                 excludePredicateWithFields(
@@ -214,7 +213,7 @@ public class FormatReadBuilder implements ReadBuilder {
                                     partition,
                                     readerFactory,
                                     partitionMapping,
-                                    readBatchSizeController));
+                                    readBatchSizer));
         }
         return ConcatRecordReader.create(suppliers);
     }
@@ -224,15 +223,11 @@ public class FormatReadBuilder implements ReadBuilder {
             @Nullable BinaryRow partition,
             FormatReaderFactory readerFactory,
             Pair<int[], RowType> partitionMapping,
-            @Nullable ReadBatchSizeController readBatchSizeController)
+            @Nullable ReadBatchSizer readBatchSizer)
             throws IOException {
         FormatReaderContext formatReaderContext =
                 new FormatReaderContext(
-                        table.fileIO(),
-                        file.filePath(),
-                        file.fileSize(),
-                        null,
-                        readBatchSizeController);
+                        table.fileIO(), file.filePath(), file.fileSize(), null, readBatchSizer);
         try {
             FileRecordReader<InternalRow> reader;
             Long length = file.length();

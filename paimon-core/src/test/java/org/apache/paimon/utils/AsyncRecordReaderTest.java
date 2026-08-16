@@ -18,7 +18,7 @@
 
 package org.apache.paimon.utils;
 
-import org.apache.paimon.reader.ReadBatchSizeController;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 
 import org.junit.jupiter.api.Test;
@@ -104,8 +104,9 @@ public class AsyncRecordReaderTest {
     }
 
     @Test
-    public void testPrefetchedBatchesMayUsePreviousRequestedSize() throws Exception {
-        ReadBatchSizeController controller = new ReadBatchSizeController(8, 5);
+    public void testPrefetchedBatchesMayUsePreviousBatchSize() throws Exception {
+        ReadBatchSizer sizer = new ReadBatchSizer();
+        sizer.setBatchSize(5);
         CountDownLatch twoBatchesPrefetched = new CountDownLatch(1);
         CountDownLatch continueReading = new CountDownLatch(1);
         AtomicInteger batchNumber = new AtomicInteger();
@@ -127,7 +128,7 @@ public class AsyncRecordReaderTest {
                             return null;
                         }
 
-                        int size = controller.requestedBatchSize();
+                        int size = sizer.batchSize().getAsInt();
                         AtomicInteger remaining = new AtomicInteger(size);
                         return new RecordIterator<Integer>() {
                             @Nullable
@@ -148,7 +149,7 @@ public class AsyncRecordReaderTest {
         try (AsyncRecordReader<Integer> asyncReader =
                 new AsyncRecordReader<>(() -> physicalReader)) {
             assertThat(twoBatchesPrefetched.await(30, TimeUnit.SECONDS)).isTrue();
-            controller.setRequestedBatchSize(2);
+            sizer.setBatchSize(2);
             continueReading.countDown();
 
             assertThat(readBatchSize(asyncReader)).isEqualTo(5);

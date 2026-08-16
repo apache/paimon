@@ -35,7 +35,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
-import org.apache.paimon.reader.ReadBatchSizeController;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataFilePlan;
@@ -697,9 +697,9 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         }
 
         @Override
-        public InnerTableRead withReadBatchSizeController(ReadBatchSizeController controller) {
-            mainRead.withReadBatchSizeController(controller);
-            fallbackRead.withReadBatchSizeController(controller);
+        public InnerTableRead withReadBatchSizer(ReadBatchSizer sizer) {
+            mainRead.withReadBatchSizer(sizer);
+            fallbackRead.withReadBatchSizer(sizer);
             return this;
         }
 

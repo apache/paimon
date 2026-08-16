@@ -27,7 +27,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.reader.ReadBatchSizeController;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -57,18 +57,18 @@ import static org.mockito.Mockito.when;
 public class BinlogTableTest extends TableTestBase {
 
     @Test
-    public void testReadBatchSizeControllerPropagatesToDataRead() {
+    public void testReadBatchSizerPropagatesToDataRead() {
         FileStoreTable wrapped = mock(FileStoreTable.class);
         InnerTableRead dataRead = mock(InnerTableRead.class);
         when(wrapped.options()).thenReturn(Collections.emptyMap());
         when(wrapped.rowType()).thenReturn(RowType.of(DataTypes.INT()));
         when(wrapped.newRead()).thenReturn(dataRead);
         when(dataRead.forceKeepDelete()).thenReturn(dataRead);
-        ReadBatchSizeController controller = new ReadBatchSizeController(16, 4);
+        ReadBatchSizer sizer = new ReadBatchSizer();
 
-        new BinlogTable(wrapped).newRead().withReadBatchSizeController(controller);
+        new BinlogTable(wrapped).newRead().withReadBatchSizer(sizer);
 
-        verify(dataRead).withReadBatchSizeController(controller);
+        verify(dataRead).withReadBatchSizer(sizer);
     }
 
     @Test

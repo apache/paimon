@@ -26,7 +26,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
-import org.apache.paimon.reader.ReadBatchSizeController;
+import org.apache.paimon.reader.ReadBatchSizer;
 
 import org.apache.parquet.VersionParser;
 import org.apache.parquet.column.ColumnDescriptor;
@@ -82,7 +82,8 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
     private final MessageType fileSchema;
     private final List<ParquetField> fields;
     private final RowIndexGenerator rowIndexGenerator;
-    @Nullable private final ReadBatchSizeController readBatchSizeController;
+    private final int defaultBatchSize;
+    @Nullable private final ReadBatchSizer readBatchSizer;
     @Nullable private final IntFunction<WritableColumnVector[]> vectorFactory;
 
     private Set<ParquetField> missingColumns;
@@ -95,20 +96,9 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
             List<ParquetField> fields,
             WritableColumnVector[] vectors,
             int batchSize,
-            FileIO fileIO)
-            throws IOException {
-        this(filePath, reader, fileSchema, fields, vectors, batchSize, fileIO, null, null);
-    }
-
-    public VectorizedParquetRecordReader(
-            Path filePath,
-            ParquetFileReader reader,
-            MessageType fileSchema,
-            List<ParquetField> fields,
-            WritableColumnVector[] vectors,
-            int batchSize,
+            int defaultBatchSize,
             FileIO fileIO,
-            @Nullable ReadBatchSizeController readBatchSizeController,
+            @Nullable ReadBatchSizer readBatchSizer,
             @Nullable IntFunction<WritableColumnVector[]> vectorFactory)
             throws IOException {
         this.filePath = filePath;
@@ -117,9 +107,10 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
         this.fields = fields;
         this.totalRowCount = reader.getFilteredRecordCount();
         this.batchSize = batchSize;
+        this.defaultBatchSize = defaultBatchSize;
         this.fileIO = fileIO;
         this.rowIndexGenerator = new RowIndexGenerator();
-        this.readBatchSizeController = readBatchSizeController;
+        this.readBatchSizer = readBatchSizer;
         this.vectorFactory = vectorFactory;
 
         // fetch writer version from file metadata
@@ -201,18 +192,18 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
                 return false;
             }
             // Snapshot once so a concurrent update only affects the next physical batch.
-            int requestedBatchSize =
-                    readBatchSizeController == null
-                            ? batchSize
-                            : readBatchSizeController.requestedBatchSize();
-            resizeBatchIfNeeded(requestedBatchSize);
+            int nextBatchSize =
+                    readBatchSizer == null
+                            ? defaultBatchSize
+                            : readBatchSizer.batchSize().orElse(defaultBatchSize);
+            resizeBatchIfNeeded(nextBatchSize);
             for (ParquetColumnVector vector : columnVectors) {
                 vector.reset();
             }
             columnarBatch.setNumRows(0);
             checkEndOfRowGroup();
 
-            int num = (int) Math.min(requestedBatchSize, totalCountLoadedSoFar - rowsReturned);
+            int num = (int) Math.min(nextBatchSize, totalCountLoadedSoFar - rowsReturned);
             for (ParquetColumnVector cv : columnVectors) {
                 for (ParquetColumnVector leafCv : cv.getLeaves()) {
                     VectorizedColumnReader columnReader = leafCv.getColumnReader();
@@ -246,19 +237,19 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
         }
     }
 
-    private void resizeBatchIfNeeded(int requestedBatchSize) {
-        if (requestedBatchSize == batchSize) {
+    private void resizeBatchIfNeeded(int nextBatchSize) {
+        if (nextBatchSize == batchSize) {
             return;
         }
 
         ParquetColumnVector[] previousVectors = columnVectors;
         // A new physical batch starts only after the prior iterator is released, so replacing the
         // wrappers here cannot mutate vectors still visible to the consumer.
-        initBatch(vectorFactory.apply(requestedBatchSize), requestedBatchSize);
+        initBatch(vectorFactory.apply(nextBatchSize), nextBatchSize);
         for (int i = 0; i < columnVectors.length; i++) {
             copyColumnReaders(previousVectors[i], columnVectors[i]);
         }
-        batchSize = requestedBatchSize;
+        batchSize = nextBatchSize;
     }
 
     private static void copyColumnReaders(

@@ -111,7 +111,7 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
         }
 
         FormatReaderContext context =
-                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file));
+                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file), null, null);
         Map<String, Map<String, String>> readFieldMetadata =
                 ((SupportsFieldMetadata) format).readFieldMetadata(context);
         Assertions.assertThat(readFieldMetadata).containsKey("id").containsKey("name");

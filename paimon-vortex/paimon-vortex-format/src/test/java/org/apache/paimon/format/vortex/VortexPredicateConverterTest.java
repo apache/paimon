@@ -388,7 +388,11 @@ public class VortexPredicateConverterTest {
         try (RecordReader<InternalRow> reader =
                         readerFactory.createReader(
                                 new FormatReaderContext(
-                                        fileIO, testFile, fileIO.getFileSize(testFile), null));
+                                        fileIO,
+                                        testFile,
+                                        fileIO.getFileSize(testFile),
+                                        null,
+                                        null));
                 RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(reader)) {
             List<InternalRow> result = new ArrayList<>();
             while (iterator.hasNext()) {

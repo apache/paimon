@@ -117,7 +117,7 @@ public class BlobFileFormatTest {
         FormatReaderFactory readerFactory = format.createReaderFactory(null, rowType, null);
         FormatReaderContext context =
                 new FormatReaderContext(
-                        trackingFileIO, file, trackingFileIO.getFileSize(file), selection);
+                        trackingFileIO, file, trackingFileIO.getFileSize(file), selection, null);
 
         try (FileRecordReader<InternalRow> reader = readerFactory.createReader(context)) {
             TrackingSeekableInputStream stream = trackingFileIO.lastInputStream;
@@ -156,7 +156,8 @@ public class BlobFileFormatTest {
         TrackingLocalFileIO trackingFileIO = new TrackingLocalFileIO();
         FormatReaderFactory readerFactory = format.createReaderFactory(null, rowType, null);
         FormatReaderContext context =
-                new FormatReaderContext(trackingFileIO, file, trackingFileIO.getFileSize(file));
+                new FormatReaderContext(
+                        trackingFileIO, file, trackingFileIO.getFileSize(file), null, null);
         TrackingSeekableInputStream trackingInputStream;
         try (FileRecordReader<InternalRow> reader = readerFactory.createReader(context)) {
             trackingInputStream = trackingFileIO.lastInputStream;
@@ -214,7 +215,8 @@ public class BlobFileFormatTest {
         TrackingLocalFileIO trackingFileIO = new TrackingLocalFileIO();
         FormatReaderFactory readerFactory = format.createReaderFactory(null, rowType, null);
         FormatReaderContext context =
-                new FormatReaderContext(trackingFileIO, file, trackingFileIO.getFileSize(file));
+                new FormatReaderContext(
+                        trackingFileIO, file, trackingFileIO.getFileSize(file), null, null);
         TrackingSeekableInputStream trackingInputStream;
         try (FileRecordReader<InternalRow> reader = readerFactory.createReader(context)) {
             trackingInputStream = trackingFileIO.lastInputStream;
@@ -252,7 +254,8 @@ public class BlobFileFormatTest {
         RowType rowType = RowType.of(DataTypes.BLOB());
         FormatReaderFactory readerFactory = format.createReaderFactory(null, rowType, null);
         FormatReaderContext context =
-                new FormatReaderContext(trackingFileIO, file, trackingFileIO.getFileSize(file));
+                new FormatReaderContext(
+                        trackingFileIO, file, trackingFileIO.getFileSize(file), null, null);
 
         assertThatThrownBy(() -> readerFactory.createReader(context));
         assertThat(trackingFileIO.lastInputStream.closeCount).isOne();
@@ -294,7 +297,7 @@ public class BlobFileFormatTest {
 
         FormatReaderFactory readerFactory = format.createReaderFactory(null, rowType, null);
         FormatReaderContext context =
-                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file));
+                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file), null, null);
         List<InternalRow> rows = new ArrayList<>();
         readerFactory.createReader(context).forEachRemaining(rows::add);
 
@@ -318,7 +321,7 @@ public class BlobFileFormatTest {
 
         FormatReaderFactory readerFactory = format.createReaderFactory(null, rowType, null);
         FormatReaderContext context =
-                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file));
+                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file), null, null);
         List<InternalRow> rows = new ArrayList<>();
         readerFactory.createReader(context).forEachRemaining(rows::add);
 
@@ -605,7 +608,7 @@ public class BlobFileFormatTest {
                 new BlobFileFormat(false, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE)
                         .createReaderFactory(null, rowType, null);
         FormatReaderContext context =
-                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file));
+                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file), null, null);
         try (FileRecordReader<InternalRow> reader = readerFactory.createReader(context)) {
             return reader.readBatch().next();
         }
@@ -652,7 +655,7 @@ public class BlobFileFormatTest {
 
         FormatReaderFactory readerFactory = format.createReaderFactory(null, rowType, null);
         FormatReaderContext context =
-                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file));
+                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file), null, null);
         assertThatThrownBy(
                         () -> {
                             try (FileRecordReader<InternalRow> reader =
@@ -764,7 +767,8 @@ public class BlobFileFormatTest {
                     new BlobFileFormat(false, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE)
                             .createReaderFactory(null, rowType, null);
             FormatReaderContext context =
-                    new FormatReaderContext(fileIO, mapFile, fileIO.getFileSize(mapFile));
+                    new FormatReaderContext(
+                            fileIO, mapFile, fileIO.getFileSize(mapFile), null, null);
             List<InternalRow> rows = new ArrayList<>();
             readerFactory.createReader(context).forEachRemaining(rows::add);
             GenericMap result = (GenericMap) rows.get(0).getMap(0);
@@ -829,7 +833,7 @@ public class BlobFileFormatTest {
         // read
         FormatReaderFactory readerFactory = format.createReaderFactory(null, rowType, null);
         FormatReaderContext context =
-                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file));
+                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file), null, null);
         List<Object> result = new ArrayList<>();
         readerFactory
                 .createReader(context)
@@ -862,7 +866,7 @@ public class BlobFileFormatTest {
         // read with selection
         RoaringBitmap32 selection = new RoaringBitmap32();
         selection.add(2);
-        context = new FormatReaderContext(fileIO, file, fileIO.getFileSize(file), selection);
+        context = new FormatReaderContext(fileIO, file, fileIO.getFileSize(file), selection, null);
         result.clear();
         readerFactory.createReader(context).forEachRemaining(row -> result.add(row.getBlob(0)));
 
@@ -898,7 +902,7 @@ public class BlobFileFormatTest {
 
         FormatReaderFactory readerFactory = format.createReaderFactory(null, rowType, null);
         FormatReaderContext context =
-                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file));
+                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file), null, null);
         assertThatThrownBy(
                         () -> {
                             try (FileRecordReader<InternalRow> reader =
@@ -946,7 +950,7 @@ public class BlobFileFormatTest {
 
         FormatReaderFactory readerFactory = format.createReaderFactory(null, rowType, null);
         FormatReaderContext context =
-                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file));
+                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file), null, null);
         assertThatThrownBy(
                         () -> {
                             try (FileRecordReader<InternalRow> reader =
@@ -979,7 +983,7 @@ public class BlobFileFormatTest {
         FormatReaderFactory readerFactory =
                 format.createReaderFactory(null, projectedRowType, null);
         FormatReaderContext context =
-                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file));
+                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file), null, null);
 
         List<InternalRow> rows = new ArrayList<>();
         readerFactory.createReader(context).forEachRemaining(rows::add);
@@ -1020,7 +1024,7 @@ public class BlobFileFormatTest {
 
         FormatReaderFactory readerFactory = format.createReaderFactory(null, rowType, null);
         FormatReaderContext context =
-                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file));
+                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file), null, null);
         List<Object> result = new ArrayList<>();
         readerFactory
                 .createReader(context)
@@ -1043,7 +1047,7 @@ public class BlobFileFormatTest {
 
         RoaringBitmap32 selection = new RoaringBitmap32();
         selection.add(0);
-        context = new FormatReaderContext(fileIO, file, fileIO.getFileSize(file), selection);
+        context = new FormatReaderContext(fileIO, file, fileIO.getFileSize(file), selection, null);
         result.clear();
         readerFactory
                 .createReader(context)
@@ -1076,7 +1080,7 @@ public class BlobFileFormatTest {
 
         FormatReaderFactory readerFactory = format.createReaderFactory(null, rowType, null);
         FormatReaderContext context =
-                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file));
+                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file), null, null);
         List<InternalRow> rows = new ArrayList<>();
         readerFactory.createReader(context).forEachRemaining(rows::add);
 
@@ -1093,7 +1097,7 @@ public class BlobFileFormatTest {
 
         RoaringBitmap32 selection = new RoaringBitmap32();
         selection.add(0);
-        context = new FormatReaderContext(fileIO, file, fileIO.getFileSize(file), selection);
+        context = new FormatReaderContext(fileIO, file, fileIO.getFileSize(file), selection, null);
         rows.clear();
         readerFactory.createReader(context).forEachRemaining(rows::add);
         assertThat(rows).hasSize(1);
@@ -1101,7 +1105,7 @@ public class BlobFileFormatTest {
 
         RowType projectedRowType = RowType.of(DataTypes.BIGINT(), rowType.getTypeAt(0));
         readerFactory = format.createReaderFactory(null, projectedRowType, null);
-        context = new FormatReaderContext(fileIO, file, fileIO.getFileSize(file));
+        context = new FormatReaderContext(fileIO, file, fileIO.getFileSize(file), null, null);
         rows.clear();
         readerFactory.createReader(context).forEachRemaining(rows::add);
         assertThat(rows.get(0).isNullAt(0)).isTrue();

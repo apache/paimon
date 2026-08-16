@@ -545,7 +545,8 @@ public class RowFormatReadWriteTest {
                 format.createReaderFactory(rowType, rowType, new ArrayList<>());
         FileRecordReader<InternalRow> reader =
                 readerFactory.createReader(
-                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)));
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), null, null));
 
         long expectedPosition = 0;
         FileRecordIterator<InternalRow> batch;
@@ -588,7 +589,8 @@ public class RowFormatReadWriteTest {
                 format.createReaderFactory(fullType, projectedType, new ArrayList<>());
         FileRecordReader<InternalRow> reader =
                 readerFactory.createReader(
-                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)));
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), null, null));
 
         List<InternalRow> result = new ArrayList<>();
         reader.forEachRemaining(row -> result.add(GenericRow.of(row.getInt(0))));
@@ -630,7 +632,8 @@ public class RowFormatReadWriteTest {
                 format.createReaderFactory(fullType, projectedType, new ArrayList<>());
         FileRecordReader<InternalRow> reader =
                 readerFactory.createReader(
-                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)));
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), null, null));
 
         List<InternalRow> result = new ArrayList<>();
         reader.forEachRemaining(row -> result.add(GenericRow.of(row.getDouble(0), row.getInt(1))));
@@ -670,7 +673,8 @@ public class RowFormatReadWriteTest {
                 format.createReaderFactory(rowType, rowType, new ArrayList<>());
         FileRecordReader<InternalRow> reader =
                 readerFactory.createReader(
-                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path), selection));
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), selection, null));
 
         List<Integer> result = new ArrayList<>();
         reader.forEachRemaining(row -> result.add(row.getInt(0)));
@@ -707,7 +711,8 @@ public class RowFormatReadWriteTest {
                 format.createReaderFactory(rowType, rowType, new ArrayList<>());
         FileRecordReader<InternalRow> reader =
                 readerFactory.createReader(
-                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path), selection));
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), selection, null));
 
         List<Integer> result = new ArrayList<>();
         reader.forEachRemaining(row -> result.add(row.getInt(0)));
@@ -895,7 +900,8 @@ public class RowFormatReadWriteTest {
                 format.createReaderFactory(rowType, rowType, new ArrayList<>());
         FileRecordReader<InternalRow> reader =
                 readerFactory.createReader(
-                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)));
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), null, null));
 
         List<InternalRow> result = new ArrayList<>();
         reader.forEachRemaining(
@@ -955,7 +961,8 @@ public class RowFormatReadWriteTest {
                 format.createReaderFactory(dataSchema, projectedSchema, new ArrayList<>());
         FileRecordReader<InternalRow> reader =
                 readerFactory.createReader(
-                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)));
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), null, null));
 
         List<InternalRow> result = new ArrayList<>();
         reader.forEachRemaining(
@@ -1011,7 +1018,8 @@ public class RowFormatReadWriteTest {
                 format.createReaderFactory(dataSchema, projectedSchema, new ArrayList<>());
         FileRecordReader<InternalRow> reader =
                 readerFactory.createReader(
-                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)));
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), null, null));
 
         List<Integer> results = new ArrayList<>();
         reader.forEachRemaining(
@@ -1057,7 +1065,8 @@ public class RowFormatReadWriteTest {
                 format.createReaderFactory(dataSchema, projectedSchema, new ArrayList<>());
         FileRecordReader<InternalRow> reader =
                 readerFactory.createReader(
-                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)));
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), null, null));
 
         List<boolean[]> nullFlags = new ArrayList<>();
         List<Integer> values = new ArrayList<>();
@@ -1120,7 +1129,8 @@ public class RowFormatReadWriteTest {
                 format.createReaderFactory(dataSchema, projectedSchema, new ArrayList<>());
         FileRecordReader<InternalRow> reader =
                 readerFactory.createReader(
-                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)));
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), null, null));
 
         List<int[]> results = new ArrayList<>();
         reader.forEachRemaining(
@@ -1172,7 +1182,8 @@ public class RowFormatReadWriteTest {
                 format.createReaderFactory(dataSchema, projectedSchema, new ArrayList<>());
         FileRecordReader<InternalRow> reader =
                 readerFactory.createReader(
-                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)));
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), null, null));
 
         List<int[]> results = new ArrayList<>();
         reader.forEachRemaining(
@@ -1223,7 +1234,8 @@ public class RowFormatReadWriteTest {
                 format.createReaderFactory(dataSchema, projectedSchema, new ArrayList<>());
         FileRecordReader<InternalRow> reader =
                 readerFactory.createReader(
-                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)));
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), null, null));
 
         List<Integer> results = new ArrayList<>();
         reader.forEachRemaining(
@@ -1278,7 +1290,8 @@ public class RowFormatReadWriteTest {
                 format.createReaderFactory(dataSchema, projectedSchema, new ArrayList<>());
         FileRecordReader<InternalRow> reader =
                 readerFactory.createReader(
-                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)));
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), null, null));
 
         List<Integer> results = new ArrayList<>();
         reader.forEachRemaining(
@@ -1316,7 +1329,8 @@ public class RowFormatReadWriteTest {
                 format.createReaderFactory(rowType, rowType, new ArrayList<>());
         FileRecordReader<InternalRow> reader =
                 readerFactory.createReader(
-                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)));
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), null, null));
         List<InternalRow> result = new ArrayList<>();
         reader.forEachRemaining(row -> result.add(copyRow(row, rowType)));
         reader.close();

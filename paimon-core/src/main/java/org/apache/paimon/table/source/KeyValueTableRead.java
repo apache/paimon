@@ -30,7 +30,7 @@ import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.LimitRecordReader;
-import org.apache.paimon.reader.ReadBatchSizeController;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.splitread.IncrementalChangelogReadProvider;
@@ -69,7 +69,7 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
     private IOManager ioManager = null;
     @Nullable private TopN topN = null;
     @Nullable private Integer limit = null;
-    @Nullable private ReadBatchSizeController readBatchSizeController;
+    @Nullable private ReadBatchSizer readBatchSizer;
 
     public KeyValueTableRead(
             Supplier<MergeFileSplitRead> mergeReadSupplier,
@@ -113,8 +113,8 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
             read = read.withTopN(topN);
         }
         read.withFilter(predicate).withIOManager(ioManager);
-        if (readBatchSizeController != null) {
-            read.withReadBatchSizeController(readBatchSizeController);
+        if (readBatchSizer != null) {
+            read.withReadBatchSizer(readBatchSizer);
         }
     }
 
@@ -203,8 +203,8 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
         if (executeFilter) {
             read.executeFilter();
         }
-        if (readBatchSizeController != null) {
-            read.withReadBatchSizeController(readBatchSizeController);
+        if (readBatchSizer != null) {
+            read.withReadBatchSizer(readBatchSizer);
         }
         return read;
     }
@@ -217,9 +217,9 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
     }
 
     @Override
-    public InnerTableRead withReadBatchSizeController(ReadBatchSizeController controller) {
-        initialized().forEach(r -> r.withReadBatchSizeController(controller));
-        this.readBatchSizeController = controller;
+    public InnerTableRead withReadBatchSizer(ReadBatchSizer sizer) {
+        initialized().forEach(r -> r.withReadBatchSizer(sizer));
+        this.readBatchSizer = sizer;
         return this;
     }
 

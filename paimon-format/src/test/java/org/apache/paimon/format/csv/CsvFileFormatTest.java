@@ -676,7 +676,11 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
                 format.createReaderFactory(fullRowType, readRowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(
-                                        fileIO, testFile, fileIO.getFileSize(testFile)))) {
+                                        fileIO,
+                                        testFile,
+                                        fileIO.getFileSize(testFile),
+                                        null,
+                                        null))) {
 
             InternalRowSerializer serializer = new InternalRowSerializer(readRowType);
             List<InternalRow> result = new ArrayList<>();
@@ -692,7 +696,7 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
                 format.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(
-                                        fileIO, testFile, fileIO.getFileSize(testFile)),
+                                        fileIO, testFile, fileIO.getFileSize(testFile), null, null),
                                 offset,
                                 length)) {
 

@@ -37,7 +37,7 @@ import org.apache.paimon.format.shredding.ShreddingReadPlanFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.FileRecordReader;
-import org.apache.paimon.reader.ReadBatchSizeController;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader.RecordIterator;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
@@ -125,7 +125,8 @@ public class OrcReaderFactory implements FormatReaderFactory {
             RowType physicalReadType = readPlan.physicalRowType();
             TypeDescription physicalReadSchema =
                     readPlan.isIdentity() ? schema : convertToOrcSchema(physicalReadType);
-            ReadBatchSizeController readBatchSizeController = context.readBatchSizeController();
+            ReadBatchSizer readBatchSizer = context.readBatchSizer();
+            int defaultBatchSize = Math.max(1, batchSize / poolSize);
             Pool<OrcReaderBatch> poolOfBatches =
                     createPoolOfBatches(
                             context.filePath(),
@@ -133,7 +134,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
                             context.fileIO(),
                             physicalReadSchema,
                             physicalReadType,
-                            readBatchSizeController);
+                            readBatchSizer);
             IntFunction<OrcReaderBatch> batchFactory =
                     size ->
                             createReaderBatch(
@@ -155,7 +156,11 @@ public class OrcReaderFactory implements FormatReaderFactory {
                             deletionVectorsEnabled);
             OrcVectorizedReader orcVectorizedReader =
                     new OrcVectorizedReader(
-                            orcReader, poolOfBatches, readBatchSizeController, batchFactory);
+                            orcReader,
+                            poolOfBatches,
+                            defaultBatchSize,
+                            readBatchSizer,
+                            batchFactory);
             return readPlan.isIdentity()
                     ? orcVectorizedReader
                     : new ShreddingFormatReader(orcVectorizedReader, readPlan);
@@ -222,12 +227,13 @@ public class OrcReaderFactory implements FormatReaderFactory {
             FileIO fileIO,
             TypeDescription readSchema,
             RowType readType,
-            @Nullable ReadBatchSizeController readBatchSizeController) {
+            @Nullable ReadBatchSizer readBatchSizer) {
         final Pool<OrcReaderBatch> pool = new Pool<>(numBatches);
+        int defaultBatchSize = Math.max(1, batchSize / numBatches);
         int allocatedBatchSize =
-                readBatchSizeController == null
-                        ? Math.max(1, batchSize / numBatches)
-                        : readBatchSizeController.requestedBatchSize();
+                readBatchSizer == null
+                        ? defaultBatchSize
+                        : readBatchSizer.batchSize().orElse(defaultBatchSize);
 
         for (int i = 0; i < numBatches; i++) {
             final VectorizedRowBatch orcBatch = createBatchWrapper(readSchema, allocatedBatchSize);
@@ -309,17 +315,20 @@ public class OrcReaderFactory implements FormatReaderFactory {
 
         private final OrcRecordReader orcReader;
         private final Pool<OrcReaderBatch> pool;
-        @Nullable private final ReadBatchSizeController readBatchSizeController;
+        private final int defaultBatchSize;
+        @Nullable private final ReadBatchSizer readBatchSizer;
         private final IntFunction<OrcReaderBatch> batchFactory;
 
         private OrcVectorizedReader(
                 final OrcRecordReader orcReader,
                 final Pool<OrcReaderBatch> pool,
-                @Nullable final ReadBatchSizeController readBatchSizeController,
+                final int defaultBatchSize,
+                @Nullable final ReadBatchSizer readBatchSizer,
                 final IntFunction<OrcReaderBatch> batchFactory) {
             this.orcReader = checkNotNull(orcReader, "orcReader");
             this.pool = checkNotNull(pool, "pool");
-            this.readBatchSizeController = readBatchSizeController;
+            this.defaultBatchSize = defaultBatchSize;
+            this.readBatchSizer = readBatchSizer;
             this.batchFactory = batchFactory;
         }
 
@@ -328,15 +337,15 @@ public class OrcReaderFactory implements FormatReaderFactory {
         public ColumnarRowIterator readBatch() throws IOException {
             OrcReaderBatch batch = getCachedEntry();
             // Snapshot after acquiring a reusable batch and before the physical read starts.
-            int requestedBatchSize =
-                    readBatchSizeController == null
-                            ? batch.batchSize()
-                            : readBatchSizeController.requestedBatchSize();
-            if (batch.batchSize() != requestedBatchSize) {
+            int nextBatchSize =
+                    readBatchSizer == null
+                            ? defaultBatchSize
+                            : readBatchSizer.batchSize().orElse(defaultBatchSize);
+            if (batch.batchSize() != nextBatchSize) {
                 // Only an acquired idle entry can be replaced. In-flight pooled batches retain
                 // their old vectors until consumers release them.
                 try {
-                    batch = batchFactory.apply(requestedBatchSize);
+                    batch = batchFactory.apply(nextBatchSize);
                 } catch (RuntimeException | Error e) {
                     // Preserve the pool size invariant if allocating the replacement fails.
                     batch.recycle();
