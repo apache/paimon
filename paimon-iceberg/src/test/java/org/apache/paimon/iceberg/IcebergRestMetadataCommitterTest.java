@@ -28,6 +28,8 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.iceberg.manifest.IcebergManifestFileMeta;
+import org.apache.paimon.iceberg.manifest.IcebergManifestList;
 import org.apache.paimon.iceberg.metadata.IcebergMetadata;
 import org.apache.paimon.iceberg.metadata.IcebergSnapshot;
 import org.apache.paimon.options.MemorySize;
@@ -1352,12 +1354,38 @@ public class IcebergRestMetadataCommitterTest {
 
         // reader-visible lineage from the REST catalog matches the file-based mirror:
         // snapshot first-row-id and manifest assignments come from local metadata, never
-        // from the server's table-level watermark
+        // from the server's table-level watermark. Compare by value, not just non-nullity,
+        // against the locally-written IcebergMetadata + manifest list under the paimon
+        // table's own metadata dir (catalogTableMetadataPath), which is the source of truth
+        // the REST-registered table's metadata-location actually points at.
+        long latestSnapshotId = table.snapshotManager().latestSnapshotId();
+        IcebergMetadata localMetadata =
+                IcebergMetadata.fromPath(
+                        table.fileIO(),
+                        new Path(
+                                catalogTableMetadataPath(table),
+                                String.format("v%d.metadata.json", latestSnapshotId)));
+        IcebergSnapshot localSnapshot = localMetadata.currentSnapshot();
+        assertThat(localSnapshot.firstRowId()).isNotNull();
+
+        IcebergPathFactory pathFactory = new IcebergPathFactory(catalogTableMetadataPath(table));
+        IcebergManifestList localManifestList = IcebergManifestList.create(table, pathFactory);
+        List<Long> localDataManifestFirstRowIds =
+                localManifestList.read(new Path(localSnapshot.manifestList()).getName()).stream()
+                        .filter(m -> m.content() == IcebergManifestFileMeta.Content.DATA)
+                        .map(IcebergManifestFileMeta::firstRowId)
+                        .collect(Collectors.toList());
+        assertThat(localDataManifestFirstRowIds).isNotEmpty().doesNotContainNull();
+
         Table reloaded = restCatalog.loadTable(TableIdentifier.of("mydb", "t"));
-        assertThat(reloaded.currentSnapshot().firstRowId()).isNotNull();
+        assertThat(reloaded.currentSnapshot().firstRowId()).isEqualTo(localSnapshot.firstRowId());
+        List<Long> restDataManifestFirstRowIds = new ArrayList<>();
         for (ManifestFile manifest : reloaded.currentSnapshot().dataManifests(reloaded.io())) {
             assertThat(manifest.firstRowId()).isNotNull();
+            restDataManifestFirstRowIds.add(manifest.firstRowId());
         }
+        assertThat(restDataManifestFirstRowIds)
+                .containsExactlyInAnyOrderElementsOf(localDataManifestFirstRowIds);
     }
 
     private static class TestRecord {

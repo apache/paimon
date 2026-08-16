@@ -25,6 +25,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.iceberg.IcebergPathFactory;
@@ -41,21 +42,30 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.IOUtils;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.iceberg.DataFile;
 import org.apache.iceberg.ManifestFile;
+import org.apache.iceberg.ManifestFiles;
+import org.apache.iceberg.ManifestReader;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.TableMetadataParser;
 import org.apache.iceberg.catalog.TableIdentifier;
+import org.apache.iceberg.data.IcebergGenerics;
+import org.apache.iceberg.data.Record;
 import org.apache.iceberg.hadoop.HadoopCatalog;
+import org.apache.iceberg.io.CloseableIterable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -533,6 +543,173 @@ public class IcebergRowLineageCompatibilityTest {
         assertThat(effectiveFileFirstRowIds(table, 1).values()).containsExactly(0L);
     }
 
+    @Test
+    public void testCompactMetadataIfNeededMaterializesRowLineageUnderV3() throws Exception {
+        // exercises the `compactMetadataIfNeeded` manifest-metadata-merge call site under v3,
+        // which no existing test hits (all format-version-3 tests leave COMPACT_MIN_FILE_NUM
+        // at its default of 10, and all tests that force compaction stay on format version 2).
+        RowType rowType = defaultRowType();
+        Map<String, String> customOptions = formatVersionOptions(3);
+        customOptions.put(IcebergOptions.COMPACT_MIN_FILE_NUM.key(), "2");
+        customOptions.put(IcebergOptions.COMPACT_MAX_FILE_NUM.key(), "2");
+        // large enough that manifests are never excluded as "already big enough", so the
+        // min/max file-count thresholds above are what actually triggers the merge
+        customOptions.put(CoreOptions.MANIFEST_TARGET_FILE_SIZE.key(), "64 mb");
+        FileStoreTable table = createPaimonTable(rowType, customOptions, "avro");
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        // commit 1: single manifest M1 (candidates=1 < COMPACT_MIN_FILE_NUM, no compaction)
+        write.write(GenericRow.of(1, 10));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(1, write.prepareCommit(false, 1));
+        Map<String, Long> idsAfterCommit1 =
+                effectiveFileFirstRowIds(table, table.snapshotManager().latestSnapshotId());
+        assertThat(idsAfterCommit1).hasSize(1);
+
+        // commit 2: M1 (already assigned) + fresh M2 => 2 candidates, meets both thresholds,
+        // manifest metadata compaction merges them into a single manifest this same commit
+        write.write(GenericRow.of(3, 30));
+        commit.commit(2, write.prepareCommit(false, 2));
+        assertThat(dataManifestCount(table, table.snapshotManager().latestSnapshotId()))
+                .as("commit 2 should have merged M1+M2 into a single data manifest")
+                .isEqualTo(1);
+        Map<String, Long> idsAfterCommit2 =
+                effectiveFileFirstRowIds(table, table.snapshotManager().latestSnapshotId());
+        assertThat(idsAfterCommit2).hasSize(2);
+        for (Map.Entry<String, Long> e : idsAfterCommit1.entrySet()) {
+            // every file's effective first-row-id survives the metadata-compaction commit
+            // unchanged, whether it was inherited or already explicit before the merge
+            assertThat(idsAfterCommit2)
+                    .as("file %s", e.getKey())
+                    .containsEntry(e.getKey(), e.getValue());
+        }
+        assertMergedManifestExistingEntriesHaveExplicitFirstRowId(table);
+
+        // commit 3: merges again, this time the base manifest already contains an
+        // EXISTING entry with an explicit field 142 from commit 2's merge (file 1/2) sitting
+        // alongside an ADDED entry with inherited-only field 142 (file from commit 2) -- this
+        // is the "explicit-142 passthrough" branch of materializeFirstRowIds that no other
+        // test reaches
+        write.write(GenericRow.of(4, 40));
+        commit.commit(3, write.prepareCommit(false, 3));
+        write.close();
+        commit.close();
+        assertThat(dataManifestCount(table, table.snapshotManager().latestSnapshotId()))
+                .as("commit 3 should merge again into a single data manifest")
+                .isEqualTo(1);
+        Map<String, Long> idsAfterCommit3 =
+                effectiveFileFirstRowIds(table, table.snapshotManager().latestSnapshotId());
+        assertThat(idsAfterCommit3).hasSize(3);
+        for (Map.Entry<String, Long> e : idsAfterCommit2.entrySet()) {
+            assertThat(idsAfterCommit3)
+                    .as("file %s", e.getKey())
+                    .containsEntry(e.getKey(), e.getValue());
+        }
+        assertMergedManifestExistingEntriesHaveExplicitFirstRowId(table);
+    }
+
+    @Test
+    public void testGaReaderResolvesPerFileRowLineage() throws Exception {
+        // standard two-commit 2+1-row setup (matches testNextRowIdAdvancesAcrossCommits):
+        // commit 1's file gets effective first-row-id 0, commit 2's file gets 2
+        FileStoreTable table = createPaimonTable(defaultRowType(), formatVersionOptions(3), "avro");
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.write(GenericRow.of(3, 30));
+        commit.commit(2, write.prepareCommit(false, 2));
+        write.close();
+        commit.close();
+
+        HadoopCatalog icebergCatalog = new HadoopCatalog(new Configuration(), tempDir.toString());
+        Table icebergTable = icebergCatalog.loadTable(TableIdentifier.of("mydb.db", "t"));
+
+        // Attempt 1: resolve a per-row `_row_id` value through iceberg-data's GA generics
+        // reader. `select(...)` does not throw, but the requested metadata column is silently
+        // dropped from the projected schema: GenericReader/InternalRecordWrapper in
+        // iceberg-data 1.11.0 have no wiring for MetadataColumns.ROW_ID (unlike _pos/_file/
+        // _deleted/_spec_id, which the same reader stack does resolve), so every record's
+        // "_row_id" field comes back null instead of the assigned/inherited value. This is
+        // verified here rather than assumed: if a future Iceberg release adds real support,
+        // this loop will start observing non-null values and the assertion below must change.
+        boolean anyRowIdResolved = false;
+        try (CloseableIterable<Record> records =
+                IcebergGenerics.read(icebergTable).select("k", "v", "_row_id").build()) {
+            for (Record record : records) {
+                if (record.getField("_row_id") != null) {
+                    anyRowIdResolved = true;
+                }
+            }
+        }
+        assertThat(anyRowIdResolved)
+                .as(
+                        "iceberg-data 1.11.0 GA generics do not resolve the _row_id metadata "
+                                + "column; if this starts failing, generics gained support and "
+                                + "the fallback below can be simplified/removed")
+                .isFalse();
+
+        // Fallback: GA's ManifestFiles/DataFile APIs DO resolve the per-file first_row_id
+        // (including inheritance from the manifest-level value), so assert actual values,
+        // not just non-nullity.
+        List<Long> resolvedFirstRowIds = new ArrayList<>();
+        for (ManifestFile manifest :
+                icebergTable.currentSnapshot().dataManifests(icebergTable.io())) {
+            try (ManifestReader<DataFile> reader =
+                    ManifestFiles.read(manifest, icebergTable.io(), icebergTable.specs())) {
+                for (DataFile file : reader) {
+                    resolvedFirstRowIds.add(file.firstRowId());
+                }
+            }
+        }
+        assertThat(resolvedFirstRowIds).containsExactlyInAnyOrder(0L, 2L);
+    }
+
+    @Test
+    public void testV2ManifestListSchemaHasNoFirstRowIdColumn() throws Exception {
+        // pins the v2 manifest-list shape: 14 columns, no first_row_id anywhere, so a future
+        // change to the v3 schema construction cannot silently leak into v2's byte-identical
+        // output
+        assertThat(IcebergManifestFileMeta.schema(false).getFieldCount()).isEqualTo(14);
+        assertThat(IcebergManifestFileMeta.schema(false).getFields().stream().map(DataField::name))
+                .doesNotContain("first_row_id");
+        assertThat(IcebergManifestFileMeta.schema(true).getFieldCount()).isEqualTo(14);
+        assertThat(IcebergManifestFileMeta.schema(true).getFields().stream().map(DataField::name))
+                .doesNotContain("first_row_id");
+
+        FileStoreTable table = createPaimonTable(defaultRowType(), formatVersionOptions(2), "avro");
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.close();
+        commit.close();
+
+        // the written manifest-list file's raw bytes must not contain "first_row_id" anywhere;
+        // Avro embeds the writer schema as JSON in the file header, so a plain byte-scan of the
+        // whole file is a valid (and stronger-than-parsed) check of the physical shape
+        Path manifestListPath =
+                new Path(readIcebergMetadata(table, 1).currentSnapshot().manifestList());
+        byte[] bytes;
+        try (SeekableInputStream in = table.fileIO().newInputStream(manifestListPath)) {
+            bytes = IOUtils.readFully(in, false);
+        }
+        String content = new String(bytes, StandardCharsets.ISO_8859_1);
+        assertThat(content).doesNotContain("first_row_id");
+    }
+
     // ------------------------------------------------------------------------
     //  helpers
     // ------------------------------------------------------------------------
@@ -726,6 +903,58 @@ public class IcebergRowLineageCompatibilityTest {
             }
         }
         return result;
+    }
+
+    /** Number of DATA-content manifests referenced by the given snapshot's manifest list. */
+    private int dataManifestCount(FileStoreTable table, long snapshotId) throws Exception {
+        return dataManifestMetas(table, snapshotId).size();
+    }
+
+    private List<IcebergManifestFileMeta> dataManifestMetas(FileStoreTable table, long snapshotId)
+            throws Exception {
+        IcebergPathFactory paths = new IcebergPathFactory(new Path(table.location(), "metadata"));
+        IcebergManifestList manifestList = IcebergManifestList.create(table, paths);
+        List<IcebergManifestFileMeta> result = new ArrayList<>();
+        for (IcebergManifestFileMeta meta :
+                manifestList.read(
+                        new Path(
+                                        readIcebergMetadata(table, snapshotId)
+                                                .currentSnapshot()
+                                                .manifestList())
+                                .getName())) {
+            if (meta.content() == IcebergManifestFileMeta.Content.DATA) {
+                result.add(meta);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * After a manifest-metadata-compaction merge, every EXISTING entry in the merged manifest(s)
+     * for the table's current snapshot must carry an explicit (non-null) field 142: EXISTING
+     * entries are, by definition, carried-over/rewritten entries, so their first_row_id must have
+     * been materialized by {@code materializeFirstRowIds} rather than left to be inherited from the
+     * (now-merged-away) original manifest.
+     */
+    private void assertMergedManifestExistingEntriesHaveExplicitFirstRowId(FileStoreTable table)
+            throws Exception {
+        IcebergPathFactory paths = new IcebergPathFactory(new Path(table.location(), "metadata"));
+        IcebergManifestFile manifestFile = IcebergManifestFile.create(table, paths);
+        long snapshotId = table.snapshotManager().latestSnapshotId();
+        boolean checkedAtLeastOneExistingEntry = false;
+        for (IcebergManifestFileMeta meta : dataManifestMetas(table, snapshotId)) {
+            for (IcebergManifestEntry entry : manifestFile.read(meta)) {
+                if (entry.status() == IcebergManifestEntry.Status.EXISTING) {
+                    checkedAtLeastOneExistingEntry = true;
+                    assertThat(entry.file().firstRowId())
+                            .as("EXISTING entry for file %s", entry.file().filePath())
+                            .isNotNull();
+                }
+            }
+        }
+        assertThat(checkedAtLeastOneExistingEntry)
+                .as("expected at least one materialized EXISTING entry after the merge")
+                .isTrue();
     }
 
     private Path metadataPath(FileStoreTable table, long snapshotId) {
