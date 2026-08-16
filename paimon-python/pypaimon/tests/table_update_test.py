@@ -306,7 +306,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
             read_columns=['age', 'city'],
         )
 
-        result = self._read_all(table)
+        result = self._read_all(table).sort_by('id')
         self.assertEqual([25, 30, 36, 41, 46], result['age'].to_pylist())
         self.assertEqual(
             ['NYC', 'LA', 'CHICAGO', 'HOUSTON', 'PHOENIX'],
