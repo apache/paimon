@@ -1017,8 +1017,6 @@ class FileStoreCommit:
                 else self.table.total_buckets
             )
             for file in msg.new_files:
-                if msg.conflict_cols is not None:
-                    file._conflict_cols = msg.conflict_cols
                 commit_entries.append(ManifestEntry(
                     kind=0,
                     partition=partition,

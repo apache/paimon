@@ -36,7 +36,6 @@ class CommitMessage:
     changelog_files: List[DataFileMeta] = field(default_factory=list)
     hash_index_base_snapshot: Optional[int] = None
     total_buckets: Optional[int] = None
-    conflict_cols: Optional[List[str]] = None
 
     def is_empty(self):
         return (

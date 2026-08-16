@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional
 import time
@@ -54,9 +54,6 @@ class DataFileMeta:
 
     # not a schema field, just for internal usage
     file_path: str = None
-    _conflict_cols: Optional[List[str]] = field(
-        default=None, repr=False, compare=False
-    )
 
     def row_id_range(self) -> Optional[Range]:
         if self.first_row_id is None:
