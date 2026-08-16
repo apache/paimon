@@ -71,6 +71,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.IntFunction;
 
 import static org.apache.paimon.data.columnar.ColumnVectorUtils.createParquetWritableColumnVector;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.PAIMON_SCHEMA;
@@ -174,13 +175,15 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 "Parquet read batch size should be positive: %s",
                 configuredBatchSize);
         ReadBatchSizeController readBatchSizeController = context.readBatchSizeController();
-        int allocatedBatchSize =
+        int initialBatchSize =
                 readBatchSizeController == null
                         ? configuredBatchSize
-                        : readBatchSizeController.maxBatchSize();
+                        : readBatchSizeController.requestedBatchSize();
         reader.setRequestedSchema(requestedSchema.messageType);
         WritableColumnVector[] writableVectors =
-                createWritableVectors(allocatedBatchSize, physicalReadFields);
+                createWritableVectors(initialBatchSize, physicalReadFields);
+        IntFunction<WritableColumnVector[]> vectorFactory =
+                size -> createWritableVectors(size, physicalReadFields);
 
         VectorizedParquetRecordReader parquetReader =
                 new VectorizedParquetRecordReader(
@@ -189,9 +192,10 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                         fileSchema,
                         requestedSchema.fields,
                         writableVectors,
-                        allocatedBatchSize,
+                        initialBatchSize,
                         context.fileIO(),
-                        readBatchSizeController);
+                        readBatchSizeController,
+                        vectorFactory);
         return readPlan.isIdentity()
                 ? parquetReader
                 : new ShreddingFormatReader(parquetReader, readPlan);

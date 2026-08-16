@@ -29,11 +29,15 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /**
  * Thread-safe controller for changing the requested read batch size within a fixed maximum.
  *
- * <p>Readers allocate their reusable vectors for {@link #maxBatchSize()} when they are created and
- * snapshot {@link #requestedBatchSize()} before starting each physical batch. Updating the
- * requested size therefore does not resize existing vectors and does not affect a physical batch
- * that has already started. Asynchronously prefetched batches may also use an earlier requested
- * size.
+ * <p>Supporting readers snapshot {@link #requestedBatchSize()} before starting each physical batch
+ * and use that value for both the logical row count and vector capacity. When the requested size
+ * changes, an idle reusable batch is replaced at the next safe batch boundary. A physical batch
+ * that has already started, including an asynchronously prefetched batch, retains its previous size
+ * and vectors.
+ *
+ * <p>{@link #maxBatchSize()} is a validation limit rather than a preallocated vector capacity.
+ * Concurrent updates use latest-value semantics, so readers are not required to observe every
+ * intermediate requested size.
  */
 @Public
 @ThreadSafe
@@ -49,12 +53,12 @@ public final class ReadBatchSizeController {
         this.requestedBatchSize = new AtomicInteger(requestedBatchSize);
     }
 
-    /** Maximum vector capacity allocated by readers using this controller. */
+    /** Maximum permitted requested batch size. */
     public int maxBatchSize() {
         return maxBatchSize;
     }
 
-    /** Requested logical size for the next physical batch that has not started. */
+    /** Requested row count and vector capacity for a future physical batch. */
     public int requestedBatchSize() {
         return requestedBatchSize.get();
     }

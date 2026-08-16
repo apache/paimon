@@ -65,6 +65,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.function.IntFunction;
 
 import static org.apache.paimon.format.orc.OrcTypeUtil.convertToOrcSchema;
 import static org.apache.paimon.format.orc.reader.AbstractOrcColumnVector.createPaimonVector;
@@ -133,6 +134,14 @@ public class OrcReaderFactory implements FormatReaderFactory {
                             physicalReadSchema,
                             physicalReadType,
                             readBatchSizeController);
+            IntFunction<OrcReaderBatch> batchFactory =
+                    size ->
+                            createReaderBatch(
+                                    context.filePath(),
+                                    createBatchWrapper(physicalReadSchema, size),
+                                    poolOfBatches.recycler(),
+                                    context.fileIO(),
+                                    physicalReadType);
 
             OrcRecordReader orcReader =
                     createRecordReader(
@@ -145,7 +154,8 @@ public class OrcReaderFactory implements FormatReaderFactory {
                             context.selection(),
                             deletionVectorsEnabled);
             OrcVectorizedReader orcVectorizedReader =
-                    new OrcVectorizedReader(orcReader, poolOfBatches, readBatchSizeController);
+                    new OrcVectorizedReader(
+                            orcReader, poolOfBatches, readBatchSizeController, batchFactory);
             return readPlan.isIdentity()
                     ? orcVectorizedReader
                     : new ShreddingFormatReader(orcVectorizedReader, readPlan);
@@ -217,7 +227,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
         int allocatedBatchSize =
                 readBatchSizeController == null
                         ? Math.max(1, batchSize / numBatches)
-                        : readBatchSizeController.maxBatchSize();
+                        : readBatchSizeController.requestedBatchSize();
 
         for (int i = 0; i < numBatches; i++) {
             final VectorizedRowBatch orcBatch = createBatchWrapper(readSchema, allocatedBatchSize);
@@ -266,6 +276,10 @@ public class OrcReaderFactory implements FormatReaderFactory {
             return orcVectorizedRowBatch;
         }
 
+        public int batchSize() {
+            return orcVectorizedRowBatch.getMaxSize();
+        }
+
         private ColumnarRowIterator convertAndGetIterator(
                 VectorizedRowBatch orcBatch, long rowNumber) {
             // no copying from the ORC column vectors to the Paimon columns vectors necessary,
@@ -296,29 +310,43 @@ public class OrcReaderFactory implements FormatReaderFactory {
         private final OrcRecordReader orcReader;
         private final Pool<OrcReaderBatch> pool;
         @Nullable private final ReadBatchSizeController readBatchSizeController;
+        private final IntFunction<OrcReaderBatch> batchFactory;
 
         private OrcVectorizedReader(
                 final OrcRecordReader orcReader,
                 final Pool<OrcReaderBatch> pool,
-                @Nullable final ReadBatchSizeController readBatchSizeController) {
+                @Nullable final ReadBatchSizeController readBatchSizeController,
+                final IntFunction<OrcReaderBatch> batchFactory) {
             this.orcReader = checkNotNull(orcReader, "orcReader");
             this.pool = checkNotNull(pool, "pool");
             this.readBatchSizeController = readBatchSizeController;
+            this.batchFactory = batchFactory;
         }
 
         @Nullable
         @Override
         public ColumnarRowIterator readBatch() throws IOException {
-            final OrcReaderBatch batch = getCachedEntry();
-            final VectorizedRowBatch orcVectorBatch = batch.orcVectorizedRowBatch();
+            OrcReaderBatch batch = getCachedEntry();
             // Snapshot after acquiring a reusable batch and before the physical read starts.
             int requestedBatchSize =
                     readBatchSizeController == null
-                            ? orcVectorBatch.getMaxSize()
+                            ? batch.batchSize()
                             : readBatchSizeController.requestedBatchSize();
+            if (batch.batchSize() != requestedBatchSize) {
+                // Only an acquired idle entry can be replaced. In-flight pooled batches retain
+                // their old vectors until consumers release them.
+                try {
+                    batch = batchFactory.apply(requestedBatchSize);
+                } catch (RuntimeException | Error e) {
+                    // Preserve the pool size invariant if allocating the replacement fails.
+                    batch.recycle();
+                    throw e;
+                }
+            }
+            final VectorizedRowBatch orcVectorBatch = batch.orcVectorizedRowBatch();
 
             long rowNumber = orcReader.recordReader.getRowNumber();
-            if (!nextBatch(orcReader.recordReader, orcVectorBatch, requestedBatchSize)) {
+            if (!nextBatch(orcReader.recordReader, orcVectorBatch)) {
                 batch.recycle();
                 return null;
             }
@@ -348,9 +376,9 @@ public class OrcReaderFactory implements FormatReaderFactory {
     private static final class OrcRecordReader {
 
         private final org.apache.orc.Reader fileReader;
-        private final RecordReaderImpl recordReader;
+        private final RecordReader recordReader;
 
-        private OrcRecordReader(org.apache.orc.Reader fileReader, RecordReaderImpl recordReader) {
+        private OrcRecordReader(org.apache.orc.Reader fileReader, RecordReader recordReader) {
             this.fileReader = fileReader;
             this.recordReader = recordReader;
         }
@@ -427,7 +455,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
             }
 
             // create ORC row reader
-            RecordReaderImpl orcRowsReader = (RecordReaderImpl) orcReader.rows(options);
+            RecordReader orcRowsReader = orcReader.rows(options);
 
             // assign ids
             schema.getId();
@@ -444,10 +472,9 @@ public class OrcReaderFactory implements FormatReaderFactory {
         return schema.createRowBatch(batchSize);
     }
 
-    private static boolean nextBatch(
-            RecordReaderImpl reader, VectorizedRowBatch rowBatch, int requestedBatchSize)
+    private static boolean nextBatch(RecordReader reader, VectorizedRowBatch rowBatch)
             throws IOException {
-        return reader.nextBatch(rowBatch, requestedBatchSize);
+        return reader.nextBatch(rowBatch);
     }
 
     private static Pair<Long, Long> getOffsetAndLengthForSplit(
