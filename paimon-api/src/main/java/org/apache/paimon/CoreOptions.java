@@ -2512,7 +2512,14 @@ public class CoreOptions implements Serializable {
                                     + "sub-fields of a nested column writes an incremental file "
                                     + "containing just those sub-fields (aligned by row id); when "
                                     + "disabled, the whole top-level column is rewritten. Requires "
-                                    + "data-evolution.enabled=true.");
+                                    + "data-evolution.enabled=true. Mixed-version compatibility "
+                                    + "warning: once a file's write columns record a nested "
+                                    + "sub-field path (e.g. 'nest.a'), a reader, writer, compactor, "
+                                    + "or other maintenance job on an older version cannot "
+                                    + "reconstruct it. Every such component reading or writing this "
+                                    + "table must be upgraded before enabling this option, and "
+                                    + "downgrading the binary is unsafe once such files have been "
+                                    + "committed.");
 
     public static final ConfigOption<Long> DATA_EVOLUTION_REASSIGN_SKIP_CONTIGUOUS_ROW_COUNT =
             key("data-evolution.reassign.skip-contiguous-row-count")

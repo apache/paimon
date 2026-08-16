@@ -78,6 +78,99 @@ class NestedSubfieldMergeIntoTest extends PaimonSparkTestBase {
     }
   }
 
+  // Guards the read path: DataEvolutionSplitRead calls leafPaths() on the planned read type,
+  // which now requires recursive field order to match the schema. A reversed nested projection
+  // must still read back correctly rather than tripping that check.
+  test("Sub-field data evolution: reversed nested projection reads correctly") {
+    withTable("s", "t") {
+      sql(s"""
+             |CREATE TABLE t (id INT, nest STRUCT<a: INT, b: STRING>) TBLPROPERTIES (
+             |  'row-tracking.enabled' = 'true',
+             |  'data-evolution.enabled' = 'true',
+             |  'data-evolution.nested-field.enabled' = 'true')
+             |""".stripMargin)
+      sql(
+        "INSERT INTO t VALUES (1, named_struct('a', 10, 'b', 'x')), " +
+          "(2, named_struct('a', 20, 'b', 'y'))")
+
+      Seq((1, 100)).toDF("id", "newa").createOrReplaceTempView("s")
+      sql(s"""
+             |MERGE INTO t
+             |USING s
+             |ON t.id = s.id
+             |WHEN MATCHED THEN UPDATE SET t.nest.a = s.newa
+             |""".stripMargin).collect()
+
+      // sub-field incremental file exists; now read the nested fields in REVERSE schema order
+      assert(latestDeltaWriteCols("t").exists(cols => cols == Seq("nest.a")))
+      checkAnswer(sql("SELECT nest.b, nest.a FROM t ORDER BY id"), Seq(Row("x", 100), Row("y", 20)))
+      // and the whole struct plus a reversed pair together
+      checkAnswer(
+        sql("SELECT id, nest.b, nest.a, nest FROM t ORDER BY id"),
+        Seq(Row(1, "x", 100, Row(100, "x")), Row(2, "y", 20, Row(20, "y"))))
+    }
+  }
+
+  test("Sub-field data evolution: compaction merges sub-field files without changing data") {
+    withTable("s", "t") {
+      sql(s"""
+             |CREATE TABLE t (id INT, nest STRUCT<a: INT, b: STRING>) TBLPROPERTIES (
+             |  'row-tracking.enabled' = 'true',
+             |  'data-evolution.enabled' = 'true',
+             |  'data-evolution.nested-field.enabled' = 'true')
+             |""".stripMargin)
+      sql(
+        "INSERT INTO t VALUES (1, named_struct('a', 10, 'b', 'x')), " +
+          "(2, named_struct('a', 20, 'b', 'y'))")
+
+      Seq((1, 100)).toDF("id", "newa").createOrReplaceTempView("s")
+      sql(s"""
+             |MERGE INTO t
+             |USING s
+             |ON t.id = s.id
+             |WHEN MATCHED THEN UPDATE SET t.nest.a = s.newa
+             |""".stripMargin).collect()
+      assert(latestDeltaWriteCols("t").exists(c => c == Seq("nest.a")))
+
+      sql("CALL sys.compact(table => 't', options => 'compaction.min.file-num=2')").collect()
+
+      // data survives the compaction and the dotted write columns are gone (single full file)
+      checkAnswer(
+        sql("SELECT id, nest.a, nest.b FROM t ORDER BY id"),
+        Seq(Row(1, 100, "x"), Row(2, 20, "y")))
+      assert(!latestDeltaWriteCols("t").exists(c => c.exists(_.contains("."))))
+    }
+  }
+
+  test("Sub-field data evolution: adding a nested sub-field after sub-field files exist") {
+    withTable("s", "t") {
+      sql(s"""
+             |CREATE TABLE t (id INT, nest STRUCT<a: INT, b: STRING>) TBLPROPERTIES (
+             |  'row-tracking.enabled' = 'true',
+             |  'data-evolution.enabled' = 'true',
+             |  'data-evolution.nested-field.enabled' = 'true')
+             |""".stripMargin)
+      sql(
+        "INSERT INTO t VALUES (1, named_struct('a', 10, 'b', 'x')), " +
+          "(2, named_struct('a', 20, 'b', 'y'))")
+
+      Seq((1, 100)).toDF("id", "newa").createOrReplaceTempView("s")
+      sql(s"""
+             |MERGE INTO t
+             |USING s
+             |ON t.id = s.id
+             |WHEN MATCHED THEN UPDATE SET t.nest.a = s.newa
+             |""".stripMargin).collect()
+      assert(latestDeltaWriteCols("t").exists(c => c == Seq("nest.a")))
+
+      // the pre-existing sub-field files must still reconstruct against the evolved struct
+      sql("ALTER TABLE t ADD COLUMN nest.c INT")
+      checkAnswer(
+        sql("SELECT id, nest.a, nest.b, nest.c FROM t ORDER BY id"),
+        Seq(Row(1, 100, "x", null), Row(2, 20, "y", null)))
+    }
+  }
+
   test("Sub-field data evolution: updating whole struct still writes the whole column") {
     withTable("s", "t") {
       sql(s"""
@@ -128,6 +221,188 @@ class NestedSubfieldMergeIntoTest extends PaimonSparkTestBase {
       assert(
         !deltaCols.exists(cols => cols.contains("nest.a")),
         s"expected no dotted (sub-field) writeCols when feature is disabled, got: $deltaCols")
+    }
+  }
+
+  test(
+    "Sub-field data evolution: sub-fields touched by separate WHEN MATCHED clauses in reverse " +
+      "schema order are not swapped (regression for #8334 review)") {
+    withTable("s", "t") {
+      sql(s"""
+             |CREATE TABLE t (id INT, nest STRUCT<a: INT, b: STRING, c: INT>) TBLPROPERTIES (
+             |  'row-tracking.enabled' = 'true',
+             |  'data-evolution.enabled' = 'true',
+             |  'data-evolution.nested-field.enabled' = 'true')
+             |""".stripMargin)
+      sql(
+        "INSERT INTO t VALUES (1, named_struct('a', 10, 'b', 'x', 'c', 100)), " +
+          "(2, named_struct('a', 200, 'b', 'y', 'c', 40))")
+
+      Seq((1, 1, 999, 111), (2, 2, 222, 888))
+        .toDF("id", "kind", "newc", "newa")
+        .createOrReplaceTempView("s")
+
+      // TWO separate WHEN MATCHED clauses: the first touches c, the second touches a.
+      // The per-action union therefore starts in clause order [c, a], not schema order [a, c].
+      sql(s"""
+             |MERGE INTO t
+             |USING s
+             |ON t.id = s.id
+             |WHEN MATCHED AND s.kind = 1 THEN UPDATE SET t.nest.c = s.newc
+             |WHEN MATCHED AND s.kind = 2 THEN UPDATE SET t.nest.a = s.newa
+             |""".stripMargin).collect()
+
+      // row1: only c updated -> (10, x, 999); row2: only a updated -> (888, y, 40)
+      checkAnswer(
+        sql("SELECT id, nest.a, nest.b, nest.c FROM t ORDER BY id"),
+        Seq(Row(1, 10, "x", 999), Row(2, 888, "y", 40)))
+    }
+  }
+
+  test(
+    "Sub-field data evolution: a matched row whose clause leaves its NULL struct untouched stays " +
+      "NULL (regression for #8334 review)") {
+    withTable("s", "t") {
+      sql(s"""
+             |CREATE TABLE t (id INT, nest STRUCT<a: INT, b: STRING>) TBLPROPERTIES (
+             |  'row-tracking.enabled' = 'true',
+             |  'data-evolution.enabled' = 'true',
+             |  'data-evolution.nested-field.enabled' = 'true')
+             |""".stripMargin)
+      sql(
+        "INSERT INTO t VALUES (1, named_struct('a', 10, 'b', 'x')), " +
+          "(2, CAST(NULL AS STRUCT<a: INT, b: STRING>))")
+
+      // BOTH rows are matched by the source, but only row 1 satisfies the update condition,
+      // so row 2 flows through the copy instruction with its NULL nest.
+      Seq((1, 1, 100), (2, 2, 200)).toDF("id", "kind", "newa").createOrReplaceTempView("s")
+
+      sql(s"""
+             |MERGE INTO t
+             |USING s
+             |ON t.id = s.id
+             |WHEN MATCHED AND s.kind = 1 THEN UPDATE SET t.nest.a = s.newa
+             |""".stripMargin).collect()
+
+      checkAnswer(
+        sql("SELECT id, nest FROM t ORDER BY id"),
+        Seq(Row(1, Row(100, "x")), Row(2, null)))
+      checkAnswer(sql("SELECT id FROM t WHERE nest IS NULL"), Seq(Row(2)))
+    }
+  }
+
+  // Note: a single clause with several assignments is normalised into schema order by Spark's
+  // own assignment alignment, so this case cannot expose the ordering bug; the multi-clause test
+  // above is the one that does. Kept as a plain correctness check.
+  test("Sub-field data evolution: several sub-field assignments in one clause keep their values") {
+    withTable("s", "t") {
+      sql(s"""
+             |CREATE TABLE t (id INT, nest STRUCT<a: INT, b: STRING, c: INT>) TBLPROPERTIES (
+             |  'row-tracking.enabled' = 'true',
+             |  'data-evolution.enabled' = 'true',
+             |  'data-evolution.nested-field.enabled' = 'true')
+             |""".stripMargin)
+      sql(
+        "INSERT INTO t VALUES (1, named_struct('a', 10, 'b', 'x', 'c', 100)), " +
+          "(2, named_struct('a', 200, 'b', 'y', 'c', 40))")
+
+      Seq((1, 999, 111), (2, 222, 888)).toDF("id", "newc", "newa").createOrReplaceTempView("s")
+
+      // note: SET touches c before a, i.e. in reverse of the struct's declaration order (a,b,c)
+      sql(s"""
+             |MERGE INTO t
+             |USING s
+             |ON t.id = s.id
+             |WHEN MATCHED THEN UPDATE SET t.nest.c = s.newc, t.nest.a = s.newa
+             |""".stripMargin).collect()
+
+      checkAnswer(
+        sql("SELECT id, nest.a, nest.b, nest.c FROM t ORDER BY id"),
+        Seq(Row(1, 111, "x", 999), Row(2, 888, "y", 222)))
+    }
+  }
+
+  // Note: a row that is not matched at all keeps its parent-struct nullness from the base file,
+  // so this case cannot expose the null-guard bug; the matched-but-untouched test above is the one
+  // that does. Kept as a plain correctness check.
+  test("Sub-field data evolution: an unmatched row keeps its NULL struct") {
+    withTable("s", "t") {
+      sql(s"""
+             |CREATE TABLE t (id INT, nest STRUCT<a: INT, b: STRING>) TBLPROPERTIES (
+             |  'row-tracking.enabled' = 'true',
+             |  'data-evolution.enabled' = 'true',
+             |  'data-evolution.nested-field.enabled' = 'true')
+             |""".stripMargin)
+      sql(
+        "INSERT INTO t VALUES (1, named_struct('a', 10, 'b', 'x')), " +
+          "(2, CAST(NULL AS STRUCT<a: INT, b: STRING>))")
+
+      Seq((1, 100)).toDF("id", "newa").createOrReplaceTempView("s")
+
+      sql(s"""
+             |MERGE INTO t
+             |USING s
+             |ON t.id = s.id
+             |WHEN MATCHED THEN UPDATE SET t.nest.a = s.newa
+             |""".stripMargin).collect()
+
+      checkAnswer(
+        sql("SELECT id, nest FROM t ORDER BY id"),
+        Seq(Row(1, Row(100, "x")), Row(2, null)))
+      checkAnswer(sql("SELECT id FROM t WHERE nest IS NULL"), Seq(Row(2)))
+    }
+  }
+
+  test(
+    "Sub-field data evolution: SET on a sub-field materializes a previously-NULL struct " +
+      "(regression for #8334 review)") {
+    withTable("s", "t") {
+      sql(s"""
+             |CREATE TABLE t (id INT, nest STRUCT<a: INT, b: STRING>) TBLPROPERTIES (
+             |  'row-tracking.enabled' = 'true',
+             |  'data-evolution.enabled' = 'true',
+             |  'data-evolution.nested-field.enabled' = 'true')
+             |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, CAST(NULL AS STRUCT<a: INT, b: STRING>))")
+
+      Seq((1, 100)).toDF("id", "newa").createOrReplaceTempView("s")
+
+      sql(s"""
+             |MERGE INTO t
+             |USING s
+             |ON t.id = s.id
+             |WHEN MATCHED THEN UPDATE SET t.nest.a = s.newa
+             |""".stripMargin).collect()
+
+      // An explicit sub-field assignment must materialize the struct even though the target
+      // struct was NULL; the untouched sibling stays NULL.
+      checkAnswer(sql("SELECT id, nest.a, nest.b FROM t"), Seq(Row(1, 100, null)))
+      assert(latestDeltaWriteCols("t").exists(cols => cols == Seq("nest.a")))
+    }
+  }
+
+  test(
+    "Sub-field data evolution: MERGE INTO whole-struct SET on a previously-NULL struct " +
+      "materializes correctly") {
+    withTable("s", "t") {
+      sql(s"""
+             |CREATE TABLE t (id INT, nest STRUCT<a: INT, b: STRING>) TBLPROPERTIES (
+             |  'row-tracking.enabled' = 'true',
+             |  'data-evolution.enabled' = 'true',
+             |  'data-evolution.nested-field.enabled' = 'true')
+             |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, CAST(NULL AS STRUCT<a: INT, b: STRING>))")
+
+      Seq((1, 100, "z")).toDF("id", "newa", "newb").createOrReplaceTempView("s")
+
+      sql(s"""
+             |MERGE INTO t
+             |USING s
+             |ON t.id = s.id
+             |WHEN MATCHED THEN UPDATE SET t.nest = named_struct('a', s.newa, 'b', s.newb)
+             |""".stripMargin).collect()
+
+      checkAnswer(sql("SELECT id, nest.a, nest.b FROM t"), Seq(Row(1, 100, "z")))
     }
   }
 }

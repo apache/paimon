@@ -199,6 +199,78 @@ public class NestedSubfieldMergeIntoActionITCase extends ActionITCaseBase {
     }
 
     @Test
+    public void testWholeStructAssignmentWithReorderedSourceThrows() throws Exception {
+        // target nest is ROW<a, b>; a whole-column assignment from a same-named-but-reordered
+        // source ROW<b, a> must be rejected. The write is positional (the source struct is
+        // written through as-is), so accepting a reordered source would silently swap the a/b
+        // values instead of failing loudly (regression for #8334 review comment on
+        // isFullyCompatibleStruct).
+        prepareNestedTarget(true);
+        sEnv.executeSql(
+                buildDdl(
+                        "S",
+                        Arrays.asList("id INT", "nest ROW<b STRING, a INT>"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<String, String>() {
+                            {
+                                put(ROW_TRACKING_ENABLED.key(), "true");
+                                put(DATA_EVOLUTION_ENABLED.key(), "true");
+                            }
+                        }));
+        insertInto("S", "(1, CAST(ROW('z', 100) AS ROW<b STRING, a INT>))");
+
+        assertThatThrownBy(
+                        () ->
+                                builder(warehouse, database, "T")
+                                        .withMergeCondition("T.id=S.id")
+                                        .withMatchedUpdateSet("T.nest=S.nest")
+                                        .withSourceTable("S")
+                                        .withSinkParallelism(2)
+                                        .build()
+                                        .run())
+                .hasMessageContaining("incompatible");
+    }
+
+    @Test
+    public void testDuplicateSetTargetThrows() throws Exception {
+        prepareNestedTarget(true);
+        prepareSubFieldSource();
+
+        // T.nest.a is targeted twice; parseCommaSeparatedKeyValues would otherwise silently keep
+        // only the last assignment (regression for #8334 review comment on buildExplicitProject).
+        assertThatThrownBy(
+                        () ->
+                                builder(warehouse, database, "T")
+                                        .withMergeCondition("T.id=S.id")
+                                        .withMatchedUpdateSet("T.nest.a=S.newa,T.nest.a=S.newa")
+                                        .withSourceTable("S")
+                                        .withSinkParallelism(2)
+                                        .build()
+                                        .run())
+                .hasMessageContaining("Duplicate");
+    }
+
+    @Test
+    public void testDuplicateSetTargetWithMixedQualifierThrows() throws Exception {
+        prepareNestedTarget(true);
+        prepareSubFieldSource();
+
+        // the same target written once qualified (T.nest.a) and once unqualified (nest.a) must
+        // still be caught as a duplicate.
+        assertThatThrownBy(
+                        () ->
+                                builder(warehouse, database, "T")
+                                        .withMergeCondition("T.id=S.id")
+                                        .withMatchedUpdateSet("T.nest.a=S.newa,nest.a=S.newa")
+                                        .withSourceTable("S")
+                                        .withSinkParallelism(2)
+                                        .build()
+                                        .run())
+                .hasMessageContaining("Duplicate");
+    }
+
+    @Test
     public void testUpdateMultipleSubFieldsWritesOnlyThoseLeaves() throws Exception {
         // a 3-field struct so that updating two sub-fields is a strict subset (stays
         // sub-field-level

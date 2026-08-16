@@ -297,9 +297,12 @@ public class DataTypesTest {
         RowType reordered = type.projectByPaths(Arrays.asList("nest.b", "nest.a"));
         Assertions.assertThat(((RowType) reordered.getField("nest").type()).getFieldNames())
                 .containsExactly("b", "a");
-        // ... but leafPaths still collapses it to the whole column: coversFully compares field ids,
-        // not positions, so a complete-though-reordered struct is not a partial write
-        Assertions.assertThat(reordered.leafPaths(type)).containsExactly("nest");
+        // ... and leafPaths does not collapse it to the whole column name: coversFully requires
+        // the same physical order as the full type, not just the same field ids, so a
+        // complete-but-reordered struct is still treated as a partial (order-preserving) write.
+        // Collapsing it to "nest" would let a reader reconstruct schema-declaration order (a, b)
+        // instead of the physical write order (b, a).
+        Assertions.assertThat(reordered.leafPaths(type)).containsExactly("nest.b", "nest.a");
     }
 
     /**
