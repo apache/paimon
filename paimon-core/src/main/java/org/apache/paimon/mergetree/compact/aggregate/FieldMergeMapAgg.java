@@ -21,9 +21,7 @@ package org.apache.paimon.mergetree.compact.aggregate;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
-import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.types.MapType;
-import org.apache.paimon.utils.ByteArrayKey;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -38,12 +36,7 @@ public class FieldMergeMapAgg extends FieldAggregator {
     private final InternalArray.ElementGetter keyGetter;
     private final InternalArray.ElementGetter valueGetter;
 
-    /**
-     * A key of type {@code BINARY} or {@code VARBINARY} arrives as a {@code byte[]}, which inherits
-     * identity equality from {@link Object}. Used directly, two keys with the same content occupy
-     * two entries and a retraction never matches, so such keys are held in a {@link ByteArrayKey}
-     * while they are in a hash collection and unwrapped again on the way out.
-     */
+    /** See {@link BinaryMapKeys}: a binary key has no value equality of its own. */
     private final boolean binaryKey;
 
     public FieldMergeMapAgg(String name, MapType dataType) {
@@ -51,28 +44,15 @@ public class FieldMergeMapAgg extends FieldAggregator {
 
         this.keyGetter = InternalArray.createElementGetter(dataType.getKeyType());
         this.valueGetter = InternalArray.createElementGetter(dataType.getValueType());
-        this.binaryKey =
-                dataType.getKeyType()
-                        .getTypeRoot()
-                        .getFamilies()
-                        .contains(DataTypeFamily.BINARY_STRING);
+        this.binaryKey = BinaryMapKeys.isBinary(dataType.getKeyType());
     }
 
     private Object hashKey(Object key) {
-        return binaryKey && key != null ? new ByteArrayKey((byte[]) key) : key;
-    }
-
-    private Object originalKey(Object key) {
-        return key instanceof ByteArrayKey ? ((ByteArrayKey) key).bytes() : key;
+        return BinaryMapKeys.hashKey(binaryKey, key);
     }
 
     private GenericMap toGenericMap(Map<Object, Object> map) {
-        if (!binaryKey) {
-            return new GenericMap(map);
-        }
-        Map<Object, Object> unwrapped = new HashMap<>(map.size());
-        map.forEach((k, v) -> unwrapped.put(originalKey(k), v));
-        return new GenericMap(unwrapped);
+        return BinaryMapKeys.toGenericMap(binaryKey, map);
     }
 
     @Override

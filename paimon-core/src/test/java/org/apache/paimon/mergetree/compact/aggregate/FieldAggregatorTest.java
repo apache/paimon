@@ -2903,6 +2903,58 @@ public class FieldAggregatorTest {
                 createExpectedEntry("key3", "C"));
     }
 
+    /**
+     * With a binary key the timestamp comparison never runs, because the lookup of the existing
+     * entry misses: the newer row is appended as a second entry under the same logical key, and a
+     * null row fails to remove anything.
+     */
+    @Test
+    public void testFieldMergeMapWithKeyTimeAggWithBinaryKey() {
+        MapType mapType =
+                DataTypes.MAP(
+                        DataTypes.VARBINARY(10),
+                        DataTypes.ROW(
+                                DataTypes.FIELD(0, "actual_value", DataTypes.STRING()),
+                                DataTypes.FIELD(1, "dbsync_ts", DataTypes.STRING())));
+        FieldMergeMapWithKeyTimeAgg agg = new FieldMergeMapWithKeyTimeAgg("test", mapType, 1);
+
+        Object acc = agg.agg(null, binaryKeyedMap(new byte[] {1, 2}, "A", "100"));
+
+        // Newer timestamp for the same key wins, and does not become a second entry.
+        acc = agg.agg(acc, binaryKeyedMap(new byte[] {1, 2}, "A1", "200"));
+        InternalMap merged = (InternalMap) acc;
+        assertThat(merged.size()).isEqualTo(1);
+        assertThat(firstRowValue(merged)).isEqualTo("A1");
+
+        // Older timestamp is ignored rather than appended.
+        acc = agg.agg(acc, binaryKeyedMap(new byte[] {1, 2}, "A0", "050"));
+        merged = (InternalMap) acc;
+        assertThat(merged.size()).isEqualTo(1);
+        assertThat(firstRowValue(merged)).isEqualTo("A1");
+
+        // A null row is a tombstone and must remove the entry.
+        Map<Object, Object> tombstone = new HashMap<>();
+        tombstone.put(new byte[] {1, 2}, null);
+        acc = agg.agg(acc, new GenericMap(tombstone));
+        assertThat(((InternalMap) acc).size()).isEqualTo(0);
+    }
+
+    private GenericMap binaryKeyedMap(byte[] key, String value, String ts) {
+        Map<Object, Object> map = new HashMap<>();
+        map.put(key, GenericRow.of(BinaryString.fromString(value), BinaryString.fromString(ts)));
+        return new GenericMap(map);
+    }
+
+    private String firstRowValue(InternalMap map) {
+        InternalArray.ElementGetter valueGetter =
+                InternalArray.createElementGetter(
+                        DataTypes.ROW(
+                                DataTypes.FIELD(0, "actual_value", DataTypes.STRING()),
+                                DataTypes.FIELD(1, "dbsync_ts", DataTypes.STRING())));
+        InternalRow row = (InternalRow) valueGetter.getElementOrNull(map.valueArray(), 0);
+        return row.getString(0).toString();
+    }
+
     private Map.Entry<BinaryString, InternalRow> createEntry(String key, String value, String ts) {
         return new AbstractMap.SimpleEntry<>(
                 BinaryString.fromString(key),
