@@ -304,11 +304,15 @@ public class IcebergDataField {
                 case "geography": // iceberg v3 format
                     String[] parameters = geographyParameters(simpleType);
                     Preconditions.checkArgument(
-                            parameters.length == 2,
+                            parameters.length == 1 || parameters.length == 2,
                             "Invalid Iceberg geography type: %s",
                             simpleType);
                     return new GeographyType(
-                            !isRequired, parameters[0], EdgeAlgorithm.fromName(parameters[1]));
+                            !isRequired,
+                            parameters[0],
+                            parameters.length == 1
+                                    ? GeographyType.DEFAULT_ALGORITHM
+                                    : EdgeAlgorithm.fromName(parameters[1]));
                 default:
                     throw new UnsupportedOperationException(
                             "Unsupported primitive data type: " + icebergType);

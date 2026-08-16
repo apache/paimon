@@ -508,6 +508,20 @@ class RowType(DataType):
         raise ValueError("Field {} not found in {}".format(field_name, self))
 
 
+def _contains_geospatial_type(data_type: DataType) -> bool:
+    if isinstance(data_type, (GeometryType, GeographyType)):
+        return True
+    if isinstance(data_type, (ArrayType, MultisetType)):
+        return _contains_geospatial_type(data_type.element)
+    if isinstance(data_type, MapType):
+        return (_contains_geospatial_type(data_type.key)
+                or _contains_geospatial_type(data_type.value))
+    if isinstance(data_type, RowType):
+        return any(_contains_geospatial_type(field.type)
+                   for field in data_type.fields)
+    return False
+
+
 def reassign_field_id(data_type: DataType, field_id: "AtomicInteger") -> DataType:
     """Return a copy of *data_type* with every nested field id reassigned from
     *field_id*, depth-first with children allocated before their parent field.
@@ -633,8 +647,12 @@ class DataTypeParser:
             type_text, re.IGNORECASE)
         if geometry_match:
             quoted_crs, raw_crs = geometry_match.groups()
-            crs = quoted_crs.replace("''", "'") if quoted_crs is not None else raw_crs
-            return GeometryType(crs or GeometryType.DEFAULT_CRS, nullable)
+            if quoted_crs is None and raw_crs is None:
+                crs = GeometryType.DEFAULT_CRS
+            else:
+                crs = quoted_crs.replace("''", "'") \
+                    if quoted_crs is not None else raw_crs
+            return GeometryType(crs, nullable)
         if type_text.upper().startswith("GEOMETRY"):
             raise ValueError("Invalid geometry type: {}".format(type_text))
 
@@ -643,8 +661,11 @@ class DataTypeParser:
             r"(?:,\s*([^(),]+?)\s*)?\))?", type_text, re.IGNORECASE)
         if geography_match:
             quoted_crs, raw_crs, raw_algorithm = geography_match.groups()
-            crs = quoted_crs.replace("''", "'") if quoted_crs is not None else raw_crs
-            crs = crs or GeographyType.DEFAULT_CRS
+            if quoted_crs is None and raw_crs is None:
+                crs = GeographyType.DEFAULT_CRS
+            else:
+                crs = quoted_crs.replace("''", "'") \
+                    if quoted_crs is not None else raw_crs
             algorithm = EdgeAlgorithm.from_name(
                 raw_algorithm or GeographyType.DEFAULT_ALGORITHM.value)
             return GeographyType(crs, algorithm, nullable)
@@ -988,9 +1009,11 @@ class PyarrowFieldParser:
         if pa_field.metadata and b'paimon.type' in pa_field.metadata:
             data_type = DataTypeParser.parse_atomic_type_sql_string(
                 pa_field.metadata[b'paimon.type'].decode('utf-8'))
-            if (isinstance(data_type, (GeometryType, GeographyType))
-                    and not (types.is_binary(pa_field.type)
-                             or types.is_fixed_size_binary(pa_field.type))):
+            if not isinstance(data_type, (GeometryType, GeographyType)):
+                raise ValueError(
+                    "Arrow field metadata 'paimon.type' is reserved for "
+                    "geospatial types: {}".format(pa_field))
+            if not types.is_binary(pa_field.type):
                 raise ValueError(
                     "Geospatial field metadata requires a binary Arrow type: {}"
                     .format(pa_field))

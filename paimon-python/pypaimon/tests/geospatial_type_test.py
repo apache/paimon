@@ -22,9 +22,9 @@ from pypaimon.casting.data_type_casts import supports_cast
 from pypaimon.schema.data_types import DataField
 from pypaimon.schema.data_types import DataTypeParser
 from pypaimon.schema.data_types import EdgeAlgorithm
+from pypaimon.schema.data_types import ArrayType
 from pypaimon.schema.data_types import GeographyType
 from pypaimon.schema.data_types import GeometryType
-from pypaimon.schema.data_types import ArrayType
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.schema.data_types import RowType
 from pypaimon.schema.schema_manager import _validate_geospatial_fields
@@ -48,6 +48,10 @@ def test_defaults_and_invalid_parameters():
     assert str(DataTypeParser.parse_data_type("GEOGRAPHY")) == \
         "GEOGRAPHY(OGC:CRS84, spherical)"
 
+    for invalid_type in ("GEOMETRY()", "GEOGRAPHY()",
+                         "GEOGRAPHY(, spherical)"):
+        with pytest.raises(ValueError, match="Invalid CRS"):
+            DataTypeParser.parse_data_type(invalid_type)
     with pytest.raises(ValueError, match="Invalid edge interpolation algorithm"):
         DataTypeParser.parse_data_type("GEOGRAPHY(OGC:CRS84, rhumb)")
     with pytest.raises(ValueError, match="Invalid geometry type"):
@@ -57,8 +61,11 @@ def test_defaults_and_invalid_parameters():
 def test_pyarrow_uses_wkb_binary_and_preserves_type_metadata():
     fields = [
         DataField(0, "geom", GeometryType()),
-        DataField(1, "geog", GeographyType("EPSG:4326", EdgeAlgorithm.VINCENTY,
-                                            nullable=False)),
+        DataField(
+            1,
+            "geog",
+            GeographyType(
+                "EPSG:4326", EdgeAlgorithm.VINCENTY, nullable=False)),
     ]
 
     arrow_schema = PyarrowFieldParser.from_paimon_schema(fields)
@@ -67,6 +74,18 @@ def test_pyarrow_uses_wkb_binary_and_preserves_type_metadata():
     assert arrow_schema.field("geom").metadata[b'paimon.type'] == \
         b'GEOMETRY(OGC:CRS84)'
     assert PyarrowFieldParser.to_paimon_schema(arrow_schema) == fields
+
+    fixed_geometry = pyarrow.field(
+        "geom",
+        pyarrow.binary(21),
+        metadata={b'paimon.type': b'GEOMETRY(OGC:CRS84)'})
+    with pytest.raises(ValueError, match="requires a binary Arrow type"):
+        PyarrowFieldParser.to_paimon_schema(pyarrow.schema([fixed_geometry]))
+
+    non_geospatial = pyarrow.field(
+        "value", pyarrow.binary(), metadata={b'paimon.type': b'INT'})
+    with pytest.raises(ValueError, match="reserved for geospatial types"):
+        PyarrowFieldParser.to_paimon_schema(pyarrow.schema([non_geospatial]))
 
 
 def test_nested_arrow_and_parquet_wkb_round_trip(tmp_path):

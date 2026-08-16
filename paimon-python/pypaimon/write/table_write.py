@@ -19,7 +19,10 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import pyarrow as pa
 
-from pypaimon.schema.data_types import PyarrowFieldParser
+from pypaimon.schema.data_types import (
+    PyarrowFieldParser,
+    _contains_geospatial_type,
+)
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.row.blob import BlobConsumer
 from pypaimon.write.row_utils import (
@@ -329,6 +332,15 @@ class TableWrite:
             release()
 
     def _validate_pyarrow_schema(self, data_schema: pa.Schema):
+        if any(_contains_geospatial_type(field.type)
+               for field in self.table.table_schema.fields):
+            raise NotImplementedError(
+                "PyPaimon does not support writing geospatial columns because "
+                "PyArrow cannot produce the native Parquet GEOMETRY or "
+                "GEOGRAPHY logical annotation required by Paimon and "
+                "Iceberg v3."
+            )
+
         if self._is_compatible_pyarrow_schema(data_schema, self.table_pyarrow_schema):
             return
 

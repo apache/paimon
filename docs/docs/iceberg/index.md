@@ -113,6 +113,8 @@ Paimon Iceberg compatibility currently supports the following data types.
 **Note on Geospatial Types:**
 - `GEOMETRY` and `GEOGRAPHY` values use OGC Well-Known Binary (WKB). The default CRS is `OGC:CRS84`, and the default geography edge algorithm is `spherical`.
 - Geospatial columns require Parquet for data, per-level, and changelog files. When Iceberg metadata is enabled, set `metadata.iceberg.format-version` to `3`.
+- Spark SQL supports geospatial columns with Spark 4.1 or later. Spark 3.x, Spark 4.0, and Flink SQL reject these columns instead of exposing them as binary and losing the CRS or edge algorithm.
+- Iceberg REST catalog publication does not yet support geospatial columns. Use `table-location`, `hadoop-catalog`, or `hive-catalog` metadata storage instead.
 - Geospatial columns cannot be primary, partition, bucket, or sequence keys. Paimon records null counts but does not publish byte-wise lower or upper bounds for WKB values.
 
 :::

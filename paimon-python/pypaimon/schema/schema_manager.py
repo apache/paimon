@@ -30,6 +30,7 @@ from pypaimon.casting.data_type_casts import can_execute_cast, supports_cast
 from pypaimon.schema.data_types import (ArrayType, AtomicInteger, DataField,
                                         DataType, GeographyType, GeometryType,
                                         MapType, MultisetType, RowType,
+                                        _contains_geospatial_type,
                                         is_array_blob_type, is_blob_file_field,
                                         is_blob_file_type, is_blob_type,
                                         is_map_blob_type, reassign_field_id)
@@ -466,20 +467,6 @@ def _validate_options(options: dict):
             f"{CoreOptions.TARGET_FILE_ROW_NUM.key()} "
             f"should be at most {max_value}"
         )
-
-
-def _contains_geospatial_type(data_type: DataType) -> bool:
-    if isinstance(data_type, (GeometryType, GeographyType)):
-        return True
-    if isinstance(data_type, (ArrayType, MultisetType)):
-        return _contains_geospatial_type(data_type.element)
-    if isinstance(data_type, MapType):
-        return (_contains_geospatial_type(data_type.key)
-                or _contains_geospatial_type(data_type.value))
-    if isinstance(data_type, RowType):
-        return any(_contains_geospatial_type(field.type)
-                   for field in data_type.fields)
-    return False
 
 
 def _validate_geospatial_fields(

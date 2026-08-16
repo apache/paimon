@@ -31,6 +31,7 @@ from parameterized import parameterized
 from pypaimon.common.json_util import JSON
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
+from pypaimon.schema.data_types import DataField, GeometryType
 from pypaimon.write.table_write import TableWrite
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 
@@ -1899,6 +1900,19 @@ class TableWriteTest(unittest.TestCase):
         table_write._validate_pyarrow_schema(pa.schema([
             ('payload', pa.binary(4)),
         ]))
+
+    def test_write_rejects_geospatial_type_without_native_parquet_annotation(self):
+        schema = Schema([DataField(0, 'geom', GeometryType())])
+        self.catalog.create_table(
+            'default.test_reject_geospatial_write', schema, False)
+        table = self.catalog.get_table(
+            'default.test_reject_geospatial_write')
+        data = pa.table({'geom': [bytes.fromhex(
+            '0101000000000000000000f03f0000000000000040')]})
+
+        with self.assertRaisesRegex(
+                NotImplementedError, 'native Parquet GEOMETRY or GEOGRAPHY'):
+            self._commit_arrow(table, data)
 
     @parameterized.expand([('parquet',), ('orc',), ('avro',)])
     def test_write_time_type(self, file_format):

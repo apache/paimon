@@ -159,20 +159,19 @@ public class DataTypeToLogicalType implements DataTypeVisitor<LogicalType> {
 
     @Override
     public LogicalType visit(GeometryType geometryType) {
-        // Flink has no native geospatial logical type. Expose WKB through SQL while preserving the
-        // geospatial type in the Paimon schema.
-        return new org.apache.flink.table.types.logical.VarBinaryType(
-                geometryType.isNullable(),
-                org.apache.flink.table.types.logical.VarBinaryType.MAX_LENGTH);
+        throw unsupportedGeospatialType(geometryType);
     }
 
     @Override
     public LogicalType visit(GeographyType geographyType) {
-        // Flink has no native geospatial logical type. Expose WKB through SQL while preserving the
-        // geospatial type in the Paimon schema.
-        return new org.apache.flink.table.types.logical.VarBinaryType(
-                geographyType.isNullable(),
-                org.apache.flink.table.types.logical.VarBinaryType.MAX_LENGTH);
+        throw unsupportedGeospatialType(geographyType);
+    }
+
+    private UnsupportedOperationException unsupportedGeospatialType(DataType dataType) {
+        return new UnsupportedOperationException(
+                "Flink SQL does not support Paimon geospatial type "
+                        + dataType.asSQLString()
+                        + ". Exposing it as VARBINARY would lose its CRS and edge algorithm.");
     }
 
     @Override

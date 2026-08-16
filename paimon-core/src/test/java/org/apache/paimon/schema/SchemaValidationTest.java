@@ -1692,6 +1692,20 @@ class SchemaValidationTest {
                                                 emptyList(),
                                                 emptyList(),
                                                 icebergV2Options)));
+
+        Map<String, String> icebergRestOptions = new HashMap<>();
+        icebergRestOptions.put(IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "rest-catalog");
+        icebergRestOptions.put(IcebergOptions.FORMAT_VERSION.key(), "3");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        geospatialSchema(
+                                                fields,
+                                                emptyList(),
+                                                emptyList(),
+                                                icebergRestOptions)))
+                .hasMessageContaining("do not support 'metadata.iceberg.storage'='rest-catalog'")
+                .hasMessageContaining("REST client");
     }
 
     @Test

@@ -485,12 +485,18 @@ public class SchemaValidation {
                 "Geometry and geography columns require '%s' to be parquet, but was '%s'.",
                 CoreOptions.CHANGELOG_FILE_FORMAT.key(),
                 options.changelogFileFormat());
-        if (options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
-                != IcebergOptions.StorageType.DISABLED) {
+        IcebergOptions.StorageType icebergStorage =
+                options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE);
+        if (icebergStorage != IcebergOptions.StorageType.DISABLED) {
             checkArgument(
                     options.toConfiguration().get(IcebergOptions.FORMAT_VERSION) == 3,
                     "Geometry and geography columns require '%s'='3' when Iceberg metadata is enabled.",
                     IcebergOptions.FORMAT_VERSION.key());
+            checkArgument(
+                    icebergStorage != IcebergOptions.StorageType.REST_CATALOG,
+                    "Geometry and geography columns do not support '%s'='%s' because the bundled Iceberg REST client cannot parse Iceberg v3 geospatial types.",
+                    IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                    IcebergOptions.StorageType.REST_CATALOG);
         }
 
         Set<String> geospatialFields =

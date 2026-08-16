@@ -184,8 +184,10 @@ class IcebergDataFieldTest {
                 .isEqualTo(new GeometryType());
         assertThat(new IcebergDataField(6, "geog", false, "geography", null).dataType())
                 .isEqualTo(new GeographyType());
+        assertThat(new IcebergDataField(7, "geog", false, "geography(EPSG:4326)", null).dataType())
+                .isEqualTo(new GeographyType(true, "EPSG:4326", GeographyType.DEFAULT_ALGORITHM));
         assertThat(
-                        new IcebergDataField(7, "geom", false, "geometry(custom, definition)", null)
+                        new IcebergDataField(8, "geom", false, "geometry(custom, definition)", null)
                                 .dataType())
                 .isEqualTo(new GeometryType("custom, definition"));
     }

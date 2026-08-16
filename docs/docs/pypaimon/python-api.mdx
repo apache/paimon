@@ -965,8 +965,9 @@ Row kind values:
 For geospatial fields, PyPaimon stores OGC Well-Known Binary (WKB) in Arrow binary arrays and preserves the logical
 type in the field's `paimon.type` metadata. This metadata is also retained for fields nested in arrays, maps, and rows.
 Use `GeometryType` or `GeographyType` in the Paimon table schema; an unannotated Arrow binary field is inferred as
-`BYTES`. Geospatial tables require Parquet, and non-spherical geography algorithms may not be supported by every
-query engine.
+`BYTES`. PyArrow does not currently expose the native Parquet `GEOMETRY` and `GEOGRAPHY` logical annotations required
+by Paimon and Iceberg v3, so PyPaimon can represent and read these fields but rejects table writes containing them.
+Geospatial tables require Parquet, and non-spherical geography algorithms may not be supported by every query engine.
 
 ### Complex Types
 
