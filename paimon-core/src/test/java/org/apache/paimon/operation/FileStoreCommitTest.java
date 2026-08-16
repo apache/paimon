@@ -50,6 +50,7 @@ import org.apache.paimon.operation.commit.CommitChanges;
 import org.apache.paimon.operation.commit.ConflictDetection;
 import org.apache.paimon.operation.commit.ManifestEntryChanges;
 import org.apache.paimon.operation.commit.RetryCommitResult;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
@@ -2499,7 +2500,14 @@ public class FileStoreCommitTest {
 
     @Test
     public void testReplaceManifestsThrowsOnConcurrentCompact() throws Exception {
-        TestFileStore store = createStore(false, 2);
+        // use a small manifest target size so compactManifest actually rewrites the manifests
+        // (changes file names), which makes the stale manifestsBefore absent from the current base
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.MANIFEST_TARGET_FILE_SIZE.key(), "1KB");
+        options.put(
+                CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE.key(),
+                MemorySize.ofBytes(1).toString());
+        TestFileStore store = createStore(false, 2, CoreOptions.ChangelogProducer.NONE, options);
         for (int i = 0; i < 3; i++) {
             store.commitData(generateDataList(10), gen::getPartition, kv -> 0);
         }
