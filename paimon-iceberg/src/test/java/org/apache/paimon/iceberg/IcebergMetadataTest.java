@@ -29,12 +29,10 @@ import org.apache.paimon.options.Options;
 
 import org.apache.iceberg.CatalogProperties;
 import org.apache.iceberg.DataFiles;
-import org.apache.iceberg.HasTableOperations;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.SortOrder;
 import org.apache.iceberg.Table;
-import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.TableUtil;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.hadoop.HadoopCatalog;
@@ -387,12 +385,10 @@ class IcebergMetadataTest {
     @Test
     @DisplayName("Test FORMAT_VERSION_V3 table")
     void testFormatVersionV3Table() throws Exception {
-        // Create a v3 format version Iceberg table
+        // Create a v3 format version Iceberg table. Row lineage is always on for v3 in
+        // GA Iceberg (the opt-in TableMetadata.Builder#enableRowLineage() was removed before
+        // GA), so no extra commit is needed to turn it on.
         Table icebergTable = createIcebergTableV3("v3_snapshot_table");
-        TableMetadata base = ((HasTableOperations) icebergTable).operations().current();
-        ((HasTableOperations) icebergTable)
-                .operations()
-                .commit(base, TableMetadata.buildFrom(base).enableRowLineage().build());
 
         // Read metadata using Paimon's IcebergMetadata
         IcebergMetadata paimonIcebergMetadata = readIcebergMetadata(icebergTable);

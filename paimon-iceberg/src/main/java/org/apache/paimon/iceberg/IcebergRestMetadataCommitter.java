@@ -682,9 +682,9 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
             return String.format(
                     "AddSnapshot(%s)",
                     ((MetadataUpdate.AddSnapshot) update).snapshot().snapshotId());
-        } else if (update instanceof MetadataUpdate.RemoveSnapshot) {
+        } else if (update instanceof MetadataUpdate.RemoveSnapshots) {
             return String.format(
-                    "RemoveSnapshot(%s)", ((MetadataUpdate.RemoveSnapshot) update).snapshotId());
+                    "RemoveSnapshots(%s)", ((MetadataUpdate.RemoveSnapshots) update).snapshotIds());
         } else if (update instanceof MetadataUpdate.SetSnapshotRef) {
             return String.format(
                     "SetSnapshotRef(%s, %s, %s)",

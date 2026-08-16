@@ -33,11 +33,18 @@ under the License.
 
     <properties>
         <target.java.version>11</target.java.version>
-        <iceberg.version>1.8.1</iceberg.version>
+        <iceberg.version>1.11.0</iceberg.version>
         <flink.version>${paimon-flink-common.flink.version}</flink.version>
-        <iceberg.flink.version>1.19</iceberg.flink.version>
+        <iceberg.flink.version>1.20</iceberg.flink.version>
         <hive.version>2.3.10</hive.version>
-        <iceberg.flink.dropwizard.version>1.19.0</iceberg.flink.dropwizard.version>
+        <iceberg.flink.dropwizard.version>1.20.0</iceberg.flink.dropwizard.version>
+        <!-- Iceberg 1.11's iceberg-parquet pulls parquet-avro/parquet-hadoop 1.17.1 (up
+             from 1.15.0 on Iceberg 1.8.1). Its HadoopInputFile now always calls the
+             FileSystem#openFile(Path) builder API, which only exists from Hadoop 3.3+;
+             the reactor-wide hadoop.version (2.8.5) predates it, so this module pins a
+             newer Hadoop for its own (test-scope) use only, matching the Hadoop 3
+             version Iceberg 1.11 itself builds/tests against. -->
+        <hadoop.version>3.4.3</hadoop.version>
     </properties>
 
     <dependencies>
@@ -108,6 +115,19 @@ under the License.
             <groupId>org.apache.iceberg</groupId>
             <artifactId>iceberg-core</artifactId>
             <version>${iceberg.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- iceberg-core 1.11 requires jackson-core/jackson-databind 2.21.3, but Hadoop's
+             own (older) jackson-annotations otherwise wins dependency mediation as the
+             nearer declaration, leaving a mismatched pair that fails with
+             NoClassDefFoundError: com/fasterxml/jackson/annotation/JsonSerializeAs at
+             runtime. Pin jackson-annotations to the matching 2.21.x line explicitly
+             (jackson-annotations has no separate patch releases). -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-annotations</artifactId>
+            <version>2.21</version>
             <scope>provided</scope>
         </dependency>
 
@@ -193,6 +213,17 @@ under the License.
                     <groupId>commons-io</groupId>
                     <artifactId>commons-io</artifactId>
                 </exclusion>
+                <!-- Hadoop 3.4.3 bundles Jetty 9.4 for its own embedded web UIs, which we
+                     never start in these tests; it must not shadow the Jetty 12 that
+                     Iceberg's GA REST test-fixtures (RESTServerExtension) require. -->
+                <exclusion>
+                    <groupId>org.eclipse.jetty</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.eclipse.jetty.websocket</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
             </exclusions>
         </dependency>
 
@@ -229,6 +260,15 @@ under the License.
                 <exclusion>
                     <groupId>commons-io</groupId>
                     <artifactId>commons-io</artifactId>
+                </exclusion>
+                <!-- see the same exclusion on hadoop-common above -->
+                <exclusion>
+                    <groupId>org.eclipse.jetty</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.eclipse.jetty.websocket</groupId>
+                    <artifactId>*</artifactId>
                 </exclusion>
             </exclusions>
         </dependency>
@@ -271,25 +311,36 @@ under the License.
         </dependency>
 
         <!-- web test dependency -->
-
+        <!-- Iceberg 1.11's REST test-fixtures (RESTServerExtension) embed a Jetty 12
+             server built on the new jetty-compression module; the old Jetty 11
+             jetty-server/jetty-servlet coordinates no longer provide the classes it
+             needs (org.eclipse.jetty.compression.Compression), so these are bumped to
+             the same Jetty 12 modules Iceberg's open-api test-fixtures use. -->
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-server</artifactId>
-            <version>11.0.24</version>
+            <version>12.1.8</version>
             <scope>test</scope>
         </dependency>
 
         <dependency>
-            <groupId>org.eclipse.jetty</groupId>
-            <artifactId>jetty-servlet</artifactId>
-            <version>11.0.24</version>
+            <groupId>org.eclipse.jetty.ee10</groupId>
+            <artifactId>jetty-ee10-servlet</artifactId>
+            <version>12.1.8</version>
             <scope>test</scope>
         </dependency>
 
         <dependency>
-            <groupId>jakarta.servlet</groupId>
-            <artifactId>jakarta.servlet-api</artifactId>
-            <version>6.1.0</version>
+            <groupId>org.eclipse.jetty.compression</groupId>
+            <artifactId>jetty-compression-server</artifactId>
+            <version>12.1.8</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.eclipse.jetty.compression</groupId>
+            <artifactId>jetty-compression-gzip</artifactId>
+            <version>12.1.8</version>
             <scope>test</scope>
         </dependency>
 
