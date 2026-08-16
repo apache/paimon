@@ -117,6 +117,15 @@ class SplitByRowIdEquivalenceTest(unittest.TestCase):
 
 
 class SplitOrderTest(unittest.TestCase):
+    class _Options:
+        options = {}
+
+    class _Table:
+        table_path = '/table'
+        options = None
+
+    _Table.options = _Options()
+
     @staticmethod
     def _entry(name, sequence):
         empty_row = GenericRow([], [])
@@ -145,26 +154,43 @@ class SplitOrderTest(unittest.TestCase):
         )
 
     def test_preserves_manifest_order_within_row_id_group(self):
-        class _Options:
-            options = {}
-
-        class _Table:
-            table_path = '/table'
-            options = _Options()
-
         entries = [
             self._entry('a.parquet', 1),
             self._entry('b.parquet', 3),
             self._entry('c.parquet', 2),
         ]
         splits = DataEvolutionSplitGenerator(
-            _Table(), target_split_size=1024, open_file_cost=0
+            self._Table(), target_split_size=1024, open_file_cost=0
         ).create_splits(entries)
 
         self.assertEqual(
             ['a.parquet', 'b.parquet', 'c.parquet'],
             [file.file_name for file in splits[0].files],
         )
+
+    def test_slice_and_shard_preserve_blob_manifest_order(self):
+        entries = [
+            self._entry('a.blob', 1),
+            self._entry('b.parquet', 2),
+            self._entry('c.blob', 3),
+        ]
+        expected = ['a.blob', 'b.parquet', 'c.blob']
+
+        generators = [
+            DataEvolutionSplitGenerator(
+                self._Table(), target_split_size=1024, open_file_cost=0
+            ).with_slice(0, 5),
+            DataEvolutionSplitGenerator(
+                self._Table(), target_split_size=1024, open_file_cost=0
+            ).with_shard(0, 2),
+        ]
+        for generator in generators:
+            with self.subTest(generator=type(generator).__name__):
+                splits = generator.create_splits(entries)
+                self.assertEqual(
+                    expected,
+                    [file.file_name for file in splits[0].files],
+                )
 
 
 if __name__ == "__main__":

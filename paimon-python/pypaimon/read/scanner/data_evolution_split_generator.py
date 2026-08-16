@@ -286,8 +286,14 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                         filtered_blob_entries.append(entry)
                         break
             
-            # Combine filtered non-blob and blob files
-            filtered_entries = filtered_non_blob_entries + filtered_blob_entries
+            kept_files = {
+                entry.file.file_name
+                for entry in filtered_non_blob_entries + filtered_blob_entries
+            }
+            filtered_entries = [
+                entry for entry in file_entries
+                if entry.file.file_name in kept_files
+            ]
             
             if filtered_entries:
                 filtered_partitioned_files[key] = filtered_entries
