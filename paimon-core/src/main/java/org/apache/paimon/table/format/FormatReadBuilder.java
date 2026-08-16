@@ -78,7 +78,6 @@ public class FormatReadBuilder implements ReadBuilder {
     @Nullable private Predicate filter;
     @Nullable private PartitionPredicate partitionFilter;
     @Nullable private Integer limit;
-    @Nullable private ReadBatchSizeController readBatchSizeController;
 
     public FormatReadBuilder(FormatTable table) {
         this.table = table;
@@ -183,12 +182,13 @@ public class FormatReadBuilder implements ReadBuilder {
         return new FormatTableRead(readType(), table.rowType(), this, filter, limit);
     }
 
-    FormatReadBuilder withReadBatchSizeController(ReadBatchSizeController controller) {
-        this.readBatchSizeController = controller;
-        return this;
+    protected RecordReader<InternalRow> createReader(FormatDataSplit dataSplit) throws IOException {
+        return createReader(dataSplit, null);
     }
 
-    protected RecordReader<InternalRow> createReader(FormatDataSplit dataSplit) throws IOException {
+    protected RecordReader<InternalRow> createReader(
+            FormatDataSplit dataSplit, @Nullable ReadBatchSizeController readBatchSizeController)
+            throws IOException {
         // Skip pushing down partition filters to reader.
         List<Predicate> readFilters =
                 excludePredicateWithFields(
@@ -207,7 +207,14 @@ public class FormatReadBuilder implements ReadBuilder {
         BinaryRow partition = dataSplit.partition();
         List<ReaderSupplier<InternalRow>> suppliers = new ArrayList<>();
         for (FormatDataSplit.FileMeta file : dataSplit.files()) {
-            suppliers.add(() -> createFileReader(file, partition, readerFactory, partitionMapping));
+            suppliers.add(
+                    () ->
+                            createFileReader(
+                                    file,
+                                    partition,
+                                    readerFactory,
+                                    partitionMapping,
+                                    readBatchSizeController));
         }
         return ConcatRecordReader.create(suppliers);
     }
@@ -216,7 +223,8 @@ public class FormatReadBuilder implements ReadBuilder {
             FormatDataSplit.FileMeta file,
             @Nullable BinaryRow partition,
             FormatReaderFactory readerFactory,
-            Pair<int[], RowType> partitionMapping)
+            Pair<int[], RowType> partitionMapping,
+            @Nullable ReadBatchSizeController readBatchSizeController)
             throws IOException {
         FormatReaderContext formatReaderContext =
                 new FormatReaderContext(

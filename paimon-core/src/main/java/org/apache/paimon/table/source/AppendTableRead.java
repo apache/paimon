@@ -117,6 +117,11 @@ public class AppendTableRead extends AbstractDataTableRead {
         return this;
     }
 
+    @Nullable
+    protected ReadBatchSizeController readBatchSizeController() {
+        return readBatchSizeController;
+    }
+
     @Override
     public RecordReader<InternalRow> reader(Split split) throws IOException {
         for (SplitReadProvider readProvider : readProviders) {

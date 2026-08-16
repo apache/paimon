@@ -33,8 +33,15 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.ReadBatchSizeController;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InstantiationUtil;
@@ -137,6 +144,35 @@ public class FormatReadBuilderTest {
     }
 
     @Test
+    public void testControllerDoesNotBreakBuilderSerialization() {
+        FormatReadBuilder readBuilder = new FormatReadBuilder(createOrcTable("serializable"));
+        readBuilder.newRead().withReadBatchSizeController(new ReadBatchSizeController(16, 4));
+
+        assertThatNoException().isThrownBy(() -> InstantiationUtil.serializeObject(readBuilder));
+    }
+
+    @Test
+    public void testControllersAreIsolatedBetweenReads() throws Exception {
+        FormatTable table = createOrcTable("isolated");
+        writeRows(table, 20);
+        FormatReadBuilder readBuilder = new FormatReadBuilder(table);
+        TableScan.Plan plan = readBuilder.newScan().plan();
+        ReadBatchSizeController firstController = new ReadBatchSizeController(16, 3);
+        ReadBatchSizeController secondController = new ReadBatchSizeController(16, 5);
+        TableRead firstRead = readBuilder.newRead().withReadBatchSizeController(firstController);
+        TableRead secondRead = readBuilder.newRead().withReadBatchSizeController(secondController);
+
+        try (RecordReader<InternalRow> firstReader = firstRead.createReader(plan);
+                RecordReader<InternalRow> secondReader = secondRead.createReader(plan)) {
+            assertThat(readBatchSize(firstReader)).isEqualTo(3);
+            assertThat(readBatchSize(secondReader)).isEqualTo(5);
+
+            firstController.setRequestedBatchSize(2);
+            assertThat(readBatchSize(firstReader)).isEqualTo(2);
+        }
+    }
+
+    @Test
     public void testCreateReaderWithCsvSplit() throws IOException {
         RowType rowType =
                 RowType.builder()
@@ -227,5 +263,50 @@ public class FormatReadBuilderTest {
             r.forEachRemaining(row -> result.add(serializer.copy(row)));
         }
         return result;
+    }
+
+    private FormatTable createOrcTable(String name) {
+        Path tablePath = new Path(tempPath.resolve(name).toUri());
+        Map<String, String> options = new HashMap<>();
+        options.put("path", tablePath.toString());
+        options.put("file.format", "orc");
+        options.put("file.compression", "zstd");
+        return FormatTable.builder()
+                .fileIO(LocalFileIO.create())
+                .identifier(Identifier.create("test_db", name))
+                .rowType(RowType.of(DataTypes.INT()))
+                .partitionKeys(new ArrayList<>())
+                .location(tablePath.toString())
+                .format(FormatTable.Format.ORC)
+                .options(options)
+                .build();
+    }
+
+    private static void writeRows(FormatTable table, int count) throws Exception {
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        List<CommitMessage> messages;
+        try (BatchTableWrite write = writeBuilder.newWrite()) {
+            for (int i = 0; i < count; i++) {
+                write.write(GenericRow.of(i));
+            }
+            messages = write.prepareCommit();
+        }
+        try (BatchTableCommit commit = writeBuilder.newCommit()) {
+            commit.commit(messages);
+        }
+    }
+
+    private static int readBatchSize(RecordReader<InternalRow> reader) throws IOException {
+        RecordReader.RecordIterator<InternalRow> batch = reader.readBatch();
+        assertThat(batch).isNotNull();
+        int size = 0;
+        try {
+            while (batch.next() != null) {
+                size++;
+            }
+        } finally {
+            batch.releaseBatch();
+        }
+        return size;
     }
 }

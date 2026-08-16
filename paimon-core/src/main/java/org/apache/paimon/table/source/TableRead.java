@@ -50,9 +50,13 @@ public interface TableRead {
     /**
      * Configure a controller shared by all physical readers created by this table read.
      *
-     * <p>The controller must be configured before creating readers. Formats that support dynamic
-     * sizing snapshot the requested size when the next physical batch starts; already started or
-     * asynchronously prefetched batches may use the previous size.
+     * <p>The controller must be configured before creating readers. Reader creation binds the
+     * controller instance, not its current integer value, so later updates through the same
+     * controller remain visible. Replacing the controller on this table read after reader creation
+     * is unsupported and is not required to affect existing readers.
+     *
+     * <p>Formats that support dynamic sizing snapshot the requested size when the next physical
+     * batch starts; already started or asynchronously prefetched batches may use the previous size.
      */
     default TableRead withReadBatchSizeController(ReadBatchSizeController controller) {
         return this;

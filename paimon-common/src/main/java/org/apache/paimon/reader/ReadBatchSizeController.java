@@ -58,12 +58,21 @@ public final class ReadBatchSizeController {
         return maxBatchSize;
     }
 
-    /** Requested row count and vector capacity for a future physical batch. */
+    /**
+     * Requested row count and vector capacity for a future physical batch.
+     *
+     * <p>Readers snapshot this value at a format-specific physical batch boundary.
+     */
     public int requestedBatchSize() {
         return requestedBatchSize.get();
     }
 
-    /** Set the requested size for future physical batches. */
+    /**
+     * Set the requested size for future physical batches.
+     *
+     * <p>The value must be between {@code 1} and {@link #maxBatchSize()}, inclusive. A reader that
+     * already started or prefetched a physical batch may finish that batch with the previous size.
+     */
     public void setRequestedBatchSize(int requestedBatchSize) {
         checkRequestedBatchSize(maxBatchSize, requestedBatchSize);
         this.requestedBatchSize.set(requestedBatchSize);
