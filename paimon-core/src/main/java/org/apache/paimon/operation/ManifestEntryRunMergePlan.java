@@ -23,8 +23,8 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.format.avro.AvroRawBlock;
+import org.apache.paimon.manifest.CollectedDeletes;
 import org.apache.paimon.manifest.CompactFileIdentifierSet;
-import org.apache.paimon.manifest.DeletedRowIdSet;
 import org.apache.paimon.manifest.FileEntry.ReusableIdentifier;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestAvroReader;
@@ -54,24 +54,30 @@ final class ManifestEntryRunMergePlan {
 
     final List<Source.Spec> sources;
     final ManifestEntryRunMerge.SortPartitionDictionary partitions;
+    final CollectedDeletes deletes;
+    final boolean minor;
 
     ManifestEntryRunMergePlan(
-            List<Source.Spec> sources, ManifestEntryRunMerge.SortPartitionDictionary partitions) {
+            List<Source.Spec> sources,
+            ManifestEntryRunMerge.SortPartitionDictionary partitions,
+            CollectedDeletes deletes,
+            boolean minor) {
         this.sources = sources;
         this.partitions = partitions;
+        this.deletes = deletes;
+        this.minor = minor;
     }
 
     List<ManifestFileMeta> mergeToManifest(
             ManifestFileSorter.RowIdEntrySortKey sortKey,
             ManifestFile manifestFile,
-            ManifestEntryRunMergeEntry.Filter filter,
             List<ManifestFileMeta> newFilesForAbort)
             throws Exception {
         List<Cursor> cursors = new ArrayList<>(sources.size());
         Exception failure = null;
         try {
             for (Source.Spec source : sources) {
-                Cursor cursor = source.open(manifestFile, sortKey, filter, partitions);
+                Cursor cursor = source.open(manifestFile, sortKey, deletes, minor, partitions);
                 cursors.add(cursor);
                 cursor.advance();
             }
@@ -100,16 +106,13 @@ final class ManifestEntryRunMergePlan {
     Pair<List<ManifestFileMeta>, List<ManifestFileMeta>> mergeMinorToManifest(
             ManifestFileSorter.RowIdEntrySortKey sortKey,
             ManifestFile manifestFile,
-            ManifestEntryRunMergeEntry.Filter filter,
-            CompactFileIdentifierSet deletedIdentifiers,
-            DeletedRowIdSet deletedRowIds,
             List<ManifestFileMeta> newFilesForAbort)
             throws Exception {
         List<Cursor> cursors = new ArrayList<>(sources.size());
         Exception failure = null;
         try {
             for (Source.Spec source : sources) {
-                Cursor cursor = source.open(manifestFile, sortKey, filter, partitions);
+                Cursor cursor = source.open(manifestFile, sortKey, deletes, minor, partitions);
                 cursors.add(cursor);
                 cursor.advance();
             }
@@ -118,8 +121,7 @@ final class ManifestEntryRunMergePlan {
                 return Pair.of(Collections.emptyList(), Collections.emptyList());
             }
             Pair<List<ManifestFileMeta>, List<ManifestFileMeta>> files =
-                    writeMinorSelected(
-                            selectionTree, manifestFile, deletedIdentifiers, deletedRowIds);
+                    writeMinorSelected(selectionTree, manifestFile, deletes);
             newFilesForAbort.addAll(files.getLeft());
             newFilesForAbort.addAll(files.getRight());
             return files;
@@ -169,10 +171,7 @@ final class ManifestEntryRunMergePlan {
     }
 
     private static Pair<List<ManifestFileMeta>, List<ManifestFileMeta>> writeMinorSelected(
-            SelectionTree selectionTree,
-            ManifestFile manifestFile,
-            CompactFileIdentifierSet deletedIdentifiers,
-            DeletedRowIdSet deletedRowIds)
+            SelectionTree selectionTree, ManifestFile manifestFile, CollectedDeletes deletes)
             throws Exception {
         ManifestAvroWriter addWriter = manifestFile.createAvroWriter();
         ManifestAvroWriter deleteWriter = manifestFile.createAvroWriter();
@@ -192,15 +191,11 @@ final class ManifestEntryRunMergePlan {
 
                 cursor.materializeCurrent();
                 if (cursor.key().kind == FileKind.ADD.toByteValue()) {
-                    if (!deletedRowIds.contains(cursor.key().firstRowId)) {
-                        writeCurrent(addWriter, cursor);
+                    ReusableIdentifier identifier = cursor.identifier();
+                    if (deletes.isDeleted(cursor.current(), identifier)) {
+                        matchedEntries.add(identifier);
                     } else {
-                        ReusableIdentifier identifier = cursor.identifier();
-                        if (deletedIdentifiers.contains(identifier)) {
-                            matchedEntries.add(identifier);
-                        } else {
-                            writeCurrent(addWriter, cursor);
-                        }
+                        writeCurrent(addWriter, cursor);
                     }
                 } else {
                     ReusableIdentifier identifier = cursor.identifier();
@@ -270,7 +265,8 @@ final class ManifestEntryRunMergePlan {
             Cursor open(
                     ManifestFile manifestFile,
                     ManifestFileSorter.RowIdEntrySortKey sortKey,
-                    ManifestEntryRunMergeEntry.Filter filter,
+                    CollectedDeletes deletes,
+                    boolean minor,
                     ManifestEntryRunMerge.SortPartitionDictionary partitions)
                     throws Exception;
         }
@@ -311,11 +307,12 @@ final class ManifestEntryRunMergePlan {
             public Cursor open(
                     ManifestFile manifestFile,
                     ManifestFileSorter.RowIdEntrySortKey sortKey,
-                    ManifestEntryRunMergeEntry.Filter filter,
+                    CollectedDeletes deletes,
+                    boolean minor,
                     ManifestEntryRunMerge.SortPartitionDictionary partitions)
                     throws Exception {
                 return new PrimitiveManifestRunCursor(
-                        manifestFile, meta, start, end, blocks, filter, partitions);
+                        manifestFile, meta, start, end, blocks, deletes, minor, partitions);
             }
         }
 
@@ -331,10 +328,12 @@ final class ManifestEntryRunMergePlan {
             public Cursor open(
                     ManifestFile manifestFile,
                     ManifestFileSorter.RowIdEntrySortKey sortKey,
-                    ManifestEntryRunMergeEntry.Filter filter,
+                    CollectedDeletes deletes,
+                    boolean minor,
                     ManifestEntryRunMerge.SortPartitionDictionary partitions)
                     throws Exception {
-                return new InMemoryManifestCursor(manifestFile, meta, sortKey, filter, partitions);
+                return new InMemoryManifestCursor(
+                        manifestFile, meta, sortKey, deletes, minor, partitions);
             }
         }
     }
@@ -351,7 +350,7 @@ final class ManifestEntryRunMergePlan {
         @Nullable
         EncodedEntry metadata();
 
-        ManifestEntryRunMergeEntry.Key key();
+        ManifestEntryRunMerge.SortKey key();
 
         @Nullable
         ByteBuffer encodedRecord();
@@ -366,7 +365,7 @@ final class ManifestEntryRunMergePlan {
             return false;
         }
 
-        default ManifestEntryRunMergeEntry.Key blockLastKey() {
+        default ManifestEntryRunMerge.SortKey blockLastKey() {
             throw new UnsupportedOperationException();
         }
 
@@ -392,14 +391,16 @@ final class ManifestEntryRunMergePlan {
 
         final ManifestAvroReader reader;
         final boolean encodedRecordsCompatible;
-        final ManifestEntryRunMergeEntry.Filter filter;
+        final CollectedDeletes deletes;
+        final boolean minor;
         final ManifestEntryRunMerge.SortPartitionDictionary partitions;
-        final ManifestEntryRunMergeEntry.Key key = new ManifestEntryRunMergeEntry.Key();
+        final ManifestEntryRunMerge.SortKey key = new ManifestEntryRunMerge.SortKey();
         final EncodedEntry metadata = new EncodedEntry();
         final ProjectedManifestEntry projectedEntry =
                 ProjectedManifestEntry.ENTRY_LAYOUT_PROJECTION.createEntry();
         final ProjectedManifestEntry fullEntry =
                 ProjectedManifestEntry.fullProjection().createEntry();
+        final ReusableIdentifier identifier = new ReusableIdentifier();
         final List<ManifestEntryRunMerge.Discovery.BlockInfo> blocks;
         final long runStart;
         final long runEnd;
@@ -421,12 +422,14 @@ final class ManifestEntryRunMergePlan {
                 long start,
                 long end,
                 List<ManifestEntryRunMerge.Discovery.BlockInfo> blocks,
-                ManifestEntryRunMergeEntry.Filter filter,
+                CollectedDeletes deletes,
+                boolean minor,
                 ManifestEntryRunMerge.SortPartitionDictionary partitions)
                 throws Exception {
             this.reader = manifestFile.scanAvroBlocks(meta.fileName(), meta.fileSize());
             this.encodedRecordsCompatible = reader.rawBlockCopySupported();
-            this.filter = filter;
+            this.deletes = deletes;
+            this.minor = minor;
             this.partitions = partitions;
             this.blocks = blocks;
             this.runStart = start;
@@ -472,7 +475,7 @@ final class ManifestEntryRunMergePlan {
                                 : fullEntry.replace(currentSourceRow);
                 decodedRemaining--;
                 key.replace(currentEntry, partitions);
-                if (filter.include(currentEntry, key)) {
+                if (minor || deletes.copyable(currentEntry, identifier, false)) {
                     current = true;
                     metadata.replace(
                             key.kind,
@@ -553,7 +556,7 @@ final class ManifestEntryRunMergePlan {
         }
 
         @Override
-        public ManifestEntryRunMergeEntry.Key key() {
+        public ManifestEntryRunMerge.SortKey key() {
             return key;
         }
 
@@ -570,7 +573,7 @@ final class ManifestEntryRunMergePlan {
         @Override
         public ReusableIdentifier identifier() {
             checkState(current, "Manifest entry has not been materialized.");
-            return filter.identifier(currentEntry);
+            return identifier.replaceWithPartition(currentEntry);
         }
 
         @Override
@@ -579,7 +582,7 @@ final class ManifestEntryRunMergePlan {
         }
 
         @Override
-        public ManifestEntryRunMergeEntry.Key blockLastKey() {
+        public ManifestEntryRunMerge.SortKey blockLastKey() {
             return currentBlock.lastKey;
         }
 
@@ -624,7 +627,7 @@ final class ManifestEntryRunMergePlan {
             decodedRemaining--;
             key.replace(currentEntry, partitions);
             checkState(
-                    filter.include(currentEntry, key),
+                    minor || deletes.copyable(currentEntry, identifier, false),
                     "Copyable manifest block contains a filtered entry.");
             current = true;
             metadata.replace(
@@ -651,6 +654,7 @@ final class ManifestEntryRunMergePlan {
             currentEntry = null;
             projectedEntry.clear();
             fullEntry.clear();
+            identifier.release();
             currentBlock = null;
             rawBlock = false;
             key.clear();
@@ -670,7 +674,8 @@ final class ManifestEntryRunMergePlan {
                 ManifestFile manifestFile,
                 ManifestFileMeta meta,
                 ManifestFileSorter.RowIdEntrySortKey sortKey,
-                ManifestEntryRunMergeEntry.Filter filter,
+                CollectedDeletes deletes,
+                boolean minor,
                 ManifestEntryRunMerge.SortPartitionDictionary partitions)
                 throws Exception {
             long entryCount = meta.numAddedFiles() + meta.numDeletedFiles();
@@ -682,14 +687,14 @@ final class ManifestEntryRunMergePlan {
                     manifestFile.scan(meta.fileName(), ProjectedManifestEntry.fullProjection())) {
                 while (iterator.hasNext()) {
                     ProjectedManifestEntry entry = iterator.next();
-                    if (!filter.include(entry)) {
+                    if (!minor && !deletes.copyable(entry, identifier, false)) {
                         continue;
                     }
                     BinaryRow row = serializer.toBinaryRow(entry.fullRow()).copy();
                     entries.add(
                             new StoredEntry(
                                     row,
-                                    ManifestEntryRunMergeEntry.Key.viewOf(
+                                    ManifestEntryRunMerge.SortKey.viewOf(
                                             view.replace(row), partitions)));
                 }
             }
@@ -726,7 +731,7 @@ final class ManifestEntryRunMergePlan {
         }
 
         @Override
-        public ManifestEntryRunMergeEntry.Key key() {
+        public ManifestEntryRunMerge.SortKey key() {
             return entries.get(position).key;
         }
 
@@ -752,9 +757,9 @@ final class ManifestEntryRunMergePlan {
     private static final class StoredEntry {
 
         final BinaryRow row;
-        final ManifestEntryRunMergeEntry.Key key;
+        final ManifestEntryRunMerge.SortKey key;
 
-        StoredEntry(BinaryRow row, ManifestEntryRunMergeEntry.Key key) {
+        StoredEntry(BinaryRow row, ManifestEntryRunMerge.SortKey key) {
             this.row = row;
             this.key = key;
         }
@@ -815,7 +820,7 @@ final class ManifestEntryRunMergePlan {
             return comparison < 0 || (comparison == 0 && left < right) ? left : right;
         }
 
-        boolean blockPrecedesOthers(int cursor, ManifestEntryRunMergeEntry.Key blockLastKey) {
+        boolean blockPrecedesOthers(int cursor, ManifestEntryRunMerge.SortKey blockLastKey) {
             for (int other = 0; other < cursors.size(); other++) {
                 if (other == cursor || !cursors.get(other).hasCurrent()) {
                     continue;
