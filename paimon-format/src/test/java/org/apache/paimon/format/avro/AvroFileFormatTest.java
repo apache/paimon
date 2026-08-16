@@ -138,7 +138,8 @@ public class AvroFileFormatTest {
         try (RecordReader<InternalRow> reader =
                 format.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
-                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null))) {
             reader.forEachRemainingWithPosition(
                     (rowPosition, row) -> assertThat(row.getInt(0) == rowPosition).isTrue());
         }
@@ -358,7 +359,11 @@ public class AvroFileFormatTest {
                 format.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(
-                                        failingFileIO, file, failingFileIO.getFileSize(file)));
+                                        failingFileIO,
+                                        file,
+                                        failingFileIO.getFileSize(file),
+                                        null,
+                                        null));
         assertThatThrownBy(() -> reader.forEachRemaining(row -> {}))
                 .isInstanceOf(IOException.class)
                 .hasMessageContaining("Artificial exception");

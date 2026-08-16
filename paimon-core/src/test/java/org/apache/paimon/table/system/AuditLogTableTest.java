@@ -31,7 +31,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PredicateBuilder;
-import org.apache.paimon.reader.ReadBatchSizeController;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -68,18 +68,18 @@ import static org.mockito.Mockito.when;
 public class AuditLogTableTest extends TableTestBase {
 
     @Test
-    public void testReadBatchSizeControllerPropagatesToDataRead() {
+    public void testReadBatchSizerPropagatesToDataRead() {
         FileStoreTable wrapped = mock(FileStoreTable.class);
         InnerTableRead dataRead = mock(InnerTableRead.class);
         when(wrapped.options()).thenReturn(Collections.emptyMap());
         when(wrapped.rowType()).thenReturn(RowType.of(DataTypes.INT()));
         when(wrapped.newRead()).thenReturn(dataRead);
         when(dataRead.forceKeepDelete()).thenReturn(dataRead);
-        ReadBatchSizeController controller = new ReadBatchSizeController(16, 4);
+        ReadBatchSizer sizer = new ReadBatchSizer();
 
-        new AuditLogTable(wrapped).newRead().withReadBatchSizeController(controller);
+        new AuditLogTable(wrapped).newRead().withReadBatchSizer(sizer);
 
-        verify(dataRead).withReadBatchSizeController(controller);
+        verify(dataRead).withReadBatchSizer(sizer);
     }
 
     @Test

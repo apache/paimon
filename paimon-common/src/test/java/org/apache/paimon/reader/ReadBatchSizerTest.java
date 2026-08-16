@@ -23,31 +23,28 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Tests for {@link ReadBatchSizeController}. */
-class ReadBatchSizeControllerTest {
+/** Tests for {@link ReadBatchSizer}. */
+class ReadBatchSizerTest {
 
     @Test
-    void testUpdateRequestedBatchSizeWithinMaximum() {
-        ReadBatchSizeController controller = new ReadBatchSizeController(1024, 64);
+    void testUpdateAndClearBatchSize() {
+        ReadBatchSizer sizer = new ReadBatchSizer();
 
-        assertThat(controller.maxBatchSize()).isEqualTo(1024);
-        assertThat(controller.requestedBatchSize()).isEqualTo(64);
+        assertThat(sizer.batchSize()).isEmpty();
 
-        controller.setRequestedBatchSize(512);
-        assertThat(controller.requestedBatchSize()).isEqualTo(512);
+        sizer.setBatchSize(512);
+        assertThat(sizer.batchSize()).hasValue(512);
+
+        sizer.clearBatchSize();
+        assertThat(sizer.batchSize()).isEmpty();
     }
 
     @Test
     void testRejectInvalidBatchSizes() {
-        assertThatThrownBy(() -> new ReadBatchSizeController(0, 0))
+        ReadBatchSizer sizer = new ReadBatchSizer();
+        assertThatThrownBy(() -> sizer.setBatchSize(0))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new ReadBatchSizeController(1024, 1025))
-                .isInstanceOf(IllegalArgumentException.class);
-
-        ReadBatchSizeController controller = new ReadBatchSizeController(1024, 64);
-        assertThatThrownBy(() -> controller.setRequestedBatchSize(0))
-                .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> controller.setRequestedBatchSize(1025))
+        assertThatThrownBy(() -> sizer.setBatchSize(-1))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 }

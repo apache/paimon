@@ -41,7 +41,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.EmptyFileRecordReader;
 import org.apache.paimon.reader.FileRecordReader;
-import org.apache.paimon.reader.ReadBatchSizeController;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
@@ -91,7 +91,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     @Nullable private List<Predicate> filters;
     @Nullable private TopN topN;
     @Nullable private Integer limit;
-    @Nullable private ReadBatchSizeController readBatchSizeController;
+    @Nullable private ReadBatchSizer readBatchSizer;
 
     public RawFileSplitRead(
             FileIO fileIO,
@@ -154,8 +154,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     }
 
     @Override
-    public SplitRead<InternalRow> withReadBatchSizeController(ReadBatchSizeController controller) {
-        this.readBatchSizeController = controller;
+    public SplitRead<InternalRow> withReadBatchSizer(ReadBatchSizer sizer) {
+        this.readBatchSizer = sizer;
         return this;
     }
 
@@ -350,7 +350,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                         dataFilePathFactory.toPath(file),
                         file.fileSize(),
                         selection,
-                        readBatchSizeController);
+                        readBatchSizer);
         FileRecordReader<InternalRow> fileRecordReader =
                 new DataFileRecordReader(
                         outputRowType,

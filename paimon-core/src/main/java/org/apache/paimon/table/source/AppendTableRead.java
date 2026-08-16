@@ -23,7 +23,7 @@ import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
-import org.apache.paimon.reader.ReadBatchSizeController;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.splitread.SplitReadConfig;
@@ -49,7 +49,7 @@ public class AppendTableRead extends AbstractDataTableRead {
     private Predicate predicate = null;
     protected TopN topN = null;
     protected Integer limit = null;
-    @Nullable private ReadBatchSizeController readBatchSizeController;
+    @Nullable private ReadBatchSizer readBatchSizer;
 
     public AppendTableRead(
             List<Function<SplitReadConfig, SplitReadProvider>> providerFactories,
@@ -78,8 +78,8 @@ public class AppendTableRead extends AbstractDataTableRead {
         read.withFilter(predicate);
         read.withTopN(topN);
         read.withLimit(limit);
-        if (readBatchSizeController != null) {
-            read.withReadBatchSizeController(readBatchSizeController);
+        if (readBatchSizer != null) {
+            read.withReadBatchSizer(readBatchSizer);
         }
     }
 
@@ -111,15 +111,15 @@ public class AppendTableRead extends AbstractDataTableRead {
     }
 
     @Override
-    public InnerTableRead withReadBatchSizeController(ReadBatchSizeController controller) {
-        initialized().forEach(r -> r.withReadBatchSizeController(controller));
-        this.readBatchSizeController = controller;
+    public InnerTableRead withReadBatchSizer(ReadBatchSizer sizer) {
+        initialized().forEach(r -> r.withReadBatchSizer(sizer));
+        this.readBatchSizer = sizer;
         return this;
     }
 
     @Nullable
-    protected ReadBatchSizeController readBatchSizeController() {
-        return readBatchSizeController;
+    protected ReadBatchSizer readBatchSizer() {
+        return readBatchSizer;
     }
 
     @Override

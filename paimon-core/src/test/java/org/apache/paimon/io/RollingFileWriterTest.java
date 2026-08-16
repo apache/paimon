@@ -288,7 +288,8 @@ public class RollingFileWriterTest {
                 rowFormat
                         .createReaderFactory(SCHEMA, SCHEMA, Collections.emptyList())
                         .createReader(
-                                new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)))) {
+                                new FormatReaderContext(
+                                        fileIO, path, fileIO.getFileSize(path), null, null))) {
             reader.forEachRemaining(row -> result.add(row.getInt(0)));
         }
         return result;

@@ -27,7 +27,7 @@ import org.apache.paimon.deletionvectors.ExposeDeletionKeyValueReader;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.FileRecordReader;
-import org.apache.paimon.reader.ReadBatchSizeController;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.RowType;
@@ -61,35 +61,8 @@ public class ChainKeyValueFileReaderFactory extends KeyValueFileReaderFactory {
             BinaryRow partition,
             DeletionVector.Factory dvFactory,
             ChainReadContext chainReadContext,
-            CoreOptions coreOptions) {
-        this(
-                fileIO,
-                schemaManager,
-                schema,
-                keyType,
-                valueType,
-                formatReaderMappingBuilder,
-                pathFactory,
-                partition,
-                dvFactory,
-                chainReadContext,
-                coreOptions,
-                null);
-    }
-
-    public ChainKeyValueFileReaderFactory(
-            FileIO fileIO,
-            SchemaManager schemaManager,
-            TableSchema schema,
-            RowType keyType,
-            RowType valueType,
-            FormatReaderMapping.Builder formatReaderMappingBuilder,
-            DataFilePathFactory pathFactory,
-            BinaryRow partition,
-            DeletionVector.Factory dvFactory,
-            ChainReadContext chainReadContext,
             CoreOptions coreOptions,
-            @Nullable ReadBatchSizeController readBatchSizeController) {
+            @Nullable ReadBatchSizer readBatchSizer) {
         super(
                 fileIO,
                 schemaManager,
@@ -101,7 +74,7 @@ public class ChainKeyValueFileReaderFactory extends KeyValueFileReaderFactory {
                 partition,
                 dvFactory,
                 coreOptions,
-                readBatchSizeController);
+                readBatchSizer);
         this.chainReadContext = chainReadContext;
         CoreOptions options = new CoreOptions(schema.options());
         this.currentBranch = options.branch();
@@ -192,7 +165,7 @@ public class ChainKeyValueFileReaderFactory extends KeyValueFileReaderFactory {
                     dvFactory,
                     chainReadContext,
                     wrapped.options,
-                    wrapped.readBatchSizeController);
+                    wrapped.readBatchSizer);
         }
     }
 }

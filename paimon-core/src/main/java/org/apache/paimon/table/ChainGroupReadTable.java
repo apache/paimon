@@ -28,7 +28,7 @@ import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
-import org.apache.paimon.reader.ReadBatchSizeController;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.ChainSplit;
@@ -595,9 +595,9 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
         }
 
         @Override
-        public InnerTableRead withReadBatchSizeController(ReadBatchSizeController controller) {
-            mainRead.withReadBatchSizeController(controller);
-            fallbackRead.withReadBatchSizeController(controller);
+        public InnerTableRead withReadBatchSizer(ReadBatchSizer sizer) {
+            mainRead.withReadBatchSizer(sizer);
+            fallbackRead.withReadBatchSizer(sizer);
             return this;
         }
 

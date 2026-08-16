@@ -671,7 +671,8 @@ class ParquetTypeWideningTest {
         List<Object[]> rows = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
                 factory.createReader(
-                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)))) {
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), null, null))) {
             // Row instances are reused across iterations, so materialize every value.
             reader.forEachRemaining(row -> rows.add(materialize(row, readType)));
         }

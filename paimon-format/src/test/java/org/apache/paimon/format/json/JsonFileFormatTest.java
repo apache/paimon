@@ -102,7 +102,11 @@ public class JsonFileFormatTest extends FormatReadWriteTest {
                 format.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(
-                                        fileIO, testFile, fileIO.getFileSize(testFile)))) {
+                                        fileIO,
+                                        testFile,
+                                        fileIO.getFileSize(testFile),
+                                        null,
+                                        null))) {
 
             InternalRowSerializer serializer = new InternalRowSerializer(rowType);
             List<InternalRow> result = new ArrayList<>();
@@ -151,7 +155,11 @@ public class JsonFileFormatTest extends FormatReadWriteTest {
                 format.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(
-                                        fileIO, testFile, fileIO.getFileSize(testFile)))) {
+                                        fileIO,
+                                        testFile,
+                                        fileIO.getFileSize(testFile),
+                                        null,
+                                        null))) {
 
             InternalRowSerializer serializer = new InternalRowSerializer(rowType);
             List<InternalRow> result = new ArrayList<>();
@@ -211,7 +219,11 @@ public class JsonFileFormatTest extends FormatReadWriteTest {
                 format.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(
-                                        fileIO, testFile, fileIO.getFileSize(testFile)))) {
+                                        fileIO,
+                                        testFile,
+                                        fileIO.getFileSize(testFile),
+                                        null,
+                                        null))) {
 
             InternalRowSerializer serializer = new InternalRowSerializer(rowType);
             List<InternalRow> result = new ArrayList<>();
@@ -435,7 +447,11 @@ public class JsonFileFormatTest extends FormatReadWriteTest {
                 format.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(
-                                        fileIO, testFile, fileIO.getFileSize(testFile)))) {
+                                        fileIO,
+                                        testFile,
+                                        fileIO.getFileSize(testFile),
+                                        null,
+                                        null))) {
 
             InternalRowSerializer serializer = new InternalRowSerializer(rowType);
             List<InternalRow> result = new ArrayList<>();

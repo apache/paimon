@@ -29,7 +29,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.reader.ReadBatchSizeController;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -135,18 +135,19 @@ class RawFileSplitReadTest {
     }
 
     @Test
-    void testTableReadSharesDynamicBatchSizeController() throws Exception {
+    void testTableReadSharesBatchSizer() throws Exception {
         FileStoreTable table = createTable("dynamic-batch-size", 20);
-        ReadBatchSizeController controller = new ReadBatchSizeController(8, 5);
-        InnerTableRead read = table.newRead().withReadBatchSizeController(controller);
+        ReadBatchSizer sizer = new ReadBatchSizer();
+        sizer.setBatchSize(5);
+        InnerTableRead read = table.newRead().withReadBatchSizer(sizer);
 
         try (RecordReader<InternalRow> reader = read.createReader(singleSplit(table))) {
             assertThat(readBatchSize(reader)).isEqualTo(5);
 
-            controller.setRequestedBatchSize(2);
+            sizer.setBatchSize(2);
             assertThat(readBatchSize(reader)).isEqualTo(2);
 
-            controller.setRequestedBatchSize(8);
+            sizer.setBatchSize(8);
             assertThat(readBatchSize(reader)).isEqualTo(8);
         }
     }

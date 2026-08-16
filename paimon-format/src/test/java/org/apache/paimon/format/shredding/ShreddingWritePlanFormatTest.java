@@ -135,7 +135,7 @@ class ShreddingWritePlanFormatTest {
         out.close();
 
         FormatReaderContext readerContext =
-                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file));
+                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file), null, null);
         return ((SupportsFieldMetadata) format).readFieldMetadata(readerContext);
     }
 

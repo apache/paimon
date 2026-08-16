@@ -94,7 +94,11 @@ public class VortexReaderWriterTest {
         try (RecordReader<InternalRow> reader =
                         readerFactory.createReader(
                                 new FormatReaderContext(
-                                        fileIO, testFile, fileIO.getFileSize(testFile), null));
+                                        fileIO,
+                                        testFile,
+                                        fileIO.getFileSize(testFile),
+                                        null,
+                                        null));
                 RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(reader)) {
             assertNotNull(reader);
 
@@ -146,7 +150,11 @@ public class VortexReaderWriterTest {
         try (RecordReader<InternalRow> reader =
                         readerFactory.createReader(
                                 new FormatReaderContext(
-                                        fileIO, testFile, fileIO.getFileSize(testFile), null));
+                                        fileIO,
+                                        testFile,
+                                        fileIO.getFileSize(testFile),
+                                        null,
+                                        null));
                 RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(reader)) {
 
             List<InternalRow> actualRows = new ArrayList<>();
@@ -196,7 +204,11 @@ public class VortexReaderWriterTest {
         try (RecordReader<InternalRow> reader =
                         readerFactory.createReader(
                                 new FormatReaderContext(
-                                        fileIO, testFile, fileIO.getFileSize(testFile), null));
+                                        fileIO,
+                                        testFile,
+                                        fileIO.getFileSize(testFile),
+                                        null,
+                                        null));
                 RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(reader)) {
 
             List<InternalRow> actualRows = new ArrayList<>();
@@ -249,7 +261,11 @@ public class VortexReaderWriterTest {
         try (RecordReader<InternalRow> reader =
                         readerFactory.createReader(
                                 new FormatReaderContext(
-                                        fileIO, testFile, fileIO.getFileSize(testFile), null));
+                                        fileIO,
+                                        testFile,
+                                        fileIO.getFileSize(testFile),
+                                        null,
+                                        null));
                 RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(reader)) {
 
             List<InternalRow> actualRows = new ArrayList<>();
@@ -318,7 +334,11 @@ public class VortexReaderWriterTest {
         try (RecordReader<InternalRow> reader =
                         readerFactory.createReader(
                                 new FormatReaderContext(
-                                        fileIO, testFile, fileIO.getFileSize(testFile), null));
+                                        fileIO,
+                                        testFile,
+                                        fileIO.getFileSize(testFile),
+                                        null,
+                                        null));
                 RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(reader)) {
 
             List<InternalRow> actualRows = new ArrayList<>();
@@ -374,7 +394,11 @@ public class VortexReaderWriterTest {
         try (RecordReader<InternalRow> reader =
                         readerFactory.createReader(
                                 new FormatReaderContext(
-                                        fileIO, testFile, fileIO.getFileSize(testFile), null));
+                                        fileIO,
+                                        testFile,
+                                        fileIO.getFileSize(testFile),
+                                        null,
+                                        null));
                 RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(reader)) {
             List<InternalRow> actualRows = new ArrayList<>();
             while (iterator.hasNext()) {
@@ -424,7 +448,11 @@ public class VortexReaderWriterTest {
         try (RecordReader<InternalRow> reader =
                         readerFactory.createReader(
                                 new FormatReaderContext(
-                                        fileIO, testFile, fileIO.getFileSize(testFile), null));
+                                        fileIO,
+                                        testFile,
+                                        fileIO.getFileSize(testFile),
+                                        null,
+                                        null));
                 RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(reader)) {
             List<InternalRow> actualRows = new ArrayList<>();
             while (iterator.hasNext()) {
@@ -468,7 +496,8 @@ public class VortexReaderWriterTest {
                                         fileIO,
                                         testFile,
                                         fileIO.getFileSize(testFile),
-                                        selection));
+                                        selection,
+                                        null));
                 RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(reader)) {
 
             List<InternalRow> actualRows = new ArrayList<>();
@@ -523,7 +552,11 @@ public class VortexReaderWriterTest {
         try (RecordReader<InternalRow> reader =
                         readerFactory.createReader(
                                 new FormatReaderContext(
-                                        fileIO, testFile, fileIO.getFileSize(testFile), null));
+                                        fileIO,
+                                        testFile,
+                                        fileIO.getFileSize(testFile),
+                                        null,
+                                        null));
                 RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(reader)) {
             InternalRow row = iterator.next();
             assertEquals(2, row.getFieldCount());
@@ -571,7 +604,11 @@ public class VortexReaderWriterTest {
         try (RecordReader<InternalRow> reader =
                         readerFactory.createReader(
                                 new FormatReaderContext(
-                                        fileIO, testFile, fileIO.getFileSize(testFile), null));
+                                        fileIO,
+                                        testFile,
+                                        fileIO.getFileSize(testFile),
+                                        null,
+                                        null));
                 RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(reader)) {
 
             List<InternalRow> actualRows = new ArrayList<>();
@@ -614,7 +651,7 @@ public class VortexReaderWriterTest {
         try (RecordReader<InternalRow> reader =
                 readerFactory.createReader(
                         new FormatReaderContext(
-                                fileIO, testFile, fileIO.getFileSize(testFile), selection))) {
+                                fileIO, testFile, fileIO.getFileSize(testFile), selection, null))) {
 
             long[] expectedPositions = new long[] {2, 5, 8};
             int idx = 0;
@@ -701,7 +738,7 @@ public class VortexReaderWriterTest {
         try (RecordReader<InternalRow> reader =
                 readerFactory.createReader(
                         new FormatReaderContext(
-                                fileIO, testFile, fileIO.getFileSize(testFile), null))) {
+                                fileIO, testFile, fileIO.getFileSize(testFile), null, null))) {
 
             long expectedPos = 0;
             RecordReader.RecordIterator<InternalRow> batch;

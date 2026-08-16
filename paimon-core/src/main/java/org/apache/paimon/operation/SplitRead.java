@@ -21,7 +21,7 @@ package org.apache.paimon.operation;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
-import org.apache.paimon.reader.ReadBatchSizeController;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
@@ -54,7 +54,7 @@ public interface SplitRead<T> {
         return this;
     }
 
-    default SplitRead<T> withReadBatchSizeController(ReadBatchSizeController controller) {
+    default SplitRead<T> withReadBatchSizer(ReadBatchSizer sizer) {
         return this;
     }
 
@@ -89,8 +89,8 @@ public interface SplitRead<T> {
             }
 
             @Override
-            public SplitRead<R> withReadBatchSizeController(ReadBatchSizeController controller) {
-                read.withReadBatchSizeController(controller);
+            public SplitRead<R> withReadBatchSizer(ReadBatchSizer sizer) {
+                read.withReadBatchSizer(sizer);
                 return this;
             }
 

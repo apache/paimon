@@ -37,7 +37,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PredicateBuilder;
-import org.apache.paimon.reader.ReadBatchSizeController;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
@@ -220,26 +220,32 @@ public class ParquetReadWriteTest {
                         RowType.builder().field("f4", new IntType()).build(),
                         4,
                         null);
-        ReadBatchSizeController controller = new ReadBatchSizeController(8, 5);
+        ReadBatchSizer sizer = new ReadBatchSizer();
+        sizer.setBatchSize(5);
         LocalFileIO fileIO = new LocalFileIO();
         try (RecordReader<InternalRow> reader =
                 factory.createReader(
                         new FormatReaderContext(
-                                fileIO, path, fileIO.getFileSize(path), null, controller))) {
+                                fileIO, path, fileIO.getFileSize(path), null, sizer))) {
             BatchResult firstBatch = readIntBatch(reader);
             assertThat(firstBatch.values).containsExactly(0, 1, 2, 3, 4);
             assertThat(firstBatch.capacity).isEqualTo(5);
 
-            controller.setRequestedBatchSize(3);
-            controller.setRequestedBatchSize(2);
+            sizer.setBatchSize(3);
+            sizer.setBatchSize(2);
             BatchResult secondBatch = readIntBatch(reader);
             assertThat(secondBatch.values).containsExactly(5, 6);
             assertThat(secondBatch.capacity).isEqualTo(2);
 
-            controller.setRequestedBatchSize(8);
+            sizer.setBatchSize(8);
             BatchResult thirdBatch = readIntBatch(reader);
             assertThat(thirdBatch.values).containsExactly(7, 8, 9, 10, 11, 12, 13, 14);
             assertThat(thirdBatch.capacity).isEqualTo(8);
+
+            sizer.clearBatchSize();
+            BatchResult defaultBatch = readIntBatch(reader);
+            assertThat(defaultBatch.values).containsExactly(15, 16, 17, 18);
+            assertThat(defaultBatch.capacity).isEqualTo(4);
         }
     }
 
@@ -249,7 +255,8 @@ public class ParquetReadWriteTest {
         Path path = createTempParquetFileByPaimon(folder, records, 10, NESTED_ARRAY_MAP_TYPE);
         ParquetReaderFactory factory =
                 new ParquetReaderFactory(new Options(), NESTED_ARRAY_MAP_TYPE, 4, null);
-        ReadBatchSizeController controller = new ReadBatchSizeController(8, 5);
+        ReadBatchSizer sizer = new ReadBatchSizer();
+        sizer.setBatchSize(5);
         InternalRowSerializer serializer = new InternalRowSerializer(NESTED_ARRAY_MAP_TYPE);
         List<InternalRow> results = new ArrayList<>();
         LocalFileIO fileIO = new LocalFileIO();
@@ -257,13 +264,13 @@ public class ParquetReadWriteTest {
         try (RecordReader<InternalRow> reader =
                 factory.createReader(
                         new FormatReaderContext(
-                                fileIO, path, fileIO.getFileSize(path), null, controller))) {
+                                fileIO, path, fileIO.getFileSize(path), null, sizer))) {
             assertThat(readNestedBatch(reader, serializer, results)).isEqualTo(5);
 
-            controller.setRequestedBatchSize(2);
+            sizer.setBatchSize(2);
             assertThat(readNestedBatch(reader, serializer, results)).isEqualTo(2);
 
-            controller.setRequestedBatchSize(8);
+            sizer.setBatchSize(8);
             assertThat(readNestedBatch(reader, serializer, results)).isEqualTo(8);
             assertThat(readNestedBatch(reader, serializer, results)).isEqualTo(8);
         }
@@ -288,7 +295,8 @@ public class ParquetReadWriteTest {
 
         try (RecordReader<InternalRow> reader =
                 factory.createReader(
-                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)))) {
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), null, null))) {
             BatchResult batch = readIntBatch(reader);
             assertThat(batch.values).containsExactly(0, 1, 2, 3);
             assertThat(batch.capacity).isEqualTo(4);
@@ -452,7 +460,9 @@ public class ParquetReadWriteTest {
                         new FormatReaderContext(
                                 new LocalFileIO(),
                                 testPath,
-                                new LocalFileIO().getFileSize(testPath)));
+                                new LocalFileIO().getFileSize(testPath),
+                                null,
+                                null));
         reader.forEachRemaining(
                 row -> {
                     int i = cnt.get();
@@ -496,7 +506,9 @@ public class ParquetReadWriteTest {
                         new FormatReaderContext(
                                 new LocalFileIO(),
                                 testPath,
-                                new LocalFileIO().getFileSize(testPath)));
+                                new LocalFileIO().getFileSize(testPath),
+                                null,
+                                null));
         reader.forEachRemaining(
                 row -> {
                     int i = cnt.get();
@@ -535,7 +547,9 @@ public class ParquetReadWriteTest {
                         new FormatReaderContext(
                                 new LocalFileIO(),
                                 testPath,
-                                new LocalFileIO().getFileSize(testPath)))) {
+                                new LocalFileIO().getFileSize(testPath),
+                                null,
+                                null))) {
             reader.forEachRemainingWithPosition(
                     (rowPosition, row) -> {
                         assertThat(row.getDouble(0)).isEqualTo(cnt.get());
@@ -582,7 +596,9 @@ public class ParquetReadWriteTest {
                         new FormatReaderContext(
                                 new LocalFileIO(),
                                 testPath,
-                                new LocalFileIO().getFileSize(testPath)))) {
+                                new LocalFileIO().getFileSize(testPath),
+                                null,
+                                null))) {
             reader.forEachRemainingWithPosition(
                     (rowPosition, row) -> {
                         // check filter
@@ -616,7 +632,11 @@ public class ParquetReadWriteTest {
         RecordReader<InternalRow> reader =
                 format.createReader(
                         new FormatReaderContext(
-                                new LocalFileIO(), path, new LocalFileIO().getFileSize(path)));
+                                new LocalFileIO(),
+                                path,
+                                new LocalFileIO().getFileSize(path),
+                                null,
+                                null));
         List<InternalRow> results = new ArrayList<>(1283);
         InternalRowSerializer internalRowSerializer =
                 new InternalRowSerializer(NESTED_ARRAY_MAP_TYPE);
@@ -640,7 +660,11 @@ public class ParquetReadWriteTest {
         RecordReader<InternalRow> reader =
                 format.createReader(
                         new FormatReaderContext(
-                                new LocalFileIO(), path, new LocalFileIO().getFileSize(path)));
+                                new LocalFileIO(),
+                                path,
+                                new LocalFileIO().getFileSize(path),
+                                null,
+                                null));
         List<InternalRow> results = new ArrayList<>(number);
         InternalRowSerializer internalRowSerializer = new InternalRowSerializer(DECIMAL_TYPE);
         reader.forEachRemaining(row -> results.add(internalRowSerializer.copy(row)));
@@ -802,7 +826,11 @@ public class ParquetReadWriteTest {
         RecordReader<InternalRow> reader =
                 format.createReader(
                         new FormatReaderContext(
-                                new LocalFileIO(), path, new LocalFileIO().getFileSize(path)));
+                                new LocalFileIO(),
+                                path,
+                                new LocalFileIO().getFileSize(path),
+                                null,
+                                null));
         reader.forEachRemaining(
                 row -> {
                     Assertions.assertArrayEquals(row.getBinary(0), row.getBinary(0));
@@ -866,7 +894,11 @@ public class ParquetReadWriteTest {
         try (RecordReader<InternalRow> reader =
                 format.createReader(
                         new FormatReaderContext(
-                                new LocalFileIO(), path, new LocalFileIO().getFileSize(path)))) {
+                                new LocalFileIO(),
+                                path,
+                                new LocalFileIO().getFileSize(path),
+                                null,
+                                null))) {
             reader.forEachRemaining(
                     row -> {
                         long nanos = nanosValues[count.get()];
@@ -898,7 +930,11 @@ public class ParquetReadWriteTest {
         RecordReader<InternalRow> reader =
                 format.createReader(
                         new FormatReaderContext(
-                                new LocalFileIO(), path, new LocalFileIO().getFileSize(path)));
+                                new LocalFileIO(),
+                                path,
+                                new LocalFileIO().getFileSize(path),
+                                null,
+                                null));
         List<InternalRow> results = new ArrayList<>();
         InternalRowSerializer serializer = new InternalRowSerializer(rowType);
         reader.forEachRemaining(row -> results.add(serializer.copy(row)));
@@ -968,7 +1004,11 @@ public class ParquetReadWriteTest {
         RecordReader<InternalRow> reader =
                 format.createReader(
                         new FormatReaderContext(
-                                new LocalFileIO(), path, new LocalFileIO().getFileSize(path)));
+                                new LocalFileIO(),
+                                path,
+                                new LocalFileIO().getFileSize(path),
+                                null,
+                                null));
 
         AtomicInteger cnt = new AtomicInteger(0);
         final AtomicReference<InternalRow> previousRow = new AtomicReference<>();

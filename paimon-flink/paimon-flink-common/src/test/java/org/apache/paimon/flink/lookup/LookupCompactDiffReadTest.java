@@ -19,7 +19,7 @@
 package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.operation.MergeFileSplitRead;
-import org.apache.paimon.reader.ReadBatchSizeController;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.schema.TableSchema;
 
 import org.junit.jupiter.api.Test;
@@ -32,13 +32,13 @@ import static org.mockito.Mockito.verify;
 class LookupCompactDiffReadTest {
 
     @Test
-    void testReadBatchSizeControllerPropagatesToMergeRead() {
+    void testReadBatchSizerPropagatesToMergeRead() {
         MergeFileSplitRead mergeRead = mock(MergeFileSplitRead.class);
         LookupCompactDiffRead read = new LookupCompactDiffRead(mergeRead, mock(TableSchema.class));
-        ReadBatchSizeController controller = new ReadBatchSizeController(16, 4);
+        ReadBatchSizer sizer = new ReadBatchSizer();
 
-        read.withReadBatchSizeController(controller);
+        read.withReadBatchSizer(sizer);
 
-        verify(mergeRead, times(2)).withReadBatchSizeController(controller);
+        verify(mergeRead, times(2)).withReadBatchSizer(sizer);
     }
 }

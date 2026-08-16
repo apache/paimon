@@ -25,7 +25,7 @@ import org.apache.paimon.format.OrcFormatReaderContext;
 import org.apache.paimon.format.orc.filter.OrcFilters;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.reader.ReadBatchSizeController;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -154,7 +154,8 @@ class OrcReaderFactoryTest {
         LocalFileIO fileIO = new LocalFileIO();
         try (RecordReader<InternalRow> reader =
                 format.createReader(
-                        new FormatReaderContext(fileIO, flatFile, fileIO.getFileSize(flatFile)))) {
+                        new FormatReaderContext(
+                                fileIO, flatFile, fileIO.getFileSize(flatFile), null, null))) {
             reader.forEachRemainingWithPosition(
                     (rowPosition, row) -> {
                         assertThat(row.isNullAt(0)).isFalse();
@@ -176,23 +177,20 @@ class OrcReaderFactoryTest {
     @Test
     void testDynamicReadBatchSize() throws IOException {
         OrcReaderFactory format = createFormat(FLAT_FILE_TYPE, new int[] {0});
-        ReadBatchSizeController controller = new ReadBatchSizeController(BATCH_SIZE, 5);
+        ReadBatchSizer sizer = new ReadBatchSizer();
+        sizer.setBatchSize(5);
         LocalFileIO fileIO = new LocalFileIO();
 
         try (RecordReader<InternalRow> reader =
                 format.createReader(
                         new FormatReaderContext(
-                                fileIO,
-                                flatFile,
-                                fileIO.getFileSize(flatFile),
-                                null,
-                                controller))) {
+                                fileIO, flatFile, fileIO.getFileSize(flatFile), null, sizer))) {
             assertThat(readBatch(reader)).isEqualTo(new BatchResult(5, 5));
 
-            controller.setRequestedBatchSize(2);
+            sizer.setBatchSize(2);
             assertThat(readBatch(reader)).isEqualTo(new BatchResult(2, 2));
 
-            controller.setRequestedBatchSize(BATCH_SIZE);
+            sizer.setBatchSize(BATCH_SIZE);
             assertThat(readBatch(reader)).isEqualTo(new BatchResult(BATCH_SIZE, BATCH_SIZE));
         }
     }
@@ -200,18 +198,19 @@ class OrcReaderFactoryTest {
     @Test
     void testDynamicReadBatchSizeWithPooledBatches() throws IOException {
         OrcReaderFactory format = createFormat(FLAT_FILE_TYPE, new int[] {0});
-        ReadBatchSizeController controller = new ReadBatchSizeController(BATCH_SIZE, 5);
+        ReadBatchSizer sizer = new ReadBatchSizer();
+        sizer.setBatchSize(5);
         LocalFileIO fileIO = new LocalFileIO();
 
         try (RecordReader<InternalRow> reader =
                 format.createReader(
                         new OrcFormatReaderContext(
-                                fileIO, flatFile, fileIO.getFileSize(flatFile), 2, controller))) {
+                                fileIO, flatFile, fileIO.getFileSize(flatFile), 2, sizer))) {
             RecordReader.RecordIterator<InternalRow> first = reader.readBatch();
             assertThat(first).isNotNull();
             assertThat(consumeBatch(first)).isEqualTo(new BatchResult(5, 5));
 
-            controller.setRequestedBatchSize(2);
+            sizer.setBatchSize(2);
             RecordReader.RecordIterator<InternalRow> second = reader.readBatch();
             assertThat(second).isNotNull();
             assertThat(consumeBatch(second)).isEqualTo(new BatchResult(2, 2));
@@ -219,8 +218,13 @@ class OrcReaderFactoryTest {
             first.releaseBatch();
             second.releaseBatch();
 
-            controller.setRequestedBatchSize(BATCH_SIZE);
+            sizer.setBatchSize(BATCH_SIZE);
             assertThat(readBatch(reader)).isEqualTo(new BatchResult(BATCH_SIZE, BATCH_SIZE));
+
+            sizer.clearBatchSize();
+            int defaultBatchSize = Math.max(1, BATCH_SIZE / 2);
+            assertThat(readBatch(reader))
+                    .isEqualTo(new BatchResult(defaultBatchSize, defaultBatchSize));
         }
     }
 
@@ -232,7 +236,7 @@ class OrcReaderFactoryTest {
         try (RecordReader<InternalRow> reader =
                 format.createReader(
                         new OrcFormatReaderContext(
-                                fileIO, flatFile, fileIO.getFileSize(flatFile), 3))) {
+                                fileIO, flatFile, fileIO.getFileSize(flatFile), 3, null))) {
             assertThat(readBatch(reader)).isEqualTo(new BatchResult(3, 3));
         }
     }
@@ -312,7 +316,8 @@ class OrcReaderFactoryTest {
                                 localFileIO,
                                 flatFile,
                                 localFileIO.getFileSize(flatFile),
-                                randomPooSize))) {
+                                randomPooSize,
+                                null))) {
             reader.forEachRemainingWithPosition(
                     (rowPosition, row) -> {
                         // check filter: _col0 > randomStart
@@ -341,7 +346,8 @@ class OrcReaderFactoryTest {
                                 localFileIO,
                                 flatFile,
                                 localFileIO.getFileSize(flatFile),
-                                randomPooSize))) {
+                                randomPooSize,
+                                null))) {
             reader.transform(row -> row)
                     .filter(row -> row.getInt(1) % 123 == 0)
                     .forEachRemainingWithPosition(
@@ -408,7 +414,8 @@ class OrcReaderFactoryTest {
         LocalFileIO fileIO = new LocalFileIO();
         RecordReader<InternalRow> reader =
                 format.createReader(
-                        new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)));
+                        new FormatReaderContext(
+                                fileIO, file, fileIO.getFileSize(file), null, null));
         reader.forEachRemaining(action);
     }
 

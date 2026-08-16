@@ -141,7 +141,7 @@ public class FileUtils {
             if (fileSize == null) {
                 fileSize = fileIO.getFileSize(file);
             }
-            return format.createReader(new FormatReaderContext(fileIO, file, fileSize));
+            return format.createReader(new FormatReaderContext(fileIO, file, fileSize, null, null));
         } catch (Exception e) {
             checkExists(fileIO, file);
             throw e;

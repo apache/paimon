@@ -33,7 +33,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
-import org.apache.paimon.reader.ReadBatchSizeController;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -144,30 +144,32 @@ public class FormatReadBuilderTest {
     }
 
     @Test
-    public void testControllerDoesNotBreakBuilderSerialization() {
+    public void testSizerDoesNotBreakBuilderSerialization() {
         FormatReadBuilder readBuilder = new FormatReadBuilder(createOrcTable("serializable"));
-        readBuilder.newRead().withReadBatchSizeController(new ReadBatchSizeController(16, 4));
+        readBuilder.newRead().withReadBatchSizer(new ReadBatchSizer());
 
         assertThatNoException().isThrownBy(() -> InstantiationUtil.serializeObject(readBuilder));
     }
 
     @Test
-    public void testControllersAreIsolatedBetweenReads() throws Exception {
+    public void testSizersAreIsolatedBetweenReads() throws Exception {
         FormatTable table = createOrcTable("isolated");
         writeRows(table, 20);
         FormatReadBuilder readBuilder = new FormatReadBuilder(table);
         TableScan.Plan plan = readBuilder.newScan().plan();
-        ReadBatchSizeController firstController = new ReadBatchSizeController(16, 3);
-        ReadBatchSizeController secondController = new ReadBatchSizeController(16, 5);
-        TableRead firstRead = readBuilder.newRead().withReadBatchSizeController(firstController);
-        TableRead secondRead = readBuilder.newRead().withReadBatchSizeController(secondController);
+        ReadBatchSizer firstSizer = new ReadBatchSizer();
+        ReadBatchSizer secondSizer = new ReadBatchSizer();
+        firstSizer.setBatchSize(3);
+        secondSizer.setBatchSize(5);
+        TableRead firstRead = readBuilder.newRead().withReadBatchSizer(firstSizer);
+        TableRead secondRead = readBuilder.newRead().withReadBatchSizer(secondSizer);
 
         try (RecordReader<InternalRow> firstReader = firstRead.createReader(plan);
                 RecordReader<InternalRow> secondReader = secondRead.createReader(plan)) {
             assertThat(readBatchSize(firstReader)).isEqualTo(3);
             assertThat(readBatchSize(secondReader)).isEqualTo(5);
 
-            firstController.setRequestedBatchSize(2);
+            firstSizer.setBatchSize(2);
             assertThat(readBatchSize(firstReader)).isEqualTo(2);
         }
     }

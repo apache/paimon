@@ -21,7 +21,7 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.reader.ReadBatchSizeController;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -41,7 +41,7 @@ import static org.mockito.Mockito.when;
 class DataEvolutionTableReadTest {
 
     @Test
-    void testReadBatchSizeControllerPropagatesToBlobPrescan() throws IOException {
+    void testReadBatchSizerPropagatesToBlobPrescan() throws IOException {
         Options options = new Options();
         options.set(CoreOptions.BLOB_VIEW_FIELD, "blob");
         TableSchema schema = mock(TableSchema.class);
@@ -57,12 +57,12 @@ class DataEvolutionTableReadTest {
                         new CoreOptions(options),
                         CatalogContext.create(new Options()),
                         () -> prescanRead);
-        ReadBatchSizeController controller = new ReadBatchSizeController(16, 4);
-        read.withReadBatchSizeController(controller);
+        ReadBatchSizer sizer = new ReadBatchSizer();
+        read.withReadBatchSizer(sizer);
 
         assertThatThrownBy(() -> read.createReader(mock(Split.class)))
                 .isInstanceOf(IOException.class)
                 .hasMessage("expected prescan stop");
-        verify(prescanRead).withReadBatchSizeController(controller);
+        verify(prescanRead).withReadBatchSizer(sizer);
     }
 }

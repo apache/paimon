@@ -1701,7 +1701,9 @@ public class MapSharedShreddingTableTest extends TableTestBase {
                         new FormatReaderContext(
                                 table.fileIO(),
                                 pathFactory.toPath(file.dataFile),
-                                file.dataFile.fileSize()));
+                                file.dataFile.fileSize(),
+                                null,
+                                null));
     }
 
     private Map<Integer, List<Long>> readSelectedKeysById(Table table) throws Exception {
