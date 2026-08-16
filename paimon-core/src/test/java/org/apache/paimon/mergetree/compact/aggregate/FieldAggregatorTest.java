@@ -2100,6 +2100,60 @@ public class FieldAggregatorTest {
         assertThat(unnest(result, elementGetter)).containsExactlyInAnyOrder(1, 2, 3);
     }
 
+    /**
+     * Elements of a binary array are {@code byte[]}, which has identity equality, so distinct
+     * collection has to compare them by content rather than dropping them into a {@link
+     * java.util.HashSet}.
+     */
+    @Test
+    public void testFieldCollectAggWithDistinctBinary() {
+        FieldCollectAgg agg =
+                new FieldCollectAggFactory()
+                        .create(
+                                DataTypes.ARRAY(DataTypes.VARBINARY(10)),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of("fields.fieldName.distinct", "true")),
+                                "fieldName");
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(DataTypes.VARBINARY(10));
+
+        InternalArray result =
+                (InternalArray)
+                        agg.agg(
+                                new GenericArray(new Object[] {new byte[] {1, 2}}),
+                                new GenericArray(
+                                        new Object[] {new byte[] {1, 2}, new byte[] {3, 4}}));
+
+        assertThat(unnest(result, elementGetter))
+                .usingRecursiveFieldByFieldElementComparator()
+                .containsExactlyInAnyOrder(new byte[] {1, 2}, new byte[] {3, 4});
+    }
+
+    /** Retraction of a binary element must match by content too. */
+    @Test
+    public void testFieldCollectAggRetractWithDistinctBinary() {
+        FieldCollectAgg agg =
+                new FieldCollectAggFactory()
+                        .create(
+                                DataTypes.ARRAY(DataTypes.VARBINARY(10)),
+                                CoreOptions.fromMap(
+                                        ImmutableMap.of("fields.fieldName.distinct", "true")),
+                                "fieldName");
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(DataTypes.VARBINARY(10));
+
+        InternalArray result =
+                (InternalArray)
+                        agg.retract(
+                                new GenericArray(
+                                        new Object[] {new byte[] {1, 2}, new byte[] {3, 4}}),
+                                new GenericArray(new Object[] {new byte[] {1, 2}}));
+
+        assertThat(unnest(result, elementGetter))
+                .usingRecursiveFieldByFieldElementComparator()
+                .containsExactly(new byte[] {3, 4});
+    }
+
     @Test
     public void testFiledCollectAggWithRowType() {
         RowType rowType = RowType.of(DataTypes.INT(), DataTypes.STRING());
@@ -2486,6 +2540,72 @@ public class FieldAggregatorTest {
                         new GenericMap(toMap(1, "A", 2, "B", 3, "C")),
                         new GenericMap(toMap(1, "A", 2, "A")));
         assertThat(toJavaMap(result)).containsExactlyInAnyOrderEntriesOf(toMap(3, "C"));
+    }
+
+    /**
+     * A binary key is a {@code byte[]}, which has identity equality, so without wrapping it the
+     * merged map keeps one entry per occurrence instead of one per distinct key.
+     */
+    @Test
+    public void testFieldMergeMapAggWithBinaryKey() {
+        FieldMergeMapAgg agg =
+                new FieldMergeMapAggFactory()
+                        .create(
+                                DataTypes.MAP(DataTypes.VARBINARY(10), DataTypes.INT()),
+                                null,
+                                null);
+
+        Map<Object, Object> first = new HashMap<>();
+        first.put(new byte[] {1, 2}, 1);
+        Map<Object, Object> second = new HashMap<>();
+        second.put(new byte[] {1, 2}, 2);
+        second.put(new byte[] {3, 4}, 3);
+
+        InternalMap merged = (InternalMap) agg.agg(new GenericMap(first), new GenericMap(second));
+
+        assertThat(merged.size()).isEqualTo(2);
+        assertThat(binaryKeyed(merged)).containsOnlyKeys("0102", "0304").containsValues(2, 3);
+    }
+
+    /** The same for retraction: a retracted binary key must match the accumulated one. */
+    @Test
+    public void testFieldMergeMapAggRetractWithBinaryKey() {
+        FieldMergeMapAgg agg =
+                new FieldMergeMapAggFactory()
+                        .create(
+                                DataTypes.MAP(DataTypes.VARBINARY(10), DataTypes.INT()),
+                                null,
+                                null);
+
+        Map<Object, Object> acc = new HashMap<>();
+        acc.put(new byte[] {1, 2}, 1);
+        acc.put(new byte[] {3, 4}, 2);
+        Map<Object, Object> retract = new HashMap<>();
+        retract.put(new byte[] {1, 2}, 1);
+
+        InternalMap result =
+                (InternalMap) agg.retract(new GenericMap(acc), new GenericMap(retract));
+
+        assertThat(result.size()).isEqualTo(1);
+        assertThat(binaryKeyed(result)).containsOnlyKeys("0304");
+    }
+
+    /** Render an {@code InternalMap} with binary keys as hex so it can be asserted by value. */
+    private Map<String, Object> binaryKeyed(InternalMap map) {
+        InternalArray.ElementGetter keyGetter =
+                InternalArray.createElementGetter(DataTypes.VARBINARY(10));
+        InternalArray.ElementGetter valueGetter =
+                InternalArray.createElementGetter(DataTypes.INT());
+        Map<String, Object> out = new HashMap<>();
+        for (int i = 0; i < map.size(); i++) {
+            byte[] key = (byte[]) keyGetter.getElementOrNull(map.keyArray(), i);
+            StringBuilder hex = new StringBuilder();
+            for (byte b : key) {
+                hex.append(String.format("%02x", b));
+            }
+            out.put(hex.toString(), valueGetter.getElementOrNull(map.valueArray(), i));
+        }
+        return out;
     }
 
     @Test
