@@ -153,6 +153,14 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         tc.close()
         return msgs
 
+    @staticmethod
+    def _list_table_files(table):
+        return {
+            os.path.relpath(os.path.join(root, name), table.table_path)
+            for root, _dirs, files in os.walk(table.table_path)
+            for name in files
+        }
+
     def _do_delete_by_predicate(self, table, predicate):
         wb = self._make_write_builder(table)
         tu = wb.new_update()
@@ -229,6 +237,90 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         self.assertEqual(
             ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
             result['name'].to_pylist(),
+        )
+
+    def test_update_by_predicate_processes_one_file_group_at_a_time(self):
+        from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+
+        table = self._create_seeded_table()
+        self._do_update(
+            table,
+            pa.Table.from_pydict({'_ROW_ID': [0], 'age': [26]}),
+            ['age'],
+        )
+        splits = table.new_read_builder().new_scan().plan_for_write().splits()
+        self.assertEqual(1, len(splits))
+
+        group_sizes = []
+        original = TableUpdateByRowId.update_columns
+
+        def capture(updater, data, columns):
+            group_sizes.append(data.num_rows)
+            return original(updater, data, columns)
+
+        with mock.patch.object(TableUpdateByRowId, 'update_columns', capture):
+            self._do_update_by_predicate(table, None, {'city': 'Updated'})
+
+        self.assertEqual([2, 3], group_sizes)
+        self.assertEqual(
+            [26, 30, 35, 40, 45],
+            self._read_all(table)['age'].to_pylist(),
+        )
+        self.assertEqual(
+            ['Updated'] * 5,
+            self._read_all(table)['city'].to_pylist(),
+        )
+
+    def test_predicate_update_aborts_groups_after_later_failure(self):
+        from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+
+        table = self._create_seeded_table()
+        self._do_update(
+            table,
+            pa.Table.from_pydict({'_ROW_ID': [0], 'age': [26]}),
+            ['age'],
+        )
+        before_files = self._list_table_files(table)
+        calls = 0
+        original = TableUpdateByRowId.update_columns
+
+        def fail_second_group(updater, data, columns):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise RuntimeError("second group failed")
+            messages = original(updater, data, columns)
+            return messages
+
+        with mock.patch.object(
+                TableUpdateByRowId, 'update_columns', fail_second_group):
+            with self.assertRaisesRegex(RuntimeError, "second group failed"):
+                self._do_update_by_predicate(
+                    table,
+                    None,
+                    {'city': 'Updated'},
+                )
+
+        self.assertEqual(2, calls)
+        self.assertEqual(before_files, self._list_table_files(table))
+
+    def test_array_assignment_spans_file_groups(self):
+        table = self._create_seeded_table()
+        self._do_update(
+            table,
+            pa.Table.from_pydict({'_ROW_ID': [0], 'age': [26]}),
+            ['age'],
+        )
+
+        self._do_update_by_predicate(
+            table,
+            None,
+            {'age': pa.array([101, 102, 103, 104, 105])},
+        )
+
+        self.assertEqual(
+            [101, 102, 103, 104, 105],
+            self._read_all(table)['age'].to_pylist(),
         )
 
     def test_update_by_predicate_no_match_is_noop(self):
@@ -1341,14 +1433,6 @@ class TableUpdateBatchTest(_BatchModeMixin, _TableUpdateTestBase, unittest.TestC
                 ])), self._next_commit_id())
 
         self.assertEqual(before_files, self._list_table_files(table))
-
-    @staticmethod
-    def _list_table_files(table):
-        return {
-            os.path.relpath(os.path.join(root, name), table.table_path)
-            for root, _dirs, files in os.walk(table.table_path)
-            for name in files
-        }
 
 
 class TableUpdateStreamTest(_StreamModeMixin, _TableUpdateTestBase, unittest.TestCase):

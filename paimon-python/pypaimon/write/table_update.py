@@ -30,17 +30,22 @@ from pypaimon.common.options.core_options import (
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.globalindex import Range
+from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
 from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.scanner.file_scanner import FileScanner
+from pypaimon.read.scanner.data_evolution_split_generator import (
+    DataEvolutionSplitGenerator,
+)
 from pypaimon.read.split import DataSplit
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.snapshot.time_travel_util import SCAN_KEYS, TimeTravelUtil
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.file_store_commit import _abort_commit_messages
 from pypaimon.write.table_delete import TableDeleteByRowId
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.table_upsert_by_key import TableUpsertByKey
@@ -233,32 +238,103 @@ class TableUpdate:
         values, builds an Arrow update table, then delegates to the existing
         row-id update path.
         """
+        has_array = any(
+            isinstance(value, (pa.Array, pa.ChunkedArray))
+            for value in assignments.values()
+        )
         self._validate_predicate_update(assignments)
 
         scan_table = self._matched_update_scan_table()
-        read_builder = scan_table.new_read_builder()
+        read_builder = scan_table.new_read_builder().with_projection(
+            [SpecialFields.ROW_ID.name]
+        )
         if predicate is not None:
             read_builder.with_filter(predicate)
-            read_builder.with_projection(
-                list(scan_table.field_names) + [SpecialFields.ROW_ID.name]
-            )
-        else:
-            read_builder.with_projection([SpecialFields.ROW_ID.name])
 
-        scan = read_builder.new_scan()
-        splits = scan.plan_for_write().splits()
-        matched = read_builder.new_read().to_arrow(splits)
-        if matched.num_rows == 0:
-            return []
-
-        update_table = self._build_predicate_update_table(
-            matched[SpecialFields.ROW_ID.name],
-            assignments,
-            matched.num_rows,
+        plan = read_builder.new_scan().plan_for_write()
+        splits = plan.splits()
+        snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
+        files_info = TableUpdateByRowId._files_info_from_splits(
+            snapshot_id, splits
         )
-        return TableUpdateByRowId(
+        table_read = read_builder.new_read()
+        updater = TableUpdateByRowId(
             self.table, self.commit_user, commit_identifier,
-        ).update_columns(update_table, list(assignments.keys()))
+            _precomputed_files_info=files_info,
+        )
+        try:
+            if has_array:
+                matched = table_read.to_arrow(splits)
+                if matched.num_rows > 0:
+                    update_table = self._build_predicate_update_table(
+                        matched[SpecialFields.ROW_ID.name],
+                        assignments,
+                        matched.num_rows,
+                    )
+                    updater.update_columns(
+                        update_table, list(assignments.keys())
+                    )
+            else:
+                for split in self._predicate_update_file_groups(splits):
+                    matched = table_read.to_arrow([split], parallelism=1)
+                    if matched.num_rows == 0:
+                        continue
+                    update_table = self._build_predicate_update_table(
+                        matched[SpecialFields.ROW_ID.name],
+                        assignments,
+                        matched.num_rows,
+                    )
+                    updater.update_columns(
+                        update_table, list(assignments.keys())
+                    )
+        except Exception:
+            _abort_commit_messages(self.table, updater.commit_messages)
+            raise
+        return updater.commit_messages
+
+    @staticmethod
+    def _predicate_update_file_groups(splits):
+        for split in splits:
+            data_split = (
+                split.data_split()
+                if isinstance(split, IndexedSplit) else split
+            )
+            deletion_files = data_split.data_deletion_files
+            deletion_by_name = (
+                {
+                    file.file_name: deletion
+                    for file, deletion in zip(
+                        data_split.files, deletion_files
+                    )
+                }
+                if deletion_files is not None else None
+            )
+            groups = DataEvolutionSplitGenerator._split_by_row_id(
+                data_split.files
+            )
+            for files in groups:
+                group = DataSplit(
+                    files=files,
+                    partition=data_split.partition,
+                    bucket=data_split.bucket,
+                    raw_convertible=len(files) == 1,
+                    data_deletion_files=(
+                        [deletion_by_name[file.file_name] for file in files]
+                        if deletion_by_name is not None else None
+                    ),
+                    snapshot_id=data_split.snapshot_id,
+                )
+                if isinstance(split, IndexedSplit):
+                    group_ranges = Range.sort_and_merge_overlap(
+                        [file.row_id_range() for file in files], True, True
+                    )
+                    row_ranges = Range.and_(
+                        split.row_ranges(), group_ranges
+                    )
+                    if not row_ranges:
+                        continue
+                    group = IndexedSplit(group, row_ranges)
+                yield group
 
     def _matched_update_scan_table(self):
         snapshot_manager = self.table.snapshot_manager()
