@@ -41,6 +41,10 @@ public class IcebergManifestFileMetaSerializer extends ObjectSerializer<IcebergM
     public IcebergManifestFileMetaSerializer(RowType schema) {
         super(schema);
         this.partitionSummarySerializer = new IcebergPartitionSummarySerializer();
+        // IcebergManifestFileMeta.schema(...) always has 14 base fields (see
+        // schemaForIcebergNew/schemaForIceberg1_4) and appends exactly one extra field,
+        // first_row_id (520), when withFirstRowId=true (see schema(boolean, boolean)); so a
+        // field count of 15 unambiguously means the row-lineage column is present.
         this.withFirstRowId = schema.getFieldCount() == 15;
     }
 

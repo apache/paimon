@@ -69,6 +69,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -504,21 +505,66 @@ public class IcebergRowLineageCompatibilityTest {
         LocalFileIO.create()
                 .rename(paths.toManifestListPath(rewritten), paths.toManifestListPath(listName));
         assertThat(manifestList.read(listName).get(0).firstRowId()).isNull();
+        // the stripped Layer-1 manifest has no existing/deleted entries, so its addedRowsCount()
+        // is an exact count of the legacy rows it carries and still needs a real id for
+        long legacyManifestRows = stripped.get(0).addedRowsCount();
+        assertThat(legacyManifestRows).isEqualTo(1L);
 
         // next commit re-lists carried-over manifests: unassigned metas get assigned now
         write.write(GenericRow.of(2, 20));
         commit.commit(2, write.prepareCommit(false, 2));
+
+        IcebergMetadata metadataAfterCommit2 = readIcebergMetadata(table, 2);
+        IcebergSnapshot snapshotAfterCommit2 = metadataAfterCommit2.currentSnapshot();
+        List<IcebergManifestFileMeta> dataManifestsAfterCommit2 = new ArrayList<>();
+        for (IcebergManifestFileMeta meta :
+                manifestList.read(new Path(snapshotAfterCommit2.manifestList()).getName())) {
+            if (meta.content() == IcebergManifestFileMeta.Content.DATA) {
+                assertThat(meta.firstRowId()).isNotNull();
+                dataManifestsAfterCommit2.add(meta);
+            }
+        }
+        // the re-assigned legacy manifest (M1) and this commit's freshly written manifest (M2)
+        // stay separate: only 2 data manifests, well under the metadata-compaction threshold
+        assertThat(dataManifestsAfterCommit2).hasSize(2);
+
+        // this is the corruption scenario from the review: added-rows/next-row-id must count
+        // the legacy manifest's re-assigned rows in addition to this commit's own new rows, not
+        // just this commit's `metrics.addedRecords` (which is only the new row)
+        long newRowsThisCommit = 1L;
+        long expectedAddedRows = legacyManifestRows + newRowsThisCommit;
+        assertThat(snapshotAfterCommit2.addedRows())
+                .as("snapshot added-rows must include the re-assigned legacy manifest's rows")
+                .isEqualTo(expectedAddedRows);
+        assertThat(metadataAfterCommit2.nextRowId())
+                .as("next-row-id must equal first-row-id plus the true assigned-rows total")
+                .isEqualTo(snapshotAfterCommit2.firstRowId() + snapshotAfterCommit2.addedRows());
+        for (IcebergManifestFileMeta meta : dataManifestsAfterCommit2) {
+            assertThat(metadataAfterCommit2.nextRowId())
+                    .as(
+                            "next-row-id must be at or beyond every manifest's assigned range "
+                                    + "(manifest %s)",
+                            meta.manifestPath())
+                    .isGreaterThanOrEqualTo(meta.firstRowId() + meta.addedRowsCount());
+        }
+
+        // a third commit: its first-row-id must continue exactly where commit 2 left off, and no
+        // manifest's assigned id range may overlap another's (i.e. no file gets a duplicate
+        // effective first-row-id)
+        write.write(GenericRow.of(3, 30));
+        commit.commit(3, write.prepareCommit(false, 3));
         write.close();
         commit.close();
 
-        for (IcebergManifestFileMeta meta :
-                manifestList.read(
-                        new Path(readIcebergMetadata(table, 2).currentSnapshot().manifestList())
-                                .getName())) {
-            if (meta.content() == IcebergManifestFileMeta.Content.DATA) {
-                assertThat(meta.firstRowId()).isNotNull();
-            }
-        }
+        IcebergMetadata metadataAfterCommit3 = readIcebergMetadata(table, 3);
+        IcebergSnapshot snapshotAfterCommit3 = metadataAfterCommit3.currentSnapshot();
+        assertThat(snapshotAfterCommit3.firstRowId()).isEqualTo(metadataAfterCommit2.nextRowId());
+
+        Map<String, Long> effectiveIdsAfterCommit3 = effectiveFileFirstRowIds(table, 3);
+        assertThat(effectiveIdsAfterCommit3).hasSize(3);
+        assertThat(new HashSet<>(effectiveIdsAfterCommit3.values()))
+                .as("no two files may share an effective first-row-id")
+                .hasSameSizeAs(effectiveIdsAfterCommit3.values());
     }
 
     @Test

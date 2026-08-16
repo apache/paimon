@@ -42,7 +42,8 @@ under the License.
              from 1.15.0 on Iceberg 1.8.1). Its HadoopInputFile now always calls the
              FileSystem#openFile(Path) builder API, which only exists from Hadoop 3.3+;
              the reactor-wide hadoop.version (2.8.5) predates it, so this module pins a
-             newer Hadoop for its own (test-scope) use only, matching the Hadoop 3
+             newer Hadoop for its own use only (hadoop-common below is `provided`, not
+             test-scoped; only hadoop-hdfs-client is test-scoped), matching the Hadoop 3
              version Iceberg 1.11 itself builds/tests against. -->
         <hadoop.version>3.4.3</hadoop.version>
     </properties>
