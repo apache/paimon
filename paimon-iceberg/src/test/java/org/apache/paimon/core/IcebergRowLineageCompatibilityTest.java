@@ -235,10 +235,62 @@ public class IcebergRowLineageCompatibilityTest {
                         new Path(readIcebergMetadata(table, 1).currentSnapshot().manifestList())
                                 .getName());
         assertThat(metas).isNotEmpty();
-        // Task 2 only adds the column; assignment arrives in Task 4 — value still null here
+        // the v3 manifest list round-trips the first_row_id column; data manifests are assigned
+        // at manifest-list write time (this table's single commit starts at row id 0)
         for (IcebergManifestFileMeta meta : metas) {
-            assertThat(meta.firstRowId()).isNull();
+            if (meta.content() == IcebergManifestFileMeta.Content.DATA) {
+                assertThat(meta.firstRowId()).isEqualTo(0L);
+            } else {
+                assertThat(meta.firstRowId()).isNull();
+            }
         }
+    }
+
+    @Test
+    public void testManifestFirstRowIdAssignment() throws Exception {
+        FileStoreTable table = createPaimonTable(defaultRowType(), formatVersionOptions(3), "avro");
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 10));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        write.write(GenericRow.of(3, 30));
+        commit.commit(2, write.prepareCommit(false, 2));
+        write.close();
+        commit.close();
+
+        IcebergPathFactory paths = new IcebergPathFactory(new Path(table.location(), "metadata"));
+        IcebergManifestList manifestList = IcebergManifestList.create(table, paths);
+        List<IcebergManifestFileMeta> metas =
+                manifestList.read(
+                        new Path(readIcebergMetadata(table, 2).currentSnapshot().manifestList())
+                                .getName());
+
+        // every data manifest is assigned; watermark walks addedRowsCount in list order
+        long watermark = -1;
+        long totalAssigned = 0;
+        for (IcebergManifestFileMeta meta : metas) {
+            if (meta.content() == IcebergManifestFileMeta.Content.DATA) {
+                assertThat(meta.firstRowId()).isNotNull();
+                assertThat(meta.firstRowId()).isGreaterThan(watermark);
+                watermark = meta.firstRowId();
+                totalAssigned += meta.addedRowsCount();
+            } else {
+                assertThat(meta.firstRowId()).isNull();
+            }
+        }
+        // commit1 assigned rows [0,2), commit2 assigned [2,3): manifests carry 0 and 2
+        assertThat(
+                        metas.stream()
+                                .filter(m -> m.content() == IcebergManifestFileMeta.Content.DATA)
+                                .map(IcebergManifestFileMeta::firstRowId))
+                .containsExactlyInAnyOrder(0L, 2L);
+        assertThat(totalAssigned).isEqualTo(3L);
     }
 
     @Test
