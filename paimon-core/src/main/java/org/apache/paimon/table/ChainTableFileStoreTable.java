@@ -23,6 +23,7 @@ import org.apache.paimon.CoreOptions.StartupMode;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.reader.ReadBatchSizeController;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.ChainSplit;
@@ -200,6 +201,13 @@ public class ChainTableFileStoreTable extends FallbackReadFileStoreTable {
         public TableRead withIOManager(IOManager ioManager) {
             chainGroupRead.withIOManager(ioManager);
             fallbackRead.withIOManager(ioManager);
+            return this;
+        }
+
+        @Override
+        public InnerTableRead withReadBatchSizeController(ReadBatchSizeController controller) {
+            chainGroupRead.withReadBatchSizeController(controller);
+            fallbackRead.withReadBatchSizeController(controller);
             return this;
         }
 

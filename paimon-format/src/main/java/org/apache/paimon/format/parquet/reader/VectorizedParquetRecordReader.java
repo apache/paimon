@@ -26,6 +26,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
+import org.apache.paimon.reader.ReadBatchSizeController;
 
 import org.apache.parquet.VersionParser;
 import org.apache.parquet.column.ColumnDescriptor;
@@ -80,6 +81,7 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
     private final MessageType fileSchema;
     private final List<ParquetField> fields;
     private final RowIndexGenerator rowIndexGenerator;
+    @Nullable private final ReadBatchSizeController readBatchSizeController;
 
     private Set<ParquetField> missingColumns;
     private VersionParser.ParsedVersion writerVersion;
@@ -93,6 +95,19 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
             int batchSize,
             FileIO fileIO)
             throws IOException {
+        this(filePath, reader, fileSchema, fields, vectors, batchSize, fileIO, null);
+    }
+
+    public VectorizedParquetRecordReader(
+            Path filePath,
+            ParquetFileReader reader,
+            MessageType fileSchema,
+            List<ParquetField> fields,
+            WritableColumnVector[] vectors,
+            int batchSize,
+            FileIO fileIO,
+            @Nullable ReadBatchSizeController readBatchSizeController)
+            throws IOException {
         this.filePath = filePath;
         this.reader = reader;
         this.fileSchema = fileSchema;
@@ -101,6 +116,7 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
         this.batchSize = batchSize;
         this.fileIO = fileIO;
         this.rowIndexGenerator = new RowIndexGenerator();
+        this.readBatchSizeController = readBatchSizeController;
 
         // fetch writer version from file metadata
         try {
@@ -186,7 +202,12 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
             columnarBatch.setNumRows(0);
             checkEndOfRowGroup();
 
-            int num = (int) Math.min(batchSize, totalCountLoadedSoFar - rowsReturned);
+            // Snapshot once so a concurrent update only affects the next physical batch.
+            int requestedBatchSize =
+                    readBatchSizeController == null
+                            ? batchSize
+                            : readBatchSizeController.requestedBatchSize();
+            int num = (int) Math.min(requestedBatchSize, totalCountLoadedSoFar - rowsReturned);
             for (ParquetColumnVector cv : columnVectors) {
                 for (ParquetColumnVector leafCv : cv.getLeaves()) {
                     VectorizedColumnReader columnReader = leafCv.getColumnReader();

@@ -1572,6 +1572,19 @@ public class RecordReaderImpl implements RecordReader {
 
     @Override
     public boolean nextBatch(VectorizedRowBatch batch) throws IOException {
+        return nextBatch(batch, batch.getMaxSize());
+    }
+
+    /** Read the next batch without changing the allocated vector capacity. */
+    public boolean nextBatch(VectorizedRowBatch batch, int requestedBatchSize) throws IOException {
+        if (requestedBatchSize <= 0 || requestedBatchSize > batch.getMaxSize()) {
+            throw new IllegalArgumentException(
+                    "Requested batch size must be between 1 and "
+                            + batch.getMaxSize()
+                            + ", but was "
+                            + requestedBatchSize
+                            + ".");
+        }
         try {
             int batchSize;
             // do...while is required to handle the case where the filter eliminates all rows in the
@@ -1588,7 +1601,7 @@ public class RecordReaderImpl implements RecordReader {
                     followRowInStripe = rowInStripe;
                 }
 
-                batchSize = computeBatchSize(batch.getMaxSize());
+                batchSize = computeBatchSize(requestedBatchSize);
                 reader.setVectorColumnCount(batch.getDataColumnCount());
                 reader.nextBatch(batch, batchSize, startReadPhase);
                 if (startReadPhase == TypeReader.ReadPhase.LEADERS && batch.size > 0) {

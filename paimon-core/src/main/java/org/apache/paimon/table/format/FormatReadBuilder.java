@@ -35,6 +35,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.FileRecordReader;
+import org.apache.paimon.reader.ReadBatchSizeController;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FormatTable;
@@ -77,6 +78,7 @@ public class FormatReadBuilder implements ReadBuilder {
     @Nullable private Predicate filter;
     @Nullable private PartitionPredicate partitionFilter;
     @Nullable private Integer limit;
+    @Nullable private ReadBatchSizeController readBatchSizeController;
 
     public FormatReadBuilder(FormatTable table) {
         this.table = table;
@@ -181,6 +183,11 @@ public class FormatReadBuilder implements ReadBuilder {
         return new FormatTableRead(readType(), table.rowType(), this, filter, limit);
     }
 
+    FormatReadBuilder withReadBatchSizeController(ReadBatchSizeController controller) {
+        this.readBatchSizeController = controller;
+        return this;
+    }
+
     protected RecordReader<InternalRow> createReader(FormatDataSplit dataSplit) throws IOException {
         // Skip pushing down partition filters to reader.
         List<Predicate> readFilters =
@@ -212,7 +219,12 @@ public class FormatReadBuilder implements ReadBuilder {
             Pair<int[], RowType> partitionMapping)
             throws IOException {
         FormatReaderContext formatReaderContext =
-                new FormatReaderContext(table.fileIO(), file.filePath(), file.fileSize(), null);
+                new FormatReaderContext(
+                        table.fileIO(),
+                        file.filePath(),
+                        file.fileSize(),
+                        null,
+                        readBatchSizeController);
         try {
             FileRecordReader<InternalRow> reader;
             Long length = file.length();

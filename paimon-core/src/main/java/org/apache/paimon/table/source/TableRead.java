@@ -24,6 +24,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.SplitRead;
+import org.apache.paimon.reader.ReadBatchSizeController;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 
@@ -45,6 +46,17 @@ public interface TableRead {
     TableRead executeFilter();
 
     TableRead withIOManager(IOManager ioManager);
+
+    /**
+     * Configure a controller shared by all physical readers created by this table read.
+     *
+     * <p>The controller must be configured before creating readers. Formats that support dynamic
+     * sizing snapshot the requested size when the next physical batch starts; already started or
+     * asynchronously prefetched batches may use the previous size.
+     */
+    default TableRead withReadBatchSizeController(ReadBatchSizeController controller) {
+        return this;
+    }
 
     RecordReader<InternalRow> createReader(Split split) throws IOException;
 

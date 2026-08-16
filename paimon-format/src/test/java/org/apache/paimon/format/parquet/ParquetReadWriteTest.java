@@ -36,6 +36,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.ReadBatchSizeController;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
@@ -202,6 +203,48 @@ public class ParquetReadWriteTest {
 
     public static Collection<Integer> parameters() {
         return Arrays.asList(10, 1000);
+    }
+
+    @Test
+    void testDynamicReadBatchSize() throws IOException {
+        List<InternalRow> records = new ArrayList<>();
+        for (int i = 0; i < 20; i++) {
+            records.add(newRow(i));
+        }
+        Path path = createTempParquetFileByPaimon(folder, records, 10_000, ROW_TYPE);
+
+        ParquetReaderFactory factory =
+                new ParquetReaderFactory(
+                        new Options(),
+                        RowType.builder().field("f4", new IntType()).build(),
+                        4,
+                        null);
+        ReadBatchSizeController controller = new ReadBatchSizeController(8, 5);
+        LocalFileIO fileIO = new LocalFileIO();
+        try (RecordReader<InternalRow> reader =
+                factory.createReader(
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), null, controller))) {
+            assertThat(readIntBatch(reader)).containsExactly(0, 1, 2, 3, 4);
+
+            controller.setRequestedBatchSize(2);
+            assertThat(readIntBatch(reader)).containsExactly(5, 6);
+
+            controller.setRequestedBatchSize(8);
+            assertThat(readIntBatch(reader)).containsExactly(7, 8, 9, 10, 11, 12, 13, 14);
+        }
+    }
+
+    private static List<Integer> readIntBatch(RecordReader<InternalRow> reader) throws IOException {
+        RecordReader.RecordIterator<InternalRow> batch = reader.readBatch();
+        assertThat(batch).isNotNull();
+        List<Integer> values = new ArrayList<>();
+        InternalRow row;
+        while ((row = batch.next()) != null) {
+            values.add(row.getInt(0));
+        }
+        batch.releaseBatch();
+        return values;
     }
 
     @ParameterizedTest

@@ -24,6 +24,7 @@ import org.apache.paimon.format.OrcFormatReaderContext;
 import org.apache.paimon.format.orc.filter.OrcFilters;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.reader.ReadBatchSizeController;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -169,6 +170,41 @@ class OrcReaderFactoryTest {
         // check that all rows have been read
         assertThat(cnt.get()).isEqualTo(1920800);
         assertThat(totalF0.get()).isEqualTo(1844737280400L);
+    }
+
+    @Test
+    void testDynamicReadBatchSize() throws IOException {
+        OrcReaderFactory format = createFormat(FLAT_FILE_TYPE, new int[] {0});
+        ReadBatchSizeController controller = new ReadBatchSizeController(BATCH_SIZE, 5);
+        LocalFileIO fileIO = new LocalFileIO();
+
+        try (RecordReader<InternalRow> reader =
+                format.createReader(
+                        new FormatReaderContext(
+                                fileIO,
+                                flatFile,
+                                fileIO.getFileSize(flatFile),
+                                null,
+                                controller))) {
+            assertThat(readBatchSize(reader)).isEqualTo(5);
+
+            controller.setRequestedBatchSize(2);
+            assertThat(readBatchSize(reader)).isEqualTo(2);
+
+            controller.setRequestedBatchSize(BATCH_SIZE);
+            assertThat(readBatchSize(reader)).isEqualTo(BATCH_SIZE);
+        }
+    }
+
+    private static int readBatchSize(RecordReader<InternalRow> reader) throws IOException {
+        RecordReader.RecordIterator<InternalRow> batch = reader.readBatch();
+        assertThat(batch).isNotNull();
+        int count = 0;
+        while (batch.next() != null) {
+            count++;
+        }
+        batch.releaseBatch();
+        return count;
     }
 
     @RepeatedTest(10)

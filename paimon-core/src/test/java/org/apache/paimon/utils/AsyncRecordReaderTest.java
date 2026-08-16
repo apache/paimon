@@ -18,6 +18,7 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.reader.ReadBatchSizeController;
 import org.apache.paimon.reader.RecordReader;
 
 import org.junit.jupiter.api.Test;
@@ -30,6 +31,8 @@ import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Queue;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -98,6 +101,73 @@ public class AsyncRecordReaderTest {
         AsyncRecordReader<Integer> asyncReader = new AsyncRecordReader<>(() -> reader);
         assertThatThrownBy(() -> asyncReader.forEachRemaining(v -> {}))
                 .hasMessageContaining(message);
+    }
+
+    @Test
+    public void testPrefetchedBatchesMayUsePreviousRequestedSize() throws Exception {
+        ReadBatchSizeController controller = new ReadBatchSizeController(8, 5);
+        CountDownLatch twoBatchesPrefetched = new CountDownLatch(1);
+        CountDownLatch continueReading = new CountDownLatch(1);
+        AtomicInteger batchNumber = new AtomicInteger();
+        RecordReader<Integer> physicalReader =
+                new RecordReader<Integer>() {
+                    @Nullable
+                    @Override
+                    public RecordIterator<Integer> readBatch() throws IOException {
+                        int current = batchNumber.getAndIncrement();
+                        if (current == 2) {
+                            twoBatchesPrefetched.countDown();
+                            try {
+                                continueReading.await();
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                throw new IOException(e);
+                            }
+                        } else if (current > 2) {
+                            return null;
+                        }
+
+                        int size = controller.requestedBatchSize();
+                        AtomicInteger remaining = new AtomicInteger(size);
+                        return new RecordIterator<Integer>() {
+                            @Nullable
+                            @Override
+                            public Integer next() {
+                                return remaining.getAndDecrement() > 0 ? current : null;
+                            }
+
+                            @Override
+                            public void releaseBatch() {}
+                        };
+                    }
+
+                    @Override
+                    public void close() {}
+                };
+
+        try (AsyncRecordReader<Integer> asyncReader =
+                new AsyncRecordReader<>(() -> physicalReader)) {
+            assertThat(twoBatchesPrefetched.await(30, TimeUnit.SECONDS)).isTrue();
+            controller.setRequestedBatchSize(2);
+            continueReading.countDown();
+
+            assertThat(readBatchSize(asyncReader)).isEqualTo(5);
+            assertThat(readBatchSize(asyncReader)).isEqualTo(5);
+            assertThat(readBatchSize(asyncReader)).isEqualTo(2);
+        } finally {
+            continueReading.countDown();
+        }
+    }
+
+    private static int readBatchSize(RecordReader<Integer> reader) throws IOException {
+        RecordReader.RecordIterator<Integer> batch = reader.readBatch();
+        assertThat(batch).isNotNull();
+        int size = 0;
+        while (batch.next() != null) {
+            size++;
+        }
+        batch.releaseBatch();
+        return size;
     }
 
     @Test

@@ -35,6 +35,7 @@ import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.FileRecordReader;
+import org.apache.paimon.reader.ReadBatchSizeController;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -167,14 +168,19 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                     requestedSchema.messageType);
         }
 
-        int actualBatchSize = computeBatchSize(reader, requestedSchema.messageType);
+        int configuredBatchSize = computeBatchSize(reader, requestedSchema.messageType);
         Preconditions.checkArgument(
-                actualBatchSize > 0,
+                configuredBatchSize > 0,
                 "Parquet read batch size should be positive: %s",
-                actualBatchSize);
+                configuredBatchSize);
+        ReadBatchSizeController readBatchSizeController = context.readBatchSizeController();
+        int allocatedBatchSize =
+                readBatchSizeController == null
+                        ? configuredBatchSize
+                        : readBatchSizeController.maxBatchSize();
         reader.setRequestedSchema(requestedSchema.messageType);
         WritableColumnVector[] writableVectors =
-                createWritableVectors(actualBatchSize, physicalReadFields);
+                createWritableVectors(allocatedBatchSize, physicalReadFields);
 
         VectorizedParquetRecordReader parquetReader =
                 new VectorizedParquetRecordReader(
@@ -183,8 +189,9 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                         fileSchema,
                         requestedSchema.fields,
                         writableVectors,
-                        actualBatchSize,
-                        context.fileIO());
+                        allocatedBatchSize,
+                        context.fileIO(),
+                        readBatchSizeController);
         return readPlan.isIdentity()
                 ? parquetReader
                 : new ShreddingFormatReader(parquetReader, readPlan);

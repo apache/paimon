@@ -212,6 +212,30 @@ public class ReadTable {
 }
 ```
 
+### Adjust Read Batch Size at Runtime
+
+Parquet and ORC readers can share a `ReadBatchSizeController` to adjust the logical size of future
+physical batches without recreating readers or reallocating their vectors:
+
+```java
+import org.apache.paimon.reader.ReadBatchSizeController;
+import org.apache.paimon.table.source.TableRead;
+
+ReadBatchSizeController controller = new ReadBatchSizeController(1024, 1024);
+TableRead read = readBuilder.newRead().withReadBatchSizeController(controller);
+RecordReader<InternalRow> reader = read.createReader(splits);
+
+controller.setRequestedBatchSize(256);
+```
+
+Configure the controller before creating readers. Its maximum size determines each reader's vector
+capacity and cannot change. A requested size must be between `1` and that maximum, and updates take
+effect when the next physical batch starts. A batch already being read, including one prefetched by
+an asynchronous reader, may still use the previous requested size.
+
+Each in-flight physical batch keeps vectors sized for the maximum. Asynchronous ORC reads can keep
+multiple batches in flight, so account for the prefetch concurrency when choosing the maximum.
+
 ## Batch Write
 
 The writing is divided into two stages:

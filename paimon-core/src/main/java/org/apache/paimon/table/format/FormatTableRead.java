@@ -24,6 +24,7 @@ import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateProjectionConverter;
 import org.apache.paimon.reader.LimitRecordReader;
+import org.apache.paimon.reader.ReadBatchSizeController;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.source.Split;
@@ -70,6 +71,12 @@ public class FormatTableRead implements TableRead {
 
     @Override
     public TableRead withIOManager(IOManager ioManager) {
+        return this;
+    }
+
+    @Override
+    public TableRead withReadBatchSizeController(ReadBatchSizeController controller) {
+        read.withReadBatchSizeController(controller);
         return this;
     }
 
