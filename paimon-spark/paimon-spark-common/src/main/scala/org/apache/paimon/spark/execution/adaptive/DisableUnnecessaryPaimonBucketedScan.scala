@@ -96,6 +96,10 @@ object DisableUnnecessaryPaimonBucketedScan extends Rule[SparkPlan] {
       hashInterestingPartitionOrOrder: Boolean,
       hasExchange: Boolean): SparkPlan = {
     plan match {
+      case p if consumesBucketPartitioning(p) =>
+        // Stop here: this operator was added because its child reports the bucket partitioning, so
+        // every bucketed scan below it is in use by definition.
+        p
       case p if hasInterestingPartitionOrOrder(p) =>
         // Operator with interesting partition, propagates `hashInterestingPartitionOrOrder` as true
         // to its children, and resets `hasExchange`.
@@ -122,6 +126,37 @@ object DisableUnnecessaryPaimonBucketedScan extends Rule[SparkPlan] {
           disableBucketScan(_, hashInterestingPartitionOrOrder = false, hasExchange = false))
     }
   }
+
+  /**
+   * Whether `plan` was inserted specifically to consume its child's bucket (key-grouped)
+   * partitioning, so that disabling the bucketed scan underneath it would leave the plan
+   * inconsistent.
+   *
+   * Spark 4.2 (SPARK-55535) reworked storage-partitioned joins: instead of letting the join read
+   * the scan's `KeyGroupedPartitioning` directly, `EnsureRequirements` now wraps the child in a
+   * `GroupPartitionsExec`, which coalesces the scan's input partitions by partition key. That node
+   * casts `child.outputPartitioning` to `Partitioning with Expression` unconditionally, because it
+   * is only ever added when the child reports `KeyedPartitioning`. If we then disable the bucketed
+   * scan below it, `PaimonScan.outputPartitioning` degrades to `UnknownPartitioning`, which is not
+   * an `Expression`, and the cast fails with a `ClassCastException` at execution time.
+   *
+   * The whole subtree is left alone, not just a scan directly beneath the node:
+   * `EnsureRequirements` wraps whatever satisfied the distribution, which can be a join or an
+   * aggregate with several scans below it, and disabling only some of them would instead trip
+   * `PartitioningCollection`'s equal-`numPartitions` requirement. Bucketing therefore stays on for
+   * scans in that subtree that do not feed the keyed partitioning; that costs some parallelism and
+   * changes no result.
+   *
+   * Matched by class name because the class does not exist before 4.2, while this file is compiled
+   * once (against the newest supported Spark) and has to load on every supported version — an
+   * `isInstanceOf` would resolve the class and fail with `NoClassDefFoundError` on the older ones.
+   * A rename in a later Spark would silently stop the match, which is why the crash itself is
+   * pinned by a query rather than by this string: see `BucketedTableQueryTest`'s "join - negative
+   * case", whose `t1 JOIN t5` (equal bucket counts, different input partition counts) is the shape
+   * that reaches `GroupPartitionsExec`.
+   */
+  private def consumesBucketPartitioning(plan: SparkPlan): Boolean =
+    plan.getClass.getName == "org.apache.spark.sql.execution.datasources.v2.GroupPartitionsExec"
 
   private def hasInterestingPartitionOrOrder(plan: SparkPlan): Boolean = {
     val hashPartition = plan.requiredChildDistribution.exists {
