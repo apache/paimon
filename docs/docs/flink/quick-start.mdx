@@ -31,12 +31,6 @@ under the License.
 
 This documentation is a guide for using Paimon in Flink.
 
-:::warning
-
-Flink SQL does not currently support Paimon `GEOMETRY` or `GEOGRAPHY` columns. Reading, writing, or copying a table whose schema contains either type fails explicitly instead of exposing the column as `VARBINARY` and losing its CRS or edge algorithm. Use the Paimon Java API or Spark 4.1 for geospatial columns.
-
-:::
-
 ## Jars
 
 Paimon currently supports Flink 2.2, 2.1, 2.0, 1.20, 1.19, 1.18, 1.17, 1.16. We recommend the latest Flink version for a better experience.

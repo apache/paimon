@@ -116,6 +116,5 @@ Paimon Iceberg compatibility currently supports the following data types.
 - Spark SQL supports geospatial columns in Spark 4.1 when `spark.sql.geospatial.enabled=true`, for CRSs recognized by Spark, with the `spherical` geography edge algorithm. Spark 3.x, Spark 4.0, and Flink SQL reject these columns instead of exposing them as binary and losing the CRS or edge algorithm.
 - When Iceberg metadata is enabled, a `GEOGRAPHY` CRS cannot contain a comma, including in nested columns, because Iceberg's geospatial type grammar uses commas to separate parameters.
 - Iceberg REST catalog publication does not yet support geospatial columns. Use `table-location`, `hadoop-catalog`, or `hive-catalog` metadata storage instead.
-- Geospatial columns cannot be primary, partition, bucket, sequence, or clustering keys. Paimon records null counts but does not publish byte-wise lower or upper bounds for WKB values.
 
 :::

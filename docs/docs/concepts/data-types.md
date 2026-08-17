@@ -206,11 +206,3 @@ All data types supported by Paimon are as follows:
     </tr>
     </tbody>
 </table>
-
-:::note Geospatial type availability
-
-`GEOMETRY` and `GEOGRAPHY` columns require Parquet for data, per-level, and changelog files. They cannot be used as primary, partition, bucket, sequence, or clustering keys.
-
-The Paimon Java API supports geospatial columns. Spark 4.1 requires `spark.sql.geospatial.enabled=true`, supports CRSs recognized by Spark, and supports only the `spherical` geography edge algorithm. Flink SQL, Spark 3.x, and Spark 4.0 reject geospatial columns instead of exposing them as binary and losing the CRS or edge algorithm.
-
-:::
