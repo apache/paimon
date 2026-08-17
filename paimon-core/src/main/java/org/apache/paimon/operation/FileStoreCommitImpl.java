@@ -49,6 +49,7 @@ import org.apache.paimon.operation.commit.CommitResult;
 import org.apache.paimon.operation.commit.CommitRollback;
 import org.apache.paimon.operation.commit.CommitScanner;
 import org.apache.paimon.operation.commit.ConflictDetection;
+import org.apache.paimon.operation.commit.GlobalIndexRowIdCoverageChecker;
 import org.apache.paimon.operation.commit.ManifestEntryChanges;
 import org.apache.paimon.operation.commit.RetryCommitResult;
 import org.apache.paimon.operation.commit.RetryCommitResult.CommitFailRetryResult;
@@ -164,6 +165,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final InternalRowPartitionComputer partitionComputer;
     @Nullable private final StrictModeChecker strictModeChecker;
     private final ConflictDetection conflictDetection;
+    private final GlobalIndexRowIdCoverageChecker globalIndexRowIdCoverageChecker;
     private final CommitCleaner commitCleaner;
 
     private boolean ignoreEmptyCommit;
@@ -234,6 +236,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                                 id))
                         .orElse(null);
         this.conflictDetection = conflictDetectFactory.create(scanner);
+        this.globalIndexRowIdCoverageChecker =
+                new GlobalIndexRowIdCoverageChecker(manifestFile, manifestList, partitionType);
         this.commitCleaner = new CommitCleaner(manifestList, manifestFile, indexManifestFile);
     }
 
@@ -1039,51 +1043,65 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         boolean discardDuplicate =
                 options.commitDiscardDuplicateFiles() && commitKind == CommitKind.APPEND;
         boolean checkConflicts = latestSnapshot != null && (discardDuplicate || detectConflicts);
+        boolean checkGlobalIndexOnly =
+                checkConflicts
+                        && options.dataEvolutionEnabled()
+                        && commitKind == CommitKind.APPEND
+                        && deltaFiles.isEmpty()
+                        && changelogFiles.isEmpty()
+                        && commitPreCallbacks.isEmpty()
+                        && !conflictDetection.shouldCheckRowIdFromSnapshot(commitKind)
+                        && GlobalIndexRowIdCoverageChecker.canCheck(indexFiles);
         // By default, if checkConflicts is required, we do not have to do the extra check bucket
         // here.
         if (!checkConflicts && shouldCheckSameFixedBucket(commitKind)) {
             checkSameFixedBucketFromSnapshot(deltaFiles, latestSnapshot);
         }
         if (checkConflicts) {
-            // latestSnapshotId is different from the snapshot id we've checked for conflicts,
-            // so we have to check again
-            if (changedPartitions == null) {
-                changedPartitions = changedPartitions(deltaFiles, indexFiles);
+            Optional<RuntimeException> exception;
+            if (checkGlobalIndexOnly) {
+                exception = globalIndexRowIdCoverageChecker.check(latestSnapshot, indexFiles);
+            } else {
+                // latestSnapshotId is different from the snapshot id we've checked for conflicts,
+                // so we have to check again
+                if (changedPartitions == null) {
+                    changedPartitions = changedPartitions(deltaFiles, indexFiles);
+                }
+                CommitFailRetryResult commitFailRetry =
+                        retryResult instanceof CommitFailRetryResult
+                                ? (CommitFailRetryResult) retryResult
+                                : null;
+                baseDataFiles =
+                        conflictDetection.scanBaseDataFiles(
+                                latestSnapshot,
+                                changedPartitions,
+                                deltaFiles,
+                                indexFiles,
+                                commitKind,
+                                commitFailRetry,
+                                hasOverwriteSinceLastAttempt);
+                if (discardDuplicate) {
+                    Set<FileEntry.Identifier> baseIdentifiers =
+                            baseDataFiles.stream()
+                                    .map(FileEntry::identifier)
+                                    .collect(Collectors.toSet());
+                    deltaFiles =
+                            deltaFiles.stream()
+                                    .filter(entry -> !baseIdentifiers.contains(entry.identifier()))
+                                    .collect(Collectors.toList());
+                }
+                RowIdConflictChecker rowIdConflictChecker =
+                        conflictDetection.createRowIdConflictChecker(
+                                schemaManager, deltaFiles, commitKind);
+                exception =
+                        conflictDetection.checkConflicts(
+                                latestSnapshot,
+                                baseDataFiles,
+                                SimpleFileEntry.from(deltaFiles),
+                                indexFiles,
+                                rowIdConflictChecker,
+                                commitKind);
             }
-            CommitFailRetryResult commitFailRetry =
-                    retryResult instanceof CommitFailRetryResult
-                            ? (CommitFailRetryResult) retryResult
-                            : null;
-            baseDataFiles =
-                    conflictDetection.scanBaseDataFiles(
-                            latestSnapshot,
-                            changedPartitions,
-                            deltaFiles,
-                            indexFiles,
-                            commitKind,
-                            commitFailRetry,
-                            hasOverwriteSinceLastAttempt);
-            if (discardDuplicate) {
-                Set<FileEntry.Identifier> baseIdentifiers =
-                        baseDataFiles.stream()
-                                .map(FileEntry::identifier)
-                                .collect(Collectors.toSet());
-                deltaFiles =
-                        deltaFiles.stream()
-                                .filter(entry -> !baseIdentifiers.contains(entry.identifier()))
-                                .collect(Collectors.toList());
-            }
-            RowIdConflictChecker rowIdConflictChecker =
-                    conflictDetection.createRowIdConflictChecker(
-                            schemaManager, deltaFiles, commitKind);
-            Optional<RuntimeException> exception =
-                    conflictDetection.checkConflicts(
-                            latestSnapshot,
-                            baseDataFiles,
-                            SimpleFileEntry.from(deltaFiles),
-                            indexFiles,
-                            rowIdConflictChecker,
-                            commitKind);
             if (exception.isPresent()) {
                 if (allowRollback && rollback != null) {
                     if (rollback.tryToRollback(latestSnapshot)) {
@@ -1094,6 +1112,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         }
 
+        boolean indexOnlyCommit =
+                deltaFiles.isEmpty() && changelogFiles.isEmpty() && !indexFiles.isEmpty();
         Snapshot newSnapshot;
         Pair<String, Long> baseManifestList = null;
         Pair<String, Long> deltaManifestList = null;
@@ -1127,6 +1147,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 mergeBeforeManifests = emptyList();
                 mergeAfterManifests = emptyList();
                 oldIndexManifest = null;
+            } else if (indexOnlyCommit) {
+                // Index-only commits do not change table data and must not rewrite data manifests.
+                mergeAfterManifests = mergeBeforeManifests;
+                skipManifestMergeOnRetry = true;
             } else {
                 ManifestMergeReuse manifestMergeReuse =
                         tryReuseManifestMergeResult(retryResult, mergeBeforeManifests);
