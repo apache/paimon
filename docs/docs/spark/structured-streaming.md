@@ -115,6 +115,91 @@ val query = spark.readStream
   .start()
 ```
 
+### Consumer progress
+
+You can assign a Paimon Consumer to a streaming query. The Consumer records a
+table-side, snapshot-level recovery position and acts as a fence during normal
+snapshot expiration. For tables with a decoupled changelog lifecycle, enabling
+`consumer.changelog-only` makes the Consumer protect long-lived changelogs
+instead of snapshots.
+
+Configure the Consumer lifetime as a table property before starting the query:
+
+```sql
+ALTER TABLE table_name SET TBLPROPERTIES (
+  'consumer.expiration-time' = '1 d'
+);
+```
+
+```scala
+val query = spark.readStream
+  .format("paimon")
+  .option("consumer-id", "my-consumer")
+  .table("table_name")
+  .writeStream
+  .format("console")
+  .option("checkpointLocation", "/path/to/spark/checkpoint")
+  .start()
+```
+
+Spark checkpoint and Paimon Consumer progress have different granularities:
+
+- When the Spark checkpoint is available, Spark uses it for precise micro-batch
+  recovery.
+- A new query without that checkpoint starts from the Consumer position. This
+  recovery is conservative and may replay a completed snapshot if the query
+  failed after processing it but before updating the Consumer.
+
+Paimon advances the Consumer only from Spark's successful micro-batch commit
+callback. If read limits divide one snapshot into several micro-batches, the
+Consumer is not advanced until the micro-batch containing the last split of that
+snapshot is committed. A Consumer update failure is propagated, fails the
+running query, and leaves the Consumer at its previous conservative position.
+
+Spark always advances Consumer progress at complete snapshot boundaries;
+`consumer.mode` does not select a different Spark source implementation.
+Offsets restored from an older Spark checkpoint do not contain snapshot
+completion metadata. Spark logs a warning and leaves the Consumer unchanged for
+those offsets rather than advancing it without proof that the snapshot finished.
+
+If the Consumer does not exist, the configured startup options are used. For
+example, the default `latest-full` mode first reads the full snapshot and creates
+the Consumer only after that snapshot is completely committed. If the Consumer
+already exists, its next snapshot takes precedence over startup options and is
+read incrementally, unless `consumer.ignore-progress` is enabled.
+
+:::note
+
+Spark can invoke the source commit callback while constructing a later
+micro-batch. Therefore the Consumer may temporarily lag behind the latest
+successful batch, especially while a query is idle or after its final available
+batch. This is safe and can only cause conservative replay.
+
+:::
+
+Consumer files are scoped to the branch being read. Use one active Spark query
+for each `(table, branch, consumer-id)` combination. Concurrent queries sharing
+the same Consumer are unsupported because a faster query could move the shared
+position past data still needed by a slower query.
+
+Configure `consumer.expiration-time` according to the longest expected snapshot
+processing time, failure recovery time, and idle interval. The Consumer file is
+refreshed when a complete snapshot is committed; there is no separate Spark
+heartbeat while a snapshot is still being processed. Expired Consumer files are
+cleaned by non-write-only table commits. A write-only writer does not perform
+Consumer expiration, so stale Consumer IDs must be managed explicitly or by a
+separate non-write-only maintenance process.
+
+An initial full scan has no Consumer retention fence until it completes, so
+snapshot retention should be long enough for that scan. If its snapshot expires
+first, a restart without a Spark checkpoint performs a new initial full scan
+according to the startup options.
+
+When expired data would force recovery of a logged Spark batch to switch between
+a full and an incremental scan, Paimon fails the query instead of combining the
+two plans. Start a new query with a new checkpoint to apply the startup options
+again.
+
 Paimon Structured Streaming also supports a variety of streaming read modes, it can support many triggers and many read limits.
 
 These read limits are supported:
