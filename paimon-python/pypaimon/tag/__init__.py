@@ -31,9 +31,8 @@ _MODULE_BY_EXPORT = {
     "TagManager": "pypaimon.tag.tag_manager",
 }
 
-# Eagerly importing both siblings here lets two threads acquire the module
-# locks of tag and tag_manager in opposite orders and fail with
-# _DeadlockError; lazy resolution keeps this package init trivial.
+# Eager sibling imports let threads lock tag and tag_manager in opposite
+# orders and fail with _DeadlockError. The lock serializes racing imports.
 _LAZY_IMPORT_LOCK = threading.RLock()
 
 

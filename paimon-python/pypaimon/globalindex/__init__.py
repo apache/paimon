@@ -107,11 +107,8 @@ _MODULE_BY_EXPORT = {
     'Range': 'pypaimon.utils.range',
 }
 
-# Eagerly importing the exports above builds a circular chain: submodules
-# such as index_file_meta initialize this package on first import, while
-# create_global_index and the scanner chain import those submodules back.
-# Lazy resolution keeps this package init trivial; the lock serializes
-# first-time imports racing from multiple threads.
+# Eager exports would cycle: index_file_meta initializes this package while
+# create_global_index imports it back. The lock serializes racing imports.
 _LAZY_IMPORT_LOCK = threading.RLock()
 
 

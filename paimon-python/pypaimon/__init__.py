@@ -53,10 +53,8 @@ _LAZY_EXPORTS = {
     "SQLContext": ("pypaimon_rust.datafusion", "SQLContext"),
 }
 
-# Unsynchronized lazy imports from two threads can acquire module locks in
-# opposite orders (pypaimon.tag initializes both tag and tag_manager) and
-# fail with _DeadlockError; the eager imports previously serialized this on
-# the root module lock.
+# Serialize first-time imports: racing threads can otherwise acquire module
+# locks in opposite orders and fail with _DeadlockError.
 _LAZY_IMPORT_LOCK = threading.RLock()
 
 
