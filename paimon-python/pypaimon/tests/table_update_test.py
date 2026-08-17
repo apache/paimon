@@ -386,7 +386,7 @@ class _TableUpdateTestBase(DataEvolutionTestBase):
         self.assertEqual([['_ROW_ID']], projections)
         self.assertEqual(
             ['NYC', 'LA', 'Updated', 'Updated', 'Updated'],
-            self._read_all(table)['city'].to_pylist(),
+            self._read_all(table).sort_by('id')['city'].to_pylist(),
         )
 
     def test_update_by_predicate_accepts_array_chunked_and_scalar_values(self):
