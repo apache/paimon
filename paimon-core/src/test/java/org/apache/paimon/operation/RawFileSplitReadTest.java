@@ -18,10 +18,13 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.deletionvectors.Bitmap64DeletionVector;
+import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FlushingFileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -44,11 +47,15 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.IOExceptionSupplier;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -135,6 +142,39 @@ class RawFileSplitReadTest {
     }
 
     @Test
+    void testLimitAfterBitmap64DeletionVector() throws Exception {
+        List<InternalRow> rows = new ArrayList<>();
+        for (int i = 0; i < 20; i++) {
+            rows.add(GenericRow.of(BinaryString.fromString("value-" + i), i));
+        }
+        FileStoreTable table = createTable("bitmap64-limit", rows);
+        DataSplit split = singleSplit(table);
+        assertThat(split.dataFiles()).hasSize(1);
+
+        DeletionVector deletionVector = new Bitmap64DeletionVector();
+        for (int position = 0; position < 5; position++) {
+            deletionVector.delete(position);
+        }
+        String fileName = split.dataFiles().get(0).fileName();
+        Map<String, IOExceptionSupplier<DeletionVector>> deletionVectorFactories =
+                Collections.singletonMap(fileName, () -> deletionVector);
+
+        RawFileSplitRead read = ((AppendOnlyFileStore) table.store()).newRead();
+        read.withLimit(10);
+        AtomicInteger count = new AtomicInteger();
+        try (RecordReader<InternalRow> reader =
+                read.createReader(
+                        split.partition(),
+                        split.bucket(),
+                        split.dataFiles(),
+                        deletionVectorFactories)) {
+            reader.forEachRemaining(ignored -> count.incrementAndGet());
+        }
+
+        assertThat(count).hasValue(10);
+    }
+
+    @Test
     void testTableReadSharesBatchSizer() throws Exception {
         FileStoreTable table = createTable("dynamic-batch-size", 20);
         ReadBatchSizer sizer = new ReadBatchSizer();
@@ -164,10 +204,21 @@ class RawFileSplitReadTest {
     }
 
     private FileStoreTable createTable(String directory) throws Exception {
-        return createTable(directory, 1);
+        return createTable(
+                directory,
+                Collections.singletonList(GenericRow.of(BinaryString.fromString("value"), 42)));
     }
 
     private FileStoreTable createTable(String directory, int rowCount) throws Exception {
+        List<InternalRow> rows = new ArrayList<>();
+        for (int i = 0; i < rowCount; i++) {
+            rows.add(GenericRow.of(BinaryString.fromString("value"), i + 42));
+        }
+        return createTable(directory, rows);
+    }
+
+    private FileStoreTable createTable(String directory, List<? extends InternalRow> rows)
+            throws Exception {
         Path tablePath = new Path(tempDir.resolve(directory).toUri());
         Options options = new Options();
         options.set(CoreOptions.PATH, tablePath.toString());
@@ -188,8 +239,8 @@ class RawFileSplitReadTest {
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         try (BatchTableWrite write = writeBuilder.newWrite();
                 BatchTableCommit commit = writeBuilder.newCommit()) {
-            for (int i = 0; i < rowCount; i++) {
-                write.write(GenericRow.of(BinaryString.fromString("value"), i + 42));
+            for (InternalRow row : rows) {
+                write.write(row);
             }
             commit.commit(write.prepareCommit());
         }
