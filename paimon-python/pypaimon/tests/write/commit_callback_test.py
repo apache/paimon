@@ -153,6 +153,53 @@ class CommitCallbackTest(unittest.TestCase):
         table_commit.close()
         self.assertTrue(callback.closed)
 
+    def test_callback_error_after_commit_keeps_committed_files(self):
+        table = self._create_table('test_callback_error_after_commit')
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+
+        callback_error = RuntimeError('callback failed after commit')
+
+        class FailingCallback(CommitCallback):
+
+            def call(self, context: CommitCallbackContext) -> None:
+                raise callback_error
+
+        table_commit.add_commit_callback(FailingCallback())
+        try:
+            table_write.write_arrow(pa.Table.from_pydict({
+                'id': [1],
+                'name': ['committed'],
+                'dt': ['p1'],
+            }, schema=self.pa_schema))
+            messages = table_write.prepare_commit()
+            data_paths = [
+                file.external_path or file.file_path
+                for message in messages
+                for file in message.new_files
+            ]
+
+            with self.assertRaises(RuntimeError) as context:
+                table_commit.commit(messages)
+
+            latest_snapshot = table.snapshot_manager().get_latest_snapshot()
+            self.assertEqual(1, latest_snapshot.id)
+            self.assertTrue(all(
+                table.file_io.exists(path) for path in data_paths))
+
+            read_builder = table.new_read_builder()
+            actual = read_builder.new_read().to_arrow(
+                read_builder.new_scan().plan().splits())
+            self.assertEqual(
+                {'id': [1], 'name': ['committed'], 'dt': ['p1']},
+                actual.to_pydict(),
+            )
+            self.assertIs(callback_error, context.exception)
+        finally:
+            table_write.close()
+            table_commit.close()
+
     def test_callback_not_invoked_when_no_data(self):
         table = self._create_table('test_callback_no_data')
         write_builder = table.new_batch_write_builder()

@@ -23,7 +23,6 @@ from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 logger = logging.getLogger(__name__)
 from pypaimon.write.commit_callback import CommitCallback
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.commit.conflict_detection import CommitConflictError
 from pypaimon.write.file_store_commit import FileStoreCommit
 
 
@@ -64,43 +63,33 @@ class TableCommit:
     def _commit(self, commit_messages: List[CommitMessage], commit_identifier: int = BATCH_COMMIT_IDENTIFIER):
         non_empty_messages = [msg for msg in commit_messages if not msg.is_empty()]
 
-        try:
-            if self.overwrite_partition is not None:
-                # Always call overwrite() even with empty messages, so that
-                # FileStoreCommit.overwrite can handle the empty case properly
-                # (e.g. static overwrite with empty data should delete the partition).
-                logger.info(
-                    "Committing overwrite to table %s, %d non-empty messages",
-                    self.table.identifier, len(non_empty_messages)
-                )
-                self.file_store_commit.overwrite(
-                    overwrite_partition=self.overwrite_partition,
-                    commit_messages=non_empty_messages,
-                    commit_identifier=commit_identifier
-                )
-            else:
-                if not non_empty_messages:
-                    return
-                logger.info(
-                    "Committing table %s, %d non-empty messages",
-                    self.table.identifier, len(non_empty_messages)
-                )
-                self.file_store_commit.commit(
-                    commit_messages=non_empty_messages,
-                    commit_identifier=commit_identifier
-                )
-        except CommitConflictError:
-            # These files are known to be uncommitted. Generic commit failures
-            # remain untouched because their success is uncertain.
-            try:
-                self.file_store_commit.abort(non_empty_messages)
-            except Exception:
-                logger.warning(
-                    "Failed to abort files after a deterministic commit "
-                    "conflict.",
-                    exc_info=True,
-                )
-            raise
+        # Never abort files in response to a commit exception. Preserving
+        # possible orphan files is safer than deleting files which another
+        # attempt may still commit or which a snapshot may already reference.
+        if self.overwrite_partition is not None:
+            # Always call overwrite() even with empty messages, so that
+            # FileStoreCommit.overwrite can handle the empty case properly
+            # (e.g. static overwrite with empty data should delete the partition).
+            logger.info(
+                "Committing overwrite to table %s, %d non-empty messages",
+                self.table.identifier, len(non_empty_messages)
+            )
+            self.file_store_commit.overwrite(
+                overwrite_partition=self.overwrite_partition,
+                commit_messages=non_empty_messages,
+                commit_identifier=commit_identifier
+            )
+        else:
+            if not non_empty_messages:
+                return
+            logger.info(
+                "Committing table %s, %d non-empty messages",
+                self.table.identifier, len(non_empty_messages)
+            )
+            self.file_store_commit.commit(
+                commit_messages=non_empty_messages,
+                commit_identifier=commit_identifier
+            )
 
     def abort(self, commit_messages: List[CommitMessage]):
         self.file_store_commit.abort(commit_messages)
