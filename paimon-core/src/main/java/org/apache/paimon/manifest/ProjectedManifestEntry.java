@@ -151,6 +151,7 @@ public final class ProjectedManifestEntry implements ManifestEntry {
                                                         DataFileMeta.LEVEL,
                                                         DataFileMeta.SCHEMA_ID,
                                                         DataFileMeta.FIRST_ROW_ID,
+                                                        DataFileMeta.MAX_SEQUENCE_NUMBER,
                                                         DataFileMeta.EXTRA_FILES,
                                                         DataFileMeta.EMBEDDED_FILE_INDEX,
                                                         DataFileMeta.EXTERNAL_PATH)))));

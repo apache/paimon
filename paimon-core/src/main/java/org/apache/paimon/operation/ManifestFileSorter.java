@@ -26,8 +26,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.manifest.CompactFileIdentifierSet;
-import org.apache.paimon.manifest.DeletedRowIdSet;
+import org.apache.paimon.manifest.CollectedDeletes;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -75,8 +74,7 @@ public class ManifestFileSorter {
         final ManifestSortKey sortKey;
         final RowType partitionType;
         final ManifestEntryExternalSort.ExternalSortConfig externalSortConfig;
-        final CompactFileIdentifierSet deleteEntries;
-        final DeletedRowIdSet deletedRowIds;
+        final CollectedDeletes deletes;
         /**
          * Manifest files that need unsorted compaction.
          *
@@ -96,8 +94,7 @@ public class ManifestFileSorter {
                 ManifestSortKey sortKey,
                 RowType partitionType,
                 ManifestEntryExternalSort.ExternalSortConfig externalSortConfig,
-                CompactFileIdentifierSet deleteEntries,
-                DeletedRowIdSet deletedRowIds,
+                CollectedDeletes deletes,
                 Map<ManifestFileMeta, Boolean> defaultCompactFiles,
                 List<ManifestAdjacentSortedRun> levelRuns,
                 List<ManifestAdjacentSortedRun> pickedRuns) {
@@ -106,8 +103,7 @@ public class ManifestFileSorter {
             this.sortKey = sortKey;
             this.partitionType = partitionType;
             this.externalSortConfig = externalSortConfig;
-            this.deleteEntries = deleteEntries;
-            this.deletedRowIds = deletedRowIds;
+            this.deletes = deletes;
             this.defaultCompactFiles = defaultCompactFiles;
             this.levelRuns = levelRuns;
             this.pickedRuns = pickedRuns;
@@ -122,8 +118,7 @@ public class ManifestFileSorter {
     /** Result of classifying manifest files. */
     static class ClassifyResult {
         final List<ManifestFileMeta> lsmFiles;
-        final CompactFileIdentifierSet deleteEntries;
-        final DeletedRowIdSet deletedRowIds;
+        final CollectedDeletes deletes;
         /**
          * Manifest files that need unsorted compaction.
          *
@@ -136,29 +131,11 @@ public class ManifestFileSorter {
 
         ClassifyResult(
                 List<ManifestFileMeta> lsmFiles,
-                CompactFileIdentifierSet deleteEntries,
-                DeletedRowIdSet deletedRowIds,
+                CollectedDeletes deletes,
                 Map<ManifestFileMeta, Boolean> compactWithoutSort) {
             this.lsmFiles = lsmFiles;
-            this.deleteEntries = deleteEntries;
-            this.deletedRowIds = deletedRowIds;
+            this.deletes = deletes;
             this.compactWithoutSort = compactWithoutSort;
-        }
-    }
-
-    /** Binary identifiers and partition values collected from DELETE entries. */
-    private static class DeletedEntryInfo {
-        final CompactFileIdentifierSet identifiers;
-        final DeletedRowIdSet rowIds;
-        final Set<BinaryRow> partitions;
-
-        private DeletedEntryInfo(
-                CompactFileIdentifierSet identifiers,
-                DeletedRowIdSet rowIds,
-                Set<BinaryRow> partitions) {
-            this.identifiers = identifiers;
-            this.rowIds = rowIds;
-            this.partitions = partitions;
         }
     }
 
@@ -268,64 +245,68 @@ public class ManifestFileSorter {
                         sortedRunSizeRatio,
                         externalSortConfig,
                         manifestReadParallelism);
-        List<ManifestAdjacentSortedRun> levelRuns = ctx.levelRuns;
-        List<ManifestAdjacentSortedRun> pickedRuns = ctx.pickedRuns;
+        try {
+            List<ManifestAdjacentSortedRun> levelRuns = ctx.levelRuns;
+            List<ManifestAdjacentSortedRun> pickedRuns = ctx.pickedRuns;
 
-        if (pickedRuns.isEmpty() && ctx.defaultCompactFiles.isEmpty()) {
-            LOG.debug(
-                    "Manifest sort full compact skipped: no runs picked and no defaultCompactFiles.");
-            return Optional.empty();
-        }
-
-        LOG.info(
-                "Manifest sort full compact: input={} files, lsm={} runs, picked={} runs, "
-                        + "defaultCompactFiles={}.",
-                input.size(),
-                levelRuns.size(),
-                pickedRuns.size(),
-                ctx.defaultCompactFiles.size());
-
-        // Step 3: Collect reused files (not picked) and picked files
-        Set<ManifestAdjacentSortedRun> pickedSet = new HashSet<>(pickedRuns);
-        List<ManifestFileMeta> result = new ArrayList<>();
-        for (ManifestAdjacentSortedRun run : levelRuns) {
-            if (!pickedSet.contains(run)) {
-                result.addAll(run.files());
+            if (pickedRuns.isEmpty() && ctx.defaultCompactFiles.isEmpty()) {
+                LOG.debug(
+                        "Manifest sort full compact skipped: no runs picked and no defaultCompactFiles.");
+                return Optional.empty();
             }
+
+            LOG.info(
+                    "Manifest sort full compact: input={} files, lsm={} runs, picked={} runs, "
+                            + "defaultCompactFiles={}.",
+                    input.size(),
+                    levelRuns.size(),
+                    pickedRuns.size(),
+                    ctx.defaultCompactFiles.size());
+
+            // Step 3: Collect reused files (not picked) and picked files
+            Set<ManifestAdjacentSortedRun> pickedSet = new HashSet<>(pickedRuns);
+            List<ManifestFileMeta> result = new ArrayList<>();
+            for (ManifestAdjacentSortedRun run : levelRuns) {
+                if (!pickedSet.contains(run)) {
+                    result.addAll(run.files());
+                }
+            }
+            List<ManifestFileMeta> pickedFiles = new ArrayList<>();
+            for (ManifestAdjacentSortedRun run : pickedRuns) {
+                pickedFiles.addAll(run.files());
+            }
+            pickedFiles.addAll(ctx.defaultCompactFiles.keySet());
+
+            // Step 4: Split into sections and merge small adjacent sections
+            List<Section> sections = splitIntoSections(pickedFiles, ctx);
+            sections = mergeSmallAdjacentSections(sections, suggestedMetaSize);
+
+            LOG.info(
+                    "Manifest sort full compact: pickedFiles={}, sections={}.",
+                    pickedFiles.size(),
+                    sections.size());
+
+            // Step 5: Rewrite sections
+            FullCompactOutput output = new FullCompactOutput(result);
+            rewriteSections(
+                    sections,
+                    output,
+                    newFilesForAbort,
+                    ctx,
+                    manifestFile,
+                    suggestedMetaSize,
+                    suggestedMinMetaCount,
+                    maxRewriteSize,
+                    manifestReadParallelism);
+
+            LOG.info(
+                    "Manifest sort full compact completed: input={}, resultFiles={}.",
+                    input.size(),
+                    result.size());
+            return Optional.of(result);
+        } finally {
+            ctx.deletes.release();
         }
-        List<ManifestFileMeta> pickedFiles = new ArrayList<>();
-        for (ManifestAdjacentSortedRun run : pickedRuns) {
-            pickedFiles.addAll(run.files());
-        }
-        pickedFiles.addAll(ctx.defaultCompactFiles.keySet());
-
-        // Step 4: Split into sections and merge small adjacent sections
-        List<Section> sections = splitIntoSections(pickedFiles, ctx);
-        sections = mergeSmallAdjacentSections(sections, suggestedMetaSize);
-
-        LOG.info(
-                "Manifest sort full compact: pickedFiles={}, sections={}.",
-                pickedFiles.size(),
-                sections.size());
-
-        // Step 5: Rewrite sections
-        FullCompactOutput output = new FullCompactOutput(result);
-        rewriteSections(
-                sections,
-                output,
-                newFilesForAbort,
-                ctx,
-                manifestFile,
-                suggestedMetaSize,
-                suggestedMinMetaCount,
-                maxRewriteSize,
-                manifestReadParallelism);
-
-        LOG.info(
-                "Manifest sort full compact completed: input={}, resultFiles={}.",
-                input.size(),
-                result.size());
-        return Optional.of(result);
     }
 
     /**
@@ -365,95 +346,99 @@ public class ManifestFileSorter {
                         sortedRunSizeRatio,
                         externalSortConfig,
                         manifestReadParallelism);
-        List<ManifestAdjacentSortedRun> levelRuns = ctx.levelRuns;
-        List<ManifestAdjacentSortedRun> pickedRuns = ctx.pickedRuns;
+        try {
+            List<ManifestAdjacentSortedRun> levelRuns = ctx.levelRuns;
+            List<ManifestAdjacentSortedRun> pickedRuns = ctx.pickedRuns;
 
-        if (pickedRuns.isEmpty() && ctx.defaultCompactFiles.isEmpty()) {
-            LOG.debug(
-                    "Manifest sort minor compact skipped: no runs picked and no defaultCompactFiles.");
-            return input;
-        }
+            if (pickedRuns.isEmpty() && ctx.defaultCompactFiles.isEmpty()) {
+                LOG.debug(
+                        "Manifest sort minor compact skipped: no runs picked and no defaultCompactFiles.");
+                return input;
+            }
 
-        LOG.info(
-                "Manifest sort minor compact: input={} files, lsm={} runs, picked={} runs, "
-                        + "defaultCompactFiles={}.",
-                input.size(),
-                levelRuns.size(),
-                pickedRuns.size(),
-                ctx.defaultCompactFiles.size());
+            LOG.info(
+                    "Manifest sort minor compact: input={} files, lsm={} runs, picked={} runs, "
+                            + "defaultCompactFiles={}.",
+                    input.size(),
+                    levelRuns.size(),
+                    pickedRuns.size(),
+                    ctx.defaultCompactFiles.size());
 
-        // Step 2: Build fileName -> index mapping and initialize 2D result
-        Map<String, Integer> fileNameToIndex = new HashMap<>();
-        List<List<ManifestFileMeta>> result = new ArrayList<>(input.size());
-        for (int i = 0; i < input.size(); i++) {
-            fileNameToIndex.put(input.get(i).fileName(), i);
-            result.add(new ArrayList<>());
-        }
+            // Step 2: Build fileName -> index mapping and initialize 2D result
+            Map<String, Integer> fileNameToIndex = new HashMap<>();
+            List<List<ManifestFileMeta>> result = new ArrayList<>(input.size());
+            for (int i = 0; i < input.size(); i++) {
+                fileNameToIndex.put(input.get(i).fileName(), i);
+                result.add(new ArrayList<>());
+            }
 
-        // Step 3: Collect reused files and picked files
-        Set<ManifestAdjacentSortedRun> pickedSet = new HashSet<>(pickedRuns);
-        for (ManifestAdjacentSortedRun run : levelRuns) {
-            if (!pickedSet.contains(run)) {
-                for (ManifestFileMeta file : run.files()) {
-                    Integer idx = fileNameToIndex.get(file.fileName());
-                    if (idx != null) {
-                        result.get(idx).add(file);
+            // Step 3: Collect reused files and picked files
+            Set<ManifestAdjacentSortedRun> pickedSet = new HashSet<>(pickedRuns);
+            for (ManifestAdjacentSortedRun run : levelRuns) {
+                if (!pickedSet.contains(run)) {
+                    for (ManifestFileMeta file : run.files()) {
+                        Integer idx = fileNameToIndex.get(file.fileName());
+                        if (idx != null) {
+                            result.get(idx).add(file);
+                        }
                     }
                 }
             }
-        }
 
-        List<ManifestFileMeta> pickedFiles = new ArrayList<>();
-        for (ManifestAdjacentSortedRun run : pickedRuns) {
-            pickedFiles.addAll(run.files());
-        }
-        pickedFiles.addAll(ctx.defaultCompactFiles.keySet());
-
-        // Step 4: Compute index range
-        int minIdx = Integer.MAX_VALUE;
-        int maxIdx = Integer.MIN_VALUE;
-        for (ManifestFileMeta meta : pickedFiles) {
-            Integer idx = fileNameToIndex.get(meta.fileName());
-            if (idx != null) {
-                minIdx = Math.min(minIdx, idx);
-                maxIdx = Math.max(maxIdx, idx);
+            List<ManifestFileMeta> pickedFiles = new ArrayList<>();
+            for (ManifestAdjacentSortedRun run : pickedRuns) {
+                pickedFiles.addAll(run.files());
             }
+            pickedFiles.addAll(ctx.defaultCompactFiles.keySet());
+
+            // Step 4: Compute index range
+            int minIdx = Integer.MAX_VALUE;
+            int maxIdx = Integer.MIN_VALUE;
+            for (ManifestFileMeta meta : pickedFiles) {
+                Integer idx = fileNameToIndex.get(meta.fileName());
+                if (idx != null) {
+                    minIdx = Math.min(minIdx, idx);
+                    maxIdx = Math.max(maxIdx, idx);
+                }
+            }
+            Pair<Integer, Integer> indexRange = Pair.of(minIdx, maxIdx);
+
+            // Step 5: Split into sections and merge small adjacent sections
+            List<Section> sections = splitIntoSections(pickedFiles, ctx);
+            sections = mergeSmallAdjacentSections(sections, suggestedMetaSize);
+
+            LOG.info(
+                    "Manifest sort minor compact: pickedFiles={}, sections={}.",
+                    pickedFiles.size(),
+                    sections.size());
+
+            // Step 6: Rewrite sections
+            MinorCompactOutput output = new MinorCompactOutput(result, indexRange, fileNameToIndex);
+            rewriteSections(
+                    sections,
+                    output,
+                    newFilesForAbort,
+                    ctx,
+                    manifestFile,
+                    suggestedMetaSize,
+                    suggestedMinMetaCount,
+                    maxRewriteSize,
+                    manifestReadParallelism);
+
+            // Step 7: Flatten 2D result into a single list
+            List<ManifestFileMeta> flatResult = new ArrayList<>();
+            for (List<ManifestFileMeta> subList : result) {
+                flatResult.addAll(subList);
+            }
+
+            LOG.info(
+                    "Manifest sort minor compact completed: input={}, resultFiles={}.",
+                    input.size(),
+                    flatResult.size());
+            return flatResult;
+        } finally {
+            ctx.deletes.release();
         }
-        Pair<Integer, Integer> indexRange = Pair.of(minIdx, maxIdx);
-
-        // Step 5: Split into sections and merge small adjacent sections
-        List<Section> sections = splitIntoSections(pickedFiles, ctx);
-        sections = mergeSmallAdjacentSections(sections, suggestedMetaSize);
-
-        LOG.info(
-                "Manifest sort minor compact: pickedFiles={}, sections={}.",
-                pickedFiles.size(),
-                sections.size());
-
-        // Step 6: Rewrite sections
-        MinorCompactOutput output = new MinorCompactOutput(result, indexRange, fileNameToIndex);
-        rewriteSections(
-                sections,
-                output,
-                newFilesForAbort,
-                ctx,
-                manifestFile,
-                suggestedMetaSize,
-                suggestedMinMetaCount,
-                maxRewriteSize,
-                manifestReadParallelism);
-
-        // Step 7: Flatten 2D result into a single list
-        List<ManifestFileMeta> flatResult = new ArrayList<>();
-        for (List<ManifestFileMeta> subList : result) {
-            flatResult.addAll(subList);
-        }
-
-        LOG.info(
-                "Manifest sort minor compact completed: input={}, resultFiles={}.",
-                input.size(),
-                flatResult.size());
-        return flatResult;
     }
 
     /**
@@ -508,8 +493,7 @@ public class ManifestFileSorter {
                 sortKey,
                 partitionType,
                 externalSortConfig,
-                classification.deleteEntries,
-                classification.deletedRowIds,
+                classification.deletes,
                 classification.compactWithoutSort,
                 levelRuns,
                 pickedRuns);
@@ -535,7 +519,7 @@ public class ManifestFileSorter {
      * <p>Non-full compaction: small files go to defaultCompactFiles for minor-style merge; the rest
      * are returned as lsmFiles.
      *
-     * @return classification containing lsmFiles, deleteEntries, and defaultCompactFiles
+     * @return classification containing lsmFiles, collected DELETEs, and defaultCompactFiles
      */
     static ClassifyResult classifyManifests(
             List<ManifestFileMeta> input,
@@ -565,28 +549,26 @@ public class ManifestFileSorter {
         // Initialize classification containers and read delete entries
         Map<ManifestFileMeta, Boolean> defaultCompactFiles = new LinkedHashMap<>();
         List<ManifestFileMeta> lsmFiles = new LinkedList<>(input);
-        CompactFileIdentifierSet classifiedDeleteEntries = new CompactFileIdentifierSet();
-        DeletedRowIdSet deletedRowIds = new DeletedRowIdSet();
-        Set<BinaryRow> deletePartitions = Collections.emptySet();
+        CollectedDeletes deletes;
         PartitionPredicate predicate = null;
         if (fullCompaction) {
-            DeletedEntryInfo deletedEntries =
+            deletes =
                     readDeletedEntries(
                             manifestFile, input, runMergeOptimizeEnabled, manifestReadParallelism);
-            classifiedDeleteEntries = deletedEntries.identifiers;
-            deletedRowIds = deletedEntries.rowIds;
-            deletePartitions = deletedEntries.partitions;
 
             // Build partition predicate from delete entries for overlap detection.
-            if (classifiedDeleteEntries.isEmpty()) {
+            if (deletes.isEmpty()) {
                 predicate = PartitionPredicate.ALWAYS_FALSE;
             } else {
                 if (partitionType.getFieldCount() > 0) {
-                    predicate = PartitionPredicate.fromMultiple(partitionType, deletePartitions);
+                    predicate =
+                            PartitionPredicate.fromMultiple(partitionType, deletes.partitions());
                 } else {
                     predicate = PartitionPredicate.ALWAYS_TRUE;
                 }
             }
+        } else {
+            deletes = new CollectedDeletes(runMergeOptimizeEnabled);
         }
 
         // Classify each file based on size and delete-partition overlap
@@ -607,18 +589,15 @@ public class ManifestFileSorter {
             }
         }
 
-        return new ClassifyResult(
-                lsmFiles, classifiedDeleteEntries, deletedRowIds, defaultCompactFiles);
+        return new ClassifyResult(lsmFiles, deletes.toImmutable(), defaultCompactFiles);
     }
 
-    private static DeletedEntryInfo readDeletedEntries(
+    private static CollectedDeletes readDeletedEntries(
             ManifestFile manifestFile,
             List<ManifestFileMeta> manifestFiles,
             boolean runMergeOptimizeEnabled,
             @Nullable Integer manifestReadParallelism) {
-        CompactFileIdentifierSet identifiers = new CompactFileIdentifierSet();
-        DeletedRowIdSet rowIds = new DeletedRowIdSet();
-        Set<BinaryRow> partitions = new HashSet<>();
+        CollectedDeletes deletes = new CollectedDeletes(runMergeOptimizeEnabled);
         List<ManifestFileMeta> filesWithDeletes = new ArrayList<>();
         for (ManifestFileMeta meta : manifestFiles) {
             if (meta.numDeletedFiles() > 0) {
@@ -629,44 +608,29 @@ public class ManifestFileSorter {
         if (filesWithDeletes.size() <= 1
                 || (manifestReadParallelism != null && manifestReadParallelism <= 1)) {
             for (ManifestFileMeta meta : filesWithDeletes) {
-                collectDeletedEntries(
-                        meta,
-                        manifestFile,
-                        identifiers,
-                        rowIds,
-                        partitions,
-                        runMergeOptimizeEnabled,
-                        false);
+                CollectedDeletes local =
+                        collectDeletedEntries(meta, manifestFile, runMergeOptimizeEnabled);
+                deletes.combine(local);
+                local.release();
             }
         } else {
-            Function<ManifestFileMeta, List<Boolean>> reader =
-                    meta -> {
-                        collectDeletedEntries(
-                                meta,
-                                manifestFile,
-                                identifiers,
-                                rowIds,
-                                partitions,
-                                runMergeOptimizeEnabled,
-                                true);
-                        return Collections.singletonList(Boolean.TRUE);
-                    };
-            for (Boolean ignored :
+            Function<ManifestFileMeta, List<CollectedDeletes>> reader =
+                    meta ->
+                            Collections.singletonList(
+                                    collectDeletedEntries(
+                                            meta, manifestFile, runMergeOptimizeEnabled));
+            for (CollectedDeletes local :
                     sequentialBatchedExecute(reader, filesWithDeletes, manifestReadParallelism)) {
-                // Iteration waits for each bounded batch of parallel reads.
+                deletes.combine(local);
+                local.release();
             }
         }
-        return new DeletedEntryInfo(identifiers, rowIds, partitions);
+        return deletes;
     }
 
-    private static void collectDeletedEntries(
-            ManifestFileMeta meta,
-            ManifestFile manifestFile,
-            CompactFileIdentifierSet identifiers,
-            DeletedRowIdSet rowIds,
-            Set<BinaryRow> partitions,
-            boolean runMergeOptimizeEnabled,
-            boolean synchronize) {
+    private static CollectedDeletes collectDeletedEntries(
+            ManifestFileMeta meta, ManifestFile manifestFile, boolean runMergeOptimizeEnabled) {
+        CollectedDeletes deletes = new CollectedDeletes(runMergeOptimizeEnabled);
         try (CloseableIterator<ProjectedManifestEntry> entries =
                 manifestFile.scan(
                         meta.fileName(), ProjectedManifestEntry.DELETE_ENTRY_PROJECTION)) {
@@ -675,27 +639,14 @@ public class ManifestFileSorter {
                 if (!entry.isDelete()) {
                     continue;
                 }
-                BinaryRow partition = entry.partition().copy();
-                if (synchronize) {
-                    synchronized (identifiers) {
-                        identifiers.add(entry);
-                        if (runMergeOptimizeEnabled) {
-                            rowIds.add(entry.file().nonNullFirstRowId());
-                        }
-                        partitions.add(partition);
-                    }
-                } else {
-                    identifiers.add(entry);
-                    if (runMergeOptimizeEnabled) {
-                        rowIds.add(entry.file().nonNullFirstRowId());
-                    }
-                    partitions.add(partition);
-                }
+                deletes.add(entry, runMergeOptimizeEnabled, true);
             }
         } catch (Exception e) {
+            deletes.release();
             throw new RuntimeException(
                     String.format("Failed to scan manifest file '%s'.", meta.fileName()), e);
         }
+        return deletes;
     }
 
     /**
@@ -1089,7 +1040,7 @@ public class ManifestFileSorter {
         }
         // Flush tail only if delete entries exist or file count >= minCount.
         if (!candidates.isEmpty()) {
-            if (!ctx.deleteEntries.isEmpty() || candidates.size() >= suggestedMinMetaCount) {
+            if (!ctx.deletes.isEmpty() || candidates.size() >= suggestedMinMetaCount) {
                 rewriteSection(
                         candidates,
                         output,
@@ -1153,8 +1104,7 @@ public class ManifestFileSorter {
                             ctx.partitionType,
                             manifestFile,
                             sortNewFiles,
-                            ctx.deleteEntries,
-                            ctx.deletedRowIds,
+                            ctx.deletes,
                             ctx.externalSortConfig.maxNumFileHandles,
                             manifestReadParallelism);
         }
@@ -1166,7 +1116,7 @@ public class ManifestFileSorter {
                             ctx.externalSortConfig,
                             manifestFile,
                             sortNewFiles,
-                            ctx.deleteEntries,
+                            ctx.deletes,
                             manifestReadParallelism);
         }
         if (!sorted.isEmpty()) {

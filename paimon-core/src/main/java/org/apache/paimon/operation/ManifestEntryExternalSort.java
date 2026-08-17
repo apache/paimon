@@ -24,6 +24,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.manifest.CollectedDeletes;
 import org.apache.paimon.manifest.CompactFileIdentifierSet;
 import org.apache.paimon.manifest.FileEntry.ReusableIdentifier;
 import org.apache.paimon.manifest.ManifestAvroWriter;
@@ -84,9 +85,10 @@ public class ManifestEntryExternalSort {
             ExternalSortConfig config,
             ManifestFile manifestFile,
             List<ManifestFileMeta> newFilesForAbort,
-            CompactFileIdentifierSet deleteEntries,
+            CollectedDeletes deletes,
             @Nullable Integer manifestReadParallelism)
             throws Exception {
+        ReusableIdentifier identifier = new ReusableIdentifier();
         try (EntrySorter sorter = new EntrySorter(sortKey, config)) {
             scanEntries(
                     section,
@@ -94,13 +96,15 @@ public class ManifestEntryExternalSort {
                     manifestReadParallelism,
                     entry -> {
                         if (entry.isAdd()
-                                && (deleteEntries.isEmpty() || !deleteEntries.contains(entry))) {
+                                && (deletes.isEmpty() || !deletes.isDeleted(entry, identifier))) {
                             sorter.write(entry);
                         }
                     });
             List<ManifestFileMeta> files = sorter.writeToManifest(manifestFile);
             newFilesForAbort.addAll(files);
             return files;
+        } finally {
+            identifier.release();
         }
     }
 

@@ -266,6 +266,25 @@ public class ProjectedManifestEntryTest {
         assertThat(entry.isDelete()).isFalse();
     }
 
+    @Test
+    void testEntryLayoutProjectionContainsRunMergeFields() {
+        RowType projectedType = ProjectedManifestEntry.ENTRY_LAYOUT_PROJECTION.projectedType();
+        RowType projectedFileType =
+                (RowType) projectedType.getTypeAt(projectedType.getFieldIndex(ManifestEntry.FILE));
+
+        assertThat(projectedFileType.getFieldNames())
+                .containsExactly(
+                        DataFileMeta.FILE_NAME,
+                        DataFileMeta.ROW_COUNT,
+                        DataFileMeta.LEVEL,
+                        DataFileMeta.SCHEMA_ID,
+                        DataFileMeta.FIRST_ROW_ID,
+                        DataFileMeta.MAX_SEQUENCE_NUMBER,
+                        DataFileMeta.EXTRA_FILES,
+                        DataFileMeta.EMBEDDED_FILE_INDEX,
+                        DataFileMeta.EXTERNAL_PATH);
+    }
+
     private static ProjectedManifestEntry.Projection projection(
             boolean includeBucket, String... projectedFileFields) {
         RowType manifestType = ManifestEntry.MANIFEST_ROW_TYPE;
