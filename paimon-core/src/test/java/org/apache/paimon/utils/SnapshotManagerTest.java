@@ -36,8 +36,10 @@ import org.mockito.Mockito;
 import javax.annotation.Nullable;
 
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -79,6 +81,18 @@ public class SnapshotManagerTest {
             assertThat(snapshotManager.snapshotPath(i))
                     .isEqualTo(new Path(tempDir.toString() + "/snapshot/snapshot-" + i));
         }
+    }
+
+    @Test
+    public void testSnapshotsWithIdSkipsExpiredSnapshot() throws Exception {
+        FileIO fileIO = Mockito.mock(FileIO.class);
+        Mockito.when(fileIO.exists(Mockito.any(Path.class))).thenReturn(true);
+        Mockito.when(fileIO.readFileUtf8(Mockito.any(Path.class)))
+                .thenThrow(new FileNotFoundException());
+        SnapshotManager snapshotManager = newSnapshotManager(fileIO, new Path(tempDir.toString()));
+
+        assertThat(snapshotManager.snapshotsWithId(Collections.singletonList(1L)).hasNext())
+                .isFalse();
     }
 
     @ParameterizedTest
