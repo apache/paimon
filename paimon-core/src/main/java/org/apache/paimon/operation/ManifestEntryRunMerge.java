@@ -93,7 +93,7 @@ final class ManifestEntryRunMerge {
         if (plan == null) {
             return null;
         }
-        return plan.mergeToManifest(sortKey, manifestFile, newFilesForAbort);
+        return plan.mergeToManifest(manifestFile, newFilesForAbort);
     }
 
     /**
@@ -125,7 +125,7 @@ final class ManifestEntryRunMerge {
             if (plan == null) {
                 return null;
             }
-            return plan.mergeMinorToManifest(sortKey, manifestFile, newFilesForAbort);
+            return plan.mergeMinorToManifest(manifestFile, newFilesForAbort);
         } finally {
             deletes.release();
         }

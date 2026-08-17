@@ -69,15 +69,12 @@ final class ManifestEntryRunMergePlan {
     }
 
     List<ManifestFileMeta> mergeToManifest(
-            ManifestFileSorter.RowIdEntrySortKey sortKey,
-            ManifestFile manifestFile,
-            List<ManifestFileMeta> newFilesForAbort)
-            throws Exception {
+            ManifestFile manifestFile, List<ManifestFileMeta> newFilesForAbort) throws Exception {
         List<Cursor> cursors = new ArrayList<>(sources.size());
         Exception failure = null;
         try {
             for (Source.Spec source : sources) {
-                Cursor cursor = source.open(manifestFile, sortKey, deletes, minor, partitions);
+                Cursor cursor = source.open(manifestFile, deletes, minor, partitions);
                 cursors.add(cursor);
                 cursor.advance();
             }
@@ -104,15 +101,12 @@ final class ManifestEntryRunMergePlan {
     }
 
     Pair<List<ManifestFileMeta>, List<ManifestFileMeta>> mergeMinorToManifest(
-            ManifestFileSorter.RowIdEntrySortKey sortKey,
-            ManifestFile manifestFile,
-            List<ManifestFileMeta> newFilesForAbort)
-            throws Exception {
+            ManifestFile manifestFile, List<ManifestFileMeta> newFilesForAbort) throws Exception {
         List<Cursor> cursors = new ArrayList<>(sources.size());
         Exception failure = null;
         try {
             for (Source.Spec source : sources) {
-                Cursor cursor = source.open(manifestFile, sortKey, deletes, minor, partitions);
+                Cursor cursor = source.open(manifestFile, deletes, minor, partitions);
                 cursors.add(cursor);
                 cursor.advance();
             }
@@ -264,7 +258,6 @@ final class ManifestEntryRunMergePlan {
 
             Cursor open(
                     ManifestFile manifestFile,
-                    ManifestFileSorter.RowIdEntrySortKey sortKey,
                     CollectedDeletes deletes,
                     boolean minor,
                     ManifestEntryRunMerge.SortPartitionDictionary partitions)
@@ -306,7 +299,6 @@ final class ManifestEntryRunMergePlan {
             @Override
             public Cursor open(
                     ManifestFile manifestFile,
-                    ManifestFileSorter.RowIdEntrySortKey sortKey,
                     CollectedDeletes deletes,
                     boolean minor,
                     ManifestEntryRunMerge.SortPartitionDictionary partitions)
@@ -327,13 +319,11 @@ final class ManifestEntryRunMergePlan {
             @Override
             public Cursor open(
                     ManifestFile manifestFile,
-                    ManifestFileSorter.RowIdEntrySortKey sortKey,
                     CollectedDeletes deletes,
                     boolean minor,
                     ManifestEntryRunMerge.SortPartitionDictionary partitions)
                     throws Exception {
-                return new InMemoryManifestCursor(
-                        manifestFile, meta, sortKey, deletes, minor, partitions);
+                return new InMemoryManifestCursor(manifestFile, meta, deletes, minor, partitions);
             }
         }
     }
@@ -673,7 +663,6 @@ final class ManifestEntryRunMergePlan {
         InMemoryManifestCursor(
                 ManifestFile manifestFile,
                 ManifestFileMeta meta,
-                ManifestFileSorter.RowIdEntrySortKey sortKey,
                 CollectedDeletes deletes,
                 boolean minor,
                 ManifestEntryRunMerge.SortPartitionDictionary partitions)
