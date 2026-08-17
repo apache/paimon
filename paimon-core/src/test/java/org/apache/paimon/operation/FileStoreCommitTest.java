@@ -50,7 +50,6 @@ import org.apache.paimon.operation.commit.CommitChanges;
 import org.apache.paimon.operation.commit.ConflictDetection;
 import org.apache.paimon.operation.commit.ManifestEntryChanges;
 import org.apache.paimon.operation.commit.RetryCommitResult;
-import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
@@ -2463,14 +2462,7 @@ public class FileStoreCommitTest {
 
     @Test
     public void testReplaceManifestsThrowsOnConcurrentCompact() throws Exception {
-        // use a small manifest target size so compactManifest actually rewrites the manifests
-        // (changes file names), which makes the stale manifestsBefore absent from the current base
-        Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.MANIFEST_TARGET_FILE_SIZE.key(), "1KB");
-        options.put(
-                CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE.key(),
-                MemorySize.ofBytes(1).toString());
-        TestFileStore store = createStore(false, 2, CoreOptions.ChangelogProducer.NONE, options);
+        TestFileStore store = createStore(false, 2);
         for (int i = 0; i < 3; i++) {
             store.commitData(generateDataList(10), gen::getPartition, kv -> 0);
         }
@@ -2479,10 +2471,20 @@ public class FileStoreCommitTest {
         ManifestList manifestList = store.manifestListFactory().create();
         List<ManifestFileMeta> manifestsBefore = manifestList.readDataManifests(snapshotBefore);
 
+        // read all entries and write them to a new manifest file, then replace — this changes
+        // the manifest file names, so the stale manifestsBefore will be absent from currentBase
+        org.apache.paimon.manifest.ManifestFile manifestFile = store.manifestFileFactory().create();
+        List<org.apache.paimon.manifest.ManifestEntry> entries = new ArrayList<>();
+        for (ManifestFileMeta meta : manifestsBefore) {
+            entries.addAll(manifestFile.read(meta.fileName(), meta.fileSize()));
+        }
+        List<ManifestFileMeta> rewrittenManifests = manifestFile.write(entries);
+
         try (FileStoreCommit commit = store.newCommit()) {
-            commit.compactManifest();
+            commit.replaceManifest(manifestsBefore, rewrittenManifests);
         }
 
+        // now the original manifests are gone; using them again must throw
         try (FileStoreCommit commit = store.newCommit()) {
             assertThatThrownBy(() -> commit.replaceManifest(manifestsBefore, manifestsBefore))
                     .hasMessageContaining("Manifest conflict");
