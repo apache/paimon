@@ -39,7 +39,7 @@ public final class ByteArrayKey {
         this.hash = Arrays.hashCode(bytes);
     }
 
-    byte[] bytes() {
+    public byte[] bytes() {
         return bytes;
     }
 
