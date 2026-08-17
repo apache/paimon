@@ -24,6 +24,10 @@ import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.GenericInternalRow
 import org.apache.spark.sql.connector.read.{HasPartitionKey, InputPartition, SupportsReportPartitioning}
 
+import java.util.{List => JList, Objects, Optional}
+
+import scala.util.control.NonFatal
+
 trait PaimonInputPartition extends InputPartition {
   def splits: Seq[Split]
 
@@ -36,6 +40,48 @@ trait PaimonInputPartition extends InputPartition {
 }
 
 case class SimplePaimonInputPartition(splits: Seq[Split]) extends PaimonInputPartition
+
+final private[spark] class PaimonMicroBatchMetadata private[spark] (
+    val sourceId: String,
+    val startOffset: String,
+    val endOffset: String,
+    val splitCount: Int,
+    @transient private var writtenColumnIdsThunk: () => Optional[JList[Integer]])
+  extends Serializable {
+
+  @transient private lazy val cachedWrittenColumnIds: Optional[JList[Integer]] = {
+    try {
+      val thunk = writtenColumnIdsThunk
+      writtenColumnIdsThunk = null
+      val supplied = if (thunk == null) null else thunk()
+      if (supplied == null) Optional.empty() else supplied
+    } catch {
+      case NonFatal(_) => Optional.empty()
+      case _: LinkageError => Optional.empty()
+    }
+  }
+
+  def writtenColumnIds: Optional[JList[Integer]] = cachedWrittenColumnIds
+
+  override def equals(other: Any): Boolean =
+    other match {
+      case that: PaimonMicroBatchMetadata =>
+        sourceId == that.sourceId &&
+        startOffset == that.startOffset &&
+        endOffset == that.endOffset &&
+        splitCount == that.splitCount
+      case _ => false
+    }
+
+  override def hashCode(): Int =
+    Objects.hash(sourceId, startOffset, endOffset, Integer.valueOf(splitCount))
+}
+
+private[spark] case class PaimonMicroBatchInputPartition(
+    splits: Seq[Split],
+    @transient metadata: PaimonMicroBatchMetadata)
+  extends PaimonInputPartition
+
 object PaimonInputPartition {
   def apply(split: Split): PaimonInputPartition = {
     SimplePaimonInputPartition(Seq(split))
