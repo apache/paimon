@@ -222,6 +222,85 @@ public class IcebergRowLineageCompatibilityTest {
         return options;
     }
 
+    @Test
+    public void testRollbackDoesNotReuseRowIds() throws Exception {
+        FileStoreTable table = createPaimonTable(defaultRowType(), formatVersionOptions(3), "avro");
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.write(GenericRow.of(3, 30));
+        commit.commit(2, write.prepareCommit(false, 2));
+        write.close();
+        commit.close();
+        assertThat(readIcebergMetadata(table, 2).nextRowId()).isEqualTo(3L);
+
+        // deletes snapshot 2; its Iceberg metadata stays behind as an abandoned twin
+        table.rollbackTo(1);
+
+        // the next commit reuses snapshot id 2; ids 0..2 were already handed out by the
+        // abandoned timeline, so the replacement snapshot must start above them
+        TableWriteImpl<?> write2 =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        TableCommitImpl commit2 = table.newCommit(commitUser);
+        write2.write(GenericRow.of(4, 40));
+        commit2.commit(3, write2.prepareCommit(false, 3));
+        write2.close();
+        commit2.close();
+
+        IcebergMetadata regenerated =
+                readIcebergMetadata(table, table.snapshotManager().latestSnapshotId());
+        // the rollback triggers a from-scratch rebuild re-exporting all 3 live rows; they
+        // start above the abandoned watermark instead of reusing ids 0..2
+        assertThat(regenerated.currentSnapshot().firstRowId()).isEqualTo(3L);
+        assertThat(regenerated.currentSnapshot().addedRows()).isEqualTo(3L);
+        assertThat(regenerated.nextRowId()).isEqualTo(6L);
+    }
+
+    @Test
+    public void testRollbackRegenerationWithoutBaseKeepsRowIdWatermark() throws Exception {
+        FileStoreTable table = createPaimonTable(defaultRowType(), formatVersionOptions(3), "avro");
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.write(GenericRow.of(3, 30));
+        commit.commit(2, write.prepareCommit(false, 2));
+        write.close();
+        commit.close();
+
+        table.rollbackTo(1);
+
+        // no base metadata survives, so regeneration must run from scratch and still
+        // respect the abandoned watermark
+        LocalFileIO.create().deleteQuietly(metadataPath(table, 1));
+
+        TableWriteImpl<?> write2 =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        TableCommitImpl commit2 = table.newCommit(commitUser);
+        write2.write(GenericRow.of(4, 40));
+        commit2.commit(3, write2.prepareCommit(false, 3));
+        write2.close();
+        commit2.close();
+
+        IcebergMetadata regenerated =
+                readIcebergMetadata(table, table.snapshotManager().latestSnapshotId());
+        // the regenerated snapshot re-exports all 3 live rows starting at the watermark
+        assertThat(regenerated.currentSnapshot().firstRowId()).isEqualTo(3L);
+        assertThat(regenerated.currentSnapshot().addedRows()).isEqualTo(3L);
+        assertThat(regenerated.nextRowId()).isEqualTo(6L);
+    }
+
     private FileStoreTable createPaimonTable(
             RowType rowType, Map<String, String> customOptions, String fileFormat)
             throws Exception {
