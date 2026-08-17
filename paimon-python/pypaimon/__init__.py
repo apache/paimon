@@ -17,7 +17,6 @@
 
 import importlib
 import sys
-import threading
 
 if sys.version_info[:2] < (3, 8):
     try:
@@ -53,18 +52,15 @@ _LAZY_EXPORTS = {
     "SQLContext": ("pypaimon_rust.datafusion", "SQLContext"),
 }
 
-# Serialize first-time imports: racing threads can otherwise acquire module
-# locks in opposite orders and fail with _DeadlockError.
-_LAZY_IMPORT_LOCK = threading.RLock()
 
-
+# Resolution stays unlocked: submodules import these names at their top
+# level, so a lock here would deadlock against Python's module locks.
 def __getattr__(name):
     target = _LAZY_EXPORTS.get(name)
     if target is None:
         raise AttributeError(
             "module 'pypaimon' has no attribute {}".format(name))
-    with _LAZY_IMPORT_LOCK:
-        if name not in globals():
-            module = importlib.import_module(target[0])
-            globals()[name] = getattr(module, target[1])
-        return globals()[name]
+    module = importlib.import_module(target[0])
+    value = getattr(module, target[1])
+    globals()[name] = value
+    return value

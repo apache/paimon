@@ -24,7 +24,7 @@ from typing import Dict, List, Optional
 from urllib.parse import urlparse
 
 from pypaimon.common.memory_size import MemorySize
-from pypaimon.common.options import Options
+from pypaimon.common.options.options import Options
 from pypaimon.common.options.config_option import ConfigOption
 from pypaimon.common.options.config_options import ConfigOptions
 from pypaimon.common.options.options_utils import OptionsUtils
