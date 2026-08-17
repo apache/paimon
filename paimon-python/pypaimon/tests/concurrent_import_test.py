@@ -140,8 +140,7 @@ if errors:
     print("\n".join(sorted(set(errors))))
     raise SystemExit(1)
 """
-        # The lazy names resolve once per process, so each attempt needs a
-        # fresh interpreter.
+        # Lazy names resolve once per process, so retries need fresh ones.
         for attempt in range(8):
             result = subprocess.run(
                 [sys.executable, "-c", script],
@@ -157,10 +156,8 @@ if errors:
             )
 
     def test_fresh_import_of_cycle_prone_leaf_modules(self):
-        # Each module must be importable as the very first pypaimon import
-        # of a process. Heavy package initializers used to pull circular
-        # chains (index_file_meta -> globalindex -> create_global_index)
-        # that the eager root import happened to mask.
+        # Each module must import cleanly as a process's first pypaimon
+        # import, without a package init pulling a circular chain.
         for module in [
             "pypaimon.index.index_file_meta",
             "pypaimon.manifest.index_manifest_entry",
