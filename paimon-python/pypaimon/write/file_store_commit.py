@@ -39,7 +39,6 @@ from pypaimon.table.row.offset_row import OffsetRow
 from pypaimon.write.commit.commit_rollback import CommitRollback
 from pypaimon.write.commit.commit_scanner import CommitScanner
 from pypaimon.write.commit.conflict_detection import (
-    CommitConflictError,
     ConflictDetection,
     RowIdExistenceConflict,
 )
@@ -567,8 +566,6 @@ class FileStoreCommit:
                 )
                 if commit_result_may_be_uncertain:
                     raise RuntimeError(error_msg) from uncertain_commit_exception
-                if retry_result is not None and retry_result.exception is None:
-                    raise CommitConflictError(error_msg)
                 if retry_result is not None and retry_result.exception:
                     raise RuntimeError(error_msg) from retry_result.exception
                 else:
@@ -597,15 +594,12 @@ class FileStoreCommit:
             hash_index_base_snapshot is not None
             and latest_snapshot_id != hash_index_base_snapshot
         ):
-            conflict = RuntimeError(
+            raise RuntimeError(
                 "HASH index assignment conflict detected: assigned from "
                 "snapshot {}, but the latest snapshot is {}.".format(
                     hash_index_base_snapshot, latest_snapshot_id
                 )
             )
-            if not commit_result_may_be_uncertain:
-                raise CommitConflictError(str(conflict)) from conflict
-            raise conflict
 
         unique_id = uuid.uuid4()
         base_manifest_list = f"manifest-list-{unique_id}-0"
@@ -671,13 +665,6 @@ class FileStoreCommit:
                         # Rolled back: base/snapshot no longer valid; next attempt
                         # re-scans from scratch (matches Java RollbackRetryResult).
                         return RetryResult(None, conflict_exception)
-                if not commit_result_may_be_uncertain:
-                    raise CommitConflictError(
-                        str(conflict_exception)
-                    ) from conflict_exception
-                # A previous attempt may have committed despite returning an
-                # error. Preserve the generic, uncertain-result semantics so
-                # callers do not delete files which a snapshot may reference.
                 raise conflict_exception
 
         # Apply row tracking logic after conflict detection (matches Java ordering)
@@ -886,7 +873,7 @@ class FileStoreCommit:
             )
         )
         if non_compaction_conflict is not None:
-            raise CommitConflictError(
+            raise RuntimeError(
                 str(non_compaction_conflict)
             ) from non_compaction_conflict
 
@@ -902,7 +889,7 @@ class FileStoreCommit:
                 commit_entries,
             )
         except RuntimeError as rewrite_error:
-            raise CommitConflictError(
+            raise RuntimeError(
                 "{} {}".format(conflict_exception, rewrite_error)
             ) from conflict_exception
 

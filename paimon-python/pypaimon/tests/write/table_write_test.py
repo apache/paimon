@@ -1174,8 +1174,6 @@ class TableWriteTest(unittest.TestCase):
         self.assertEqual(1, overwrite_plan.num_buckets(('p',)))
 
     def test_postpone_worker_bucket_plan_mismatch_fails_commit(self):
-        from pypaimon.write.commit.conflict_detection import CommitConflictError
-
         table = self._create_postpone_table(
             'default.test_postpone_worker_plan_mismatch',
             pa_schema=self.postpone_pa_schema,
@@ -1202,7 +1200,7 @@ class TableWriteTest(unittest.TestCase):
             large_messages = large_write.prepare_commit()
             self.assertEqual({1}, {m.total_buckets for m in small_messages})
             self.assertEqual({3}, {m.total_buckets for m in large_messages})
-            with self.assertRaisesRegex(CommitConflictError, 'Total buckets'):
+            with self.assertRaisesRegex(RuntimeError, 'Total buckets'):
                 commit.commit(small_messages + large_messages)
         finally:
             small_write.close()
@@ -1210,8 +1208,6 @@ class TableWriteTest(unittest.TestCase):
             commit.close()
 
     def test_postpone_overwrite_bucket_plan_mismatch_fails_commit(self):
-        from pypaimon.write.commit.conflict_detection import CommitConflictError
-
         table = self._create_postpone_table(
             'default.test_postpone_overwrite_plan_mismatch',
             pa_schema=self.postpone_pa_schema,
@@ -1245,7 +1241,7 @@ class TableWriteTest(unittest.TestCase):
                 for file in message.new_files
             ]
 
-            with self.assertRaisesRegex(CommitConflictError, 'Total buckets'):
+            with self.assertRaisesRegex(RuntimeError, 'Total buckets'):
                 commit.commit(messages)
             self.assertTrue(all(
                 table.file_io.exists(path) for path in paths))
@@ -1468,8 +1464,6 @@ class TableWriteTest(unittest.TestCase):
         )
 
     def test_postpone_concurrent_new_partition_bucket_num_conflict(self):
-        from pypaimon.write.commit.conflict_detection import CommitConflictError
-
         table_two_buckets = self._create_postpone_table(
             'default.test_postpone_concurrent_bucket_num',
             partition_keys=['dt'],
@@ -1530,7 +1524,7 @@ class TableWriteTest(unittest.TestCase):
 
             commit_three.file_store_commit.snapshot_commit.commit = (
                 fail_cas_after_concurrent_commit)
-            with self.assertRaisesRegex(CommitConflictError, "Total buckets"):
+            with self.assertRaisesRegex(RuntimeError, "Total buckets"):
                 commit_three.commit(messages_three)
             self.assertTrue(concurrent_commit['done'])
             self.assertTrue(all(

@@ -149,10 +149,6 @@ class _WriteRange:
         self.field_ids = field_ids
 
 
-class CommitConflictError(RuntimeError):
-    """A deterministic pre-snapshot conflict which is not auto-aborted."""
-
-
 class RowIdExistenceConflict(RuntimeError):
     """A staged row-id file no longer matches the current base-file layout."""
 

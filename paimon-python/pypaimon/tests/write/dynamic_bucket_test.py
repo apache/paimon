@@ -37,7 +37,6 @@ from pypaimon.index.index_file_meta import IndexFileMeta
 from pypaimon.manifest.index_manifest_entry import IndexManifestEntry
 from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.write.commit.conflict_detection import CommitConflictError
 from pypaimon.write.row_key_extractor import DynamicBucketRowKeyExtractor
 
 
@@ -643,7 +642,7 @@ class DynamicBucketTest(unittest.TestCase):
                 '_commit_retry_wait',
             ):
                 with self.assertRaisesRegex(
-                    CommitConflictError, 'HASH index assignment conflict'
+                    RuntimeError, 'HASH index assignment conflict'
                 ):
                     commit.commit(messages)
 

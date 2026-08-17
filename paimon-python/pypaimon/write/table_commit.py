@@ -63,9 +63,9 @@ class TableCommit:
     def _commit(self, commit_messages: List[CommitMessage], commit_identifier: int = BATCH_COMMIT_IDENTIFIER):
         non_empty_messages = [msg for msg in commit_messages if not msg.is_empty()]
 
-        # Never abort files in response to a commit exception. Even a conflict
-        # which appears deterministic can cross a post-commit extension point;
-        # preserving possible orphan files is safer than deleting committed data.
+        # Never abort files in response to a commit exception. Preserving
+        # possible orphan files is safer than deleting files which another
+        # attempt may still commit or which a snapshot may already reference.
         if self.overwrite_partition is not None:
             # Always call overwrite() even with empty messages, so that
             # FileStoreCommit.overwrite can handle the empty case properly

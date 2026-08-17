@@ -23,7 +23,6 @@ import unittest
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.write.commit.conflict_detection import CommitConflictError
 from pypaimon.write.commit_callback import CommitCallback, CommitCallbackContext
 
 
@@ -154,21 +153,20 @@ class CommitCallbackTest(unittest.TestCase):
         table_commit.close()
         self.assertTrue(callback.closed)
 
-    def test_callback_conflict_after_commit_keeps_committed_files(self):
-        table = self._create_table('test_callback_conflict_after_commit')
+    def test_callback_error_after_commit_keeps_committed_files(self):
+        table = self._create_table('test_callback_error_after_commit')
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()
         table_commit = write_builder.new_commit()
 
-        callback_error = CommitConflictError(
-            'nested commit conflict in callback')
+        callback_error = RuntimeError('callback failed after commit')
 
-        class ConflictCallback(CommitCallback):
+        class FailingCallback(CommitCallback):
 
             def call(self, context: CommitCallbackContext) -> None:
                 raise callback_error
 
-        table_commit.add_commit_callback(ConflictCallback())
+        table_commit.add_commit_callback(FailingCallback())
         try:
             table_write.write_arrow(pa.Table.from_pydict({
                 'id': [1],
@@ -182,7 +180,7 @@ class CommitCallbackTest(unittest.TestCase):
                 for file in message.new_files
             ]
 
-            with self.assertRaises(CommitConflictError) as context:
+            with self.assertRaises(RuntimeError) as context:
                 table_commit.commit(messages)
 
             latest_snapshot = table.snapshot_manager().get_latest_snapshot()
