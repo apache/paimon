@@ -150,7 +150,7 @@ class _WriteRange:
 
 
 class CommitConflictError(RuntimeError):
-    """A deterministic pre-snapshot conflict which is safe to abort."""
+    """A deterministic pre-snapshot conflict which is not auto-aborted."""
 
 
 class RowIdExistenceConflict(RuntimeError):

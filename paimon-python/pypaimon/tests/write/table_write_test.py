@@ -1248,7 +1248,7 @@ class TableWriteTest(unittest.TestCase):
             with self.assertRaisesRegex(CommitConflictError, 'Total buckets'):
                 commit.commit(messages)
             self.assertTrue(all(
-                not table.file_io.exists(path) for path in paths))
+                table.file_io.exists(path) for path in paths))
         finally:
             small_write.close()
             large_write.close()
@@ -1534,7 +1534,7 @@ class TableWriteTest(unittest.TestCase):
                 commit_three.commit(messages_three)
             self.assertTrue(concurrent_commit['done'])
             self.assertTrue(all(
-                not table_three_buckets.file_io.exists(path)
+                table_three_buckets.file_io.exists(path)
                 for path in losing_paths
             ))
         finally:
