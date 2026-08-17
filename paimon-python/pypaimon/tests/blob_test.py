@@ -22,6 +22,8 @@ import os
 import shutil
 import struct
 import tempfile
+import threading
+import time
 import unittest
 import zlib
 from decimal import Decimal
@@ -2412,18 +2414,36 @@ class BlobEndToEndTest(unittest.TestCase):
         calls = []
         range_reads = []
         original_read = file_io.read_blobs_concurrent
-        original_range_read = file_io.read_file_range
+        original_open = file_io.new_input_stream
 
         def read_blobs_concurrent(blobs, parallelism):
             calls.append((list(blobs), parallelism))
             return original_read(blobs, parallelism)
 
-        def read_file_range(path, offset, length):
-            range_reads.append((path, offset, length))
-            return original_range_read(path, offset, length)
+        def new_input_stream(path):
+            stream = original_open(path)
+
+            class TrackingStream:
+                def read(self, length=-1):
+                    return stream.read(length)
+
+                def seek(self, offset, whence=0):
+                    return stream.seek(offset, whence)
+
+                def tell(self):
+                    return stream.tell()
+
+                def read_at(self, length, offset):
+                    range_reads.append((path, offset, length))
+                    return os.pread(stream.fileno(), length, offset)
+
+                def close(self):
+                    stream.close()
+
+            return TrackingStream()
 
         file_io.read_blobs_concurrent = read_blobs_concurrent
-        file_io.read_file_range = read_file_range
+        file_io.new_input_stream = new_input_stream
         reader = FormatBlobReader(
             file_io=file_io,
             file_path=blob_file_path,
@@ -3714,13 +3734,22 @@ class CoalesceRangesTest(unittest.TestCase):
                 output.write(data)
             file_io = FileIO.get(f"file://{tmp_dir}", {})
             reads = []
-            original_read = file_io.read_file_range
+            original_open = file_io.new_input_stream
 
-            def read_file_range(file_path, offset, length):
-                reads.append((file_path, offset, length))
-                return original_read(file_path, offset, length)
+            def new_input_stream(file_path):
+                stream = original_open(file_path)
 
-            file_io.read_file_range = read_file_range
+                class TrackingStream:
+                    def read_at(self, length, offset):
+                        reads.append((file_path, offset, length))
+                        return os.pread(stream.fileno(), length, offset)
+
+                    def close(self):
+                        stream.close()
+
+                return TrackingStream()
+
+            file_io.new_input_stream = new_input_stream
             got = file_io.read_ranges_coalesced_views(
                 [(path, 0, 10), (path, 1000, 10)],
                 parallelism=4,
@@ -3743,6 +3772,503 @@ class CoalesceRangesTest(unittest.TestCase):
             )
             self.assertEqual(reads, [(path, 0, 1010)])
             self.assertIs(shared[0].obj, shared[1].obj)
+
+    def test_lane_stream_failure_reopens_range(self):
+        from pypaimon.common.file_io import FileIO
+
+        data = bytes(range(64))
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = os.path.join(tmp_dir, "blob.bin")
+            with open(path, "wb") as output:
+                output.write(data)
+            file_io = FileIO.get(f"file://{tmp_dir}", {})
+            fallbacks = []
+
+            class FailingStream:
+                def read_at(self, length, offset):
+                    raise IOError("shared stream failed")
+
+                def close(self):
+                    pass
+
+            def read_file_range(file_path, offset, length):
+                fallbacks.append((file_path, offset, length))
+                return data[offset:offset + length]
+
+            file_io.new_input_stream = lambda _: FailingStream()
+            file_io.read_file_range = read_file_range
+            ranges = [(path, 0, 4), (path, 16, 4)]
+
+            self.assertEqual(
+                [data[0:4], data[16:20]],
+                file_io.read_ranges_coalesced(
+                    ranges, parallelism=2, max_gap=0),
+            )
+            self.assertEqual(2, len(fallbacks))
+
+    def test_fallback_reads_do_not_exceed_parallelism(self):
+        from pypaimon.common.file_io import FileIO
+
+        parallelism = 8
+        file_io = FileIO.get("file:///tmp", {})
+        barrier = threading.Barrier(parallelism)
+        lock = threading.Lock()
+        open_streams = 0
+        max_open_streams = 0
+
+        def opened():
+            nonlocal open_streams, max_open_streams
+            with lock:
+                open_streams += 1
+                max_open_streams = max(max_open_streams, open_streams)
+
+        def closed():
+            nonlocal open_streams
+            with lock:
+                open_streams -= 1
+
+        class FailingStream:
+            def __init__(self):
+                self.closed = False
+                opened()
+
+            def read_at(self, length, offset):
+                barrier.wait(timeout=5)
+                raise IOError("pooled read failed")
+
+            def close(self):
+                if not self.closed:
+                    self.closed = True
+                    closed()
+
+        def read_file_range(path, offset, length):
+            opened()
+            try:
+                time.sleep(0.01)
+                return b"ok"
+            finally:
+                closed()
+
+        file_io.new_input_stream = lambda _: FailingStream()
+        file_io.read_file_range = read_file_range
+        ranges = [
+            ("blob-%d" % index, 0, 2)
+            for index in range(parallelism)
+        ]
+
+        self.assertEqual(
+            [b"ok"] * parallelism,
+            file_io.read_ranges_coalesced(
+                ranges, parallelism=parallelism, max_gap=0),
+        )
+        self.assertLessEqual(max_open_streams, parallelism)
+        self.assertEqual(0, open_streams)
+        self.assertFalse(barrier.broken)
+
+    def test_known_and_unknown_lengths_share_exclusive_lane(self):
+        from pypaimon.common.file_io import FileIO
+
+        file_io = FileIO.get("file:///tmp", {})
+        operations = []
+        streams = []
+
+        class LaneStream:
+            def __init__(self):
+                self.position = 0
+                self.closed = False
+
+            def read_at(self, length, offset):
+                operations.append(("read_at", offset, length))
+                return b"known"
+
+            def seek(self, offset):
+                operations.append(("seek", offset))
+                self.position = offset
+
+            def read(self):
+                operations.append(("read", self.position))
+                return b"tail"
+
+            def close(self):
+                self.closed = True
+
+        def new_input_stream(_):
+            stream = LaneStream()
+            streams.append(stream)
+            return stream
+
+        file_io.new_input_stream = new_input_stream
+        file_io.read_file_range = lambda *args: self.fail(
+            "exclusive lane unexpectedly used fallback")
+
+        self.assertEqual(
+            [b"known", b"tail"],
+            file_io.read_ranges_coalesced(
+                [("blob", 0, 5), ("blob", 5, -1)],
+                parallelism=1,
+                max_gap=0,
+            ),
+        )
+        self.assertEqual([
+            ("read_at", 0, 5),
+            ("seek", 5),
+            ("read", 5),
+        ], operations)
+        self.assertEqual(1, len(streams))
+        self.assertTrue(streams[0].closed)
+
+    def test_non_positional_streams_are_exclusive(self):
+        from pypaimon.common.file_io import FileIO
+
+        data = bytes(range(128))
+        file_io = FileIO.get("file:///tmp", {})
+
+        class SerialStream:
+            def __init__(self):
+                self.position = 0
+                self.reading = False
+
+            def seek(self, position):
+                self.position = position
+
+            def read(self, length):
+                if self.reading:
+                    raise AssertionError("non-positional reads overlapped")
+                self.reading = True
+                try:
+                    time.sleep(0.001)
+                    result = data[self.position:self.position + length]
+                    self.position += len(result)
+                    return result
+                finally:
+                    self.reading = False
+
+            def close(self):
+                pass
+
+        streams = []
+
+        def new_input_stream(_):
+            stream = SerialStream()
+            streams.append(stream)
+            return stream
+
+        file_io.new_input_stream = new_input_stream
+        ranges = [("blob", i * 4, 2) for i in range(16)]
+
+        self.assertEqual(
+            [data[i * 4:i * 4 + 2] for i in range(16)],
+            file_io.read_ranges_coalesced(
+                ranges, parallelism=8, max_gap=0),
+        )
+        self.assertGreater(len(streams), 1)
+        self.assertLessEqual(len(streams), 8)
+
+    def test_same_path_reuses_bounded_exclusive_lanes(self):
+        from pypaimon.common.file_io import FileIO
+
+        data = bytes(range(256)) * 64
+        file_io = FileIO.get("file:///tmp", {})
+        streams = []
+
+        class PositionalStream:
+            def __init__(self):
+                self.reading = False
+                self.reads = 0
+                self.closed = False
+
+            def read_at(self, length, offset):
+                if self.reading:
+                    raise AssertionError("one stream was used concurrently")
+                self.reading = True
+                try:
+                    time.sleep(0.01)
+                    self.reads += 1
+                    return data[offset:offset + length]
+                finally:
+                    self.reading = False
+
+            def close(self):
+                self.closed = True
+
+        def new_input_stream(_):
+            stream = PositionalStream()
+            streams.append(stream)
+            return stream
+
+        file_io.new_input_stream = new_input_stream
+        ranges = [("blob", i * 128, 16) for i in range(64)]
+
+        self.assertEqual(
+            [data[offset:offset + length]
+             for _, offset, length in ranges],
+            file_io.read_ranges_coalesced(
+                ranges, parallelism=64, max_gap=0),
+        )
+        self.assertEqual(16, len(streams))
+        self.assertTrue(all(stream.reads == 4 for stream in streams))
+        self.assertEqual(64, sum(stream.reads for stream in streams))
+        self.assertTrue(all(stream.closed for stream in streams))
+
+    def test_same_path_lanes_balance_estimated_io(self):
+        from pypaimon.common.file_io import FileIO
+
+        large = 8 << 20
+        file_io = FileIO.get("file:///tmp", {})
+        streams = []
+
+        class PositionalStream:
+            def __init__(self):
+                self.lengths = []
+
+            def read_at(self, length, offset):
+                self.lengths.append(length)
+                return b"x"
+
+            def close(self):
+                pass
+
+        def new_input_stream(_):
+            stream = PositionalStream()
+            streams.append(stream)
+            return stream
+
+        file_io.new_input_stream = new_input_stream
+        ranges = []
+        offset = 0
+        for index in range(256):
+            length = large if index % 16 == 0 else 1
+            ranges.append(("blob", offset, length))
+            offset += length + 1
+
+        file_io.read_ranges_coalesced(
+            ranges, parallelism=64, max_gap=0)
+
+        self.assertEqual(16, len(streams))
+        self.assertEqual(
+            [1] * 16,
+            sorted(stream.lengths.count(large) for stream in streams),
+        )
+
+    def test_skewed_paths_redistribute_capped_lanes(self):
+        from collections import Counter
+
+        from pypaimon.common.file_io import FileIO
+
+        file_io = FileIO.get("file:///tmp", {})
+        streams = Counter()
+        lock = threading.Lock()
+
+        class PositionalStream:
+            def __init__(self, path):
+                self.path = path
+
+            def read_at(self, length, offset):
+                return self.path[0].encode() * length
+
+            def close(self):
+                pass
+
+        def new_input_stream(path):
+            with lock:
+                streams[path] += 1
+            return PositionalStream(path)
+
+        file_io.new_input_stream = new_input_stream
+        ranges = (
+            [("hot", index * 2, 1) for index in range(9900)]
+            + [("cold", index * 2, 1) for index in range(100)]
+        )
+
+        result = file_io.read_ranges_coalesced(
+            ranges, parallelism=64, max_gap=0)
+
+        self.assertEqual([b"h"] * 9900 + [b"c"] * 100, result)
+        self.assertEqual(Counter({"hot": 16, "cold": 16}), streams)
+
+    def test_path_memberships_can_exceed_worker_count(self):
+        from collections import Counter
+
+        from pypaimon.common.file_io import FileIO
+
+        file_io = FileIO.get("file:///tmp", {})
+        streams = Counter()
+        lock = threading.Lock()
+        active_streams = 0
+        max_active_streams = 0
+
+        class PositionalStream:
+            def __init__(self, path):
+                self.path = path
+                self.closed = False
+
+            def read_at(self, length, offset):
+                return self.path[0].encode() * length
+
+            def close(self):
+                nonlocal active_streams
+                if self.closed:
+                    return
+                self.closed = True
+                with lock:
+                    active_streams -= 1
+
+        def new_input_stream(path):
+            nonlocal active_streams, max_active_streams
+            with lock:
+                streams[path] += 1
+                active_streams += 1
+                max_active_streams = max(
+                    max_active_streams, active_streams)
+            return PositionalStream(path)
+
+        file_io.new_input_stream = new_input_stream
+        ranges = (
+            [("hot", index * 2, 1) for index in range(10000)]
+            + [("cold-%d" % index, 0, 1) for index in range(63)]
+        )
+
+        result = file_io.read_ranges_coalesced(
+            ranges, parallelism=64, max_gap=0)
+
+        self.assertEqual(10063, len(result))
+        self.assertEqual(16, streams["hot"])
+        self.assertLessEqual(max_active_streams, 64)
+        self.assertEqual(0, active_streams)
+
+    def test_stream_count_is_bounded_across_paths(self):
+        from pypaimon.common.file_io import FileIO
+
+        file_io = FileIO.get("file:///tmp", {})
+        lock = threading.Lock()
+        open_streams = 0
+        max_open_streams = 0
+        total_streams = 0
+
+        class PositionalStream:
+            def read_at(self, length, offset):
+                time.sleep(0.03 if offset == 0 else 0.001)
+                return bytes([offset]) * length
+
+            def close(self):
+                nonlocal open_streams
+                with lock:
+                    open_streams -= 1
+
+        def new_input_stream(_):
+            nonlocal open_streams, max_open_streams, total_streams
+            with lock:
+                open_streams += 1
+                total_streams += 1
+                max_open_streams = max(max_open_streams, open_streams)
+            return PositionalStream()
+
+        file_io.new_input_stream = new_input_stream
+        ranges = [
+            ("blob-%d" % path, offset, 4)
+            for path in range(4)
+            for offset in range(0, 32, 8)
+        ]
+
+        self.assertEqual(
+            [bytes([offset]) * length for _, offset, length in ranges],
+            file_io.read_ranges_coalesced(
+                ranges, parallelism=4, max_gap=0),
+        )
+        self.assertLessEqual(max_open_streams, 4)
+        self.assertEqual(4, total_streams)
+        self.assertEqual(0, open_streams)
+
+    def test_closes_all_streams_before_raising_close_error(self):
+        from pypaimon.common.file_io import FileIO
+
+        data = bytes(range(128))
+        file_io = FileIO.get("file:///tmp", {})
+        streams = []
+
+        class CloseStream:
+            def __init__(self, index):
+                self.index = index
+                self.closed = False
+
+            def read_at(self, length, offset):
+                time.sleep(0.01)
+                return data[offset:offset + length]
+
+            def close(self):
+                self.closed = True
+                if self.index == 0:
+                    raise IOError("first close failed")
+
+        def new_input_stream(_):
+            stream = CloseStream(len(streams))
+            streams.append(stream)
+            return stream
+
+        file_io.new_input_stream = new_input_stream
+        ranges = [("blob", offset, 4) for offset in range(0, 64, 8)]
+
+        with self.assertRaisesRegex(IOError, "first close failed"):
+            file_io.read_ranges_coalesced(
+                ranges, parallelism=4, max_gap=0)
+
+        self.assertGreater(len(streams), 1)
+        self.assertTrue(all(stream.closed for stream in streams))
+
+    def test_close_error_does_not_mask_read_error(self):
+        from pypaimon.common.file_io import FileIO
+
+        file_io = FileIO.get("file:///tmp", {})
+
+        class FailingStream:
+            def __init__(self, path):
+                self.path = path
+
+            def read_at(self, length, offset):
+                if self.path == "read-error":
+                    raise IOError("shared read failed")
+                return b"ok"
+
+            def close(self):
+                raise IOError("close failed")
+
+        def fail_fallback(path, offset, length):
+            raise IOError("fallback read failed")
+
+        file_io.new_input_stream = FailingStream
+        file_io.read_file_range = fail_fallback
+
+        with self.assertRaisesRegex(IOError, "shared read failed"):
+            file_io.read_ranges_coalesced(
+                [("close-error", 0, 2), ("read-error", 0, 2)],
+                parallelism=2,
+                max_gap=0,
+            )
+
+    def test_failed_stream_close_stops_before_fallback(self):
+        from pypaimon.common.file_io import FileIO
+
+        file_io = FileIO.get("file:///tmp", {})
+        fallbacks = []
+
+        class FailingStream:
+            def read_at(self, length, offset):
+                raise IOError("pooled read failed")
+
+            def close(self):
+                raise IOError("discard close failed")
+
+        def read_file_range(path, offset, length):
+            fallbacks.append((path, offset, length))
+            return b"ok"
+
+        file_io.new_input_stream = lambda _: FailingStream()
+        file_io.read_file_range = read_file_range
+
+        with self.assertRaisesRegex(IOError, "pooled read failed"):
+            file_io.read_ranges_coalesced(
+                [("blob", 0, 2)], parallelism=1, max_gap=0)
+        self.assertEqual([], fallbacks)
 
 
 class ReadFileRangeTest(unittest.TestCase):

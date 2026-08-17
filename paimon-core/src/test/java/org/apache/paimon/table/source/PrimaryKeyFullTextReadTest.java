@@ -33,9 +33,17 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -45,14 +53,74 @@ import static org.assertj.core.api.Assertions.tuple;
 class PrimaryKeyFullTextReadTest {
 
     @Test
+    void testStartsBucketsBeforeWaitingForResults() throws Exception {
+        PrimaryKeyFullTextSearchSplit split0 = split("indexed-0", "raw-0", 0, 2);
+        PrimaryKeyFullTextSearchSplit split1 = split("indexed-1", "raw-1", 1, 2);
+        CompletableFuture<List<List<PrimaryKeySearchPosition>>> future0 = new CompletableFuture<>();
+        CompletableFuture<List<List<PrimaryKeySearchPosition>>> future1 = new CompletableFuture<>();
+        CountDownLatch started = new CountDownLatch(2);
+        PrimaryKeyFullTextRead read =
+                new PrimaryKeyFullTextRead(
+                        GlobalIndexSearchMode.FAST,
+                        10,
+                        split -> {
+                            started.countDown();
+                            if (split == split0) {
+                                return future0;
+                            }
+                            assertThat(split).isSameAs(split1);
+                            return future1;
+                        });
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+
+        try {
+            Future<PrimaryKeyScoredResult> resultFuture =
+                    executor.submit(
+                            () -> read.read(Arrays.<FullTextSearchSplit>asList(split0, split1)));
+            assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
+
+            future1.complete(
+                    Collections.singletonList(
+                            Collections.singletonList(position("indexed-1", 1, 0, 9F))));
+            future0.complete(
+                    Collections.singletonList(
+                            Collections.singletonList(position("indexed-0", 0, 0, 9F))));
+
+            assertThat(resultFuture.get(5, TimeUnit.SECONDS).positions())
+                    .extracting(
+                            PrimaryKeySearchPosition::bucket,
+                            PrimaryKeySearchPosition::dataFileName)
+                    .containsExactly(tuple(0, "indexed-0"), tuple(1, "indexed-1"));
+        } finally {
+            future0.completeExceptionally(new RuntimeException("Test cleanup."));
+            future1.completeExceptionally(new RuntimeException("Test cleanup."));
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void testPropagatesBucketFailure() {
+        CompletableFuture<List<List<PrimaryKeySearchPosition>>> failed = new CompletableFuture<>();
+        failed.completeExceptionally(new IOException("broken"));
+        PrimaryKeyFullTextRead read =
+                new PrimaryKeyFullTextRead(GlobalIndexSearchMode.FAST, 10, split -> failed);
+
+        assertThatThrownBy(() -> read.read(Collections.singletonList(split())))
+                .isInstanceOf(CompletionException.class)
+                .hasRootCauseMessage("broken");
+    }
+
+    @Test
     void testFastPropagatesScores() {
         PrimaryKeyFullTextRead read =
                 new PrimaryKeyFullTextRead(
                         GlobalIndexSearchMode.FAST,
                         10,
                         split ->
-                                Collections.singletonList(
-                                        Collections.singletonList(position("indexed", 1, 9F))));
+                                CompletableFuture.completedFuture(
+                                        Collections.singletonList(
+                                                Collections.singletonList(
+                                                        position("indexed", 1, 9F)))));
 
         PrimaryKeyScoredResult result = read.read(Collections.singletonList(split()));
 
@@ -74,11 +142,13 @@ class PrimaryKeyFullTextReadTest {
                         GlobalIndexSearchMode.FAST,
                         2,
                         split ->
-                                Arrays.asList(
+                                CompletableFuture.completedFuture(
                                         Arrays.asList(
-                                                position("indexed", 0, 100F),
-                                                position("indexed", 1, 99F)),
-                                        Collections.singletonList(position("raw", 0, 1F))));
+                                                Arrays.asList(
+                                                        position("indexed", 0, 100F),
+                                                        position("indexed", 1, 99F)),
+                                                Collections.singletonList(
+                                                        position("raw", 0, 1F)))));
 
         PrimaryKeyScoredResult result = read.read(Collections.singletonList(split()));
 
@@ -98,31 +168,46 @@ class PrimaryKeyFullTextReadTest {
         assertThatThrownBy(
                         () ->
                                 new PrimaryKeyFullTextRead(
-                                        mode, 10, split -> Collections.emptyList()))
+                                        mode,
+                                        10,
+                                        split ->
+                                                CompletableFuture.completedFuture(
+                                                        Collections.emptyList())))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessageContaining("only supports the FAST full-text-index search mode");
     }
 
     private static PrimaryKeySearchPosition position(
             String dataFile, long rowPosition, float score) {
-        return new PrimaryKeySearchPosition(BinaryRow.EMPTY_ROW, 0, dataFile, rowPosition, score);
+        return position(dataFile, 0, rowPosition, score);
+    }
+
+    private static PrimaryKeySearchPosition position(
+            String dataFile, int bucket, long rowPosition, float score) {
+        return new PrimaryKeySearchPosition(
+                BinaryRow.EMPTY_ROW, bucket, dataFile, rowPosition, score);
     }
 
     private static PrimaryKeyFullTextSearchSplit split() {
-        List<DataFileMeta> dataFiles = Arrays.asList(dataFile("indexed"), dataFile("raw"));
+        return split("indexed", "raw", 0, 1);
+    }
+
+    private static PrimaryKeyFullTextSearchSplit split(
+            String indexedFile, String rawFile, int bucket, int totalBuckets) {
+        List<DataFileMeta> dataFiles = Arrays.asList(dataFile(indexedFile), dataFile(rawFile));
         DataSplit dataSplit =
                 DataSplit.builder()
                         .withSnapshot(11)
                         .withPartition(BinaryRow.EMPTY_ROW)
-                        .withBucket(0)
-                        .withBucketPath("bucket-0")
-                        .withTotalBuckets(1)
+                        .withBucket(bucket)
+                        .withBucketPath("bucket-" + bucket)
+                        .withTotalBuckets(totalBuckets)
                         .withDataFiles(dataFiles)
                         .build();
         return new PrimaryKeyFullTextSearchSplit(
                 dataSplit,
-                Collections.singletonList(payload("indexed")),
-                Collections.singletonList("raw"));
+                Collections.singletonList(payload(indexedFile)),
+                Collections.singletonList(rawFile));
     }
 
     private static DataFileMeta dataFile(String name) {

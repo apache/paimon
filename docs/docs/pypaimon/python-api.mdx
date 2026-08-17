@@ -1119,12 +1119,35 @@ sub-columns for column-skipping via sub-field projection.
 Fields not listed in `variant.shreddingSchema` are stored in the overflow `value` bytes and remain
 fully accessible on the read path.
 
-Supported Paimon type strings for shredded sub-fields: `BOOLEAN`, `INT`, `BIGINT`, `FLOAT`, `DOUBLE`,
-`VARCHAR`, `DECIMAL(p,s)`, and nested `ROW` types for recursive object shredding.
+Supported Paimon type strings for shredded sub-fields: `BOOLEAN`, `TINYINT`, `SMALLINT`, `INT`,
+`BIGINT`, `FLOAT`, `DOUBLE`, `VARCHAR`, `BINARY`, `VARBINARY`, `DECIMAL(p,s)`, `ARRAY`, and nested
+`ROW` types for recursive object shredding.
 
 </TabItem>
 
 </Tabs>
+
+### VARIANT Path Updates
+
+Read existing paths as Arrow arrays, use Arrow compute, and replace them
+without decoding unrelated fields:
+
+```python
+import pyarrow as pa
+import pyarrow.compute as pc
+
+from pypaimon.data import variant_get, variant_replace
+
+current = variant_get(payload, '$.velocity.y', pa.float64())
+updated_payload = variant_replace(
+    payload, '$.velocity.y', pc.negate(current))
+```
+
+The Arrow type must match the stored VARIANT type; these APIs do not cast
+values. Exact extraction supports scalar types and nested struct, list, and
+string-keyed map types. Replacement supports scalar types. Missing paths read
+as NULL and remain unchanged unless `strict=True` is specified. Pass mappings
+to process multiple paths in one pass.
 
 
 **`GenericVariant` API:**

@@ -28,13 +28,15 @@ import java.util.List;
 /** Utilities for manifest schemas. */
 final class ManifestSchemaUtils {
 
+    static final String FORMAT_IDENTIFIER_FIELD = "_VERSION";
+
     private ManifestSchemaUtils() {}
 
     /** Adds the permanent on-disk format identifier field to a manifest row type. */
     static RowType withFormatIdentifier(RowType rowType) {
         List<DataField> fields = new ArrayList<>();
         // Keep the historical field name for compatibility with existing manifest files.
-        fields.add(new DataField(-1, "_VERSION", new IntType(false)));
+        fields.add(new DataField(-1, FORMAT_IDENTIFIER_FIELD, new IntType(false)));
         fields.addAll(rowType.getFields());
         return new RowType(false, fields);
     }

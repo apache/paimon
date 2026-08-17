@@ -47,8 +47,7 @@ public final class ByteArrayKey {
     public boolean equals(Object obj) {
         return obj == this
                 || (obj instanceof ByteArrayKey && Arrays.equals(bytes, ((ByteArrayKey) obj).bytes))
-                || (obj instanceof ByteArrayLookupKey
-                        && Arrays.equals(bytes, ((ByteArrayLookupKey) obj).bytes()));
+                || (obj instanceof ByteArrayLookupKey && obj.equals(this));
     }
 
     @Override

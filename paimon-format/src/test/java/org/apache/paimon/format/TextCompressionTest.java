@@ -139,7 +139,8 @@ public abstract class TextCompressionTest {
 
         try (RecordReader<InternalRow> reader =
                 readerFactory.createReader(
-                        new FormatReaderContext(fileIO, filePath, fileIO.getFileSize(filePath)))) {
+                        new FormatReaderContext(
+                                fileIO, filePath, fileIO.getFileSize(filePath), null, null))) {
             reader.forEachRemaining(readData::add);
         }
 
@@ -183,7 +184,8 @@ public abstract class TextCompressionTest {
         List<InternalRow> readData = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
                 readerFactory.createReader(
-                        new FormatReaderContext(fileIO, filePath, fileIO.getFileSize(filePath)))) {
+                        new FormatReaderContext(
+                                fileIO, filePath, fileIO.getFileSize(filePath), null, null))) {
             reader.forEachRemaining(readData::add);
         }
 

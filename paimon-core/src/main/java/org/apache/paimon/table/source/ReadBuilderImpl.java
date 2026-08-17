@@ -26,6 +26,7 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReader.RecordIterator;
 import org.apache.paimon.table.InnerTable;
@@ -311,6 +312,12 @@ public class ReadBuilderImpl implements ReadBuilder {
         @Override
         public TableRead withIOManager(IOManager ioManager) {
             delegate.withIOManager(ioManager);
+            return this;
+        }
+
+        @Override
+        public TableRead withReadBatchSizer(ReadBatchSizer sizer) {
+            delegate.withReadBatchSizer(sizer);
             return this;
         }
 

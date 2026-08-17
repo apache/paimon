@@ -43,6 +43,7 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.ExecutorThreadFactory;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import org.apache.paimon.utils.SnapshotManager;
@@ -362,23 +363,36 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     @Override
     public void close() throws Exception {
+        List<AutoCloseable> writerCloseables = new ArrayList<>();
         for (Map<Integer, WriterContainer<T>> bucketWriters : writers.values()) {
             for (WriterContainer<T> writerContainer : bucketWriters.values()) {
-                writerContainer.writer.close();
+                writerCloseables.add(writerContainer.writer::close);
                 if (writerContainer.primaryKeyIndexMaintainer != null) {
-                    writerContainer.primaryKeyIndexMaintainer.close();
+                    writerCloseables.add(writerContainer.primaryKeyIndexMaintainer::close);
                 }
             }
         }
-        writers.clear();
-        if (lazyCompactExecutor != null && closeCompactExecutorWhenLeaving) {
-            lazyCompactExecutor.shutdownNow();
-        }
-        if (lazyPrimaryKeyIndexExecutor != null) {
-            lazyPrimaryKeyIndexExecutor.shutdownNow();
-        }
-        if (compactionMetrics != null) {
-            compactionMetrics.close();
+
+        try {
+            // There is one writer per bucket per partition, each holding its own files and
+            // buffers. Closing them in a plain loop meant the first failure abandoned every
+            // writer behind it; closeAll runs all of them and rethrows the first failure with
+            // the rest attached to it as suppressed.
+            IOUtils.closeAll(writerCloseables);
+        } finally {
+            // These have to run whatever the writers did. Previously a single failing writer
+            // also left both thread pools running for the life of the process. None of the
+            // calls below throws, so the writer failure is never replaced by one of them.
+            writers.clear();
+            if (lazyCompactExecutor != null && closeCompactExecutorWhenLeaving) {
+                lazyCompactExecutor.shutdownNow();
+            }
+            if (lazyPrimaryKeyIndexExecutor != null) {
+                lazyPrimaryKeyIndexExecutor.shutdownNow();
+            }
+            if (compactionMetrics != null) {
+                compactionMetrics.close();
+            }
         }
     }
 

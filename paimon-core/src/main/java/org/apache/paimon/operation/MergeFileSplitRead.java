@@ -43,6 +43,7 @@ import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
 import org.apache.paimon.mergetree.compact.ReducerMergeFunctionWrapper;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.EmptyRecordReader;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
@@ -184,6 +185,12 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         if (mfFactory instanceof LookupMergeFunction.Factory) {
             ((LookupMergeFunction.Factory) mfFactory).withIOManager(ioManager);
         }
+        return this;
+    }
+
+    @Override
+    public MergeFileSplitRead withReadBatchSizer(ReadBatchSizer sizer) {
+        readerFactoryBuilder.withReadBatchSizer(sizer);
         return this;
     }
 

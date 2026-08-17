@@ -58,6 +58,20 @@ This section introduce all available spark procedures about paimon.
       </td>
     </tr>
     <tr>
+      <td>materialize_deletion_vectors</td>
+      <td>
+         Applies deletion vectors to the latest state of an unaware-bucket Data Evolution table and assigns new row IDs to surviving rows. Affected global indexes are dropped. Spark processes bounded batches until all matching deletion vectors are materialized. Historical snapshots and tags can retain the replaced files until snapshot expiration. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>partitions: partition filter. Cannot be used together with where.</li>
+            <li>options: additional dynamic table options.</li>
+            <li>where: partition predicate. Cannot be used together with partitions.</li>
+      </td>
+      <td>
+         CALL sys.materialize_deletion_vectors(table => 'T') <br/><br/>
+         CALL sys.materialize_deletion_vectors(table => 'T', partitions => 'dt=2026-08-12')
+      </td>
+    </tr>
+    <tr>
       <td>compact_database</td>
       <td>
          To compact all tables across one or more databases. Arguments:
@@ -324,6 +338,17 @@ This section introduce all available spark procedures about paimon.
       </td>
     </tr>
     <tr>
+      <td>repair_earliest_snapshot</td>
+      <td>
+         Repair the earliest snapshot hint for a table. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>snapshot_id: the snapshot ID to set as the earliest snapshot.</li>
+      </td>
+      <td>
+          CALL sys.repair_earliest_snapshot(table => 'test_db.T', snapshot_id => 10)
+      </td>
+    </tr>
+    <tr>
       <td>create_branch</td>
       <td>
          To merge a branch to main branch. Arguments:
@@ -441,11 +466,15 @@ This section introduce all available spark procedures about paimon.
          To compact_manifest the manifests. Arguments:
             <li>table: the target table identifier. Cannot be empty.</li>
             <li>options: the additional dynamic options of the table. It prioritizes higher than original `tableProp` and lower than `procedureArg`.</li>
-            <li>dry_run (Boolean, optional): when true, logs manifest metadata statistics without actually compacting. The result is printed to the application log; the SQL return value is still `true`.</li>
+            <li>dry_run (Boolean, optional): when true, logs manifest metadata statistics without actually compacting. When manifest sort is enabled, the log also contains the number of manifest files in each level built by manifest sort. The result is printed to the application log; the SQL return value is still `true`.</li>
+            <li>manifest_sort_enabled (Boolean, optional): whether to use manifest sort rewrite for this invocation.</li>
+            <li>manifest_sort_partition_field (String, optional): partition field used to sort manifest entries. Defaults to the first partition field.</li>
+            <li>manifest_sort_max_rewrite_size (String, optional): maximum manifest size rewritten by one sort pass.</li>
       </td>
       <td>
          CALL sys.compact_manifest(`table` => 'default.T')<br/>
-         CALL sys.compact_manifest(`table` => 'default.T', dry_run => true)
+         CALL sys.compact_manifest(`table` => 'default.T', dry_run => true)<br/>
+         CALL sys.compact_manifest(`table` => 'default.T', manifest_sort_enabled => true, manifest_sort_partition_field => 'dt', manifest_sort_max_rewrite_size => '1 gb')
       </td>
    </tr>
    <tr>
@@ -558,6 +587,18 @@ This section introduce all available spark procedures about paimon.
          CALL sys.drop_global_index(table => 'default.T', index_column => 'name', index_type => 'btree', partitions => 'pt=p1')<br/><br/>
          -- Preview what would be dropped without deleting<br/>
          CALL sys.drop_global_index(table => 'default.T', index_column => 'name', index_type => 'btree', dry_run => true)
+      </td>
+   </tr>
+   <tr>
+      <td>reassign_row_id</td>
+      <td>
+         To reassign row IDs for a data evolution table when partition row-id ranges overlap. The table must have <code>row-tracking.enabled=true</code> and <code>data-evolution.enabled=true</code>. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>partitions: partition filter to limit the partitions to reassign. The comma (",") represents "AND", the semicolon (";") represents "OR". Left empty for all partitions.</li>
+      </td>
+      <td>
+         CALL sys.reassign_row_id(table => 'default.T')<br/><br/>
+         CALL sys.reassign_row_id(table => 'default.T', partitions => 'dt=2026-05-19')
       </td>
    </tr>
    <tr>

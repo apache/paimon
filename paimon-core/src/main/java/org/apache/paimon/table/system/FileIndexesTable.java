@@ -67,7 +67,6 @@ import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -198,8 +197,6 @@ public class FileIndexesTable implements ReadonlyTable {
 
     private static class FileIndexesRead implements InnerTableRead {
 
-        private static final Set<String> SCAN_PUSHDOWN_FIELDS =
-                Collections.unmodifiableSet(new HashSet<>(Arrays.asList("partition", "bucket")));
         private static final Set<String> FILE_PUSHDOWN_FIELDS = Collections.singleton("file_path");
 
         private final FileStoreTable storeTable;
@@ -216,13 +213,7 @@ public class FileIndexesTable implements ReadonlyTable {
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
-            List<Predicate> remaining =
-                    PredicateBuilder.splitAnd(predicate).stream()
-                            .filter(
-                                    p ->
-                                            !(p instanceof LeafPredicate)
-                                                    || !onlyContainsFields(p, SCAN_PUSHDOWN_FIELDS))
-                            .collect(Collectors.toList());
+            List<Predicate> remaining = new ArrayList<>(PredicateBuilder.splitAnd(predicate));
             List<Predicate> filePredicates =
                     remaining.stream()
                             .filter(p -> onlyContainsFields(p, FILE_PUSHDOWN_FIELDS))

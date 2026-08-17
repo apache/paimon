@@ -23,6 +23,7 @@ import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.table.FileStoreTable;
 
+import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 
@@ -64,6 +65,55 @@ public class DataEvolutionDeleteSqlITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testMaterializeDeletionVectorsProcedure() throws Exception {
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        createTable();
+        sql("INSERT INTO T VALUES (1, 'one', 'A'), (2, 'two', 'A'), (3, 'three', 'A')");
+        sql("INSERT INTO T VALUES (4, 'four', 'B'), (5, 'five', 'B'), (6, 'six', 'B')");
+        sql("DELETE FROM T WHERE id IN (2, 4)");
+
+        FileStoreTable table = paimonTable("T");
+        assertThat(deletionVectorCardinality(table)).isEqualTo(2L);
+
+        sql("CALL sys.materialize_deletion_vectors(`table` => 'default.T')");
+
+        table = paimonTable("T");
+        assertThat(deletionVectorCardinality(table)).isZero();
+        assertThat(sql("SELECT id, name, dt FROM T ORDER BY id"))
+                .containsExactly(
+                        Row.of(1, "one", "A"),
+                        Row.of(3, "three", "A"),
+                        Row.of(5, "five", "B"),
+                        Row.of(6, "six", "B"));
+    }
+
+    @Test
+    public void testMaterializeDeletionVectorsForEmptyTable() throws Exception {
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        createTable();
+
+        assertThat(sql("CALL sys.materialize_deletion_vectors(`table` => 'default.T')"))
+                .containsExactly(Row.of("Success"));
+        assertThat(paimonTable("T").latestSnapshot()).isEmpty();
+    }
+
+    @Test
+    public void testCompactRejectsLegacyRowIdRewriteForEmptyTable() {
+        createTable();
+
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "CALL sys.compact(`table` => 'default.T', "
+                                                + "options => 'data-evolution.compaction.rewrite-row-ids=true')"))
+                .hasRootCauseMessage(
+                        "Option 'data-evolution.compaction.rewrite-row-ids=true' is no longer supported. "
+                                + "Data evolution compaction preserves row IDs and logical deletions. "
+                                + "Use the 'materialize_deletion_vectors' procedure to apply deletion "
+                                + "vectors to the latest table state and assign new row IDs.");
+    }
+
+    @Test
     public void testDeleteFromEmptyTable() throws Exception {
         createTable();
 
@@ -81,6 +131,22 @@ public class DataEvolutionDeleteSqlITCase extends CatalogITCaseBase {
         assertThatThrownBy(() -> sql("DELETE FROM T WHERE id = 1"))
                 .hasRootCauseMessage(
                         "Data-evolution delete requires deletion-vectors.enabled to be true.");
+    }
+
+    @Test
+    public void testResetDeletionVectorsAfterDelete() throws Exception {
+        createTable();
+        sql("INSERT INTO T VALUES (1, 'one', 'A'), (2, 'two', 'A'), (3, 'three', 'A')");
+        sql("DELETE FROM T WHERE id = 2");
+
+        assertThat(deletionVectorCardinality(paimonTable("T"))).isEqualTo(1L);
+        assertThatThrownBy(() -> sql("ALTER TABLE T RESET ('deletion-vectors.enabled')"))
+                .hasRootCauseMessage(
+                        "Cannot change deletion vectors mode from true to false. If modifying table "
+                                + "deletion-vectors mode without full-compaction, this may result in data "
+                                + "duplication. If you are confident, you can set table option "
+                                + "'deletion-vectors.modifiable' = 'true' to allow deletion vectors modification.");
+        assertThat(sql("SELECT id FROM T ORDER BY id")).containsExactly(Row.of(1), Row.of(3));
     }
 
     @Test

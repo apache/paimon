@@ -46,10 +46,11 @@ public abstract class ObjectsFile<T> implements SimpleFileReader<T> {
 
     protected final FileIO fileIO;
     protected final ObjectSerializer<T> serializer;
-    protected final FormatReaderFactory readerFactory;
     protected final FormatWriterFactory writerFactory;
     protected final String compression;
     protected final PathFactory pathFactory;
+
+    private final BiFunctionWithIOE<Path, Long, CloseableIterator<InternalRow>> iteratorFactory;
 
     @Nullable protected final ObjectsCache<Path, T, ?> cache;
 
@@ -62,9 +63,31 @@ public abstract class ObjectsFile<T> implements SimpleFileReader<T> {
             String compression,
             PathFactory pathFactory,
             @Nullable SegmentsCache<Path> cache) {
+        this(
+                fileIO,
+                serializer,
+                formatType,
+                (file, fileSize) ->
+                        FileUtils.createFormatReader(fileIO, readerFactory, file, fileSize)
+                                .toCloseableIterator(),
+                writerFactory,
+                compression,
+                pathFactory,
+                cache);
+    }
+
+    protected ObjectsFile(
+            FileIO fileIO,
+            ObjectSerializer<T> serializer,
+            RowType formatType,
+            BiFunctionWithIOE<Path, Long, CloseableIterator<InternalRow>> iteratorFactory,
+            FormatWriterFactory writerFactory,
+            String compression,
+            PathFactory pathFactory,
+            @Nullable SegmentsCache<Path> cache) {
         this.fileIO = fileIO;
         this.serializer = serializer;
-        this.readerFactory = readerFactory;
+        this.iteratorFactory = iteratorFactory;
         this.writerFactory = writerFactory;
         this.compression = compression;
         this.pathFactory = pathFactory;
@@ -200,8 +223,7 @@ public abstract class ObjectsFile<T> implements SimpleFileReader<T> {
 
     public CloseableIterator<InternalRow> createIterator(Path file, @Nullable Long fileSize)
             throws IOException {
-        return FileUtils.createFormatReader(fileIO, readerFactory, file, fileSize)
-                .toCloseableIterator();
+        return iteratorFactory.apply(file, fileSize);
     }
 
     public long fileSize(Path file) throws IOException {

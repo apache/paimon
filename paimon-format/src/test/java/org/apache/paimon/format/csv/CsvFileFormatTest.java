@@ -204,6 +204,32 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
     }
 
     @Test
+    public void testCsvFieldDelimiterFallbackKeys() throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.INT().notNull(), DataTypes.STRING());
+
+        List<InternalRow> testData =
+                Arrays.asList(
+                        GenericRow.of(1, BinaryString.fromString("Alice")),
+                        GenericRow.of(2, BinaryString.fromString("Bob")));
+
+        for (String fallbackKey : new String[] {"field-delimiter", "seq", "delimiter"}) {
+            Options options = new Options();
+            options.set(fallbackKey, ";");
+
+            assertThat(options.get(CsvOptions.FIELD_DELIMITER)).isEqualTo(";");
+
+            List<InternalRow> result =
+                    writeThenRead(options, rowType, rowType, testData, "test_" + fallbackKey);
+
+            assertThat(result).hasSize(2);
+            assertThat(result.get(0).getInt(0)).isEqualTo(1);
+            assertThat(result.get(0).getString(1).toString()).isEqualTo("Alice");
+            assertThat(result.get(1).getInt(0)).isEqualTo(2);
+            assertThat(result.get(1).getString(1).toString()).isEqualTo("Bob");
+        }
+    }
+
+    @Test
     public void testCsvLineDelimiterWriteRead() throws IOException {
         RowType rowType = DataTypes.ROW(DataTypes.INT().notNull(), DataTypes.STRING());
 
@@ -650,7 +676,11 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
                 format.createReaderFactory(fullRowType, readRowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(
-                                        fileIO, testFile, fileIO.getFileSize(testFile)))) {
+                                        fileIO,
+                                        testFile,
+                                        fileIO.getFileSize(testFile),
+                                        null,
+                                        null))) {
 
             InternalRowSerializer serializer = new InternalRowSerializer(readRowType);
             List<InternalRow> result = new ArrayList<>();
@@ -666,7 +696,7 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
                 format.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(
-                                        fileIO, testFile, fileIO.getFileSize(testFile)),
+                                        fileIO, testFile, fileIO.getFileSize(testFile), null, null),
                                 offset,
                                 length)) {
 

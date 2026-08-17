@@ -82,6 +82,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.File;
 import java.math.BigDecimal;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -1344,31 +1345,94 @@ public class IcebergCompatibilityTest {
         write.write(GenericRow.of(2.0, 200), 1);
         write.write(GenericRow.of(Double.NaN, 300), 1);
         commit.commit(1, write.prepareCommit(false, 1));
+
+        assertThat(readPartitionSummaries(table, 1))
+                .anySatisfy(
+                        summary -> {
+                            assertThat(summary.get("contains_nan")).isEqualTo(true);
+                            assertThat(readDoubleBound(summary, "lower_bound")).isEqualTo(1.0);
+                            assertThat(readDoubleBound(summary, "upper_bound")).isEqualTo(2.0);
+                        });
+
+        write.write(GenericRow.of(Double.NaN, 400), 1);
+        commit.commit(2, write.prepareCommit(false, 2));
         write.close();
         commit.close();
+
+        assertThat(readPartitionSummaries(table, 2))
+                .anySatisfy(
+                        summary -> {
+                            assertThat(summary.get("contains_nan")).isEqualTo(true);
+                            assertThat(summary.get("lower_bound")).isNull();
+                            assertThat(summary.get("upper_bound")).isNull();
+                        });
+    }
+
+    @Test
+    public void testNullPartitionValue() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.VARCHAR(10), DataTypes.INT()},
+                        new String[] {"pt", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType, Collections.singletonList("pt"), Collections.emptyList(), -1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(BinaryString.fromString("a"), 1), 1);
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        // every entry of this manifest has a null partition value, so its partition
+        // statistics are unknown and the summary must omit both bounds
+        write.write(GenericRow.of(null, 2), 1);
+        commit.commit(2, write.prepareCommit(false, 2));
 
         FileIO fileIO = table.fileIO();
         IcebergMetadata metadata =
                 IcebergMetadata.fromPath(
-                        fileIO, new Path(table.location(), "metadata/v1.metadata.json"));
-
-        String currentSnapshotManifest = metadata.currentSnapshot().manifestList();
-        File snapShotAvroFile = new File(currentSnapshotManifest);
-
-        boolean sawNanPartitionSummary = false;
+                        fileIO, new Path(table.location(), "metadata/v2.metadata.json"));
+        List<String> partitionSummaries = new ArrayList<>();
         try (DataFileReader<GenericRecord> dataFileReader =
                 new DataFileReader<>(
-                        new SeekableFileInput(snapShotAvroFile), new GenericDatumReader<>())) {
+                        new SeekableFileInput(new File(metadata.currentSnapshot().manifestList())),
+                        new GenericDatumReader<>())) {
             while (dataFileReader.hasNext()) {
-                GenericRecord record = dataFileReader.next();
-                String partitionSummary = record.get("partitions").toString();
-                if (partitionSummary.contains("contains_nan\": true")) {
-                    sawNanPartitionSummary = true;
-                }
+                partitionSummaries.add(dataFileReader.next().get("partitions").toString());
             }
         }
+        assertThat(partitionSummaries)
+                .anySatisfy(
+                        summary ->
+                                assertThat(summary)
+                                        .contains("\"contains_null\": true")
+                                        .contains("\"lower_bound\": null")
+                                        .contains("\"upper_bound\": null"));
+        // known bounds are still recorded for non-null partition values
+        assertThat(partitionSummaries)
+                .anySatisfy(
+                        summary ->
+                                assertThat(summary)
+                                        .contains("\"lower_bound\": \"a\"")
+                                        .contains("\"upper_bound\": \"a\""));
 
-        assertThat(sawNanPartitionSummary).isTrue();
+        write.write(GenericRow.of(BinaryString.fromString("b"), 3), 1);
+        commit.commit(3, write.prepareCommit(false, 3));
+
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(a, 1)", "Record(null, 2)", "Record(b, 3)");
+
+        // a non add-only commit reads the omitted bounds back from the base manifests
+        Map<String, String> partition = new HashMap<>();
+        partition.put("pt", "a");
+        commit.truncatePartitions(Collections.singletonList(partition));
+
+        assertThat(getIcebergResult()).containsExactlyInAnyOrder("Record(null, 2)", "Record(b, 3)");
+
+        write.close();
+        commit.close();
     }
 
     @Test
@@ -2581,6 +2645,32 @@ public class IcebergCompatibilityTest {
     private List<String> getIcebergResult() throws Exception {
         return getIcebergResult(
                 icebergTable -> IcebergGenerics.read(icebergTable).build(), Record::toString);
+    }
+
+    private List<GenericRecord> readPartitionSummaries(FileStoreTable table, long version)
+            throws Exception {
+        IcebergMetadata metadata =
+                IcebergMetadata.fromPath(
+                        table.fileIO(),
+                        new Path(table.location(), "metadata/v" + version + ".metadata.json"));
+        List<GenericRecord> partitionSummaries = new ArrayList<>();
+        try (DataFileReader<GenericRecord> dataFileReader =
+                new DataFileReader<>(
+                        new SeekableFileInput(new File(metadata.currentSnapshot().manifestList())),
+                        new GenericDatumReader<>())) {
+            while (dataFileReader.hasNext()) {
+                GenericRecord record = dataFileReader.next();
+                partitionSummaries.add((GenericRecord) ((List<?>) record.get("partitions")).get(0));
+            }
+        }
+        return partitionSummaries;
+    }
+
+    private double readDoubleBound(GenericRecord partitionSummary, String field) {
+        return ((ByteBuffer) partitionSummary.get(field))
+                .duplicate()
+                .order(ByteOrder.LITTLE_ENDIAN)
+                .getDouble();
     }
 
     private org.apache.iceberg.Table getIcebergTable() {

@@ -18,11 +18,14 @@
 
 package org.apache.paimon.fileindex;
 
+import org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndex;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -34,8 +37,11 @@ import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
 
+import static org.apache.paimon.fileindex.FileIndexResult.REMAIN;
+import static org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndexFactory.BLOOM_FILTER;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link FileIndexPredicate}. */
@@ -52,6 +58,27 @@ public class FileIndexPredicateTest {
         assertThat(requiredNames).containsExactlyInAnyOrder("a", "b");
         assertThat(left.visitCount).isEqualTo(1);
         assertThat(right.visitCount).isEqualTo(1);
+    }
+
+    @Test
+    public void testIsNaNWithBloomFilter() throws Exception {
+        RowType rowType = RowType.builder().field("d", DataTypes.DOUBLE()).build();
+        FileIndexWriter indexWriter =
+                new BloomFilterFileIndex(DataTypes.DOUBLE(), new Options()).createWriter();
+        indexWriter.writeRecord(Double.NaN);
+
+        Map<String, Map<String, byte[]>> indexes = new HashMap<>();
+        indexes.computeIfAbsent("d", column -> new HashMap<>())
+                .put(BLOOM_FILTER, indexWriter.serializedBytes());
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        try (FileIndexFormat.Writer writer = FileIndexFormat.createWriter(baos)) {
+            writer.writeColumnIndexes(indexes);
+        }
+
+        try (FileIndexPredicate predicate = new FileIndexPredicate(baos.toByteArray(), rowType)) {
+            assertThat(predicate.evaluate(new PredicateBuilder(rowType).isNaN(0))).isSameAs(REMAIN);
+        }
     }
 
     @SuppressWarnings("unchecked")

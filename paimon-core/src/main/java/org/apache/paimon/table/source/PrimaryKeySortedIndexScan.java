@@ -42,6 +42,7 @@ import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.FutureUtils;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.IndexFilePathFactories;
 import org.apache.paimon.utils.Pair;
@@ -54,6 +55,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
@@ -64,6 +66,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Supplier;
 
@@ -245,6 +248,8 @@ public final class PrimaryKeySortedIndexScan {
         }
 
         Map<PkSortedIndexGroup, SharedGlobalIndexReader> sharedReaders = new IdentityHashMap<>();
+        List<GlobalIndexEvaluator> evaluators = new ArrayList<>();
+        List<CompletableFuture<Optional<GlobalIndexResult>>> resultFutures = new ArrayList<>();
         List<EvaluatedFile> files = new ArrayList<>();
         try {
             for (FilePlan file : plan.files()) {
@@ -274,12 +279,22 @@ public final class PrimaryKeySortedIndexScan {
                                                                         totalRowCount));
                                         sharedReaders.put(indexGroup, reader);
                                     }
-                                    return Collections.singletonList(
-                                            fileLocalReader(file, group.get(), reader));
+                                    return Collections.singletonList(fileLocalReader(file, reader));
                                 });
+                evaluators.add(evaluator);
+                try {
+                    resultFutures.add(evaluator.evaluateAsync(predicate));
+                } catch (RuntimeException e) {
+                    rethrowIfInterrupted(e);
+                    resultFutures.add(FutureUtils.completedExceptionally(e));
+                }
+            }
+
+            for (int i = 0; i < plan.files().size(); i++) {
+                FilePlan file = plan.files().get(i);
                 Optional<GlobalIndexResult> result;
                 try {
-                    result = evaluator.evaluate(predicate);
+                    result = awaitEvaluation(resultFutures.get(i));
                 } catch (RuntimeException e) {
                     rethrowIfInterrupted(e);
                     LOG.warn(
@@ -288,35 +303,49 @@ public final class PrimaryKeySortedIndexScan {
                             file.dataFile().fileName(),
                             e);
                     result = Optional.empty();
-                } finally {
-                    evaluator.close();
                 }
                 files.add(new EvaluatedFile(file, result));
             }
         } finally {
+            IOUtils.closeAllQuietly(evaluators);
             IOUtils.closeAllQuietly(sharedReaders.values());
         }
         return new EvaluatedPlan(plan.snapshotId(), files);
     }
 
-    private static GlobalIndexReader fileLocalReader(
-            FilePlan file, PkSortedIndexGroup group, SharedGlobalIndexReader reader) {
-        List<PrimaryKeyIndexSourceFile> sourceFiles = group.sourceFiles();
-        PrimaryKeyIndexSourceFile target =
-                new PrimaryKeyIndexSourceFile(
-                        file.dataFile().fileName(), file.dataFile().rowCount());
-        int sourceIndex = -1;
-        for (int i = 0; i < sourceFiles.size(); i++) {
-            if (sourceFiles.get(i).equals(target)) {
-                sourceIndex = i;
-                break;
+    private static Optional<GlobalIndexResult> awaitEvaluation(
+            CompletableFuture<Optional<GlobalIndexResult>> future) {
+        try {
+            return future.get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted during index evaluation", e);
+        } catch (ExecutionException e) {
+            if (e.getCause() instanceof RuntimeException) {
+                throw (RuntimeException) e.getCause();
             }
+            if (e.getCause() instanceof Error) {
+                throw (Error) e.getCause();
+            }
+            throw new RuntimeException(e.getCause());
         }
+    }
+
+    private static GlobalIndexReader fileLocalReader(
+            FilePlan file, SharedGlobalIndexReader reader) {
+        DataFileMeta dataFile = file.dataFile();
+        SourceLocation sourceLocation = reader.sourceLocations.get(dataFile.fileName());
         checkArgument(
-                sourceIndex >= 0,
+                sourceLocation != null,
                 "Data file %s is not covered by its sorted-index source group.",
-                file.dataFile().fileName());
-        return new FileLocalGlobalIndexReader(reader, sourceIndex);
+                dataFile.fileName());
+        checkArgument(
+                dataFile.rowCount() == sourceLocation.rowCount,
+                "Data file %s row count %s does not match sorted-index source row count %s.",
+                dataFile.fileName(),
+                dataFile.rowCount(),
+                sourceLocation.rowCount);
+        return new FileLocalGlobalIndexReader(reader, sourceLocation.sourceIndex);
     }
 
     private static long totalRowCount(List<PrimaryKeyIndexSourceFile> sourceFiles) {
@@ -333,6 +362,17 @@ public final class PrimaryKeySortedIndexScan {
         }
     }
 
+    private static final class SourceLocation {
+
+        private final long rowCount;
+        private final int sourceIndex;
+
+        private SourceLocation(long rowCount, int sourceIndex) {
+            this.rowCount = rowCount;
+            this.sourceIndex = sourceIndex;
+        }
+    }
+
     /** Shares one source-group reader and its group-global query results across source files. */
     private static final class SharedGlobalIndexReader implements GlobalIndexReader {
 
@@ -342,6 +382,7 @@ public final class PrimaryKeySortedIndexScan {
                         CompletableFuture<Optional<GlobalIndexResult>>,
                         CompletableFuture<List<Optional<GlobalIndexResult>>>>
                 localizedResults;
+        private final Map<String, SourceLocation> sourceLocations;
         private final long[] sourceOffsets;
 
         private GlobalIndexReader reader;
@@ -353,10 +394,18 @@ public final class PrimaryKeySortedIndexScan {
             this.readerFactory = readerFactory;
             this.results = new ConcurrentHashMap<>();
             this.localizedResults = new ConcurrentHashMap<>();
+            this.sourceLocations = new HashMap<>();
             this.sourceOffsets = new long[sourceFiles.size() + 1];
             for (int i = 0; i < sourceFiles.size(); i++) {
-                sourceOffsets[i + 1] =
-                        Math.addExact(sourceOffsets[i], sourceFiles.get(i).rowCount());
+                PrimaryKeyIndexSourceFile sourceFile = sourceFiles.get(i);
+                checkArgument(
+                        sourceLocations.put(
+                                        sourceFile.fileName(),
+                                        new SourceLocation(sourceFile.rowCount(), i))
+                                == null,
+                        "Duplicate sorted-index source file %s.",
+                        sourceFile.fileName());
+                sourceOffsets[i + 1] = Math.addExact(sourceOffsets[i], sourceFile.rowCount());
             }
         }
 

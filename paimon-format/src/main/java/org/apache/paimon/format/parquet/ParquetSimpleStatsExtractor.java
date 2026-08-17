@@ -152,6 +152,10 @@ public class ParquetSimpleStatsExtractor implements SimpleStatsExtractor {
                                 binaryStats.genericGetMax().getBytes(),
                                 nullCount);
                 break;
+            case GEOMETRY:
+            case GEOGRAPHY:
+                fieldStats = new SimpleColStats(null, null, nullCount);
+                break;
             case BOOLEAN:
                 assertStatsClass(field, stats, BooleanStatistics.class);
                 BooleanStatistics boolStats = (BooleanStatistics) stats;

@@ -57,7 +57,8 @@ import scala.collection.JavaConverters._
 case class PaimonSparkWriter(
     table: FileStoreTable,
     writeRowTracking: Boolean = false,
-    batchId: Option[Long] = None)
+    batchId: Option[Long] = None,
+    ignorePreviousFiles: Boolean = false)
   extends WriteHelper {
 
   private lazy val tableSchema = table.schema
@@ -115,9 +116,13 @@ case class PaimonSparkWriter(
     PaimonSparkWriter(table.copy(singletonMap(WRITE_ONLY.key(), "true")))
   }
 
+  def withIgnorePreviousFiles(): PaimonSparkWriter = {
+    copy(ignorePreviousFiles = true)
+  }
+
   def withRowTracking(): PaimonSparkWriter = {
     if (coreOptions.rowTrackingEnabled()) {
-      PaimonSparkWriter(table, writeRowTracking = true)
+      PaimonSparkWriter(table, writeRowTracking = true, ignorePreviousFiles = ignorePreviousFiles)
     } else {
       this
     }
@@ -175,7 +180,8 @@ case class PaimonSparkWriter(
         fullCompactionDeltaCommits,
         batchId,
         uriReaderFactory,
-        postponePartitionBucketComputer
+        postponePartitionBucketComputer,
+        ignorePreviousFiles
       )
 
     def sparkParallelism = {

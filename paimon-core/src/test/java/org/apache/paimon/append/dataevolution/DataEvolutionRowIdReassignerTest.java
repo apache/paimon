@@ -133,7 +133,7 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
 
     @Test
     public void testProjectedPlannerBuildsExpectedPlan() throws Exception {
-        catalog.createTable(identifier(), projectedPlannerSchema(null), true);
+        catalog.createTable(identifier(), projectedPlannerSchema(), true);
         FileStoreTable table = getTableDefault();
         writeOneRow(table, "a", 0);
         writeOneRow(table, "b", 1);
@@ -155,7 +155,7 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
 
     @Test
     public void testProjectedPlannerAppliesPartitionPredicate() throws Exception {
-        catalog.createTable(identifier(), projectedPlannerSchema(null), true);
+        catalog.createTable(identifier(), projectedPlannerSchema(), true);
         FileStoreTable table = getTableDefault();
         writeOneRow(table, "a", 0);
         writeOneRow(table, "b", 1);
@@ -171,23 +171,6 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         assertThat(result.isEmpty()).isTrue();
         assertThat(result.manifestOrdinals).isEmpty();
         assertThat(result.totalOffset).isZero();
-    }
-
-    @Test
-    public void testProjectedPlannerReadsOrcManifest() throws Exception {
-        catalog.createTable(identifier(), projectedPlannerSchema("orc"), true);
-        FileStoreTable table = getTableDefault();
-        writeOneRow(table, "a", 0);
-        writeOneRow(table, "b", 1);
-        writeOneRow(table, "a", 2);
-
-        DataEvolutionRowIdAssignmentPlanner.Result result = planProjectedState(table, null);
-
-        assertThat(result.rowIdMappings).hasSize(1);
-        RowRangeMappingIndex mapping = result.rowIdMappings.values().iterator().next();
-        assertThat(mapping.map(new Range(0L, 0L))).hasValue(new Range(0L, 0L));
-        assertThat(mapping.map(new Range(2L, 2L))).hasValue(new Range(1L, 1L));
-        assertThat(result.totalOffset).isEqualTo(2L);
     }
 
     @Test
@@ -217,7 +200,7 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         return state.plan(groups);
     }
 
-    private Schema projectedPlannerSchema(String manifestFormat) {
+    private Schema projectedPlannerSchema() {
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("pt", DataTypes.STRING());
         schemaBuilder.column("id", DataTypes.INT());
@@ -225,9 +208,6 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         schemaBuilder.partitionKeys("pt");
         schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
-        if (manifestFormat != null) {
-            schemaBuilder.option(CoreOptions.MANIFEST_FORMAT.key(), manifestFormat);
-        }
         return schemaBuilder.build();
     }
 
@@ -304,35 +284,6 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                 compactPlanView(table, metasWithoutPartitionStats, null);
         Optional<AssignmentPlanView> legacyPlan =
                 legacyPlanView(table, metasWithoutPartitionStats, null);
-        assertPlanViewsEqual(compactPlan, legacyPlan);
-        assertThat(compactPlan).isPresent();
-    }
-
-    @Test
-    public void testCompactAndLegacyPlansMatchForOrcManifests() throws Exception {
-        Schema base = schemaDefault();
-        Map<String, String> options = new HashMap<>(base.options());
-        options.put(CoreOptions.MANIFEST_FORMAT.key(), "orc");
-        catalog.createTable(
-                identifier(),
-                new Schema(
-                        base.fields(),
-                        base.partitionKeys(),
-                        base.primaryKeys(),
-                        options,
-                        base.comment()),
-                true);
-        FileStoreTable table = getTableDefault();
-        writeOneRow(table, "a", 0);
-        writeOneRow(table, "b", 1);
-        writeOneRow(table, "a", 2);
-
-        Snapshot snapshot = table.snapshotManager().latestSnapshot();
-        ManifestList manifestList = table.store().manifestListFactory().create();
-        List<ManifestFileMeta> manifestMetas = manifestList.readDataManifests(snapshot);
-
-        Optional<AssignmentPlanView> compactPlan = compactPlanView(table, manifestMetas, null);
-        Optional<AssignmentPlanView> legacyPlan = legacyPlanView(table, manifestMetas, null);
         assertPlanViewsEqual(compactPlan, legacyPlan);
         assertThat(compactPlan).isPresent();
     }

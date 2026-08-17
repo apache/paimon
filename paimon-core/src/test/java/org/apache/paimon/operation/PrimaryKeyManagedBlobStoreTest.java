@@ -39,6 +39,9 @@ import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.paimon.mergetree.compact.FirstRowMergeFunction;
+import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.postpone.PostponeBucketWriter;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.Schema;
@@ -354,6 +357,59 @@ class PrimaryKeyManagedBlobStoreTest {
     }
 
     @Test
+    void testFirstRowManagedBlobKeepsFirstValue() throws Exception {
+        FileIO fileIO = LocalFileIO.create();
+        TestFileStore store = createFirstRowStore(fileIO);
+        byte[] first = "first".getBytes(StandardCharsets.UTF_8);
+        byte[] second = "second".getBytes(StandardCharsets.UTF_8);
+
+        try (IOManager ioManager = IOManager.create(tempDir.resolve("io").toString())) {
+            commitFirstRowData(
+                    store,
+                    ioManager,
+                    Collections.singletonList(keyValue(1, RowKind.INSERT, first)),
+                    0L);
+            ManifestEntry firstFile = store.newScan().plan().files().get(0);
+            ManagedBlobReferenceFile.Reference firstReference =
+                    references(fileIO, store, firstFile).get(0);
+
+            commitFirstRowData(
+                    store,
+                    ioManager,
+                    Collections.singletonList(keyValue(1, RowKind.UPDATE_AFTER, second)),
+                    1L);
+            List<ManifestEntry> filesBeforeCompaction = store.newScan().plan().files();
+            assertThat(filesBeforeCompaction).hasSize(2);
+            ManagedBlobReferenceFile.Reference secondReference = null;
+            for (ManifestEntry file : filesBeforeCompaction) {
+                for (ManagedBlobReferenceFile.Reference reference :
+                        references(fileIO, store, file)) {
+                    if (!reference.equals(firstReference)) {
+                        secondReference = reference;
+                    }
+                }
+            }
+            assertThat(secondReference).isNotNull();
+            assertThat(secondReference).isNotEqualTo(firstReference);
+
+            KeyValue read =
+                    store.readKvsFromSnapshot(store.snapshotManager().latestSnapshotId()).get(0);
+            assertThat(read.value().getBlob(1).toData()).isEqualTo(first);
+
+            forceFullCompaction(store, ioManager);
+
+            List<ManifestEntry> files = store.newScan().plan().files();
+            assertThat(files).hasSize(1);
+            List<ManagedBlobReferenceFile.Reference> compactedReferences =
+                    references(fileIO, store, files.get(0));
+            assertThat(compactedReferences).containsExactly(firstReference);
+            assertThat(compactedReferences).doesNotContain(secondReference);
+            read = store.readKvsFromSnapshot(store.snapshotManager().latestSnapshotId()).get(0);
+            assertThat(read.value().getBlob(1).toData()).isEqualTo(first);
+        }
+    }
+
+    @Test
     void testCompactionRebuildsExactBlobReferences() throws Exception {
         FileIO fileIO = LocalFileIO.create();
         TestFileStore store = createStore(fileIO);
@@ -480,6 +536,22 @@ class PrimaryKeyManagedBlobStoreTest {
         return createStore(fileIO, "payloads", DataTypes.MAP(DataTypes.STRING(), DataTypes.BLOB()));
     }
 
+    private TestFileStore createFirstRowStore(FileIO fileIO) throws Exception {
+        return createStore(
+                fileIO,
+                "payload",
+                DataTypes.BLOB(),
+                1,
+                options -> {
+                    options.put(
+                            CoreOptions.MERGE_ENGINE.key(),
+                            CoreOptions.MergeEngine.FIRST_ROW.toString());
+                    options.put(
+                            CoreOptions.CHANGELOG_PRODUCER.key(),
+                            CoreOptions.ChangelogProducer.NONE.toString());
+                });
+    }
+
     private TestFileStore createStore(FileIO fileIO, String payloadName, DataType payloadType)
             throws Exception {
         return createStore(fileIO, payloadName, payloadType, 1);
@@ -487,6 +559,16 @@ class PrimaryKeyManagedBlobStoreTest {
 
     private TestFileStore createStore(
             FileIO fileIO, String payloadName, DataType payloadType, int bucket) throws Exception {
+        return createStore(fileIO, payloadName, payloadType, bucket, ignored -> {});
+    }
+
+    private TestFileStore createStore(
+            FileIO fileIO,
+            String payloadName,
+            DataType payloadType,
+            int bucket,
+            java.util.function.Consumer<Map<String, String>> optionsCustomizer)
+            throws Exception {
         Path tablePath = new Path(tempDir.toUri());
         List<DataField> valueFields =
                 Arrays.asList(
@@ -504,6 +586,13 @@ class PrimaryKeyManagedBlobStoreTest {
         options.put(CoreOptions.BUCKET.key(), String.valueOf(bucket));
         options.put(CoreOptions.BLOB_FIELD.key(), payloadName);
         options.put(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "1 b");
+        optionsCustomizer.accept(options);
+        MergeFunctionFactory<KeyValue> mergeFunctionFactory =
+                CoreOptions.MergeEngine.FIRST_ROW
+                                .toString()
+                                .equals(options.get(CoreOptions.MERGE_ENGINE.key()))
+                        ? FirstRowMergeFunction.factory(Options.fromMap(options))
+                        : DeduplicateMergeFunction.factory();
         TableSchema schema =
                 new SchemaManager(fileIO, tablePath)
                         .createTable(
@@ -535,7 +624,7 @@ class PrimaryKeyManagedBlobStoreTest {
                         keyType,
                         valueType,
                         extractor,
-                        DeduplicateMergeFunction.factory(),
+                        mergeFunctionFactory,
                         schema)
                 .build();
     }
@@ -557,9 +646,35 @@ class PrimaryKeyManagedBlobStoreTest {
         return ManagedBlobReferenceFile.read(fileIO, sidecar);
     }
 
-    private void forceFullCompaction(TestFileStore store) throws Exception {
+    private void commitFirstRowData(
+            TestFileStore store, IOManager ioManager, List<KeyValue> kvs, long identifier)
+            throws Exception {
         AbstractFileStoreWrite<KeyValue> write = store.newWrite();
         try {
+            write.withIOManager(ioManager);
+            for (KeyValue kv : kvs) {
+                write.write(BinaryRow.EMPTY_ROW, 0, kv);
+            }
+            List<CommitMessage> messages = write.prepareCommit(false, identifier);
+            try (FileStoreCommit commit = store.newCommit()) {
+                commit.commit(new ManifestCommittable(identifier, null, messages), false);
+            }
+        } finally {
+            write.close();
+        }
+    }
+
+    private void forceFullCompaction(TestFileStore store) throws Exception {
+        forceFullCompaction(store, null);
+    }
+
+    private void forceFullCompaction(
+            TestFileStore store, @javax.annotation.Nullable IOManager ioManager) throws Exception {
+        AbstractFileStoreWrite<KeyValue> write = store.newWrite();
+        try {
+            if (ioManager != null) {
+                write.withIOManager(ioManager);
+            }
             write.compact(BinaryRow.EMPTY_ROW, 0, true);
             List<CommitMessage> messages = write.prepareCommit(true, 1000L);
             try (FileStoreCommit commit = store.newCommit()) {

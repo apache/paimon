@@ -30,6 +30,8 @@ import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.GeographyType;
+import org.apache.paimon.types.GeometryType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
@@ -83,6 +85,16 @@ public class ArrowFieldTypeConversion {
         public FieldType visit(VarBinaryType varBinaryType) {
             return new FieldType(
                     varBinaryType.isNullable(), Types.MinorType.VARBINARY.getType(), null);
+        }
+
+        @Override
+        public FieldType visit(GeometryType geometryType) {
+            throw new UnsupportedOperationException("Unsupported primitive type: " + geometryType);
+        }
+
+        @Override
+        public FieldType visit(GeographyType geographyType) {
+            throw new UnsupportedOperationException("Unsupported primitive type: " + geographyType);
         }
 
         @Override

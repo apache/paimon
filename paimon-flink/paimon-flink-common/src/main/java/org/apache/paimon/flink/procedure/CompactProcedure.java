@@ -64,7 +64,8 @@ public class CompactProcedure extends ProcedureBase {
                 @ArgumentHint(
                         name = "compact_strategy",
                         type = @DataTypeHint("STRING"),
-                        isOptional = true)
+                        isOptional = true),
+                @ArgumentHint(name = "buckets", type = @DataTypeHint("STRING"), isOptional = true)
             })
     public String[] call(
             ProcedureContext procedureContext,
@@ -75,7 +76,8 @@ public class CompactProcedure extends ProcedureBase {
             String tableOptions,
             String where,
             String partitionIdleTime,
-            String compactStrategy)
+            String compactStrategy,
+            String buckets)
             throws Exception {
         Map<String, String> catalogOptions = catalog.options();
         Map<String, String> tableConf =
@@ -117,6 +119,10 @@ public class CompactProcedure extends ProcedureBase {
         } else {
             throw new IllegalArgumentException(
                     "You must specify 'order strategy' and 'order by columns' both.");
+        }
+
+        if (buckets != null) {
+            action.withBucketsExpression(buckets);
         }
 
         if (!(isNullOrWhitespaceOnly(partitions))) {

@@ -31,6 +31,8 @@ import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.GeographyType;
+import org.apache.paimon.types.GeometryType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
@@ -153,6 +155,23 @@ public class DataTypeToLogicalType implements DataTypeVisitor<LogicalType> {
         // TODO introduce blob type in Flink SQL?
         return new org.apache.flink.table.types.logical.VarBinaryType(
                 org.apache.flink.table.types.logical.VarBinaryType.MAX_LENGTH);
+    }
+
+    @Override
+    public LogicalType visit(GeometryType geometryType) {
+        throw unsupportedGeospatialType(geometryType);
+    }
+
+    @Override
+    public LogicalType visit(GeographyType geographyType) {
+        throw unsupportedGeospatialType(geographyType);
+    }
+
+    private UnsupportedOperationException unsupportedGeospatialType(DataType dataType) {
+        return new UnsupportedOperationException(
+                "Flink SQL does not support Paimon geospatial type "
+                        + dataType.asSQLString()
+                        + ". Exposing it as VARBINARY would lose its CRS and edge algorithm.");
     }
 
     @Override

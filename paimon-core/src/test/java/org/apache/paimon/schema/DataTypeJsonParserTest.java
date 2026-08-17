@@ -31,7 +31,10 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
+import org.apache.paimon.types.EdgeAlgorithm;
 import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.GeographyType;
+import org.apache.paimon.types.GeometryType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
@@ -114,6 +117,14 @@ public class DataTypeJsonParserTest {
                 TestSpec.forString("TIMESTAMP_LTZ(3)").expectType(new LocalZonedTimestampType(3)),
                 TestSpec.forString("VARIANT").expectType(new VariantType()),
                 TestSpec.forString("BLOB").expectType(new BlobType()),
+                TestSpec.forString("GEOMETRY")
+                        .expectType(new GeometryType(GeometryType.DEFAULT_CRS)),
+                TestSpec.forString("geometry(ogc:crs84) NOT NULL")
+                        .expectType(new GeometryType(false, "OGC:CRS84")),
+                TestSpec.forString("GEOGRAPHY")
+                        .expectType(new GeographyType(GeographyType.DEFAULT_CRS)),
+                TestSpec.forString("GEOGRAPHY(EPSG:4326, karney)")
+                        .expectType(new GeographyType("EPSG:4326", EdgeAlgorithm.KARNEY)),
                 TestSpec.forString("VECTOR<FLOAT, 3>")
                         .expectType(DataTypes.VECTOR(3, DataTypes.FLOAT())),
                 TestSpec.forString("VECTOR<INT, 5> NOT NULL")
@@ -198,7 +209,9 @@ public class DataTypeJsonParserTest {
 
                 TestSpec.forString("VARCHAR(test)").expectErrorMessage("<LITERAL_INT> expected"),
                 TestSpec.forString("VARCHAR(33333333333)")
-                        .expectErrorMessage("Invalid integer value"));
+                        .expectErrorMessage("Invalid integer value"),
+                TestSpec.forString("GEOGRAPHY(OGC:CRS84, rhumb)")
+                        .expectErrorMessage("Invalid edge interpolation algorithm"));
     }
 
     @ParameterizedTest(name = "{index}: [From: {0}, To: {1}]")

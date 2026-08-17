@@ -211,6 +211,11 @@ public final class DataTypeCasts {
             return true;
         }
 
+        if (sourceType.isAnyOf(DataTypeRoot.GEOMETRY, DataTypeRoot.GEOGRAPHY)
+                || targetType.isAnyOf(DataTypeRoot.GEOMETRY, DataTypeRoot.GEOGRAPHY)) {
+            return false;
+        }
+
         return compatibleCastingRules
                 .get(targetType.getTypeRoot())
                 .contains(sourceType.getTypeRoot());
@@ -228,6 +233,11 @@ public final class DataTypeCasts {
         // ignore nullability during compare
         if (sourceType.copy(true).equals(targetType.copy(true))) {
             return true;
+        }
+
+        if (sourceType.isAnyOf(DataTypeRoot.GEOMETRY, DataTypeRoot.GEOGRAPHY)
+                || targetType.isAnyOf(DataTypeRoot.GEOMETRY, DataTypeRoot.GEOGRAPHY)) {
+            return false;
         }
 
         final DataTypeRoot sourceRoot = sourceType.getTypeRoot();

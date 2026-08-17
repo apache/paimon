@@ -53,9 +53,7 @@ import org.apache.paimon.operation.commit.ManifestEntryChanges;
 import org.apache.paimon.operation.commit.RetryCommitResult;
 import org.apache.paimon.operation.commit.RetryCommitResult.CommitFailRetryResult;
 import org.apache.paimon.operation.commit.RetryCommitResult.ManifestMergeResult;
-import org.apache.paimon.operation.commit.RowIdColumnConflictChecker;
 import org.apache.paimon.operation.commit.RowIdConflictChecker;
-import org.apache.paimon.operation.commit.RowIdRangeConflictChecker;
 import org.apache.paimon.operation.commit.RowTrackingCommitUtils.RowTrackingAssigned;
 import org.apache.paimon.operation.commit.StrictModeChecker;
 import org.apache.paimon.operation.commit.SuccessCommitResult;
@@ -113,7 +111,6 @@ import static org.apache.paimon.manifest.ManifestEntry.nullableRecordCount;
 import static org.apache.paimon.manifest.ManifestEntry.recordCountAdd;
 import static org.apache.paimon.manifest.ManifestEntry.recordCountDelete;
 import static org.apache.paimon.operation.commit.ManifestEntryChanges.changedPartitions;
-import static org.apache.paimon.operation.commit.RowIdConflictChecker.TriggerSource.MATERIALIZE_DV_COMPACTION;
 import static org.apache.paimon.operation.commit.RowTrackingCommitUtils.assignRowTracking;
 import static org.apache.paimon.partition.PartitionPredicate.createBinaryPartitions;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
@@ -1057,25 +1054,15 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     retryResult instanceof CommitFailRetryResult
                             ? (CommitFailRetryResult) retryResult
                             : null;
-            // An overwrite may replace the base manifest list without recording the replacements
-            // in its delta manifest, so the cached base cannot always be refreshed incrementally.
-            if (commitFailRetry != null
-                    && commitFailRetry.latestSnapshot != null
-                    && commitFailRetry.baseDataFiles != null
-                    && !hasOverwriteSinceLastAttempt) {
-                baseDataFiles = new ArrayList<>(commitFailRetry.baseDataFiles);
-                List<SimpleFileEntry> incremental =
-                        scanner.readIncrementalChanges(
-                                commitFailRetry.latestSnapshot, latestSnapshot, changedPartitions);
-                if (!incremental.isEmpty()) {
-                    baseDataFiles.addAll(incremental);
-                    baseDataFiles = new ArrayList<>(FileEntry.mergeEntries(baseDataFiles));
-                }
-            } else {
-                baseDataFiles =
-                        scanner.readAllEntriesFromChangedPartitions(
-                                latestSnapshot, changedPartitions);
-            }
+            baseDataFiles =
+                    conflictDetection.scanBaseDataFiles(
+                            latestSnapshot,
+                            changedPartitions,
+                            deltaFiles,
+                            indexFiles,
+                            commitKind,
+                            commitFailRetry,
+                            hasOverwriteSinceLastAttempt);
             if (discardDuplicate) {
                 Set<FileEntry.Identifier> baseIdentifiers =
                         baseDataFiles.stream()
@@ -1086,36 +1073,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 .filter(entry -> !baseIdentifiers.contains(entry.identifier()))
                                 .collect(Collectors.toList());
             }
-            RowIdConflictChecker rowIdConflictChecker = null;
-            if (conflictDetection.shouldCheckRowIdFromSnapshot(commitKind)) {
-                List<DataFileMeta> rowIdConflictFiles;
-                if (conflictDetection.rowIdConflictCheckTriggerSource()
-                        == MATERIALIZE_DV_COMPACTION) {
-                    // For materialize dv compaction jobs, we should check each deleted file range
-                    // will not be erroneously restored by concurrent merg-into updates.
-                    rowIdConflictFiles =
-                            deltaFiles.stream()
-                                    .filter(entry -> entry.kind() == FileKind.DELETE)
-                                    .map(ManifestEntry::file)
-                                    .filter(file -> file.firstRowId() != null)
-                                    .filter(
-                                            file ->
-                                                    !isBlobFile(file.fileName())
-                                                            && !isVectorStoreFile(file.fileName()))
-                                    .collect(Collectors.toList());
-
-                    rowIdConflictChecker =
-                            RowIdRangeConflictChecker.fromDataFiles(rowIdConflictFiles);
-                } else {
-                    rowIdConflictFiles =
-                            deltaFiles.stream()
-                                    .map(ManifestEntry::file)
-                                    .collect(Collectors.toList());
-                    rowIdConflictChecker =
-                            RowIdColumnConflictChecker.fromDataFiles(
-                                    schemaManager, rowIdConflictFiles);
-                }
-            }
+            RowIdConflictChecker rowIdConflictChecker =
+                    conflictDetection.createRowIdConflictChecker(
+                            schemaManager, deltaFiles, commitKind);
             Optional<RuntimeException> exception =
                     conflictDetection.checkConflicts(
                             latestSnapshot,
@@ -1629,16 +1589,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 manifestList.readDataManifests(latestSnapshot);
         List<ManifestFileMeta> mergeAfterManifests;
 
-        // the fist trial: use a copied options with forced full compaction settings
-        Options compactOptions = Options.fromMap(options.toMap());
-        compactOptions.set(CoreOptions.MANIFEST_MERGE_MIN_COUNT, 1);
-        compactOptions.set(CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE, MemorySize.ofBytes(1));
         mergeAfterManifests =
                 ManifestFileMerger.merge(
                         mergeBeforeManifests,
                         manifestFile,
                         partitionType,
-                        new CoreOptions(compactOptions),
+                        manifestCompactionOptions(options, mergeBeforeManifests, partitionType),
                         ioManager);
 
         if (new HashSet<>(mergeBeforeManifests).equals(new HashSet<>(mergeAfterManifests))) {
@@ -1675,6 +1631,20 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         null);
 
         return commitSnapshotImpl(latestSnapshot, newSnapshot, emptyList());
+    }
+
+    static CoreOptions manifestCompactionOptions(
+            CoreOptions options, List<ManifestFileMeta> manifests, RowType partitionType) {
+        // Use a copied options with forced full compaction settings for the legacy merge path.
+        // Manifest sort has its own full/minor picking strategy and should respect its configured
+        // thresholds.
+        Options compactOptions = Options.fromMap(options.toMap());
+        if (!ManifestFileMerger.canUseManifestSort(manifests, partitionType, options)) {
+            compactOptions.set(CoreOptions.MANIFEST_MERGE_MIN_COUNT, 1);
+            compactOptions.set(
+                    CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE, MemorySize.ofBytes(1));
+        }
+        return new CoreOptions(compactOptions);
     }
 
     private boolean commitSnapshotImpl(

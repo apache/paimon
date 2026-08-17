@@ -24,6 +24,7 @@ import pyarrow as pa
 from pypaimon import CatalogFactory, Schema
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.read.native_plan import native_family_search_modes_available
+from pypaimon.table.row.blob import BlobDescriptor
 from pypaimon.utils.range import Range
 
 
@@ -211,6 +212,21 @@ class NativePlanIntegrationTest(unittest.TestCase):
             for split in blob_plan.splits()
             for data_file in split.files
         ))
+
+        descriptor_table = native_table.copy({'blob-as-descriptor': 'true'})
+        descriptor_builder = (
+            descriptor_table.new_read_builder()
+            .with_projection(['media.camera'])
+            .with_limit(1))
+        descriptor_plan = descriptor_builder.new_scan().plan()
+        descriptor_rows = descriptor_builder.new_read().to_arrow(
+            descriptor_plan.splits()).to_pylist()
+        self.assertEqual(len(descriptor_plan.splits()), 1)
+        self.assertEqual(
+            BlobDescriptor.deserialize(descriptor_rows[0]['media.camera']).length,
+            1,
+        )
+        self.assertTrue(descriptor_builder.explain().native_planned)
 
     @unittest.skipUnless(_has_native_row_ranges(),
                          "pypaimon_rust row-range API not installed")

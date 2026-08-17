@@ -586,7 +586,9 @@ public class FieldAggregatorTest {
                         DataTypeRoot.ARRAY,
                         DataTypeRoot.VECTOR,
                         DataTypeRoot.VARIANT,
-                        DataTypeRoot.BLOB));
+                        DataTypeRoot.BLOB,
+                        DataTypeRoot.GEOMETRY,
+                        DataTypeRoot.GEOGRAPHY));
         assertThat(sampledRoots)
                 .as("a comparable type root must be covered here and in InternalRowUtils.compare")
                 .isEqualTo(expectedRoots);
@@ -604,6 +606,8 @@ public class FieldAggregatorTest {
                         DataTypes.ROW(DataTypes.FIELD(0, "f0", DataTypes.INT())),
                         DataTypes.VARIANT(),
                         DataTypes.BLOB(),
+                        DataTypes.GEOMETRY(),
+                        DataTypes.GEOGRAPHY(),
                         DataTypes.VECTOR(3, DataTypes.FLOAT()))) {
             assertThatThrownBy(() -> new FieldMaxAggFactory().create(incomparable, null, "label"))
                     .isInstanceOf(IllegalArgumentException.class)

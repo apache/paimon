@@ -114,6 +114,7 @@ const sidebars = {
     },
     "items": [
       "multimodal-table/data-evolution",
+      "multimodal-table/variant",
       "multimodal-table/blob",
       "multimodal-table/vector",
       {
@@ -251,7 +252,6 @@ const sidebars = {
       "maintenance/rescale-bucket",
       "maintenance/manage-tags",
       "maintenance/metrics",
-      "maintenance/manage-privileges",
       "maintenance/manage-branches",
       "maintenance/manage-partitions",
       "maintenance/configurations"

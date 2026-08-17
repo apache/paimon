@@ -32,6 +32,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -173,10 +174,47 @@ class RawFileSplitReadTest {
         assertThat(count).hasValue(10);
     }
 
+    @Test
+    void testTableReadSharesBatchSizer() throws Exception {
+        FileStoreTable table = createTable("dynamic-batch-size", 20);
+        ReadBatchSizer sizer = new ReadBatchSizer();
+        sizer.setBatchSize(5);
+        InnerTableRead read = table.newRead().withReadBatchSizer(sizer);
+
+        try (RecordReader<InternalRow> reader = read.createReader(singleSplit(table))) {
+            assertThat(readBatchSize(reader)).isEqualTo(5);
+
+            sizer.setBatchSize(2);
+            assertThat(readBatchSize(reader)).isEqualTo(2);
+
+            sizer.setBatchSize(8);
+            assertThat(readBatchSize(reader)).isEqualTo(8);
+        }
+    }
+
+    private static int readBatchSize(RecordReader<InternalRow> reader) throws Exception {
+        RecordReader.RecordIterator<InternalRow> batch = reader.readBatch();
+        assertThat(batch).isNotNull();
+        int count = 0;
+        while (batch.next() != null) {
+            count++;
+        }
+        batch.releaseBatch();
+        return count;
+    }
+
     private FileStoreTable createTable(String directory) throws Exception {
         return createTable(
                 directory,
                 Collections.singletonList(GenericRow.of(BinaryString.fromString("value"), 42)));
+    }
+
+    private FileStoreTable createTable(String directory, int rowCount) throws Exception {
+        List<InternalRow> rows = new ArrayList<>();
+        for (int i = 0; i < rowCount; i++) {
+            rows.add(GenericRow.of(BinaryString.fromString("value"), i + 42));
+        }
+        return createTable(directory, rows);
     }
 
     private FileStoreTable createTable(String directory, List<? extends InternalRow> rows)
@@ -186,6 +224,7 @@ class RawFileSplitReadTest {
         options.set(CoreOptions.PATH, tablePath.toString());
         options.set(CoreOptions.BUCKET, 1);
         options.set(CoreOptions.BUCKET_KEY, "first");
+        options.set(CoreOptions.READ_BATCH_SIZE, 8);
         Schema schema =
                 Schema.newBuilder()
                         .column("first", DataTypes.STRING())
