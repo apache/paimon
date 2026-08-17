@@ -61,6 +61,16 @@ class OptionalDataSketchesDependencyTest(unittest.TestCase):
             else:
                 raise AssertionError(
                     "theta_sketch should require datasketches")
+
+            hll_agg = create_field_aggregator(
+                AtomicType("VARBINARY"), "value", "hll_sketch", options)
+            try:
+                hll_agg.agg(b"first", b"second")
+            except ImportError as exc:
+                assert "pypaimon[hll-sketch]" in str(exc)
+            else:
+                raise AssertionError(
+                    "hll_sketch should require datasketches")
             """
         )
         env = os.environ.copy()
