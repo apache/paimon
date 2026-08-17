@@ -33,6 +33,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.ResolvedFieldPath;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
@@ -207,13 +208,13 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
 
         /** The primary index column. */
         DataField indexField(RowType rowType) {
-            return rowType.getField(indexFieldId);
+            return resolveFieldPath(rowType, indexFieldId).leafField();
         }
 
         /** The extra columns beyond the primary one; empty for a single-column index. */
         List<DataField> extraFields(RowType rowType) {
             return fieldIds.subList(1, fieldIds.size()).stream()
-                    .map(rowType::getField)
+                    .map(fieldId -> resolveFieldPath(rowType, fieldId).leafField())
                     .collect(Collectors.toList());
         }
     }
@@ -281,7 +282,12 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             return Optional.empty();
         }
 
-        DataField indexField = table.rowType().getField(topN.orders().get(0).field().name());
+        Optional<ResolvedFieldPath> fieldPath =
+                ResolvedFieldPath.resolve(table.rowType(), topN.orders().get(0).field().name());
+        if (!fieldPath.isPresent()) {
+            return Optional.empty();
+        }
+        DataField indexField = fieldPath.get().leafField();
         int fieldId = indexField.id();
         @Nullable Snapshot snapshot = tryTravelOrLatest(table);
         List<IndexFileMeta> indexFiles =
@@ -384,7 +390,7 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
             return Optional.of(GlobalIndexResult.createEmpty());
         }
         String fieldName = topN.orders().get(0).field().name();
-        if (!rowType.containsField(fieldName)) {
+        if (!ResolvedFieldPath.resolve(rowType, fieldName).isPresent()) {
             return Optional.empty();
         }
         return globalIndexEvaluator.evaluateTopN(topN);
@@ -410,7 +416,12 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
     public GlobalIndexResult unindexedRows(TopN topN) {
         String fieldName = topN.orders().get(0).field().name();
         RoaringNavigableMap64 rows = new RoaringNavigableMap64();
-        for (Range range : coverage.unindexedRanges(rowType.getField(fieldName).id())) {
+        int fieldId =
+                ResolvedFieldPath.resolve(rowType, fieldName)
+                        .orElseThrow(() -> new RuntimeException("Cannot find field: " + fieldName))
+                        .leafField()
+                        .id();
+        for (Range range : coverage.unindexedRanges(fieldId)) {
             rows.addRange(range);
         }
         return GlobalIndexResult.create(rows);
@@ -465,13 +476,23 @@ public class DataEvolutionGlobalIndexScanner implements Closeable {
                                             table.name(),
                                             indexType,
                                             group.fieldIds.stream()
-                                                    .map(rowType::getField)
-                                                    .map(DataField::name)
+                                                    .map(
+                                                            fieldId ->
+                                                                    resolveFieldPath(
+                                                                                    rowType,
+                                                                                    fieldId)
+                                                                            .fullName())
                                                     .collect(Collectors.toList()),
                                             duration / 1_000_000)));
         }
 
         return readers;
+    }
+
+    private static ResolvedFieldPath resolveFieldPath(RowType rowType, int fieldId) {
+        return ResolvedFieldPath.resolve(rowType, fieldId)
+                .orElseThrow(
+                        () -> new RuntimeException("Cannot find field by field id: " + fieldId));
     }
 
     private GlobalIndexIOMeta toGlobalMeta(IndexFileMeta meta) {

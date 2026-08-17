@@ -28,6 +28,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.ResolvedFieldPath;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RowRangeIndex;
 
@@ -69,12 +70,14 @@ public class GenericGlobalIndexScanner implements Serializable {
         checkArgument(!indexColumns.isEmpty(), "Index columns must not be empty.");
         List<DataField> indexFields = new ArrayList<>(indexColumns.size());
         for (String indexColumn : indexColumns) {
+            Optional<ResolvedFieldPath> resolvedFieldPath =
+                    ResolvedFieldPath.resolve(table.rowType(), indexColumn);
             checkArgument(
-                    table.rowType().containsField(indexColumn),
+                    resolvedFieldPath.isPresent(),
                     "Column '%s' does not exist in table '%s'.",
                     indexColumn,
                     table.fullName());
-            indexFields.add(table.rowType().getField(indexColumn));
+            indexFields.add(resolvedFieldPath.get().leafField());
         }
         this.indexType = indexType;
         this.indexFields = Collections.unmodifiableList(indexFields);

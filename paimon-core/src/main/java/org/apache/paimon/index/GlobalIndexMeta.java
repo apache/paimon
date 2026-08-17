@@ -22,6 +22,7 @@ import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.ResolvedFieldPath;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 
@@ -132,14 +133,14 @@ public class GlobalIndexMeta {
     public List<DataField> getIndexedFields(RowType rowType) {
         List<DataField> fields = new ArrayList<>();
         for (int id : getIndexedFieldIds()) {
-            fields.add(rowType.getField(id));
+            fields.add(resolveFieldPath(rowType, id).leafField());
         }
         return fields;
     }
 
     /** The primary index column. */
     public DataField getIndexField(RowType rowType) {
-        return rowType.getField(indexFieldId);
+        return resolveFieldPath(rowType, indexFieldId).leafField();
     }
 
     /** The extra columns beyond the primary one; empty for a single-column index. */
@@ -147,7 +148,7 @@ public class GlobalIndexMeta {
         List<DataField> fields = new ArrayList<>();
         if (extraFieldIds != null) {
             for (int id : extraFieldIds) {
-                fields.add(rowType.getField(id));
+                fields.add(resolveFieldPath(rowType, id).leafField());
             }
         }
         return fields;
@@ -156,9 +157,24 @@ public class GlobalIndexMeta {
     public List<String> getIndexedFieldNames(RowType rowType) {
         List<String> names = new ArrayList<>();
         for (int id : getIndexedFieldIds()) {
-            names.add(rowType.getField(id).name());
+            names.add(resolveFieldPath(rowType, id).fullName());
         }
         return names;
+    }
+
+    /** The top-level fields containing the indexed fields, in index column order. */
+    public List<String> getIndexedTopLevelFieldNames(RowType rowType) {
+        List<String> names = new ArrayList<>();
+        for (int id : getIndexedFieldIds()) {
+            names.add(resolveFieldPath(rowType, id).topLevelField().name());
+        }
+        return names;
+    }
+
+    private static ResolvedFieldPath resolveFieldPath(RowType rowType, int fieldId) {
+        return ResolvedFieldPath.resolve(rowType, fieldId)
+                .orElseThrow(
+                        () -> new RuntimeException("Cannot find field by field id: " + fieldId));
     }
 
     @Override

@@ -30,6 +30,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.types.ResolvedFieldPath;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ParameterUtils;
@@ -95,16 +96,15 @@ public class DropGlobalIndexProcedure extends ProcedureBase {
                         .filter(s -> !s.isEmpty())
                         .collect(Collectors.toList());
         checkArgument(!indexColumns.isEmpty(), "At least one column required.");
+        List<ResolvedFieldPath> indexFieldPaths = new ArrayList<>(indexColumns.size());
         for (String col : indexColumns) {
-            checkArgument(
-                    rowType.containsField(col),
-                    "Column '%s' does not exist in table '%s'.",
-                    col,
-                    tableId);
+            ResolvedFieldPath path = ResolvedFieldPath.resolve(rowType, col).orElse(null);
+            checkArgument(path != null, "Column '%s' does not exist in table '%s'.", col, tableId);
+            indexFieldPaths.add(path);
         }
         final List<Integer> indexFieldIds =
-                indexColumns.stream()
-                        .map(col -> rowType.getField(col).id())
+                indexFieldPaths.stream()
+                        .map(path -> path.leafField().id())
                         .collect(Collectors.toList());
         final String columnsDesc = String.join(",", indexColumns);
 

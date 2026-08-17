@@ -34,6 +34,7 @@ import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.ResultEntry;
+import org.apache.paimon.globalindex.RowIdIndexFieldsExtractor;
 import org.apache.paimon.globalindex.ScanResult;
 import org.apache.paimon.globalindex.generic.GenericGlobalIndexScanner;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
@@ -51,9 +52,9 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.ResolvedFieldPath;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
-import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.Range;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -219,13 +220,18 @@ public class GenericIndexTopoBuilder {
                 indexColumns);
 
         RowType rowType = table.rowType();
-        DataField indexField = rowType.getField(indexColumn);
-        List<DataField> extraFields =
-                extraColumns.stream().map(rowType::getField).collect(Collectors.toList());
-        // Project indexColumns + _ROW_ID so we can read the actual row ID from data
-        List<String> readColumns = new ArrayList<>(indexColumns);
-        readColumns.add(SpecialFields.ROW_ID.name());
-        RowType projectedRowType = SpecialFields.rowTypeWithRowId(rowType).project(readColumns);
+        List<ResolvedFieldPath> indexFieldPaths =
+                ResolvedFieldPath.resolveAll(rowType, indexColumns).get();
+        List<DataField> indexFields =
+                indexFieldPaths.stream()
+                        .map(ResolvedFieldPath::leafField)
+                        .collect(Collectors.toList());
+        DataField indexField = indexFields.get(0);
+        List<DataField> extraFields = new ArrayList<>(indexFields.subList(1, indexFields.size()));
+        // Nested values are extracted from the projected parent ROW fields in the build operator.
+        RowType projectedRowType =
+                SpecialFields.rowTypeWithRowId(
+                        ResolvedFieldPath.projectTopLevel(rowType, indexFieldPaths));
 
         Options mergedOptions = new Options(table.options(), userOptions.toMap());
         byte[] sourceMeta =
@@ -371,10 +377,8 @@ public class GenericIndexTopoBuilder {
 
         private transient TableRead tableRead;
         private transient List<DataField> indexedFields;
-        private transient InternalRow.FieldGetter[] indexFieldGetters;
-        private transient int rowIdFieldIndex;
+        private transient RowIdIndexFieldsExtractor indexFieldsExtractor;
         private transient boolean multiColumn;
-        private transient ProjectedRow writerProjection;
 
         BuildIndexOperator(
                 ReadBuilder readBuilder,
@@ -404,22 +408,15 @@ public class GenericIndexTopoBuilder {
             this.indexedFields = new ArrayList<>(1 + extraFields.size());
             indexedFields.add(indexField);
             indexedFields.addAll(extraFields);
-            this.indexFieldGetters = new InternalRow.FieldGetter[indexedFields.size()];
-            for (int i = 0; i < indexedFields.size(); i++) {
-                DataField field = indexedFields.get(i);
-                indexFieldGetters[i] =
-                        InternalRow.createFieldGetter(
-                                field.type(), projectedRowType.getFieldIndex(field.name()));
+            List<String> indexFieldPaths = new ArrayList<>(indexedFields.size());
+            for (DataField field : indexedFields) {
+                indexFieldPaths.add(
+                        ResolvedFieldPath.resolve(projectedRowType, field.id()).get().fullName());
             }
-            this.rowIdFieldIndex = projectedRowType.getFieldIndex(SpecialFields.ROW_ID.name());
+            this.indexFieldsExtractor =
+                    new RowIdIndexFieldsExtractor(
+                            projectedRowType, Collections.emptyList(), indexFieldPaths);
             this.multiColumn = !extraFields.isEmpty();
-            if (multiColumn) {
-                int[] projection = new int[indexedFields.size()];
-                for (int i = 0; i < indexedFields.size(); i++) {
-                    projection[i] = projectedRowType.getFieldIndex(indexedFields.get(i).name());
-                }
-                this.writerProjection = ProjectedRow.from(projection);
-            }
         }
 
         @Override
@@ -450,7 +447,7 @@ public class GenericIndexTopoBuilder {
                         CloseableIterator<InternalRow> iter = reader.toCloseableIterator()) {
                     while (iter.hasNext()) {
                         InternalRow row = iter.next();
-                        long currentRowId = row.getLong(rowIdFieldIndex);
+                        long currentRowId = indexFieldsExtractor.extractRowId(row);
 
                         if (currentRowId < lastRowId) {
                             throw new IllegalStateException(
@@ -473,11 +470,10 @@ public class GenericIndexTopoBuilder {
                             long rowId = currentRowId - shardRange.from;
                             if (multiColumn) {
                                 ((GlobalIndexMultiColumnWriter) indexWriter)
-                                        .write(rowId, writerProjection.replaceRow(row));
+                                        .write(rowId, indexFieldsExtractor.extractIndexFields(row));
                             } else {
-                                Object fieldData = indexFieldGetters[0].getFieldOrNull(row);
                                 ((GlobalIndexSingleColumnWriter) indexWriter)
-                                        .write(fieldData, rowId);
+                                        .write(indexFieldsExtractor.extractIndexField(row), rowId);
                             }
                             rowsSeen++;
                         }

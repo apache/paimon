@@ -30,6 +30,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.types.ResolvedFieldPath;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.StringUtils;
@@ -127,16 +128,21 @@ public class DropGlobalIndexProcedure extends BaseProcedure {
                         FileStoreTable table = (FileStoreTable) t;
 
                         RowType rowType = table.rowType();
+                        List<ResolvedFieldPath> indexFieldPaths =
+                                new ArrayList<>(indexColumns.size());
                         for (String col : indexColumns) {
+                            ResolvedFieldPath path =
+                                    ResolvedFieldPath.resolve(rowType, col).orElse(null);
                             checkArgument(
-                                    rowType.containsField(col),
+                                    path != null,
                                     "Column '%s' does not exist in table '%s'.",
                                     col,
                                     tableIdent);
+                            indexFieldPaths.add(path);
                         }
                         List<Integer> indexFieldIds =
-                                indexColumns.stream()
-                                        .map(col -> rowType.getField(col).id())
+                                indexFieldPaths.stream()
+                                        .map(path -> path.leafField().id())
                                         .collect(Collectors.toList());
                         DataSourceV2Relation relation = createRelation(tableIdent);
                         PartitionPredicate partitionPredicate =

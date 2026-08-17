@@ -18,6 +18,7 @@
 
 package org.apache.paimon.predicate;
 
+import org.apache.paimon.types.ResolvedFieldPath;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
@@ -46,9 +47,8 @@ public interface PredicateVisitor<T> {
         }
         Set<Integer> fieldIds = new HashSet<>();
         for (String name : collectFieldNames(predicate)) {
-            if (rowType.containsField(name)) {
-                fieldIds.add(rowType.getField(name).id());
-            }
+            ResolvedFieldPath.resolve(rowType, name)
+                    .ifPresent(path -> fieldIds.add(path.leafField().id()));
         }
         return fieldIds;
     }

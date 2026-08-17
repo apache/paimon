@@ -38,6 +38,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.types.ResolvedFieldPath;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
@@ -390,7 +391,8 @@ public class DataEvolutionBatchScan implements DataTableScan {
         if (topN == null
                 || pushDownLimit != null
                 || globalIndexResult != null
-                || !table.rowType().containsField(topN.orders().get(0).field().name())) {
+                || !ResolvedFieldPath.resolve(table.rowType(), topN.orders().get(0).field().name())
+                        .isPresent()) {
             return false;
         }
         CoreOptions options = table.coreOptions();

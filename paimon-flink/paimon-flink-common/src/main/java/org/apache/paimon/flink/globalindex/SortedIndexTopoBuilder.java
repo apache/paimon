@@ -38,6 +38,7 @@ import org.apache.paimon.flink.utils.BoundedOneInputOperator;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
+import org.apache.paimon.globalindex.RowIdIndexFieldsExtractor;
 import org.apache.paimon.globalindex.ScanResult;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexWriter;
@@ -58,6 +59,7 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.ResolvedFieldPath;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 
@@ -90,6 +92,7 @@ public class SortedIndexTopoBuilder {
 
     private static final String BUILD_TASK_ID_FIELD = "_SORTED_INDEX_BUILD_TASK_ID";
     private static final int BUILD_TASK_ID_FIELD_ID = -1;
+    private static final String INDEX_KEY_FIELD = "_SORTED_INDEX_KEY";
     private static final HashSet<String> SUPPORTED_INDEX_TYPES =
             new HashSet<>(Arrays.asList("btree", "bitmap"));
 
@@ -162,16 +165,25 @@ public class SortedIndexTopoBuilder {
                 continue;
             }
 
-            // 2. Select necessary columns (index field + ROW_ID)
-            List<String> selectedColumns = new ArrayList<>();
-            selectedColumns.add(indexColumn);
-
+            // 2. Read the top-level parent ROW and flatten the nested leaf before sorting.
+            ResolvedFieldPath indexFieldPath =
+                    ResolvedFieldPath.resolve(table.rowType(), indexColumn).get();
+            RowType sourceReadType =
+                    SpecialFields.rowTypeWithRowId(
+                            ResolvedFieldPath.projectTopLevel(
+                                    table.rowType(), Collections.singletonList(indexFieldPath)));
             RowType dataReadType =
-                    SpecialFields.rowTypeWithRowId(table.rowType().project(selectedColumns));
+                    SpecialFields.rowTypeWithRowId(
+                            new RowType(
+                                    Collections.singletonList(
+                                            new DataField(
+                                                    indexFieldPath.leafField().id(),
+                                                    INDEX_KEY_FIELD,
+                                                    indexFieldPath.leafField().type()))));
             String buildTaskIdField = buildTaskIdFieldName(dataReadType);
             RowType sortReadType = withBuildTaskId(dataReadType, buildTaskIdField);
             int taskIdPos = sortReadType.getFieldIndex(buildTaskIdField);
-            int indexFieldPos = sortReadType.getFieldIndex(indexColumn);
+            int indexFieldPos = sortReadType.getFieldIndex(INDEX_KEY_FIELD);
             int rowIdPos = sortReadType.getFieldIndex(SpecialFields.ROW_ID.name());
             DataType indexFieldType = sortReadType.getTypeAt(indexFieldPos);
 
@@ -183,8 +195,16 @@ public class SortedIndexTopoBuilder {
 
             // 4. Build one topology for all contiguous row ranges
             CoreOptions coreOptions = table.coreOptions();
-            ReadBuilder readBuilder = table.newReadBuilder().withReadType(dataReadType);
-            List<String> sortColumns = createSortColumns(buildTaskIdField, indexColumn);
+            ReadBuilder readBuilder = table.newReadBuilder().withReadType(sourceReadType);
+            RowIdIndexFieldsExtractor indexFieldsExtractor =
+                    new RowIdIndexFieldsExtractor(
+                            sourceReadType,
+                            Collections.emptyList(),
+                            ResolvedFieldPath.resolve(
+                                            sourceReadType, indexFieldPath.leafField().id())
+                                    .get()
+                                    .fullName());
+            List<String> sortColumns = createSortColumns(buildTaskIdField, INDEX_KEY_FIELD);
             int partitionFieldSize = table.partitionKeys().size();
             BinaryRowSerializer binaryRowSerializer = new BinaryRowSerializer(partitionFieldSize);
             List<SortedBuildTask> buildTasks = new ArrayList<>();
@@ -218,6 +238,7 @@ public class SortedIndexTopoBuilder {
                             buildTasks,
                             splitTasks,
                             readBuilder,
+                            indexFieldsExtractor,
                             new SortedGlobalIndexWriter(table, indexType, userOptions)
                                     .withIndexField(indexColumn),
                             scanResult.scanSnapshotId(),
@@ -297,6 +318,7 @@ public class SortedIndexTopoBuilder {
             List<SortedBuildTask> buildTasks,
             List<SortedSplitTask> splitTasks,
             ReadBuilder readBuilder,
+            RowIdIndexFieldsExtractor indexFieldsExtractor,
             SortedGlobalIndexWriter indexWriter,
             long scanSnapshotId,
             int partitionFieldSize,
@@ -322,7 +344,7 @@ public class SortedIndexTopoBuilder {
                         .transform(
                                 "Read Data",
                                 InternalTypeInfo.of(LogicalTypeConversion.toLogicalType(readType)),
-                                new ReadDataOperator(readBuilder))
+                                new ReadDataOperator(readBuilder, indexFieldsExtractor))
                         .setParallelism(parallelism);
 
         TableSortInfo sortInfo =
@@ -393,6 +415,13 @@ public class SortedIndexTopoBuilder {
         return new RowType(readType.isNullable(), fields);
     }
 
+    static InternalRow flattenIndexRow(
+            RowIdIndexFieldsExtractor indexFieldsExtractor, InternalRow row) {
+        return GenericRow.of(
+                indexFieldsExtractor.extractIndexField(row),
+                indexFieldsExtractor.extractRowId(row));
+    }
+
     private static void commit(
             FileStoreTable table, DataStream<Committable> written, String commitUser) {
         OneInputStreamOperatorFactory<Committable, Committable> committerOperator =
@@ -419,11 +448,14 @@ public class SortedIndexTopoBuilder {
         private static final long serialVersionUID = 1L;
 
         private final ReadBuilder readBuilder;
+        private final RowIdIndexFieldsExtractor indexFieldsExtractor;
 
         private transient TableRead tableRead;
 
-        public ReadDataOperator(ReadBuilder readBuilder) {
+        public ReadDataOperator(
+                ReadBuilder readBuilder, RowIdIndexFieldsExtractor indexFieldsExtractor) {
             this.readBuilder = readBuilder;
+            this.indexFieldsExtractor = indexFieldsExtractor;
         }
 
         @Override
@@ -441,7 +473,12 @@ public class SortedIndexTopoBuilder {
                         row ->
                                 output.collect(
                                         new StreamRecord<>(
-                                                new FlinkRowData(new JoinedRow(taskId, row)))));
+                                                new FlinkRowData(
+                                                        new JoinedRow(
+                                                                taskId,
+                                                                flattenIndexRow(
+                                                                        indexFieldsExtractor,
+                                                                        row))))));
             }
         }
     }

@@ -23,6 +23,7 @@ import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.types.ResolvedFieldPath;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -72,6 +73,36 @@ public class SortedGlobalIndexITCase extends CatalogITCaseBase {
 
         // assert select with filter
         assertThat(sql("SELECT * FROM T WHERE id = 100")).containsOnly(Row.of(100, "name_100"));
+    }
+
+    @Test
+    public void testNestedBTreeIndex() throws Catalog.TableNotExistException {
+        sql(
+                "CREATE TABLE T_NESTED (id INT, profile ROW<zip INT, city STRING>) WITH ("
+                        + "'global-index.enabled' = 'true', "
+                        + "'row-tracking.enabled' = 'true', "
+                        + "'data-evolution.enabled' = 'true'"
+                        + ")");
+        sql("INSERT INTO T_NESTED VALUES (1, ROW(100, 'a')), (2, ROW(200, 'b'))");
+        sql(
+                "CALL sys.create_global_index(`table` => 'default.T_NESTED', "
+                        + "index_column => 'profile.zip', index_type => 'btree')");
+
+        FileStoreTable table = paimonTable("T_NESTED");
+        List<IndexFileMeta> btreeEntries =
+                table.store().newIndexFileHandler().scanEntries().stream()
+                        .map(IndexManifestEntry::indexFile)
+                        .filter(f -> "btree".equals(f.indexType()))
+                        .collect(Collectors.toList());
+        int zipFieldId =
+                ResolvedFieldPath.resolve(table.rowType(), "profile.zip").get().leafField().id();
+
+        assertThat(btreeEntries).hasSize(1);
+        assertThat(btreeEntries.get(0).rowCount()).isEqualTo(2L);
+        assertThat(btreeEntries.get(0).globalIndexMeta()).isNotNull();
+        assertThat(btreeEntries.get(0).globalIndexMeta().indexFieldId()).isEqualTo(zipFieldId);
+        assertThat(sql("SELECT * FROM T_NESTED WHERE profile.zip = 200"))
+                .containsOnly(Row.of(2, Row.of(200, "b")));
     }
 
     @Test

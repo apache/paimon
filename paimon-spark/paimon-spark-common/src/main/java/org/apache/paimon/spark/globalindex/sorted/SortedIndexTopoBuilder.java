@@ -34,12 +34,14 @@ import org.apache.paimon.spark.SparkRow;
 import org.apache.paimon.spark.globalindex.GlobalIndexTopologyBuilder;
 import org.apache.paimon.spark.util.ScanPlanHelper$;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.ResolvedFieldPath;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.Range;
@@ -70,6 +72,7 @@ import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.splitByConti
 /** The {@link GlobalIndexTopologyBuilder} for sorted indexes. */
 public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
 
+    private static final String INDEX_KEY_FIELD = "_SORTED_INDEX_KEY";
     private static final HashSet<String> SUPPORTED_INDEX_TYPES =
             new HashSet<>(Arrays.asList("btree", "bitmap"));
 
@@ -88,9 +91,11 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
             DataField indexField,
             Options options)
             throws IOException {
+        ResolvedFieldPath indexFieldPath =
+                ResolvedFieldPath.resolve(table.rowType(), indexField.id()).get();
         SortedGlobalIndexScanner indexScanner =
                 new SortedGlobalIndexScanner(table, indexType, options)
-                        .withIndexField(indexField.name());
+                        .withIndexField(indexFieldPath.fullName());
         if (partitionPredicate != null) {
             indexScanner = indexScanner.withPartitionPredicate(partitionPredicate);
         }
@@ -113,20 +118,26 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
             return Collections.emptyList();
         }
 
-        List<String> selectedColumns = new ArrayList<>(readType.getFieldNames());
+        RowType flattenedReadType =
+                SpecialFields.rowTypeWithRowId(
+                        new RowType(
+                                Collections.singletonList(
+                                        new DataField(
+                                                indexField.id(),
+                                                INDEX_KEY_FIELD,
+                                                indexField.type()))));
 
         // Calculate maximum parallelism bound
         long recordsPerRange = options.get(SortedIndexOptions.SORTED_INDEX_RECORDS_PER_RANGE);
         int maxParallelism = options.get(SortedIndexOptions.SORTED_INDEX_BUILD_MAX_PARALLELISM);
 
         List<CommitMessage> allMessages = new ArrayList<>();
-        List<String> sortColumns = new ArrayList<>();
-        sortColumns.add(indexField.name());
+        List<String> sortColumns = Collections.singletonList(INDEX_KEY_FIELD);
         final int partitionKeyNum = table.partitionKeys().size();
         BinaryRowSerializer binaryRowSerializer = new BinaryRowSerializer(partitionKeyNum);
         SortedGlobalIndexWriter indexWriter =
                 new SortedGlobalIndexWriter(table, indexType, options)
-                        .withIndexField(indexField.name());
+                        .withIndexField(indexFieldPath.fullName());
         for (Map.Entry<BinaryRow, Map<Range, List<Split>>> partitionEntry :
                 partitionRangeSplits.entrySet()) {
             for (Map.Entry<Range, List<Split>> entry : partitionEntry.getValue().entrySet()) {
@@ -146,12 +157,13 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
 
                 Dataset<Row> selected =
                         source.select(
-                                selectedColumns.stream()
-                                        .map(functions::col)
-                                        .toArray(Column[]::new));
+                                indexColumn(indexFieldPath).alias(INDEX_KEY_FIELD),
+                                quotedColumn(SpecialFields.ROW_ID.name()));
 
                 Column[] sortFields =
-                        sortColumns.stream().map(functions::col).toArray(Column[]::new);
+                        sortColumns.stream()
+                                .map(SortedIndexTopoBuilder::quotedColumn)
+                                .toArray(Column[]::new);
 
                 Dataset<Row> partitioned =
                         selected.repartitionByRange(partitionNum, sortFields)
@@ -163,7 +175,7 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
                 JavaRDD<byte[]> written =
                         partitioned
                                 .javaRDD()
-                                .map(row -> (InternalRow) (new SparkRow(readType, row)))
+                                .map(row -> (InternalRow) (new SparkRow(flattenedReadType, row)))
                                 .mapPartitions(
                                         (FlatMapFunction<Iterator<InternalRow>, byte[]>)
                                                 iter ->
@@ -189,6 +201,19 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
                             CompactIncrement.emptyIncrement()));
         }
         return allMessages;
+    }
+
+    static Column indexColumn(ResolvedFieldPath fieldPath) {
+        List<String> fieldNames = fieldPath.fieldNames();
+        Column column = quotedColumn(fieldNames.get(0));
+        for (int i = 1; i < fieldNames.size(); i++) {
+            column = column.getField(fieldNames.get(i));
+        }
+        return column;
+    }
+
+    private static Column quotedColumn(String fieldName) {
+        return functions.col("`" + fieldName.replace("`", "``") + "`");
     }
 
     private static Iterator<byte[]> buildSortedIndex(

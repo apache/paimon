@@ -29,6 +29,7 @@ import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.ResolvedFieldPath;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ProcedureUtils;
 import org.apache.paimon.utils.StringUtils;
@@ -44,6 +45,7 @@ import org.apache.spark.sql.types.StructType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -150,12 +152,17 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                         // frameworks. Whether multiple columns are supported, and any practical
                         // limit, is decided by each index type (single-column types reject
                         // multi-column via UnsupportedOperationException).
+                        List<ResolvedFieldPath> indexFieldPaths =
+                                new ArrayList<>(indexColumns.size());
                         for (String col : indexColumns) {
+                            ResolvedFieldPath path =
+                                    ResolvedFieldPath.resolve(rowType, col).orElse(null);
                             checkArgument(
-                                    rowType.containsField(col),
+                                    path != null,
                                     "Column '%s' does not exist in table '%s'.",
                                     col,
                                     tableIdent);
+                            indexFieldPaths.add(path);
                         }
                         DataSourceV2Relation relation = createRelation(tableIdent, sparkTable);
                         PartitionPredicate partitionPredicate =
@@ -163,10 +170,11 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                                         partitions, table, spark());
 
                         List<DataField> indexFields =
-                                indexColumns.stream()
-                                        .map(rowType::getField)
+                                indexFieldPaths.stream()
+                                        .map(ResolvedFieldPath::leafField)
                                         .collect(Collectors.toList());
-                        RowType projectedRowType = rowType.project(indexColumns);
+                        RowType projectedRowType =
+                                ResolvedFieldPath.projectTopLevel(rowType, indexFieldPaths);
                         RowType readRowType = SpecialFields.rowTypeWithRowId(projectedRowType);
 
                         Options userOptions = createUserOptions(table, optionString);

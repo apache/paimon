@@ -34,7 +34,9 @@ import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.memory.MemorySlice;
@@ -52,6 +54,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.ResolvedFieldPath;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 
@@ -240,6 +243,37 @@ public class SortedGlobalIndexScannerTest extends TableTestBase {
         Assertions.assertFalse(
                 builder.incrementalScan().isPresent(),
                 "incrementalScan should return empty when all data is already indexed");
+    }
+
+    @Test
+    public void testIncrementalScanMatchesNestedIndexField() throws Exception {
+        FileStoreTable table = writeNestedRows();
+        DataField indexField =
+                ResolvedFieldPath.resolve(table.rowType(), "profile.zip").get().leafField();
+        IndexFileMeta indexFile =
+                new IndexFileMeta(
+                        "btree",
+                        "nested-index",
+                        1L,
+                        10L,
+                        new GlobalIndexMeta(0, 9, indexField.id(), null, null),
+                        null);
+        CommitMessage message =
+                new CommitMessageImpl(
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        null,
+                        DataIncrement.indexIncrement(Collections.singletonList(indexFile)),
+                        CompactIncrement.emptyIncrement());
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(Collections.singletonList(message));
+        }
+
+        assertThat(
+                        new SortedGlobalIndexScanner(table, "btree")
+                                .withIndexField("profile.zip")
+                                .incrementalScan())
+                .isEmpty();
     }
 
     @Test
@@ -432,6 +466,34 @@ public class SortedGlobalIndexScannerTest extends TableTestBase {
                 commit.commit(messages);
             }
         }
+    }
+
+    private FileStoreTable writeNestedRows() throws Exception {
+        Schema schema =
+                Schema.newBuilder()
+                        .column(
+                                "profile",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(0, "city", DataTypes.STRING()),
+                                        DataTypes.FIELD(1, "zip", DataTypes.INT())))
+                        .option(CoreOptions.BUCKET.key(), "-1")
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .build();
+        catalog.createTable(identifier("NestedSortedTable"), schema, false);
+        FileStoreTable table = getTable(identifier("NestedSortedTable"));
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite()) {
+            for (int i = 0; i < 10; i++) {
+                write.write(
+                        GenericRow.of(
+                                GenericRow.of(BinaryString.fromString("city-" + i), i * 100)));
+            }
+            try (BatchTableCommit commit = builder.newCommit()) {
+                commit.commit(write.prepareCommit());
+            }
+        }
+        return table;
     }
 
     private void setFirstRowId(List<CommitMessage> messages, long firstRowId) {

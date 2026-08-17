@@ -19,9 +19,14 @@
 package org.apache.paimon.globalindex.generic;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.globalindex.ScanResult;
+import org.apache.paimon.index.GlobalIndexMeta;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
@@ -30,12 +35,18 @@ import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.ResolvedFieldPath;
 import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -88,6 +99,19 @@ public class GenericGlobalIndexScannerTest extends TableTestBase {
     }
 
     @Test
+    public void testIncrementalScanMatchesNestedIndexFields() throws Exception {
+        FileStoreTable table = writeNestedRows();
+        List<String> indexColumns = Arrays.asList("profile.zip", "profile.city");
+        commitIndex(table, "test-index", indexColumns);
+
+        assertThat(
+                        new GenericGlobalIndexScanner(table)
+                                .withIndex("test-index", indexColumns, new Options())
+                                .incrementalScan())
+                .isEmpty();
+    }
+
+    @Test
     public void testScanEmptyTable() throws Exception {
         createTableDefault();
 
@@ -107,5 +131,59 @@ public class GenericGlobalIndexScannerTest extends TableTestBase {
             }
         }
         return table;
+    }
+
+    private FileStoreTable writeNestedRows() throws Exception {
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column(
+                                "profile",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(0, "city", DataTypes.STRING()),
+                                        DataTypes.FIELD(1, "zip", DataTypes.INT())))
+                        .option(CoreOptions.BUCKET.key(), "-1")
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .build();
+        catalog.createTable(identifier("NestedTable"), schema, false);
+        FileStoreTable table = getTable(identifier("NestedTable"));
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = builder.newWrite()) {
+            for (int i = 0; i < 10; i++) {
+                write.write(
+                        GenericRow.of(
+                                i, GenericRow.of(BinaryString.fromString("city-" + i), i * 100)));
+            }
+            try (BatchTableCommit commit = builder.newCommit()) {
+                commit.commit(write.prepareCommit());
+            }
+        }
+        return table;
+    }
+
+    private void commitIndex(FileStoreTable table, String indexType, List<String> indexColumns)
+            throws Exception {
+        List<DataField> fields =
+                indexColumns.stream()
+                        .map(column -> ResolvedFieldPath.resolve(table.rowType(), column).get())
+                        .map(ResolvedFieldPath::leafField)
+                        .collect(Collectors.toList());
+        int[] extraFieldIds =
+                fields.subList(1, fields.size()).stream().mapToInt(DataField::id).toArray();
+        GlobalIndexMeta globalIndexMeta =
+                new GlobalIndexMeta(0, 9, fields.get(0).id(), extraFieldIds, null);
+        IndexFileMeta indexFile =
+                new IndexFileMeta(indexType, "nested-index", 1L, 10L, globalIndexMeta, null);
+        CommitMessageImpl message =
+                new CommitMessageImpl(
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        null,
+                        DataIncrement.indexIncrement(Collections.singletonList(indexFile)),
+                        CompactIncrement.emptyIncrement());
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(Collections.singletonList(message));
+        }
     }
 }

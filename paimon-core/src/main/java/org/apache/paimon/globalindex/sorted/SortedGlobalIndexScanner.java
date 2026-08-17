@@ -30,6 +30,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.ResolvedFieldPath;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.Range;
@@ -76,12 +77,14 @@ public class SortedGlobalIndexScanner implements Serializable {
     }
 
     public SortedGlobalIndexScanner withIndexField(String indexField) {
+        Optional<ResolvedFieldPath> resolvedFieldPath =
+                ResolvedFieldPath.resolve(rowType, indexField);
         checkArgument(
-                rowType.containsField(indexField),
+                resolvedFieldPath.isPresent(),
                 "Column '%s' does not exist in table '%s'.",
                 indexField,
                 table.fullName());
-        this.indexField = rowType.getField(indexField);
+        this.indexField = resolvedFieldPath.get().leafField();
         return this;
     }
 

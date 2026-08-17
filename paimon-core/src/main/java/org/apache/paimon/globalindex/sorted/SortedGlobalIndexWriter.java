@@ -34,6 +34,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.ResolvedFieldPath;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 
@@ -43,6 +44,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Optional;
 
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.createIndexWriter;
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.toIndexFileMetas;
@@ -76,12 +78,14 @@ public class SortedGlobalIndexWriter implements Serializable {
     }
 
     public SortedGlobalIndexWriter withIndexField(String indexField) {
+        Optional<ResolvedFieldPath> resolvedFieldPath =
+                ResolvedFieldPath.resolve(rowType, indexField);
         checkArgument(
-                rowType.containsField(indexField),
+                resolvedFieldPath.isPresent(),
                 "Column '%s' does not exist in table '%s'.",
                 indexField,
                 table.fullName());
-        this.indexField = rowType.getField(indexField);
+        this.indexField = resolvedFieldPath.get().leafField();
         return this;
     }
 

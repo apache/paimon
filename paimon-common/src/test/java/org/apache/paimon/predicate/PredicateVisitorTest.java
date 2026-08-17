@@ -25,6 +25,7 @@ import org.apache.paimon.types.RowType;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.Collections;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -49,5 +50,29 @@ public class PredicateVisitorTest {
         assertThat(PredicateVisitor.collectFieldIds(rowType, predicate))
                 .containsExactlyInAnyOrder(10, 20);
         assertThat(PredicateVisitor.collectFieldIds(rowType, null)).isEmpty();
+    }
+
+    @Test
+    public void testCollectNestedFieldIds() {
+        RowType rowType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(
+                                        1,
+                                        "profile",
+                                        new RowType(
+                                                Collections.singletonList(
+                                                        new DataField(
+                                                                7, "zip", DataTypes.INT()))))));
+        Predicate predicate =
+                new LeafPredicate(
+                        Equal.INSTANCE,
+                        DataTypes.INT(),
+                        1,
+                        "profile.zip",
+                        Collections.singletonList(42));
+
+        assertThat(PredicateVisitor.collectFieldIds(rowType, predicate)).containsExactly(7);
     }
 }

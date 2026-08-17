@@ -24,19 +24,19 @@ import org.apache.paimon.globalindex.GlobalIndexMultiColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.ResultEntry;
+import org.apache.paimon.globalindex.RowIdIndexFieldsExtractor;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.ResolvedFieldPath;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.LongCounter;
-import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
@@ -139,6 +139,15 @@ public class DefaultGlobalIndexBuilder implements Serializable {
         return fields;
     }
 
+    static RowIdIndexFieldsExtractor createIndexFieldsExtractor(
+            RowType readType, List<DataField> indexedFields) {
+        List<String> indexFieldPaths = new ArrayList<>(indexedFields.size());
+        for (DataField field : indexedFields) {
+            indexFieldPaths.add(ResolvedFieldPath.resolve(readType, field.id()).get().fullName());
+        }
+        return new RowIdIndexFieldsExtractor(readType, Collections.emptyList(), indexFieldPaths);
+    }
+
     public FileStoreTable table() {
         return table;
     }
@@ -170,45 +179,25 @@ public class DefaultGlobalIndexBuilder implements Serializable {
         GlobalIndexWriter indexWriter =
                 createIndexWriter(table, indexType, indexField, extraFields, options);
         boolean multiColumn = !extraFields.isEmpty();
+        RowIdIndexFieldsExtractor indexFieldsExtractor =
+                createIndexFieldsExtractor(readType, indexedFields());
 
         try {
-            if (multiColumn) {
-                GlobalIndexMultiColumnWriter multiWriter =
-                        (GlobalIndexMultiColumnWriter) indexWriter;
-                List<DataField> indexedFields = indexedFields();
-                int[] projection = new int[indexedFields.size()];
-                for (int i = 0; i < indexedFields.size(); i++) {
-                    DataField field = indexedFields.get(i);
-                    projection[i] = readType.getFieldIndex(field.name());
+            while (rows.hasNext()) {
+                InternalRow row = rows.next();
+                long absRowId = indexFieldsExtractor.extractRowId(row);
+                if (absRowId < rowRange.from || absRowId > rowRange.to) {
+                    continue;
                 }
-                ProjectedRow projectedRow = ProjectedRow.from(projection);
-                int rowIdIndex = readType.getFieldIndex(SpecialFields.ROW_ID.name());
-                while (rows.hasNext()) {
-                    InternalRow row = rows.next();
-                    long absRowId = row.getLong(rowIdIndex);
-                    if (absRowId < rowRange.from || absRowId > rowRange.to) {
-                        continue;
-                    }
-                    multiWriter.write(absRowId - rowRange.from, projectedRow.replaceRow(row));
-                    rowCounter.add(1);
+                long localRowId = absRowId - rowRange.from;
+                if (multiColumn) {
+                    ((GlobalIndexMultiColumnWriter) indexWriter)
+                            .write(localRowId, indexFieldsExtractor.extractIndexFields(row));
+                } else {
+                    ((GlobalIndexSingleColumnWriter) indexWriter)
+                            .write(indexFieldsExtractor.extractIndexField(row), localRowId);
                 }
-            } else {
-                GlobalIndexSingleColumnWriter singleWriter =
-                        (GlobalIndexSingleColumnWriter) indexWriter;
-                InternalRow.FieldGetter getter =
-                        InternalRow.createFieldGetter(
-                                indexField.type(), readType.getFieldIndex(indexField.name()));
-                int rowIdIndex = readType.getFieldIndex(SpecialFields.ROW_ID.name());
-                while (rows.hasNext()) {
-                    InternalRow row = rows.next();
-                    long absRowId = row.getLong(rowIdIndex);
-                    if (absRowId < rowRange.from || absRowId > rowRange.to) {
-                        continue;
-                    }
-                    Object indexO = getter.getFieldOrNull(row);
-                    singleWriter.write(indexO, absRowId - rowRange.from);
-                    rowCounter.add(1);
-                }
+                rowCounter.add(1);
             }
             return indexWriter.finish();
         } finally {

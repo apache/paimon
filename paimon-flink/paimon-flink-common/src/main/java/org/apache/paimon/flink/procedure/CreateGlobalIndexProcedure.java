@@ -26,6 +26,7 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.ResolvedFieldPath;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ParameterUtils;
 
@@ -34,6 +35,7 @@ import org.apache.flink.table.annotation.DataTypeHint;
 import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
@@ -100,13 +102,16 @@ public class CreateGlobalIndexProcedure extends ProcedureBase {
                 indexColumns.size() == new HashSet<>(indexColumns).size(),
                 "Duplicate index columns are not allowed: %s",
                 indexColumns);
+        List<ResolvedFieldPath> indexFieldPaths = new ArrayList<>(indexColumns.size());
         for (String col : indexColumns) {
-            checkArgument(
-                    rowType.containsField(col),
-                    "Column '%s' does not exist in table '%s'.",
-                    col,
-                    tableId);
+            ResolvedFieldPath path = ResolvedFieldPath.resolve(rowType, col).orElse(null);
+            checkArgument(path != null, "Column '%s' does not exist in table '%s'.", col, tableId);
+            indexFieldPaths.add(path);
         }
+        List<DataField> indexFields =
+                indexFieldPaths.stream()
+                        .map(ResolvedFieldPath::leafField)
+                        .collect(Collectors.toList());
 
         // Parse partition predicate
         PartitionPredicate partitionPredicate = parsePartitionPredicate(table, partitions);
@@ -118,13 +123,12 @@ public class CreateGlobalIndexProcedure extends ProcedureBase {
         if (indexColumns.size() > 1) {
             // Fail fast before submitting the job: index types that do not support multi-column
             // throw from GlobalIndexerFactory#create, which happens before any indexer side effect.
-            DataField indexField = rowType.getField(indexColumns.get(0));
-            List<DataField> extraFields =
-                    indexColumns.subList(1, indexColumns.size()).stream()
-                            .map(rowType::getField)
-                            .collect(Collectors.toList());
             try {
-                GlobalIndexer.create(indexType, indexField, extraFields, userOptions);
+                GlobalIndexer.create(
+                        indexType,
+                        indexFields.get(0),
+                        indexFields.subList(1, indexFields.size()),
+                        userOptions);
             } catch (UnsupportedOperationException e) {
                 throw new IllegalArgumentException(
                         String.format(

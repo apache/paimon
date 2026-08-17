@@ -18,13 +18,19 @@
 
 package org.apache.paimon.globalindex.sorted;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.ResultEntry;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.TableTestBase;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.ResolvedFieldPath;
 import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
@@ -119,6 +125,40 @@ public class SortedGlobalIndexWriterTest extends TableTestBase {
                 .hasMessage("write failed");
 
         verify((Closeable) activeWriter).close();
+    }
+
+    @Test
+    public void testNestedIndexFieldUsesLeafFieldId() throws Exception {
+        Schema schema =
+                Schema.newBuilder()
+                        .column(
+                                "profile",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(11, "city", DataTypes.STRING()),
+                                        DataTypes.FIELD(12, "zip", DataTypes.INT())))
+                        .build();
+        catalog.createTable(identifier("NestedTable"), schema, false);
+        FileStoreTable table = getTable(identifier("NestedTable"));
+        Path indexPath = table.store().pathFactory().globalIndexFileFactory().newPath();
+        table.fileIO().newOutputStream(indexPath, false).close();
+
+        CommitMessageImpl message =
+                (CommitMessageImpl)
+                        new SortedGlobalIndexWriter(table, "btree")
+                                .withIndexField("profile.zip")
+                                .flushIndex(
+                                        new Range(0, 9),
+                                        Collections.singletonList(
+                                                new ResultEntry(indexPath.getName(), 10, null)),
+                                        BinaryRow.EMPTY_ROW,
+                                        1L);
+
+        IndexFileMeta indexFile = message.newFilesIncrement().newIndexFiles().get(0);
+        ResolvedFieldPath fieldPath =
+                ResolvedFieldPath.resolve(table.rowType(), "profile.zip").get();
+        assertThat(indexFile.globalIndexMeta().indexFieldId())
+                .isEqualTo(fieldPath.leafField().id())
+                .isNotEqualTo(fieldPath.topLevelField().id());
     }
 
     @Override

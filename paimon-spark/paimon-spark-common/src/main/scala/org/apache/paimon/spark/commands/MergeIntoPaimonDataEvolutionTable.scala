@@ -934,7 +934,7 @@ case class MergeIntoPaimonDataEvolutionTable(
         if (globalIndexMeta == null) {
           false
         } else {
-          val indexedNames = globalIndexMeta.getIndexedFieldNames(rowType).asScala
+          val indexedNames = globalIndexMeta.getIndexedTopLevelFieldNames(rowType).asScala
           affectedParts.contains(entry.partition()) && updateColumns.exists(
             col => indexedNames.contains(col.name))
         }

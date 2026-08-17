@@ -20,7 +20,9 @@ package org.apache.paimon.globalindex;
 
 import org.apache.paimon.predicate.And;
 import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
@@ -165,6 +167,106 @@ class GlobalIndexEvaluatorTest {
         assertThat(secondResult).isPresent();
         assertBitmapContainsExactly(secondResult.get().results(), 1L, 2L, 3L);
         assertThat(readersCreated).hasValue(1);
+        evaluator.close();
+    }
+
+    @Test
+    void testNestedFieldPredicateUsesLeafFieldId() {
+        RowType rowType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(
+                                        1,
+                                        "profile",
+                                        new RowType(
+                                                Arrays.asList(
+                                                        new DataField(
+                                                                7, "zip", DataTypes.INT()))))));
+        AtomicInteger requestedFieldId = new AtomicInteger(-1);
+        AtomicBoolean nestedReferenceVisited = new AtomicBoolean();
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType,
+                        fieldId -> {
+                            requestedFieldId.set(fieldId);
+                            return Collections.singletonList(
+                                    new StubGlobalIndexReader(null) {
+                                        @Override
+                                        public CompletableFuture<Optional<GlobalIndexResult>>
+                                                visitEqual(FieldRef fieldRef, Object literal) {
+                                            nestedReferenceVisited.set(
+                                                    fieldRef.name().equals("profile.zip")
+                                                            && literal.equals(42));
+                                            return CompletableFuture.completedFuture(
+                                                    Optional.of(resultOf(5, 8)));
+                                        }
+                                    });
+                        });
+        Predicate predicate =
+                new LeafPredicate(
+                        Equal.INSTANCE,
+                        DataTypes.INT(),
+                        1,
+                        "profile.zip",
+                        Collections.singletonList(42));
+
+        Optional<GlobalIndexEvaluator.Evaluation> evaluation =
+                evaluator.evaluateWithContributingFields(predicate);
+
+        assertThat(evaluation).isPresent();
+        assertThat(requestedFieldId).hasValue(7);
+        assertThat(nestedReferenceVisited).isTrue();
+        assertThat(evaluation.get().contributingFieldIds()).containsExactly(7);
+        assertBitmapContainsExactly(evaluation.get().result().results(), 5L, 8L);
+        evaluator.close();
+    }
+
+    @Test
+    void testNestedFieldTopNUsesLeafFieldId() {
+        RowType rowType =
+                new RowType(
+                        Collections.singletonList(
+                                new DataField(
+                                        1,
+                                        "profile",
+                                        new RowType(
+                                                Collections.singletonList(
+                                                        new DataField(
+                                                                7, "zip", DataTypes.INT()))))));
+        AtomicInteger requestedFieldId = new AtomicInteger(-1);
+        AtomicBoolean nestedTopNVisited = new AtomicBoolean();
+        GlobalIndexEvaluator evaluator =
+                new GlobalIndexEvaluator(
+                        rowType,
+                        fieldId -> {
+                            requestedFieldId.set(fieldId);
+                            return Collections.singletonList(
+                                    new StubGlobalIndexReader(null) {
+                                        @Override
+                                        public CompletableFuture<Optional<GlobalIndexResult>>
+                                                visitTopN(TopN topN) {
+                                            nestedTopNVisited.set(
+                                                    topN.orders()
+                                                            .get(0)
+                                                            .field()
+                                                            .name()
+                                                            .equals("profile.zip"));
+                                            return CompletableFuture.completedFuture(
+                                                    Optional.of(resultOf(3, 4)));
+                                        }
+                                    });
+                        });
+        TopN topN =
+                new TopN(
+                        new FieldRef(1, "profile.zip", DataTypes.INT()), DESCENDING, NULLS_LAST, 2);
+
+        Optional<GlobalIndexResult> result = evaluator.evaluateTopN(topN);
+
+        assertThat(result).isPresent();
+        assertThat(requestedFieldId).hasValue(7);
+        assertThat(nestedTopNVisited).isTrue();
+        assertBitmapContainsExactly(result.get().results(), 3L, 4L);
         evaluator.close();
     }
 

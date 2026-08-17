@@ -34,6 +34,7 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -56,6 +57,14 @@ class DataEvolutionGlobalIndexRefreshPlannerTest {
             new DataField(1, "vector", new ArrayType(new FloatType()));
     private static final DataField OTHER_FIELD = new DataField(2, "other", new IntType());
     private static final DataField UNRELATED_FIELD = new DataField(3, "unrelated", new IntType());
+    private static final DataField NESTED_ZIP_FIELD = new DataField(5, "zip", new IntType());
+    private static final DataField PROFILE_FIELD =
+            new DataField(
+                    4,
+                    "profile",
+                    new RowType(
+                            Arrays.asList(
+                                    NESTED_ZIP_FIELD, new DataField(6, "score", new IntType()))));
 
     private SchemaManager schemaManager;
 
@@ -94,6 +103,16 @@ class DataEvolutionGlobalIndexRefreshPlannerTest {
                                         OTHER_FIELD,
                                         UNRELATED_FIELD),
                                 3,
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                new HashMap<>(),
+                                ""));
+        when(schemaManager.schema(3L))
+                .thenReturn(
+                        new TableSchema(
+                                3L,
+                                Arrays.asList(PROFILE_FIELD, UNRELATED_FIELD),
+                                7,
                                 Collections.emptyList(),
                                 Collections.emptyList(),
                                 new HashMap<>(),
@@ -235,6 +254,27 @@ class DataEvolutionGlobalIndexRefreshPlannerTest {
                                         data("unrelated-update", 0, 100, 6, 1, "unrelated")),
                                 Collections.singletonList(index),
                                 indexedFields))
+                .isEmpty();
+    }
+
+    @Test
+    void testNestedIndexRefreshesWhenParentRowIsWritten() {
+        IndexManifestEntry index =
+                index("nested", "btree", NESTED_ZIP_FIELD, 0, 99, 5L, BinaryRow.EMPTY_ROW, 0);
+
+        assertThat(
+                        plan(
+                                Collections.singletonList(
+                                        data("profile-update", 0, 100, 6, 3, "profile")),
+                                Collections.singletonList(index),
+                                Collections.singletonList(NESTED_ZIP_FIELD)))
+                .containsExactly(index);
+        assertThat(
+                        plan(
+                                Collections.singletonList(
+                                        data("unrelated-update", 0, 100, 6, 3, "unrelated")),
+                                Collections.singletonList(index),
+                                Collections.singletonList(NESTED_ZIP_FIELD)))
                 .isEmpty();
     }
 

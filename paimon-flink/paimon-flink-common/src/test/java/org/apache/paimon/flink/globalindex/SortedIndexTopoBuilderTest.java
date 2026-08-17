@@ -18,14 +18,18 @@
 
 package org.apache.paimon.flink.globalindex;
 
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.globalindex.SortedIndexTopoBuilder.SortedBuildTask;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
+import org.apache.paimon.globalindex.RowIdIndexFieldsExtractor;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -36,6 +40,7 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -175,5 +180,30 @@ public class SortedIndexTopoBuilderTest {
     public void testSortColumnsUseRowIdAsTieBreaker() {
         assertThat(SortedIndexTopoBuilder.createSortColumns("task-id", "index-key"))
                 .containsExactly("task-id", "index-key", SpecialFields.ROW_ID.name());
+    }
+
+    @Test
+    public void testFlattenNestedIndexRowBeforeSorting() {
+        RowType addressType = DataTypes.ROW(DataTypes.FIELD(2, "zip", DataTypes.INT()));
+        RowType profileType = DataTypes.ROW(DataTypes.FIELD(1, "address", addressType));
+        RowType readType =
+                SpecialFields.rowTypeWithRowId(
+                        DataTypes.ROW(DataTypes.FIELD(0, "profile", profileType)));
+        RowIdIndexFieldsExtractor extractor =
+                new RowIdIndexFieldsExtractor(
+                        readType, Collections.emptyList(), "profile.address.zip");
+
+        InternalRow flattened =
+                SortedIndexTopoBuilder.flattenIndexRow(
+                        extractor, GenericRow.of(GenericRow.of(GenericRow.of(310000)), 42L));
+        assertThat(flattened.getInt(0)).isEqualTo(310000);
+        assertThat(flattened.getLong(1)).isEqualTo(42L);
+
+        for (InternalRow row :
+                Arrays.asList(
+                        GenericRow.of(null, 43L),
+                        GenericRow.of(GenericRow.of((Object) null), 44L))) {
+            assertThat(SortedIndexTopoBuilder.flattenIndexRow(extractor, row).isNullAt(0)).isTrue();
+        }
     }
 }

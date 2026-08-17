@@ -33,6 +33,7 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ProjectedManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.DataField;
@@ -53,8 +54,6 @@ import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Set;
 import java.util.TreeMap;
-
-import static org.apache.paimon.utils.DataEvolutionUtils.fileFieldIds;
 
 /** Plans existing global index files which need refresh after data-evolution updates. */
 public final class DataEvolutionGlobalIndexRefreshPlanner {
@@ -247,9 +246,33 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
         Set<Integer> physicalFieldIds =
                 fileFieldIdsCache.computeIfAbsent(
                         Pair.of(file.schemaId(), file.writeCols()),
-                        key -> fileFieldIds(schemaManager::schema, file));
+                        key -> fileFieldIds(schemaManager, file));
         if (!disjoint(indexedFieldIds, physicalFieldIds)) {
             group.addUpdatedFile(file.maxSequenceNumber(), file.nonNullRowIdRange());
+        }
+    }
+
+    private static Set<Integer> fileFieldIds(SchemaManager schemaManager, DataFileMeta file) {
+        TableSchema schema = schemaManager.schema(file.schemaId());
+        List<String> writeCols = file.writeCols();
+        Set<String> writeColNames = writeCols == null ? null : new HashSet<>(writeCols);
+        Set<Integer> ids = new HashSet<>();
+        for (DataField field : schema.fields()) {
+            // writeCols describes top-level physical columns. Writing a ROW writes all of its
+            // nested fields, whose IDs are used by nested global-index metadata.
+            if (writeColNames == null || writeColNames.contains(field.name())) {
+                collectFieldIds(field, ids);
+            }
+        }
+        return ids;
+    }
+
+    private static void collectFieldIds(DataField field, Set<Integer> ids) {
+        ids.add(field.id());
+        if (field.type() instanceof RowType) {
+            for (DataField nestedField : ((RowType) field.type()).getFields()) {
+                collectFieldIds(nestedField, ids);
+            }
         }
     }
 

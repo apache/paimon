@@ -23,6 +23,7 @@ import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.pkfulltext.PkFullTextIndexFile;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.types.ResolvedFieldPath;
 
 import org.apache.flink.table.api.config.TableConfigOptions;
 import org.apache.flink.types.Row;
@@ -36,6 +37,35 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link FullTextSearchProcedure}. */
 public class FullTextSearchProcedureITCase extends CatalogITCaseBase {
+
+    @Test
+    public void testCreateGlobalIndexForNestedField() throws Exception {
+        sql(
+                "CREATE TABLE T_NESTED (id INT, profile ROW<zip INT, city STRING>) WITH ("
+                        + "'bucket' = '-1', "
+                        + "'row-tracking.enabled' = 'true', "
+                        + "'data-evolution.enabled' = 'true'"
+                        + ")");
+        sql("INSERT INTO T_NESTED VALUES (1, ROW(100, 'a')), (2, ROW(200, 'b'))");
+        sql(
+                "CALL sys.create_global_index(`table` => 'default.T_NESTED', "
+                        + "index_column => 'profile.city', index_type => 'full-text')");
+
+        FileStoreTable table = paimonTable("T_NESTED");
+        List<IndexManifestEntry> entries = table.store().newIndexFileHandler().scan("full-text");
+        int cityFieldId =
+                ResolvedFieldPath.resolve(table.rowType(), "profile.city").get().leafField().id();
+
+        assertThat(entries).isNotEmpty();
+        assertThat(entries.stream().mapToLong(e -> e.indexFile().rowCount()).sum()).isEqualTo(2L);
+        assertThat(entries)
+                .allSatisfy(
+                        entry -> {
+                            assertThat(entry.indexFile().globalIndexMeta()).isNotNull();
+                            assertThat(entry.indexFile().globalIndexMeta().indexFieldId())
+                                    .isEqualTo(cityFieldId);
+                        });
+    }
 
     @Test
     public void testGenericFullTextRefreshesUpdatedDataEvolutionRange() throws Exception {

@@ -107,7 +107,8 @@ public class MergeIntoUpdateChecker extends BoundedOneInputOperator<Committable,
                                             entry.indexFile().globalIndexMeta();
                                     if (globalIndexMeta != null) {
                                         List<String> indexedNames =
-                                                globalIndexMeta.getIndexedFieldNames(rowType);
+                                                globalIndexMeta.getIndexedTopLevelFieldNames(
+                                                        rowType);
                                         boolean overlaps =
                                                 indexedNames.stream()
                                                         .anyMatch(updatedColumns::contains);

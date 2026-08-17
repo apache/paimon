@@ -30,6 +30,7 @@ import org.apache.paimon.predicate.LeafTernaryFunction;
 import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.types.ResolvedFieldPath;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
 
@@ -93,7 +94,7 @@ public class GlobalIndexEvaluator implements Closeable {
 
     public Optional<GlobalIndexResult> evaluateTopN(TopN topN) {
         FieldRef fieldRef = topN.orders().get(0).field();
-        int fieldId = rowType.getField(fieldRef.name()).id();
+        int fieldId = resolveFieldId(fieldRef);
         Collection<GlobalIndexReader> readers =
                 indexReadersCache.computeIfAbsent(fieldId, readersFunction::apply);
 
@@ -134,7 +135,7 @@ public class GlobalIndexEvaluator implements Closeable {
             return CompletableFuture.completedFuture(Optional.empty());
         }
         FieldRef fieldRef = fieldRefOptional.get();
-        int fieldId = rowType.getField(fieldRef.name()).id();
+        int fieldId = resolveFieldId(fieldRef);
         Collection<GlobalIndexReader> readers =
                 indexReadersCache.computeIfAbsent(fieldId, readersFunction::apply);
 
@@ -168,6 +169,13 @@ public class GlobalIndexEvaluator implements Closeable {
                                     result ->
                                             new Evaluation(result, Collections.singleton(fieldId)));
                         });
+    }
+
+    private int resolveFieldId(FieldRef fieldRef) {
+        return ResolvedFieldPath.resolve(rowType, fieldRef.name())
+                .orElseThrow(() -> new RuntimeException("Cannot find field: " + fieldRef.name()))
+                .leafField()
+                .id();
     }
 
     private CompletableFuture<Optional<Evaluation>> visitCompoundAsync(
