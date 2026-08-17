@@ -45,6 +45,7 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogTableType;
+import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.types.DataField;
@@ -741,13 +742,30 @@ public class HiveCatalog extends AbstractCatalog {
                 continue;
             }
 
-            mainTable.switchToBranch(branchName).newScan()
+            branchTableForPartitionExistence(mainTable, branchName).newScan()
                     .withPartitionsFilter(new ArrayList<>(inputsToRemove)).listPartitions().stream()
                     .map(partitionComputer::generatePartValues)
                     .forEach(inputsToRemove::remove);
         }
 
         return new ArrayList<>(inputsToRemove);
+    }
+
+    /**
+     * Returns the physical table of {@code branchName} without fallback read.
+     *
+     * <p>{@link FallbackReadFileStoreTable#switchToBranch(String)} keeps the original fallback
+     * (snapshot/delta for chain tables). Listing partitions through that scan would treat fallback
+     * data as still present on the target branch, so Hive metastore partitions would never be
+     * dropped.
+     */
+    private FileStoreTable branchTableForPartitionExistence(
+            FileStoreTable table, String branchName) {
+        FileStoreTable branchTable = table.switchToBranch(branchName);
+        if (branchTable instanceof FallbackReadFileStoreTable) {
+            return ((FallbackReadFileStoreTable) branchTable).wrapped();
+        }
+        return branchTable;
     }
 
     @Override
