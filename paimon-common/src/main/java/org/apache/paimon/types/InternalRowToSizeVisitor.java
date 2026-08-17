@@ -89,6 +89,20 @@ public class InternalRowToSizeVisitor
     }
 
     @Override
+    public BiFunction<DataGetters, Integer, Integer> visit(GeometryType geometryType) {
+        return binarySize();
+    }
+
+    @Override
+    public BiFunction<DataGetters, Integer, Integer> visit(GeographyType geographyType) {
+        return binarySize();
+    }
+
+    private BiFunction<DataGetters, Integer, Integer> binarySize() {
+        return (row, index) -> row.isNullAt(index) ? NULL_SIZE : row.getBinary(index).length;
+    }
+
+    @Override
     public BiFunction<DataGetters, Integer, Integer> visit(DecimalType decimalType) {
         return (row, index) -> {
             if (row.isNullAt(index)) {

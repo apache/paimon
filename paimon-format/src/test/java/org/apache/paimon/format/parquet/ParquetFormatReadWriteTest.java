@@ -19,7 +19,13 @@
 package org.apache.paimon.format.parquet;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalMap;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.FormatMetadataUtils;
@@ -30,6 +36,7 @@ import org.apache.paimon.format.SupportsFieldMetadata;
 import org.apache.paimon.format.SupportsWriterMetadata;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
@@ -46,6 +53,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
@@ -66,6 +74,94 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
     @Test
     public void testArrayBlobDescriptors() throws Exception {
         testArrayBlobDescriptorRoundTrip();
+    }
+
+    @Test
+    public void testGeospatialWkbRoundTrip() throws Exception {
+        byte[] pointWkb =
+                new byte[] {
+                    1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, (byte) 0xf0, 0x3f, 0, 0, 0, 0, 0, 0, 0, 0x40
+                };
+        RowType rowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "geom", DataTypes.GEOMETRY()),
+                        DataTypes.FIELD(1, "geog", DataTypes.GEOGRAPHY()),
+                        DataTypes.FIELD(2, "geometries", DataTypes.ARRAY(DataTypes.GEOMETRY())),
+                        DataTypes.FIELD(
+                                3,
+                                "geospatial_map",
+                                DataTypes.MAP(DataTypes.GEOMETRY(), DataTypes.GEOGRAPHY())),
+                        DataTypes.FIELD(
+                                4,
+                                "nested",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(5, "nested_geom", DataTypes.GEOMETRY()))));
+        Map<byte[], byte[]> map = new LinkedHashMap<>();
+        map.put(pointWkb, pointWkb);
+
+        write(
+                fileFormat().createWriterFactory(rowType),
+                file,
+                GenericRow.of(
+                        pointWkb,
+                        pointWkb,
+                        new GenericArray(new Object[] {pointWkb, null}),
+                        GenericMap.fromBinaryKeyMap(map),
+                        GenericRow.of(pointWkb)));
+
+        try (RecordReader<InternalRow> reader =
+                fileFormat()
+                        .createReaderFactory(rowType, rowType, java.util.Collections.emptyList())
+                        .createReader(
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null))) {
+            InternalRow row = new InternalRowSerializer(rowType).copy(reader.readBatch().next());
+            Assertions.assertThat(row.getBinary(0)).isEqualTo(pointWkb);
+            Assertions.assertThat(row.getBinary(1)).isEqualTo(pointWkb);
+            InternalArray geometries = row.getArray(2);
+            Assertions.assertThat(geometries.getBinary(0)).isEqualTo(pointWkb);
+            Assertions.assertThat(geometries.isNullAt(1)).isTrue();
+            InternalMap geospatialMap = row.getMap(3);
+            Assertions.assertThat(geospatialMap.keyArray().getBinary(0)).isEqualTo(pointWkb);
+            Assertions.assertThat(geospatialMap.valueArray().getBinary(0)).isEqualTo(pointWkb);
+            Assertions.assertThat(row.getRow(4, 1).getBinary(0)).isEqualTo(pointWkb);
+        }
+
+        try (ParquetFileReader reader =
+                ParquetUtil.getParquetReader(
+                        fileIO, file, fileIO.getFileSize(file), new Options())) {
+            Map<String, ColumnChunkMetaData> columns = new HashMap<>();
+            for (ColumnChunkMetaData column : reader.getFooter().getBlocks().get(0).getColumns()) {
+                columns.put(column.getPath().toDotString(), column);
+            }
+            Assertions.assertThat(columns)
+                    .containsKeys(
+                            "geom",
+                            "geog",
+                            "geometries.list.element",
+                            "geospatial_map.key_value.key",
+                            "geospatial_map.key_value.value",
+                            "nested.nested_geom");
+            for (ColumnChunkMetaData column : columns.values()) {
+                Assertions.assertThat(column.getStatistics().hasNonNullValue())
+                        .as(column.getPath().toDotString())
+                        .isFalse();
+                Assertions.assertThat(column.getStatistics().isNumNullsSet())
+                        .as(column.getPath().toDotString())
+                        .isTrue();
+            }
+            Assertions.assertThat(
+                            columns.get("geometries.list.element").getStatistics().getNumNulls())
+                    .isEqualTo(1);
+            Assertions.assertThat(columns.get("geom").getGeospatialStatistics()).isNotNull();
+            Assertions.assertThat(columns.get("geometries.list.element").getGeospatialStatistics())
+                    .isNotNull();
+            Assertions.assertThat(
+                            columns.get("geospatial_map.key_value.key").getGeospatialStatistics())
+                    .isNotNull();
+            Assertions.assertThat(columns.get("nested.nested_geom").getGeospatialStatistics())
+                    .isNotNull();
+        }
     }
 
     @Test

@@ -18,8 +18,9 @@
 
 package org.apache.paimon.spark.data
 
-import org.apache.paimon.types.DataType
+import org.apache.paimon.types.{DataType, GeographyType, GeometryType}
 
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.unsafe.types.{GeographyVal, GeometryVal, VariantVal}
 
 class Spark4ArrayData(override val elementType: DataType) extends AbstractSparkArrayData {
@@ -30,8 +31,17 @@ class Spark4ArrayData(override val elementType: DataType) extends AbstractSparkA
   }
 
   override def getGeography(ordinal: Int): GeographyVal =
-    throw new UnsupportedOperationException("Paimon does not support Geography type")
+    SparkShimLoader.shim
+      .toSparkGeography(
+        paimonArray.getBinary(ordinal),
+        elementType.asInstanceOf[GeographyType].getCrs,
+        elementType.asInstanceOf[GeographyType].getAlgorithm.toString)
+      .asInstanceOf[GeographyVal]
 
   override def getGeometry(ordinal: Int): GeometryVal =
-    throw new UnsupportedOperationException("Paimon does not support Geometry type")
+    SparkShimLoader.shim
+      .toSparkGeometry(
+        paimonArray.getBinary(ordinal),
+        elementType.asInstanceOf[GeometryType].getCrs)
+      .asInstanceOf[GeometryVal]
 }

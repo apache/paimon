@@ -187,7 +187,9 @@ public class IcebergDataFileMeta {
                     || typeRoot == DataTypeRoot.MULTISET
                     || typeRoot == DataTypeRoot.VARIANT
                     || typeRoot == DataTypeRoot.VECTOR
-                    || typeRoot == DataTypeRoot.BLOB) {
+                    || typeRoot == DataTypeRoot.BLOB
+                    || typeRoot == DataTypeRoot.GEOMETRY
+                    || typeRoot == DataTypeRoot.GEOGRAPHY) {
                 continue;
             }
 

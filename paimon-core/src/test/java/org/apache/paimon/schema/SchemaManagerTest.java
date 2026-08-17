@@ -26,6 +26,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
@@ -170,6 +171,74 @@ public class SchemaManagerTest {
         Optional<TableSchema> latest = retryArtificialException(() -> manager.latest());
         assertThat(latest.isPresent()).isTrue();
         assertThat(latest.get().options()).containsEntry("new_k", "new_v");
+    }
+
+    @Test
+    public void testEnableIcebergMetadataValidatesHistoricalGeospatialSchemas() throws Exception {
+        Map<String, String> geospatialOptions = new HashMap<>();
+        geospatialOptions.put(CoreOptions.BUCKET.key(), "-1");
+        Schema geospatialSchema =
+                new Schema(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(1, "geom", DataTypes.GEOMETRY())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        geospatialOptions,
+                        "");
+
+        retryArtificialException(() -> manager.createTable(geospatialSchema));
+        retryArtificialException(() -> manager.commitChanges(SchemaChange.dropColumn("geom")));
+
+        assertThatThrownBy(
+                        () ->
+                                retryArtificialException(
+                                        () ->
+                                                manager.commitChanges(
+                                                        SchemaChange.setOption(
+                                                                IcebergOptions
+                                                                        .METADATA_ICEBERG_STORAGE
+                                                                        .key(),
+                                                                "table-location"))))
+                .hasStackTraceContaining(
+                        "Geometry and geography columns require 'metadata.iceberg.format-version'='3'");
+
+        assertThatThrownBy(
+                        () ->
+                                retryArtificialException(
+                                        () ->
+                                                manager.commitChanges(
+                                                        Arrays.asList(
+                                                                SchemaChange.setOption(
+                                                                        IcebergOptions
+                                                                                .METADATA_ICEBERG_STORAGE
+                                                                                .key(),
+                                                                        "rest-catalog"),
+                                                                SchemaChange.setOption(
+                                                                        IcebergOptions
+                                                                                .FORMAT_VERSION
+                                                                                .key(),
+                                                                        "3")))))
+                .hasStackTraceContaining(
+                        "Geometry and geography columns do not support 'metadata.iceberg.storage'='rest-catalog'");
+
+        assertThatCode(
+                        () ->
+                                retryArtificialException(
+                                        () ->
+                                                manager.commitChanges(
+                                                        Arrays.asList(
+                                                                SchemaChange.setOption(
+                                                                        IcebergOptions
+                                                                                .METADATA_ICEBERG_STORAGE
+                                                                                .key(),
+                                                                        "table-location"),
+                                                                SchemaChange.setOption(
+                                                                        IcebergOptions
+                                                                                .FORMAT_VERSION
+                                                                                .key(),
+                                                                        "3")))))
+                .doesNotThrowAnyException();
     }
 
     @Test

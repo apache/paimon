@@ -126,6 +126,24 @@ public class ArrowUtilsTest {
     }
 
     @Test
+    public void testGeospatialTypesUnsupported() {
+        Assertions.assertThatThrownBy(
+                        () -> ArrowUtils.toArrowField("geom", 7, DataTypes.GEOMETRY(), 0))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Unsupported primitive type: GEOMETRY(OGC:CRS84)");
+
+        Assertions.assertThatThrownBy(
+                        () ->
+                                ArrowUtils.toArrowField(
+                                        "geographies",
+                                        8,
+                                        DataTypes.ARRAY(DataTypes.GEOGRAPHY()),
+                                        0))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Unsupported primitive type: GEOGRAPHY(OGC:CRS84, spherical)");
+    }
+
+    @Test
     public void testSameRootAllocatorIncludesNestedVectors() {
         try (RootAllocator allocator = new RootAllocator();
                 BufferAllocator childAllocator =

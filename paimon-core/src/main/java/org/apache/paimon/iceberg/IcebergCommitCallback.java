@@ -53,6 +53,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitCallback;
@@ -1967,6 +1968,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         TableSchema schema = schemaManager.schema(id);
                         // backstop: reject variant on each schema as it is emitted
                         checkVariantNotPublishable(schema.logicalRowType());
+                        SchemaValidation.validateIcebergGeospatialTypes(
+                                schema.logicalRowType(), table.coreOptions());
                         return IcebergSchema.create(schema);
                     });
         }

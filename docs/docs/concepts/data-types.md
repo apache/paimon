@@ -77,6 +77,23 @@ All data types supported by Paimon are as follows:
       </td>
     </tr>
     <tr>
+      <td><code>GEOMETRY</code><br>
+          <code>GEOMETRY(crs)</code>
+      </td>
+      <td><code>Data type of a planar geometry encoded as OGC Well-Known Binary (WKB).</code><br><br>
+          <code>The optional crs identifies the coordinate reference system. The default is OGC:CRS84.</code>
+      </td>
+    </tr>
+    <tr>
+      <td><code>GEOGRAPHY</code><br>
+          <code>GEOGRAPHY(crs)</code><br>
+          <code>GEOGRAPHY(crs, algorithm)</code>
+      </td>
+      <td><code>Data type of a geography whose edges are interpolated on the surface of the coordinate reference system, encoded as OGC Well-Known Binary (WKB).</code><br><br>
+          <code>The default crs is OGC:CRS84 and the default edge interpolation algorithm is spherical. Supported algorithms are spherical, vincenty, thomas, andoyer, and karney.</code>
+      </td>
+    </tr>
+    <tr>
       <td><code>DECIMAL</code><br>
           <code>DECIMAL(p)</code><br>
           <code>DECIMAL(p, s)</code>
@@ -189,3 +206,11 @@ All data types supported by Paimon are as follows:
     </tr>
     </tbody>
 </table>
+
+:::note Geospatial type availability
+
+`GEOMETRY` and `GEOGRAPHY` columns require Parquet for data, per-level, and changelog files. They cannot be used as primary, partition, bucket, sequence, or clustering keys.
+
+The Paimon Java API supports geospatial columns. Spark 4.1 requires `spark.sql.geospatial.enabled=true`, supports CRSs recognized by Spark, and supports only the `spherical` geography edge algorithm. Flink SQL, Spark 3.x, and Spark 4.0 reject geospatial columns instead of exposing them as binary and losing the CRS or edge algorithm.
+
+:::

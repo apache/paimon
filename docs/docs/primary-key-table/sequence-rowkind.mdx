@@ -55,7 +55,7 @@ CREATE TABLE my_table (
 </Tabs>
 
 The record with the largest `sequence.field` value will be the last to merge, if the values are the same, the input
-order will be used to determine which one is the last one. `sequence.field` supports fields of all data types.
+order will be used to determine which one is the last one. `sequence.field` does not support `GEOMETRY`, `GEOGRAPHY`, or managed `BLOB` fields.
 
 You can define multiple fields for `sequence.field`, for example `'update_time,flag'`, multiple fields will be compared in order.
 

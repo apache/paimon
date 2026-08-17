@@ -30,6 +30,8 @@ import org.apache.paimon.spark.data.SparkInternalRow;
 import org.apache.paimon.spark.util.shim.TypeUtils;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.GeographyType;
+import org.apache.paimon.types.GeometryType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
@@ -40,6 +42,7 @@ import org.apache.spark.sql.catalyst.util.ArrayBasedMapData;
 import org.apache.spark.sql.catalyst.util.ArrayData;
 import org.apache.spark.sql.catalyst.util.DateTimeUtils;
 import org.apache.spark.sql.catalyst.util.MapData;
+import org.apache.spark.sql.paimon.shims.SparkShimLoader;
 import org.apache.spark.sql.types.Decimal;
 import org.apache.spark.unsafe.types.UTF8String;
 
@@ -70,6 +73,16 @@ public class DataConverter {
                 return fromPaimon((InternalRow) o, (RowType) type);
             case BLOB:
                 return ((Blob) o).toData();
+            case GEOMETRY:
+                return SparkShimLoader.shim()
+                        .toSparkGeometry((byte[]) o, ((GeometryType) type).getCrs());
+            case GEOGRAPHY:
+                GeographyType geographyType = (GeographyType) type;
+                return SparkShimLoader.shim()
+                        .toSparkGeography(
+                                (byte[]) o,
+                                geographyType.getCrs(),
+                                geographyType.getAlgorithm().toString());
             default:
                 return o;
         }

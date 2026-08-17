@@ -66,6 +66,14 @@ public interface DataTypeVisitor<R> {
 
     R visit(BlobType blobType);
 
+    default R visit(GeometryType geometryType) {
+        throw new UnsupportedOperationException("Unsupported type: " + geometryType);
+    }
+
+    default R visit(GeographyType geographyType) {
+        throw new UnsupportedOperationException("Unsupported type: " + geographyType);
+    }
+
     R visit(ArrayType arrayType);
 
     R visit(VectorType vectorType);

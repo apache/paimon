@@ -32,6 +32,7 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexerFactory;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
+import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldLastValueAggFactory;
@@ -43,6 +44,8 @@ import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.GeographyType;
+import org.apache.paimon.types.GeometryType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
@@ -125,7 +128,9 @@ public class SchemaValidation {
                     RowType.class,
                     MultisetType.class,
                     VectorType.class,
-                    VariantType.class);
+                    VariantType.class,
+                    GeometryType.class,
+                    GeographyType.class);
 
     /**
      * Validate the {@link TableSchema} and {@link CoreOptions}.
@@ -226,6 +231,7 @@ public class SchemaValidation {
         FileFormat fileFormat =
                 FileFormat.fromIdentifier(options.formatType(), new Options(schema.options()));
         RowType tableRowType = new RowType(schema.fields());
+        validateGeospatialTypes(schema, options, tableRowType);
         validateBlobFields(tableRowType, options);
         Set<String> blobDescriptorFields = validateBlobDescriptorFields(tableRowType, options);
         Set<String> blobViewFields =
@@ -446,6 +452,106 @@ public class SchemaValidation {
                                     fieldName));
                 }
             }
+        }
+    }
+
+    private static void validateGeospatialTypes(
+            TableSchema schema, CoreOptions options, RowType rowType) {
+        boolean hasGeospatial =
+                containsType(
+                        rowType,
+                        type -> type.isAnyOf(DataTypeRoot.GEOMETRY, DataTypeRoot.GEOGRAPHY));
+        if (!hasGeospatial) {
+            return;
+        }
+
+        checkArgument(
+                CoreOptions.FILE_FORMAT_PARQUET.equals(options.formatType()),
+                "Geometry and geography columns require '%s'='parquet', but was '%s'.",
+                CoreOptions.FILE_FORMAT.key(),
+                options.formatType());
+        options.fileFormatPerLevel()
+                .forEach(
+                        (level, format) ->
+                                checkArgument(
+                                        CoreOptions.FILE_FORMAT_PARQUET.equals(format),
+                                        "Geometry and geography columns require parquet at every level, but '%s' contains '%s:%s'.",
+                                        CoreOptions.FILE_FORMAT_PER_LEVEL.key(),
+                                        level,
+                                        format));
+        checkArgument(
+                options.changelogFileFormat() == null
+                        || CoreOptions.FILE_FORMAT_PARQUET.equals(options.changelogFileFormat()),
+                "Geometry and geography columns require '%s' to be parquet, but was '%s'.",
+                CoreOptions.CHANGELOG_FILE_FORMAT.key(),
+                options.changelogFileFormat());
+        validateIcebergGeospatialTypes(rowType, options);
+
+        List<String> geospatialClusteringColumns =
+                schema.fields().stream()
+                        .filter(field -> options.clusteringColumns().contains(field.name()))
+                        .filter(
+                                field ->
+                                        containsType(
+                                                field.type(),
+                                                type ->
+                                                        type.isAnyOf(
+                                                                DataTypeRoot.GEOMETRY,
+                                                                DataTypeRoot.GEOGRAPHY)))
+                        .map(DataField::name)
+                        .collect(Collectors.toList());
+        checkArgument(
+                geospatialClusteringColumns.isEmpty(),
+                "Geometry and geography columns cannot be clustering columns: %s.",
+                geospatialClusteringColumns);
+
+        Set<String> geospatialFields =
+                schema.fields().stream()
+                        .filter(
+                                field ->
+                                        field.type()
+                                                .isAnyOf(
+                                                        DataTypeRoot.GEOMETRY,
+                                                        DataTypeRoot.GEOGRAPHY))
+                        .map(DataField::name)
+                        .collect(Collectors.toSet());
+        Set<String> geospatialBucketKeys = new HashSet<>(schema.bucketKeys());
+        geospatialBucketKeys.retainAll(geospatialFields);
+        checkArgument(
+                geospatialBucketKeys.isEmpty(),
+                "Geometry and geography columns cannot be bucket keys: %s.",
+                geospatialBucketKeys);
+        Set<String> geospatialSequenceFields = new HashSet<>(options.sequenceField());
+        geospatialSequenceFields.retainAll(geospatialFields);
+        checkArgument(
+                geospatialSequenceFields.isEmpty(),
+                "Geometry and geography columns cannot be sequence fields: %s.",
+                geospatialSequenceFields);
+    }
+
+    /** Validate geospatial types in a schema that will be published as Iceberg metadata. */
+    public static void validateIcebergGeospatialTypes(DataType dataType, CoreOptions options) {
+        boolean hasGeospatial =
+                containsType(
+                        dataType,
+                        type -> type.isAnyOf(DataTypeRoot.GEOMETRY, DataTypeRoot.GEOGRAPHY));
+        if (!hasGeospatial) {
+            return;
+        }
+
+        IcebergOptions.StorageType icebergStorage =
+                options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE);
+        if (icebergStorage != IcebergOptions.StorageType.DISABLED) {
+            checkArgument(
+                    options.toConfiguration().get(IcebergOptions.FORMAT_VERSION) == 3,
+                    "Geometry and geography columns require '%s'='3' when Iceberg metadata is enabled.",
+                    IcebergOptions.FORMAT_VERSION.key());
+            checkArgument(
+                    icebergStorage != IcebergOptions.StorageType.REST_CATALOG,
+                    "Geometry and geography columns do not support '%s'='%s' because the bundled Iceberg REST client cannot parse Iceberg v3 geospatial types.",
+                    IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                    IcebergOptions.StorageType.REST_CATALOG);
+            validateIcebergGeographyCrs(dataType);
         }
     }
 
@@ -810,6 +916,30 @@ public class SchemaValidation {
             return containsType(((VectorType) dataType).getElementType(), predicate);
         }
         return false;
+    }
+
+    private static void validateIcebergGeographyCrs(DataType dataType) {
+        if (dataType.is(DataTypeRoot.GEOGRAPHY)) {
+            String crs = ((GeographyType) dataType).getCrs();
+            checkArgument(
+                    !crs.contains(","),
+                    "Geography CRS '%s' cannot contain ',' when Iceberg metadata is enabled.",
+                    crs);
+        } else if (dataType instanceof RowType) {
+            for (DataField field : ((RowType) dataType).getFields()) {
+                validateIcebergGeographyCrs(field.type());
+            }
+        } else if (dataType instanceof ArrayType) {
+            validateIcebergGeographyCrs(((ArrayType) dataType).getElementType());
+        } else if (dataType instanceof MultisetType) {
+            validateIcebergGeographyCrs(((MultisetType) dataType).getElementType());
+        } else if (dataType instanceof MapType) {
+            MapType mapType = (MapType) dataType;
+            validateIcebergGeographyCrs(mapType.getKeyType());
+            validateIcebergGeographyCrs(mapType.getValueType());
+        } else if (dataType instanceof VectorType) {
+            validateIcebergGeographyCrs(((VectorType) dataType).getElementType());
+        }
     }
 
     private static void validateMapSharedShreddingFileFormats(CoreOptions options) {
