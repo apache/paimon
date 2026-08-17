@@ -105,6 +105,9 @@ public class CompactorSourceBuilder {
         if (bucketFilter != null) {
             readBuilder.withBucketFilter(bucketFilter);
         }
+        if (!isContinuous && CoreOptions.fromMap(table.options()).manifestDeleteFileDropStats()) {
+            readBuilder = readBuilder.dropStats();
+        }
         if (isContinuous) {
             return new ContinuousFileStoreSource(readBuilder, compactBucketsTable.options(), null);
         } else {
