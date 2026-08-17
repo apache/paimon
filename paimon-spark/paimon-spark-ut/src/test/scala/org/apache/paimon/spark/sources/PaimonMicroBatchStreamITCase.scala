@@ -37,9 +37,7 @@ class PaimonMicroBatchStreamITCase extends PaimonSparkTestBase {
     val stream = createStream(sourceTable)
     val initial = stream.initialOffset().asInstanceOf[PaimonSourceOffset]
 
-    val latest = stream
-      .latestOffset(initial, ReadLimit.allAvailable())
-      .asInstanceOf[PaimonSourceOffset]
+    val latest = latestOffset(stream, initial, ReadLimit.allAvailable())
 
     assert(latest.totalSplits.isEmpty)
     assert(!latest.json().contains("totalSplits"))
@@ -51,18 +49,14 @@ class PaimonMicroBatchStreamITCase extends PaimonSparkTestBase {
     val initial = stream.initialOffset().asInstanceOf[PaimonSourceOffset]
 
     assert(initial.scanSnapshot)
-    val partial = stream
-      .latestOffset(initial, ReadLimit.maxFiles(1))
-      .asInstanceOf[PaimonSourceOffset]
+    val partial = latestOffset(stream, initial, ReadLimit.maxFiles(1))
     assert(partial.index == 0L)
     assert(partial.totalSplits.contains(2L))
 
     stream.commit(partial)
     assert(!sourceTable.consumerManager().consumer(consumerId).isPresent)
 
-    val complete = stream
-      .latestOffset(partial, ReadLimit.maxFiles(1))
-      .asInstanceOf[PaimonSourceOffset]
+    val complete = latestOffset(stream, partial, ReadLimit.maxFiles(1))
     assert(complete.index == 1L)
     assert(complete.totalSplits.contains(2L))
 
@@ -74,9 +68,7 @@ class PaimonMicroBatchStreamITCase extends PaimonSparkTestBase {
     val sourceTable = withConsumer(createTableWithOneSnapshot())
     val firstStream = createStream(sourceTable)
     val firstInitial = firstStream.initialOffset().asInstanceOf[PaimonSourceOffset]
-    val firstComplete = firstStream
-      .latestOffset(firstInitial, ReadLimit.allAvailable())
-      .asInstanceOf[PaimonSourceOffset]
+    val firstComplete = latestOffset(firstStream, firstInitial, ReadLimit.allAvailable())
     firstStream.commit(firstComplete)
 
     spark.sql("INSERT INTO T VALUES (20, 'v_20'), (21, 'v_21'), (22, 'v_22')")
@@ -86,9 +78,7 @@ class PaimonMicroBatchStreamITCase extends PaimonSparkTestBase {
     assert(restartedInitial.snapshotId == firstComplete.snapshotId + 1)
     assert(!restartedInitial.scanSnapshot)
 
-    val next = restartedStream
-      .latestOffset(restartedInitial, ReadLimit.allAvailable())
-      .asInstanceOf[PaimonSourceOffset]
+    val next = latestOffset(restartedStream, restartedInitial, ReadLimit.allAvailable())
     assert(next.snapshotId == restartedInitial.snapshotId)
     assert(!next.scanSnapshot)
   }
@@ -100,9 +90,7 @@ class PaimonMicroBatchStreamITCase extends PaimonSparkTestBase {
     val branchTable = withConsumer(mainTable.switchToBranch("dev").asInstanceOf[FileStoreTable])
     val stream = createStream(branchTable)
     val initial = stream.initialOffset().asInstanceOf[PaimonSourceOffset]
-    val complete = stream
-      .latestOffset(initial, ReadLimit.allAvailable())
-      .asInstanceOf[PaimonSourceOffset]
+    val complete = latestOffset(stream, initial, ReadLimit.allAvailable())
 
     stream.commit(complete)
 
@@ -115,9 +103,7 @@ class PaimonMicroBatchStreamITCase extends PaimonSparkTestBase {
     val sourceTable = withConsumer(mainTable)
     val stream = createStream(sourceTable)
     val initial = stream.initialOffset().asInstanceOf[PaimonSourceOffset]
-    val complete = stream
-      .latestOffset(initial, ReadLimit.allAvailable())
-      .asInstanceOf[PaimonSourceOffset]
+    val complete = latestOffset(stream, initial, ReadLimit.allAvailable())
     stream.commit(complete)
     val protectedSnapshot = complete.snapshotId + 1
 
@@ -125,23 +111,13 @@ class PaimonMicroBatchStreamITCase extends PaimonSparkTestBase {
     spark.sql("INSERT INTO T VALUES (30, 'v_30')")
     spark.sql("INSERT INTO T VALUES (40, 'v_40')")
 
-    val expireOptions = new HashMap[String, String]()
-    expireOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "1")
-    expireOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "1")
-    expireOptions.put(CoreOptions.SNAPSHOT_TIME_RETAINED.key(), "0 ms")
-    val expireTable = mainTable.copy(expireOptions)
-    expireTable
-      .newExpireSnapshots()
-      .config(expireTable.coreOptions().expireConfig())
-      .expire()
+    expireSnapshotsWithMinimalRetention(mainTable)
 
     assert(!mainTable.snapshotManager().snapshotExists(complete.snapshotId))
     assert(mainTable.snapshotManager().snapshotExists(protectedSnapshot))
     assert(mainTable.snapshotManager().earliestSnapshotId() == protectedSnapshot)
 
-    val next = stream
-      .latestOffset(complete, ReadLimit.allAvailable())
-      .asInstanceOf[PaimonSourceOffset]
+    val next = latestOffset(stream, complete, ReadLimit.allAvailable())
     assert(next.snapshotId >= protectedSnapshot)
     assert(!next.scanSnapshot)
     assert(stream.planInputPartitions(complete, next).nonEmpty)
@@ -152,30 +128,18 @@ class PaimonMicroBatchStreamITCase extends PaimonSparkTestBase {
     val sourceTable = withConsumer(mainTable)
     val initialStream = createStream(sourceTable)
     val initial = initialStream.initialOffset().asInstanceOf[PaimonSourceOffset]
-    val complete = initialStream
-      .latestOffset(initial, ReadLimit.allAvailable())
-      .asInstanceOf[PaimonSourceOffset]
+    val complete = latestOffset(initialStream, initial, ReadLimit.allAvailable())
     assert(complete.snapshotCompleted)
 
     // Simulate a crash before the completed offset advances consumer progress.
     spark.sql("INSERT INTO T VALUES (20, 'v_20')")
     spark.sql("INSERT INTO T VALUES (30, 'v_30')")
     spark.sql("INSERT INTO T VALUES (40, 'v_40')")
-    val loggedDeltaEnd = initialStream
-      .latestOffset(complete, ReadLimit.allAvailable())
-      .asInstanceOf[PaimonSourceOffset]
+    val loggedDeltaEnd = latestOffset(initialStream, complete, ReadLimit.allAvailable())
     assert(!loggedDeltaEnd.scanSnapshot)
     assert(loggedDeltaEnd.snapshotId == mainTable.snapshotManager().latestSnapshotId())
 
-    val expireOptions = new HashMap[String, String]()
-    expireOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "1")
-    expireOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "1")
-    expireOptions.put(CoreOptions.SNAPSHOT_TIME_RETAINED.key(), "0 ms")
-    val expireTable = mainTable.copy(expireOptions)
-    expireTable
-      .newExpireSnapshots()
-      .config(expireTable.coreOptions().expireConfig())
-      .expire()
+    expireSnapshotsWithMinimalRetention(mainTable)
 
     assert(!mainTable.snapshotManager().snapshotExists(complete.snapshotId + 1))
     assert(!mainTable.snapshotManager().snapshotExists(complete.snapshotId + 2))
@@ -187,9 +151,7 @@ class PaimonMicroBatchStreamITCase extends PaimonSparkTestBase {
     }
     assert(exception.getMessage.contains("no longer readable"))
 
-    val currentFullEnd = restartedStream
-      .latestOffset(complete, ReadLimit.allAvailable())
-      .asInstanceOf[PaimonSourceOffset]
+    val currentFullEnd = latestOffset(restartedStream, complete, ReadLimit.allAvailable())
     assert(currentFullEnd.scanSnapshot)
     assert(restartedStream.planInputPartitions(complete, currentFullEnd).nonEmpty)
   }
@@ -199,32 +161,20 @@ class PaimonMicroBatchStreamITCase extends PaimonSparkTestBase {
     val sourceTable = withConsumer(mainTable)
     val initialStream = createStream(sourceTable)
     val initial = initialStream.initialOffset().asInstanceOf[PaimonSourceOffset]
-    val complete = initialStream
-      .latestOffset(initial, ReadLimit.allAvailable())
-      .asInstanceOf[PaimonSourceOffset]
+    val complete = latestOffset(initialStream, initial, ReadLimit.allAvailable())
     assert(complete.snapshotCompleted)
 
     spark.sql("INSERT INTO T VALUES (20, 'v_20')")
     spark.sql("INSERT INTO T VALUES (30, 'v_30')")
     spark.sql("INSERT INTO T VALUES (40, 'v_40')")
-    val loggedEnd = initialStream
-      .latestOffset(complete, ReadLimit.allAvailable())
-      .asInstanceOf[PaimonSourceOffset]
+    val loggedEnd = latestOffset(initialStream, complete, ReadLimit.allAvailable())
     assert(loggedEnd.snapshotId == complete.snapshotId + 3)
 
     spark.sql("INSERT INTO T VALUES (50, 'v_50')")
     val latestSnapshotId = mainTable.snapshotManager().latestSnapshotId()
     assert(latestSnapshotId == loggedEnd.snapshotId + 1)
 
-    val expireOptions = new HashMap[String, String]()
-    expireOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "1")
-    expireOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "1")
-    expireOptions.put(CoreOptions.SNAPSHOT_TIME_RETAINED.key(), "0 ms")
-    val expireTable = mainTable.copy(expireOptions)
-    expireTable
-      .newExpireSnapshots()
-      .config(expireTable.coreOptions().expireConfig())
-      .expire()
+    expireSnapshotsWithMinimalRetention(mainTable)
 
     assert(!mainTable.snapshotManager().snapshotExists(loggedEnd.snapshotId))
     assert(mainTable.snapshotManager().earliestSnapshotId() == latestSnapshotId)
@@ -264,9 +214,7 @@ class PaimonMicroBatchStreamITCase extends PaimonSparkTestBase {
     assert(initial.snapshotId == 1L)
     assert(!initial.scanSnapshot)
 
-    val end = stream
-      .latestOffset(initial, ReadLimit.maxFiles(1))
-      .asInstanceOf[PaimonSourceOffset]
+    val end = latestOffset(stream, initial, ReadLimit.maxFiles(1))
     assert(end.snapshotId == 1L)
     assert(stream.planInputPartitions(initial, end).nonEmpty)
   }
@@ -320,6 +268,25 @@ class PaimonMicroBatchStreamITCase extends PaimonSparkTestBase {
 
   private def createStream(table: FileStoreTable): PaimonMicroBatchStream = {
     new PaimonMicroBatchStream(table, table.newReadBuilder(), "unused")
+  }
+
+  private def latestOffset(
+      stream: PaimonMicroBatchStream,
+      start: PaimonSourceOffset,
+      limit: ReadLimit): PaimonSourceOffset = {
+    stream.latestOffset(start, limit).asInstanceOf[PaimonSourceOffset]
+  }
+
+  private def expireSnapshotsWithMinimalRetention(table: FileStoreTable): Unit = {
+    val expireOptions = new HashMap[String, String]()
+    expireOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "1")
+    expireOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "1")
+    expireOptions.put(CoreOptions.SNAPSHOT_TIME_RETAINED.key(), "0 ms")
+    val expireTable = table.copy(expireOptions)
+    expireTable
+      .newExpireSnapshots()
+      .config(expireTable.coreOptions().expireConfig())
+      .expire()
   }
 
   private def consumerNextSnapshot(table: FileStoreTable): Long = {

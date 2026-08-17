@@ -32,16 +32,8 @@ class PaimonMicroBatchStreamTest extends AnyFunSuite {
 
   test("advance consumer only after the last split of a snapshot is committed") {
     val (stream, scan) = createStreamWithConsumer()
-    val partial = PaimonSourceOffset.withTotalSplits(
-      snapshotId = 5L,
-      index = 0L,
-      scanSnapshot = false,
-      totalSplits = 2L)
-    val complete = PaimonSourceOffset.withTotalSplits(
-      snapshotId = 5L,
-      index = 1L,
-      scanSnapshot = false,
-      totalSplits = 2L)
+    val partial = consumerOffset(index = 0L, totalSplits = 2L)
+    val complete = consumerOffset(index = 1L, totalSplits = 2L)
 
     stream.commit(partial)
     verify(scan, never()).notifyCheckpointComplete(6L)
@@ -61,11 +53,7 @@ class PaimonMicroBatchStreamTest extends AnyFunSuite {
 
   test("propagate consumer update failure and allow retry") {
     val (stream, scan) = createStreamWithConsumer()
-    val complete = PaimonSourceOffset.withTotalSplits(
-      snapshotId = 5L,
-      index = 1L,
-      scanSnapshot = false,
-      totalSplits = 2L)
+    val complete = consumerOffset(index = 1L, totalSplits = 2L)
     val failure = new UncheckedIOException(new IOException("expected failure"))
     doThrow(failure).doNothing().when(scan).notifyCheckpointComplete(6L)
 
@@ -76,6 +64,14 @@ class PaimonMicroBatchStreamTest extends AnyFunSuite {
 
     stream.commit(complete)
     verify(scan, times(2)).notifyCheckpointComplete(6L)
+  }
+
+  private def consumerOffset(index: Long, totalSplits: Long): PaimonSourceOffset = {
+    PaimonSourceOffset.withTotalSplits(
+      snapshotId = 5L,
+      index = index,
+      scanSnapshot = false,
+      totalSplits = totalSplits)
   }
 
   private def createStreamWithConsumer(): (PaimonMicroBatchStream, StreamDataTableScan) = {

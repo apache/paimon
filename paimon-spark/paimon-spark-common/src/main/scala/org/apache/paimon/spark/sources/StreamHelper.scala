@@ -39,9 +39,8 @@ case class IndexedDataSplit(snapshotId: Long, index: Long, entry: DataSplit) {
   // Keep the existing three-field case class API while carrying planning metadata internally.
   private var totalSplitsValue: Long = -1L
 
-  private[spark] def totalSplits: Option[Long] = {
+  private[spark] def totalSplits: Option[Long] =
     if (totalSplitsValue < 0) None else Some(totalSplitsValue)
-  }
 
   private[spark] def withTotalSplits(totalSplits: Long): IndexedDataSplit = {
     require(totalSplits > 0, s"Total splits must be positive, but was $totalSplits.")
@@ -79,9 +78,8 @@ private[spark] trait StreamHelper {
   // Used to get the initial offset.
   lazy val streamScanStartingContext: StartingContext = streamScan.startingContext()
 
-  protected def notifyConsumerCheckpointComplete(nextSnapshot: Long): Unit = {
+  protected def notifyConsumerCheckpointComplete(nextSnapshot: Long): Unit =
     streamScan.notifyCheckpointComplete(nextSnapshot)
-  }
 
   def getLatestOffset(
       startOffset: PaimonSourceOffset,

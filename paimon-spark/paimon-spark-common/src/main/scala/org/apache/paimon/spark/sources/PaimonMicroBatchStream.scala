@@ -126,16 +126,13 @@ class PaimonMicroBatchStream(
 
   private def normalizeStartOffset(start: Offset): PaimonSourceOffset = {
     val startOffset = PaimonSourceOffset(start)
-    val resumeSnapshotId = if (startOffset.snapshotCompleted) {
+    val snapshotCompleted = startOffset.snapshotCompleted
+    val resumeSnapshotId = if (snapshotCompleted) {
       startOffset.snapshotId + 1
     } else {
       startOffset.snapshotId
     }
-    val resumeScanSnapshot = if (startOffset.snapshotCompleted) {
-      false
-    } else {
-      startOffset.scanSnapshot
-    }
+    val resumeScanSnapshot = !snapshotCompleted && startOffset.scanSnapshot
     val earliestReadable = earliestReadableId(resumeScanSnapshot)
     // Fall back to initOffset only when the checkpointed resume position has expired.
     // initOffset is recomputed from the current table state on every (re)start,

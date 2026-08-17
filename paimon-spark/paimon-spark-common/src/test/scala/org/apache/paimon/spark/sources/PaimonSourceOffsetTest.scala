@@ -25,11 +25,7 @@ import org.scalatest.funsuite.AnyFunSuite
 class PaimonSourceOffsetTest extends AnyFunSuite {
 
   test("round trip total splits in offset JSON") {
-    val offset: PaimonSourceOffset = PaimonSourceOffset.withTotalSplits(
-      snapshotId = 3L,
-      index = 1L,
-      scanSnapshot = true,
-      totalSplits = 2L)
+    val offset: PaimonSourceOffset = offsetWithTotalSplits(scanSnapshot = true)
 
     val restored = PaimonSourceOffset(offset.json())
 
@@ -40,11 +36,7 @@ class PaimonSourceOffsetTest extends AnyFunSuite {
   }
 
   test("copy and Java serialization preserve total splits") {
-    val offset = PaimonSourceOffset.withTotalSplits(
-      snapshotId = 3L,
-      index = 1L,
-      scanSnapshot = true,
-      totalSplits = 2L)
+    val offset = offsetWithTotalSplits(scanSnapshot = true)
 
     val copied = offset.copy(index = 0L)
     val deserialized = org.apache.paimon.utils.InstantiationUtil.clone(offset)
@@ -57,11 +49,7 @@ class PaimonSourceOffsetTest extends AnyFunSuite {
   }
 
   test("copy clears total splits when snapshot identity changes") {
-    val offset = PaimonSourceOffset.withTotalSplits(
-      snapshotId = 3L,
-      index = 1L,
-      scanSnapshot = true,
-      totalSplits = 2L)
+    val offset = offsetWithTotalSplits(scanSnapshot = true)
 
     assert(offset.copy(snapshotId = 4L).totalSplits.isEmpty)
     assert(offset.copy(scanSnapshot = false).totalSplits.isEmpty)
@@ -77,11 +65,7 @@ class PaimonSourceOffsetTest extends AnyFunSuite {
   }
 
   test("new offset JSON remains readable by the legacy decoder") {
-    val offset = PaimonSourceOffset.withTotalSplits(
-      snapshotId = 3L,
-      index = 1L,
-      scanSnapshot = false,
-      totalSplits = 2L)
+    val offset = offsetWithTotalSplits(scanSnapshot = false)
 
     val restoredByLegacyDecoder = legacyRead(offset.json())
 
@@ -91,11 +75,7 @@ class PaimonSourceOffsetTest extends AnyFunSuite {
   }
 
   test("total splits does not change the three-field case class API") {
-    val offset: PaimonSourceOffset = PaimonSourceOffset.withTotalSplits(
-      snapshotId = 3L,
-      index = 1L,
-      scanSnapshot = false,
-      totalSplits = 2L)
+    val offset: PaimonSourceOffset = offsetWithTotalSplits(scanSnapshot = false)
 
     assert(offset.productArity == 3)
     val PaimonSourceOffset(snapshotId, index, scanSnapshot) = offset
@@ -135,6 +115,14 @@ class PaimonSourceOffsetTest extends AnyFunSuite {
     assert(IndexedDataSplit.isInstanceOf[Function3[_, _, _, _]])
     IndexedDataSplit.getClass.getMethod("tupled")
     IndexedDataSplit.getClass.getMethod("curried")
+  }
+
+  private def offsetWithTotalSplits(scanSnapshot: Boolean): PaimonSourceOffset = {
+    PaimonSourceOffset.withTotalSplits(
+      snapshotId = 3L,
+      index = 1L,
+      scanSnapshot = scanSnapshot,
+      totalSplits = 2L)
   }
 
   private def legacyRead(json: String): PaimonSourceOffset = {
