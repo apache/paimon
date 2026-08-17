@@ -15,7 +15,9 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import importlib
 import sys
+import threading
 
 if sys.version_info[:2] < (3, 8):
     try:
@@ -23,11 +25,13 @@ if sys.version_info[:2] < (3, 8):
     except ImportError:
         pass
 
-from pypaimon.catalog.catalog_factory import CatalogFactory
-from pypaimon.filesystem.pvfs import PaimonVirtualFileSystem
-from pypaimon.schema.schema import Schema
-from pypaimon.tag.tag import Tag
-from pypaimon.tag.tag_manager import TagManager
+if sys.version_info[:2] < (3, 7):
+    # Module-level __getattr__ is unavailable before Python 3.7.
+    from pypaimon.catalog.catalog_factory import CatalogFactory
+    from pypaimon.filesystem.pvfs import PaimonVirtualFileSystem
+    from pypaimon.schema.schema import Schema
+    from pypaimon.tag.tag import Tag
+    from pypaimon.tag.tag_manager import TagManager
 
 __all__ = [
     "PaimonVirtualFileSystem",
@@ -38,9 +42,31 @@ __all__ = [
     "SQLContext",
 ]
 
+_LAZY_EXPORTS = {
+    "CatalogFactory": ("pypaimon.catalog.catalog_factory", "CatalogFactory"),
+    "PaimonVirtualFileSystem": (
+        "pypaimon.filesystem.pvfs", "PaimonVirtualFileSystem",
+    ),
+    "Schema": ("pypaimon.schema.schema", "Schema"),
+    "Tag": ("pypaimon.tag.tag", "Tag"),
+    "TagManager": ("pypaimon.tag.tag_manager", "TagManager"),
+    "SQLContext": ("pypaimon_rust.datafusion", "SQLContext"),
+}
+
+# Unsynchronized lazy imports from two threads can acquire module locks in
+# opposite orders (pypaimon.tag initializes both tag and tag_manager) and
+# fail with _DeadlockError; the eager imports previously serialized this on
+# the root module lock.
+_LAZY_IMPORT_LOCK = threading.RLock()
+
 
 def __getattr__(name):
-    if name == "SQLContext":
-        from pypaimon_rust.datafusion import SQLContext
-        return SQLContext
-    raise AttributeError("module 'pypaimon' has no attribute {}".format(name))
+    target = _LAZY_EXPORTS.get(name)
+    if target is None:
+        raise AttributeError(
+            "module 'pypaimon' has no attribute {}".format(name))
+    with _LAZY_IMPORT_LOCK:
+        if name not in globals():
+            module = importlib.import_module(target[0])
+            globals()[name] = getattr(module, target[1])
+        return globals()[name]
