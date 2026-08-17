@@ -25,6 +25,7 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.ResolvedFieldPath;
 
 import javax.annotation.Nullable;
 
@@ -102,9 +103,9 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
     private DataField textColumn() {
         checkNotNull(query, "Query must be set via withQuery()");
         checkNotNull(fieldName, "Field name must be set via withQuery()");
-        DataField textColumn = table.rowType().getField(fieldName);
-        checkNotNull(textColumn, "Text column '%s' does not exist.", fieldName);
-        return textColumn;
+        ResolvedFieldPath path = ResolvedFieldPath.resolve(table.rowType(), fieldName).orElse(null);
+        checkNotNull(path, "Text column '%s' does not exist.", fieldName);
+        return path.leafField();
     }
 
     private Optional<PrimaryKeyIndexDefinition> primaryKeyFullTextDefinition(DataField textColumn) {

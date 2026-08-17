@@ -33,8 +33,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
-import static org.apache.paimon.utils.InternalRowUtils.get;
-
 /** Transform that casts a field to a new type. */
 public class CastTransform implements Transform {
 
@@ -112,7 +110,7 @@ public class CastTransform implements Transform {
 
     @Override
     public Object transform(InternalRow row) {
-        return cast.cast(get(row, fieldRef.index(), fieldRef.type()));
+        return cast.cast(fieldRef.get(row));
     }
 
     @Override

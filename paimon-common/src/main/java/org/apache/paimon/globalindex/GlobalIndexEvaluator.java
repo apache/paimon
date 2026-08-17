@@ -30,7 +30,6 @@ import org.apache.paimon.predicate.LeafTernaryFunction;
 import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
-import org.apache.paimon.types.ResolvedFieldPath;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
 
@@ -172,9 +171,8 @@ public class GlobalIndexEvaluator implements Closeable {
     }
 
     private int resolveFieldId(FieldRef fieldRef) {
-        return ResolvedFieldPath.resolve(rowType, fieldRef.name())
+        return fieldRef.resolveField(rowType)
                 .orElseThrow(() -> new RuntimeException("Cannot find field: " + fieldRef.name()))
-                .leafField()
                 .id();
     }
 

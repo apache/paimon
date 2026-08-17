@@ -146,6 +146,11 @@ public class LeafPredicate implements Predicate {
             return !(function instanceof AlwaysFalse);
         }
         FieldRef fieldRef = fieldRefOptional.get();
+        if (fieldRef.isNested()) {
+            // File statistics are currently stored for top-level fields. They cannot safely be
+            // interpreted using the nested leaf type, so retain the file for row-level filtering.
+            return true;
+        }
         int index = fieldRef.index();
         DataType type = fieldRef.type();
 

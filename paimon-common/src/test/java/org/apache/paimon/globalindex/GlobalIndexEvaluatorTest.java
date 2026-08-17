@@ -20,9 +20,7 @@ package org.apache.paimon.globalindex;
 
 import org.apache.paimon.predicate.And;
 import org.apache.paimon.predicate.CompoundPredicate;
-import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.FieldRef;
-import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
@@ -181,8 +179,8 @@ class GlobalIndexEvaluatorTest {
                                         "profile",
                                         new RowType(
                                                 Arrays.asList(
-                                                        new DataField(
-                                                                7, "zip", DataTypes.INT()))))));
+                                                        new DataField(7, "zip", DataTypes.INT())))),
+                                new DataField(8, "profile.zip", DataTypes.STRING())));
         AtomicInteger requestedFieldId = new AtomicInteger(-1);
         AtomicBoolean nestedReferenceVisited = new AtomicBoolean();
         GlobalIndexEvaluator evaluator =
@@ -203,13 +201,8 @@ class GlobalIndexEvaluatorTest {
                                         }
                                     });
                         });
-        Predicate predicate =
-                new LeafPredicate(
-                        Equal.INSTANCE,
-                        DataTypes.INT(),
-                        1,
-                        "profile.zip",
-                        Collections.singletonList(42));
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        Predicate predicate = builder.equal(builder.field(Arrays.asList("profile", "zip")), 42);
 
         Optional<GlobalIndexEvaluator.Evaluation> evaluation =
                 evaluator.evaluateWithContributingFields(predicate);
@@ -226,14 +219,14 @@ class GlobalIndexEvaluatorTest {
     void testNestedFieldTopNUsesLeafFieldId() {
         RowType rowType =
                 new RowType(
-                        Collections.singletonList(
+                        Arrays.asList(
                                 new DataField(
                                         1,
                                         "profile",
                                         new RowType(
                                                 Collections.singletonList(
-                                                        new DataField(
-                                                                7, "zip", DataTypes.INT()))))));
+                                                        new DataField(7, "zip", DataTypes.INT())))),
+                                new DataField(8, "profile.zip", DataTypes.STRING())));
         AtomicInteger requestedFieldId = new AtomicInteger(-1);
         AtomicBoolean nestedTopNVisited = new AtomicBoolean();
         GlobalIndexEvaluator evaluator =
@@ -257,9 +250,10 @@ class GlobalIndexEvaluatorTest {
                                         }
                                     });
                         });
-        TopN topN =
-                new TopN(
-                        new FieldRef(1, "profile.zip", DataTypes.INT()), DESCENDING, NULLS_LAST, 2);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        FieldRef fieldRef =
+                (FieldRef) builder.field(Arrays.asList("profile", "zip")).inputs().get(0);
+        TopN topN = new TopN(fieldRef, DESCENDING, NULLS_LAST, 2);
 
         Optional<GlobalIndexResult> result = evaluator.evaluateTopN(topN);
 

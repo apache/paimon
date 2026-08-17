@@ -63,15 +63,10 @@ public class PredicateVisitorTest {
                                         "profile",
                                         new RowType(
                                                 Collections.singletonList(
-                                                        new DataField(
-                                                                7, "zip", DataTypes.INT()))))));
-        Predicate predicate =
-                new LeafPredicate(
-                        Equal.INSTANCE,
-                        DataTypes.INT(),
-                        1,
-                        "profile.zip",
-                        Collections.singletonList(42));
+                                                        new DataField(7, "zip", DataTypes.INT())))),
+                                new DataField(8, "profile.zip", DataTypes.STRING())));
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        Predicate predicate = builder.equal(builder.field(Arrays.asList("profile", "zip")), 42);
 
         assertThat(PredicateVisitor.collectFieldIds(rowType, predicate)).containsExactly(7);
     }

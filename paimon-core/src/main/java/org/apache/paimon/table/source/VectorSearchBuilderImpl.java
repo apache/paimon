@@ -25,6 +25,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.ResolvedFieldPath;
 import org.apache.paimon.utils.Pair;
 
 import javax.annotation.Nullable;
@@ -49,6 +50,7 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
     protected Predicate filter;
     protected int limit;
     protected DataField vectorColumn;
+    protected String vectorColumnPath;
     protected float[] vector;
     protected Map<String, String> options = new HashMap<>();
     @Nullable private Snapshot pinnedSnapshot;
@@ -102,7 +104,9 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
 
     @Override
     public VectorSearchBuilder withVectorColumn(String name) {
-        this.vectorColumn = table.rowType().getField(name);
+        ResolvedFieldPath path = ResolvedFieldPath.resolve(table.rowType(), name).orElse(null);
+        this.vectorColumn = path == null ? null : path.leafField();
+        this.vectorColumnPath = path == null ? name : path.fullName();
         return this;
     }
 
@@ -132,7 +136,7 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
             return new PrimaryKeyVectorScan(
                     table,
                     vectorColumn.id(),
-                    table.coreOptions().primaryKeyVectorIndexType(vectorColumn.name()),
+                    table.coreOptions().primaryKeyVectorIndexType(vectorColumnPath),
                     partitionFilter,
                     filter,
                     pinnedSnapshot);
@@ -153,7 +157,7 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
 
     protected boolean isPrimaryKeyVectorSearch() {
         return vectorColumn != null
-                && table.coreOptions().primaryKeyVectorIndexColumns().contains(vectorColumn.name());
+                && table.coreOptions().primaryKeyVectorIndexColumns().contains(vectorColumnPath);
     }
 
     public VectorSearchBuilderImpl withSnapshot(Snapshot snapshot) {

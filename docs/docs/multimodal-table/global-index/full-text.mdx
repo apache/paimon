@@ -44,6 +44,9 @@ Build full-text indexes on `STRING`, `CHAR`, or `VARCHAR` columns. Null values
 are skipped by the native text index, while row-id coverage is still tracked by
 Paimon.
 
+A full-text index can target a string leaf inside nested `ROW` columns. Pass its dot-separated
+path, such as `profile.content`, as `index_column` and use the same path when searching.
+
 <Tabs groupId="fulltext-build">
 
 <TabItem value="sql" label="SQL">
@@ -202,6 +205,9 @@ Spark SQL uses the `full_text_search(table_name, column, query, limit)`
 table-valued function. The `column` argument is the Paimon table column to
 search. The `query` argument is passed to the native full-text reader as a JSON
 string.
+
+The Spark SQL and Java search APIs accept nested `ROW` paths such as `profile.content`. In `full`
+and `detail` search modes, raw-row fallback also reads the nested value for index-uncovered ranges.
 
 <Tabs groupId="fulltext-search">
 

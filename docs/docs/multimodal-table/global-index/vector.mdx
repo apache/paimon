@@ -64,6 +64,10 @@ is accepted.
 
 ## Build Vector Index
 
+A vector index can target an `ARRAY<FLOAT>` or `VECTOR<FLOAT>` leaf inside nested `ROW` columns.
+Pass its dot-separated path, such as `profile.embedding`, as `index_column` and use the same path
+for vector search.
+
 <Tabs groupId="vector-build">
 
 <TabItem value="sql" label="SQL">
@@ -280,6 +284,10 @@ With the properties above, `title_embedding` is indexed with `nlist=256` while `
 uses `nlist=512` and trains with half of the non-null vectors.
 
 ## Vector Search
+
+Spark SQL, the Flink vector-search procedure, and the Java single-query and batch-query builders
+accept nested `ROW` paths such as `profile.embedding`. Raw-vector fallback and reranking read the
+nested leaf value for index-uncovered ranges.
 
 Search-time options are passed with each vector search request:
 

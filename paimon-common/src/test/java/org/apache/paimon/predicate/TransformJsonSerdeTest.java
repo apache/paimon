@@ -49,6 +49,18 @@ class TransformJsonSerdeTest {
                         .expectJson(
                                 "{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":1,\"name\":\"f1\",\"type\":\"STRING\"}}"),
 
+                // Nested FieldTransform
+                TestSpec.forTransform(
+                                new FieldTransform(
+                                        new FieldRef(
+                                                1,
+                                                "profile.address.zip",
+                                                DataTypes.INT(),
+                                                new int[] {1, 0},
+                                                new int[] {2, 1})))
+                        .expectJson(
+                                "{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":1,\"name\":\"profile.address.zip\",\"type\":\"INT\",\"nestedIndexes\":[1,0],\"nestedArities\":[2,1]}}"),
+
                 // CastTransform - INT to BIGINT
                 TestSpec.forTransform(
                                 new CastTransform(

@@ -30,6 +30,7 @@ import org.apache.paimon.predicate.SimpleColStatsTestUtils;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.expressions.CallExpression;
 import org.apache.flink.table.expressions.FieldReferenceExpression;
+import org.apache.flink.table.expressions.NestedFieldReferenceExpression;
 import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.flink.table.expressions.ValueLiteralExpression;
 import org.apache.flink.table.functions.BuiltInFunctionDefinitions;
@@ -808,6 +809,54 @@ public class PredicateConverterTest {
         DataType structType = DataTypes.ROW(DataTypes.INT()).bridgedTo(Row.class);
         assertThatThrownBy(() -> field(0, structType).accept(converter))
                 .isInstanceOf(PredicateConverter.UnsupportedExpression.class);
+    }
+
+    @Test
+    public void testNestedFieldReferenceExpression() {
+        RowType rowType =
+                RowType.of(
+                        new org.apache.flink.table.types.logical.LogicalType[] {
+                            RowType.of(
+                                    new org.apache.flink.table.types.logical.LogicalType[] {
+                                        new VarCharType(),
+                                        RowType.of(
+                                                new org.apache.flink.table.types.logical.LogicalType
+                                                        [] {new IntType()},
+                                                new String[] {"zip"})
+                                    },
+                                    new String[] {"name", "address"})
+                        },
+                        new String[] {"profile"});
+        NestedFieldReferenceExpression zip =
+                new NestedFieldReferenceExpression(
+                        new String[] {"profile", "address", "zip"},
+                        new int[] {0, 1, 0},
+                        DataTypes.INT());
+        Predicate predicate =
+                call(BuiltInFunctionDefinitions.EQUALS, zip, new ValueLiteralExpression(100))
+                        .accept(new PredicateConverter(rowType));
+        Predicate between =
+                call(
+                                BuiltInFunctionDefinitions.BETWEEN,
+                                zip,
+                                new ValueLiteralExpression(50),
+                                new ValueLiteralExpression(150))
+                        .accept(new PredicateConverter(rowType));
+        Predicate isNull =
+                call(BuiltInFunctionDefinitions.IS_NULL, zip)
+                        .accept(new PredicateConverter(rowType));
+
+        assertThat(predicate.toString()).isEqualTo("Equal(profile.address.zip, 100)");
+        assertThat(predicate.test(GenericRow.of(GenericRow.of("Alice", GenericRow.of(100)))))
+                .isTrue();
+        assertThat(predicate.test(GenericRow.of(GenericRow.of("Alice", GenericRow.of(200)))))
+                .isFalse();
+        assertThat(between.test(GenericRow.of(GenericRow.of("Alice", GenericRow.of(100)))))
+                .isTrue();
+        assertThat(between.test(GenericRow.of(GenericRow.of("Alice", GenericRow.of(200)))))
+                .isFalse();
+        assertThat(isNull.test(GenericRow.of(GenericRow.of("Alice", null)))).isTrue();
+        assertThat(isNull.test(GenericRow.of((Object) null))).isTrue();
     }
 
     // ==================== Nested OR Conversion Tests ====================

@@ -41,6 +41,7 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.BatchVectorSearch;
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.predicate.VectorSearch;
@@ -49,6 +50,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.ResolvedFieldPath;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Range;
@@ -443,7 +445,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         TableScan.Plan plan =
                 newRawReadBuilder(readType, false).withRowRanges(rawRowRanges).newScan().plan();
         ReadBuilder readBuilder = newRawReadBuilder(readType, includeFilter);
-        int vectorIndex = readType.getFieldIndex(vectorColumn.name());
+        FieldRef vectorRef = vectorFieldRef(readType);
         int rowIdIndex = readType.getFieldIndex(SpecialFields.ROW_ID.name());
         PriorityQueue<long[]> topKHeap =
                 new PriorityQueue<>(Math.max(1, limit + 1), WEAKEST_SCORE_FIRST);
@@ -456,10 +458,11 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                         if (scoreCandidates != null && !scoreCandidates.contains(rowId)) {
                             return;
                         }
-                        if (row.isNullAt(vectorIndex)) {
+                        Object storedValue = vectorRef.get(row);
+                        if (storedValue == null) {
                             return;
                         }
-                        float[] stored = getVector(row, vectorIndex);
+                        float[] stored = getVector(storedValue);
                         checkVectorDimension(queryVector, stored);
                         offerScore(
                                 topKHeap,
@@ -493,7 +496,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                 newRawReadBuilder(readType, false).withRowRanges(rawRowRanges).newScan().plan();
         ReadBuilder readBuilder = newRawReadBuilder(readType, includeFilter);
         Map<Long, float[]> rawVectors = new HashMap<>();
-        int vectorIndex = readType.getFieldIndex(vectorColumn.name());
+        FieldRef vectorRef = vectorFieldRef(readType);
         int rowIdIndex = readType.getFieldIndex(SpecialFields.ROW_ID.name());
 
         try (RecordReader<InternalRow> reader =
@@ -504,10 +507,11 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
                         if (candidates != null && !candidates.contains(rowId)) {
                             return;
                         }
-                        if (row.isNullAt(vectorIndex)) {
+                        Object storedValue = vectorRef.get(row);
+                        if (storedValue == null) {
                             return;
                         }
-                        float[] stored = getVector(row, vectorIndex);
+                        float[] stored = getVector(storedValue);
                         rawVectors.put(rowId, stored);
                     });
         } catch (IOException e) {
@@ -590,14 +594,15 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
     protected RowType rawSearchReadType(boolean includeFilter) {
         RowType tableRowType = table.rowType();
         List<String> readFields = new ArrayList<>();
-        readFields.add(vectorColumn.name());
+        readFields.add(vectorFieldPath(tableRowType).topLevelField().name());
 
         if (includeFilter && filter != null) {
             Set<String> filterFields = PredicateVisitor.collectFieldNames(filter);
-            for (String field : tableRowType.getFieldNames()) {
-                if (filterFields.contains(field) && !readFields.contains(field)) {
-                    readFields.add(field);
-                }
+            for (String field : filterFields) {
+                ResolvedFieldPath.resolve(tableRowType, field)
+                        .map(path -> path.topLevelField().name())
+                        .filter(name -> !readFields.contains(name))
+                        .ifPresent(readFields::add);
             }
         }
 
@@ -668,12 +673,25 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         return null;
     }
 
-    private float[] getVector(InternalRow row, int vectorIndex) {
+    private ResolvedFieldPath vectorFieldPath(RowType rowType) {
+        return ResolvedFieldPath.resolve(rowType, vectorColumn.id())
+                .orElseThrow(
+                        () ->
+                                new IllegalArgumentException(
+                                        "Cannot find vector column by field id: "
+                                                + vectorColumn.id()));
+    }
+
+    private FieldRef vectorFieldRef(RowType rowType) {
+        return FieldRef.from(vectorFieldPath(rowType));
+    }
+
+    private float[] getVector(Object value) {
         if (vectorColumn.type().getTypeRoot() == DataTypeRoot.VECTOR) {
-            InternalVector vector = row.getVector(vectorIndex);
+            InternalVector vector = (InternalVector) value;
             return vector.toFloatArray();
         } else if (vectorColumn.type().getTypeRoot() == DataTypeRoot.ARRAY) {
-            InternalArray array = row.getArray(vectorIndex);
+            InternalArray array = (InternalArray) value;
             return array.toFloatArray();
         }
         throw new IllegalArgumentException(

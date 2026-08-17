@@ -53,6 +53,7 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.ResolvedFieldPath;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 
@@ -894,6 +895,74 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         }
 
         assertThat(rawDeserialized.rowRanges()).isEqualTo(rawOriginal.rowRanges());
+    }
+
+    @Test
+    public void testNestedFullTextSearchWithRawFallback() throws Exception {
+        Identifier identifier = identifier("nested_full_text_search");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column(
+                                "profile",
+                                DataTypes.ROW(DataTypes.FIELD(0, "content", DataTypes.STRING())))
+                        .option(CoreOptions.BUCKET.key(), "-1")
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(CoreOptions.FULL_TEXT_INDEX_SEARCH_MODE.key(), "full")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+        FileStoreTable table = getTable(identifier);
+        String[] documents = {"paimon indexed", "other indexed", "paimon raw", "other raw"};
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (int i = 0; i < documents.length; i++) {
+                write.write(GenericRow.of(i, GenericRow.of(BinaryString.fromString(documents[i]))));
+            }
+            commit.commit(write.prepareCommit());
+        }
+
+        DataField textField =
+                ResolvedFieldPath.resolve(table.rowType(), "profile.content").get().leafField();
+        GlobalIndexSingleColumnWriter indexWriter =
+                (GlobalIndexSingleColumnWriter)
+                        GlobalIndexBuilderUtils.createIndexWriter(
+                                table,
+                                TestFullTextGlobalIndexerFactory.IDENTIFIER,
+                                textField,
+                                table.coreOptions().toConfiguration());
+        indexWriter.write(documents[0], 0);
+        indexWriter.write(documents[1], 1);
+        List<IndexFileMeta> indexFiles =
+                GlobalIndexBuilderUtils.toIndexFileMetas(
+                        table.fileIO(),
+                        table.store().pathFactory().globalIndexFileFactory(),
+                        table.coreOptions(),
+                        new Range(0, 1),
+                        textField.id(),
+                        TestFullTextGlobalIndexerFactory.IDENTIFIER,
+                        indexWriter.finish());
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(
+                    Collections.singletonList(
+                            new CommitMessageImpl(
+                                    BinaryRow.EMPTY_ROW,
+                                    0,
+                                    null,
+                                    DataIncrement.indexIncrement(indexFiles),
+                                    CompactIncrement.emptyIncrement())));
+        }
+
+        GlobalIndexResult result =
+                table.newFullTextSearchBuilder()
+                        .withQuery("profile.content", matchQuery("paimon"))
+                        .withLimit(10)
+                        .executeLocal();
+
+        assertThat(result.results()).containsExactlyInAnyOrder(0L, 2L);
+        assertThat(readIds(table, result)).containsExactlyInAnyOrder(0, 2);
     }
 
     // ====================== Helper methods ======================

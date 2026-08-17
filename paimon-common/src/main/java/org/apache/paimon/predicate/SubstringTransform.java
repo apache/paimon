@@ -56,8 +56,7 @@ public class SubstringTransform implements Transform {
         if (source instanceof FieldRef) {
             FieldRef sourceFieldRef = (FieldRef) source;
             checkArgument(sourceFieldRef.type().is(CHARACTER_STRING));
-            int sourceIndex = sourceFieldRef.index();
-            sourceString = row.isNullAt(sourceIndex) ? null : row.getString(sourceIndex);
+            sourceString = (BinaryString) sourceFieldRef.get(row);
         } else {
             sourceString = (BinaryString) inputs.get(0);
         }
@@ -71,7 +70,7 @@ public class SubstringTransform implements Transform {
         if (begin instanceof FieldRef) {
             FieldRef beginRef = (FieldRef) begin;
             checkArgument(beginRef.type().is(INTEGER_NUMERIC));
-            beginIndex = row.getInt(beginRef.index());
+            beginIndex = ((Number) beginRef.get(row)).intValue();
         } else {
             beginIndex = Integer.parseInt(inputs.get(1).toString());
         }
@@ -85,7 +84,7 @@ public class SubstringTransform implements Transform {
             if (end instanceof FieldRef) {
                 FieldRef endRef = (FieldRef) inputs.get(2);
                 checkArgument(endRef.type().is(INTEGER_NUMERIC));
-                endIndex = beginIndex + row.getInt(endRef.index()) - 1;
+                endIndex = beginIndex + ((Number) endRef.get(row)).intValue() - 1;
             } else {
                 endIndex = beginIndex + Integer.parseInt(inputs.get(2).toString()) - 1;
             }

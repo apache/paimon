@@ -160,6 +160,12 @@ The legacy `btree-index.records-per-range` and
 ## Query with BTree Index
 
 Once a BTree index is built, it is automatically used during scan when a filter predicate matches the indexed column.
+Flink and Spark SQL can query a leaf inside nested `ROW` columns. Build the index with a
+dot-separated path such as `profile.address.zip`, then use the normal structured predicate:
+
+```sql
+SELECT * FROM my_table WHERE profile.address.zip BETWEEN 100 AND 200;
+```
 
 <Tabs groupId="btree-search">
 

@@ -61,6 +61,7 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.ResolvedFieldPath;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
@@ -1666,6 +1667,87 @@ public class VectorSearchBuilderTest extends TableTestBase {
                 impl.newFilesIncrement().newFiles().add(file.assignFirstRowId(firstRowId));
             }
         }
+    }
+
+    @Test
+    public void testNestedVectorSearchWithRawFallback() throws Exception {
+        catalog.createTable(
+                identifier("nested_vector_search"),
+                withVectorSchemaOptions(
+                                Schema.newBuilder()
+                                        .column("id", DataTypes.INT())
+                                        .column(
+                                                "profile",
+                                                DataTypes.ROW(
+                                                        DataTypes.FIELD(
+                                                                0,
+                                                                "vec",
+                                                                new ArrayType(DataTypes.FLOAT())))))
+                        .option(CoreOptions.VECTOR_INDEX_SEARCH_MODE.key(), "full")
+                        .build(),
+                false);
+        FileStoreTable table = getTable(identifier("nested_vector_search"));
+        float[][] vectors = {{10.0f, 0.0f}, {9.0f, 0.0f}, {0.0f, 0.0f}, {1.0f, 0.0f}};
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (int i = 0; i < vectors.length; i++) {
+                write.write(GenericRow.of(i, GenericRow.of(new GenericArray(vectors[i]))));
+            }
+            commit.commit(write.prepareCommit());
+        }
+
+        DataField vectorField =
+                ResolvedFieldPath.resolve(table.rowType(), "profile.vec").get().leafField();
+        GlobalIndexSingleColumnWriter indexWriter =
+                (GlobalIndexSingleColumnWriter)
+                        GlobalIndexBuilderUtils.createIndexWriter(
+                                table,
+                                TestVectorGlobalIndexerFactory.IDENTIFIER,
+                                vectorField,
+                                table.coreOptions().toConfiguration());
+        indexWriter.write(vectors[0], 0);
+        indexWriter.write(vectors[1], 1);
+        List<IndexFileMeta> indexFiles =
+                GlobalIndexBuilderUtils.toIndexFileMetas(
+                        table.fileIO(),
+                        table.store().pathFactory().globalIndexFileFactory(),
+                        table.coreOptions(),
+                        new Range(0, 1),
+                        vectorField.id(),
+                        TestVectorGlobalIndexerFactory.IDENTIFIER,
+                        indexWriter.finish());
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(
+                    Collections.singletonList(
+                            new CommitMessageImpl(
+                                    BinaryRow.EMPTY_ROW,
+                                    0,
+                                    null,
+                                    DataIncrement.indexIncrement(indexFiles),
+                                    CompactIncrement.emptyIncrement())));
+        }
+
+        GlobalIndexResult result =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {0.0f, 0.0f})
+                        .withLimit(1)
+                        .withVectorColumn("profile.vec")
+                        .executeLocal();
+
+        assertThat(result.results()).containsExactly(2L);
+        assertThat(readIds(table, result)).containsExactly(2);
+
+        List<GlobalIndexResult> batchResults =
+                table.newBatchVectorSearchBuilder()
+                        .withVectors(new float[][] {{0.0f, 0.0f}, {10.0f, 0.0f}})
+                        .withLimit(1)
+                        .withVectorColumn("profile.vec")
+                        .executeBatchLocal();
+        assertThat(batchResults).hasSize(2);
+        assertThat(batchResults.get(0).results()).containsExactly(2L);
+        assertThat(batchResults.get(1).results()).containsExactly(0L);
     }
 
     private void writeVectors(FileStoreTable table, float[][] vectors) throws Exception {

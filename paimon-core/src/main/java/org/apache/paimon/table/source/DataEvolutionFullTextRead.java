@@ -35,6 +35,7 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.FullTextSearch;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.ResolvedFieldPath;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
@@ -59,6 +60,7 @@ public class DataEvolutionFullTextRead implements FullTextRead {
     @Nullable private final PartitionPredicate partitionFilter;
     private final int limit;
     private final DataField textColumn;
+    private final String textColumnPath;
     private final String query;
 
     public DataEvolutionFullTextRead(
@@ -75,6 +77,14 @@ public class DataEvolutionFullTextRead implements FullTextRead {
                     "Full-text search expects exactly one text column, got: " + textColumns);
         }
         this.textColumn = textColumns.get(0);
+        this.textColumnPath =
+                ResolvedFieldPath.resolve(table.rowType(), textColumn.id())
+                        .orElseThrow(
+                                () ->
+                                        new IllegalArgumentException(
+                                                "Cannot find text column by field id: "
+                                                        + textColumn.id()))
+                        .fullName();
         this.query = query;
     }
 
@@ -146,7 +156,7 @@ public class DataEvolutionFullTextRead implements FullTextRead {
             ExecutorService executor,
             @Nullable RoaringNavigableMap64 liveRows) {
         return evalColumnQuery(
-                textColumn.name(),
+                textColumnPath,
                 splitsByColumn,
                 indexPathFactory,
                 indexFileReader,

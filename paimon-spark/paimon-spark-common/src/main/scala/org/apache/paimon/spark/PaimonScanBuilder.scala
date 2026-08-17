@@ -24,6 +24,7 @@ import org.apache.paimon.predicate._
 import org.apache.paimon.predicate.SortValue.{NullOrdering, SortDirection}
 import org.apache.paimon.spark.aggregate.AggregatePushDownUtils.tryPushdownAggregation
 import org.apache.paimon.spark.read.{PaimonLocalScan, PaimonSupportsPushDownVariantExtractions, VectorSearchResultUtils}
+import org.apache.paimon.spark.util.SparkExpressionConverter
 import org.apache.paimon.table.{FileStoreTable, InnerTable}
 
 import org.apache.spark.sql.connector.expressions
@@ -53,18 +54,15 @@ class PaimonScanBuilder(val table: InnerTable)
     val sorts: List[SortValue] = orders
       .map(
         order => {
-          val fieldName = order.expression() match {
-            case nr: NamedReference => nr.fieldNames.mkString(".")
+          val fieldRef = order.expression() match {
+            case nr: NamedReference =>
+              try {
+                SparkExpressionConverter.toPaimonFieldRef(nr, table.rowType())
+              } catch {
+                case _: UnsupportedOperationException => return false
+              }
             case _ => return false
           }
-
-          val rowType = table.rowType()
-          if (rowType.notContainsField(fieldName)) {
-            return false
-          }
-
-          val field = rowType.getField(fieldName)
-          val ref = new FieldRef(field.id(), field.name(), field.`type`())
 
           val nullOrdering = order.nullOrdering() match {
             case expressions.NullOrdering.NULLS_LAST => NullOrdering.NULLS_LAST
@@ -78,7 +76,7 @@ class PaimonScanBuilder(val table: InnerTable)
             case _ => return false
           }
 
-          new SortValue(ref, direction, nullOrdering)
+          new SortValue(fieldRef, direction, nullOrdering)
         })
       .toList
 

@@ -21,6 +21,7 @@ package org.apache.paimon.flink;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.flink.table.data.conversion.DataStructureConverters;
@@ -28,6 +29,7 @@ import org.apache.flink.table.expressions.CallExpression;
 import org.apache.flink.table.expressions.Expression;
 import org.apache.flink.table.expressions.ExpressionVisitor;
 import org.apache.flink.table.expressions.FieldReferenceExpression;
+import org.apache.flink.table.expressions.NestedFieldReferenceExpression;
 import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.flink.table.expressions.TypeLiteralExpression;
 import org.apache.flink.table.expressions.ValueLiteralExpression;
@@ -40,6 +42,8 @@ import org.apache.flink.table.types.logical.RowType;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.List;
 import java.util.Objects;
@@ -94,35 +98,35 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
         } else if (func == BuiltInFunctionDefinitions.LESS_THAN_OR_EQUAL) {
             return visitBiFunction(children, builder::lessOrEqual, builder::greaterOrEqual);
         } else if (func == BuiltInFunctionDefinitions.IN) {
-            FieldReferenceExpression fieldRefExpr =
+            ResolvedFieldReference fieldRefExpr =
                     extractFieldReference(children.get(0)).orElseThrow(UnsupportedExpression::new);
             List<Object> literals = new ArrayList<>();
             for (int i = 1; i < children.size(); i++) {
-                literals.add(extractLiteral(fieldRefExpr.getOutputDataType(), children.get(i)));
+                literals.add(extractLiteral(fieldRefExpr.outputDataType, children.get(i)));
             }
-            return builder.in(builder.indexOf(fieldRefExpr.getName()), literals);
+            return builder.in(fieldRefExpr.transform(builder), literals);
         } else if (func == BuiltInFunctionDefinitions.IS_NULL) {
             return extractFieldReference(children.get(0))
-                    .map(FieldReferenceExpression::getName)
-                    .map(builder::indexOf)
+                    .map(field -> field.transform(builder))
                     .map(builder::isNull)
                     .orElseThrow(UnsupportedExpression::new);
         } else if (func == BuiltInFunctionDefinitions.IS_NOT_NULL) {
             return extractFieldReference(children.get(0))
-                    .map(FieldReferenceExpression::getName)
-                    .map(builder::indexOf)
+                    .map(field -> field.transform(builder))
                     .map(builder::isNotNull)
                     .orElseThrow(UnsupportedExpression::new);
         } else if (func == BuiltInFunctionDefinitions.BETWEEN) {
-            FieldReferenceExpression fieldRefExpr =
+            ResolvedFieldReference fieldRefExpr =
                     extractFieldReference(children.get(0)).orElseThrow(UnsupportedExpression::new);
             return builder.between(
-                    builder.indexOf(fieldRefExpr.getName()), children.get(1), children.get(2));
+                    fieldRefExpr.transform(builder),
+                    extractLiteral(fieldRefExpr.outputDataType, children.get(1)),
+                    extractLiteral(fieldRefExpr.outputDataType, children.get(2)));
         } else if (func == BuiltInFunctionDefinitions.LIKE) {
-            FieldReferenceExpression fieldRefExpr =
+            ResolvedFieldReference fieldRefExpr =
                     extractFieldReference(children.get(0)).orElseThrow(UnsupportedExpression::new);
             if (fieldRefExpr
-                    .getOutputDataType()
+                    .outputDataType
                     .getLogicalType()
                     .getTypeRoot()
                     .getFamilies()
@@ -130,14 +134,14 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                 String sqlPattern =
                         Objects.requireNonNull(
                                         extractLiteral(
-                                                fieldRefExpr.getOutputDataType(), children.get(1)))
+                                                fieldRefExpr.outputDataType, children.get(1)))
                                 .toString();
                 String escape =
                         children.size() <= 2
                                 ? null
                                 : Objects.requireNonNull(
                                                 extractLiteral(
-                                                        fieldRefExpr.getOutputDataType(),
+                                                        fieldRefExpr.outputDataType,
                                                         children.get(2)))
                                         .toString();
                 String escapedSqlPattern = sqlPattern;
@@ -183,19 +187,19 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                     Matcher beginMatcher = BEGIN_PATTERN.matcher(escapedSqlPattern);
                     if (beginMatcher.matches()) {
                         return builder.startsWith(
-                                builder.indexOf(fieldRefExpr.getName()),
+                                fieldRefExpr.transform(builder),
                                 BinaryString.fromString(beginMatcher.group(1)));
                     }
                 }
             }
         } else if (func == BuiltInFunctionDefinitions.IS_TRUE) {
-            FieldReferenceExpression fieldRefExpr =
+            ResolvedFieldReference fieldRefExpr =
                     extractFieldReference(children.get(0)).orElseThrow(UnsupportedExpression::new);
-            return builder.equal(builder.indexOf(fieldRefExpr.getName()), Boolean.TRUE);
+            return builder.equal(fieldRefExpr.transform(builder), Boolean.TRUE);
         } else if (func == BuiltInFunctionDefinitions.IS_FALSE) {
-            FieldReferenceExpression fieldRefExpr =
+            ResolvedFieldReference fieldRefExpr =
                     extractFieldReference(children.get(0)).orElseThrow(UnsupportedExpression::new);
-            return builder.equal(builder.indexOf(fieldRefExpr.getName()), Boolean.FALSE);
+            return builder.equal(fieldRefExpr.transform(builder), Boolean.FALSE);
         }
 
         // TODO is_xxx, between_xxx, similar, in, not_in, not?
@@ -240,30 +244,56 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
 
     private Predicate visitBiFunction(
             List<Expression> children,
-            BiFunction<Integer, Object, Predicate> visit1,
-            BiFunction<Integer, Object, Predicate> visit2) {
-        Optional<FieldReferenceExpression> fieldRefExpr = extractFieldReference(children.get(0));
+            BiFunction<Transform, Object, Predicate> visit1,
+            BiFunction<Transform, Object, Predicate> visit2) {
+        Optional<ResolvedFieldReference> fieldRefExpr = extractFieldReference(children.get(0));
         if (fieldRefExpr.isPresent()) {
-            Object literal =
-                    extractLiteral(fieldRefExpr.get().getOutputDataType(), children.get(1));
-            return visit1.apply(builder.indexOf(fieldRefExpr.get().getName()), literal);
+            Object literal = extractLiteral(fieldRefExpr.get().outputDataType, children.get(1));
+            return visit1.apply(fieldRefExpr.get().transform(builder), literal);
         } else {
             fieldRefExpr = extractFieldReference(children.get(1));
             if (fieldRefExpr.isPresent()) {
-                Object literal =
-                        extractLiteral(fieldRefExpr.get().getOutputDataType(), children.get(0));
-                return visit2.apply(builder.indexOf(fieldRefExpr.get().getName()), literal);
+                Object literal = extractLiteral(fieldRefExpr.get().outputDataType, children.get(0));
+                return visit2.apply(fieldRefExpr.get().transform(builder), literal);
             }
         }
 
         throw new UnsupportedExpression();
     }
 
-    private Optional<FieldReferenceExpression> extractFieldReference(Expression expression) {
+    private Optional<ResolvedFieldReference> extractFieldReference(Expression expression) {
         if (expression instanceof FieldReferenceExpression) {
-            return Optional.of((FieldReferenceExpression) expression);
+            FieldReferenceExpression field = (FieldReferenceExpression) expression;
+            return Optional.of(
+                    new ResolvedFieldReference(
+                            Collections.singletonList(field.getName()), field.getOutputDataType()));
+        }
+        if (expression instanceof NestedFieldReferenceExpression) {
+            NestedFieldReferenceExpression field = (NestedFieldReferenceExpression) expression;
+            return Optional.of(
+                    new ResolvedFieldReference(
+                            Arrays.asList(field.getFieldNames()), field.getOutputDataType()));
         }
         return Optional.empty();
+    }
+
+    private static class ResolvedFieldReference {
+
+        private final List<String> fieldNames;
+        private final DataType outputDataType;
+
+        private ResolvedFieldReference(List<String> fieldNames, DataType outputDataType) {
+            this.fieldNames = fieldNames;
+            this.outputDataType = outputDataType;
+        }
+
+        private Transform transform(PredicateBuilder builder) {
+            try {
+                return builder.field(fieldNames);
+            } catch (IllegalArgumentException e) {
+                throw new UnsupportedExpression();
+            }
+        }
     }
 
     private Object extractLiteral(DataType expectedType, Expression expression) {
@@ -335,6 +365,11 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
 
     @Override
     public Predicate visit(FieldReferenceExpression fieldReferenceExpression) {
+        throw new UnsupportedExpression();
+    }
+
+    @Override
+    public Predicate visit(NestedFieldReferenceExpression nestedFieldReferenceExpression) {
         throw new UnsupportedExpression();
     }
 

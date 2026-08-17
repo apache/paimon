@@ -18,7 +18,6 @@
 
 package org.apache.paimon.predicate;
 
-import org.apache.paimon.types.ResolvedFieldPath;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
@@ -46,11 +45,34 @@ public interface PredicateVisitor<T> {
             return Collections.emptySet();
         }
         Set<Integer> fieldIds = new HashSet<>();
-        for (String name : collectFieldNames(predicate)) {
-            ResolvedFieldPath.resolve(rowType, name)
-                    .ifPresent(path -> fieldIds.add(path.leafField().id()));
+        for (FieldRef fieldRef : predicate.visit(new FieldRefCollector())) {
+            fieldRef.resolveField(rowType).ifPresent(field -> fieldIds.add(field.id()));
         }
         return fieldIds;
+    }
+
+    /** A visitor that collects all field references used by a predicate. */
+    class FieldRefCollector implements PredicateVisitor<Set<FieldRef>> {
+
+        @Override
+        public Set<FieldRef> visit(LeafPredicate predicate) {
+            Set<FieldRef> fieldRefs = new HashSet<>();
+            for (Object input : predicate.transform().inputs()) {
+                if (input instanceof FieldRef) {
+                    fieldRefs.add((FieldRef) input);
+                }
+            }
+            return fieldRefs;
+        }
+
+        @Override
+        public Set<FieldRef> visit(CompoundPredicate predicate) {
+            Set<FieldRef> fieldRefs = new HashSet<>();
+            for (Predicate child : predicate.children()) {
+                fieldRefs.addAll(child.visit(this));
+            }
+            return fieldRefs;
+        }
     }
 
     /** A visitor that collects all field names referenced by a predicate. */

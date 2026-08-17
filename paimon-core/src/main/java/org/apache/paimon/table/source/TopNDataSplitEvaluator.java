@@ -53,7 +53,9 @@ public class TopNDataSplitEvaluator {
     }
 
     public List<Split> evaluate(SortValue order, int limit, List<Split> splits) {
-        if (limit > splits.size()) {
+        if (limit > splits.size() || order.field().isNested()) {
+            // Top-level file statistics do not contain nested leaf min/max values. The global
+            // index may still narrow row ranges, but split-level TopN pruning must be conservative.
             return splits;
         }
         return getTopNSplits(order, limit, splits);

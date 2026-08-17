@@ -130,8 +130,7 @@ public abstract class StringTransform implements Transform {
         for (Object input : inputs) {
             if (input instanceof FieldRef) {
                 FieldRef ref = (FieldRef) input;
-                int i = ref.index();
-                strings.add(row.isNullAt(i) ? null : row.getString(i));
+                strings.add((BinaryString) ref.get(row));
             } else {
                 strings.add((BinaryString) input);
             }

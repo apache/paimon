@@ -20,6 +20,7 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
@@ -37,10 +38,12 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.ResolvedFieldPath;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.IOUtils;
@@ -179,7 +182,14 @@ class RawFullTextReadImpl {
         long rowRangeStart = rawRowRanges.get(0).from;
         long rowRangeEnd = rawRowRanges.get(rawRowRanges.size() - 1).to;
         String fallbackIndexType = firstIndexType(splitsByColumn);
-        String column = textColumn.name();
+        ResolvedFieldPath textColumnPath =
+                ResolvedFieldPath.resolve(readType, textColumn.id())
+                        .orElseThrow(
+                                () ->
+                                        new IllegalArgumentException(
+                                                "Cannot find text column by field id: "
+                                                        + textColumn.id()));
+        String column = textColumnPath.fullName();
         String indexType = indexType(column, splitsByColumn);
         if (indexType == null) {
             indexType = checkNotNull(fallbackIndexType);
@@ -197,7 +207,7 @@ class RawFullTextReadImpl {
                     column,
                     new RawFullTextIndex(
                             column,
-                            readColumnIndex(textColumn, readType),
+                            FieldRef.from(textColumnPath),
                             indexType,
                             textColumn.id(),
                             rowRangeStart,
@@ -232,10 +242,6 @@ class RawFullTextReadImpl {
             }
         }
         return null;
-    }
-
-    private static int readColumnIndex(DataField textColumn, RowType readType) {
-        return readType.getFieldIndexByFieldId(textColumn.id());
     }
 
     private static byte[] rawFileBytes(Map<String, RawFullTextIndex> rawIndexes, String fileName) {
@@ -290,7 +296,7 @@ class RawFullTextReadImpl {
     private static class RawFullTextIndex implements Closeable {
 
         private final String column;
-        private final int columnIndex;
+        private final FieldRef columnRef;
         private final String indexType;
         private final int fieldId;
         private final long rowRangeStart;
@@ -301,7 +307,7 @@ class RawFullTextReadImpl {
 
         private RawFullTextIndex(
                 String column,
-                int columnIndex,
+                FieldRef columnRef,
                 String indexType,
                 int fieldId,
                 long rowRangeStart,
@@ -309,7 +315,7 @@ class RawFullTextReadImpl {
                 GlobalIndexSingleColumnWriter writer,
                 RawFullTextIndexFileWriter fileWriter) {
             this.column = column;
-            this.columnIndex = columnIndex;
+            this.columnRef = columnRef;
             this.indexType = indexType;
             this.fieldId = fieldId;
             this.rowRangeStart = rowRangeStart;
@@ -319,10 +325,11 @@ class RawFullTextReadImpl {
         }
 
         private void write(InternalRow row, long rowId) {
-            if (row.isNullAt(columnIndex)) {
+            BinaryString value = (BinaryString) columnRef.get(row);
+            if (value == null) {
                 return;
             }
-            writer.write(row.getString(columnIndex), rowId - rowRangeStart);
+            writer.write(value, rowId - rowRangeStart);
             indexedRows.add(rowId);
         }
 

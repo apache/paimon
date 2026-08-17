@@ -24,6 +24,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.ResolvedFieldPath;
 import org.apache.paimon.utils.Pair;
 
 import java.util.Arrays;
@@ -47,6 +48,7 @@ public class BatchVectorSearchBuilderImpl implements BatchVectorSearchBuilder {
     protected Predicate filter;
     protected int limit;
     protected DataField vectorColumn;
+    protected String vectorColumnPath;
     protected float[][] vectors;
     protected Map<String, String> options = new HashMap<>();
 
@@ -99,7 +101,9 @@ public class BatchVectorSearchBuilderImpl implements BatchVectorSearchBuilder {
 
     @Override
     public BatchVectorSearchBuilder withVectorColumn(String name) {
-        this.vectorColumn = table.rowType().getField(name);
+        ResolvedFieldPath path = ResolvedFieldPath.resolve(table.rowType(), name).orElse(null);
+        this.vectorColumn = path == null ? null : path.leafField();
+        this.vectorColumnPath = path == null ? name : path.fullName();
         return this;
     }
 
@@ -129,7 +133,7 @@ public class BatchVectorSearchBuilderImpl implements BatchVectorSearchBuilder {
             return new PrimaryKeyVectorScan(
                     table,
                     vectorColumn.id(),
-                    table.coreOptions().primaryKeyVectorIndexType(vectorColumn.name()),
+                    table.coreOptions().primaryKeyVectorIndexType(vectorColumnPath),
                     partitionFilter,
                     filter);
         }
@@ -155,6 +159,6 @@ public class BatchVectorSearchBuilderImpl implements BatchVectorSearchBuilder {
 
     protected boolean isPrimaryKeyVectorSearch() {
         return vectorColumn != null
-                && table.coreOptions().primaryKeyVectorIndexColumns().contains(vectorColumn.name());
+                && table.coreOptions().primaryKeyVectorIndexColumns().contains(vectorColumnPath);
     }
 }

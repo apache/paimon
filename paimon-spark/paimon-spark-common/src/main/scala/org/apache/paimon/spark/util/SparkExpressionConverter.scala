@@ -22,7 +22,7 @@ import org.apache.paimon.data.{BinaryString, Decimal, Timestamp}
 import org.apache.paimon.predicate._
 import org.apache.paimon.spark.{PaimonImplicits, SparkTypeUtils}
 import org.apache.paimon.spark.util.shim.TypeUtils.treatPaimonTimestampTypeAsSparkTimestampType
-import org.apache.paimon.types.{DecimalType, RowType}
+import org.apache.paimon.types.{DecimalType, ResolvedFieldPath, RowType}
 import org.apache.paimon.types.DataTypeRoot._
 
 import org.apache.spark.sql.catalyst.util.DateTimeUtils
@@ -127,15 +127,13 @@ object SparkExpressionConverter {
     }
   }
 
-  private def toPaimonFieldRef(ref: NamedReference, rowType: RowType): FieldRef = {
-    val fieldName = toFieldName(ref)
-    val f = rowType.getField(fieldName)
-    // Note: here should use fieldIndex instead of fieldId
-    val index = rowType.getFieldIndex(fieldName)
-    if (index == -1) {
-      throw new UnsupportedOperationException(s"Nested field '$fieldName' is unsupported.")
+  private[spark] def toPaimonFieldRef(ref: NamedReference, rowType: RowType): FieldRef = {
+    val fieldNames = ref.fieldNames().toSeq
+    val path = ResolvedFieldPath.resolve(rowType, fieldNames.asJava)
+    if (!path.isPresent) {
+      throw new UnsupportedOperationException(s"Field '${toFieldName(ref)}' does not exist.")
     }
-    new FieldRef(index, f.name(), f.`type`())
+    FieldRef.from(path.get())
   }
 
   private def toFieldName(ref: NamedReference): String = ref.fieldNames().mkString(".")

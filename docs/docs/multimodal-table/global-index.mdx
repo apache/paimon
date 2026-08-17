@@ -52,6 +52,20 @@ Global indexes work on top of Data Evolution tables. To use global indexes, your
 - `'row-tracking.enabled' = 'true'`
 - `'data-evolution.enabled' = 'true'`
 
+### Nested ROW Fields
+
+Flink, Spark, and the Java API support global indexes on leaf fields inside nested `ROW` columns.
+Use a dot-separated path such as `profile.address.zip` for index build, drop, and search APIs.
+Flink and Spark SQL scalar predicates preserve the structured path, so a BTree or Bitmap index is
+used automatically for filters such as `WHERE profile.address.zip = 100`. Spark also supports
+Top-N pushdown on an indexed nested field. Full-text and vector search APIs accept the same path,
+for example `profile.content` or `profile.embedding`.
+
+Nested paths traverse `ROW` fields only. Traversing `ARRAY` elements or `MAP` keys and values is not
+supported. If a table has a top-level column whose literal name contains dots, string-based APIs
+resolve that exact top-level name before interpreting the dots as a nested path; avoid defining both
+forms in the same schema. PyPaimon does not yet support nested global-index field paths.
+
 > Global index queries may not be exact when the index only covers part of the table data. If a query predicate matches the index, Paimon returns only the results from the indexed portion. Matching records in data that has not been indexed yet will not be returned.
 
 ## Prerequisites

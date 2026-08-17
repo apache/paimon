@@ -25,6 +25,7 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.ResolvedFieldPath;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
@@ -72,6 +73,29 @@ public class PredicateBuilder {
 
     public int indexOf(String field) {
         return fieldNames.indexOf(field);
+    }
+
+    /** Returns a transform for a top-level or ROW-nested field path. */
+    public Transform field(String fieldPath) {
+        return new FieldTransform(
+                FieldRef.from(
+                        ResolvedFieldPath.resolve(rowType, fieldPath)
+                                .orElseThrow(
+                                        () ->
+                                                new IllegalArgumentException(
+                                                        "Cannot find field: " + fieldPath))));
+    }
+
+    /** Returns a transform for an unambiguous structured field path. */
+    public Transform field(List<String> fieldPath) {
+        return new FieldTransform(
+                FieldRef.from(
+                        ResolvedFieldPath.resolve(rowType, fieldPath)
+                                .orElseThrow(
+                                        () ->
+                                                new IllegalArgumentException(
+                                                        "Cannot find field: "
+                                                                + String.join(".", fieldPath)))));
     }
 
     public Predicate equal(int idx, Object literal) {

@@ -31,6 +31,7 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.snapshot.TimeTravelUtil;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.ResolvedFieldPath;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
 
@@ -95,7 +96,15 @@ public class DataEvolutionFullTextScan implements FullTextScan {
         Map<Integer, String> idToColumn = new HashMap<>();
         for (DataField textColumn : textColumns) {
             textColumnIds.add(textColumn.id());
-            idToColumn.put(textColumn.id(), textColumn.name());
+            idToColumn.put(
+                    textColumn.id(),
+                    ResolvedFieldPath.resolve(table.rowType(), textColumn.id())
+                            .orElseThrow(
+                                    () ->
+                                            new IllegalArgumentException(
+                                                    "Cannot find text column by field id: "
+                                                            + textColumn.id()))
+                            .fullName());
         }
 
         @Nullable

@@ -182,6 +182,9 @@ print(matched_files)
 
 Once a bitmap index is built, it is automatically used during scan when a filter
 predicate matches the indexed column.
+For a leaf inside nested `ROW` columns, build the index with a dot-separated path such as
+`profile.tag`; Flink and Spark SQL then use it for normal predicates such as
+`WHERE profile.tag IN ('vip', 'trial')`.
 
 <Tabs groupId="bitmap-search">
 

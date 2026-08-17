@@ -22,6 +22,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.ResolvedFieldPath;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InstantiationUtil;
 
@@ -34,6 +35,51 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class LeafPredicateTest {
+
+    @Test
+    public void testNestedFieldReference() {
+        RowType rowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                0,
+                                "profile",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(1, "name", DataTypes.STRING()),
+                                        DataTypes.FIELD(
+                                                2,
+                                                "address",
+                                                DataTypes.ROW(
+                                                        DataTypes.FIELD(
+                                                                3, "zip", DataTypes.INT()))))));
+        FieldRef ref =
+                FieldRef.from(ResolvedFieldPath.resolve(rowType, "profile.address.zip").get());
+        LeafPredicate predicate =
+                LeafPredicate.of(
+                        new FieldTransform(ref),
+                        Equal.INSTANCE,
+                        java.util.Collections.singletonList(100));
+
+        assertThat(ref.isNested()).isTrue();
+        assertThat(ref.index()).isZero();
+        assertThat(ref.nestedIndexes()).containsExactly(1, 0);
+        assertThat(ref.nestedArities()).containsExactly(2, 1);
+        assertThat(predicate.test(GenericRow.of(GenericRow.of("Alice", GenericRow.of(100)))))
+                .isTrue();
+        assertThat(predicate.test(GenericRow.of(GenericRow.of("Alice", GenericRow.of(200)))))
+                .isFalse();
+        assertThat(predicate.test(GenericRow.of((Object) null))).isFalse();
+
+        // Top-level file statistics do not contain leaf statistics for nested fields. The
+        // predicate must therefore degrade to "might match" instead of interpreting the parent
+        // ROW value as the leaf type.
+        assertThat(
+                        predicate.test(
+                                1,
+                                GenericRow.of(GenericRow.of("Alice", GenericRow.of(100))),
+                                GenericRow.of(GenericRow.of("Alice", GenericRow.of(100))),
+                                new GenericArray(new long[] {0})))
+                .isTrue();
+    }
 
     @Test
     public void testReturnTrue() {

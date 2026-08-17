@@ -29,7 +29,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
-import static org.apache.paimon.utils.InternalRowUtils.get;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Transform that extracts a field from a row. */
@@ -71,7 +70,7 @@ public class FieldTransform implements Transform {
 
     @Override
     public Object transform(InternalRow row) {
-        return get(row, fieldRef.index(), fieldRef.type());
+        return fieldRef.get(row);
     }
 
     @Override
