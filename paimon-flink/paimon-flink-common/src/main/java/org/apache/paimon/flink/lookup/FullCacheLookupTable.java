@@ -259,6 +259,15 @@ public abstract class FullCacheLookupTable implements LookupTable {
 
     @Override
     public void refresh() throws Exception {
+        // Surface a failure from a previous asynchronous refresh. Without this the field is
+        // write-only and the failure is lost: the scan cursor has already moved past the
+        // snapshot whose rows failed to apply, so nothing retries it and the cache keeps
+        // serving what it held before. Same shape as TableCommitImpl.maintain().
+        Exception previousFailure = cachedException.getAndSet(null);
+        if (previousFailure != null) {
+            throw previousFailure;
+        }
+
         if (refreshExecutor == null) {
             doRefresh();
             return;
