@@ -59,7 +59,6 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 final class ManifestEntryRunMerge {
 
     private static final int FRAGMENTED_RUN_THRESHOLD = 64;
-    private static final long MAX_IN_MEMORY_FRAGMENTED_ENTRIES = 25_000L;
     private static final int MAX_STREAM_CURSORS = 128;
     private static final int MAX_STREAM_READ_AMPLIFICATION = 8;
 
@@ -93,7 +92,7 @@ final class ManifestEntryRunMerge {
         if (plan == null) {
             return null;
         }
-        return plan.mergeToManifest(sortKey, manifestFile, newFilesForAbort);
+        return plan.mergeToManifest(manifestFile, newFilesForAbort);
     }
 
     /**
@@ -125,7 +124,7 @@ final class ManifestEntryRunMerge {
             if (plan == null) {
                 return null;
             }
-            return plan.mergeMinorToManifest(sortKey, manifestFile, newFilesForAbort);
+            return plan.mergeMinorToManifest(manifestFile, newFilesForAbort);
         } finally {
             deletes.release();
         }
@@ -146,7 +145,6 @@ final class ManifestEntryRunMerge {
                 new SortPartitionDictionary(sortKey::comparePartitions);
         List<ManifestEntryRunMergePlan.Source.Spec> sources = new ArrayList<>();
         int streamCursorCount = 0;
-        long inMemoryEntries = 0;
         List<Discovery.DiscoveredManifest> discovered = new ArrayList<>(section.size());
         if (section.size() <= 1
                 || (manifestReadParallelism != null && manifestReadParallelism <= 1)) {
@@ -234,11 +232,6 @@ final class ManifestEntryRunMerge {
             ManifestFileMeta meta = section.get(manifestIndex);
             Discovery.DiscoveredManifest manifest = discovered.get(manifestIndex);
             if (manifest.fragmented) {
-                long entryCount = meta.numAddedFiles() + meta.numDeletedFiles();
-                inMemoryEntries += entryCount;
-                if (inMemoryEntries > MAX_IN_MEMORY_FRAGMENTED_ENTRIES) {
-                    return null;
-                }
                 sources.add(new ManifestEntryRunMergePlan.Source.FragmentedManifestSpec(meta));
                 streamCursorCount++;
             } else {
@@ -297,7 +290,6 @@ final class ManifestEntryRunMerge {
         boolean hasPrevious = false;
         long runStart = 0;
         long position = 0;
-        long entryCount = meta.numAddedFiles() + meta.numDeletedFiles();
         boolean fragmented = false;
         ProjectedManifestEntry entry = ProjectedManifestEntry.ENTRY_LAYOUT_PROJECTION.createEntry();
         while (reader.hasNext()) {
@@ -336,9 +328,6 @@ final class ManifestEntryRunMerge {
                                     meta, runStart, position, blocks));
                     runStart = position;
                     if (runs.size() >= FRAGMENTED_RUN_THRESHOLD) {
-                        if (entryCount > MAX_IN_MEMORY_FRAGMENTED_ENTRIES) {
-                            return Discovery.DiscoveredManifest.requiresExternalSort();
-                        }
                         fragmented = true;
                         runs.clear();
                         blocks.clear();
@@ -366,9 +355,7 @@ final class ManifestEntryRunMerge {
                             meta, runStart, position, blocks));
         }
         if (exceedsStreamingReadAmplification(runs, blocks.size())) {
-            return entryCount > MAX_IN_MEMORY_FRAGMENTED_ENTRIES
-                    ? Discovery.DiscoveredManifest.requiresExternalSort()
-                    : Discovery.DiscoveredManifest.fragmented();
+            return Discovery.DiscoveredManifest.fragmented();
         }
         return Discovery.DiscoveredManifest.runs(runs, blocks);
     }

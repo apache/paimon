@@ -1922,7 +1922,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @Test
-    public void testDataEvolutionManifestRunMergeFallsBackForLargeFragmentedManifest() {
+    public void testDataEvolutionManifestRunMergeSortsLargeFragmentedManifest() {
         List<ManifestEntry> firstManifest = new ArrayList<>();
         List<ManifestEntry> secondManifest = new ArrayList<>();
         for (long firstRowId = 25_000; firstRowId >= 12_500; firstRowId--) {
@@ -1956,7 +1956,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @Test
-    public void testDataEvolutionMinorRunMergeFallsBackForLargeFragmentedManifest() {
+    public void testDataEvolutionMinorRunMergeSortsLargeFragmentedManifest() {
         List<ManifestEntry> fragmentedEntries = new ArrayList<>();
         for (long firstRowId = 25_000; firstRowId >= 0; firstRowId--) {
             fragmentedEntries.add(
