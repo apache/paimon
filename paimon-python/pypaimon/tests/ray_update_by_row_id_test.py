@@ -175,7 +175,7 @@ class RayUpdateByRowIdTest(unittest.TestCase):
             update_by_row_id(target, src, self.catalog_options, update_cols=["age"])
         self.assertEqual(captured["base_snapshot_id"], expected_sid)
 
-    def test_new_commit_failure_aborts_pending_messages(self):
+    def test_new_commit_failure_preserves_pending_messages(self):
         err = RuntimeError("new_commit failed")
         recorder = {}
 
@@ -186,8 +186,8 @@ class RayUpdateByRowIdTest(unittest.TestCase):
             )
 
         self.assertEqual(recorder["commit_calls"], 0)
-        self.assertEqual(recorder["abort_calls"], 1)
-        self.assertEqual(recorder["abort_msgs"], recorder["msgs"])
+        self.assertEqual(recorder["abort_calls"], 0)
+        self.assertEqual(recorder["new_commit_calls"], 1)
 
     def test_commit_failure_does_not_abort_after_commit_started(self):
         err = RuntimeError("commit failed")
