@@ -392,15 +392,19 @@ def _field_slot(id_table: bytes, id_size: int, key_id: int) -> Optional[int]:
 @functools.lru_cache(maxsize=256)
 def _compile_paths(paths: Tuple[_Path, ...]):
     nodes = [(None, None, None)]
-    node_by_prefix = {(): 0}
+    node_by_edge = {}
     results = []
     for path in paths:
-        for length in range(1, len(path) + 1):
-            prefix = path[:length]
-            if prefix not in node_by_prefix:
-                node_by_prefix[prefix] = len(nodes)
-                nodes.append((node_by_prefix[prefix[:-1]],) + prefix[-1])
-        results.append(node_by_prefix[path])
+        parent = 0
+        for segment in path:
+            edge = (parent, segment)
+            node = node_by_edge.get(edge)
+            if node is None:
+                node = len(nodes)
+                node_by_edge[edge] = node
+                nodes.append((parent,) + segment)
+            parent = node
+        results.append(parent)
     return tuple(nodes), tuple(results)
 
 

@@ -26,6 +26,7 @@ import pyarrow.compute as pc
 from pypaimon.data._variant_binary import _primitive_header
 from pypaimon.data.generic_variant import _DOUBLE, GenericVariant
 from pypaimon.data.variant_path import (
+    _compile_paths,
     _metadata_cache,
     _metadata_key_ids,
     _path_positions,
@@ -77,6 +78,25 @@ def _typed_object(fields):
 
 
 class TestVariantGet(unittest.TestCase):
+
+    def test_compile_paths_builds_trie_without_prefix_slices(self):
+        class NoSlicePath(tuple):
+            def __getitem__(self, item):
+                if isinstance(item, slice):
+                    raise AssertionError("path prefix was materialized")
+                return super().__getitem__(item)
+
+        paths = (
+            NoSlicePath((('key', 'root'), ('index', 0), ('key', 'left'))),
+            NoSlicePath((('key', 'root'), ('index', 0), ('key', 'right'))),
+        )
+
+        nodes, results = _compile_paths(paths)
+
+        self.assertEqual(len(nodes), 5)
+        self.assertEqual(results, (3, 4))
+        self.assertEqual(nodes[3], (2, 'key', 'left'))
+        self.assertEqual(nodes[4], (2, 'key', 'right'))
 
     def test_metadata_cache_is_bounded_and_released(self):
         column = _variants([
