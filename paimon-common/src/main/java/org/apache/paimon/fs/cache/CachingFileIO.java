@@ -110,9 +110,7 @@ public class CachingFileIO implements FileIO {
         }
         Options options = context.options();
         Set<FileType> whitelist =
-                FileType.parseWhitelist(
-                        CatalogOptions.LOCAL_CACHE_WHITELIST.key(),
-                        options.get(CatalogOptions.LOCAL_CACHE_WHITELIST));
+                FileType.parseWhitelist(options.get(CatalogOptions.LOCAL_CACHE_WHITELIST));
         if (whitelist.isEmpty()) {
             return fileIO;
         }

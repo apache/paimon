@@ -31,6 +31,7 @@ import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENDPOINT;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ORIGIN_ENDPOINT;
@@ -56,7 +57,6 @@ public class JindoHadoopOptions implements Serializable {
     private static final String OSS_ACCESS_KEY_SECRET = "fs.oss.accessKeySecret";
     private static final String OSS_SECURITY_TOKEN = "fs.oss.securityToken";
     private static final String OSS_ENDPOINT = "fs.oss.endpoint";
-    private static final String OSS_DIRECT_ENDPOINT = "fs.oss.direct.endpoint";
     private static final String OSS_SHOW_DIR_TIMESTAMP = "fs.oss.show-dir-timestamp";
 
     private static final Map<String, String> CASE_SENSITIVE_KEYS =
@@ -67,10 +67,6 @@ public class JindoHadoopOptions implements Serializable {
                     put(OSS_SECURITY_TOKEN.toLowerCase(Locale.ROOT), OSS_SECURITY_TOKEN);
                 }
             };
-
-    private boolean isJindoCacheBackend(CatalogContext context) {
-        return context.options().get("fs.jindocache.namespace.rpc.address") != null;
-    }
 
     public JindoHadoopOptions(CatalogContext context) {
         hadoopOptions = new Options();
@@ -116,29 +112,11 @@ public class JindoHadoopOptions implements Serializable {
 
         JindoUserAgent.apply(context.options(), hadoopOptions);
 
-        if (isJindoCacheBackend(context)) {
-            initJindoCacheBackend(context);
-        } else {
-            initDLFCacheBackend(context);
-        }
+        initDLFCacheBackend(context);
     }
 
     public Options get(boolean enableCache) {
         return enableCache ? hadoopOptionsWithCache : hadoopOptions;
-    }
-
-    private void initJindoCacheBackend(CatalogContext context) {
-        // another config using jindocache
-        hadoopOptionsWithCache = new Options(hadoopOptions.toMap());
-        hadoopOptionsWithCache.set("fs.xengine", "jindocache");
-        if (!hadoopOptionsWithCache.containsKey("fs.jindocache.client.metrics.enable")) {
-            // enable metrics report by default
-            hadoopOptionsWithCache.set("fs.jindocache.client.metrics.enable", "true");
-        }
-        // Workaround: following configurations to avoid bug in some JindoSDK versions
-        hadoopOptionsWithCache.set("fs.oss.read.profile.columnar.use-pread", "false");
-        hadoopOptionsWithCache.set(
-                "fs.jindocache.read.profile.columnar.readahead.pread.enable", "false");
     }
 
     private void initDLFCacheBackend(CatalogContext context) {
@@ -150,15 +128,16 @@ public class JindoHadoopOptions implements Serializable {
         }
 
         String originEndpoint = context.options().get(IO_CACHE_ORIGIN_ENDPOINT);
-        if (StringUtils.isNullOrWhitespaceOnly(originEndpoint)) {
-            originEndpoint = context.options().get(OSS_DIRECT_ENDPOINT);
-        }
         if (!StringUtils.isNullOrWhitespaceOnly(originEndpoint)) {
             hadoopOptions.set(OSS_ENDPOINT, originEndpoint);
         }
-        LOG.info(
-                "Using direct access to OSS endpoint: {}, cache endpoint: {}",
-                hadoopOptions.get(OSS_ENDPOINT),
-                hadoopOptionsWithCache.get(OSS_ENDPOINT));
+        String directEndpoint = hadoopOptions.get(OSS_ENDPOINT);
+        String configuredCacheEndpoint = hadoopOptionsWithCache.get(OSS_ENDPOINT);
+        if (!Objects.equals(directEndpoint, configuredCacheEndpoint)) {
+            LOG.info(
+                    "Using direct access to OSS endpoint: {}, cache endpoint: {}",
+                    directEndpoint,
+                    configuredCacheEndpoint);
+        }
     }
 }

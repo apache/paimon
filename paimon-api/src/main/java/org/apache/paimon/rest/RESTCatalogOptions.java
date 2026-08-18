@@ -114,15 +114,6 @@ public class RESTCatalogOptions {
                                     + "'openapi' (the earlier ROA HMAC-SHA1 scheme). "
                                     + "If not set, will be automatically selected based on endpoint host.");
 
-    /** @deprecated Cache enablement is controlled by the policy vended by the REST server. */
-    @Deprecated
-    public static final ConfigOption<Boolean> IO_CACHE_ENABLED =
-            ConfigOptions.key("io-cache.enabled")
-                    .booleanType()
-                    .defaultValue(true)
-                    .withDescription(
-                            "Deprecated. Cache enablement is controlled by the policy vended by the REST server.");
-
     public static final ConfigOption<Boolean> IO_CACHE_IGNORE_VPC_VALIDATE =
             ConfigOptions.key("io-cache.ignore-vpc-validate")
                     .booleanType()

@@ -39,29 +39,10 @@ import java.util.Set;
  * </ul>
  */
 public enum FileType {
-    /**
-     * Table metadata files, including snapshots, schemas, manifests, statistics, tags, changelog
-     * metadata, hint files, success files, consumers, and services.
-     */
     META,
-
-    /**
-     * Data files, including ORC, Parquet, changelog data, blob and vector files. Unrecognized files
-     * are also classified as data by default.
-     */
     DATA,
-
-    /** Bucket-level {@code index-*} files, such as hash indexes and deletion-vector indexes. */
     BUCKET_INDEX,
-
-    /**
-     * Table-level {@code global-index-*.index} files, such as BTree, Lumina, and full-text indexes.
-     */
     GLOBAL_INDEX,
-
-    /**
-     * Non-global data-file-level {@code *.index} files, such as Bloom filter and bitmap indexes.
-     */
     FILE_INDEX;
 
     private static final Logger LOG = LoggerFactory.getLogger(FileType.class);
@@ -107,16 +88,6 @@ public enum FileType {
 
     /** Parse a comma-separated whitelist string into a set of {@link FileType}s. */
     public static Set<FileType> parseWhitelist(String whitelist) {
-        return parseWhitelist("file type whitelist", whitelist);
-    }
-
-    /**
-     * Parse a comma-separated whitelist string into a set of {@link FileType}s.
-     *
-     * @param optionKey configuration key used when reporting unsupported values
-     * @param whitelist comma-separated file type names
-     */
-    public static Set<FileType> parseWhitelist(String optionKey, String whitelist) {
         Set<FileType> result = EnumSet.noneOf(FileType.class);
         if (whitelist == null) {
             return result;
@@ -145,10 +116,9 @@ public enum FileType {
                 default:
                     if (!name.isEmpty()) {
                         LOG.warn(
-                                "Unknown {} value '{}'. "
+                                "Unknown whitelist value '{}'. "
                                         + "Supported values: meta, global-index, bucket-index, data, file-index, "
                                         + "or * for all of them.",
-                                optionKey,
                                 name);
                     }
                     break;

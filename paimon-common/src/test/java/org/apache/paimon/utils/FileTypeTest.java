@@ -109,17 +109,11 @@ public class FileTypeTest {
 
     @Test
     public void testParseWhitelist() {
-        assertThat(
-                        FileType.parseWhitelist(
-                                "test-cache.whitelist",
-                                " meta, global-index, bucket-index, data, file-index "))
+        assertThat(FileType.parseWhitelist(" meta, global-index, bucket-index, data, file-index "))
                 .containsExactlyInAnyOrderElementsOf(EnumSet.allOf(FileType.class));
-        assertThat(FileType.parseWhitelist("test-cache.whitelist", ""))
-                .isEqualTo(Collections.emptySet());
-        assertThat(FileType.parseWhitelist("test-cache.whitelist", "manifest,unknown"))
-                .isEqualTo(Collections.emptySet());
-        assertThat(FileType.parseWhitelist("test-cache.whitelist", null))
-                .isEqualTo(Collections.emptySet());
+        assertThat(FileType.parseWhitelist("")).isEqualTo(Collections.emptySet());
+        assertThat(FileType.parseWhitelist("manifest,unknown")).isEqualTo(Collections.emptySet());
+        assertThat(FileType.parseWhitelist(null)).isEqualTo(Collections.emptySet());
     }
 
     // ===== META files =====

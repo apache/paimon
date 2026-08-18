@@ -29,6 +29,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.Pair;
 
 import com.aliyun.jindodata.common.JindoHadoopSystem;
+import com.aliyun.jindodata.oss.JindoOssFileSystem;
 import com.aliyun.jindodata.types.JindoHadoopFileStatus;
 import com.aliyun.oss.ClientConfiguration;
 import com.aliyun.oss.HttpMethod;
@@ -46,7 +47,6 @@ import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.Date;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.paimon.options.CatalogOptions.FILE_IO_ALLOW_CACHE;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -278,38 +278,30 @@ public class JindoFileIOTest {
     }
 
     @Test
-    void closeClosesDirectAndCacheFileSystems() {
+    void closeClearsDirectAndCacheFileSystems() {
         JindoFileIO fileIO = createNonCachingFileIO();
-        TrackingJindoHadoopSystem directFileSystem = new TrackingJindoHadoopSystem();
-        TrackingJindoHadoopSystem cacheFileSystem = new TrackingJindoHadoopSystem();
         fileIO.fsMap = new ConcurrentHashMap<>();
-        fileIO.fsMap.put("test-bucket", Pair.of(directFileSystem, "test"));
-        fileIO.jindoCacheFsMap = new ConcurrentHashMap<>();
-        fileIO.jindoCacheFsMap.put("test-bucket", Pair.of(cacheFileSystem, "test"));
+        fileIO.fsMap.put("test-bucket", Pair.of(new JindoOssFileSystem(), "test"));
+        fileIO.cacheFsMap = new ConcurrentHashMap<>();
+        fileIO.cacheFsMap.put("test-bucket", Pair.of(new JindoOssFileSystem(), "test"));
 
         fileIO.close();
 
-        assertThat(directFileSystem.closeCount.get()).isOne();
-        assertThat(cacheFileSystem.closeCount.get()).isOne();
         assertThat(fileIO.fsMap).isEmpty();
-        assertThat(fileIO.jindoCacheFsMap).isEmpty();
+        assertThat(fileIO.cacheFsMap).isEmpty();
 
         assertThatCode(fileIO::close).doesNotThrowAnyException();
-        assertThat(directFileSystem.closeCount.get()).isOne();
-        assertThat(cacheFileSystem.closeCount.get()).isOne();
     }
 
     @Test
     void closeHandlesCacheOnlyFileSystem() {
         JindoFileIO fileIO = createNonCachingFileIO();
-        TrackingJindoHadoopSystem cacheFileSystem = new TrackingJindoHadoopSystem();
-        fileIO.jindoCacheFsMap = new ConcurrentHashMap<>();
-        fileIO.jindoCacheFsMap.put("test-bucket", Pair.of(cacheFileSystem, "test"));
+        fileIO.cacheFsMap = new ConcurrentHashMap<>();
+        fileIO.cacheFsMap.put("test-bucket", Pair.of(new JindoOssFileSystem(), "test"));
 
         assertThatCode(fileIO::close).doesNotThrowAnyException();
 
-        assertThat(cacheFileSystem.closeCount.get()).isOne();
-        assertThat(fileIO.jindoCacheFsMap).isEmpty();
+        assertThat(fileIO.cacheFsMap).isEmpty();
     }
 
     private JindoFileIO createNonCachingFileIO() {
@@ -326,20 +318,5 @@ public class JindoFileIOTest {
             result.append(String.format("%02x", value & 0xff));
         }
         return result.toString();
-    }
-
-    private static class TrackingJindoHadoopSystem extends JindoHadoopSystem {
-
-        private final AtomicInteger closeCount = new AtomicInteger();
-
-        @Override
-        public String getScheme() {
-            return "test";
-        }
-
-        @Override
-        public void close() {
-            closeCount.incrementAndGet();
-        }
     }
 }

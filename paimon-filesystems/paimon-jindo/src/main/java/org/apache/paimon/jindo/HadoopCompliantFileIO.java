@@ -52,7 +52,6 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENDPOINT;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_IGNORE_VPC_VALIDATE;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_POLICY;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_VPC_VALIDATED;
@@ -69,9 +68,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
 
     private static final long serialVersionUID = 1L;
 
-    // Cache policy values select operation types. In particular, policy "meta" controls metadata
-    // operations such as getFileStatus and exists. It is independent from whitelist "meta", which
-    // selects paths classified as FileType.META.
+    // Cache policy tags select the operation types that use cache.
     private static final String META_CACHE_ENABLED_TAG = "meta";
     private static final String READ_CACHE_ENABLED_TAG = "read";
     private static final String WRITE_CACHE_ENABLED_TAG = "write";
@@ -82,23 +79,20 @@ public abstract class HadoopCompliantFileIO implements FileIO {
     protected boolean writeCacheEnabled = false;
 
     protected transient volatile Map<String, Pair<JindoHadoopSystem, String>> fsMap;
-    protected transient volatile Map<String, Pair<JindoHadoopSystem, String>> jindoCacheFsMap;
+    protected transient volatile Map<String, Pair<JindoHadoopSystem, String>> cacheFsMap;
 
     private Set<FileType> cacheWhitelist = EnumSet.noneOf(FileType.class);
     private List<String> cacheWhitelistPaths = new ArrayList<>();
     private boolean cacheAllPaths = false;
 
     boolean shouldCache(Path path) {
-        return cacheWhitelist != null
-                && !FileType.isMutable(path)
+        return !FileType.isMutable(path)
                 && cacheWhitelist.contains(FileType.classify(path))
                 && matchesCacheWhitelistPath(path);
     }
 
     private boolean matchesCacheWhitelistPath(Path path) {
-        // A null list can occur when deserializing an instance written before path filtering was
-        // restored. Such instances previously allowed all paths after the file type check.
-        if (cacheAllPaths || cacheWhitelistPaths == null) {
+        if (cacheAllPaths) {
             return true;
         }
 
@@ -123,19 +117,16 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         // Process file io cache configuration
         Options options = context.options();
         String cachePolicy = options.get(IO_CACHE_POLICY);
-        boolean useVpcValidationProtocol =
-                options.contains(IO_CACHE_ENDPOINT) || options.contains(IO_CACHE_VPC_VALIDATED);
-        boolean vpcValidated = !useVpcValidationProtocol || options.get(IO_CACHE_VPC_VALIDATED);
+        boolean vpcValidated = options.get(IO_CACHE_VPC_VALIDATED);
         boolean ignoreVpcValidate = options.get(IO_CACHE_IGNORE_VPC_VALIDATE);
         if (cachePolicy == null
                 || cachePolicy.contains(DISABLE_CACHE_TAG)
                 || (!vpcValidated && !ignoreVpcValidate)) {
             LOG.debug(
-                    "Cache is disabled with io-cache.policy={}, io-cache.vpc-validated={}, io-cache.ignore-vpc-validate={}, use-vpc-validation-protocol={}",
+                    "Cache is disabled with io-cache.policy={}, io-cache.vpc-validated={}, io-cache.ignore-vpc-validate={}",
                     cachePolicy,
                     vpcValidated,
-                    ignoreVpcValidate,
-                    useVpcValidationProtocol);
+                    ignoreVpcValidate);
             return;
         }
         // Enable file io cache
@@ -146,7 +137,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         if (whitelist != null && "*".equals(whitelist.trim())) {
             cacheWhitelist = EnumSet.allOf(FileType.class);
         } else {
-            cacheWhitelist = FileType.parseWhitelist(IO_CACHE_WHITELIST.key(), whitelist);
+            cacheWhitelist = FileType.parseWhitelist(whitelist);
         }
 
         String whitelistPath = options.get(IO_CACHE_WHITELIST_PATH);
@@ -327,14 +318,14 @@ public abstract class HadoopCompliantFileIO implements FileIO {
             org.apache.hadoop.fs.Path path, boolean enableCache) throws IOException {
         Map<String, Pair<JindoHadoopSystem, String>> map;
         if (enableCache) {
-            if (jindoCacheFsMap == null) {
+            if (cacheFsMap == null) {
                 synchronized (this) {
-                    if (jindoCacheFsMap == null) {
-                        jindoCacheFsMap = new ConcurrentHashMap<>();
+                    if (cacheFsMap == null) {
+                        cacheFsMap = new ConcurrentHashMap<>();
                     }
                 }
             }
-            map = jindoCacheFsMap;
+            map = cacheFsMap;
         } else {
             if (fsMap == null) {
                 synchronized (this) {

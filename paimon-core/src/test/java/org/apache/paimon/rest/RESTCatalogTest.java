@@ -171,7 +171,6 @@ import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
 import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
 import static org.apache.paimon.rest.RESTApi.PAGE_TOKEN;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_OSS_ENDPOINT;
-import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENABLED;
 import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_IGNORE_VPC_VALIDATE;
 import static org.apache.paimon.rest.auth.DLFToken.TOKEN_DATE_FORMATTER;
 import static org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMillis;
@@ -2175,7 +2174,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     @Test
     void testValidTokenWithIOCacheIgnoreVpcValidate() throws Exception {
         Map<String, String> options = new HashMap<>();
-        options.put(IO_CACHE_ENABLED.key(), "false");
         options.put(IO_CACHE_IGNORE_VPC_VALIDATE.key(), "true");
         this.catalog = newRestCatalogWithDataToken(options);
         Identifier identifier =
@@ -2192,7 +2190,6 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         RESTToken fileDataToken = fileIO.validToken();
 
         assertEquals("true", fileDataToken.token().get(IO_CACHE_IGNORE_VPC_VALIDATE.key()));
-        assertThat(fileDataToken.token()).doesNotContainKey(IO_CACHE_ENABLED.key());
     }
 
     @Test

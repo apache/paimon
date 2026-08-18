@@ -231,7 +231,7 @@ public class JindoFileIO extends HadoopCompliantFileIO implements HadoopOptionsP
         }
         if (!allowCache) {
             closeFileSystems(fsMap);
-            closeFileSystems(jindoCacheFsMap);
+            closeFileSystems(cacheFsMap);
         }
     }
 
