@@ -636,6 +636,28 @@ class TestVariantSetFastPaths(unittest.TestCase):
             [True] * len(column),
         )
 
+    def test_insert_validates_singleton_lengths_without_batching(self):
+        lengths = list(range(1, 13))
+        column = _variants([
+            {'nested': {'value': 'x' * length}}
+            for length in lengths
+        ])
+
+        with patch(
+                'pypaimon.data.variant_path._matching_value_structures',
+        ) as structure_match, patch(
+                'pypaimon.data.variant_path._validate_value_field_ids',
+                wraps=_validate_value_field_ids,
+        ) as subtree_validation:
+            result = variant_set(column, '$.processed', pa.scalar(True))
+
+        structure_match.assert_not_called()
+        self.assertEqual(subtree_validation.call_count, len(lengths))
+        self.assertEqual(
+            variant_get(result, '$.processed', pa.bool_()).to_pylist(),
+            [True] * len(column),
+        )
+
     def test_insert_validates_deep_unmodified_sibling_iteratively(self):
         metadata = GenericVariant.from_python(
             {'sibling': [], 'target': {}}).metadata()

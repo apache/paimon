@@ -2039,9 +2039,15 @@ def _root_insert_splice(
             boundaries = np.flatnonzero(lengths[1:] != lengths[:-1]) + 1
             for group in np.split(candidates, boundaries):
                 exemplar = int(group[0])
+                value = values.view(int(rows[exemplar]))
+                if len(group) == 1:
+                    _validate_value_field_ids(
+                        value, 0, len(value), source_metadata_size)
+                    matching_structures[exemplar] = True
+                    continue
                 matches = _matching_value_structures(
-                    values.view(int(rows[exemplar])), source_data,
-                    row_starts[group], source_metadata_size)
+                    value, source_data, row_starts[group],
+                    source_metadata_size)
                 if matches is not None:
                     matching_structures[group[matches]] = True
 
