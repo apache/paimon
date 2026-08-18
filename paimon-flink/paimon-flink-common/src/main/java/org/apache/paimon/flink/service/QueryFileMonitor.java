@@ -45,6 +45,7 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 
@@ -85,6 +86,7 @@ public class QueryFileMonitor extends AbstractNonCoordinatedSource<InternalRow> 
     private class Reader extends AbstractNonCoordinatedSourceReader<InternalRow> {
         private transient StreamTableScan scan;
         private transient TableRead read;
+        private CompletableFuture<Void> availableFuture = CompletableFuture.completedFuture(null);
 
         @Override
         public void start() {
@@ -95,11 +97,24 @@ public class QueryFileMonitor extends AbstractNonCoordinatedSource<InternalRow> 
         }
 
         @Override
+        public CompletableFuture<Void> isAvailable() {
+            return availableFuture;
+        }
+
+        @Override
         public InputStatus pollNext(ReaderOutput<InternalRow> readerOutput) throws Exception {
             boolean isEmpty = doScan(readerOutput);
 
             if (isEmpty) {
-                Thread.sleep(monitorInterval);
+                availableFuture =
+                        CompletableFuture.runAsync(
+                                () -> {
+                                    try {
+                                        Thread.sleep(monitorInterval);
+                                    } catch (InterruptedException ignored) {
+                                    }
+                                });
+                return InputStatus.NOTHING_AVAILABLE;
             }
             return InputStatus.MORE_AVAILABLE;
         }
