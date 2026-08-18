@@ -32,6 +32,17 @@ class PaimonMicroBatchStreamITCase extends PaimonSparkTestBase {
 
   private val consumerId = "spark-consumer"
 
+  test("initialize stream when table has no snapshots") {
+    val sourceTable = createTableWithoutSnapshot()
+    assert(sourceTable.snapshotManager().earliestSnapshotId() == null)
+
+    val initial = createStream(sourceTable).initialOffset().asInstanceOf[PaimonSourceOffset]
+
+    assert(initial.snapshotId == 1L)
+    assert(initial.index == PaimonSourceOffset.INIT_OFFSET_INDEX)
+    assert(!initial.scanSnapshot)
+  }
+
   test("keep legacy offset JSON when consumer is not configured") {
     val sourceTable = createTableWithOneSnapshot()
     val stream = createStream(sourceTable)
@@ -251,6 +262,12 @@ class PaimonMicroBatchStreamITCase extends PaimonSparkTestBase {
   }
 
   private def createTableWithOneSnapshot(): FileStoreTable = {
+    createTableWithoutSnapshot()
+    spark.sql("INSERT INTO T VALUES (10, 'v_10'), (11, 'v_11'), (12, 'v_12')")
+    loadTable("T")
+  }
+
+  private def createTableWithoutSnapshot(): FileStoreTable = {
     spark.sql("DROP TABLE IF EXISTS T")
     spark.sql("""CREATE TABLE T (a INT, b STRING)
                 |TBLPROPERTIES (
@@ -258,7 +275,6 @@ class PaimonMicroBatchStreamITCase extends PaimonSparkTestBase {
                 |  'bucket-key' = 'a',
                 |  'file.format' = 'parquet'
                 |)""".stripMargin)
-    spark.sql("INSERT INTO T VALUES (10, 'v_10'), (11, 'v_11'), (12, 'v_12')")
     loadTable("T")
   }
 

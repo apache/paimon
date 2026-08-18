@@ -250,16 +250,18 @@ class PaimonMicroBatchStream(
   override def table: DataTable = originTable
 
   private def earliestReadableId(scanSnapshot: Boolean): Long = {
-    if (!scanSnapshot && coreOptions.changelogLifecycleDecoupled()) {
-      val earliestChangelogId = table.changelogManager().earliestLongLivedChangelogId()
-      if (earliestChangelogId == null) {
-        table.snapshotManager().earliestSnapshotId().longValue()
+    val earliestId: JLong =
+      if (!scanSnapshot && coreOptions.changelogLifecycleDecoupled()) {
+        val earliestChangelogId = table.changelogManager().earliestLongLivedChangelogId()
+        if (earliestChangelogId == null) {
+          table.snapshotManager().earliestSnapshotId()
+        } else {
+          earliestChangelogId
+        }
       } else {
-        earliestChangelogId.longValue()
+        table.snapshotManager().earliestSnapshotId()
       }
-    } else {
-      table.snapshotManager().earliestSnapshotId().longValue()
-    }
+    if (earliestId == null) 0L else earliestId.longValue()
   }
 
 }
