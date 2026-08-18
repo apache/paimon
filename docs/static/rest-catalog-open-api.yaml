@@ -48,14 +48,11 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConfigResponse'
-              example: {
-                "overrides": {
-                  "key": "value"
-                },
-                "defaults": {
-                  "prefix": "prefix"
-                }
-              }
+              example:
+                overrides:
+                  key: value
+                defaults:
+                  prefix: prefix
         "401":
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "500":
@@ -2229,10 +2226,9 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
-          example: {
-            "message": "Malformed request",
-            "code": 400
-          }
+          example:
+            message: Malformed request
+            code: 400
     UnauthorizedErrorResponse:
       description:
         Used for 401 errors.
@@ -2240,10 +2236,9 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
-          example: {
-            "message": "No auth for this resource",
-            "code": 401
-          }
+          example:
+            message: No auth for this resource
+            code: 401
     ForbiddenErrorResponse:
       description:
         Used for 403 errors.
@@ -2251,10 +2246,9 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
-          example: {
-            "message": "Table has no permission",
-            "code": 403
-          }
+          example:
+            message: Table has no permission
+            code: 403
     ResourceNotExistErrorResponse:
       description:
         Used for 404 errors, which means the resource does not exist.
@@ -2262,12 +2256,11 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
-          example: {
-            "message": "Resource is not exist",
-            "resourceType": "TABLE",
-            "resourceName": "user",
-            "code": 404
-          }
+          example:
+            message: Resource does not exist
+            resourceType: TABLE
+            resourceName: user
+            code: 404
     DatabaseNotExistErrorResponse:
       description:
         Not Found - DatabaseNotExistException, the database does not exist
@@ -2276,12 +2269,10 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
           example:
-            {
-              "message": "The given database does not exist",
-              "resourceType": "DATABASE",
-              "resourceName": "db",
-              "code": 404
-            }
+            message: The given database does not exist
+            resourceType: DATABASE
+            resourceName: db
+            code: 404
     TableNotExistErrorResponse:
       description:
         Not Found - TableNotExistException, the table does not exist
@@ -2290,12 +2281,10 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
           example:
-            {
-              "message": "The given table does not exist",
-              "resourceType": "TABLE",
-              "resourceName": "table",
-              "code": 404
-            }
+            message: The given table does not exist
+            resourceType: TABLE
+            resourceName: table
+            code: 404
     SnapshotNotExistErrorResponse:
       description:
         Not Found - SnapshotNotExistException, the snapshot does not exist
@@ -2304,12 +2293,10 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
           example:
-            {
-              "message": "The given snapshot does not exist",
-              "resourceType": "SNAPSHOT",
-              "resourceName": "1",
-              "code": 404
-            }
+            message: The given snapshot does not exist
+            resourceType: SNAPSHOT
+            resourceName: "1"
+            code: 404
     BranchNotExistErrorResponse:
       description:
         Not Found - BranchNotExistException, the branch does not exist
@@ -2318,12 +2305,10 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
           example:
-            {
-              "message": "The given branch does not exist",
-              "resourceType": "BRANCH",
-              "resourceName": "branch",
-              "code": 404
-            }
+            message: The given branch does not exist
+            resourceType: BRANCH
+            resourceName: branch
+            code: 404
     TagNotExistErrorResponse:
       description:
         Not Found - TagNotExistException, the tag does not exist
@@ -2332,12 +2317,10 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
           example:
-            {
-              "message": "The given tag does not exist",
-              "resourceType": "TAG",
-              "resourceName": "tag1",
-              "code": 404
-            }
+            message: The given tag does not exist
+            resourceType: TAG
+            resourceName: tag1
+            code: 404
     ViewNotExistErrorResponse:
       description:
         Not Found - ViewNotExistException, the view does not exist
@@ -2346,12 +2329,10 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
           example:
-            {
-              "message": "The given view does not exist",
-              "resourceType": "VIEW",
-              "resourceName": "view",
-              "code": 404
-            }
+            message: The given view does not exist
+            resourceType: VIEW
+            resourceName: view
+            code: 404
     FunctionNotExistErrorResponse:
       description:
         Not Found - FunctionNotExistException, the function does not exist
@@ -2360,12 +2341,10 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
           example:
-            {
-              "message": "The given function does not exist",
-              "resourceType": "FUNCTION",
-              "resourceName": "function",
-              "code": 404
-            }
+            message: The given function does not exist
+            resourceType: FUNCTION
+            resourceName: function
+            code: 404
     ResourceAlreadyExistErrorResponse:
       description:
         Used for 409 errors.
@@ -2373,12 +2352,11 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
-          example: {
-            "message": "Resource has exist",
-            "resourceType": "TABLE",
-            "resourceName": "account",
-            "code": 409
-          }
+          example:
+            message: Resource already exists
+            resourceType: TABLE
+            resourceName: account
+            code: 409
     DatabaseAlreadyExistErrorResponse:
       description: Conflict - The database already exists
       content:
@@ -2386,12 +2364,10 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
           example:
-            {
-              "message": "The given database already exists",
-              "resourceType": "DATABASE",
-              "resourceName": "db",
-              "code": 409
-            }
+            message: The given database already exists
+            resourceType: DATABASE
+            resourceName: db
+            code: 409
     TableAlreadyExistErrorResponse:
       description: Conflict - The table already exists
       content:
@@ -2399,12 +2375,10 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
           example:
-            {
-              "message": "The given table already exists",
-              "resourceType": "TABLE",
-              "resourceName": "table",
-              "code": 409
-            }
+            message: The given table already exists
+            resourceType: TABLE
+            resourceName: table
+            code: 409
     BranchAlreadyExistErrorResponse:
       description: Conflict - The branch already exists
       content:
@@ -2412,12 +2386,10 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
           example:
-            {
-              "message": "The given branch already exists",
-              "resourceType": "BRANCH",
-              "resourceName": "branch",
-              "code": 409
-            }
+            message: The given branch already exists
+            resourceType: BRANCH
+            resourceName: branch
+            code: 409
     TagAlreadyExistErrorResponse:
       description: Conflict - The tag already exists
       content:
@@ -2425,12 +2397,10 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
           example:
-            {
-              "message": "The given tag already exists",
-              "resourceType": "TAG",
-              "resourceName": "tag1",
-              "code": 409
-            }
+            message: The given tag already exists
+            resourceType: TAG
+            resourceName: tag1
+            code: 409
     ViewAlreadyExistErrorResponse:
       description: Conflict - The view already exists
       content:
@@ -2438,12 +2408,10 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
           example:
-            {
-              "message": "The given view already exists",
-              "resourceType": "VIEW",
-              "resourceName": "view",
-              "code": 409
-            }
+            message: The given view already exists
+            resourceType: VIEW
+            resourceName: view
+            code: 409
     FunctionAlreadyExistErrorResponse:
       description: Conflict - The view already exists
       content:
@@ -2451,12 +2419,10 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
           example:
-            {
-              "message": "The given function already exists",
-              "resourceType": "FUNCTION",
-              "resourceName": "function",
-              "code": 409
-            }
+            message: The given function already exists
+            resourceType: FUNCTION
+            resourceName: function
+            code: 409
     ServerErrorResponse:
       description:
         Used for server 5xx errors.
@@ -2464,10 +2430,9 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
-          example: {
-            "message": "Internal Server Error",
-            "code": 500
-          }
+          example:
+            message: Internal Server Error
+            code: 500
   schemas:
     CreateDatabaseRequest:
       type: object
@@ -2599,12 +2564,10 @@ components:
         message:
           type: string
         resourceType:
-          type: string
-          nullable: true
-          enum: [ "DATABASE", "TABLE", "PARTITION", "COLUMN", "SNAPSHOT", "BRANCH", "TAG", "VIEW", "DIALECT", "UNKNOWN" ]
+          type: [ string, "null" ]
+          enum: [ "DATABASE", "TABLE", "PARTITION", "COLUMN", "SNAPSHOT", "BRANCH", "TAG", "VIEW", "DIALECT", "FUNCTION", "DEFINITION", "UNKNOWN", null ]
         resourceName:
-          type: string
-          nullable: true
+          type: [ string, "null" ]
         code:
           type: integer
           format: int32
@@ -2720,7 +2683,7 @@ components:
           type: string
           const: "updateComment"
         comment:
-          type: string
+          type: [ string, "null" ]
     AddDefinition:
       allOf:
         - $ref: '#/components/schemas/BaseFunctionChange'
@@ -2865,8 +2828,8 @@ components:
         action:
           type: string
           const: "updateComment"
-        key:
-          type: string
+        comment:
+          type: [ string, "null" ]
     AddDialect:
       allOf:
         - $ref: '#/components/schemas/BaseViewChange'
@@ -2910,6 +2873,8 @@ components:
           $ref: '#/components/schemas/DataType'
         description:
           type: string
+        defaultValue:
+          type: string
     DataType:
       oneOf:
         - $ref: '#/components/schemas/PrimitiveType'
@@ -2917,6 +2882,7 @@ components:
         - $ref: '#/components/schemas/MultisetType'
         - $ref: '#/components/schemas/MapType'
         - $ref: '#/components/schemas/RowType'
+        - $ref: '#/components/schemas/VectorType'
     PrimitiveType:
       type: string
     ArrayType:
@@ -2959,6 +2925,18 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DataField'
+    VectorType:
+      type: object
+      properties:
+        type:
+          type: string
+          pattern: ^VECTOR.*
+          example: VECTOR
+        element:
+          $ref: '#/components/schemas/DataType'
+        length:
+          type: integer
+          format: int32
     Identifier:
       type: object
       properties:
@@ -3008,10 +2986,12 @@ components:
         owner:
           type: string
         createdAt:
+          type: integer
           format: int64
         createdBy:
           type: string
         updatedAt:
+          type: integer
           format: int64
         updatedBy:
           type: string
@@ -3028,6 +3008,7 @@ components:
         - $ref: '#/components/schemas/UpdateColumnType'
         - $ref: '#/components/schemas/UpdateColumnPosition'
         - $ref: '#/components/schemas/UpdateColumnNullability'
+        - $ref: '#/components/schemas/DropPrimaryKey'
     BaseSchemaChange:
       discriminator:
         propertyName: action
@@ -3043,6 +3024,7 @@ components:
           updateColumnType: '#/components/schemas/UpdateColumnType'
           updateColumnPosition: '#/components/schemas/UpdateColumnPosition'
           updateColumnNullability: '#/components/schemas/UpdateColumnNullability'
+          dropPrimaryKey: '#/components/schemas/DropPrimaryKey'
       type: object
       required:
         - action
@@ -3077,7 +3059,7 @@ components:
           type: string
           const: "updateComment"
         comment:
-          type: string
+          type: [ string, "null" ]
     AddColumn:
       allOf:
         - $ref: '#/components/schemas/BaseSchemaChange'
@@ -3182,6 +3164,13 @@ components:
             type: string
         newNullability:
           type: boolean
+    DropPrimaryKey:
+      allOf:
+        - $ref: '#/components/schemas/BaseSchemaChange'
+      properties:
+        action:
+          type: string
+          const: "dropPrimaryKey"
     Move:
       type: object
       properties:
@@ -3204,8 +3193,7 @@ components:
         tableId:
           type: string
         baseSnapshotUuid:
-          type: string
-          nullable: true
+          type: [ string, "null" ]
         snapshot:
           $ref: '#/components/schemas/Snapshot'
         statistics:
@@ -3218,9 +3206,8 @@ components:
         instant:
           $ref: '#/components/schemas/Instant'
         fromSnapshot:
-          type: integer
+          type: [ integer, "null" ]
           format: int64
-          nullable: true
     RollbackSchemaRequest:
       type: object
       required:
@@ -3235,7 +3222,7 @@ components:
         - $ref: '#/components/schemas/TagInstant'
     BaseInstant:
       discriminator:
-        propertyName: action
+        propertyName: type
         mapping:
           snapshot: '#/components/schemas/SnapshotInstant'
           tag: '#/components/schemas/TagInstant'
@@ -3268,12 +3255,10 @@ components:
       type: object
       properties:
         version:
-          type: integer
+          type: [ integer, "null" ]
           format: int32
-          nullable: true
         uuid:
-          type: string
-          nullable: true
+          type: [ string, "null" ]
         id:
           type: integer
           format: int64
@@ -3285,8 +3270,7 @@ components:
         deltaManifestList:
           type: string
         changelogManifestList:
-          type: string
-          nullable: true
+          type: [ string, "null" ]
         indexManifest:
           type: string
         commitUser:
@@ -3439,10 +3423,12 @@ components:
         owner:
           type: string
         createdAt:
+          type: integer
           format: int64
         createdBy:
           type: string
         updatedAt:
+          type: integer
           format: int64
         updatedBy:
           type: string
@@ -3471,8 +3457,7 @@ components:
         tables:
           type: array
           items:
-            identifier:
-              $ref: '#/components/schemas/Identifier'
+            $ref: '#/components/schemas/Identifier'
         nextPageToken:
           type: string
     ConfigResponse:
@@ -3501,8 +3486,7 @@ components:
         branch:
           type: string
         fromTag:
-          nullable: true
-          type: string
+          type: [ string, "null" ]
     RenameBranchRequest:
       type: object
       properties:
@@ -3528,13 +3512,11 @@ components:
         tagName:
           type: string
         snapshotId:
-          type: integer
+          type: [ integer, "null" ]
           format: int64
-          nullable: true
           description: Optional snapshot id, if not provided uses latest snapshot
         timeRetained:
-          type: string
-          nullable: true
+          type: [ string, "null" ]
           description: Optional time retained as string (e.g., "1d", "12h", "30m")
         ignoreIfExists:
           type: boolean
@@ -3548,12 +3530,10 @@ components:
         snapshot:
           $ref: '#/components/schemas/Snapshot'
         tagCreateTime:
-          type: integer
+          type: [ integer, "null" ]
           format: int64
-          nullable: true
         tagTimeRetained:
-          type: string
-          nullable: true
+          type: [ string, "null" ]
     ListTagsResponse:
       type: object
       properties:
@@ -3572,12 +3552,10 @@ components:
           type: integer
           format: int64
         tagCreateTime:
-          type: integer
+          type: [ integer, "null" ]
           format: int64
-          nullable: true
         tagTimeRetained:
-          type: string
-          nullable: true
+          type: [ string, "null" ]
     GetViewResponse:
       type: object
       properties:
@@ -3590,10 +3568,12 @@ components:
         owner:
           type: string
         createdAt:
+          type: integer
           format: int64
         createdBy:
           type: string
         updatedAt:
+          type: integer
           format: int64
         updatedBy:
           type: string
@@ -3623,14 +3603,15 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Identifier'
+        nextPageToken:
+          type: string
     ListViewsGloballyResponse:
       type: object
       properties:
-        tables:
+        views:
           type: array
           items:
-            identifier:
-              $ref: '#/components/schemas/Identifier'
+            $ref: '#/components/schemas/Identifier'
         nextPageToken:
           type: string
     ListFunctionsResponse:
@@ -3654,6 +3635,8 @@ components:
     GetFunctionResponse:
       type: object
       properties:
+        uuid:
+          type: string
         name:
           type: string
         inputParams:
@@ -3679,10 +3662,12 @@ components:
         owner:
           type: string
         createdAt:
+          type: integer
           format: int64
         createdBy:
           type: string
         updatedAt:
+          type: integer
           format: int64
         updatedBy:
           type: string
@@ -3799,28 +3784,25 @@ components:
   examples:
     TableNotExistError:
       summary: The requested table does not exist
-      value: {
-        "message": "The given table does not exist",
-        "resourceType": "TABLE",
-        "resourceName": "table",
-        "code": 404
-      }
+      value:
+        message: The given table does not exist
+        resourceType: TABLE
+        resourceName: table
+        code: 404
     SnapshotNotExistError:
       summary: The requested snapshot does not exist
-      value: {
-        "message": "The given snapshot does not exist",
-        "resourceType": "SNAPSHOT",
-        "resourceName": "1",
-        "code": 404
-      }
+      value:
+        message: The given snapshot does not exist
+        resourceType: SNAPSHOT
+        resourceName: "1"
+        code: 404
     TagNotExistError:
       summary: The requested tag does not exist
-      value: {
-        "message": "The given tag does not exist",
-        "resourceType": "TAG",
-        "resourceName": "tag1",
-        "code": 404
-      }
+      value:
+        message: The given tag does not exist
+        resourceType: TAG
+        resourceName: tag1
+        code: 404
   securitySchemes:
     BearerAuth:
       type: http
