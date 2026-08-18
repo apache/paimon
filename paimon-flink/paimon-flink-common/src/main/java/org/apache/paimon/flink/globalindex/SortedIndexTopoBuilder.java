@@ -39,13 +39,14 @@ import org.apache.paimon.flink.utils.InternalTypeInfo;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.globalindex.GlobalIndexKeyExtractor;
-import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexer;
+import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScanResult;
 import org.apache.paimon.globalindex.SortedGlobalIndexer;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexWriter;
 import org.apache.paimon.globalindex.sorted.SortedIndexOptions;
+import org.apache.paimon.globalindex.sorted.SortedSingleColumnIndexWriter;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -369,9 +370,7 @@ public class SortedIndexTopoBuilder {
                                 taskIdPos,
                                 indexFieldPos,
                                 rowIdPos,
-                                indexFieldType,
-                                !keyExtractor.isIdentity(),
-                                indexWriter.recordsPerRange()))
+                                indexFieldType))
                 .setParallelism(parallelism);
     }
 
@@ -557,13 +556,10 @@ public class SortedIndexTopoBuilder {
         private final int indexFieldPos;
         private final int rowIdPos;
         private final DataType indexFieldType;
-        private final boolean multipleValues;
-        private final long recordsPerRange;
 
-        private transient long counter;
         private transient SortedBuildTask currentTask;
         private transient BinaryRow currentPartition;
-        private transient GlobalIndexSingleColumnWriter currentWriter;
+        private transient SortedSingleColumnIndexWriter currentWriter;
         private transient List<CommitMessage> commitMessages;
         private transient Map<Integer, SortedBuildTask> buildTasksById;
         private transient InternalRow.FieldGetter indexFieldGetter;
@@ -577,9 +573,7 @@ public class SortedIndexTopoBuilder {
                 int taskIdPos,
                 int indexFieldPos,
                 int rowIdPos,
-                DataType indexFieldType,
-                boolean multipleValues,
-                long recordsPerRange) {
+                DataType indexFieldType) {
             this.buildTasks = buildTasks;
             this.partitionFieldSize = partitionFieldSize;
             this.writer = writer;
@@ -588,8 +582,6 @@ public class SortedIndexTopoBuilder {
             this.indexFieldPos = indexFieldPos;
             this.rowIdPos = rowIdPos;
             this.indexFieldType = indexFieldType;
-            this.multipleValues = multipleValues;
-            this.recordsPerRange = recordsPerRange;
         }
 
         @Override
@@ -619,15 +611,10 @@ public class SortedIndexTopoBuilder {
                 currentPartition = binaryRowSerializer.deserializeFromBytes(task.partition);
             }
 
-            if (!multipleValues && currentWriter != null && counter >= recordsPerRange) {
-                flushCurrentWriter();
-            }
-
             if (currentWriter == null) {
-                currentWriter = writer.createWriter();
+                currentWriter = writer.createTaskWriter(currentTask.rowRange);
             }
 
-            counter++;
             long localRowId = row.getLong(rowIdPos) - currentTask.rowRange.from;
             currentWriter.write(indexFieldGetter.getFieldOrNull(row), localRowId);
         }
@@ -646,11 +633,10 @@ public class SortedIndexTopoBuilder {
         @Override
         public void close() throws Exception {
             try {
-                GlobalIndexSingleColumnWriter writer = currentWriter;
+                SortedSingleColumnIndexWriter writer = currentWriter;
                 currentWriter = null;
-                counter = 0;
-                if (writer instanceof AutoCloseable) {
-                    ((AutoCloseable) writer).close();
+                if (writer != null) {
+                    writer.close();
                 }
             } finally {
                 super.close();
@@ -659,17 +645,16 @@ public class SortedIndexTopoBuilder {
 
         private void flushCurrentWriter() throws IOException {
             if (currentWriter != null) {
-                commitMessages.add(
-                        writer.flushIndex(
-                                currentTask.rowRange,
-                                multipleValues
-                                        ? currentWriter.finish(currentTask.rowRange.count())
-                                        : currentWriter.finish(),
-                                currentPartition,
-                                scanSnapshotId));
+                for (List<ResultEntry> resultEntries : currentWriter.finish()) {
+                    commitMessages.add(
+                            writer.flushIndex(
+                                    currentTask.rowRange,
+                                    resultEntries,
+                                    currentPartition,
+                                    scanSnapshotId));
+                }
             }
             currentWriter = null;
-            counter = 0;
         }
     }
 

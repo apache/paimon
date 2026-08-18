@@ -22,6 +22,7 @@ import org.apache.paimon.flink.globalindex.SortedIndexTopoBuilder.SortedBuildTas
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexWriter;
+import org.apache.paimon.globalindex.sorted.SortedSingleColumnIndexWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
@@ -76,9 +77,7 @@ public class SortedIndexTopoBuilderTest {
                         int.class,
                         int.class,
                         int.class,
-                        org.apache.paimon.types.DataType.class,
-                        boolean.class,
-                        long.class);
+                        org.apache.paimon.types.DataType.class);
         constructor.setAccessible(true);
         Object operator =
                 constructor.newInstance(
@@ -89,16 +88,16 @@ public class SortedIndexTopoBuilderTest {
                         0,
                         0,
                         0,
-                        DataTypes.INT(),
-                        false,
-                        1L);
+                        DataTypes.INT());
         GlobalIndexSingleColumnWriter activeWriter =
                 mock(
                         GlobalIndexSingleColumnWriter.class,
                         org.mockito.Mockito.withSettings().extraInterfaces(Closeable.class));
+        SortedSingleColumnIndexWriter taskWriter =
+                SortedSingleColumnIndexWriter.forSourceRowCount(1, activeWriter);
         Field currentWriter = operatorClass.getDeclaredField("currentWriter");
         currentWriter.setAccessible(true);
-        currentWriter.set(operator, activeWriter);
+        currentWriter.set(operator, taskWriter);
 
         Method close = operatorClass.getMethod("close");
         close.invoke(operator);

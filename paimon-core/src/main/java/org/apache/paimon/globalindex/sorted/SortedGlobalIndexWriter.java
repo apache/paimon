@@ -38,7 +38,6 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Range;
 
 import java.io.IOException;
@@ -107,35 +106,8 @@ public class SortedGlobalIndexWriter implements Serializable {
     public List<CommitMessage> buildForSinglePartition(
             Range rowRange, BinaryRow partition, Iterator<InternalRow> data, long scanSnapshotId)
             throws IOException {
-        if (keyExtractor.isIdentity()) {
-            return buildIdentityIndex(rowRange, partition, data, scanSnapshotId);
-        }
-
         FieldGetter indexFieldGetter = InternalRow.createFieldGetter(keyExtractor.keyType(), 0);
-        GlobalIndexSingleColumnWriter writer = createWriter();
-        try {
-            while (data.hasNext()) {
-                InternalRow row = data.next();
-                long localRowId = row.getLong(1) - rowRange.from;
-                writer.write(indexFieldGetter.getFieldOrNull(row), localRowId);
-            }
-
-            return Collections.singletonList(
-                    flushIndex(
-                            rowRange, writer.finish(rowRange.count()), partition, scanSnapshotId));
-        } finally {
-            if (writer instanceof AutoCloseable) {
-                IOUtils.closeQuietly((AutoCloseable) writer);
-            }
-        }
-    }
-
-    private List<CommitMessage> buildIdentityIndex(
-            Range rowRange, BinaryRow partition, Iterator<InternalRow> data, long scanSnapshotId)
-            throws IOException {
-        FieldGetter indexFieldGetter = InternalRow.createFieldGetter(keyExtractor.keyType(), 0);
-        try (SortedSingleColumnIndexWriter writer =
-                new SortedSingleColumnIndexWriter(recordsPerRange, this::createWriter)) {
+        try (SortedSingleColumnIndexWriter writer = createTaskWriter(rowRange)) {
             while (data.hasNext()) {
                 InternalRow row = data.next();
                 long localRowId = row.getLong(1) - rowRange.from;
@@ -148,6 +120,14 @@ public class SortedGlobalIndexWriter implements Serializable {
             }
             return commitMessages;
         }
+    }
+
+    /** Creates a task writer which owns file rotation and source-row coverage semantics. */
+    public SortedSingleColumnIndexWriter createTaskWriter(Range rowRange) throws IOException {
+        if (keyExtractor.isIdentity()) {
+            return new SortedSingleColumnIndexWriter(recordsPerRange, this::createWriter);
+        }
+        return SortedSingleColumnIndexWriter.forSourceRowCount(rowRange.count(), createWriter());
     }
 
     public GlobalIndexSingleColumnWriter createWriter() throws IOException {
