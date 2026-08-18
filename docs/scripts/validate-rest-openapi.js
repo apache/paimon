@@ -106,6 +106,16 @@ function requireArrayOfIdentifiers(schemaName, propertyName) {
   );
 }
 
+function requireNullableStringProperty(schemaName, propertyName) {
+  const property = requireProperties(schemaName, [propertyName])[propertyName];
+  check(
+    Array.isArray(property.type) &&
+      property.type.includes('string') &&
+      property.type.includes('null'),
+    `Schema ${schemaName}.${propertyName} must accept string and null`,
+  );
+}
+
 check(spec.openapi === '3.1.1', `Expected OpenAPI 3.1.1, found: ${spec.openapi}`);
 check(spec.paths && spec.components && spec.components.schemas, 'Incomplete OpenAPI document');
 visit(spec);
@@ -164,6 +174,9 @@ check(
 
 const updateViewComment = requireProperties('UpdateViewComment', ['action', 'comment']);
 check(!updateViewComment.key, 'Schema UpdateViewComment must use comment instead of key');
+['UpdateComment', 'UpdateViewComment', 'UpdateFunctionComment'].forEach((schemaName) =>
+  requireNullableStringProperty(schemaName, 'comment'),
+);
 
 const errorResourceTypes = requireProperties('ErrorResponse', ['resourceType']).resourceType.enum || [];
 ['FUNCTION', 'DEFINITION'].forEach((resourceType) => {
@@ -175,6 +188,10 @@ const errorResourceTypes = requireProperties('ErrorResponse', ['resourceType']).
 
 requireArrayOfIdentifiers('ListTablesGloballyResponse', 'tables');
 requireArrayOfIdentifiers('ListViewsGloballyResponse', 'views');
+requireArrayOfIdentifiers('ListFunctionsGloballyResponse', 'functions');
+requireProperties('ListFunctionsGloballyResponse', ['nextPageToken']);
+const getFunctionProperties = requireProperties('GetFunctionResponse', ['uuid']);
+check(getFunctionProperties.uuid.type === 'string', 'Schema GetFunctionResponse.uuid must be a string');
 
 ['GetDatabaseResponse', 'GetTableResponse', 'GetViewResponse', 'GetFunctionResponse'].forEach(
   (schemaName) => requireTypedIntegerProperties(schemaName, ['createdAt', 'updatedAt']),

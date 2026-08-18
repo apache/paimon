@@ -18,6 +18,7 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterFunctionRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
@@ -195,6 +196,23 @@ public class RESTApiJsonTest {
                 expectedViewComment,
                 RESTApi.fromJson(
                         RESTApi.toJson(ViewChange.updateComment("new comment")), Map.class));
+    }
+
+    @Test
+    public void nullableCommentChangesJsonShapeTest() throws Exception {
+        Map<String, Object> expected = new HashMap<>();
+        expected.put("action", "updateComment");
+        expected.put("comment", null);
+
+        assertEquals(
+                expected,
+                RESTApi.fromJson(RESTApi.toJson(SchemaChange.updateComment(null)), Map.class));
+        assertEquals(
+                expected,
+                RESTApi.fromJson(RESTApi.toJson(ViewChange.updateComment(null)), Map.class));
+        assertEquals(
+                expected,
+                RESTApi.fromJson(RESTApi.toJson(FunctionChange.updateComment(null)), Map.class));
     }
 
     @Test

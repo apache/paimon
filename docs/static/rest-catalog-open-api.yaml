@@ -2683,7 +2683,7 @@ components:
           type: string
           const: "updateComment"
         comment:
-          type: string
+          type: [ string, "null" ]
     AddDefinition:
       allOf:
         - $ref: '#/components/schemas/BaseFunctionChange'
@@ -2829,7 +2829,7 @@ components:
           type: string
           const: "updateComment"
         comment:
-          type: string
+          type: [ string, "null" ]
     AddDialect:
       allOf:
         - $ref: '#/components/schemas/BaseViewChange'
@@ -3059,7 +3059,7 @@ components:
           type: string
           const: "updateComment"
         comment:
-          type: string
+          type: [ string, "null" ]
     AddColumn:
       allOf:
         - $ref: '#/components/schemas/BaseSchemaChange'
@@ -3603,6 +3603,8 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Identifier'
+        nextPageToken:
+          type: string
     ListViewsGloballyResponse:
       type: object
       properties:
@@ -3633,6 +3635,8 @@ components:
     GetFunctionResponse:
       type: object
       properties:
+        uuid:
+          type: string
         name:
           type: string
         inputParams:
