@@ -70,6 +70,7 @@ import static org.apache.paimon.data.variant.GenericVariantUtil.UUID;
 import static org.apache.paimon.data.variant.GenericVariantUtil.VERSION;
 import static org.apache.paimon.data.variant.GenericVariantUtil.arrayHeader;
 import static org.apache.paimon.data.variant.GenericVariantUtil.checkIndex;
+import static org.apache.paimon.data.variant.GenericVariantUtil.compareUnsignedUtf8;
 import static org.apache.paimon.data.variant.GenericVariantUtil.getMetadataKey;
 import static org.apache.paimon.data.variant.GenericVariantUtil.handleArray;
 import static org.apache.paimon.data.variant.GenericVariantUtil.handleObject;
@@ -543,7 +544,7 @@ public class GenericVariantBuilder {
 
         @Override
         public int compareTo(FieldEntry other) {
-            return key.compareTo(other.key);
+            return compareUnsignedUtf8(key, other.key);
         }
     }
 

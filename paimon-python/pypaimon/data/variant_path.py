@@ -785,19 +785,17 @@ def _vectorized_path_positions(
                 data_starts = offset_starts + (sizes + 1) * offset_widths
                 if np.any(data_starts > parent_ends):
                     return None
+                for index in range(size):
+                    expected_id = _read_unsigned(
+                        first_value, id_start + index * id_size, id_size)
+                    ids = _take_unsigned(
+                        data, id_starts + index * id_widths, id_widths)
+                    if np.any(ids != expected_id):
+                        return None
                 if slot is None:
-                    for index in range(size):
-                        ids = _take_unsigned(
-                            data, id_starts + index * id_widths, id_widths)
-                        if np.any(ids == key_id):
-                            return None
                     positions.append(None)
                     limits.append(None)
                     continue
-                ids = _take_unsigned(
-                    data, id_starts + slot * id_widths, id_widths)
-                if np.any(ids != key_id):
-                    return None
                 successor_slot = min(
                     (
                         index for index in range(size + 1)
@@ -1439,7 +1437,8 @@ def _vectorized_replace_chunk(
 
 def _supported_replacement_type(data_type: pa.DataType) -> bool:
     return (
-        pa.types.is_boolean(data_type)
+        pa.types.is_null(data_type)
+        or pa.types.is_boolean(data_type)
         or pa.types.is_signed_integer(data_type)
         or pa.types.is_float32(data_type)
         or pa.types.is_float64(data_type)
@@ -1454,6 +1453,8 @@ def _supported_replacement_type(data_type: pa.DataType) -> bool:
 
 
 def _replacement_type_matches(value, pos, data_type):
+    if pa.types.is_null(data_type):
+        return True
     variant_type = _variant_get_type(value, pos)
     if variant_type == _Type.NULL:
         return True
@@ -1691,7 +1692,7 @@ def _apply_edits(
                 try:
                     fields.sort(
                         key=lambda field: names_by_id[
-                            field[0]].encode('utf-16-be'))
+                            field[0]].encode('utf-8'))
                 except KeyError:
                     _malformed("object key is missing from metadata")
             results[token] = _build_object_value_ordered(fields)

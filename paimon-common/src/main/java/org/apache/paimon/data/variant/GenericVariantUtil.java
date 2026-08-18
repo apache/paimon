@@ -22,6 +22,7 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.UUID;
 
@@ -144,6 +145,19 @@ public class GenericVariantUtil {
     public static final int MAX_DECIMAL16_PRECISION = 38;
 
     public static final int BINARY_SEARCH_THRESHOLD = 32;
+
+    static int compareUnsignedUtf8(String left, String right) {
+        byte[] leftBytes = left.getBytes(StandardCharsets.UTF_8);
+        byte[] rightBytes = right.getBytes(StandardCharsets.UTF_8);
+        int length = Math.min(leftBytes.length, rightBytes.length);
+        for (int i = 0; i < length; i++) {
+            int comparison = (leftBytes[i] & 0xFF) - (rightBytes[i] & 0xFF);
+            if (comparison != 0) {
+                return comparison;
+            }
+        }
+        return Integer.compare(leftBytes.length, rightBytes.length);
+    }
 
     // Write the least significant `numBytes` bytes in `value` into `bytes[pos, pos + numBytes)` in
     // little endian.

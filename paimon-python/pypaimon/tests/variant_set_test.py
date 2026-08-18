@@ -224,9 +224,7 @@ class TestVariantSetInsert(unittest.TestCase):
         self.assertEqual(decoded, expected)
         self.assertEqual(list(decoded), sorted(decoded))
 
-    def test_inserted_fields_stay_sorted_by_utf16_for_java(self):
-        # Java binary-searches fields by UTF-16 order; U+10000 < U+E000
-        # there, opposite of code point order.
+    def test_inserted_fields_stay_sorted_by_utf8(self):
         key_sup = chr(0x10000)
         key_bmp = chr(0xE000)
         payload = {key_bmp: 1.0, key_sup: 2.0}
@@ -239,7 +237,7 @@ class TestVariantSetInsert(unittest.TestCase):
         self.assertEqual(decoded[key_bmp], 1.0)
         self.assertEqual(list(decoded), sorted(
             list(payload.keys()) + ['aaa'],
-            key=lambda name: name.encode('utf-16-be')))
+            key=lambda name: name.encode('utf-8')))
 
     def test_mixed_rows_in_one_chunk(self):
         metadata = GenericVariant.from_python({'a': 0, 'b': 0}).metadata()
@@ -327,6 +325,23 @@ class TestVariantSetNullSemantics(unittest.TestCase):
             {'value': -2.0, 'mark': 'done'},
         ])
         self.assertEqual(result.null_count, 0)
+
+    def test_untyped_arrow_null_becomes_variant_null(self):
+        replacements = [
+            pa.scalar(None),
+            pa.nulls(2),
+            pa.chunked_array([pa.nulls(1), pa.nulls(1)]),
+        ]
+        for replacement in replacements:
+            with self.subTest(replacement=type(replacement).__name__):
+                result = variant_set(
+                    _variants([{'value': 1.0}, {'value': 2.0}]),
+                    '$.value',
+                    replacement,
+                )
+                self.assertEqual(_decode(result), [
+                    {'value': None}, {'value': None},
+                ])
 
     def test_variant_null_parent_is_not_an_object(self):
         column = _variants([{'parent': None}])
@@ -724,6 +739,23 @@ class TestVariantSetErrors(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "MALFORMED_VARIANT"):
             variant_set(column, '$.value', pa.scalar(9.0))
 
+    def test_rejects_duplicate_source_field_id_in_peer_row(self):
+        metadata = GenericVariant.from_python({'a': 0, 'b': 0}).metadata()
+        duplicate = _build_object_value([
+            (0, _encode_scalar_to_value_bytes(1.0, pa.float64())),
+            (0, _encode_scalar_to_value_bytes(2.0, pa.float64())),
+        ])
+        column = GenericVariant.to_arrow_array([
+            GenericVariant.from_python({'a': 1.0, 'b': 2.0}),
+            GenericVariant(duplicate, metadata),
+        ])
+
+        for updater in (variant_replace, variant_set):
+            with self.subTest(updater=updater.__name__):
+                with self.assertRaisesRegex(
+                        ValueError, "MALFORMED_VARIANT"):
+                    updater(column, '$.a', pa.scalar(9.0))
+
     def test_rejects_truncated_child_offsets(self):
         valid = GenericVariant.from_python({'a': 1.0, 'b': 2.0})
         truncated = _build_object_value([
@@ -741,10 +773,7 @@ class TestVariantSetErrors(unittest.TestCase):
 
 class TestVariantSetJavaInterop(unittest.TestCase):
 
-    def test_from_python_orders_object_fields_by_utf16(self):
-        # Java binary-searches fields by UTF-16 order; U+10000 < U+E000 there,
-        # opposite of Python code point order. Enough fields to exceed the
-        # Java binary-search threshold (32).
+    def test_from_python_orders_object_fields_by_utf8(self):
         key_sup = chr(0x10000)
         key_bmp = chr(0xE000)
         payload = {'k%02d' % i: float(i) for i in range(40)}
@@ -755,7 +784,7 @@ class TestVariantSetJavaInterop(unittest.TestCase):
         order = list(variant.to_python().keys())
         expected = sorted(
             list(payload.keys()),
-            key=lambda name: name.encode('utf-16-be'))
+            key=lambda name: name.encode('utf-8'))
         self.assertEqual(order, expected)
 
     def test_reads_java_generated_variant(self):

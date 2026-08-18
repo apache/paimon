@@ -48,6 +48,7 @@ import static org.apache.paimon.data.variant.GenericVariantUtil.Type;
 import static org.apache.paimon.data.variant.GenericVariantUtil.VERSION;
 import static org.apache.paimon.data.variant.GenericVariantUtil.VERSION_MASK;
 import static org.apache.paimon.data.variant.GenericVariantUtil.checkIndex;
+import static org.apache.paimon.data.variant.GenericVariantUtil.compareUnsignedUtf8;
 import static org.apache.paimon.data.variant.GenericVariantUtil.getMetadataKey;
 import static org.apache.paimon.data.variant.GenericVariantUtil.handleArray;
 import static org.apache.paimon.data.variant.GenericVariantUtil.handleObject;
@@ -255,29 +256,59 @@ public final class GenericVariant implements Variant, Serializable {
                             }
                         }
                     } else {
-                        int low = 0;
-                        int high = size - 1;
-                        while (low <= high) {
-                            // Use unsigned right shift to compute the middle of `low` and `high`.
-                            // This is not only a performance optimization, because it can properly
-                            // handle the case where `low + high` overflows int.
-                            int mid = (low + high) >>> 1;
-                            int id = readUnsigned(value, idStart + idSize * mid, idSize);
-                            int cmp = getMetadataKey(metadata, id).compareTo(key);
-                            if (cmp < 0) {
-                                low = mid + 1;
-                            } else if (cmp > 0) {
-                                high = mid - 1;
-                            } else {
-                                int offset =
-                                        readUnsigned(
-                                                value, offsetStart + offsetSize * mid, offsetSize);
-                                return new GenericVariant(value, metadata, dataStart + offset);
-                            }
-                        }
+                        GenericVariant result =
+                                binarySearchObjectField(
+                                        key,
+                                        size,
+                                        idSize,
+                                        offsetSize,
+                                        idStart,
+                                        offsetStart,
+                                        dataStart,
+                                        true);
+                        return result != null
+                                ? result
+                                : binarySearchObjectField(
+                                        key,
+                                        size,
+                                        idSize,
+                                        offsetSize,
+                                        idStart,
+                                        offsetStart,
+                                        dataStart,
+                                        false);
                     }
                     return null;
                 });
+    }
+
+    private GenericVariant binarySearchObjectField(
+            String key,
+            int size,
+            int idSize,
+            int offsetSize,
+            int idStart,
+            int offsetStart,
+            int dataStart,
+            boolean utf8Order) {
+        int low = 0;
+        int high = size - 1;
+        while (low <= high) {
+            int mid = (low + high) >>> 1;
+            int id = readUnsigned(value, idStart + idSize * mid, idSize);
+            String fieldName = getMetadataKey(metadata, id);
+            int comparison =
+                    utf8Order ? compareUnsignedUtf8(fieldName, key) : fieldName.compareTo(key);
+            if (comparison < 0) {
+                low = mid + 1;
+            } else if (comparison > 0) {
+                high = mid - 1;
+            } else {
+                int offset = readUnsigned(value, offsetStart + offsetSize * mid, offsetSize);
+                return new GenericVariant(value, metadata, dataStart + offset);
+            }
+        }
+        return null;
     }
 
     /** Variant object field. */
