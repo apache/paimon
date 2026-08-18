@@ -579,10 +579,37 @@ class TestVariantSetFastPaths(unittest.TestCase):
             args[1] == 0
             for args, _ in subtree_validation.call_args_list
         ))
+        self.assertEqual(subtree_validation.call_count, 1)
         rebuild.assert_not_called()
         self.assertEqual(
             variant_get(result, '$.processed', pa.bool_()).to_pylist(),
             [True] * 100,
+        )
+
+    def test_insert_batches_multiple_nested_structures(self):
+        sequences = [0, 128, 32768]
+        column = _variants([
+            {
+                'nested': {'value': float(index)},
+                'sequence': sequences[index % len(sequences)],
+            }
+            for index in range(300)
+        ])
+
+        with patch(
+                'pypaimon.data.variant_path._validate_value_field_ids',
+                wraps=_validate_value_field_ids,
+        ) as subtree_validation, patch(
+                'pypaimon.data.variant_path._apply_edits',
+                wraps=_apply_edits,
+        ) as rebuild:
+            result = variant_set(column, '$.processed', pa.scalar(True))
+
+        self.assertEqual(subtree_validation.call_count, len(sequences))
+        rebuild.assert_not_called()
+        self.assertEqual(
+            variant_get(result, '$.processed', pa.bool_()).to_pylist(),
+            [True] * len(column),
         )
 
     def test_insert_validates_deep_unmodified_sibling_iteratively(self):
@@ -769,6 +796,12 @@ class TestVariantSetErrors(unittest.TestCase):
     def test_root_splice_rejects_nested_unknown_field_id(self):
         metadata = GenericVariant.from_python({'sibling': {}}).metadata()
         key_ids = _metadata_key_ids(metadata)
+        valid_sibling = _build_object_value([
+            (
+                key_ids['sibling'],
+                _encode_scalar_to_value_bytes(1.0, pa.float64()),
+            ),
+        ])
         corrupt_sibling = _build_object_value([
             (
                 len(key_ids),
@@ -779,6 +812,9 @@ class TestVariantSetErrors(unittest.TestCase):
             (key_ids['sibling'], corrupt_sibling),
         ])
         column = GenericVariant.to_arrow_array([
+            GenericVariant(_build_object_value([
+                (key_ids['sibling'], valid_sibling),
+            ]), metadata),
             GenericVariant(corrupt_root, metadata),
         ])
 

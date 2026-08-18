@@ -70,6 +70,10 @@ _INDEX_PATTERN = re.compile(r"\[(\d+)]")
 _KEY_PATTERN = re.compile(r"\.([^\.\[]+)|\['([^']+)']|\[\"([^\"]+)\"]")
 _Path = Tuple[Tuple[str, object], ...]
 _SLOW_PATH_ROWS = 64
+_STRUCTURE_MATCH_GROUPS = 8
+_STRUCTURE_MATCH_MAX_BYTES = 64 * 1024
+_STRUCTURE_MATCH_ROWS = 16384
+_STRUCTURE_MATCH_WIDTH = 64
 
 
 @functools.lru_cache(maxsize=256)
@@ -345,7 +349,8 @@ def _checked_value_size(value, pos, limit=None):
     return end - pos
 
 
-def _validate_value_field_ids(value, pos, limit, metadata_size):
+def _validate_value_field_ids(
+        value, pos, limit, metadata_size, structure_ranges=None):
     """Validate object field ids in one unedited value subtree."""
     stack = [(pos, limit)]
     while stack:
@@ -356,6 +361,8 @@ def _validate_value_field_ids(value, pos, limit, metadata_size):
             size, id_size, id_start, data_start, offsets, value_end = (
                 _checked_object_layout(
                     value, current_pos, current_limit))
+            if structure_ranges is not None:
+                structure_ranges.append((current_pos, data_start))
             ids = [
                 _read_unsigned(value, id_start + i * id_size, id_size)
                 for i in range(size)
@@ -374,6 +381,8 @@ def _validate_value_field_ids(value, pos, limit, metadata_size):
         elif basic_type == _ARRAY:
             size, data_start, offsets, value_end = _checked_array_layout(
                 value, current_pos, current_limit)
+            if structure_ranges is not None:
+                structure_ranges.append((current_pos, data_start))
             for index in range(size):
                 stack.append((
                     data_start + offsets[index],
@@ -382,8 +391,52 @@ def _validate_value_field_ids(value, pos, limit, metadata_size):
         else:
             value_end = current_pos + _checked_value_size(
                 value, current_pos, current_limit)
+            if structure_ranges is not None:
+                type_info = (value[current_pos] >> 2) & 0x3F
+                structure_end = current_pos + 1
+                if basic_type == _PRIMITIVE:
+                    if type_info in (_BINARY, _LONG_STR):
+                        structure_end += _U32_SIZE
+                    elif type_info in (
+                            _DECIMAL4, _DECIMAL8, _DECIMAL16):
+                        structure_end = value_end
+                structure_ranges.append((current_pos, structure_end))
         if value_end != current_limit:
             _malformed("child size does not match container offsets")
+
+
+def _matching_value_structures(
+        value, source_data, row_starts, row_lengths, metadata_size):
+    """Match rows against one fully validated value structure."""
+    ranges = []
+    _validate_value_field_ids(
+        value, 0, len(value), metadata_size, ranges)
+    position_count = sum(end - start for start, end in ranges)
+    if position_count > _STRUCTURE_MATCH_MAX_BYTES:
+        return None
+    positions = np.empty(position_count, dtype=np.int64)
+    cursor = 0
+    for start, end in ranges:
+        count = end - start
+        positions[cursor:cursor + count] = np.arange(
+            start, end, dtype=np.int64)
+        cursor += count
+
+    matches = row_lengths == len(value)
+    safe_starts = np.where(matches, row_starts, 0)
+    expected = np.frombuffer(value, dtype=np.uint8)
+    for row_start in range(0, len(matches), _STRUCTURE_MATCH_ROWS):
+        row_end = min(row_start + _STRUCTURE_MATCH_ROWS, len(matches))
+        batch_matches = matches[row_start:row_end]
+        batch_starts = safe_starts[row_start:row_end]
+        for start in range(0, position_count, _STRUCTURE_MATCH_WIDTH):
+            offsets = positions[start:start + _STRUCTURE_MATCH_WIDTH]
+            batch_matches &= np.all(
+                source_data[batch_starts[:, None] + offsets]
+                == expected[offsets],
+                axis=1,
+            )
+    return matches
 
 
 def _field_slot(id_table: bytes, id_size: int, key_id: int) -> Optional[int]:
@@ -1971,6 +2024,23 @@ def _root_insert_splice(
         header, size, size_width, id_size, id_start, data_start,
         offset_size, offset_start, slot, sentinels, ok,
     ) = plan
+    matching_structures = None
+    if source_metadata_size is not None:
+        matching_structures = np.zeros(len(rows), dtype=bool)
+        remaining = ok.copy()
+        for _ in range(_STRUCTURE_MATCH_GROUPS):
+            candidates = np.flatnonzero(remaining)
+            if not len(candidates):
+                break
+            exemplar = int(candidates[0])
+            matches = _matching_value_structures(
+                values.view(int(rows[exemplar])), source_data,
+                row_starts, row_lengths, source_metadata_size)
+            if matches is None:
+                break
+            matches &= remaining
+            matching_structures |= matches
+            remaining &= ~matches
 
     if state.data is not None:
         source_view = memoryview(state.data)
@@ -1992,8 +2062,10 @@ def _root_insert_splice(
             continue
         original = values.view(row)
         if source_metadata_size is not None:
-            _validate_value_field_ids(
-                original, 0, len(original), source_metadata_size)
+            if (matching_structures is None
+                    or not matching_structures[index]):
+                _validate_value_field_ids(
+                    original, 0, len(original), source_metadata_size)
         else:
             row_size, _, _, row_data_start, offsets, _ = (
                 _checked_object_layout(original, 0, len(original)))
