@@ -556,22 +556,30 @@ class TestVariantSetFastPaths(unittest.TestCase):
             [True] * 4096,
         )
 
-    def test_insert_fuses_root_validation_with_rebuild(self):
+    def test_insert_splices_nested_root_after_validation(self):
         column = _variants([
-            {'nested': {'value': float(index)}, 'other': float(index)}
+            {
+                'nested_object': {'value': float(index)},
+                'nested_array': [{'value': float(index)}],
+                'other': float(index),
+            }
             for index in range(100)
         ])
 
         with patch(
                 'pypaimon.data.variant_path._validate_value_field_ids',
                 wraps=_validate_value_field_ids,
-        ) as subtree_validation:
+        ) as subtree_validation, patch(
+                'pypaimon.data.variant_path._apply_edits',
+                wraps=_apply_edits,
+        ) as rebuild:
             result = variant_set(column, '$.processed', pa.scalar(True))
 
-        self.assertFalse(any(
+        self.assertTrue(any(
             args[1] == 0
             for args, _ in subtree_validation.call_args_list
         ))
+        rebuild.assert_not_called()
         self.assertEqual(
             variant_get(result, '$.processed', pa.bool_()).to_pylist(),
             [True] * 100,

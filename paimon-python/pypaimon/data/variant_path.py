@@ -350,14 +350,12 @@ def _validate_value_field_ids(value, pos, limit, metadata_size):
     stack = [(pos, limit)]
     while stack:
         current_pos, current_limit = stack.pop()
-        value_end = current_pos + _checked_value_size(
-            value, current_pos, current_limit)
-        if value_end != current_limit:
-            _malformed("child size does not match container offsets")
+        _require_range(current_pos, 1, current_limit)
         basic_type = value[current_pos] & 0x3
         if basic_type == _OBJECT:
-            size, id_size, id_start, data_start, offsets, _ = (
-                _checked_object_layout(value, current_pos, value_end))
+            size, id_size, id_start, data_start, offsets, value_end = (
+                _checked_object_layout(
+                    value, current_pos, current_limit))
             ids = [
                 _read_unsigned(value, id_start + i * id_size, id_size)
                 for i in range(size)
@@ -368,18 +366,24 @@ def _validate_value_field_ids(value, pos, limit, metadata_size):
             end_by_offset = dict(zip(
                 ordered_offsets, ordered_offsets[1:]))
             for slot in range(size):
-                child_start, child_end = _checked_object_child_bounds(
-                    value, data_start, offsets, slot, end_by_offset)
-                if (value[child_start] & 0x3) in (_OBJECT, _ARRAY):
-                    stack.append((child_start, child_end))
+                child_offset = offsets[slot]
+                stack.append((
+                    data_start + child_offset,
+                    data_start + end_by_offset[child_offset],
+                ))
         elif basic_type == _ARRAY:
-            size, data_start, offsets, _ = _checked_array_layout(
-                value, current_pos, value_end)
+            size, data_start, offsets, value_end = _checked_array_layout(
+                value, current_pos, current_limit)
             for index in range(size):
                 stack.append((
                     data_start + offsets[index],
                     data_start + offsets[index + 1],
                 ))
+        else:
+            value_end = current_pos + _checked_value_size(
+                value, current_pos, current_limit)
+        if value_end != current_limit:
+            _malformed("child size does not match container offsets")
 
 
 def _field_slot(id_table: bytes, id_size: int, key_id: int) -> Optional[int]:
@@ -1882,8 +1886,7 @@ def _apply_edits(
 
 def _plan_root_insert_splice(
         values, rows, row_starts, row_lengths, source_data,
-        key_id, key_name, names_by_id, payloads,
-        source_metadata_size):
+        key_id, key_name, names_by_id, payloads):
     """Plan a splice and identify rows matching the root layout."""
     first_view = values.view(int(rows[0]))
     header = first_view[0]
@@ -1891,14 +1894,9 @@ def _plan_root_insert_splice(
         _checked_object_layout(first_view, 0, len(first_view)))
     ordered_offsets = sorted(first_offsets)
     end_by_offset = dict(zip(ordered_offsets, ordered_offsets[1:]))
-    has_nested_child = False
     for index in range(size):
-        child_start, _ = _checked_object_child_bounds(
+        _checked_object_child_bounds(
             first_view, data_start, first_offsets, index, end_by_offset)
-        has_nested_child |= (
-            first_view[child_start] & 0x3) in (_OBJECT, _ARRAY)
-    if source_metadata_size is not None and has_nested_child:
-        return None
     type_info = (header >> 2) & 0x3F
     large_size = ((type_info >> 4) & 0x1) != 0
     size_width = _U32_SIZE if large_size else 1
@@ -1966,8 +1964,7 @@ def _root_insert_splice(
     """Splice one field into uniform root objects."""
     plan = _plan_root_insert_splice(
         values, rows, row_starts, row_lengths, source_data,
-        key_id, key_name, names_by_id, payloads,
-        source_metadata_size)
+        key_id, key_name, names_by_id, payloads)
     if plan is None:
         return None
     (
