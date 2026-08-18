@@ -1880,11 +1880,11 @@ def _apply_edits(
     return _materialize_value(results[0])
 
 
-def _root_insert_splice(
-        values, state, rows, row_starts, row_lengths, source_data,
+def _plan_root_insert_splice(
+        values, rows, row_starts, row_lengths, source_data,
         key_id, key_name, names_by_id, payloads,
-        source_metadata_size, output_metadata_size):
-    """Splice one field into uniform root objects."""
+        source_metadata_size):
+    """Plan a splice and identify rows matching the root layout."""
     first_view = values.view(int(rows[0]))
     header = first_view[0]
     size, id_size, id_start, data_start, first_offsets, _ = (
@@ -1952,6 +1952,28 @@ def _root_insert_splice(
         (len(payload) for payload in payloads), np.int64, len(payloads))
     new_sentinels = sentinels + payload_lengths
     ok &= new_sentinels < 1 << (8 * offset_size)
+
+    return (
+        header, size, size_width, id_size, id_start, data_start,
+        offset_size, offset_start, slot, sentinels, ok,
+    )
+
+
+def _root_insert_splice(
+        values, state, rows, row_starts, row_lengths, source_data,
+        key_id, key_name, names_by_id, payloads,
+        source_metadata_size, output_metadata_size):
+    """Splice one field into uniform root objects."""
+    plan = _plan_root_insert_splice(
+        values, rows, row_starts, row_lengths, source_data,
+        key_id, key_name, names_by_id, payloads,
+        source_metadata_size)
+    if plan is None:
+        return None
+    (
+        header, size, size_width, id_size, id_start, data_start,
+        offset_size, offset_start, slot, sentinels, ok,
+    ) = plan
 
     if state.data is not None:
         source_view = memoryview(state.data)
