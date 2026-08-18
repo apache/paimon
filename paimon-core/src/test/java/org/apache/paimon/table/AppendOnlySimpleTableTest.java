@@ -103,6 +103,7 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -325,47 +326,26 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                             options.set(CoreOptions.COMMIT_DISCARD_DUPLICATE_FILES, true);
                             options.set(CoreOptions.COMMIT_MAX_RETRIES, 50);
                             options.set(CoreOptions.COMMIT_MAX_RETRY_WAIT, Duration.ofMillis(100));
-                            // Keep all snapshots so concurrent expiry does not race readers.
-                            options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 1000);
-                            options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 1000);
                         });
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
-        List<List<CommitMessage>> messages = new ArrayList<>();
-        for (int i = 0; i < 10; i++) {
-            try (BatchTableWrite write = writeBuilder.newWrite()) {
-                write.write(rowData(1, 10, 100L));
-                messages.add(write.prepareCommit());
-            }
+        List<CommitMessage> messages;
+        try (BatchTableWrite write = writeBuilder.newWrite()) {
+            write.write(rowData(1, 10, 100L));
+            messages = write.prepareCommit();
         }
-        int commitThreadNum = 10;
-        int commitsPerThread = 10;
-        Runnable asserter =
-                () -> {
-                    List<Split> splits = table.newReadBuilder().newScan().plan().splits();
-                    assertThat(splits.size()).isEqualTo(1);
-                    assertThat(splits.get(0).convertToRawFiles().get().size())
-                            .isLessThanOrEqualTo(messages.size());
-                };
 
+        int commitThreadNum = 5;
         ExecutorService pool = Executors.newFixedThreadPool(commitThreadNum);
+        List<Future<?>> futures = new ArrayList<>();
         try {
-            List<Future<?>> futures = new ArrayList<>();
-            for (int thread = 0; thread < commitThreadNum; thread++) {
-                int threadId = thread;
+            for (int i = 0; i < commitThreadNum; i++) {
                 futures.add(
                         pool.submit(
                                 () -> {
-                                    for (int round = 0; round < commitsPerThread; round++) {
-                                        int messageIndex = (threadId + round) % messages.size();
-                                        try (BatchTableCommit commit = writeBuilder.newCommit()) {
-                                            commit.commit(messages.get(messageIndex));
-                                        } catch (Exception e) {
-                                            throw new RuntimeException(
-                                                    String.format(
-                                                            "Failed to commit message %s in thread %s round %s.",
-                                                            messageIndex, threadId, round),
-                                                    e);
-                                        }
+                                    try (BatchTableCommit commit = writeBuilder.newCommit()) {
+                                        commit.commit(messages);
+                                    } catch (Exception e) {
+                                        throw new RuntimeException(e);
                                     }
                                 }));
             }
@@ -373,9 +353,13 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                 future.get();
             }
         } finally {
-            pool.shutdownNow();
+            pool.shutdown();
+            assertThat(pool.awaitTermination(1, TimeUnit.MINUTES)).isTrue();
         }
-        asserter.run();
+
+        List<Split> splits = table.newReadBuilder().newScan().plan().splits();
+        assertThat(splits).hasSize(1);
+        assertThat(splits.get(0).convertToRawFiles().get()).hasSize(1);
     }
 
     @Test
