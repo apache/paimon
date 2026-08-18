@@ -70,10 +70,8 @@ _INDEX_PATTERN = re.compile(r"\[(\d+)]")
 _KEY_PATTERN = re.compile(r"\.([^\.\[]+)|\['([^']+)']|\[\"([^\"]+)\"]")
 _Path = Tuple[Tuple[str, object], ...]
 _SLOW_PATH_ROWS = 64
-_STRUCTURE_MATCH_GROUPS = 8
-_STRUCTURE_MATCH_MAX_BYTES = 64 * 1024
-_STRUCTURE_MATCH_ROWS = 16384
-_STRUCTURE_MATCH_WIDTH = 64
+# Bound the dominant temporary allocation during batch structure matching.
+_STRUCTURE_MATCH_INDEX_BUDGET = 8 * 1024 * 1024
 
 
 @functools.lru_cache(maxsize=256)
@@ -406,14 +404,18 @@ def _validate_value_field_ids(
 
 
 def _matching_value_structures(
-        value, source_data, row_starts, row_lengths, metadata_size):
-    """Match rows against one fully validated value structure."""
+        value, source_data, row_starts, metadata_size):
+    """Match equal-length rows against one validated value structure."""
     ranges = []
     _validate_value_field_ids(
         value, 0, len(value), metadata_size, ranges)
     position_count = sum(end - start for start, end in ranges)
-    if position_count > _STRUCTURE_MATCH_MAX_BYTES:
+    index_size = np.dtype(np.int64).itemsize
+    position_bytes = position_count * index_size
+    available_bytes = _STRUCTURE_MATCH_INDEX_BUDGET - position_bytes
+    if available_bytes < index_size:
         return None
+    max_cells = available_bytes // index_size
     positions = np.empty(position_count, dtype=np.int64)
     cursor = 0
     for start, end in ranges:
@@ -422,15 +424,16 @@ def _matching_value_structures(
             start, end, dtype=np.int64)
         cursor += count
 
-    matches = row_lengths == len(value)
-    safe_starts = np.where(matches, row_starts, 0)
+    matches = np.ones(len(row_starts), dtype=bool)
     expected = np.frombuffer(value, dtype=np.uint8)
-    for row_start in range(0, len(matches), _STRUCTURE_MATCH_ROWS):
-        row_end = min(row_start + _STRUCTURE_MATCH_ROWS, len(matches))
+    width = max(1, min(position_count, max_cells))
+    row_chunk_size = min(len(matches), max(1, max_cells // width))
+    for row_start in range(0, len(matches), row_chunk_size):
+        row_end = min(row_start + row_chunk_size, len(matches))
         batch_matches = matches[row_start:row_end]
-        batch_starts = safe_starts[row_start:row_end]
-        for start in range(0, position_count, _STRUCTURE_MATCH_WIDTH):
-            offsets = positions[start:start + _STRUCTURE_MATCH_WIDTH]
+        batch_starts = row_starts[row_start:row_end]
+        for start in range(0, position_count, width):
+            offsets = positions[start:start + width]
             batch_matches &= np.all(
                 source_data[batch_starts[:, None] + offsets]
                 == expected[offsets],
@@ -2027,20 +2030,20 @@ def _root_insert_splice(
     matching_structures = None
     if source_metadata_size is not None:
         matching_structures = np.zeros(len(rows), dtype=bool)
-        remaining = ok.copy()
-        for _ in range(_STRUCTURE_MATCH_GROUPS):
-            candidates = np.flatnonzero(remaining)
-            if not len(candidates):
-                break
-            exemplar = int(candidates[0])
-            matches = _matching_value_structures(
-                values.view(int(rows[exemplar])), source_data,
-                row_starts, row_lengths, source_metadata_size)
-            if matches is None:
-                break
-            matches &= remaining
-            matching_structures |= matches
-            remaining &= ~matches
+        candidates = np.flatnonzero(ok)
+        if len(candidates):
+            lengths = row_lengths[candidates]
+            order = np.argsort(lengths, kind='stable')
+            candidates = candidates[order]
+            lengths = lengths[order]
+            boundaries = np.flatnonzero(lengths[1:] != lengths[:-1]) + 1
+            for group in np.split(candidates, boundaries):
+                exemplar = int(group[0])
+                matches = _matching_value_structures(
+                    values.view(int(rows[exemplar])), source_data,
+                    row_starts[group], source_metadata_size)
+                if matches is not None:
+                    matching_structures[group[matches]] = True
 
     if state.data is not None:
         source_view = memoryview(state.data)
