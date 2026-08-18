@@ -439,6 +439,9 @@ def _matching_value_structures(
                 == expected[offsets],
                 axis=1,
             )
+            if (start + width < position_count
+                    and not np.any(batch_matches)):
+                break
     return matches
 
 
@@ -1940,19 +1943,16 @@ def _apply_edits(
     return _materialize_value(results[0])
 
 
-def _plan_root_insert_splice(
-        values, rows, row_starts, row_lengths, source_data,
-        key_id, key_name, names_by_id, payloads):
-    """Plan a splice and identify rows matching the root layout."""
-    first_view = values.view(int(rows[0]))
-    header = first_view[0]
+def _root_insert_splice_layout(value, key_id, key_name, names_by_id):
+    """Return a root layout that can splice the new field."""
+    header = value[0]
     size, id_size, id_start, data_start, first_offsets, _ = (
-        _checked_object_layout(first_view, 0, len(first_view)))
+        _checked_object_layout(value, 0, len(value)))
     ordered_offsets = sorted(first_offsets)
     end_by_offset = dict(zip(ordered_offsets, ordered_offsets[1:]))
     for index in range(size):
         _checked_object_child_bounds(
-            first_view, data_start, first_offsets, index, end_by_offset)
+            value, data_start, first_offsets, index, end_by_offset)
     type_info = (header >> 2) & 0x3F
     large_size = ((type_info >> 4) & 0x1) != 0
     size_width = _U32_SIZE if large_size else 1
@@ -1963,13 +1963,35 @@ def _plan_root_insert_splice(
     if key_id >= 1 << (8 * id_size):
         return None
     ids = [
-        _read_unsigned(first_view, id_start + i * id_size, id_size)
+        _read_unsigned(value, id_start + i * id_size, id_size)
         for i in range(size)
     ]
     names = [names_by_id.get(field_id) for field_id in ids]
     if any(name is None for name in names) or names != sorted(names):
         return None
     slot = sum(name < key_name for name in names)
+    return (
+        header, size, size_width, id_size, id_start, data_start,
+        offset_size, offset_start, ids, slot,
+    )
+
+
+def _plan_root_insert_splice(
+        values, rows, row_starts, row_lengths, source_data,
+        key_id, key_name, names_by_id, payloads):
+    """Plan a splice and identify rows matching one root layout."""
+    layout = None
+    for row in rows:
+        layout = _root_insert_splice_layout(
+            values.view(int(row)), key_id, key_name, names_by_id)
+        if layout is not None:
+            break
+    if layout is None:
+        return None
+    (
+        header, size, size_width, id_size, id_start, data_start,
+        offset_size, offset_start, ids, slot,
+    ) = layout
 
     widths = np.full(len(rows), size_width, dtype=np.int64)
     ok = source_data[row_starts] == header
@@ -2071,8 +2093,7 @@ def _root_insert_splice(
             continue
         original = values.view(row)
         if source_metadata_size is not None:
-            if (matching_structures is None
-                    or not matching_structures[index]):
+            if not matching_structures[index]:
                 _validate_value_field_ids(
                     original, 0, len(original), source_metadata_size)
         else:

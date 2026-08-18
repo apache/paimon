@@ -658,6 +658,36 @@ class TestVariantSetFastPaths(unittest.TestCase):
             [True] * len(column),
         )
 
+    def test_insert_uses_layout_after_noncanonical_first_row(self):
+        metadata = GenericVariant.from_python({'a': 0, 'b': 0}).metadata()
+        key_ids = _metadata_key_ids(metadata)
+        a_value = _encode_scalar_to_value_bytes(1.0, pa.float64())
+        b_value = _encode_scalar_to_value_bytes(2.0, pa.float64())
+        noncanonical = _build_object_value_ordered([
+            (key_ids['b'], b_value),
+            (key_ids['a'], a_value),
+        ])
+        canonical = _build_object_value_ordered([
+            (key_ids['a'], a_value),
+            (key_ids['b'], b_value),
+        ])
+        column = GenericVariant.to_arrow_array([
+            GenericVariant(noncanonical, metadata),
+            *[GenericVariant(canonical, metadata) for _ in range(99)],
+        ])
+
+        with patch(
+                'pypaimon.data.variant_path._apply_edits',
+                wraps=_apply_edits,
+        ) as rebuild:
+            result = variant_set(column, '$.processed', pa.scalar(True))
+
+        self.assertEqual(rebuild.call_count, 1)
+        self.assertEqual(
+            variant_get(result, '$.processed', pa.bool_()).to_pylist(),
+            [True] * len(column),
+        )
+
     def test_insert_validates_deep_unmodified_sibling_iteratively(self):
         metadata = GenericVariant.from_python(
             {'sibling': [], 'target': {}}).metadata()
