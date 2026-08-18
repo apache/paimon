@@ -80,7 +80,7 @@ public class MultiValueGlobalIndexTableTest extends TableTestBase {
         PredicateBuilder builder = new PredicateBuilder(table.rowType());
         Predicate containsRed = builder.arrayContains(1, RED);
         assertThat(readIds(table, containsRed)).containsExactlyInAnyOrder(1, 5);
-        assertThat(readIds(table, builder.isNull(1))).containsExactly(3);
+        assertThat(readIdsWithFallback(table, builder.isNull(1))).containsExactly(3);
 
         write(table, GenericRow.of(6, array(RED)));
         table = getTableDefault();
@@ -115,9 +115,24 @@ public class MultiValueGlobalIndexTableTest extends TableTestBase {
     }
 
     private List<Integer> readIds(FileStoreTable table, Predicate predicate) throws Exception {
+        return readIds(table, predicate, true);
+    }
+
+    private List<Integer> readIdsWithFallback(FileStoreTable table, Predicate predicate)
+            throws Exception {
+        return readIds(table, predicate, false);
+    }
+
+    private List<Integer> readIds(
+            FileStoreTable table, Predicate predicate, boolean expectIndexedSplits)
+            throws Exception {
         ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
         TableScan.Plan plan = readBuilder.newScan().plan();
-        assertThat(plan.splits()).allMatch(IndexedSplit.class::isInstance);
+        if (expectIndexedSplits) {
+            assertThat(plan.splits()).allMatch(IndexedSplit.class::isInstance);
+        } else {
+            assertThat(plan.splits()).noneMatch(IndexedSplit.class::isInstance);
+        }
 
         List<Integer> ids = new ArrayList<>();
         readBuilder
