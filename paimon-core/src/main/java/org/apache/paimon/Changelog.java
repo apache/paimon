@@ -69,57 +69,6 @@ public class Changelog extends Snapshot {
                 snapshot.operation);
     }
 
-    public Changelog(
-            int version,
-            @Nullable String uuid,
-            long id,
-            long schemaId,
-            String baseManifestList,
-            @Nullable Long baseManifestListSize,
-            String deltaManifestList,
-            @Nullable Long deltaManifestListSize,
-            @Nullable String changelogManifestList,
-            @Nullable Long changelogManifestListSize,
-            @Nullable String indexManifest,
-            String commitUser,
-            long commitIdentifier,
-            CommitKind commitKind,
-            long timeMillis,
-            long totalRecordCount,
-            long deltaRecordCount,
-            @Nullable Long changelogRecordCount,
-            @Nullable Long watermark,
-            @Nullable String statistics,
-            Map<String, String> properties,
-            @Nullable Long nextRowId,
-            @Nullable Operation operation) {
-        this(
-                version,
-                uuid,
-                id,
-                schemaId,
-                baseManifestList,
-                baseManifestListSize,
-                deltaManifestList,
-                deltaManifestListSize,
-                changelogManifestList,
-                changelogManifestListSize,
-                indexManifest,
-                commitUser,
-                null,
-                commitIdentifier,
-                commitKind,
-                timeMillis,
-                totalRecordCount,
-                deltaRecordCount,
-                changelogRecordCount,
-                watermark,
-                statistics,
-                properties,
-                nextRowId,
-                operation);
-    }
-
     @JsonCreator
     public Changelog(
             @JsonProperty(FIELD_VERSION) int version,

@@ -411,6 +411,7 @@ public class ExpireSnapshotsTest {
                 null,
                 null,
                 "test",
+                null,
                 0L,
                 Snapshot.CommitKind.APPEND,
                 0L,

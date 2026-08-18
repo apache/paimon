@@ -2205,6 +2205,7 @@ public class FileStoreCommitTest {
                             null,
                             previousSnapshot == null ? null : previousSnapshot.indexManifest(),
                             "conflict-user",
+                            snapshot.commitId(),
                             Long.MAX_VALUE,
                             Snapshot.CommitKind.ANALYZE,
                             System.currentTimeMillis(),
