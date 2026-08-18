@@ -1435,6 +1435,19 @@ public class FileStoreCommitTest {
     }
 
     @Test
+    public void testSnapshotCommitId() throws Exception {
+        TestFileStore store = createStore(false);
+
+        try (FileStoreCommit fileStoreCommit = store.newCommit()) {
+            fileStoreCommit.ignoreEmptyCommit(false);
+            fileStoreCommit.commit(new ManifestCommittable(0), false);
+        }
+
+        assertThat(checkNotNull(store.snapshotManager().latestSnapshot()).commitId())
+                .isEqualTo(CoreCommitId.get());
+    }
+
+    @Test
     public void testGlobalIndexCommitChecksExistingRowIds() throws Exception {
         TestFileStore store = createRowTrackingDataEvolutionStore();
 

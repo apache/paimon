@@ -44,6 +44,7 @@ public class TagTest {
                     null,
                     null,
                     null,
+                    "commit-id",
                     0L,
                     Snapshot.CommitKind.APPEND,
                     1000,
@@ -68,6 +69,7 @@ public class TagTest {
                         + "  \"baseManifestList\" : null,\n"
                         + "  \"deltaManifestList\" : null,\n"
                         + "  \"commitUser\" : null,\n"
+                        + "  \"commitId\" : \"commit-id\",\n"
                         + "  \"commitIdentifier\" : 0,\n"
                         + "  \"commitKind\" : \"APPEND\",\n"
                         + "  \"timeMillis\" : 1000,\n"
@@ -94,6 +96,7 @@ public class TagTest {
                         + "  \"baseManifestList\" : null,\n"
                         + "  \"deltaManifestList\" : null,\n"
                         + "  \"commitUser\" : null,\n"
+                        + "  \"commitId\" : \"commit-id\",\n"
                         + "  \"commitIdentifier\" : 0,\n"
                         + "  \"commitKind\" : \"APPEND\",\n"
                         + "  \"timeMillis\" : 1000,\n"
@@ -106,5 +109,6 @@ public class TagTest {
 
         Tag newTag = Tag.fromJson(tagJson);
         assertEquals(tag, newTag);
+        assertEquals("commit-id", newTag.trimToSnapshot().commitId());
     }
 }
