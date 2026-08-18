@@ -21,9 +21,11 @@ package org.apache.paimon.globalindex.btree;
 import org.apache.paimon.compression.BlockCompressionFactory;
 import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
+import org.apache.paimon.globalindex.GlobalIndexKeyExtractor;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.KeySerializer;
+import org.apache.paimon.globalindex.SortedGlobalIndexer;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.io.cache.CacheManager;
@@ -58,15 +60,17 @@ import java.util.concurrent.ExecutorService;
  *
  * <p>This approach significantly reduces memory pressure during index reads.
  */
-public class BTreeGlobalIndexer implements GlobalIndexer {
+public class BTreeGlobalIndexer implements SortedGlobalIndexer {
 
     private final KeySerializer keySerializer;
+    private final GlobalIndexKeyExtractor keyExtractor;
     private final Options options;
     private final long fallbackScanMaxSize;
     private final LazyField<CacheManager> cacheManager;
 
     public BTreeGlobalIndexer(DataField dataField, Options options) {
         this.keySerializer = KeySerializer.create(dataField.type());
+        this.keyExtractor = GlobalIndexKeyExtractor.identity(dataField.type());
         this.options = options;
         this.fallbackScanMaxSize =
                 options.get(BTreeIndexOptions.BTREE_INDEX_FALLBACK_SCAN_MAX_SIZE).getBytes();
@@ -78,6 +82,11 @@ public class BTreeGlobalIndexer implements GlobalIndexer {
                                         options.get(
                                                 BTreeIndexOptions
                                                         .BTREE_INDEX_HIGH_PRIORITY_POOL_RATIO)));
+    }
+
+    @Override
+    public GlobalIndexKeyExtractor keyExtractor() {
+        return keyExtractor;
     }
 
     @Override

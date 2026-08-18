@@ -68,6 +68,11 @@ public class OnlyPartitionKeyEqualVisitor implements FunctionVisitor<Boolean> {
     }
 
     @Override
+    public Boolean visitArrayContains(FieldRef fieldRef, Object literal) {
+        return false;
+    }
+
+    @Override
     public Boolean visitLike(FieldRef fieldRef, Object literal) {
         return false;
     }

@@ -171,6 +171,11 @@ class PredicateJsonSerdeTest {
                         .expectJson(
                                 "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}},\"function\":\"CONTAINS\",\"literals\":[\"foo\"]}"),
 
+                // LeafPredicate - ArrayContains uses the element type for literal serde
+                TestSpec.forPredicate(builder.arrayContains(4, BinaryString.fromString("vip")))
+                        .expectJson(
+                                "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":4,\"name\":\"f4\",\"type\":{\"type\":\"ARRAY\",\"element\":\"STRING\"}}},\"function\":\"ARRAY_CONTAINS\",\"literals\":[\"vip\"]}"),
+
                 // LeafPredicate - Between
                 TestSpec.forPredicate(builder.between(0, 3, 7))
                         .expectJson(
@@ -249,7 +254,12 @@ class PredicateJsonSerdeTest {
 
     private static PredicateBuilder newBuilder() {
         return new PredicateBuilder(
-                RowType.of(new IntType(), DataTypes.STRING(), DataTypes.STRING(), new IntType()));
+                RowType.of(
+                        new IntType(),
+                        DataTypes.STRING(),
+                        DataTypes.STRING(),
+                        new IntType(),
+                        DataTypes.ARRAY(DataTypes.STRING())));
     }
 
     private static List<Object> manyInts() {

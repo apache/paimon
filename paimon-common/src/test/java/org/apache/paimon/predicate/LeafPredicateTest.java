@@ -71,6 +71,28 @@ class LeafPredicateTest {
         assertThat(clone.toString()).isEqualTo(predicate.toString());
     }
 
+    @Test
+    public void testArrayContainsSerializationUsesElementSerializer()
+            throws IOException, ClassNotFoundException {
+        PredicateBuilder builder =
+                new PredicateBuilder(RowType.of(DataTypes.ARRAY(DataTypes.STRING())));
+        LeafPredicate predicate =
+                (LeafPredicate) builder.arrayContains(0, BinaryString.fromString("vip"));
+
+        LeafPredicate clone = InstantiationUtil.clone(predicate);
+
+        assertThat(clone).isEqualTo(predicate);
+        assertThat(
+                        clone.test(
+                                GenericRow.of(
+                                        new GenericArray(
+                                                new BinaryString[] {
+                                                    BinaryString.fromString("trial"),
+                                                    BinaryString.fromString("vip")
+                                                }))))
+                .isTrue();
+    }
+
     private LeafPredicate create() {
         List<Object> inputs = new ArrayList<>();
         inputs.add(new FieldRef(0, "f0", DataTypes.STRING()));

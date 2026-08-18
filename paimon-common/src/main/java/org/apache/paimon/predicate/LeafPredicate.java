@@ -88,7 +88,8 @@ public class LeafPredicate implements Predicate {
             @JsonProperty(FIELD_TRANSFORM) Transform transform,
             @JsonProperty(FIELD_FUNCTION) LeafFunction function,
             @JsonProperty(FIELD_LITERALS) List<Object> literals) {
-        List<Object> convertedLiterals = deserializeLiterals(transform.outputType(), literals);
+        List<Object> convertedLiterals =
+                deserializeLiterals(function.literalType(transform.outputType()), literals);
         return new LeafPredicate(transform, function, convertedLiterals);
     }
 
@@ -108,7 +109,7 @@ public class LeafPredicate implements Predicate {
 
     @JsonGetter(FIELD_LITERALS)
     public List<Object> literalsForJson() {
-        return serializeLiterals(transform.outputType(), literals);
+        return serializeLiterals(function.literalType(transform.outputType()), literals);
     }
 
     public List<String> fieldNames() {
@@ -208,7 +209,7 @@ public class LeafPredicate implements Predicate {
     private ListSerializer<Object> literalsSerializer() {
         return new ListSerializer<>(
                 NullableSerializer.wrapIfNullIsNotSupported(
-                        InternalSerializers.create(transform.outputType())));
+                        InternalSerializers.create(function.literalType(transform.outputType()))));
     }
 
     private void writeObject(ObjectOutputStream out) throws IOException {

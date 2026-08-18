@@ -42,6 +42,12 @@ public interface GlobalIndexReader
     }
 
     @Override
+    default CompletableFuture<Optional<GlobalIndexResult>> visitArrayContains(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
+    }
+
+    @Override
     default CompletableFuture<Optional<GlobalIndexResult>> visitBetween(
             FieldRef fieldRef, Object from, Object to) {
         return CompletableFuture.completedFuture(Optional.empty());

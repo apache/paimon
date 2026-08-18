@@ -16,134 +16,160 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.globalindex;
+package org.apache.paimon.globalindex.bitmap;
 
+import org.apache.paimon.globalindex.GlobalIndexIOMeta;
+import org.apache.paimon.globalindex.GlobalIndexReader;
+import org.apache.paimon.globalindex.GlobalIndexResult;
+import org.apache.paimon.globalindex.KeySerializer;
+import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataType;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 
-/**
- * A {@link GlobalIndexReader} that returns the same fixed result for every scalar predicate.
- *
- * <p>Used to pad an index that covers a shorter row range with an all-hit bitmap over the missing
- * tail, so that AND-ing it with a longer-range index does not drop rows the shorter index simply
- * has not indexed.
- */
-public class ConstantGlobalIndexReader implements GlobalIndexReader {
+/** Exposes array-element membership over the bitmap global index format. */
+public class MultiValueBitmapIndexReader implements GlobalIndexReader {
 
-    private final CompletableFuture<Optional<GlobalIndexResult>> result;
+    private final DataType elementType;
+    private final boolean compatibleElementType;
+    private final LazyFilteredBitmapReader bitmapReader;
 
-    public ConstantGlobalIndexReader(GlobalIndexResult result) {
-        this.result = CompletableFuture.completedFuture(Optional.of(result));
+    MultiValueBitmapIndexReader(
+            GlobalIndexFileReader fileReader,
+            List<GlobalIndexIOMeta> files,
+            DataType elementType,
+            KeySerializer keySerializer,
+            long totalRowCount,
+            ExecutorService executor) {
+        this.elementType = elementType;
+        this.compatibleElementType =
+                files.stream()
+                        .allMatch(
+                                file ->
+                                        MultiValueIndexFileMeta.hasCompatibleElementType(
+                                                file.metadata(), elementType));
+        this.bitmapReader =
+                new LazyFilteredBitmapReader(
+                        fileReader, files, keySerializer, 0, totalRowCount, executor);
     }
 
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitIsNotNull(FieldRef fieldRef) {
-        return result;
+        return unsupported();
     }
 
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitIsNull(FieldRef fieldRef) {
-        return result;
-    }
-
-    @Override
-    public CompletableFuture<Optional<GlobalIndexResult>> visitIsNaN(FieldRef fieldRef) {
-        return result;
-    }
-
-    @Override
-    public CompletableFuture<Optional<GlobalIndexResult>> visitStartsWith(
-            FieldRef fieldRef, Object literal) {
-        return result;
-    }
-
-    @Override
-    public CompletableFuture<Optional<GlobalIndexResult>> visitEndsWith(
-            FieldRef fieldRef, Object literal) {
-        return result;
-    }
-
-    @Override
-    public CompletableFuture<Optional<GlobalIndexResult>> visitContains(
-            FieldRef fieldRef, Object literal) {
-        return result;
+        return unsupported();
     }
 
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitArrayContains(
             FieldRef fieldRef, Object literal) {
-        return result;
+        if (!compatibleElementType
+                || !(fieldRef.type() instanceof ArrayType)
+                || !((ArrayType) fieldRef.type()).getElementType().equals(elementType)) {
+            return unsupported();
+        }
+        return bitmapReader.visitEqual(fieldRef, literal);
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitStartsWith(
+            FieldRef fieldRef, Object literal) {
+        return unsupported();
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitEndsWith(
+            FieldRef fieldRef, Object literal) {
+        return unsupported();
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitContains(
+            FieldRef fieldRef, Object literal) {
+        return unsupported();
     }
 
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitLike(
             FieldRef fieldRef, Object literal) {
-        return result;
+        return unsupported();
     }
 
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitLessThan(
             FieldRef fieldRef, Object literal) {
-        return result;
+        return unsupported();
     }
 
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterOrEqual(
             FieldRef fieldRef, Object literal) {
-        return result;
+        return unsupported();
     }
 
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitNotEqual(
             FieldRef fieldRef, Object literal) {
-        return result;
+        return unsupported();
     }
 
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitLessOrEqual(
             FieldRef fieldRef, Object literal) {
-        return result;
+        return unsupported();
     }
 
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitEqual(
             FieldRef fieldRef, Object literal) {
-        return result;
+        return unsupported();
     }
 
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitGreaterThan(
             FieldRef fieldRef, Object literal) {
-        return result;
+        return unsupported();
     }
 
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitIn(
             FieldRef fieldRef, List<Object> literals) {
-        return result;
+        return unsupported();
     }
 
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitNotIn(
             FieldRef fieldRef, List<Object> literals) {
-        return result;
+        return unsupported();
     }
 
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitBetween(
             FieldRef fieldRef, Object from, Object to) {
-        return result;
+        return unsupported();
     }
 
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitNotBetween(
             FieldRef fieldRef, Object from, Object to) {
-        return result;
+        return unsupported();
     }
 
     @Override
-    public void close() {}
+    public void close() throws IOException {
+        bitmapReader.close();
+    }
+
+    private static CompletableFuture<Optional<GlobalIndexResult>> unsupported() {
+        return CompletableFuture.completedFuture(Optional.empty());
+    }
 }
