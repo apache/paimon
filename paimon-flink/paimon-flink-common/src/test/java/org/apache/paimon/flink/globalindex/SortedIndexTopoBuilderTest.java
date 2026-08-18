@@ -173,7 +173,13 @@ public class SortedIndexTopoBuilderTest {
 
     @Test
     public void testSortColumnsUseRowIdAsTieBreaker() {
-        assertThat(SortedIndexTopoBuilder.createSortColumns("task-id", "index-key"))
+        assertThat(SortedIndexTopoBuilder.createSortColumns("task-id", "index-key", true))
                 .containsExactly("task-id", "index-key", SpecialFields.ROW_ID.name());
+    }
+
+    @Test
+    public void testUnorderedIndexSortsOnlyByTaskAndRowId() {
+        assertThat(SortedIndexTopoBuilder.createSortColumns("task-id", "index-key", false))
+                .containsExactly("task-id", SpecialFields.ROW_ID.name());
     }
 }

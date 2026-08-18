@@ -31,6 +31,7 @@ import org.apache.paimon.fileindex.FileIndexerFactoryUtils;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexerFactory;
+import org.apache.paimon.globalindex.bitmap.MultiValueGlobalIndexerFactory;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
 import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
@@ -1217,6 +1218,7 @@ public class SchemaValidation {
         List<String> vectorColumns = options.primaryKeyVectorIndexColumns();
         List<String> btreeColumns = options.primaryKeyBTreeIndexColumns();
         List<String> bitmapColumns = options.primaryKeyBitmapIndexColumns();
+        List<String> multiValueColumns = options.primaryKeyMultiValueIndexColumns();
         List<String> fullTextColumns = options.primaryKeyFullTextIndexColumns();
         validateNoDuplicatePrimaryKeyIndexColumns(
                 vectorColumns, CoreOptions.PK_VECTOR_INDEX_COLUMNS.key());
@@ -1225,12 +1227,15 @@ public class SchemaValidation {
         validateNoDuplicatePrimaryKeyIndexColumns(
                 bitmapColumns, CoreOptions.PK_BITMAP_INDEX_COLUMNS.key());
         validateNoDuplicatePrimaryKeyIndexColumns(
+                multiValueColumns, CoreOptions.PK_MULTIVALUE_INDEX_COLUMNS.key());
+        validateNoDuplicatePrimaryKeyIndexColumns(
                 fullTextColumns, CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS.key());
 
         Set<String> indexedColumns = new HashSet<>();
         validateUniquePrimaryKeyIndexColumns(indexedColumns, vectorColumns);
         validateUniquePrimaryKeyIndexColumns(indexedColumns, btreeColumns);
         validateUniquePrimaryKeyIndexColumns(indexedColumns, bitmapColumns);
+        validateUniquePrimaryKeyIndexColumns(indexedColumns, multiValueColumns);
         validateUniquePrimaryKeyIndexColumns(indexedColumns, fullTextColumns);
     }
 
@@ -1255,27 +1260,28 @@ public class SchemaValidation {
 
     private static void validatePrimaryKeySortedIndexes(TableSchema schema, CoreOptions options) {
         if (options.primaryKeyBTreeIndexColumns().isEmpty()
-                && options.primaryKeyBitmapIndexColumns().isEmpty()) {
+                && options.primaryKeyBitmapIndexColumns().isEmpty()
+                && options.primaryKeyMultiValueIndexColumns().isEmpty()) {
             return;
         }
 
         checkArgument(
                 options.deletionVectorsEnabled(),
-                "Primary-key BTree and Bitmap indexes require deletion-vectors.enabled = true.");
+                "Primary-key BTree, Bitmap, and Multivalue indexes require deletion-vectors.enabled = true.");
         checkArgument(
                 !schema.primaryKeys().isEmpty(),
-                "Primary-key BTree and Bitmap indexes require a primary-key table.");
+                "Primary-key BTree, Bitmap, and Multivalue indexes require a primary-key table.");
         checkArgument(
                 options.bucket() > 0 || options.bucket() == BucketMode.POSTPONE_BUCKET,
-                "Primary-key BTree and Bitmap indexes require fixed or postpone bucket mode "
+                "Primary-key BTree, Bitmap, and Multivalue indexes require fixed or postpone bucket mode "
                         + "(bucket > 0 or bucket = -2), but bucket is %s.",
                 options.bucket());
         checkArgument(
                 !options.deletionVectorsMergeOnRead(),
-                "Primary-key BTree and Bitmap indexes require deletion-vectors.merge-on-read = false.");
+                "Primary-key BTree, Bitmap, and Multivalue indexes require deletion-vectors.merge-on-read = false.");
         checkArgument(
                 !options.pkClusteringOverride(),
-                "Primary-key BTree and Bitmap indexes do not support pk-clustering-override.");
+                "Primary-key BTree, Bitmap, and Multivalue indexes do not support pk-clustering-override.");
 
         validatePrimaryKeySortedIndexColumns(
                 schema,
@@ -1285,6 +1291,10 @@ public class SchemaValidation {
                 schema,
                 options.primaryKeyBitmapIndexColumns(),
                 CoreOptions.PK_BITMAP_INDEX_COLUMNS.key());
+        validatePrimaryKeySortedIndexColumns(
+                schema,
+                options.primaryKeyMultiValueIndexColumns(),
+                CoreOptions.PK_MULTIVALUE_INDEX_COLUMNS.key());
 
         Map<String, DataField> fields = schema.nameToFieldMap();
         for (String column : options.primaryKeyBTreeIndexColumns()) {
@@ -1298,6 +1308,12 @@ public class SchemaValidation {
                     BitmapGlobalIndexerFactory.IDENTIFIER,
                     fields.get(column),
                     options.primaryKeyBitmapIndexOptions(column));
+        }
+        for (String column : options.primaryKeyMultiValueIndexColumns()) {
+            GlobalIndexer.create(
+                    MultiValueGlobalIndexerFactory.IDENTIFIER,
+                    fields.get(column),
+                    options.primaryKeyMultiValueIndexOptions(column));
         }
     }
 

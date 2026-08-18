@@ -46,7 +46,7 @@ import java.util.Map;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Builds source-backed BTree or Bitmap payloads for ordered physical data files. */
+/** Builds source-backed sorted-index payloads for ordered physical data files. */
 public class PkSortedIndexFile extends IndexFile {
 
     public PkSortedIndexFile(FileIO fileIO, IndexPathFactory pathFactory) {

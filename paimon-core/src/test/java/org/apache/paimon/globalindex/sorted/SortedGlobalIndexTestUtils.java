@@ -21,6 +21,7 @@ package org.apache.paimon.globalindex.sorted;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.globalindex.KeySerializer;
+import org.apache.paimon.globalindex.bitmap.MultiValueGlobalIndexerFactory;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
@@ -74,16 +75,21 @@ public final class SortedGlobalIndexTestUtils {
             }
         }
 
-        Comparator<Object> comparator = KeySerializer.create(indexField.type()).createComparator();
-        rows.sort(
-                (left, right) -> {
-                    if (left.getKey() == null) {
-                        return right.getKey() == null ? 0 : -1;
-                    }
-                    return right.getKey() == null
-                            ? 1
-                            : comparator.compare(left.getKey(), right.getKey());
-                });
+        if (MultiValueGlobalIndexerFactory.IDENTIFIER.equals(indexType)) {
+            rows.sort(Comparator.comparingLong(row -> row.getValue()));
+        } else {
+            Comparator<Object> comparator =
+                    KeySerializer.create(indexField.type()).createComparator();
+            rows.sort(
+                    (left, right) -> {
+                        if (left.getKey() == null) {
+                            return right.getKey() == null ? 0 : -1;
+                        }
+                        return right.getKey() == null
+                                ? 1
+                                : comparator.compare(left.getKey(), right.getKey());
+                    });
+        }
 
         List<InternalRow> sortedRows = new ArrayList<>(rows.size());
         for (Pair<Object, Long> row : rows) {

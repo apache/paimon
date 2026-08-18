@@ -28,6 +28,7 @@ public class PrimaryKeyIndexDefinition {
         VECTOR,
         BTREE,
         BITMAP,
+        MULTI_VALUE,
         FULL_TEXT
     }
 

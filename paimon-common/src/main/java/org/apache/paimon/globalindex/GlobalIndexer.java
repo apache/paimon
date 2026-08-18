@@ -30,6 +30,11 @@ import java.util.concurrent.ExecutorService;
 /** Abstract base class for global indexers. */
 public interface GlobalIndexer {
 
+    /** Whether the writer requires records to be ordered by the indexed field. */
+    default boolean requiresSortedInput() {
+        return true;
+    }
+
     GlobalIndexWriter createWriter(GlobalIndexFileWriter fileWriter) throws IOException;
 
     /**

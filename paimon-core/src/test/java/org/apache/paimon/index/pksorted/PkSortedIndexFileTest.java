@@ -18,6 +18,7 @@
 
 package org.apache.paimon.index.pksorted;
 
+import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -123,6 +124,37 @@ class PkSortedIndexFileTest {
                     .isEqualTo(source);
             assertThat(indexFile.exists(payload)).isTrue();
         }
+    }
+
+    @Test
+    void testBuildsMultiValuePayloadFromArrayRows() throws Exception {
+        PkSortedIndexFile indexFile =
+                new PkSortedIndexFile(LocalFileIO.create(), pathFactory(tempPath));
+        PrimaryKeyIndexSourceFile source = new PrimaryKeyIndexSourceFile("data-file", 4);
+        DataField tags = new DataField(8, "tags", DataTypes.ARRAY(DataTypes.INT()));
+
+        IndexFileMeta payload =
+                indexFile.build(
+                        1,
+                        Collections.singletonList(source),
+                        tags,
+                        "multivalue",
+                        options(),
+                        Arrays.asList(
+                                        new PkSortedIndexFile.Entry(null, 1),
+                                        new PkSortedIndexFile.Entry(
+                                                new GenericArray(new Integer[0]), 2),
+                                        new PkSortedIndexFile.Entry(
+                                                new GenericArray(new Integer[] {2, 1}), 0),
+                                        new PkSortedIndexFile.Entry(
+                                                new GenericArray(new Integer[] {2}), 3))
+                                .iterator());
+
+        assertThat(payload.indexType()).isEqualTo("multivalue");
+        assertThat(payload.rowCount()).isEqualTo(4L);
+        assertThat(payload.globalIndexMeta().indexFieldId()).isEqualTo(8);
+        assertThat(PrimaryKeyIndexSourceMeta.fromIndexFile(payload).sourceFile()).isEqualTo(source);
+        assertThat(indexFile.exists(payload)).isTrue();
     }
 
     @Test

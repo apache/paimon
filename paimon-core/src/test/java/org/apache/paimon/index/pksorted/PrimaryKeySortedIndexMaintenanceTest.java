@@ -73,7 +73,7 @@ import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** End-to-end maintenance tests for source-backed BTree and Bitmap indexes. */
+/** End-to-end maintenance tests for source-backed sorted indexes. */
 class PrimaryKeySortedIndexMaintenanceTest {
 
     @TempDir java.nio.file.Path tempDir;

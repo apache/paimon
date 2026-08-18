@@ -21,6 +21,7 @@ package org.apache.paimon.spark.globalindex.sorted;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.BinaryRowSerializer;
+import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.ScanResult;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexWriter;
@@ -34,6 +35,7 @@ import org.apache.paimon.spark.SparkRow;
 import org.apache.paimon.spark.globalindex.GlobalIndexTopologyBuilder;
 import org.apache.paimon.spark.util.ScanPlanHelper$;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
@@ -71,7 +73,7 @@ import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.splitByConti
 public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
 
     private static final HashSet<String> SUPPORTED_INDEX_TYPES =
-            new HashSet<>(Arrays.asList("btree", "bitmap"));
+            new HashSet<>(Arrays.asList("btree", "bitmap", "multivalue"));
 
     public static boolean supports(String indexType) {
         return SUPPORTED_INDEX_TYPES.contains(indexType);
@@ -121,7 +123,11 @@ public class SortedIndexTopoBuilder implements GlobalIndexTopologyBuilder {
 
         List<CommitMessage> allMessages = new ArrayList<>();
         List<String> sortColumns = new ArrayList<>();
-        sortColumns.add(indexField.name());
+        if (GlobalIndexer.create(indexType, indexField, options).requiresSortedInput()) {
+            sortColumns.add(indexField.name());
+        } else {
+            sortColumns.add(SpecialFields.ROW_ID.name());
+        }
         final int partitionKeyNum = table.partitionKeys().size();
         BinaryRowSerializer binaryRowSerializer = new BinaryRowSerializer(partitionKeyNum);
         SortedGlobalIndexWriter indexWriter =

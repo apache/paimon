@@ -38,6 +38,7 @@ import org.apache.paimon.flink.utils.BoundedOneInputOperator;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
+import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.ScanResult;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexWriter;
@@ -91,7 +92,7 @@ public class SortedIndexTopoBuilder {
     private static final String BUILD_TASK_ID_FIELD = "_SORTED_INDEX_BUILD_TASK_ID";
     private static final int BUILD_TASK_ID_FIELD_ID = -1;
     private static final HashSet<String> SUPPORTED_INDEX_TYPES =
-            new HashSet<>(Arrays.asList("btree", "bitmap"));
+            new HashSet<>(Arrays.asList("btree", "bitmap", "multivalue"));
 
     public static boolean supports(String indexType) {
         return SUPPORTED_INDEX_TYPES.contains(indexType);
@@ -174,6 +175,10 @@ public class SortedIndexTopoBuilder {
             int indexFieldPos = sortReadType.getFieldIndex(indexColumn);
             int rowIdPos = sortReadType.getFieldIndex(SpecialFields.ROW_ID.name());
             DataType indexFieldType = sortReadType.getTypeAt(indexFieldPos);
+            boolean requiresSortedInput =
+                    GlobalIndexer.create(
+                                    indexType, table.rowType().getField(indexColumn), userOptions)
+                            .requiresSortedInput();
 
             // 3. Calculate maximum parallelism bound
             long recordsPerRange =
@@ -184,7 +189,8 @@ public class SortedIndexTopoBuilder {
             // 4. Build one topology for all contiguous row ranges
             CoreOptions coreOptions = table.coreOptions();
             ReadBuilder readBuilder = table.newReadBuilder().withReadType(dataReadType);
-            List<String> sortColumns = createSortColumns(buildTaskIdField, indexColumn);
+            List<String> sortColumns =
+                    createSortColumns(buildTaskIdField, indexColumn, requiresSortedInput);
             int partitionFieldSize = table.partitionKeys().size();
             BinaryRowSerializer binaryRowSerializer = new BinaryRowSerializer(partitionFieldSize);
             List<SortedBuildTask> buildTasks = new ArrayList<>();
@@ -371,7 +377,11 @@ public class SortedIndexTopoBuilder {
         return (int) Math.min(parallelism, maxParallelism);
     }
 
-    static List<String> createSortColumns(String buildTaskIdField, String indexColumn) {
+    static List<String> createSortColumns(
+            String buildTaskIdField, String indexColumn, boolean requiresSortedInput) {
+        if (!requiresSortedInput) {
+            return Arrays.asList(buildTaskIdField, SpecialFields.ROW_ID.name());
+        }
         // Range shuffle may spread duplicate boundary keys randomly. ROW_ID makes the full sort key
         // unique while keeping equal index keys adjacent, so output file key ranges stay ordered.
         return Arrays.asList(buildTaskIdField, indexColumn, SpecialFields.ROW_ID.name());

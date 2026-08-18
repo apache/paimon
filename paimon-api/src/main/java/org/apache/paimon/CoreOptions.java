@@ -2952,6 +2952,13 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Comma-separated columns indexed by primary-key Bitmap indexes.");
 
+    public static final ConfigOption<String> PK_MULTIVALUE_INDEX_COLUMNS =
+            key("pk-multivalue.index.columns")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Comma-separated ARRAY columns indexed by primary-key Multivalue indexes.");
+
     public static final ConfigOption<String> PK_FULL_TEXT_INDEX_COLUMNS =
             key("pk-full-text.index.columns")
                     .stringType()
@@ -4605,6 +4612,10 @@ public class CoreOptions implements Serializable {
         return primaryKeyIndexColumns(PK_BITMAP_INDEX_COLUMNS);
     }
 
+    public List<String> primaryKeyMultiValueIndexColumns() {
+        return primaryKeyIndexColumns(PK_MULTIVALUE_INDEX_COLUMNS);
+    }
+
     public List<String> primaryKeyFullTextIndexColumns() {
         return primaryKeyIndexColumns(PK_FULL_TEXT_INDEX_COLUMNS);
     }
@@ -4623,6 +4634,10 @@ public class CoreOptions implements Serializable {
 
     public Options primaryKeyBitmapIndexOptions(String column) {
         return primaryKeySortedIndexOptions(column, "pk-bitmap", "bitmap-index.");
+    }
+
+    public Options primaryKeyMultiValueIndexOptions(String column) {
+        return primaryKeySortedIndexOptions(column, "pk-multivalue", "multivalue-index.");
     }
 
     public Options primaryKeyFullTextIndexOptions(String column) {

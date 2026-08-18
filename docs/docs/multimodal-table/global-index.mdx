@@ -34,6 +34,7 @@ without full-table scans. Paimon supports multiple global index types:
 
 - **[BTree Index](./global-index/btree)**: A B-tree based index for scalar column lookups. Supports equality, IN, range predicates, and can be combined across multiple columns with AND/OR logic.
 - **[Bitmap Index](./global-index/bitmap)**: A bitmap based index for enum-like scalar dimensions and tag columns. Supports equality, IN, prefix match on string columns, complement predicates, and null checks with compressed row-id bitmaps.
+- **[Multivalue Index](./global-index/multivalue)**: A bitmap-backed index for element-membership predicates on `ARRAY` columns.
 - **[Vector Index](./global-index/vector)**: An approximate nearest neighbor (ANN) index powered by Paimon's vector index library for vector similarity search.
 - **[Full-Text Index](./global-index/full-text)**: A full-text search index backed by the native full-text engine for text retrieval. Supports term matching and relevance scoring.
 - **[Hybrid Search](./global-index/hybrid-search)**: A multi-route search API that combines results from multiple vector routes, multiple full-text routes, or both before reading table rows.
@@ -42,6 +43,7 @@ without full-table scans. Paimon supports multiple global index types:
 |---|---|---|
 | BTree | Scalar filters on numeric, string, date, and timestamp columns | Best when predicates are selective, such as equality, IN, range, and null checks. |
 | Bitmap | Enum-like dimensions and tag columns | Best for equality, IN, string prefix match, complement predicates, and null checks over compressed row-id bitmaps. |
+| Multivalue | Membership tests on arrays of supported scalar elements | Best for `ARRAY_CONTAINS(array_column, element)` and array null checks. |
 | Vector | Top-K similarity search on embeddings | Uses ANN algorithms. Tune build-time and search-time options to balance recall, latency, and index size. |
 | Full-Text | Keyword search over text columns | Uses full-text scoring and tokenizer configuration stored with each index file. |
 | Hybrid Search | Combining multiple vector routes, multiple full-text routes, or vector and full-text retrieval together | Runs multiple scored routes and merges them with a ranker before reading rows. |
@@ -66,6 +68,7 @@ Create a table with the required properties:
 CREATE TABLE my_table (
     id INT,
     name STRING,
+    tags ARRAY<STRING>,
     embedding ARRAY<FLOAT>,
     content STRING
 ) TBLPROPERTIES (
@@ -89,6 +92,7 @@ schema = Schema.from_pyarrow_schema(
     pa.schema([
         pa.field("id", pa.int32()),
         pa.field("name", pa.string()),
+        pa.field("tags", pa.list_(pa.string())),
         pa.field("embedding", pa.list_(pa.float32())),
         pa.field("content", pa.string()),
     ]),
@@ -395,12 +399,12 @@ These table options affect global index build and read behavior:
 |---|---|---|
 | `global-index.enabled` | `true` | Whether scans can use global indexes. |
 | `global-index.search-mode` | Not set | Legacy fallback search mode for global-index queries. Family-specific options take precedence. |
-| `scalar-index.search-mode` | `fast` | Search mode for BTree and Bitmap queries. |
+| `scalar-index.search-mode` | `fast` | Search mode for BTree, Bitmap, and Multivalue queries. |
 | `vector-index.search-mode` | `fast` | Search mode for vector queries. |
 | `full-text-index.search-mode` | `fast` | Search mode for full-text queries. |
 | `global-index.external-path` | Not set | Root directory for global index files. If not set, files are stored under the table index directory. |
 | `global-index.column-update-action` | `THROW_ERROR` | Action for updates to indexed columns. `THROW_ERROR` rejects the update, `DROP_PARTITION_INDEX` drops affected partition indexes, and `IGNORE` keeps existing index files unchanged during the update and causes the next incremental index build to scan active data manifests and rebuild affected row ranges. Index files created before source metadata was introduced are not refreshed automatically. |
-| `sorted-index.records-per-range` | `10000000` | Expected number of records per sorted global index file for BTree and Bitmap builds. |
+| `sorted-index.records-per-range` | `10000000` | Expected number of records per sorted global index file for BTree, Bitmap, and Multivalue builds. |
 | `sorted-index.build.max-parallelism` | `4096` | Maximum Flink or Spark parallelism for building sorted global indexes. |
 | `global-index.row-count-per-shard` | `100000` | Target row count per shard for non-sorted global index builds such as vector and full-text indexes. |
 | `global-index.build.max-shard` | `32` | Preferred maximum shard count for global index builds. |
@@ -419,6 +423,12 @@ for build and query examples.
 Use Bitmap indexes for enum-like dimensions and tag columns queried by equality, IN, string prefix
 match, complement, or null predicates. See [Bitmap Index](./global-index/bitmap) for build examples,
 options, and file format details.
+
+## Multivalue Index
+
+Use Multivalue indexes for element-membership predicates on `ARRAY` columns. See
+[Multivalue Index](./global-index/multivalue) for Data Evolution build examples, Core query usage,
+options, and array null semantics.
 
 ## Vector Index
 
