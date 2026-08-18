@@ -31,9 +31,8 @@ array as one scalar key.
 The index preserves these array semantics:
 
 - Duplicate elements in one array contribute the row ID only once.
-- A null array is different from an empty array.
+- An empty array is non-null but contributes no element to the index.
 - Null elements inside a non-null array are ignored for membership lookup.
-- Array `IS NULL` and `IS NOT NULL` use dedicated row bitmaps.
 
 The indexed column must be an `ARRAY` whose element type is supported by the global-index key
 serializer. A Multivalue index is single-column.
