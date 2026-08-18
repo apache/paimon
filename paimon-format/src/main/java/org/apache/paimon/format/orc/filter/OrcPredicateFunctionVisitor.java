@@ -88,6 +88,18 @@ public class OrcPredicateFunctionVisitor
     }
 
     @Override
+    public Optional<OrcFilters.Predicate> visitArraysOverlap(
+            FieldRef fieldRef, List<Object> literals) {
+        return Optional.empty();
+    }
+
+    @Override
+    public Optional<OrcFilters.Predicate> visitArrayContainsAll(
+            FieldRef fieldRef, List<Object> literals) {
+        return Optional.empty();
+    }
+
+    @Override
     public Optional<OrcFilters.Predicate> visitLike(FieldRef fieldRef, Object literal) {
         return Optional.empty();
     }

@@ -93,6 +93,36 @@ class LeafPredicateTest {
                 .isTrue();
     }
 
+    @Test
+    public void testArraySetPredicateSerializationUsesElementSerializer()
+            throws IOException, ClassNotFoundException {
+        PredicateBuilder builder =
+                new PredicateBuilder(RowType.of(DataTypes.ARRAY(DataTypes.STRING())));
+        LeafPredicate overlap =
+                (LeafPredicate)
+                        builder.arraysOverlap(
+                                0,
+                                java.util.Arrays.asList(
+                                        BinaryString.fromString("trial"),
+                                        BinaryString.fromString("vip")));
+        LeafPredicate containsAll =
+                (LeafPredicate)
+                        builder.arrayContainsAll(
+                                0,
+                                java.util.Arrays.asList(
+                                        BinaryString.fromString("trial"),
+                                        BinaryString.fromString("vip")));
+
+        GenericRow row =
+                GenericRow.of(
+                        new GenericArray(
+                                new BinaryString[] {
+                                    BinaryString.fromString("trial"), BinaryString.fromString("vip")
+                                }));
+        assertThat(InstantiationUtil.clone(overlap).test(row)).isTrue();
+        assertThat(InstantiationUtil.clone(containsAll).test(row)).isTrue();
+    }
+
     private LeafPredicate create() {
         List<Object> inputs = new ArrayList<>();
         inputs.add(new FieldRef(0, "f0", DataTypes.STRING()));

@@ -181,6 +181,28 @@ public class PredicateBuilder {
         return leaf(ArrayContains.INSTANCE, transform, elementLiteral);
     }
 
+    public Predicate arraysOverlap(int idx, List<?> elementLiterals) {
+        DataField field = rowType.getFields().get(idx);
+        ArraysOverlap.elementType(field.type());
+        return leaf(ArraysOverlap.INSTANCE, idx, new ArrayList<>(elementLiterals));
+    }
+
+    public Predicate arraysOverlap(Transform transform, List<?> elementLiterals) {
+        ArraysOverlap.elementType(transform.outputType());
+        return leaf(ArraysOverlap.INSTANCE, transform, new ArrayList<>(elementLiterals));
+    }
+
+    public Predicate arrayContainsAll(int idx, List<?> elementLiterals) {
+        DataField field = rowType.getFields().get(idx);
+        ArrayContainsAll.elementType(field.type());
+        return leaf(ArrayContainsAll.INSTANCE, idx, new ArrayList<>(elementLiterals));
+    }
+
+    public Predicate arrayContainsAll(Transform transform, List<?> elementLiterals) {
+        ArrayContainsAll.elementType(transform.outputType());
+        return leaf(ArrayContainsAll.INSTANCE, transform, new ArrayList<>(elementLiterals));
+    }
+
     public Predicate like(int idx, Object patternLiteral) {
         Pair<LeafBinaryFunction, Object> optimized =
                 LikeOptimization.tryOptimize(patternLiteral)
@@ -202,6 +224,15 @@ public class PredicateBuilder {
 
     private Predicate leaf(LeafFunction function, Transform transform, Object literal) {
         return LeafPredicate.of(transform, function, singletonList(literal));
+    }
+
+    private Predicate leaf(LeafFunction function, int idx, List<Object> literals) {
+        DataField field = rowType.getFields().get(idx);
+        return new LeafPredicate(function, field.type(), idx, field.name(), literals);
+    }
+
+    private Predicate leaf(LeafFunction function, Transform transform, List<Object> literals) {
+        return LeafPredicate.of(transform, function, literals);
     }
 
     private Predicate leaf(LeafUnaryFunction function, int idx) {

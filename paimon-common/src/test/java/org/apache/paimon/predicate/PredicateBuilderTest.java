@@ -251,12 +251,53 @@ public class PredicateBuilderTest {
     }
 
     @Test
+    public void testArraysOverlap() {
+        PredicateBuilder builder =
+                new PredicateBuilder(RowType.of(DataTypes.ARRAY(DataTypes.INT())));
+        Predicate overlap = builder.arraysOverlap(0, Arrays.asList(9, null, 2, 2));
+        Predicate noOverlap = builder.arraysOverlap(0, Arrays.asList(9, null));
+        Predicate empty = builder.arraysOverlap(0, new ArrayList<>());
+
+        GenericRow row = GenericRow.of(new GenericArray(new Integer[] {1, null, 2, 2}));
+        assertThat(overlap.test(row)).isTrue();
+        assertThat(noOverlap.test(row)).isFalse();
+        assertThat(empty.test(row)).isFalse();
+        assertThat(overlap.test(GenericRow.of((Object) null))).isFalse();
+        assertThat(overlap.negate()).isEmpty();
+    }
+
+    @Test
+    public void testArrayContainsAll() {
+        PredicateBuilder builder =
+                new PredicateBuilder(RowType.of(DataTypes.ARRAY(DataTypes.INT())));
+        Predicate containsAll = builder.arrayContainsAll(0, Arrays.asList(2, 1, 2));
+        Predicate missing = builder.arrayContainsAll(0, Arrays.asList(1, 3));
+        Predicate containsNull = builder.arrayContainsAll(0, Arrays.asList(1, null));
+        Predicate empty = builder.arrayContainsAll(0, new ArrayList<>());
+
+        GenericRow row = GenericRow.of(new GenericArray(new Integer[] {1, null, 2, 2}));
+        assertThat(containsAll.test(row)).isTrue();
+        assertThat(missing.test(row)).isFalse();
+        assertThat(containsNull.test(row)).isFalse();
+        assertThat(empty.test(row)).isTrue();
+        assertThat(empty.test(GenericRow.of(new GenericArray(new Integer[0])))).isTrue();
+        assertThat(empty.test(GenericRow.of((Object) null))).isFalse();
+        assertThat(containsAll.negate()).isEmpty();
+    }
+
+    @Test
     public void testArrayContainsRequiresArrayField() {
         PredicateBuilder builder = new PredicateBuilder(RowType.of(DataTypes.INT()));
 
         assertThatThrownBy(() -> builder.arrayContains(0, 1))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("ARRAY_CONTAINS requires an ARRAY field");
+        assertThatThrownBy(() -> builder.arraysOverlap(0, Arrays.asList(1, 2)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("ARRAYS_OVERLAP requires an ARRAY field");
+        assertThatThrownBy(() -> builder.arrayContainsAll(0, Arrays.asList(1, 2)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("ARRAY_CONTAINS_ALL requires an ARRAY field");
     }
 
     // ---- or()/and() binary tree structure tests ----

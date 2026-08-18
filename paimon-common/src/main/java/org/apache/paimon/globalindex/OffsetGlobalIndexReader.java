@@ -81,6 +81,18 @@ public class OffsetGlobalIndexReader implements GlobalIndexReader {
     }
 
     @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitArraysOverlap(
+            FieldRef fieldRef, List<Object> literals) {
+        return wrapped.visitArraysOverlap(fieldRef, literals).thenApply(this::applyOffset);
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitArrayContainsAll(
+            FieldRef fieldRef, List<Object> literals) {
+        return wrapped.visitArrayContainsAll(fieldRef, literals).thenApply(this::applyOffset);
+    }
+
+    @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitLike(
             FieldRef fieldRef, Object literal) {
         return wrapped.visitLike(fieldRef, literal).thenApply(this::applyOffset);

@@ -41,6 +41,7 @@ import org.apache.paimon.types.DataTypes;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -82,6 +83,15 @@ public class MultiValueGlobalIndexTableTest extends TableTestBase {
         PredicateBuilder builder = new PredicateBuilder(table.rowType());
         Predicate containsRed = builder.arrayContains(1, RED);
         assertThat(readIds(table, containsRed)).containsExactlyInAnyOrder(1, 5);
+        assertThat(readIds(table, builder.arraysOverlap(1, Arrays.asList(BLUE, 9))))
+                .containsExactlyInAnyOrder(1, 2);
+        assertThat(readIds(table, builder.arrayContainsAll(1, Arrays.asList(RED, BLUE))))
+                .containsExactly(1);
+        assertThat(readIds(table, builder.arrayContainsAll(1, Arrays.asList(RED, RED))))
+                .containsExactlyInAnyOrder(1, 5);
+        assertThat(readIds(table, builder.arrayContainsAll(1, Arrays.asList(RED, null)))).isEmpty();
+        assertThat(readIdsWithFallback(table, builder.arrayContainsAll(1, Collections.emptyList())))
+                .containsExactlyInAnyOrder(1, 2, 4, 5);
         assertThat(readIdsWithFallback(table, builder.isNull(1))).containsExactly(3);
 
         write(table, GenericRow.of(6, array(RED)));

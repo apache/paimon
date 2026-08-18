@@ -800,6 +800,18 @@ class GlobalIndexEvaluatorTest {
                         return CompletableFuture.completedFuture(
                                 Optional.of(GlobalIndexResult.createEmpty()));
                     }
+
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexResult>> visitArraysOverlap(
+                            FieldRef fieldRef, List<Object> literals) {
+                        return CompletableFuture.completedFuture(Optional.of(resultOf(1, 2, 3)));
+                    }
+
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexResult>> visitArrayContainsAll(
+                            FieldRef fieldRef, List<Object> literals) {
+                        return CompletableFuture.completedFuture(Optional.of(resultOf(2)));
+                    }
                 };
         GlobalIndexEvaluator evaluator =
                 new GlobalIndexEvaluator(
@@ -814,11 +826,19 @@ class GlobalIndexEvaluatorTest {
                 evaluator.evaluate(
                         PredicateBuilder.and(
                                 builder.arrayContains(0, 1), builder.arrayContains(0, 2)));
+        Optional<GlobalIndexResult> overlap =
+                evaluator.evaluate(builder.arraysOverlap(0, Arrays.asList(1, 2)));
+        Optional<GlobalIndexResult> containsAll =
+                evaluator.evaluate(builder.arrayContainsAll(0, Arrays.asList(1, 2)));
 
         assertThat(any).isPresent();
         assertBitmapContainsExactly(any.get().results(), 1L, 2L, 3L);
         assertThat(all).isPresent();
         assertBitmapContainsExactly(all.get().results(), 2L);
+        assertThat(overlap).isPresent();
+        assertBitmapContainsExactly(overlap.get().results(), 1L, 2L, 3L);
+        assertThat(containsAll).isPresent();
+        assertBitmapContainsExactly(containsAll.get().results(), 2L);
         evaluator.close();
     }
 
@@ -844,6 +864,18 @@ class GlobalIndexEvaluatorTest {
                             FieldRef fieldRef, Object literal) {
                         return CompletableFuture.completedFuture(Optional.of(resultOf(1, 3)));
                     }
+
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexResult>> visitArraysOverlap(
+                            FieldRef fieldRef, List<Object> literals) {
+                        return CompletableFuture.completedFuture(Optional.of(resultOf(1, 3)));
+                    }
+
+                    @Override
+                    public CompletableFuture<Optional<GlobalIndexResult>> visitArrayContainsAll(
+                            FieldRef fieldRef, List<Object> literals) {
+                        return CompletableFuture.completedFuture(Optional.of(resultOf(1, 3)));
+                    }
                 };
         GlobalIndexReader wrapped =
                 new UnionGlobalIndexReader(
@@ -855,6 +887,16 @@ class GlobalIndexEvaluatorTest {
 
         assertThat(result).isPresent();
         assertBitmapContainsExactly(result.get().results(), 11L, 13L);
+        Optional<GlobalIndexResult> overlapResult =
+                evaluator.evaluate(
+                        new PredicateBuilder(rowType).arraysOverlap(0, Arrays.asList(2)));
+        Optional<GlobalIndexResult> containsAllResult =
+                evaluator.evaluate(
+                        new PredicateBuilder(rowType).arrayContainsAll(0, Arrays.asList(2)));
+        assertThat(overlapResult).isPresent();
+        assertBitmapContainsExactly(overlapResult.get().results(), 11L, 13L);
+        assertThat(containsAllResult).isPresent();
+        assertBitmapContainsExactly(containsAllResult.get().results(), 11L, 13L);
         Optional<GlobalIndexResult> constantResult =
                 new ConstantGlobalIndexReader(resultOf(4))
                         .visitArrayContains(
@@ -862,6 +904,22 @@ class GlobalIndexEvaluatorTest {
                         .join();
         assertThat(constantResult).isPresent();
         assertBitmapContainsExactly(constantResult.get().results(), 4L);
+        ConstantGlobalIndexReader constantReader = new ConstantGlobalIndexReader(resultOf(5));
+        FieldRef fieldRef = new FieldRef(0, "tags", DataTypes.ARRAY(DataTypes.INT()));
+        assertBitmapContainsExactly(
+                constantReader
+                        .visitArraysOverlap(fieldRef, Arrays.asList(2))
+                        .join()
+                        .get()
+                        .results(),
+                5L);
+        assertBitmapContainsExactly(
+                constantReader
+                        .visitArrayContainsAll(fieldRef, Arrays.asList(2))
+                        .join()
+                        .get()
+                        .results(),
+                5L);
         evaluator.close();
     }
 
