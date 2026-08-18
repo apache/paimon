@@ -191,12 +191,11 @@ public class SortedGlobalIndexScannerTest extends TableTestBase {
         assertThat(entries).isNotEmpty();
         assertThat(entries)
                 .allSatisfy(
-                        entry ->
-                                assertThat(
-                                                DataEvolutionIndexSourceMeta.fromIndexFile(
-                                                                entry.indexFile())
-                                                        .scanSnapshotId())
-                                        .isEqualTo(scanSnapshotId));
+                        entry -> {
+                            DataEvolutionIndexSourceMeta sourceMeta =
+                                    DataEvolutionIndexSourceMeta.fromIndexFile(entry.indexFile());
+                            assertThat(sourceMeta.scanSnapshotId()).isEqualTo(scanSnapshotId);
+                        });
     }
 
     @Test

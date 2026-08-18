@@ -244,6 +244,50 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
     }
   }
 
+  test("create multivalue global index") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT, tags ARRAY<STRING>)
+                  |TBLPROPERTIES (
+                  |  'bucket' = '-1',
+                  |  'global-index.enabled' = 'true',
+                  |  'row-tracking.enabled' = 'true',
+                  |  'data-evolution.enabled' = 'true')
+                  |""".stripMargin)
+
+      spark.sql(
+        "INSERT INTO T VALUES " +
+          "(1, array('red', 'blue')), " +
+          "(2, array('blue')), " +
+          "(3, array('green')), " +
+          "(4, array('red', 'red')), " +
+          "(5, CAST(NULL AS ARRAY<STRING>)), " +
+          "(6, CAST(array() AS ARRAY<STRING>)), " +
+          "(7, array(CAST(NULL AS STRING))), " +
+          "(8, array('red', CAST(NULL AS STRING)))"
+      )
+
+      val output =
+        spark
+          .sql("CALL sys.create_global_index(table => 'test.T', index_column => 'tags', " +
+            "index_type => 'multivalue', options => 'sorted-index.records-per-range=2')")
+          .collect()
+          .head
+
+      assert(output.getBoolean(0))
+      val entries = loadTable("T")
+        .store()
+        .newIndexFileHandler()
+        .scanEntries()
+        .asScala
+        .map(_.indexFile())
+        .filter(_.indexType() == "multivalue")
+      assert(entries.size > 1)
+      assert(entries.map(_.rowCount()).sum == 8L)
+      entries.foreach(entry => assert(entry.globalIndexMeta() != null))
+    }
+  }
+
   test("create btree global index with multiple partitions") {
     withTable("T") {
       spark.sql("""

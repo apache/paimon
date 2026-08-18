@@ -30,6 +30,7 @@ import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexer;
+import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.SortedGlobalIndexer;
 import org.apache.paimon.globalindex.SortedIndexFileMeta;
@@ -206,10 +207,8 @@ class MultiValueBitmapIndexReaderTest {
 
     @Test
     void testFactoryAndTypeValidation() throws Exception {
-        MultiValueGlobalIndexerFactory factory = new MultiValueGlobalIndexerFactory();
-        assertThat(factory.identifier()).isEqualTo(MultiValueGlobalIndexerFactory.IDENTIFIER);
-        assertThat(factory.create(dataField, new Options()))
-                .isInstanceOf(MultiValueGlobalIndexer.class);
+        assertThat(GlobalIndexerFactoryUtils.load(MultiValueGlobalIndexerFactory.IDENTIFIER))
+                .isInstanceOf(MultiValueGlobalIndexerFactory.class);
         assertThat(globalIndexer).isInstanceOf(SortedGlobalIndexer.class);
         GlobalIndexKeyExtractor extractor = ((SortedGlobalIndexer) globalIndexer).keyExtractor();
         assertThat(extractor.keyType()).isEqualTo(DataTypes.STRING());

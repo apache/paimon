@@ -71,7 +71,8 @@ public class PrimaryKeyBatchScan extends AbstractBatchTableScan {
         for (PrimaryKeyIndexDefinition definition :
                 PrimaryKeyIndexDefinitions.create(table.schema()).definitions()) {
             if (definition.family() == PrimaryKeyIndexDefinition.Family.BTREE
-                    || definition.family() == PrimaryKeyIndexDefinition.Family.BITMAP) {
+                    || definition.family() == PrimaryKeyIndexDefinition.Family.BITMAP
+                    || definition.family() == PrimaryKeyIndexDefinition.Family.MULTI_VALUE) {
                 definitions.add(definition);
                 definitionFieldIds.add(definition.fieldId());
             }

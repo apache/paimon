@@ -1,0 +1,118 @@
+---
+title: "Multivalue Index"
+sidebar_position: 3
+---
+
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+
+# Multivalue Index
+
+A Multivalue index maps every distinct non-null element of an `ARRAY` column to a compressed
+64-bit row-id bitmap. It accelerates element-membership predicates without treating the complete
+array as one scalar key.
+
+For membership lookup, the index has these semantics:
+
+- Duplicate elements in one array contribute the row ID only once.
+- Null arrays, empty arrays, and null elements contribute no posting. The index does not
+  distinguish those cases and does not accelerate array `IS NULL` or `IS NOT NULL` predicates.
+
+The indexed column must be an `ARRAY` whose element type is supported by the global-index key
+serializer. A Multivalue index is single-column.
+
+## Build on a Data Evolution Table
+
+Create a table with the regular global-index prerequisites:
+
+```sql
+CREATE TABLE my_table (
+    id INT,
+    tags ARRAY<STRING>
+) TBLPROPERTIES (
+    'bucket' = '-1',
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true',
+    'global-index.enabled' = 'true'
+);
+```
+
+Flink and Spark can build the index with `create_global_index`:
+
+```sql
+CALL sys.create_global_index(
+    table => 'db.my_table',
+    index_column => 'tags',
+    index_type => 'multivalue',
+    options => 'sorted-index.records-per-range=10000000'
+);
+```
+
+Arrays do not need to be ordered. Flink and Spark first assign source rows to stable row-id ranges,
+expand every non-null element into an `(element, row-id)` entry, and sort those entries with their
+spillable sort paths. The writer then streams the sorted entries into bitmap posting lists while
+retaining the original source-row count for index coverage, including ranges containing only null
+or empty arrays.
+
+Build the procedure again after appending rows to cover newly added row-id ranges. The
+`scalar-index.search-mode` option controls whether an indexed scan includes uncovered rows:
+`fast` returns indexed coverage only, while `full` and `detail` retain their regular global-index
+coverage behavior.
+
+## Query Through Paimon Core
+
+The Core predicate API exposes array membership directly:
+
+```java
+int tagsFieldIndex = table.rowType().getFieldIndex("tags");
+Predicate predicate = new PredicateBuilder(table.rowType())
+        .arrayContains(tagsFieldIndex, BinaryString.fromString("blue"));
+
+ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
+TableScan.Plan plan = readBuilder.newScan().plan();
+```
+
+Paimon automatically uses matching Multivalue global index files and maps their row IDs to Data
+Evolution splits. SQL engines use the index after their connector translates an array-membership
+expression to Paimon's `ARRAY_CONTAINS` predicate; that connector translation is separate from the
+Core index implementation.
+
+## Drop the Index
+
+```sql
+CALL sys.drop_global_index(
+    table => 'db.my_table',
+    index_column => 'tags',
+    index_type => 'multivalue'
+);
+```
+
+## Options
+
+| Option | Default | Description |
+|---|---|---|
+| `sorted-index.records-per-range` | `10000000` | Expected number of source records per generated Multivalue index file. |
+| `sorted-index.build.max-parallelism` | `4096` | Maximum Flink or Spark parallelism for building the index. |
+| `multivalue-index.dictionary-block-size` | `16 kb` | Target size of the block-indexed element dictionary. |
+| `multivalue-index.compression` | `none` | Compression algorithm for dictionary blocks. |
+| `multivalue-index.compression-level` | `1` | Compression level used by codecs which support levels. |
+
+The expanded entries use the engine's spillable sort, and the writer keeps only the current
+element's posting list in memory. `sorted-index.records-per-range` bounds the source-row range—and
+therefore the largest posting list—owned by one Data Evolution index file.
