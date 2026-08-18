@@ -340,6 +340,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
             String abandonedUuid = null;
             int abandonedLastColumnId = 0;
+            long abandonedNextRowId = 0;
             if (table.fileIO().exists(pathFactory.toMetadataPath(snapshotId))) {
                 if (metadataMatchesSnapshot(snapshotId, snapshot)) {
                     // a retry repairs hint, pointer and files only while this snapshot is
@@ -393,6 +394,9 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 if (abandoned != null) {
                     abandonedUuid = abandoned.tableUuid();
                     abandonedLastColumnId = abandoned.lastColumnId();
+                    if (abandoned.nextRowId() != null) {
+                        abandonedNextRowId = abandoned.nextRowId();
+                    }
                 }
             }
             // steady-state commits skip the listing; anything suspicious lists the actual
@@ -415,6 +419,9 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                     }
                     abandonedLastColumnId =
                             Math.max(abandonedLastColumnId, surviving.lastColumnId());
+                    if (surviving.nextRowId() != null) {
+                        abandonedNextRowId = Math.max(abandonedNextRowId, surviving.nextRowId());
+                    }
                 }
             }
 
@@ -432,9 +439,11 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                                 .collect(Collectors.toList()),
                         snapshot,
                         baseMetadataPath,
-                        abandonedLastColumnId);
+                        abandonedLastColumnId,
+                        abandonedNextRowId);
             } else {
-                createMetadataWithoutBase(snapshotId, abandonedUuid, abandonedLastColumnId);
+                createMetadataWithoutBase(
+                        snapshotId, abandonedUuid, abandonedLastColumnId, abandonedNextRowId);
             }
 
             if (retireSuffix) {
@@ -455,16 +464,19 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
     // -------------------------------------------------------------------------------------
 
     private void createMetadataWithoutBase(long snapshotId) throws IOException {
-        createMetadataWithoutBase(snapshotId, null, 0);
+        createMetadataWithoutBase(snapshotId, null, 0, 0L);
     }
 
     private void createMetadataWithoutBase(long snapshotId, @Nullable String inheritUuid)
             throws IOException {
-        createMetadataWithoutBase(snapshotId, inheritUuid, 0);
+        createMetadataWithoutBase(snapshotId, inheritUuid, 0, 0L);
     }
 
     private void createMetadataWithoutBase(
-            long snapshotId, @Nullable String inheritUuid, int lastColumnIdFloor)
+            long snapshotId,
+            @Nullable String inheritUuid,
+            int lastColumnIdFloor,
+            long nextRowIdFloor)
             throws IOException {
         SnapshotReader snapshotReader = table.newSnapshotReader().withSnapshot(snapshotId);
         Snapshot paimonSnapshot = table.snapshotManager().snapshot(snapshotId);
@@ -539,6 +551,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 computeSnapshotSummary(
                         IcebergSnapshotSummary.APPEND.operation(), paimonSnapshot, metrics);
 
+        // a rebuild replaces metadata whose ids are already out with readers: never reuse them
+        RowLineage rowLineage = computeRowLineage(nextRowIdFloor, metrics.addedRecords);
         IcebergSnapshot snapshot =
                 new IcebergSnapshot(
                         snapshotId,
@@ -549,8 +563,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         snapshotSummary,
                         pathFactory.toManifestListPath(manifestListFileName).toString(),
                         snapshotSchemaId,
-                        null,
-                        null);
+                        rowLineage.firstRowId,
+                        rowLineage.addedRows);
 
         // Tags can only be included in Iceberg if they point to an Iceberg snapshot that
         // exists. Otherwise, an Iceberg client fails to parse the metadata and all reads fail.
@@ -593,6 +607,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                                         IcebergPartitionField.FIRST_FIELD_ID - 1),
                         Collections.singletonList(snapshot),
                         (int) snapshotId,
+                        rowLineage.nextRowId,
                         refs);
 
         Path metadataPath = pathFactory.toMetadataPath(snapshotId);
@@ -911,10 +926,16 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             List<IndexManifestEntry> indexFiles,
             Snapshot snapshot,
             Path baseMetadataPath,
-            int lastColumnIdFloor)
+            int lastColumnIdFloor,
+            long nextRowIdFloor)
             throws IOException {
         long snapshotId = snapshot.id();
         IcebergMetadata baseMetadata = IcebergMetadata.fromPath(table.fileIO(), baseMetadataPath);
+        // row ids handed out by the base or by abandoned metadata must never be reused
+        long rowIdFloor =
+                Math.max(
+                        nextRowIdFloor,
+                        baseMetadata.nextRowId() == null ? 0L : baseMetadata.nextRowId());
 
         // a base left on the abandoned timeline must be rebuilt, not extended
         if (table.snapshotManager().snapshotExists(snapshotId - 1)
@@ -929,14 +950,29 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             createMetadataWithoutBase(
                     snapshotId,
                     baseMetadata.tableUuid(),
-                    Math.max(lastColumnIdFloor, baseMetadata.lastColumnId()));
+                    Math.max(lastColumnIdFloor, baseMetadata.lastColumnId()),
+                    rowIdFloor);
             return;
         }
 
         if (!isSameFormatVersion(baseMetadata.formatVersion())) {
             // we need to recreate iceberg metadata if format version changed
             createMetadataWithoutBase(
-                    snapshot.id(), null, Math.max(lastColumnIdFloor, baseMetadata.lastColumnId()));
+                    snapshot.id(),
+                    null,
+                    Math.max(lastColumnIdFloor, baseMetadata.lastColumnId()),
+                    rowIdFloor);
+            return;
+        }
+
+        if (formatVersion == IcebergMetadata.FORMAT_VERSION_V3
+                && baseMetadata.nextRowId() == null) {
+            // v3 base metadata written before Paimon emitted row lineage; recreate to self-heal
+            createMetadataWithoutBase(
+                    snapshot.id(),
+                    baseMetadata.tableUuid(),
+                    Math.max(lastColumnIdFloor, baseMetadata.lastColumnId()),
+                    rowIdFloor);
             return;
         }
 
@@ -960,7 +996,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 createMetadataWithoutBase(
                         snapshot.id(),
                         baseMetadata.tableUuid(),
-                        Math.max(lastColumnIdFloor, baseMetadata.lastColumnId()));
+                        Math.max(lastColumnIdFloor, baseMetadata.lastColumnId()),
+                        rowIdFloor);
                 return;
             }
         }
@@ -978,7 +1015,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 createMetadataWithoutBase(
                         snapshot.id(),
                         baseMetadata.tableUuid(),
-                        Math.max(lastColumnIdFloor, baseMetadata.lastColumnId()));
+                        Math.max(lastColumnIdFloor, baseMetadata.lastColumnId()),
+                        rowIdFloor);
                 return;
             }
         }
@@ -1123,6 +1161,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         }
         // a schema-pointer rollback (validated above): only the current pointer moves
 
+        RowLineage rowLineage = computeRowLineage(rowIdFloor, metrics.addedRecords);
+
         List<IcebergSnapshot> snapshots = new ArrayList<>(baseMetadata.snapshots());
         snapshots.add(
                 new IcebergSnapshot(
@@ -1135,8 +1175,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         pathFactory.toManifestListPath(manifestListFileName).toString(),
                         // the snapshot's own schema, for time travel
                         snapshotSchemaId,
-                        null,
-                        null));
+                        rowLineage.firstRowId,
+                        rowLineage.addedRows));
 
         // all snapshots in this list, except the last one, need to expire
         List<IcebergSnapshot> toExpireExceptLast = new ArrayList<>();
@@ -1181,6 +1221,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         baseMetadata.lastPartitionId(),
                         snapshots,
                         (int) snapshotId,
+                        rowLineage.nextRowId,
                         refs);
 
         Path metadataPath = pathFactory.toMetadataPath(snapshotId);
@@ -1646,6 +1687,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                             baseMetadata.lastPartitionId(),
                             baseMetadata.snapshots(),
                             baseMetadata.currentSnapshotId(),
+                            baseMetadata.nextRowId(),
                             baseMetadata.refs());
 
             /*
@@ -1704,6 +1746,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                             baseMetadata.lastPartitionId(),
                             baseMetadata.snapshots(),
                             baseMetadata.currentSnapshotId(),
+                            baseMetadata.nextRowId(),
                             baseMetadata.refs());
 
             /*
@@ -1954,6 +1997,28 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             return false;
         }
         return true;
+    }
+
+    /**
+     * Row-lineage bookkeeping for a new snapshot, mandatory in Iceberg format version 3: the
+     * snapshot's first-row-id starts at the base metadata's next-row-id watermark and the table's
+     * next-row-id advances by the snapshot's added records. For format version 2 all fields stay
+     * null so nothing is written.
+     */
+    private RowLineage computeRowLineage(long baseNextRowId, long addedRecords) {
+        RowLineage lineage = new RowLineage();
+        if (formatVersion >= IcebergMetadata.FORMAT_VERSION_V3) {
+            lineage.firstRowId = baseNextRowId;
+            lineage.addedRows = addedRecords;
+            lineage.nextRowId = baseNextRowId + addedRecords;
+        }
+        return lineage;
+    }
+
+    private static class RowLineage {
+        @Nullable private Long firstRowId;
+        @Nullable private Long addedRows;
+        @Nullable private Long nextRowId;
     }
 
     private class SchemaCache {
