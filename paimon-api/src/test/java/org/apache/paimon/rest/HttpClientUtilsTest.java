@@ -264,7 +264,10 @@ public class HttpClientUtilsTest {
         registerHandler(
                 "/encoded",
                 exchange -> {
-                    requestCount.incrementAndGet();
+                    if (requestCount.incrementAndGet() > 1) {
+                        respond(exchange, 410, new byte[0]);
+                        return;
+                    }
                     exchange.getResponseHeaders().add("Content-Encoding", "gzip");
                     respond(exchange, 200, compressed);
                 });
@@ -272,7 +275,60 @@ public class HttpClientUtilsTest {
         try (InputStream in = HttpClientUtils.getAsInputStream(url("/encoded"))) {
             assertThat(readAll(in)).isEqualTo(payload);
         }
+        assertThat(requestCount).hasValue(1);
+    }
+
+    @Test
+    public void testGetAsInputStreamFallsBackWhenIdentityEncodingIsRejected() throws Exception {
+        byte[] payload = payload(4096);
+        byte[] compressed = gzip(payload);
+        AtomicInteger requestCount = new AtomicInteger();
+        AtomicReference<String> firstAcceptEncoding = new AtomicReference<>();
+        AtomicReference<String> secondAcceptEncoding = new AtomicReference<>();
+        registerHandler(
+                "/encoded-only",
+                exchange -> {
+                    int currentRequest = requestCount.incrementAndGet();
+                    String acceptEncoding =
+                            exchange.getRequestHeaders().getFirst("Accept-Encoding");
+                    if (currentRequest == 1) {
+                        firstAcceptEncoding.set(acceptEncoding);
+                        respond(exchange, 406, new byte[0]);
+                        return;
+                    }
+
+                    secondAcceptEncoding.set(acceptEncoding);
+                    exchange.getResponseHeaders().add("Content-Encoding", "gzip");
+                    respond(exchange, 200, compressed);
+                });
+
+        try (InputStream in = HttpClientUtils.getAsInputStream(url("/encoded-only"))) {
+            assertThat(readAll(in)).isEqualTo(payload);
+        }
         assertThat(requestCount).hasValue(2);
+        assertThat(firstAcceptEncoding).hasValue("identity");
+        assertThat(secondAcceptEncoding.get()).contains("gzip");
+    }
+
+    @Test
+    public void testGetAsInputStreamDoesNotResumeTruncatedEncodedResponse() throws Exception {
+        byte[] compressed = gzip(payload(4096));
+        AtomicInteger requestCount = new AtomicInteger();
+        registerHandler(
+                "/truncated-encoded",
+                exchange -> {
+                    requestCount.incrementAndGet();
+                    exchange.getResponseHeaders().add("Content-Encoding", "gzip");
+                    respondTruncated(
+                            exchange, 200, compressed.length, compressed, compressed.length / 2);
+                });
+
+        try (InputStream in = HttpClientUtils.getAsInputStream(url("/truncated-encoded"))) {
+            assertThatThrownBy(() -> readAll(in))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("encoded response bodies cannot be resumed safely");
+        }
+        assertThat(requestCount).hasValue(1);
     }
 
     @Test
@@ -341,6 +397,81 @@ public class HttpClientUtilsTest {
         assertThat(requestCount).hasValue(2);
         assertThat(range.get()).isNull();
         assertThat(acceptEncoding).hasValue("identity");
+    }
+
+    @Test
+    public void testGetAsInputStreamReadsChunkedReplayPastInitialContentLength() throws Exception {
+        byte[] replayedPayload = payload(120);
+        AtomicInteger requestCount = new AtomicInteger();
+        registerHandler(
+                "/longer-chunked-replay",
+                exchange -> {
+                    if (requestCount.incrementAndGet() == 1) {
+                        respondTruncated(exchange, 200, 100, replayedPayload, 40);
+                    } else {
+                        respondChunked(exchange, 200, replayedPayload);
+                    }
+                });
+
+        try (InputStream in = HttpClientUtils.getAsInputStream(url("/longer-chunked-replay"))) {
+            assertThat(readAll(in)).isEqualTo(replayedPayload);
+        }
+        assertThat(requestCount).hasValue(2);
+    }
+
+    @Test
+    public void testGetAsInputStreamReplaysWhenOnlyLastModifiedIsAvailable() throws Exception {
+        byte[] payload = payload(4096);
+        AtomicInteger requestCount = new AtomicInteger();
+        AtomicReference<String> range = new AtomicReference<>();
+        AtomicReference<String> ifRange = new AtomicReference<>();
+        registerHandler(
+                "/last-modified-only",
+                exchange -> {
+                    exchange.getResponseHeaders()
+                            .add("Last-Modified", "Mon, 17 Aug 2026 00:00:00 GMT");
+                    if (requestCount.incrementAndGet() == 1) {
+                        respondTruncated(exchange, payload, 1024);
+                    } else {
+                        range.set(exchange.getRequestHeaders().getFirst("Range"));
+                        ifRange.set(exchange.getRequestHeaders().getFirst("If-Range"));
+                        respond(exchange, 200, payload);
+                    }
+                });
+
+        try (InputStream in = HttpClientUtils.getAsInputStream(url("/last-modified-only"))) {
+            assertThat(readAll(in)).isEqualTo(payload);
+        }
+        assertThat(requestCount).hasValue(2);
+        assertThat(range.get()).isNull();
+        assertThat(ifRange.get()).isNull();
+    }
+
+    @Test
+    public void testGetAsInputStreamReplaysWhenOnlyWeakEtagIsAvailable() throws Exception {
+        byte[] payload = payload(4096);
+        AtomicInteger requestCount = new AtomicInteger();
+        AtomicReference<String> range = new AtomicReference<>();
+        AtomicReference<String> ifRange = new AtomicReference<>();
+        registerHandler(
+                "/weak-etag",
+                exchange -> {
+                    exchange.getResponseHeaders().add("ETag", "W/\"image-v1\"");
+                    if (requestCount.incrementAndGet() == 1) {
+                        respondTruncated(exchange, payload, 1024);
+                    } else {
+                        range.set(exchange.getRequestHeaders().getFirst("Range"));
+                        ifRange.set(exchange.getRequestHeaders().getFirst("If-Range"));
+                        respond(exchange, 200, payload);
+                    }
+                });
+
+        try (InputStream in = HttpClientUtils.getAsInputStream(url("/weak-etag"))) {
+            assertThat(readAll(in)).isEqualTo(payload);
+        }
+        assertThat(requestCount).hasValue(2);
+        assertThat(range.get()).isNull();
+        assertThat(ifRange.get()).isNull();
     }
 
     @Test
@@ -685,6 +816,14 @@ public class HttpClientUtilsTest {
         outputStream.write(body, 0, truncatedLength);
         outputStream.flush();
         exchange.close();
+    }
+
+    private static void respondChunked(HttpExchange exchange, int statusCode, byte[] body)
+            throws IOException {
+        exchange.sendResponseHeaders(statusCode, 0);
+        try (OutputStream outputStream = exchange.getResponseBody()) {
+            outputStream.write(body);
+        }
     }
 
     private static byte[] payload(int length) {

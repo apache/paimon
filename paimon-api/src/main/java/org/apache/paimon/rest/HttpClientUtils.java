@@ -27,6 +27,7 @@ import org.apache.hc.client5.http.classic.methods.HttpGet;
 import org.apache.hc.client5.http.classic.methods.HttpHead;
 import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.config.RequestConfig;
+import org.apache.hc.client5.http.entity.DecompressingEntity;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
 import org.apache.hc.client5.http.impl.classic.HttpClientBuilder;
@@ -50,7 +51,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.Locale;
 import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -262,9 +262,9 @@ public class HttpClientUtils {
      * <p>The request retry strategy only covers failures before response headers are returned. A
      * {@link ConnectionClosedException} or {@link TruncatedChunkException} can instead be raised
      * while the entity stream is consumed. Replaying the whole response would duplicate bytes
-     * already written by the caller. A stable resource validator allows a byte range continuation.
-     * Without one, a complete response is replayed and its already-delivered prefix is verified
-     * before reading continues.
+     * already written by the caller. A strong ETag allows a byte range continuation. Without one, a
+     * complete response is replayed and its already-delivered prefix is verified before reading
+     * continues.
      */
     private static class ResumableHttpInputStream extends InputStream {
 
@@ -276,7 +276,7 @@ public class HttpClientUtils {
         private long position;
         private long contentLength = -1L;
         private long currentResponseEndExclusive = Long.MAX_VALUE;
-        private String validator;
+        private String strongEtag;
         private boolean identityEncoded;
         private int resumeAttempts;
         private boolean closed;
@@ -331,7 +331,7 @@ public class HttpClientUtils {
                                                     currentResponseEndExclusive - position));
                     int bytesRead = stream.read(bytes, offset, readLength);
                     if (bytesRead > 0) {
-                        if (validator == null) {
+                        if (strongEtag == null) {
                             deliveredDigest.update(bytes, offset, bytesRead);
                         }
                         position += bytesRead;
@@ -375,22 +375,35 @@ public class HttpClientUtils {
             CloseableHttpResponse newResponse = execute(request, uri);
             boolean accepted = false;
             try {
-                if (newResponse.getCode() != HttpStatus.SC_OK) {
-                    throw httpError(newResponse.getCode());
-                }
-                if (!isIdentityEncoded(newResponse)) {
+                if (newResponse.getCode() == HttpStatus.SC_NOT_ACCEPTABLE) {
                     closeQuietly(newResponse);
                     accepted = true;
                     openContentDecodedResponse();
                     return;
                 }
+                if (newResponse.getCode() != HttpStatus.SC_OK) {
+                    throw httpError(newResponse.getCode());
+                }
 
                 HttpEntity entity = requireEntity(newResponse);
+                if (entity instanceof DecompressingEntity || !isIdentityEncoded(newResponse)) {
+                    response = newResponse;
+                    stream = entity.getContent();
+                    contentLength =
+                            entity instanceof DecompressingEntity ? -1L : entity.getContentLength();
+                    currentResponseEndExclusive =
+                            contentLength < 0 ? Long.MAX_VALUE : contentLength;
+                    strongEtag = null;
+                    identityEncoded = false;
+                    accepted = true;
+                    return;
+                }
+
                 response = newResponse;
                 stream = entity.getContent();
                 contentLength = entity.getContentLength();
                 currentResponseEndExclusive = contentLength < 0 ? Long.MAX_VALUE : contentLength;
-                validator = responseValidator(newResponse);
+                strongEtag = responseStrongEtag(newResponse);
                 identityEncoded = true;
                 accepted = true;
             } finally {
@@ -436,16 +449,14 @@ public class HttpClientUtils {
             if (!identityEncoded) {
                 throw readFailure("encoded response bodies cannot be resumed safely");
             }
-            if (validator == null) {
+            if (strongEtag == null) {
                 replayFromStart();
                 return;
             }
 
             HttpGet request = newBodyGet(uri);
             request.addHeader(HttpHeaders.RANGE, "bytes=" + position + "-");
-            if (validator != null) {
-                request.addHeader(HttpHeaders.IF_RANGE, validator);
-            }
+            request.addHeader(HttpHeaders.IF_RANGE, strongEtag);
 
             CloseableHttpResponse newResponse = execute(request, uri);
             boolean accepted = false;
@@ -470,17 +481,17 @@ public class HttpClientUtils {
                     contentLength = range.total;
                 }
 
+                HttpEntity entity = requireEntity(newResponse);
                 long rangeLength = range.end - range.start + 1;
-                if (!isIdentityEncoded(newResponse)) {
+                if (entity instanceof DecompressingEntity || !isIdentityEncoded(newResponse)) {
                     throw readFailure("range response uses a content encoding");
                 }
-                HttpEntity entity = requireEntity(newResponse);
                 if (entity.getContentLength() >= 0 && entity.getContentLength() != rangeLength) {
                     throw readFailure("range response length does not match Content-Range");
                 }
 
-                if (validator != null && hasDifferentValidator(newResponse, validator)) {
-                    throw readFailure("resource validator changed while resuming");
+                if (hasDifferentStrongEtag(newResponse, strongEtag)) {
+                    throw readFailure("strong ETag changed while resuming");
                 }
 
                 response = newResponse;
@@ -495,9 +506,9 @@ public class HttpClientUtils {
         }
 
         /**
-         * Replays a response without a resource validator from byte zero and verifies that its
-         * prefix is identical to the bytes already returned. Once the prefix matches, continuing
-         * with the same response cannot combine bytes from two different representations.
+         * Replays a response without a strong ETag from byte zero and verifies that its prefix is
+         * identical to the bytes already returned. Once the prefix matches, continuing with the
+         * same response cannot combine bytes from two different representations.
          */
         private void replayFromStart() throws IOException {
             byte[] expectedPrefixDigest = digestSnapshot(deliveredDigest);
@@ -512,11 +523,10 @@ public class HttpClientUtils {
                                         + newResponse.getCode()
                                         + " while replaying the response");
                     }
-                    if (!isIdentityEncoded(newResponse)) {
+                    HttpEntity entity = requireEntity(newResponse);
+                    if (entity instanceof DecompressingEntity || !isIdentityEncoded(newResponse)) {
                         throw readFailure("replayed response uses a content encoding");
                     }
-
-                    HttpEntity entity = requireEntity(newResponse);
                     long replayedLength = entity.getContentLength();
                     if (contentLength >= 0
                             && replayedLength >= 0
@@ -530,14 +540,12 @@ public class HttpClientUtils {
 
                     InputStream newStream = entity.getContent();
                     verifyReplayedPrefix(newStream, expectedPrefixDigest);
-                    if (contentLength < 0 && replayedLength >= 0) {
-                        contentLength = replayedLength;
-                    }
+                    contentLength = replayedLength;
                     response = newResponse;
                     stream = newStream;
                     currentResponseEndExclusive =
-                            contentLength < 0 ? Long.MAX_VALUE : contentLength;
-                    validator = responseValidator(newResponse);
+                            replayedLength < 0 ? Long.MAX_VALUE : replayedLength;
+                    strongEtag = responseStrongEtag(newResponse);
                     identityEncoded = true;
                     accepted = true;
                     return;
@@ -598,7 +606,7 @@ public class HttpClientUtils {
                 stream = entity.getContent();
                 contentLength = -1L;
                 currentResponseEndExclusive = Long.MAX_VALUE;
-                validator = null;
+                strongEtag = null;
                 identityEncoded = false;
                 accepted = true;
             } finally {
@@ -659,38 +667,28 @@ public class HttpClientUtils {
     private static HttpGet newBodyGet(String uri) {
         HttpGet request = newHttpGet(uri);
         request.addHeader(HttpHeaders.ACCEPT_ENCODING, "identity");
-        request.setConfig(
-                RequestConfig.copy(DEFAULT_REQUEST_CONFIG)
-                        .setContentCompressionEnabled(false)
-                        .build());
         return request;
     }
 
-    private static String responseValidator(CloseableHttpResponse response) {
+    private static String responseStrongEtag(CloseableHttpResponse response) {
         Header etag = response.getFirstHeader(HttpHeaders.ETAG);
-        if (etag != null) {
-            String value = etag.getValue();
-            if (value != null && !value.trim().toUpperCase(Locale.ROOT).startsWith("W/")) {
-                return value;
-            }
+        if (etag == null || etag.getValue() == null) {
+            return null;
         }
-        Header lastModified = response.getFirstHeader(HttpHeaders.LAST_MODIFIED);
-        return lastModified == null ? null : lastModified.getValue();
+
+        String value = etag.getValue().trim();
+        return value.length() >= 2
+                        && value.charAt(0) == '"'
+                        && value.charAt(value.length() - 1) == '"'
+                        && value.indexOf('"', 1) == value.length() - 1
+                ? value
+                : null;
     }
 
-    private static boolean hasDifferentValidator(
-            CloseableHttpResponse response, String expectedValidator) {
-        boolean hasValidator = false;
-        for (String headerName : new String[] {HttpHeaders.ETAG, HttpHeaders.LAST_MODIFIED}) {
-            Header header = response.getFirstHeader(headerName);
-            if (header != null) {
-                hasValidator = true;
-                if (expectedValidator.equals(header.getValue())) {
-                    return false;
-                }
-            }
-        }
-        return hasValidator;
+    private static boolean hasDifferentStrongEtag(
+            CloseableHttpResponse response, String expectedStrongEtag) {
+        Header etag = response.getFirstHeader(HttpHeaders.ETAG);
+        return etag != null && !expectedStrongEtag.equals(responseStrongEtag(response));
     }
 
     private static boolean isIdentityEncoded(CloseableHttpResponse response) {
