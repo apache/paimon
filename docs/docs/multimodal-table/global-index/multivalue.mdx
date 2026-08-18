@@ -25,14 +25,18 @@ under the License.
 # Multivalue Index
 
 A Multivalue index maps every distinct non-null element of an `ARRAY` column to a compressed
-64-bit row-id bitmap. It accelerates element-membership predicates without treating the complete
-array as one scalar key.
+64-bit row-id bitmap. It accelerates `ARRAY_CONTAINS`, `ARRAYS_OVERLAP`, and
+`ARRAY_CONTAINS_ALL` predicates without treating the complete array as one scalar key.
 
 For membership lookup, the index has these semantics:
 
 - Duplicate elements in one array contribute the row ID only once.
 - Null arrays, empty arrays, and null elements contribute no posting. The index does not
   distinguish those cases and does not accelerate array `IS NULL` or `IS NOT NULL` predicates.
+- `ARRAYS_OVERLAP` unions the postings for its non-null literal elements.
+  `ARRAY_CONTAINS_ALL` intersects the postings for its distinct literal elements. A null literal
+  element cannot match; an empty contains-all literal safely falls back because the index cannot
+  distinguish a null array from a non-null array with no indexed elements.
 
 The indexed column must be an `ARRAY` whose element type is supported by the global-index key
 serializer. A Multivalue index is single-column.
@@ -77,21 +81,27 @@ coverage behavior.
 
 ## Query Through Paimon Core
 
-The Core predicate API exposes array membership directly:
+The Core predicate API exposes single-element, any-element, and all-element membership directly:
 
 ```java
 int tagsFieldIndex = table.rowType().getFieldIndex("tags");
-Predicate predicate = new PredicateBuilder(table.rowType())
-        .arrayContains(tagsFieldIndex, BinaryString.fromString("blue"));
+PredicateBuilder predicates = new PredicateBuilder(table.rowType());
+Predicate contains = predicates.arrayContains(tagsFieldIndex, BinaryString.fromString("blue"));
+Predicate overlaps = predicates.arraysOverlap(
+        tagsFieldIndex,
+        Arrays.asList(BinaryString.fromString("blue"), BinaryString.fromString("green")));
+Predicate containsAll = predicates.arrayContainsAll(
+        tagsFieldIndex,
+        Arrays.asList(BinaryString.fromString("blue"), BinaryString.fromString("green")));
 
-ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
+ReadBuilder readBuilder = table.newReadBuilder().withFilter(overlaps);
 TableScan.Plan plan = readBuilder.newScan().plan();
 ```
 
 Paimon automatically uses matching Multivalue global index files and maps their row IDs to Data
 Evolution splits. SQL engines use the index after their connector translates an array-membership
-expression to Paimon's `ARRAY_CONTAINS` predicate; that connector translation is separate from the
-Core index implementation.
+expression to Paimon's `ARRAY_CONTAINS`, `ARRAYS_OVERLAP`, or `ARRAY_CONTAINS_ALL` predicate; that
+connector translation is separate from the Core index implementation.
 
 ## Drop the Index
 

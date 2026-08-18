@@ -128,11 +128,51 @@ class MultiValueBitmapIndexReaderTest {
             assertRows(reader.visitArrayContains(fieldRef, str("B")).join(), 0L, 3L);
             assertRows(reader.visitArrayContains(fieldRef, str("missing")).join());
             assertRows(reader.visitArrayContains(fieldRef, null).join());
+            assertRows(
+                    reader.visitArraysOverlap(
+                                    fieldRef,
+                                    java.util.Arrays.asList(
+                                            str("missing"), null, str("B"), str("B")))
+                            .join(),
+                    0L,
+                    3L);
+            assertRows(
+                    reader.visitArraysOverlap(
+                                    fieldRef, java.util.Arrays.asList(str("missing"), null))
+                            .join());
+            assertRows(
+                    reader.visitArrayContainsAll(
+                                    fieldRef, java.util.Arrays.asList(str("A"), str("B"), str("A")))
+                            .join(),
+                    0L);
+            assertRows(
+                    reader.visitArrayContainsAll(
+                                    fieldRef, java.util.Arrays.asList(str("A"), str("C")))
+                            .join());
+            assertRows(
+                    reader.visitArrayContainsAll(fieldRef, java.util.Arrays.asList(str("A"), null))
+                            .join());
+            assertThat(reader.visitArrayContainsAll(fieldRef, Collections.emptyList()).join())
+                    .isEmpty();
             assertThat(
                             reader.visitArrayContains(
                                             new FieldRef(
                                                     1, "tags", DataTypes.ARRAY(DataTypes.BIGINT())),
                                             1L)
+                                    .join())
+                    .isEmpty();
+            assertThat(
+                            reader.visitArraysOverlap(
+                                            new FieldRef(
+                                                    1, "tags", DataTypes.ARRAY(DataTypes.BIGINT())),
+                                            Collections.singletonList(1L))
+                                    .join())
+                    .isEmpty();
+            assertThat(
+                            reader.visitArrayContainsAll(
+                                            new FieldRef(
+                                                    1, "tags", DataTypes.ARRAY(DataTypes.BIGINT())),
+                                            Collections.singletonList(1L))
                                     .join())
                     .isEmpty();
             assertThat(reader.visitIsNull(fieldRef).join()).isEmpty();

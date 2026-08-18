@@ -458,6 +458,22 @@ public final class PrimaryKeySortedIndexScan {
         }
 
         @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitArraysOverlap(
+                FieldRef fieldRef, List<Object> literals) {
+            return query(
+                    QueryKey.ofLiterals(QueryOperation.ARRAYS_OVERLAP, fieldRef, literals),
+                    () -> reader().visitArraysOverlap(fieldRef, literals));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitArrayContainsAll(
+                FieldRef fieldRef, List<Object> literals) {
+            return query(
+                    QueryKey.ofLiterals(QueryOperation.ARRAY_CONTAINS_ALL, fieldRef, literals),
+                    () -> reader().visitArrayContainsAll(fieldRef, literals));
+        }
+
+        @Override
         public CompletableFuture<Optional<GlobalIndexResult>> visitLike(
                 FieldRef fieldRef, Object literal) {
             return query(
@@ -639,6 +655,8 @@ public final class PrimaryKeySortedIndexScan {
         ENDS_WITH,
         CONTAINS,
         ARRAY_CONTAINS,
+        ARRAYS_OVERLAP,
+        ARRAY_CONTAINS_ALL,
         LIKE,
         LESS_THAN,
         GREATER_OR_EQUAL,
@@ -737,6 +755,18 @@ public final class PrimaryKeySortedIndexScan {
         public CompletableFuture<Optional<GlobalIndexResult>> visitArrayContains(
                 FieldRef fieldRef, Object literal) {
             return localize(wrapped.visitArrayContains(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitArraysOverlap(
+                FieldRef fieldRef, List<Object> literals) {
+            return localize(wrapped.visitArraysOverlap(fieldRef, literals));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitArrayContainsAll(
+                FieldRef fieldRef, List<Object> literals) {
+            return localize(wrapped.visitArrayContainsAll(fieldRef, literals));
         }
 
         @Override

@@ -65,12 +65,12 @@ See [Bitmap Index](../multimodal-table/global-index/bitmap) for predicate and fo
 <TabItem value="multivalue" label="Multivalue">
 
 Use Multivalue for element-membership predicates on an `ARRAY` column. It stores one compressed
-bitmap posting list per distinct non-null element and accelerates Paimon Core `ARRAY_CONTAINS`
-predicates. Null arrays, empty arrays, and null elements produce no membership posting; array null
-checks fall back to the ordinary data path.
+bitmap posting list per distinct non-null element and accelerates Paimon Core `ARRAY_CONTAINS`,
+`ARRAYS_OVERLAP`, and `ARRAY_CONTAINS_ALL` predicates. Null arrays, empty arrays, and null elements
+produce no membership posting; array null checks fall back to the ordinary data path.
 
 The Core predicate and index pushdown are available independently of SQL connectors. A connector
-uses this index after it translates its array-membership expression to Paimon's `ARRAY_CONTAINS`
+uses this index after it translates its array-membership expression to the corresponding Paimon
 predicate.
 
 For an append-only or Data Evolution table whose Multivalue index is built independently, see
@@ -323,19 +323,23 @@ become full-text searchable only after compaction publishes an eligible data fil
 BTree, Bitmap, and Multivalue indexes are applied automatically to snapshot-scoped Core batch
 scans after a supported predicate reaches Paimon. BTree and Bitmap can accelerate equality, `IN`,
 null checks, comparisons and ranges, complement predicates, and supported string predicates.
-Multivalue accelerates `ARRAY_CONTAINS(array_column, element)`.
+Multivalue accelerates `ARRAY_CONTAINS`, `ARRAYS_OVERLAP`, and `ARRAY_CONTAINS_ALL` predicates.
 
 The Java/Core predicate can be constructed directly:
 
 ```java
 Predicate predicate = new PredicateBuilder(rowType)
-        .arrayContains(tagsFieldIndex, BinaryString.fromString("blue"));
+        .arraysOverlap(
+                tagsFieldIndex,
+                Arrays.asList(
+                        BinaryString.fromString("blue"),
+                        BinaryString.fromString("green")));
 ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
 TableScan.Plan plan = readBuilder.newScan().plan();
 ```
 
-SQL engines need a connector-specific expression conversion before their `array_contains` or
-equivalent function reaches this Core predicate.
+SQL engines need a connector-specific expression conversion before their array-membership
+function reaches the corresponding Core predicate.
 
 Paimon combines indexed predicate results as follows:
 

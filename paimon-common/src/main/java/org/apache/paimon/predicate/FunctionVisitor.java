@@ -70,6 +70,14 @@ public interface FunctionVisitor<T> extends PredicateVisitor<T> {
         throw new UnsupportedOperationException();
     }
 
+    default T visitArraysOverlap(FieldRef fieldRef, List<Object> literals) {
+        throw new UnsupportedOperationException();
+    }
+
+    default T visitArrayContainsAll(FieldRef fieldRef, List<Object> literals) {
+        throw new UnsupportedOperationException();
+    }
+
     T visitLike(FieldRef fieldRef, Object literal);
 
     T visitLessThan(FieldRef fieldRef, Object literal);

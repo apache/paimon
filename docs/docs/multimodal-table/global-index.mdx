@@ -43,7 +43,7 @@ without full-table scans. Paimon supports multiple global index types:
 |---|---|---|
 | BTree | Scalar filters on numeric, string, date, and timestamp columns | Best when predicates are selective, such as equality, IN, range, and null checks. |
 | Bitmap | Enum-like dimensions and tag columns | Best for equality, IN, string prefix match, complement predicates, and null checks over compressed row-id bitmaps. |
-| Multivalue | Membership tests on arrays of supported scalar elements | Best for `ARRAY_CONTAINS(array_column, element)`. |
+| Multivalue | Membership tests on arrays of supported scalar elements | Best for `ARRAY_CONTAINS`, `ARRAYS_OVERLAP`, and `ARRAY_CONTAINS_ALL`. |
 | Vector | Top-K similarity search on embeddings | Uses ANN algorithms. Tune build-time and search-time options to balance recall, latency, and index size. |
 | Full-Text | Keyword search over text columns | Uses full-text scoring and tokenizer configuration stored with each index file. |
 | Hybrid Search | Combining multiple vector routes, multiple full-text routes, or vector and full-text retrieval together | Runs multiple scored routes and merges them with a ranker before reading rows. |
