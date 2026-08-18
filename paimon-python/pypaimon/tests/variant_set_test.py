@@ -26,6 +26,7 @@ from pypaimon.data.generic_variant import GenericVariant, _check_variant_sizes
 from pypaimon.data.variant_path import (
     _apply_edits,
     _build_object_value_ordered,
+    _checked_object_layout,
     _materialize_value,
     _metadata_key_ids,
     _metadata_with_keys,
@@ -541,10 +542,14 @@ class TestVariantSetFastPaths(unittest.TestCase):
         ) as slow_path, patch(
                 'pypaimon.data.variant_path._metadata_key_ids',
                 wraps=_metadata_key_ids,
-        ) as metadata_parse:
+        ) as metadata_parse, patch(
+                'pypaimon.data.variant_path._apply_edits',
+                wraps=_apply_edits,
+        ) as rebuild:
             result = variant_set(column, '$.processed', pa.scalar(True))
 
         slow_path.assert_not_called()
+        rebuild.assert_not_called()
         self.assertLessEqual(metadata_parse.call_count, 2)
         self.assertEqual(
             variant_get(result, '$.processed', pa.bool_()).to_pylist(),
@@ -753,6 +758,25 @@ class TestVariantSetErrors(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "MALFORMED_VARIANT"):
             variant_set(column, '$.child.new', pa.scalar(True))
 
+    def test_root_splice_rejects_nested_unknown_field_id(self):
+        metadata = GenericVariant.from_python({'sibling': {}}).metadata()
+        key_ids = _metadata_key_ids(metadata)
+        corrupt_sibling = _build_object_value([
+            (
+                len(key_ids),
+                _encode_scalar_to_value_bytes(2.0, pa.float64()),
+            ),
+        ])
+        corrupt_root = _build_object_value([
+            (key_ids['sibling'], corrupt_sibling),
+        ])
+        column = GenericVariant.to_arrow_array([
+            GenericVariant(corrupt_root, metadata),
+        ])
+
+        with self.assertRaisesRegex(ValueError, "MALFORMED_VARIANT"):
+            variant_set(column, '$.new', pa.scalar(True))
+
     def test_rejects_duplicate_source_field_id(self):
         metadata = GenericVariant.from_python({'value': 0}).metadata()
         corrupt = _build_object_value([
@@ -781,6 +805,35 @@ class TestVariantSetErrors(unittest.TestCase):
                 with self.assertRaisesRegex(
                         ValueError, "MALFORMED_VARIANT"):
                     updater(column, '$.a', pa.scalar(9.0))
+
+    def test_root_splice_rejects_duplicate_peer_offsets(self):
+        valid = GenericVariant.from_python({'a': 1.0, 'b': 2.0})
+        corrupt = bytearray(valid.value())
+        size, id_size, id_start, _, _, _ = _checked_object_layout(
+            corrupt, 0, len(corrupt))
+        offset_size = ((corrupt[0] >> 2) & 0x3) + 1
+        offset_start = id_start + size * id_size
+        corrupt[offset_start + offset_size:
+                offset_start + 2 * offset_size] = (
+            0).to_bytes(offset_size, 'little')
+        column = GenericVariant.to_arrow_array([
+            valid, GenericVariant(bytes(corrupt), valid.metadata()),
+        ])
+
+        with self.assertRaisesRegex(ValueError, "MALFORMED_VARIANT"):
+            variant_set(column, '$.new', pa.scalar(True))
+
+    def test_root_splice_enforces_value_size_limit(self):
+        variant = GenericVariant.from_python({'padding': 'x' * 100})
+        column = GenericVariant.to_arrow_array([variant])
+
+        with patch(
+                'pypaimon.data.generic_variant._SIZE_LIMIT',
+                len(variant.value()) + 2,
+        ):
+            with self.assertRaisesRegex(
+                    ValueError, 'VARIANT_CONSTRUCTOR_SIZE_LIMIT'):
+                variant_set(column, '$.new', pa.scalar(True))
 
     def test_rejects_truncated_child_offsets(self):
         valid = GenericVariant.from_python({'a': 1.0, 'b': 2.0})
