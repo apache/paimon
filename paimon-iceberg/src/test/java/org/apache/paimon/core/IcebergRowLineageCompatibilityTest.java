@@ -502,6 +502,143 @@ public class IcebergRowLineageCompatibilityTest {
     }
 
     @Test
+    public void testDeletedEntriesDoNotShiftInheritedIds() throws Exception {
+        // A legacy (pre-assignment) manifest holding a DELETED entry before a live one: GA
+        // readers skip DELETED entries when assigning inherited ids, so the live entry
+        // inherits the manifest's first_row_id itself, NOT shifted by the deleted rows.
+        RowType rowType = defaultRowType();
+        Map<String, String> customOptions = formatVersionOptions(3);
+        customOptions.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        customOptions.put(CoreOptions.DELETION_VECTOR_BITMAP64.key(), "true");
+        FileStoreTable table = createPkPaimonTable(rowType, customOptions);
+
+        int keyBucket0 = findKeyForBucket(table, 0);
+        int keyBucket1 = findKeyForBucket(table, 1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser)
+                        .withIOManager(new IOManagerImpl(tempDir.toString() + "/tmp"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(keyBucket0, 10));
+        write.write(GenericRow.of(keyBucket1, 20));
+        write.compact(BinaryRow.EMPTY_ROW, 0, true);
+        write.compact(BinaryRow.EMPTY_ROW, 1, true);
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        // rewrite the shared manifest: bucket 0's entry becomes DELETED, bucket 1's is
+        // carried as EXISTING behind it
+        write.write(GenericRow.ofKind(RowKind.DELETE, keyBucket0, 10));
+        write.compact(BinaryRow.EMPTY_ROW, 0, true);
+        commit.commit(2, write.prepareCommit(true, 2));
+
+        long rewriteSnapshot = table.snapshotManager().latestSnapshotId();
+        IcebergPathFactory paths = new IcebergPathFactory(new Path(table.location(), "metadata"));
+        IcebergManifestList listReader = IcebergManifestList.create(table, paths);
+        IcebergManifestFile entryReader = IcebergManifestFile.create(table, paths);
+        String listName =
+                new Path(
+                                readIcebergMetadata(table, rewriteSnapshot)
+                                        .currentSnapshot()
+                                        .manifestList())
+                        .getName();
+
+        // strip lineage from the manifest with the DELETED entry and from the list,
+        // simulating metadata written before manifest-level assignment existed
+        FileStoreTable v2SchemaView =
+                table.copy(Collections.singletonMap(IcebergOptions.FORMAT_VERSION.key(), "2"));
+        IcebergManifestFile oldEntryWriter = IcebergManifestFile.create(v2SchemaView, paths);
+        String strippedPath = null;
+        for (IcebergManifestFileMeta meta : listReader.read(listName)) {
+            if (meta.content() != IcebergManifestFileMeta.Content.DATA
+                    || meta.deletedFilesCount() == 0) {
+                continue;
+            }
+            strippedPath = meta.manifestPath();
+            List<IcebergManifestEntry> entries = entryReader.read(meta);
+            assertThat(entries.get(0).status()).isEqualTo(IcebergManifestEntry.Status.DELETED);
+            List<IcebergManifestFileMeta> rewritten =
+                    oldEntryWriter.rollingWrite(
+                            entries.iterator(), meta.sequenceNumber(), meta.content());
+            Path target = new Path(meta.manifestPath());
+            LocalFileIO.create().deleteQuietly(target);
+            LocalFileIO.create().rename(new Path(rewritten.get(0).manifestPath()), target);
+        }
+        assertThat(strippedPath).isNotNull();
+        final String stripped = strippedPath;
+        IcebergManifestList oldListWriter = IcebergManifestList.create(v2SchemaView, paths);
+        String rewrittenList = oldListWriter.writeWithoutRolling(listReader.read(listName));
+        LocalFileIO.create().deleteQuietly(paths.toManifestListPath(listName));
+        LocalFileIO.create()
+                .rename(
+                        paths.toManifestListPath(rewrittenList),
+                        paths.toManifestListPath(listName));
+
+        // next commit re-assigns the stripped manifest at list level
+        write.write(GenericRow.of(keyBucket0, 11));
+        commit.commit(3, write.prepareCommit(false, 3));
+        write.close();
+        commit.close();
+
+        long latest = table.snapshotManager().latestSnapshotId();
+        Long assignedFirst = null;
+        long upperBoundAdvance = 0;
+        String latestList =
+                new Path(readIcebergMetadata(table, latest).currentSnapshot().manifestList())
+                        .getName();
+        for (IcebergManifestFileMeta meta : listReader.read(latestList)) {
+            if (meta.manifestPath().equals(strippedPath)) {
+                assignedFirst = meta.firstRowId();
+                upperBoundAdvance = meta.addedRowsCount() + meta.existingRowsCount();
+            }
+        }
+        assertThat(assignedFirst).isNotNull();
+        // the manifest reserves only its ADDED+EXISTING rows; the DELETED entry is excluded
+        assertThat(upperBoundAdvance).isEqualTo(1L);
+
+        // the live entry inherits the manifest's own first_row_id, not shifted by the
+        // 1-row DELETED entry sitting before it
+        Map<String, Long> effective = effectiveFileFirstRowIds(table, latest);
+        boolean sawSurvivor = false;
+        for (IcebergManifestEntry entry :
+                entryReader.read(
+                        listReader.read(latestList).stream()
+                                .filter(m -> m.manifestPath().equals(stripped))
+                                .findFirst()
+                                .get())) {
+            if (entry.isLive()) {
+                sawSurvivor = true;
+                assertThat(entry.file().firstRowId()).isNull();
+                assertThat(effective.get(entry.file().filePath())).isEqualTo(assignedFirst);
+            }
+        }
+        assertThat(sawSurvivor).isTrue();
+
+        // GA reader cross-check: Iceberg 1.11 resolves the same id for the live file
+        if (GA_ROW_LINEAGE_READER) {
+            HadoopCatalog icebergCatalog =
+                    new HadoopCatalog(new Configuration(), tempDir.toString());
+            Table icebergTable = icebergCatalog.loadTable(TableIdentifier.of("mydb2.db", "t"));
+            boolean checked = false;
+            for (ManifestFile manifest :
+                    icebergTable.currentSnapshot().dataManifests(icebergTable.io())) {
+                if (!manifest.path().equals(strippedPath)) {
+                    continue;
+                }
+                try (ManifestReader<DataFile> gaReader =
+                        ManifestFiles.read(manifest, icebergTable.io(), icebergTable.specs())) {
+                    for (DataFile file : gaReader) {
+                        checked = true;
+                        assertThat(dataFileFirstRowId(file)).isEqualTo(assignedFirst);
+                    }
+                }
+            }
+            assertThat(checked).isTrue();
+        }
+    }
+
+    @Test
     public void testGaReaderSeesAssignedManifests() throws Exception {
         assumeGaRowLineageReader();
         FileStoreTable table = createPaimonTable(defaultRowType(), formatVersionOptions(3), "avro");
@@ -1000,6 +1137,11 @@ public class IcebergRowLineageCompatibilityTest {
             }
             long watermark = meta.firstRowId() == null ? -1 : meta.firstRowId();
             for (IcebergManifestEntry entry : manifestFile.read(meta)) {
+                if (entry.status() == IcebergManifestEntry.Status.DELETED) {
+                    // GA readers never assign ids to DELETED entries; they must not
+                    // advance the inheritance walk either
+                    continue;
+                }
                 long effective;
                 if (entry.file().firstRowId() != null) {
                     effective = entry.file().firstRowId();

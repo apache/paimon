@@ -2063,14 +2063,13 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
      * newly-assigned manifest's TRUE inheriting-rows count (see {@link #trueInheritingRowsCount}),
      * returned as {@link ManifestRowIdAssignment#assignedRows}.
      *
-     * <p>A manifest written entirely by Layer 2 (this commit or a later one) satisfies "null-142
-     * rows == ADDED rows", so {@code addedRowsCount()} is exact for it. But a manifest carried over
-     * from before manifest-level assignment existed (a "Layer-1" manifest) may reach here
-     * unassigned with existing/deleted entries whose per-file field 142 is also still null; for
-     * those, {@code addedRowsCount()} alone would undercount the rows this assignment must cover,
-     * silently shrinking the range handed out and colliding with the next commit's ids. Callers
-     * MUST use {@code assignedRows} (not this commit's added-records count) to advance the
-     * snapshot's added-rows / table next-row-id, precisely because of that mismatch.
+     * <p>A manifest written entirely under manifest-level assignment satisfies "inheriting rows ==
+     * ADDED rows", so the bound is exact for it. A manifest carried over from before assignment
+     * existed may hold EXISTING entries whose field 142 is also still null; the bound covers them
+     * without reading the manifest, at the cost of spec-legal id gaps when some of those entries
+     * were already materialized. DELETED entries never inherit ids and are excluded. Callers MUST
+     * use {@code assignedRows} (not this commit's added-records count) to advance the snapshot's
+     * added-rows / table next-row-id, precisely because of that mismatch.
      */
     private ManifestRowIdAssignment assignManifestFirstRowIds(
             List<IcebergManifestFileMeta> manifests, @Nullable Long snapshotFirstRowId) {
@@ -2083,7 +2082,12 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             if (meta.content() == IcebergManifestFileMeta.Content.DATA
                     && meta.firstRowId() == null) {
                 result.add(meta.withFirstRowId(watermark));
-                watermark += trueInheritingRowsCount(meta);
+                // spec-sanctioned upper bound: only ADDED and EXISTING rows can inherit
+                // ids from this manifest (readers never assign ids to DELETED entries).
+                // Rows whose field 142 is already materialized merely widen the reserved
+                // range, leaving legal id gaps - in exchange the commit path never has to
+                // read manifest contents.
+                watermark += meta.addedRowsCount() + meta.existingRowsCount();
             } else {
                 result.add(meta);
             }
@@ -2092,39 +2096,13 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
     }
 
     /**
-     * The true number of rows an unassigned manifest needs from the row-id space: the sum of {@code
-     * recordCount()} over entries whose per-file first_row_id (field 142) is null.
-     *
-     * <p>Fast path: when the manifest has no existing/deleted entries ({@code existingFilesCount()
-     * + deletedFilesCount() == 0}), every entry is ADDED and, by the Layer-2 invariant, has a null
-     * field 142, so {@code addedRowsCount()} already equals this sum without having to read the
-     * manifest file.
-     *
-     * <p>Otherwise (a manifest that may carry Layer-1-era existing/deleted entries whose field 142
-     * was never materialized) the manifest is actually read and entries are inspected one by one,
-     * since {@code addedRowsCount()} alone would not include those entries' rows.
-     */
-    private long trueInheritingRowsCount(IcebergManifestFileMeta meta) {
-        if (meta.existingFilesCount() + meta.deletedFilesCount() == 0) {
-            return meta.addedRowsCount();
-        }
-        long sum = 0;
-        for (IcebergManifestEntry entry :
-                manifestFile.read(new Path(meta.manifestPath()).getName())) {
-            if (entry.file().firstRowId() == null) {
-                sum += entry.file().recordCount();
-            }
-        }
-        return sum;
-    }
-
-    /**
      * Iceberg v3 requires the inherited first_row_id to be written into file metadata when entries
      * are copied into a rewritten manifest. Computes each entry's effective id in base manifest
-     * order (explicit field 142, or inherited from the manifest's first_row_id) and returns entries
-     * with the id materialized. No-op for delete manifests and for base manifests without an
-     * assigned first_row_id (v2 metadata, or v3 metadata written before manifest-level assignment
-     * existed — those stay in the spec's upgraded-table state).
+     * order (explicit field 142, or inherited from the manifest's first_row_id, skipping DELETED
+     * entries exactly like GA readers do) and returns entries with the id materialized. No-op for
+     * delete manifests and for base manifests without an assigned first_row_id (v2 metadata, or v3
+     * metadata written before manifest-level assignment existed — those stay in the spec's
+     * upgraded-table state).
      */
     private static List<IcebergManifestEntry> materializeFirstRowIds(
             IcebergManifestFileMeta baseMeta, List<IcebergManifestEntry> entries) {
@@ -2135,10 +2113,13 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         List<IcebergManifestEntry> result = new ArrayList<>();
         long watermark = baseMeta.firstRowId();
         for (IcebergManifestEntry entry : entries) {
-            if (entry.file().firstRowId() == null) {
+            if (entry.status() != IcebergManifestEntry.Status.DELETED
+                    && entry.file().firstRowId() == null) {
                 result.add(entry.withFile(entry.file().withFirstRowId(watermark)));
                 watermark += entry.file().recordCount();
             } else {
+                // DELETED entries never inherit an id (GA readers skip them when
+                // assigning), so their field 142 stays null and the walk does not advance
                 result.add(entry);
             }
         }
