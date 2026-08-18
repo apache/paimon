@@ -46,10 +46,12 @@ import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.rest.responses.ListViewsResponse;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.view.ViewChange;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 
@@ -155,15 +157,44 @@ public class RESTApiJsonTest {
         String name = "col1";
         IntType type = DataTypes.INT();
         String descStr = "desc";
+        String defaultValue = "42";
         String dataFieldStr =
                 String.format(
-                        "{\"id\": %d,\"name\":\"%s\",\"type\":\"%s\", \"description\":\"%s\"}",
-                        id, name, type, descStr);
+                        "{\"id\": %d,\"name\":\"%s\",\"type\":\"%s\","
+                                + "\"description\":\"%s\",\"defaultValue\":\"%s\"}",
+                        id, name, type, descStr, defaultValue);
         DataField parseData = RESTApi.fromJson(dataFieldStr, DataField.class);
         assertEquals(id, parseData.id());
         assertEquals(name, parseData.name());
         assertEquals(type, parseData.type());
         assertEquals(descStr, parseData.description());
+        assertEquals(defaultValue, parseData.defaultValue());
+
+        DataField field = new DataField(id, name, type, descStr, defaultValue);
+        assertEquals(field, RESTApi.fromJson(RESTApi.toJson(field), DataField.class));
+    }
+
+    @Test
+    public void providerFacingTypeAndChangeJsonShapeTest() throws Exception {
+        DataField vectorField =
+                new DataField(2, "embedding", DataTypes.VECTOR(3, DataTypes.FLOAT()));
+        Map<?, ?> vectorJson = RESTApi.fromJson(RESTApi.toJson(vectorField), Map.class);
+        Map<?, ?> vectorType = (Map<?, ?>) vectorJson.get("type");
+        assertEquals("VECTOR", vectorType.get("type"));
+        assertEquals("FLOAT", vectorType.get("element"));
+        assertEquals(3, vectorType.get("length"));
+
+        assertEquals(
+                Collections.singletonMap("action", "dropPrimaryKey"),
+                RESTApi.fromJson(RESTApi.toJson(SchemaChange.dropPrimaryKey()), Map.class));
+
+        Map<String, Object> expectedViewComment = new HashMap<>();
+        expectedViewComment.put("action", "updateComment");
+        expectedViewComment.put("comment", "new comment");
+        assertEquals(
+                expectedViewComment,
+                RESTApi.fromJson(
+                        RESTApi.toJson(ViewChange.updateComment("new comment")), Map.class));
     }
 
     @Test
@@ -363,6 +394,9 @@ public class RESTApiJsonTest {
         RollbackTableRequest rollbackTableRequestBySnapshot =
                 MockRESTMessage.rollbackTableRequestBySnapshot(snapshotId);
         String rollbackTableRequestBySnapshotStr = RESTApi.toJson(rollbackTableRequestBySnapshot);
+        Map<?, ?> rollbackJson = RESTApi.fromJson(rollbackTableRequestBySnapshotStr, Map.class);
+        Map<?, ?> instantJson = (Map<?, ?>) rollbackJson.get("instant");
+        assertEquals("snapshot", instantJson.get("type"));
         Instant.SnapshotInstant rollbackTableRequestParseData =
                 (Instant.SnapshotInstant)
                         RESTApi.fromJson(
