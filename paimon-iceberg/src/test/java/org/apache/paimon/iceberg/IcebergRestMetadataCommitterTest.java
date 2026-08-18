@@ -49,6 +49,7 @@ import org.apache.iceberg.ManifestFile;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
+import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.TableUtil;
 import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.TableIdentifier;
@@ -219,8 +220,15 @@ public class IcebergRestMetadataCommitterTest {
                 expected,
                 Record::toString);
 
-        PartitionSpec expectedPartitionSpec = PartitionSpec.builderFor(new Schema()).build();
-        runPartitionSpecCompatibilityTest(expectedPartitionSpec);
+        // registration imports the real partition spec even when a partition column has
+        // field id 0 (the create-path fallback used to register an unpartitioned spec)
+        PartitionSpec registeredSpec =
+                restCatalog.loadTable(TableIdentifier.of("mydb", "t")).spec();
+        assertThat(registeredSpec.fields()).hasSize(2);
+        assertThat(registeredSpec.fields().get(0).name()).isEqualTo("pt1");
+        assertThat(registeredSpec.fields().get(0).sourceId()).isEqualTo(0);
+        assertThat(registeredSpec.fields().get(1).name()).isEqualTo("pt2");
+        assertThat(registeredSpec.fields().get(1).sourceId()).isEqualTo(1);
     }
 
     @Test
@@ -411,9 +419,9 @@ public class IcebergRestMetadataCommitterTest {
 
         Table icebergTable = restCatalog.loadTable(TableIdentifier.of("mydb", "t"));
         assertThat(icebergTable.currentSnapshot().snapshotId()).isEqualTo(5);
-        // 1 metadata for createTable + 4 history metadata
+        // the registered metadata plus later commits' history
         assertThat(((BaseTable) icebergTable).operations().current().previousFiles().size())
-                .isEqualTo(5);
+                .isEqualTo(4);
 
         write.close();
         commit.close();
@@ -633,11 +641,11 @@ public class IcebergRestMetadataCommitterTest {
         assertThat(icebergTable.schema().findField("v2").type().toString()).isEqualTo("long");
 
         // Paimon has 4 schema versions (0-3); step 3 is a duplicate of step 2 (same fields).
-        // Iceberg should have exactly 4 schemas: the empty placeholder (id=0) plus 3 unique
-        // field-sets. Without dedup it would have 5 (empty + one-per-Paimon-schema).
+        // The registered table carries exactly the 3 unique field-sets: registration imports
+        // the deduplicated local schemas verbatim, with no placeholder schema.
         int paimonSchemaCount = ctx.table.schemaManager().listAllIds().size();
         assertThat(paimonSchemaCount).isEqualTo(4);
-        assertThat(icebergTable.schemas().size()).isEqualTo(4); // 5 without dedup
+        assertThat(icebergTable.schemas().size()).isEqualTo(3); // 4 without dedup
 
         ctx.close();
     }
@@ -1388,6 +1396,19 @@ public class IcebergRestMetadataCommitterTest {
             }
             assertThat(restDataManifestFirstRowIds)
                     .containsExactlyInAnyOrderElementsOf(localDataManifestFirstRowIds);
+
+            // the registered server table must carry the full row-id high-water mark:
+            // external REST writers allocate from it, so anything lower reuses ids
+            Long serverNextRowId =
+                    tableMetadataNextRowId(((BaseTable) reloaded).operations().current());
+            assertThat(serverNextRowId).isNotNull();
+            assertThat(serverNextRowId).isGreaterThanOrEqualTo(localMetadata.nextRowId());
+
+            // one external append through the Iceberg API allocates above the watermark
+            reloaded.newAppend().commit();
+            Table afterExternal = restCatalog.loadTable(TableIdentifier.of("mydb", "t"));
+            assertThat(afterExternal.currentSnapshot().firstRowId())
+                    .isGreaterThanOrEqualTo(localMetadata.nextRowId());
         }
     }
 
@@ -1488,6 +1509,17 @@ public class IcebergRestMetadataCommitterTest {
     private static Long manifestFirstRowId(ManifestFile manifest) {
         try {
             return (Long) ManifestFile.class.getMethod("firstRowId").invoke(manifest);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** TableMetadata#nextRowId is a GA (1.10+) API; resolve reflectively. */
+    private static Long tableMetadataNextRowId(TableMetadata metadata) {
+        try {
+            return (Long) TableMetadata.class.getMethod("nextRowId").invoke(metadata);
+        } catch (NoSuchMethodException e) {
+            return null;
         } catch (ReflectiveOperationException e) {
             throw new IllegalStateException(e);
         }
