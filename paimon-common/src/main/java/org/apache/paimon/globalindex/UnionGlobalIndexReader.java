@@ -78,6 +78,12 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
     }
 
     @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitArrayContains(
+            FieldRef fieldRef, Object literal) {
+        return unionAsync(reader -> reader.visitArrayContains(fieldRef, literal));
+    }
+
+    @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitLike(
             FieldRef fieldRef, Object literal) {
         return unionAsync(reader -> reader.visitLike(fieldRef, literal));

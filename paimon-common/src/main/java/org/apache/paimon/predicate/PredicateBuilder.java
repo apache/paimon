@@ -170,6 +170,17 @@ public class PredicateBuilder {
         return leaf(Contains.INSTANCE, transform, patternLiteral);
     }
 
+    public Predicate arrayContains(int idx, Object elementLiteral) {
+        DataField field = rowType.getFields().get(idx);
+        ArrayContains.elementType(field.type());
+        return leaf(ArrayContains.INSTANCE, idx, elementLiteral);
+    }
+
+    public Predicate arrayContains(Transform transform, Object elementLiteral) {
+        ArrayContains.elementType(transform.outputType());
+        return leaf(ArrayContains.INSTANCE, transform, elementLiteral);
+    }
+
     public Predicate like(int idx, Object patternLiteral) {
         Pair<LeafBinaryFunction, Object> optimized =
                 LikeOptimization.tryOptimize(patternLiteral)

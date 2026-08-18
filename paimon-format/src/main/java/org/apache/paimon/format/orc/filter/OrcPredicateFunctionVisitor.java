@@ -83,6 +83,11 @@ public class OrcPredicateFunctionVisitor
     }
 
     @Override
+    public Optional<OrcFilters.Predicate> visitArrayContains(FieldRef fieldRef, Object literal) {
+        return Optional.empty();
+    }
+
+    @Override
     public Optional<OrcFilters.Predicate> visitLike(FieldRef fieldRef, Object literal) {
         return Optional.empty();
     }

@@ -75,6 +75,12 @@ public class OffsetGlobalIndexReader implements GlobalIndexReader {
     }
 
     @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitArrayContains(
+            FieldRef fieldRef, Object literal) {
+        return wrapped.visitArrayContains(fieldRef, literal).thenApply(this::applyOffset);
+    }
+
+    @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitLike(
             FieldRef fieldRef, Object literal) {
         return wrapped.visitLike(fieldRef, literal).thenApply(this::applyOffset);
