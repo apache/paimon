@@ -1136,7 +1136,7 @@ without decoding unrelated fields:
 import pyarrow as pa
 import pyarrow.compute as pc
 
-from pypaimon.data import variant_get, variant_replace
+from pypaimon.data import variant_get, variant_replace, variant_set
 
 current = variant_get(payload, '$.velocity.y', pa.float64())
 updated_payload = variant_replace(
@@ -1148,6 +1148,24 @@ values. Exact extraction supports scalar types and nested struct, list, and
 string-keyed map types. Replacement supports scalar types. Missing paths read
 as NULL and remain unchanged unless `strict=True` is specified. Pass mappings
 to process multiple paths in one pass.
+
+`variant_set` upserts paths: existing paths are replaced like
+`variant_replace`, and a missing final key is inserted when its parent path
+exists and is an OBJECT:
+
+```python
+updated_payload = variant_set(payload, {
+    '$.velocity.y': pc.negate(current),
+    '$.processed': pa.scalar(True, type=pa.bool_()),
+})
+```
+
+Values may be a `pa.Scalar` (broadcast to every row) or a `pa.Array` /
+`pa.ChunkedArray` with one value per row; Arrow NULL values are stored as
+VARIANT NULL and SQL NULL rows are preserved. `variant_set` raises
+`ValueError` when an intermediate path is missing, when the parent of a
+missing key is not an OBJECT, or for a missing array index — it never
+creates intermediate objects or extends arrays.
 
 
 **`GenericVariant` API:**

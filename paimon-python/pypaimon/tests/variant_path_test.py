@@ -26,6 +26,7 @@ import pyarrow.compute as pc
 from pypaimon.data._variant_binary import _primitive_header
 from pypaimon.data.generic_variant import _DOUBLE, GenericVariant
 from pypaimon.data.variant_path import (
+    _metadata_cache,
     _metadata_key_ids,
     _path_positions,
     _rebuilt_offsets,
@@ -76,6 +77,26 @@ def _typed_object(fields):
 
 
 class TestVariantGet(unittest.TestCase):
+
+    def test_metadata_cache_is_bounded_and_released(self):
+        column = _variants([
+            {'value': float(index), 'key_%d' % index: index}
+            for index in range(300)
+        ])
+        cache_sizes = []
+
+        def parse_metadata(metadata):
+            cache_sizes.append(len(_metadata_cache.value))
+            return _metadata_key_ids(metadata)
+
+        with patch(
+                'pypaimon.data.variant_path._metadata_key_ids',
+                side_effect=parse_metadata):
+            result = variant_get(column, '$.value', pa.float64())
+
+        self.assertEqual(result.to_pylist(), [float(i) for i in range(300)])
+        self.assertLessEqual(max(cache_sizes), 256)
+        self.assertFalse(hasattr(_metadata_cache, 'value'))
 
     def test_nested_paths_and_missing_values(self):
         column = pa.chunked_array([

@@ -388,7 +388,9 @@ class _GenericVariantBuilder:
         self._write_le(micros_since_epoch & 0xFFFFFFFFFFFFFFFF, 8)
 
     def _finish_writing_object(self, start, fields):
-        fields.sort(key=lambda f: f[0])
+        # Java binary-searches fields by UTF-16 order (String.compareTo), so sort
+        # by key name as UTF-16 code units, not by Python code point.
+        fields.sort(key=lambda f: f[0].encode('utf-16-be'))
         for i in range(1, len(fields)):
             if fields[i][0] == fields[i - 1][0]:
                 raise ValueError('Duplicate key in variant object')
