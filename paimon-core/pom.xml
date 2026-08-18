@@ -286,12 +286,19 @@ under the License.
                         </goals>
                         <configuration>
                             <target>
+                                <!-- Prevent Git from discovering an unrelated repository
+                                     containing a Paimon source archive. -->
+                                <property name="paimon.core.git.ceiling"
+                                          location="${project.basedir}/../.."/>
+
                                 <exec executable="git"
                                       dir="${project.basedir}"
                                       failifexecutionfails="false"
                                       failonerror="false"
                                       outputproperty="paimon.core.git.commit.id"
                                       resultproperty="paimon.core.git.result">
+                                    <env key="GIT_CEILING_DIRECTORIES"
+                                         value="${paimon.core.git.ceiling}"/>
                                     <arg value="rev-parse"/>
                                     <arg value="HEAD"/>
                                 </exec>
