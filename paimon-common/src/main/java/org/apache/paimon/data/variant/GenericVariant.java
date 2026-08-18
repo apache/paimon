@@ -18,8 +18,10 @@
 
 package org.apache.paimon.data.variant;
 
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.variant.VariantPathSegment.ArrayExtraction;
 import org.apache.paimon.data.variant.VariantPathSegment.ObjectExtraction;
+import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.types.DataType;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonFactory;
@@ -48,11 +50,11 @@ import static org.apache.paimon.data.variant.GenericVariantUtil.Type;
 import static org.apache.paimon.data.variant.GenericVariantUtil.VERSION;
 import static org.apache.paimon.data.variant.GenericVariantUtil.VERSION_MASK;
 import static org.apache.paimon.data.variant.GenericVariantUtil.checkIndex;
-import static org.apache.paimon.data.variant.GenericVariantUtil.compareUnsignedUtf8;
 import static org.apache.paimon.data.variant.GenericVariantUtil.getMetadataKey;
 import static org.apache.paimon.data.variant.GenericVariantUtil.handleArray;
 import static org.apache.paimon.data.variant.GenericVariantUtil.handleObject;
 import static org.apache.paimon.data.variant.GenericVariantUtil.malformedVariant;
+import static org.apache.paimon.data.variant.GenericVariantUtil.pointToMetadataKey;
 import static org.apache.paimon.data.variant.GenericVariantUtil.readUnsigned;
 import static org.apache.paimon.data.variant.GenericVariantUtil.valueSize;
 import static org.apache.paimon.data.variant.GenericVariantUtil.variantConstructorSizeLimit;
@@ -243,12 +245,13 @@ public final class GenericVariant implements Variant, Serializable {
                 value,
                 pos,
                 (size, idSize, offsetSize, idStart, offsetStart, dataStart) -> {
+                    MetadataKeyLookup keyLookup = new MetadataKeyLookup(metadata, key);
                     // Use linear search for a short list. Switch to binary search when the length
                     // reaches `BINARY_SEARCH_THRESHOLD`.
                     if (size < BINARY_SEARCH_THRESHOLD) {
                         for (int i = 0; i < size; ++i) {
                             int id = readUnsigned(value, idStart + idSize * i, idSize);
-                            if (key.equals(getMetadataKey(metadata, id))) {
+                            if (keyLookup.compareUtf8(id) == 0) {
                                 int offset =
                                         readUnsigned(
                                                 value, offsetStart + offsetSize * i, offsetSize);
@@ -258,24 +261,24 @@ public final class GenericVariant implements Variant, Serializable {
                     } else {
                         GenericVariant result =
                                 binarySearchObjectField(
-                                        key,
                                         size,
                                         idSize,
                                         offsetSize,
                                         idStart,
                                         offsetStart,
                                         dataStart,
+                                        keyLookup,
                                         true);
                         return result != null
                                 ? result
                                 : binarySearchObjectField(
-                                        key,
                                         size,
                                         idSize,
                                         offsetSize,
                                         idStart,
                                         offsetStart,
                                         dataStart,
+                                        keyLookup,
                                         false);
                     }
                     return null;
@@ -283,22 +286,23 @@ public final class GenericVariant implements Variant, Serializable {
     }
 
     private GenericVariant binarySearchObjectField(
-            String key,
             int size,
             int idSize,
             int offsetSize,
             int idStart,
             int offsetStart,
             int dataStart,
+            MetadataKeyLookup keyLookup,
             boolean utf8Order) {
         int low = 0;
         int high = size - 1;
         while (low <= high) {
             int mid = (low + high) >>> 1;
             int id = readUnsigned(value, idStart + idSize * mid, idSize);
-            String fieldName = getMetadataKey(metadata, id);
             int comparison =
-                    utf8Order ? compareUnsignedUtf8(fieldName, key) : fieldName.compareTo(key);
+                    utf8Order
+                            ? keyLookup.compareUtf8(id)
+                            : getMetadataKey(metadata, id).compareTo(keyLookup.key);
             if (comparison < 0) {
                 low = mid + 1;
             } else if (comparison > 0) {
@@ -309,6 +313,27 @@ public final class GenericVariant implements Variant, Serializable {
             }
         }
         return null;
+    }
+
+    private static final class MetadataKeyLookup {
+        private final byte[] metadata;
+        private final String key;
+        private final MemorySegment[] metadataSegments;
+        private final BinaryString binaryKey;
+        private final BinaryString candidate;
+
+        private MetadataKeyLookup(byte[] metadata, String key) {
+            this.metadata = metadata;
+            this.key = key;
+            this.metadataSegments = new MemorySegment[] {MemorySegment.wrap(metadata)};
+            this.binaryKey = BinaryString.fromString(key);
+            this.candidate = BinaryString.fromAddress(metadataSegments, 0, 0);
+        }
+
+        private int compareUtf8(int id) {
+            pointToMetadataKey(metadata, metadataSegments, id, candidate);
+            return candidate.compareTo(binaryKey);
+        }
     }
 
     /** Variant object field. */

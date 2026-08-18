@@ -18,6 +18,8 @@
 
 package org.apache.paimon.data.variant;
 
+import org.apache.paimon.data.BinaryString;
+
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonFactory;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonParseException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonParser;
@@ -70,7 +72,6 @@ import static org.apache.paimon.data.variant.GenericVariantUtil.UUID;
 import static org.apache.paimon.data.variant.GenericVariantUtil.VERSION;
 import static org.apache.paimon.data.variant.GenericVariantUtil.arrayHeader;
 import static org.apache.paimon.data.variant.GenericVariantUtil.checkIndex;
-import static org.apache.paimon.data.variant.GenericVariantUtil.compareUnsignedUtf8;
 import static org.apache.paimon.data.variant.GenericVariantUtil.getMetadataKey;
 import static org.apache.paimon.data.variant.GenericVariantUtil.handleArray;
 import static org.apache.paimon.data.variant.GenericVariantUtil.handleObject;
@@ -529,22 +530,28 @@ public class GenericVariantBuilder {
      */
     public static final class FieldEntry implements Comparable<FieldEntry> {
         final String key;
+        final BinaryString binaryKey;
         final int id;
         final int offset;
 
         public FieldEntry(String key, int id, int offset) {
+            this(key, BinaryString.fromString(key), id, offset);
+        }
+
+        private FieldEntry(String key, BinaryString binaryKey, int id, int offset) {
             this.key = key;
+            this.binaryKey = binaryKey;
             this.id = id;
             this.offset = offset;
         }
 
         FieldEntry withNewOffset(int newOffset) {
-            return new FieldEntry(key, id, newOffset);
+            return new FieldEntry(key, binaryKey, id, newOffset);
         }
 
         @Override
         public int compareTo(FieldEntry other) {
-            return compareUnsignedUtf8(key, other.key);
+            return binaryKey.compareTo(other.binaryKey);
         }
     }
 

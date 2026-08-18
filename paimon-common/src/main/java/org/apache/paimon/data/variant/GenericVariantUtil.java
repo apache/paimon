@@ -18,6 +18,9 @@
 
 package org.apache.paimon.data.variant;
 
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.memory.MemorySegment;
+
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
@@ -144,23 +147,6 @@ public class GenericVariantUtil {
     public static final int MAX_DECIMAL16_PRECISION = 38;
 
     public static final int BINARY_SEARCH_THRESHOLD = 32;
-
-    static int compareUnsignedUtf8(String left, String right) {
-        // UTF-8 preserves Unicode scalar order, so compare code points without encoding.
-        int leftIndex = 0;
-        int rightIndex = 0;
-        while (leftIndex < left.length() && rightIndex < right.length()) {
-            int leftCodePoint = left.codePointAt(leftIndex);
-            int rightCodePoint = right.codePointAt(rightIndex);
-            int comparison = Integer.compare(leftCodePoint, rightCodePoint);
-            if (comparison != 0) {
-                return comparison;
-            }
-            leftIndex += Character.charCount(leftCodePoint);
-            rightIndex += Character.charCount(rightCodePoint);
-        }
-        return Integer.compare(left.length() - leftIndex, right.length() - rightIndex);
-    }
 
     // Write the least significant `numBytes` bytes in `value` into `bytes[pos, pos + numBytes)` in
     // little endian.
@@ -667,5 +653,23 @@ public class GenericVariantUtil {
         }
         checkIndex(stringStart + nextOffset - 1, metadata.length);
         return new String(metadata, stringStart + offset, nextOffset - offset);
+    }
+
+    static void pointToMetadataKey(
+            byte[] metadata, MemorySegment[] metadataSegments, int id, BinaryString result) {
+        checkIndex(0, metadata.length);
+        int offsetSize = ((metadata[0] >> 6) & 0x3) + 1;
+        int dictSize = readUnsigned(metadata, 1, offsetSize);
+        if (id >= dictSize) {
+            throw malformedVariant();
+        }
+        int stringStart = 1 + (dictSize + 2) * offsetSize;
+        int offset = readUnsigned(metadata, 1 + (id + 1) * offsetSize, offsetSize);
+        int nextOffset = readUnsigned(metadata, 1 + (id + 2) * offsetSize, offsetSize);
+        if (offset > nextOffset) {
+            throw malformedVariant();
+        }
+        checkIndex(stringStart + nextOffset - 1, metadata.length);
+        result.pointTo(metadataSegments, stringStart + offset, nextOffset - offset);
     }
 }

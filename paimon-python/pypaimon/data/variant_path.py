@@ -35,6 +35,7 @@ from pypaimon.data._variant_binary import (
     _U32_SIZE,
     _VERSION,
     _VERSION_MASK,
+    _array_header,
     _get_int_size,
     _object_header,
     _primitive_header,
@@ -55,6 +56,7 @@ from pypaimon.data.generic_variant import (
     _PRIMITIVE_FIXED_SIZES,
     GenericVariant,
     _Type,
+    _check_variant_sizes,
     _variant_get_type,
 )
 from pypaimon.data.variant_shredding import (
@@ -200,7 +202,9 @@ def _metadata_with_keys(metadata: bytes, new_keys: Tuple[str, ...]):
         offset_size = _get_int_size(max_size) if max_size > 0 else 1
         offset_start = 1 + offset_size
         string_start = offset_start + (len(encoded) + 1) * offset_size
-        rebuilt = bytearray(string_start + total_size)
+        metadata_size = string_start + total_size
+        _check_variant_sizes(0, metadata_size)
+        rebuilt = bytearray(metadata_size)
         rebuilt[0] = _VERSION | ((offset_size - 1) << 6)
         rebuilt[1:1 + offset_size] = len(encoded).to_bytes(
             offset_size, 'little')
@@ -1639,16 +1643,49 @@ def variant_replace(
     return pa.chunked_array(result_chunks, type=data_type)
 
 
-def _build_object_value_ordered(fields):
-    """Build object value bytes keeping the given field order."""
-    if not fields:
-        return _build_object_value([])
+class _ValueParts:
+
+    __slots__ = ('parts', 'size')
+
+    def __init__(self, parts, size):
+        _check_variant_sizes(size, 0)
+        self.parts = tuple(parts)
+        self.size = size
+
+    def __len__(self):
+        return self.size
+
+
+def _part_size(part):
+    return part.size if isinstance(part, _ValueParts) else len(part)
+
+
+def _materialize_value(part):
+    if not isinstance(part, _ValueParts):
+        _check_variant_sizes(len(part), 0)
+        return bytes(part)
+    output = bytearray(part.size)
+    output_pos = 0
+    stack = list(reversed(part.parts))
+    while stack:
+        current = stack.pop()
+        if isinstance(current, _ValueParts):
+            stack.extend(reversed(current.parts))
+            continue
+        size = len(current)
+        output[output_pos:output_pos + size] = current
+        output_pos += size
+    return bytes(output)
+
+
+def _build_object_value_parts(fields):
+    """Build an object without copying child values."""
     size = len(fields)
-    data_size = sum(len(child) for _, child in fields)
+    data_size = sum(_part_size(child) for _, child in fields)
     large_size = size > _U8_MAX
     size_bytes = _U32_SIZE if large_size else 1
-    max_id = max(field_id for field_id, _ in fields)
-    id_size = _get_int_size(max_id)
+    max_id = max((field_id for field_id, _ in fields), default=0)
+    id_size = _get_int_size(max_id) if max_id > 0 else 1
     offset_size = _get_int_size(data_size) if data_size > 0 else 1
     buf = bytearray()
     buf.append(_object_header(large_size, id_size, offset_size))
@@ -1658,11 +1695,37 @@ def _build_object_value_ordered(fields):
     offset = 0
     for _, child in fields:
         buf += offset.to_bytes(offset_size, 'little')
-        offset += len(child)
+        offset += _part_size(child)
     buf += offset.to_bytes(offset_size, 'little')
-    for _, child in fields:
-        buf += child
-    return bytes(buf)
+    header = bytes(buf)
+    return _ValueParts(
+        [header] + [child for _, child in fields],
+        len(header) + data_size,
+    )
+
+
+def _build_array_value_parts(children):
+    """Build an array without copying child values."""
+    size = len(children)
+    data_size = sum(_part_size(child) for child in children)
+    large_size = size > _U8_MAX
+    size_bytes = _U32_SIZE if large_size else 1
+    offset_size = _get_int_size(data_size) if data_size > 0 else 1
+    buf = bytearray()
+    buf.append(_array_header(large_size, offset_size))
+    buf += size.to_bytes(size_bytes, 'little')
+    offset = 0
+    for child in children:
+        buf += offset.to_bytes(offset_size, 'little')
+        offset += _part_size(child)
+    buf += offset.to_bytes(offset_size, 'little')
+    header = bytes(buf)
+    return _ValueParts([header] + children, len(header) + data_size)
+
+
+def _build_object_value_ordered(fields):
+    """Build object value bytes keeping the given field order."""
+    return _materialize_value(_build_object_value_parts(fields))
 
 
 def _apply_edits(
@@ -1675,6 +1738,7 @@ def _apply_edits(
         source_metadata_size=None,
 ):
     """Apply edits and validate source ids before metadata extension."""
+    source = value if isinstance(value, memoryview) else memoryview(value)
     results = {}
     next_token = 1
     stack = [('visit', 0, pos, limit, edits)]
@@ -1695,13 +1759,13 @@ def _apply_edits(
                             field[0]].encode('utf-8'))
                 except KeyError:
                     _malformed("object key is missing from metadata")
-            results[token] = _build_object_value_ordered(fields)
+            results[token] = _build_object_value_parts(fields)
             continue
         if kind == 'finish_array':
             _, token, children, child_tokens = action
             for index, child_token in child_tokens:
                 children[index] = results.pop(child_token)
-            results[token] = _build_array_value(children)
+            results[token] = _build_array_value_parts(children)
             continue
 
         _, token, node_pos, node_limit, node_edits = action
@@ -1770,7 +1834,7 @@ def _apply_edits(
                         _validate_value_field_ids(
                             value, child_pos, child_end,
                             source_metadata_size)
-                    children.append(bytes(value[child_pos:child_end]))
+                    children.append(source[child_pos:child_end])
             stack.append((
                 'finish_object', token, ids, children, inserts,
                 child_tokens,
@@ -1802,14 +1866,14 @@ def _apply_edits(
                         _validate_value_field_ids(
                             value, child_pos, child_end,
                             source_metadata_size)
-                    children.append(bytes(value[child_pos:child_end]))
+                    children.append(source[child_pos:child_end])
             stack.append((
                 'finish_array', token, children, child_tokens,
             ))
         else:
             _malformed("path segment does not match the value type")
         stack.extend(child_actions)
-    return results[0]
+    return _materialize_value(results[0])
 
 
 def _set_chunk(chunk, values, parsed, global_row):
@@ -1838,7 +1902,8 @@ def _set_chunk(chunk, values, parsed, global_row):
         return scalar_payloads[index]
 
     def rebuild_row(row, view, insert_set, key_ids, names_by_id,
-                    new_metadata, source_metadata_size=None,
+                    original_metadata, new_metadata,
+                    source_metadata_size=None,
                     validated_positions=None):
         edits = []
         for index, (path, parsed_path, provider) in enumerate(parsed):
@@ -1855,6 +1920,11 @@ def _set_chunk(chunk, values, parsed, global_row):
         rebuilt = _apply_edits(
             view, 0, len(view), edits, key_ids, names_by_id,
             source_metadata_size)
+        _check_variant_sizes(
+            len(rebuilt),
+            len(new_metadata if new_metadata is not None
+                else original_metadata),
+        )
         if new_metadata is not None or rebuilt != view:
             rebuilt_rows[row] = rebuilt
         if new_metadata is not None:
@@ -1906,7 +1976,7 @@ def _set_chunk(chunk, values, parsed, global_row):
             row = int(row)
             rebuild_row(
                 row, values.view(row), insert_set, key_ids, names_by_id,
-                new_metadata, source_metadata_size,
+                first_metadata, new_metadata, source_metadata_size,
                 [
                     None if target_positions[index] is None
                     else int(target_positions[index][offset_index])
@@ -1948,8 +2018,8 @@ def _set_chunk(chunk, values, parsed, global_row):
         new_metadata, key_ids, names_by_id = _metadata_with_keys(
             row_metadata, tuple(insert_keys))
         rebuild_row(
-            row, view, insert_set, key_ids, names_by_id, new_metadata,
-            source_metadata_size)
+            row, view, insert_set, key_ids, names_by_id, row_metadata,
+            new_metadata, source_metadata_size)
 
     if rebuilt_rows:
         state.ensure()

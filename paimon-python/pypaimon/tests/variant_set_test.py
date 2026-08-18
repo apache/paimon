@@ -22,10 +22,11 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from pypaimon.data import variant_replace, variant_set
-from pypaimon.data.generic_variant import GenericVariant
+from pypaimon.data.generic_variant import GenericVariant, _check_variant_sizes
 from pypaimon.data.variant_path import (
     _apply_edits,
     _build_object_value_ordered,
+    _materialize_value,
     _metadata_key_ids,
     _metadata_with_keys,
     _path_positions,
@@ -607,8 +608,13 @@ class TestVariantSetFastPaths(unittest.TestCase):
         ])
         path = '$.target' + '[0]' * 1020 + '.new'
 
-        result = variant_set(column, path, pa.scalar(True))
+        with patch(
+                'pypaimon.data.variant_path._materialize_value',
+                wraps=_materialize_value,
+        ) as materialize:
+            result = variant_set(column, path, pa.scalar(True))
 
+        self.assertEqual(materialize.call_count, 1)
         self.assertEqual(
             variant_get(result, path, pa.bool_()).to_pylist(),
             [True],
@@ -635,6 +641,26 @@ class TestVariantSetFastPaths(unittest.TestCase):
 
 
 class TestVariantSetErrors(unittest.TestCase):
+
+    def test_variant_size_limit_boundary(self):
+        with patch('pypaimon.data.generic_variant._SIZE_LIMIT', 64):
+            _check_variant_sizes(64, 64)
+            with self.assertRaisesRegex(
+                    ValueError, 'VARIANT_CONSTRUCTOR_SIZE_LIMIT'):
+                _check_variant_sizes(65, 64)
+            with self.assertRaisesRegex(
+                    ValueError, 'VARIANT_CONSTRUCTOR_SIZE_LIMIT'):
+                _check_variant_sizes(64, 65)
+
+    def test_rejects_oversized_value_and_metadata(self):
+        column = _variants([{'value': 'a'}])
+        with patch('pypaimon.data.generic_variant._SIZE_LIMIT', 64):
+            with self.assertRaisesRegex(
+                    ValueError, 'VARIANT_CONSTRUCTOR_SIZE_LIMIT'):
+                variant_set(column, '$.value', pa.scalar('x' * 128))
+            with self.assertRaisesRegex(
+                    ValueError, 'VARIANT_CONSTRUCTOR_SIZE_LIMIT'):
+                variant_set(column, '$.' + 'k' * 128, pa.scalar(True))
 
     def test_rejects_type_and_length_mismatches(self):
         column = _variants([{'value': 1.0}, {'value': 2.0}])
