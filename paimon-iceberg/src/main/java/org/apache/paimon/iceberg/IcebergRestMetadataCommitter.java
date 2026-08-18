@@ -46,6 +46,7 @@ import org.apache.iceberg.catalog.Catalog;
 import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.exceptions.AlreadyExistsException;
+import org.apache.iceberg.rest.Endpoint;
 import org.apache.iceberg.rest.RESTCatalog;
 import org.apache.iceberg.types.Types;
 import org.apache.iceberg.types.Types.NestedField;
@@ -54,6 +55,8 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -61,6 +64,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static org.apache.iceberg.CatalogUtil.ICEBERG_CATALOG_TYPE;
@@ -81,7 +85,7 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
 
     private final RESTCatalog restCatalog;
     private final FileIO fileIO;
-    private final Path tableLocation;
+    private final Path metadataDirectory;
     private final String icebergDatabaseName;
     private final TableIdentifier icebergTableIdentifier;
     private final IcebergOptions icebergOptions;
@@ -92,7 +96,7 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
         Options options = new Options(table.options());
         icebergOptions = new IcebergOptions(options);
         this.fileIO = table.fileIO();
-        this.tableLocation = table.location();
+        this.metadataDirectory = IcebergCommitCallback.catalogTableMetadataPath(table);
 
         Identifier identifier = Preconditions.checkNotNull(table.catalogEnvironment().identifier());
         String icebergDatabase = options.get(IcebergOptions.METASTORE_DATABASE);
@@ -156,10 +160,7 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
 
         try {
             if (!tableExists()) {
-                if (newMetadata.currentSnapshot() != null) {
-                    // metadata with history is imported wholesale: replaying it through
-                    // TableMetadata.Builder would recompute next-row-id from added-rows
-                    // and lose any high-water mark that does not start at 0
+                if (requiresRegistration(newIcebergMetadata)) {
                     LOG.info("Table {} does not exist, register it.", icebergTableIdentifier);
                     registerAsCurrent(newIcebergMetadata, newMetadata, false);
                     return;
@@ -204,10 +205,9 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                     LOG.info(
                             "Iceberg table {} exists but has no snapshots, treating as new table.",
                             icebergTableIdentifier);
-                    if (newMetadata.currentSnapshot() != null) {
-                        // same watermark argument as above; registration has no
-                        // post-create commit step, so the drop+create failure loop this
-                        // branch used to guard against cannot occur
+                    if (requiresRegistration(newIcebergMetadata)) {
+                        // registration has no post-create commit step, so the drop+create
+                        // failure loop this branch guards against cannot occur
                         registerAsCurrent(newIcebergMetadata, newMetadata, true);
                         return;
                     }
@@ -224,11 +224,14 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                                 newMetadata.currentSnapshot() != null
                                         ? newMetadata.currentSnapshot().snapshotId()
                                         : "No snapshot");
-                        LOG.info(
-                                "the base metadata is incorrect, re-registering the iceberg"
-                                        + " table from local metadata.");
-                        registerAsCurrent(newIcebergMetadata, newMetadata, true);
-                        return;
+                        if (requiresRegistration(newIcebergMetadata)) {
+                            LOG.info(
+                                    "the base metadata is incorrect, re-registering the iceberg"
+                                            + " table from local metadata.");
+                            registerAsCurrent(newIcebergMetadata, newMetadata, true);
+                            return;
+                        }
+                        updateBuilder = updatesForIncorrectBase(newMetadata);
                     }
                 }
             }
@@ -308,6 +311,13 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
         return updateBuilder;
     }
 
+    private TableMetadata.Builder updatesForIncorrectBase(TableMetadata newMetadata) {
+        LOG.info("the base metadata is incorrect, we'll recreate the iceberg table.");
+        icebergTable = recreateTable(newMetadata);
+        return updatesForCorrectBase(
+                ((BaseTable) icebergTable).operations().current(), newMetadata, true);
+    }
+
     private RESTCatalog initRestCatalog(Map<String, String> restConfigs, Configuration conf) {
         restConfigs.put(ICEBERG_CATALOG_TYPE, "rest");
         Catalog catalog = CatalogUtil.buildIcebergCatalog(REST_CATALOG_NAME, restConfigs, conf);
@@ -339,50 +349,168 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
     }
 
     /**
+     * Whether publishing {@code metadata} to a new or recreated catalog table must go through
+     * {@link RESTCatalog#registerTable}. The create/update path replays only the current snapshot
+     * through {@link TableMetadata.Builder}, which derives the table's next-row-id from that
+     * snapshot's added-rows alone, so the server ends at {@code added-rows} while the local
+     * watermark is {@code first-row-id + added-rows}. Any nonzero first-row-id (rollback and
+     * self-heal rebuilds) would leave the server below ids already assigned in manifests, and a
+     * later external writer could reuse them; registration imports the metadata verbatim. Format
+     * version 2 tables and zero-based v3 metadata keep the create/update path, which every REST
+     * catalog supports.
+     */
+    private static boolean requiresRegistration(IcebergMetadata metadata) {
+        IcebergSnapshot current = metadata.currentSnapshot();
+        return metadata.formatVersion() >= IcebergMetadata.FORMAT_VERSION_V3
+                && current != null
+                && current.firstRowId() != null
+                && current.firstRowId() != 0;
+    }
+
+    /**
      * Makes the catalog's state exactly the (REST-adjusted) local metadata by registering a
-     * metadata file, instead of rebuilding the table through {@link TableMetadata.Builder}. The
-     * builder recomputes the row-id high-water mark from each snapshot's added-rows, so any id
-     * space that does not start at 0 (self-heal and rollback rebuilds) would end below the ids
-     * already assigned in manifests, and a later external writer could reuse them. Registration
-     * imports every field of the metadata verbatim, next-row-id included.
+     * metadata file, instead of rebuilding the table through {@link TableMetadata.Builder}; see
+     * {@link #requiresRegistration}. Fails before touching the catalog table when the server does
+     * not support registration.
      */
     private void registerAsCurrent(
             IcebergMetadata adjustedMetadata, TableMetadata newMetadata, boolean dropFirst) {
+        if (!registerTableAdvertised()) {
+            throw registerTableUnsupported(
+                    "The Iceberg REST catalog does not advertise registerTable",
+                    adjustedMetadata,
+                    null);
+        }
         try {
-            Path registerPath =
-                    new Path(
-                            tableLocation,
-                            String.format(
-                                    "metadata/rest-register-v%d.metadata.json",
-                                    adjustedMetadata.currentSnapshotId()));
-            if (!fileIO.tryToWriteAtomic(registerPath, adjustedMetadata.toJson())) {
-                fileIO.deleteQuietly(registerPath);
-                fileIO.overwriteFileUtf8(registerPath, adjustedMetadata.toJson());
-            }
+            Path registerPath = writeRegisterFile(adjustedMetadata);
             if (dropFirst) {
+                if (probeRegisterTable(registerPath)) {
+                    // the table disappeared concurrently and the probe registered it
+                    verifyRegistered(newMetadata);
+                    return;
+                }
                 dropTable();
             }
             icebergTable =
                     restCatalog.registerTable(icebergTableIdentifier, registerPath.toString());
-            long registered =
-                    ((BaseTable) icebergTable)
-                            .operations()
-                            .current()
-                            .currentSnapshot()
-                            .snapshotId();
-            if (newMetadata.currentSnapshot() == null
-                    || registered != newMetadata.currentSnapshot().snapshotId()) {
-                throw new IllegalStateException(
-                        String.format(
-                                "Registered catalog table is at snapshot %s instead of %s",
-                                registered,
-                                newMetadata.currentSnapshot() == null
-                                        ? "null"
-                                        : newMetadata.currentSnapshot().snapshotId()));
-            }
+            verifyRegistered(newMetadata);
+        } catch (UnsupportedOperationException e) {
+            throw e;
         } catch (Exception e) {
             throw new RuntimeException(
                     "Fail to register iceberg table " + icebergTableIdentifier, e);
+        }
+    }
+
+    /**
+     * Whether the server advertises the register-table endpoint. Iceberg's REST client keeps the
+     * endpoint set from the server's {@code /v1/config} response (or its backwards-compatible
+     * defaults, register-table included, when the server advertises none) in {@code
+     * RESTSessionCatalog#endpoints}, without a public accessor.
+     */
+    private boolean registerTableAdvertised() {
+        try {
+            Field sessionField = RESTCatalog.class.getDeclaredField("sessionCatalog");
+            sessionField.setAccessible(true);
+            Object sessionCatalog = sessionField.get(restCatalog);
+            Field endpointsField = null;
+            for (Class<?> c = sessionCatalog.getClass(); c != null; c = c.getSuperclass()) {
+                try {
+                    endpointsField = c.getDeclaredField("endpoints");
+                    break;
+                } catch (NoSuchFieldException ignored) {
+                    // keep looking in the superclass
+                }
+            }
+            if (endpointsField == null) {
+                throw new NoSuchFieldException("endpoints");
+            }
+            endpointsField.setAccessible(true);
+            Set<?> endpoints = (Set<?>) endpointsField.get(sessionCatalog);
+            return endpoints.contains(Endpoint.V1_REGISTER_TABLE);
+        } catch (Exception | LinkageError e) {
+            LOG.warn(
+                    "Cannot read the endpoints advertised by the Iceberg REST catalog, "
+                            + "assuming registerTable is unsupported.",
+                    e);
+            return false;
+        }
+    }
+
+    /**
+     * A server that advertises no endpoint list gets the client's default list, register-table
+     * included, so {@link #registerTableAdvertised} alone cannot prove support. Before the existing
+     * table is dropped, the registration is attempted against it: a server that implements the
+     * endpoint rejects it with {@link AlreadyExistsException}; anything else means the endpoint is
+     * unavailable and the existing table is left untouched.
+     *
+     * @return true if the registration went through because the table no longer existed
+     */
+    private boolean probeRegisterTable(Path registerPath) {
+        try {
+            icebergTable =
+                    restCatalog.registerTable(icebergTableIdentifier, registerPath.toString());
+            return true;
+        } catch (AlreadyExistsException e) {
+            return false;
+        } catch (RuntimeException e) {
+            throw registerTableUnsupported(
+                    "registerTable against the existing Iceberg REST catalog table failed with "
+                            + "something other than AlreadyExists, so the endpoint is assumed "
+                            + "unsupported",
+                    null,
+                    e);
+        }
+    }
+
+    private UnsupportedOperationException registerTableUnsupported(
+            String reason, @Nullable IcebergMetadata metadata, @Nullable Throwable cause) {
+        return new UnsupportedOperationException(
+                String.format(
+                        "%s; registerTable is required to publish format version 3 metadata "
+                                + "whose row-id space does not start at 0%s. The catalog table "
+                                + "%s was left untouched.",
+                        reason,
+                        metadata == null
+                                ? ""
+                                : String.format(
+                                        " (current snapshot first-row-id %s, next-row-id %s)",
+                                        metadata.currentSnapshot().firstRowId(),
+                                        metadata.nextRowId()),
+                        icebergTableIdentifier),
+                cause);
+    }
+
+    /**
+     * Writes the metadata to register into a fresh, never-overwritten file. A catalog may keep
+     * referencing the registered location, and rollback and rebuild paths reuse Paimon snapshot ids
+     * for different timelines, so the name carries a UUID and an existing file is never replaced.
+     */
+    private Path writeRegisterFile(IcebergMetadata metadata) throws IOException {
+        Path registerPath =
+                new Path(
+                        metadataDirectory,
+                        String.format(
+                                "rest-register-v%d-%s.metadata.json",
+                                metadata.currentSnapshotId(), UUID.randomUUID()));
+        if (!fileIO.tryToWriteAtomic(registerPath, metadata.toJson())) {
+            throw new IOException("Metadata file to register already exists: " + registerPath);
+        }
+        return registerPath;
+    }
+
+    private void verifyRegistered(TableMetadata newMetadata) {
+        long registered =
+                ((BaseTable) icebergTable).operations().current().currentSnapshot().snapshotId();
+        if (newMetadata.currentSnapshot() == null
+                || registered != newMetadata.currentSnapshot().snapshotId()) {
+            throw new IllegalStateException(
+                    String.format(
+                            "Registered catalog table is at snapshot %s instead of %s",
+                            registered,
+                            newMetadata.currentSnapshot() == null
+                                    ? "null"
+                                    : newMetadata.currentSnapshot().snapshotId()));
         }
     }
 
@@ -473,6 +601,15 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
             return "s3://" + location.substring("s3n://".length());
         }
         return location;
+    }
+
+    private Table recreateTable(TableMetadata newMetadata) {
+        try {
+            dropTable();
+            return createTable(newMetadata);
+        } catch (Exception e) {
+            throw new RuntimeException("Fail to recreate iceberg table.", e);
+        }
     }
 
     private Table getTable() {
