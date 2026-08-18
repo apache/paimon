@@ -43,11 +43,12 @@ import org.apache.paimon.types.VarCharType;
 
 import javax.annotation.concurrent.ThreadSafe;
 
+import java.io.Serializable;
 import java.util.Comparator;
 
 /** This interface provides core methods to ser/de and compare global index keys. */
 @ThreadSafe
-public interface KeySerializer {
+public interface KeySerializer extends Serializable {
 
     byte[] serialize(Object key);
 

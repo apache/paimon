@@ -21,6 +21,8 @@ package org.apache.paimon.globalindex.sorted;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexRefreshPlanner;
+import org.apache.paimon.globalindex.GlobalIndexer;
+import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.ScanResult;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.Options;
@@ -93,6 +95,10 @@ public class SortedGlobalIndexScanner implements Serializable {
     public SortedGlobalIndexScanner withSnapshot(Snapshot snapshot) {
         this.snapshot = snapshot;
         return this;
+    }
+
+    public Optional<KeySerializer> sortKeySerializer() {
+        return GlobalIndexer.create(indexType, indexField, options).sortKeySerializer();
     }
 
     public Optional<ScanResult<DataSplit>> scan() {
