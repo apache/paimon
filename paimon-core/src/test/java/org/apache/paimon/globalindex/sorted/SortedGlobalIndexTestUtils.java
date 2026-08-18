@@ -20,8 +20,8 @@ package org.apache.paimon.globalindex.sorted;
 
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.globalindex.GlobalIndexKeyExtractor;
 import org.apache.paimon.globalindex.KeySerializer;
-import org.apache.paimon.globalindex.bitmap.MultiValueGlobalIndexerFactory;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
@@ -61,6 +61,7 @@ public final class SortedGlobalIndexTestUtils {
                 SpecialFields.rowTypeWithRowId(table.rowType())
                         .project(Arrays.asList(indexFieldName, SpecialFields.ROW_ID.name()));
         InternalRow.FieldGetter fieldGetter = InternalRow.createFieldGetter(indexField.type(), 0);
+        GlobalIndexKeyExtractor keyExtractor = writer.keyExtractor();
         List<Pair<Object, Long>> rows = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
                         table.newReadBuilder()
@@ -71,25 +72,34 @@ public final class SortedGlobalIndexTestUtils {
             while (iterator.hasNext()) {
                 InternalRow row = iterator.next();
                 Object value = fieldGetter.getFieldOrNull(row);
-                rows.add(Pair.of(InternalRowUtils.copy(value, indexField.type()), row.getLong(1)));
+                long rowId = row.getLong(1);
+                keyExtractor.extract(
+                        value,
+                        key ->
+                                rows.add(
+                                        Pair.of(
+                                                InternalRowUtils.copy(key, keyExtractor.keyType()),
+                                                rowId)));
             }
         }
 
-        if (MultiValueGlobalIndexerFactory.IDENTIFIER.equals(indexType)) {
-            rows.sort(Comparator.comparingLong(row -> row.getValue()));
-        } else {
-            Comparator<Object> comparator =
-                    KeySerializer.create(indexField.type()).createComparator();
-            rows.sort(
-                    (left, right) -> {
-                        if (left.getKey() == null) {
-                            return right.getKey() == null ? 0 : -1;
-                        }
+        Comparator<Object> comparator =
+                KeySerializer.create(keyExtractor.keyType()).createComparator();
+        rows.sort(
+                (left, right) -> {
+                    if (left.getKey() == null) {
                         return right.getKey() == null
-                                ? 1
-                                : comparator.compare(left.getKey(), right.getKey());
-                    });
-        }
+                                ? Long.compare(left.getValue(), right.getValue())
+                                : -1;
+                    }
+                    int comparison =
+                            right.getKey() == null
+                                    ? 1
+                                    : comparator.compare(left.getKey(), right.getKey());
+                    return comparison == 0
+                            ? Long.compare(left.getValue(), right.getValue())
+                            : comparison;
+                });
 
         List<InternalRow> sortedRows = new ArrayList<>(rows.size());
         for (Pair<Object, Long> row : rows) {

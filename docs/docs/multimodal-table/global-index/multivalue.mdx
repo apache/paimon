@@ -28,11 +28,11 @@ A Multivalue index maps every distinct non-null element of an `ARRAY` column to 
 64-bit row-id bitmap. It accelerates element-membership predicates without treating the complete
 array as one scalar key.
 
-The index preserves these array semantics:
+For membership lookup, the index has these semantics:
 
 - Duplicate elements in one array contribute the row ID only once.
-- An empty array is non-null but contributes no element to the index.
-- Null elements inside a non-null array are ignored for membership lookup.
+- Null arrays, empty arrays, and null elements contribute no posting. The index does not
+  distinguish those cases and does not accelerate array `IS NULL` or `IS NOT NULL` predicates.
 
 The indexed column must be an `ARRAY` whose element type is supported by the global-index key
 serializer. A Multivalue index is single-column.
@@ -64,9 +64,11 @@ CALL sys.create_global_index(
 );
 ```
 
-The Multivalue writer does not require arrays to be ordered. Flink and Spark distribute build
-records by row ID, while each writer sorts its distinct element dictionary before writing the
-bitmap index file.
+Arrays do not need to be ordered. Flink and Spark first assign source rows to stable row-id ranges,
+expand every non-null element into an `(element, row-id)` entry, and sort those entries with their
+spillable sort paths. The writer then streams the sorted entries into bitmap posting lists while
+retaining the original source-row count for index coverage, including ranges containing only null
+or empty arrays.
 
 Build the procedure again after appending rows to cover newly added row-id ranges. The
 `scalar-index.search-mode` option controls whether an indexed scan includes uncovered rows:
@@ -111,6 +113,6 @@ CALL sys.drop_global_index(
 | `multivalue-index.compression` | `none` | Compression algorithm for dictionary blocks. |
 | `multivalue-index.compression-level` | `1` | Compression level used by codecs which support levels. |
 
-Each writer currently buffers the distinct-element posting lists for its source group in memory.
-Use Multivalue first for arrays with low or moderate element cardinality, and control per-writer
-input with `sorted-index.records-per-range` when necessary.
+The expanded entries use the engine's spillable sort, and the writer keeps only the current
+element's posting list in memory. `sorted-index.records-per-range` bounds the source-row range—and
+therefore the largest posting list—owned by one Data Evolution index file.

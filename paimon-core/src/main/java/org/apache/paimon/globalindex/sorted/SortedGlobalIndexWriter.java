@@ -21,9 +21,12 @@ package org.apache.paimon.globalindex.sorted;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalRow.FieldGetter;
+import org.apache.paimon.globalindex.GlobalIndexKeyExtractor;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
+import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.ResultEntry;
+import org.apache.paimon.globalindex.SortedGlobalIndexer;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
@@ -35,6 +38,7 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Range;
 
 import java.io.IOException;
@@ -61,6 +65,7 @@ public class SortedGlobalIndexWriter implements Serializable {
     private final long recordsPerRange;
 
     private DataField indexField;
+    private GlobalIndexKeyExtractor keyExtractor;
 
     public SortedGlobalIndexWriter(Table table, String indexType) {
         this(table, indexType, ((FileStoreTable) table).coreOptions().toConfiguration());
@@ -82,7 +87,17 @@ public class SortedGlobalIndexWriter implements Serializable {
                 indexField,
                 table.fullName());
         this.indexField = rowType.getField(indexField);
+        GlobalIndexer indexer = GlobalIndexer.create(indexType, this.indexField, options);
+        checkArgument(
+                indexer instanceof SortedGlobalIndexer,
+                "Index algorithm %s does not expose sorted index keys.",
+                indexType);
+        this.keyExtractor = ((SortedGlobalIndexer) indexer).keyExtractor();
         return this;
+    }
+
+    public GlobalIndexKeyExtractor keyExtractor() {
+        return keyExtractor;
     }
 
     public long recordsPerRange() {
@@ -92,7 +107,33 @@ public class SortedGlobalIndexWriter implements Serializable {
     public List<CommitMessage> buildForSinglePartition(
             Range rowRange, BinaryRow partition, Iterator<InternalRow> data, long scanSnapshotId)
             throws IOException {
-        FieldGetter indexFieldGetter = InternalRow.createFieldGetter(indexField.type(), 0);
+        if (keyExtractor.isIdentity()) {
+            return buildIdentityIndex(rowRange, partition, data, scanSnapshotId);
+        }
+
+        FieldGetter indexFieldGetter = InternalRow.createFieldGetter(keyExtractor.keyType(), 0);
+        GlobalIndexSingleColumnWriter writer = createWriter();
+        try {
+            while (data.hasNext()) {
+                InternalRow row = data.next();
+                long localRowId = row.getLong(1) - rowRange.from;
+                writer.write(indexFieldGetter.getFieldOrNull(row), localRowId);
+            }
+
+            return Collections.singletonList(
+                    flushIndex(
+                            rowRange, writer.finish(rowRange.count()), partition, scanSnapshotId));
+        } finally {
+            if (writer instanceof AutoCloseable) {
+                IOUtils.closeQuietly((AutoCloseable) writer);
+            }
+        }
+    }
+
+    private List<CommitMessage> buildIdentityIndex(
+            Range rowRange, BinaryRow partition, Iterator<InternalRow> data, long scanSnapshotId)
+            throws IOException {
+        FieldGetter indexFieldGetter = InternalRow.createFieldGetter(keyExtractor.keyType(), 0);
         try (SortedSingleColumnIndexWriter writer =
                 new SortedSingleColumnIndexWriter(recordsPerRange, this::createWriter)) {
             while (data.hasNext()) {

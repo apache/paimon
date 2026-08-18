@@ -260,8 +260,11 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
           "(1, array('red', 'blue')), " +
           "(2, array('blue')), " +
           "(3, array('green')), " +
-          "(4, CAST(NULL AS ARRAY<STRING>)), " +
-          "(5, array('red', 'red'))"
+          "(4, array('red', 'red')), " +
+          "(5, CAST(NULL AS ARRAY<STRING>)), " +
+          "(6, CAST(array() AS ARRAY<STRING>)), " +
+          "(7, array(CAST(NULL AS STRING))), " +
+          "(8, array('red', CAST(NULL AS STRING)))"
       )
 
       val output =
@@ -280,7 +283,7 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
         .map(_.indexFile())
         .filter(_.indexType() == "multivalue")
       assert(entries.size > 1)
-      assert(entries.map(_.rowCount()).sum == 5L)
+      assert(entries.map(_.rowCount()).sum == 8L)
       entries.foreach(entry => assert(entry.globalIndexMeta() != null))
     }
   }

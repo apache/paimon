@@ -53,6 +53,7 @@ public class SortedIndexTopoBuilderTest {
     public void testSupportsBitmapAndBTree() {
         assertThat(SortedIndexTopoBuilder.supports("bitmap")).isTrue();
         assertThat(SortedIndexTopoBuilder.supports("btree")).isTrue();
+        assertThat(SortedIndexTopoBuilder.supports("multivalue")).isTrue();
         assertThat(SortedIndexTopoBuilder.supports("inverted")).isFalse();
     }
 
@@ -75,7 +76,9 @@ public class SortedIndexTopoBuilderTest {
                         int.class,
                         int.class,
                         int.class,
-                        org.apache.paimon.types.DataType.class);
+                        org.apache.paimon.types.DataType.class,
+                        boolean.class,
+                        long.class);
         constructor.setAccessible(true);
         Object operator =
                 constructor.newInstance(
@@ -86,7 +89,9 @@ public class SortedIndexTopoBuilderTest {
                         0,
                         0,
                         0,
-                        DataTypes.INT());
+                        DataTypes.INT(),
+                        false,
+                        1L);
         GlobalIndexSingleColumnWriter activeWriter =
                 mock(
                         GlobalIndexSingleColumnWriter.class,
@@ -172,14 +177,8 @@ public class SortedIndexTopoBuilderTest {
     }
 
     @Test
-    public void testSortColumnsUseRowIdAsTieBreaker() {
-        assertThat(SortedIndexTopoBuilder.createSortColumns("task-id", "index-key", true))
+    public void testNormalizedSortColumnsUseRowIdAsTieBreaker() {
+        assertThat(SortedIndexTopoBuilder.createSortColumns("task-id", "index-key"))
                 .containsExactly("task-id", "index-key", SpecialFields.ROW_ID.name());
-    }
-
-    @Test
-    public void testUnorderedIndexSortsOnlyByTaskAndRowId() {
-        assertThat(SortedIndexTopoBuilder.createSortColumns("task-id", "index-key", false))
-                .containsExactly("task-id", SpecialFields.ROW_ID.name());
     }
 }

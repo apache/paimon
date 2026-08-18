@@ -74,7 +74,6 @@ public class PkSortedIndexFile extends IndexFile {
         try {
             writer = createWriter(indexType, indexField, indexOptions, fileWriter);
 
-            long writtenRows = 0;
             while (sortedEntries.hasNext()) {
                 Entry entry = sortedEntries.next();
                 checkArgument(
@@ -83,15 +82,9 @@ public class PkSortedIndexFile extends IndexFile {
                         entry.rowId,
                         sourceRowCount);
                 writer.write(entry.value, entry.rowId);
-                writtenRows++;
             }
-            checkArgument(
-                    writtenRows == sourceRowCount,
-                    "Sorted index input row count %s does not match source row count %s.",
-                    writtenRows,
-                    sourceRowCount);
 
-            List<ResultEntry> results = writer.finish();
+            List<ResultEntry> results = writer.finish(sourceRowCount);
             checkArgument(
                     results.size() == 1,
                     "Sorted index build must produce exactly one payload file, but produced %s.",
@@ -145,7 +138,7 @@ public class PkSortedIndexFile extends IndexFile {
         return (GlobalIndexSingleColumnWriter) writer;
     }
 
-    /** One sorted scalar value and its zero-based ordinal in the ordered source group. */
+    /** One sorted normalized key and its zero-based source-row ordinal. */
     public static final class Entry {
 
         @Nullable private final Object value;

@@ -66,7 +66,8 @@ See [Bitmap Index](../multimodal-table/global-index/bitmap) for predicate and fo
 
 Use Multivalue for element-membership predicates on an `ARRAY` column. It stores one compressed
 bitmap posting list per distinct non-null element and accelerates Paimon Core `ARRAY_CONTAINS`
-predicates. Null arrays, empty arrays, and null elements retain distinct semantics.
+predicates. Null arrays, empty arrays, and null elements produce no membership posting; array null
+checks fall back to the ordinary data path.
 
 The Core predicate and index pushdown are available independently of SQL connectors. A connector
 uses this index after it translates its array-membership expression to Paimon's `ARRAY_CONTAINS`
@@ -322,7 +323,7 @@ become full-text searchable only after compaction publishes an eligible data fil
 BTree, Bitmap, and Multivalue indexes are applied automatically to snapshot-scoped Core batch
 scans after a supported predicate reaches Paimon. BTree and Bitmap can accelerate equality, `IN`,
 null checks, comparisons and ranges, complement predicates, and supported string predicates.
-Multivalue accelerates `ARRAY_CONTAINS(array_column, element)` and array null checks.
+Multivalue accelerates `ARRAY_CONTAINS(array_column, element)`.
 
 The Java/Core predicate can be constructed directly:
 
@@ -555,8 +556,8 @@ create a table with the desired definition and migrate the data.
 
 - BTree, Bitmap, and Multivalue definitions are single-column indexes.
 - Multivalue supports arrays of scalar element types accepted by the global-index key serializer.
-  Null elements are not indexed. It is currently intended for low-to-moderate element cardinality,
-  because one build buffers the distinct-element posting lists for its source group in memory.
+  Null elements are not indexed. Higher array and element cardinality increases the expanded-sort
+  I/O and index-file size.
 - Exactly one vector index column is currently supported per table.
 - Exactly one full-text index column is currently supported per table.
 - Only `FLOAT` vectors are supported.

@@ -23,7 +23,9 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.globalindex.GlobalIndexKeyExtractor;
 import org.apache.paimon.globalindex.GlobalIndexer;
+import org.apache.paimon.globalindex.SortedGlobalIndexer;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
 import org.apache.paimon.io.DataFileMeta;
@@ -39,16 +41,14 @@ import javax.annotation.Nullable;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
-import java.util.NoSuchElementException;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Builds source-backed index payloads, sorting physical records when required by the indexer. */
+/** Builds source-backed index payloads by extracting and spill-sorting normalized index keys. */
 public class PkSortedIndexBuilder {
 
     private static final int ROW_ID_FIELD_ID = Integer.MAX_VALUE;
@@ -104,9 +104,12 @@ public class PkSortedIndexBuilder {
             sourceFiles.add(
                     new PrimaryKeyIndexSourceFile(dataFile.fileName(), dataFile.rowCount()));
         }
-        if (!GlobalIndexer.create(indexType, indexField, options).requiresSortedInput()) {
-            return buildWithoutSorting(dataLevel, orderedDataFiles, sourceFiles);
-        }
+        GlobalIndexer indexer = GlobalIndexer.create(indexType, indexField, options);
+        checkArgument(
+                indexer instanceof SortedGlobalIndexer,
+                "Index algorithm %s does not expose sorted index keys.",
+                indexType);
+        GlobalIndexKeyExtractor keyExtractor = ((SortedGlobalIndexer) indexer).keyExtractor();
 
         IOManager actualIOManager = ioManager;
         boolean ownsIOManager = false;
@@ -118,16 +121,18 @@ public class PkSortedIndexBuilder {
         BinaryExternalSortBuffer sortBuffer = null;
         try {
             CoreOptions coreOptions = new CoreOptions(options);
+            DataField keyField =
+                    new DataField(indexField.id(), indexField.name(), keyExtractor.keyType());
             RowType sortRowType =
                     RowType.of(
-                            indexField,
+                            keyField,
                             new DataField(
                                     ROW_ID_FIELD_ID, "_ROW_ID", DataTypes.BIGINT().notNull()));
             sortBuffer =
                     BinaryExternalSortBuffer.create(
                             actualIOManager,
                             sortRowType,
-                            new int[] {0},
+                            new int[] {0, 1},
                             coreOptions.writeBufferSize(),
                             coreOptions.pageSize(),
                             coreOptions.localSortMaxNumFileHandles(),
@@ -143,6 +148,7 @@ public class PkSortedIndexBuilder {
                             reader.rowCount(),
                             dataFile.fileName(),
                             dataFile.rowCount());
+                    long readRows = 0;
                     PkSortedDataFileReader.Entry entry;
                     while ((entry = reader.readNext()) != null) {
                         checkArgument(
@@ -152,11 +158,19 @@ public class PkSortedIndexBuilder {
                                 entry.rowPosition(),
                                 dataFile.fileName(),
                                 dataFile.rowCount());
-                        sortBuffer.write(
-                                GenericRow.of(
-                                        entry.value(),
-                                        Math.addExact(sourceOffset, entry.rowPosition())));
+                        long rowId = Math.addExact(sourceOffset, entry.rowPosition());
+                        BinaryExternalSortBuffer currentSortBuffer = sortBuffer;
+                        keyExtractor.extract(
+                                entry.value(),
+                                key -> currentSortBuffer.write(GenericRow.of(key, rowId)));
+                        readRows++;
                     }
+                    checkArgument(
+                            readRows == dataFile.rowCount(),
+                            "Sorted reader returned %s rows for data file %s, expected %s.",
+                            readRows,
+                            dataFile.fileName(),
+                            dataFile.rowCount());
                 }
                 sourceOffset = Math.addExact(sourceOffset, dataFile.rowCount());
             }
@@ -166,7 +180,7 @@ public class PkSortedIndexBuilder {
                             sortBuffer.sortedIterator(),
                             new BinaryRow(sortRowType.getFieldCount()));
             InternalRow.FieldGetter valueGetter =
-                    InternalRow.createFieldGetter(indexField.type(), 0);
+                    InternalRow.createFieldGetter(keyExtractor.keyType(), 0);
             Iterator<PkSortedIndexFile.Entry> sortedEntries =
                     new Iterator<PkSortedIndexFile.Entry>() {
                         @Override
@@ -193,18 +207,6 @@ public class PkSortedIndexBuilder {
         }
     }
 
-    private IndexFileMeta buildWithoutSorting(
-            int dataLevel,
-            List<DataFileMeta> dataFiles,
-            List<PrimaryKeyIndexSourceFile> sourceFiles)
-            throws IOException {
-        try (UnsortedEntryIterator entries = new UnsortedEntryIterator(readerFactory, dataFiles)) {
-            return indexFile.build(dataLevel, sourceFiles, indexField, indexType, options, entries);
-        } catch (UncheckedIOException e) {
-            throw e.getCause();
-        }
-    }
-
     protected IOManager createTemporaryIOManager() {
         return IOManager.create(System.getProperty("java.io.tmpdir"));
     }
@@ -222,95 +224,5 @@ public class PkSortedIndexBuilder {
     interface ReaderFactory {
 
         Reader create(DataFileMeta dataFile) throws IOException;
-    }
-
-    private static final class UnsortedEntryIterator
-            implements Iterator<PkSortedIndexFile.Entry>, Closeable {
-
-        private final ReaderFactory readerFactory;
-        private final List<DataFileMeta> dataFiles;
-
-        private int fileIndex;
-        private long sourceOffset;
-        @Nullable private Reader currentReader;
-        @Nullable private PkSortedIndexFile.Entry next;
-
-        private UnsortedEntryIterator(ReaderFactory readerFactory, List<DataFileMeta> dataFiles) {
-            this.readerFactory = readerFactory;
-            this.dataFiles = dataFiles;
-        }
-
-        @Override
-        public boolean hasNext() {
-            if (next == null) {
-                loadNext();
-            }
-            return next != null;
-        }
-
-        @Override
-        public PkSortedIndexFile.Entry next() {
-            if (!hasNext()) {
-                throw new NoSuchElementException();
-            }
-            PkSortedIndexFile.Entry result = next;
-            next = null;
-            return result;
-        }
-
-        private void loadNext() {
-            while (fileIndex < dataFiles.size()) {
-                DataFileMeta dataFile = dataFiles.get(fileIndex);
-                if (currentReader == null) {
-                    try {
-                        currentReader = readerFactory.create(dataFile);
-                    } catch (IOException e) {
-                        throw new UncheckedIOException(e);
-                    }
-                    checkArgument(
-                            currentReader.rowCount() == dataFile.rowCount(),
-                            "Sorted reader row count %s does not match data file %s row count %s.",
-                            currentReader.rowCount(),
-                            dataFile.fileName(),
-                            dataFile.rowCount());
-                }
-
-                PkSortedDataFileReader.Entry entry = currentReader.readNext();
-                if (entry != null) {
-                    checkArgument(
-                            entry.rowPosition() >= 0 && entry.rowPosition() < dataFile.rowCount(),
-                            "Row position %s is outside data file %s row range [0, %s).",
-                            entry.rowPosition(),
-                            dataFile.fileName(),
-                            dataFile.rowCount());
-                    next =
-                            new PkSortedIndexFile.Entry(
-                                    entry.value(),
-                                    Math.addExact(sourceOffset, entry.rowPosition()));
-                    return;
-                }
-
-                closeCurrentReader();
-                sourceOffset = Math.addExact(sourceOffset, dataFile.rowCount());
-                fileIndex++;
-            }
-        }
-
-        private void closeCurrentReader() {
-            try {
-                close();
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
-            }
-        }
-
-        @Override
-        public void close() throws IOException {
-            Reader reader = currentReader;
-            currentReader = null;
-            if (reader != null) {
-                reader.close();
-            }
-        }
     }
 }

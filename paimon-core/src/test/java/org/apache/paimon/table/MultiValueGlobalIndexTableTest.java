@@ -19,18 +19,21 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.ScanResult;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexTestUtils;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.TableScan;
@@ -47,14 +50,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Tests the multivalue global index on Data Evolution tables. */
 public class MultiValueGlobalIndexTableTest extends TableTestBase {
 
-    private static final BinaryString RED = BinaryString.fromString("red");
-    private static final BinaryString BLUE = BinaryString.fromString("blue");
+    private static final Integer RED = 1;
+    private static final Integer BLUE = 2;
 
     @Override
     protected Schema schemaDefault() {
         return Schema.newBuilder()
                 .column("id", DataTypes.INT())
-                .column("tags", DataTypes.ARRAY(DataTypes.STRING()))
+                .column("tags", DataTypes.ARRAY(DataTypes.INT()))
                 .option("bucket", "-1")
                 .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
                 .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
@@ -94,6 +97,43 @@ public class MultiValueGlobalIndexTableTest extends TableTestBase {
         assertThat(readIds(fullSearchTable, containsRed)).containsExactlyInAnyOrder(1, 5, 6);
     }
 
+    @Test
+    public void testElementTypeEvolutionFallsBackAndRebuildsIndex() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        write(
+                table,
+                GenericRow.of(1, array(RED, BLUE)),
+                GenericRow.of(2, array(BLUE)),
+                GenericRow.of(3, null));
+        buildIndex(table);
+
+        table.schemaManager()
+                .commitChanges(
+                        SchemaChange.updateColumnType(
+                                new String[] {"tags", "element"}, DataTypes.BIGINT(), false));
+        catalog.invalidateTable(identifier());
+        table = getTableDefault();
+
+        Predicate containsOne = new PredicateBuilder(table.rowType()).arrayContains(1, 1L);
+        assertThat(readIdsWithFallback(table, containsOne)).containsExactly(1);
+
+        ScanResult<DataSplit> rebuild =
+                new SortedGlobalIndexScanner(table, "multivalue")
+                        .withIndexField("tags")
+                        .incrementalScan()
+                        .orElseThrow(
+                                () ->
+                                        new IllegalStateException(
+                                                "Expected incompatible index to be rebuilt."));
+        assertThat(rebuild.deletedIndexEntries()).isNotEmpty();
+        assertThat(rebuild.entries()).extracting(DataSplit::rowCount).containsOnly(3L);
+
+        buildIndex(table);
+        table = getTableDefault();
+        assertThat(readIds(table, containsOne)).containsExactly(1);
+    }
+
     private void buildIndex(FileStoreTable table) throws Exception {
         SortedGlobalIndexScanner scanner =
                 new SortedGlobalIndexScanner(table, "multivalue").withIndexField("tags");
@@ -109,6 +149,19 @@ public class MultiValueGlobalIndexTableTest extends TableTestBase {
                     SortedGlobalIndexTestUtils.buildIndex(
                             table, "multivalue", "tags", split, scanResult.scanSnapshotId()));
         }
+        scanResult
+                .deletedIndexEntries()
+                .forEach(
+                        entry ->
+                                messages.add(
+                                        new CommitMessageImpl(
+                                                entry.partition(),
+                                                entry.bucket(),
+                                                null,
+                                                DataIncrement.deleteIndexIncrement(
+                                                        Collections.singletonList(
+                                                                entry.indexFile())),
+                                                CompactIncrement.emptyIncrement())));
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.commit(messages);
         }
@@ -143,7 +196,7 @@ public class MultiValueGlobalIndexTableTest extends TableTestBase {
         return ids;
     }
 
-    private GenericArray array(BinaryString... elements) {
+    private GenericArray array(Object... elements) {
         return new GenericArray(elements);
     }
 }

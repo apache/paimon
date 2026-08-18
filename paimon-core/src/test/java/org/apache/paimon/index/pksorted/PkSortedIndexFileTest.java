@@ -18,7 +18,6 @@
 
 package org.apache.paimon.index.pksorted;
 
-import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -141,13 +140,9 @@ class PkSortedIndexFileTest {
                         "multivalue",
                         options(),
                         Arrays.asList(
-                                        new PkSortedIndexFile.Entry(null, 1),
-                                        new PkSortedIndexFile.Entry(
-                                                new GenericArray(new Integer[0]), 2),
-                                        new PkSortedIndexFile.Entry(
-                                                new GenericArray(new Integer[] {2, 1}), 0),
-                                        new PkSortedIndexFile.Entry(
-                                                new GenericArray(new Integer[] {2}), 3))
+                                        new PkSortedIndexFile.Entry(1, 0),
+                                        new PkSortedIndexFile.Entry(2, 0),
+                                        new PkSortedIndexFile.Entry(2, 3))
                                 .iterator());
 
         assertThat(payload.indexType()).isEqualTo("multivalue");

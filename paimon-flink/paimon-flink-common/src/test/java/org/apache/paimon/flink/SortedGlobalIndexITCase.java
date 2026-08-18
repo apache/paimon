@@ -129,8 +129,11 @@ public class SortedGlobalIndexITCase extends CatalogITCaseBase {
                         + "(1, ARRAY['red', 'blue']), "
                         + "(2, ARRAY['blue']), "
                         + "(3, ARRAY['green']), "
-                        + "(4, CAST(NULL AS ARRAY<STRING>)), "
-                        + "(5, ARRAY['red', 'red'])");
+                        + "(4, ARRAY['red', 'red']), "
+                        + "(5, CAST(NULL AS ARRAY<STRING>)), "
+                        + "(6, ARRAY[CAST(NULL AS STRING)]), "
+                        + "(7, ARRAY[CAST(NULL AS STRING)]), "
+                        + "(8, ARRAY['red', CAST(NULL AS STRING)])");
         sql(
                 "CALL sys.create_global_index(`table` => 'default.T_MULTIVALUE', "
                         + "index_column => 'tags', index_type => 'multivalue', "
@@ -144,7 +147,7 @@ public class SortedGlobalIndexITCase extends CatalogITCaseBase {
                         .collect(Collectors.toList());
         assertThat(entries).hasSizeGreaterThan(1);
         assertThat(entries).allSatisfy(entry -> assertThat(entry.globalIndexMeta()).isNotNull());
-        assertThat(entries.stream().mapToLong(IndexFileMeta::rowCount).sum()).isEqualTo(5L);
+        assertThat(entries.stream().mapToLong(IndexFileMeta::rowCount).sum()).isEqualTo(8L);
         Set<String> initialFiles =
                 entries.stream().map(IndexFileMeta::fileName).collect(Collectors.toSet());
 
@@ -160,7 +163,7 @@ public class SortedGlobalIndexITCase extends CatalogITCaseBase {
                 .executeFilter()
                 .createReader(plan)
                 .forEachRemaining(row -> ids.add(row.getInt(0)));
-        assertThat(ids).containsExactlyInAnyOrder(1, 5);
+        assertThat(ids).containsExactlyInAnyOrder(1, 4, 8);
 
         sql("CREATE TABLE S_MULTIVALUE (id INT, tags ARRAY<STRING>)");
         sql("INSERT INTO S_MULTIVALUE VALUES (2, ARRAY['red'])");
@@ -201,7 +204,7 @@ public class SortedGlobalIndexITCase extends CatalogITCaseBase {
                 .executeFilter()
                 .createReader(plan)
                 .forEachRemaining(row -> ids.add(row.getInt(0)));
-        assertThat(ids).containsExactlyInAnyOrder(1, 2, 5);
+        assertThat(ids).containsExactlyInAnyOrder(1, 2, 4, 8);
     }
 
     @Test

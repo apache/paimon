@@ -1007,15 +1007,23 @@ public class SchemaManager implements Serializable {
 
     private static void assertNotUpdatingPrimaryKeyIndexColumn(
             TableSchema schema, String[] fieldNames, String operation) {
+        String fieldName = fieldNames[0];
+        CoreOptions options = new CoreOptions(schema.options());
+
+        // Updating an ARRAY element is represented as a nested field change. It still changes
+        // the serialized key type of a multivalue index on the top-level column.
+        if (options.primaryKeyMultiValueIndexColumns().contains(fieldName)) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Cannot %s primary-key index column: [%s]", operation, fieldName));
+        }
+
         if (fieldNames.length > 1) {
             return;
         }
-        String fieldName = fieldNames[0];
-        CoreOptions options = new CoreOptions(schema.options());
         if (options.primaryKeyVectorIndexColumns().contains(fieldName)
                 || options.primaryKeyBTreeIndexColumns().contains(fieldName)
                 || options.primaryKeyBitmapIndexColumns().contains(fieldName)
-                || options.primaryKeyMultiValueIndexColumns().contains(fieldName)
                 || options.primaryKeyFullTextIndexColumns().contains(fieldName)) {
             throw new UnsupportedOperationException(
                     String.format(

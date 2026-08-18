@@ -275,6 +275,55 @@ public class GlobalIndexBuilderUtils {
         return result;
     }
 
+    /** Splits contiguous build ranges into globally aligned, source-row bounded shards. */
+    public static Map<Range, List<Split>> shardSplitsByRowRange(
+            Map<Range, List<Split>> rangeSplits, long rowsPerShard) {
+        checkArgument(rowsPerShard > 0, "Rows per sorted-index shard must be positive.");
+        Map<Range, List<Split>> result = new LinkedHashMap<>();
+        for (Map.Entry<Range, List<Split>> entry : rangeSplits.entrySet()) {
+            Range buildRange = entry.getKey();
+            checkArgument(
+                    buildRange.from >= 0,
+                    "Sorted-index row IDs must be non-negative, but range starts at %s.",
+                    buildRange.from);
+            long shardStart = (buildRange.from / rowsPerShard) * rowsPerShard;
+            while (shardStart <= buildRange.to) {
+                long unboundedShardEnd = shardStart + rowsPerShard - 1;
+                long shardEnd = unboundedShardEnd < shardStart ? Long.MAX_VALUE : unboundedShardEnd;
+                Range shardRange =
+                        new Range(
+                                Math.max(buildRange.from, shardStart),
+                                Math.min(buildRange.to, shardEnd));
+                List<Split> shardSplits = new ArrayList<>();
+                for (Split split : entry.getValue()) {
+                    DataSplit dataSplit;
+                    List<Range> splitRanges;
+                    if (split instanceof IndexedSplit) {
+                        IndexedSplit indexedSplit = (IndexedSplit) split;
+                        dataSplit = indexedSplit.dataSplit();
+                        splitRanges = indexedSplit.rowRanges();
+                    } else {
+                        dataSplit = (DataSplit) split;
+                        splitRanges = calcRowRanges(Collections.singletonList(dataSplit));
+                    }
+                    List<Range> intersections =
+                            Range.and(splitRanges, Collections.singletonList(shardRange));
+                    if (!intersections.isEmpty()) {
+                        shardSplits.add(new IndexedSplit(dataSplit, intersections, null));
+                    }
+                }
+                if (!shardSplits.isEmpty()) {
+                    result.put(shardRange, shardSplits);
+                }
+                if (shardEnd == Long.MAX_VALUE) {
+                    break;
+                }
+                shardStart = shardEnd + 1;
+            }
+        }
+        return result;
+    }
+
     private static List<DataSplit> splitByContiguousRowRange(DataSplit split) {
         List<DataFileMeta> input = split.dataFiles();
         RangeHelper<DataFileMeta> rangeHelper = new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
