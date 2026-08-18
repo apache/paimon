@@ -276,6 +276,41 @@ under the License.
     <build>
         <plugins>
             <plugin>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>generate-commit-id</id>
+                        <phase>process-resources</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <exec executable="git"
+                                      dir="${project.basedir}"
+                                      failifexecutionfails="false"
+                                      failonerror="false"
+                                      outputproperty="paimon.core.git.commit.id"
+                                      resultproperty="paimon.core.git.result">
+                                    <arg value="rev-parse"/>
+                                    <arg value="HEAD"/>
+                                </exec>
+                                <condition property="paimon.core.commit.id"
+                                           value="${paimon.core.git.commit.id}">
+                                    <equals arg1="${paimon.core.git.result}" arg2="0"/>
+                                </condition>
+                                <!-- Git metadata is not available in source archives. -->
+                                <property name="paimon.core.commit.id" value="UNKNOWN"/>
+                                <mkdir dir="${project.build.outputDirectory}/META-INF"/>
+                                <echo file="${project.build.outputDirectory}/META-INF/paimon-core.commit-id"
+                                      message="${paimon.core.commit.id}"/>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-jar-plugin</artifactId>
                 <executions>

@@ -40,8 +40,13 @@ import org.apache.paimon.utils.StringUtils;
 
 import javax.annotation.Nullable;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.Serializable;
 import java.lang.reflect.Field;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -71,6 +76,10 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Core options for paimon. */
 public class CoreOptions implements Serializable {
+
+    private static final String CORE_COMMIT_ID_RESOURCE = "/META-INF/paimon-core.commit-id";
+
+    @Nullable private static final String CORE_COMMIT_ID = loadCoreCommitId();
 
     public static final String FIELDS_PREFIX = "fields";
 
@@ -3171,9 +3180,35 @@ public class CoreOptions implements Serializable {
 
     public static String createCommitUser(Options options) {
         String commitUserPrefix = options.get(COMMIT_USER_PREFIX);
-        return commitUserPrefix == null
-                ? UUID.randomUUID().toString()
-                : commitUserPrefix + "_" + UUID.randomUUID();
+        String commitUser =
+                commitUserPrefix == null
+                        ? UUID.randomUUID().toString()
+                        : commitUserPrefix + "_" + UUID.randomUUID();
+        return CORE_COMMIT_ID == null ? commitUser : commitUser + "_" + CORE_COMMIT_ID;
+    }
+
+    @Nullable
+    private static String loadCoreCommitId() {
+        InputStream inputStream = CoreOptions.class.getResourceAsStream(CORE_COMMIT_ID_RESOURCE);
+        if (inputStream == null) {
+            return null;
+        }
+
+        try (BufferedReader reader =
+                new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8))) {
+            String commitId = reader.readLine();
+            if (StringUtils.isNullOrWhitespaceOnly(commitId)) {
+                return null;
+            }
+
+            commitId = commitId.trim();
+            if ("UNKNOWN".equals(commitId)) {
+                return null;
+            }
+            return commitId.substring(0, Math.min(10, commitId.length()));
+        } catch (IOException e) {
+            return null;
+        }
     }
 
     public String createCommitUser() {

@@ -23,11 +23,62 @@ import org.apache.paimon.options.Options;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.util.UUID;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link org.apache.paimon.CoreOptions}. */
 public class CoreOptionsTest {
+
+    @Test
+    public void testCreateCommitUser() throws IOException {
+        String commitId = shortCoreCommitId();
+        String commitIdSuffix = commitId == null ? "" : "_" + commitId;
+
+        String commitUser = CoreOptions.createCommitUser(new Options());
+        assertThat(commitUser).endsWith(commitIdSuffix);
+        assertThat(
+                        UUID.fromString(
+                                        commitUser.substring(
+                                                0, commitUser.length() - commitIdSuffix.length()))
+                                .toString())
+                .isEqualTo(commitUser.substring(0, commitUser.length() - commitIdSuffix.length()));
+
+        Options options = new Options();
+        options.set(CoreOptions.COMMIT_USER_PREFIX, "my-user");
+        commitUser = CoreOptions.createCommitUser(options);
+        assertThat(commitUser).startsWith("my-user_").endsWith(commitIdSuffix);
+        String uuid =
+                commitUser.substring(
+                        "my-user_".length(), commitUser.length() - commitIdSuffix.length());
+        assertThat(UUID.fromString(uuid).toString()).isEqualTo(uuid);
+    }
+
+    private String shortCoreCommitId() throws IOException {
+        InputStream inputStream =
+                CoreOptions.class.getResourceAsStream("/META-INF/paimon-core.commit-id");
+        if (inputStream == null) {
+            return null;
+        }
+
+        try (BufferedReader reader =
+                new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8))) {
+            String commitId = reader.readLine();
+            if (commitId == null || commitId.trim().isEmpty()) {
+                return null;
+            }
+            commitId = commitId.trim();
+            return "UNKNOWN".equals(commitId)
+                    ? null
+                    : commitId.substring(0, Math.min(10, commitId.length()));
+        }
+    }
 
     @Test
     public void testDefaultStartupMode() {
