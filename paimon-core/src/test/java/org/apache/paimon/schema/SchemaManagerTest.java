@@ -513,15 +513,6 @@ public class SchemaManagerTest {
                                                 "tags", DataTypes.ARRAY(DataTypes.BIGINT()))))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage("Cannot update type of primary-key index column: [tags]");
-        assertThatThrownBy(
-                        () ->
-                                manager.commitChanges(
-                                        SchemaChange.updateColumnType(
-                                                new String[] {"tags", "element"},
-                                                DataTypes.BIGINT(),
-                                                false)))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage("Cannot update type of primary-key index column: [tags]");
     }
 
     @Test

@@ -30,7 +30,6 @@ import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
@@ -95,43 +94,6 @@ public class MultiValueGlobalIndexTableTest extends TableTestBase {
                         Collections.singletonMap(
                                 CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "full"));
         assertThat(readIds(fullSearchTable, containsRed)).containsExactlyInAnyOrder(1, 5, 6);
-    }
-
-    @Test
-    public void testElementTypeEvolutionFallsBackAndRebuildsIndex() throws Exception {
-        createTableDefault();
-        FileStoreTable table = getTableDefault();
-        write(
-                table,
-                GenericRow.of(1, array(RED, BLUE)),
-                GenericRow.of(2, array(BLUE)),
-                GenericRow.of(3, null));
-        buildIndex(table);
-
-        table.schemaManager()
-                .commitChanges(
-                        SchemaChange.updateColumnType(
-                                new String[] {"tags", "element"}, DataTypes.BIGINT(), false));
-        catalog.invalidateTable(identifier());
-        table = getTableDefault();
-
-        Predicate containsOne = new PredicateBuilder(table.rowType()).arrayContains(1, 1L);
-        assertThat(readIdsWithFallback(table, containsOne)).containsExactly(1);
-
-        ScanResult<DataSplit> rebuild =
-                new SortedGlobalIndexScanner(table, "multivalue")
-                        .withIndexField("tags")
-                        .incrementalScan()
-                        .orElseThrow(
-                                () ->
-                                        new IllegalStateException(
-                                                "Expected incompatible index to be rebuilt."));
-        assertThat(rebuild.deletedIndexEntries()).isNotEmpty();
-        assertThat(rebuild.entries()).extracting(DataSplit::rowCount).containsOnly(3L);
-
-        buildIndex(table);
-        table = getTableDefault();
-        assertThat(readIds(table, containsOne)).containsExactly(1);
     }
 
     private void buildIndex(FileStoreTable table) throws Exception {

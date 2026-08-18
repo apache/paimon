@@ -22,8 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexRefreshPlanner;
 import org.apache.paimon.globalindex.ScanResult;
-import org.apache.paimon.globalindex.bitmap.MultiValueIndexFileMeta;
-import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -31,7 +29,6 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
-import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
@@ -136,34 +133,25 @@ public class SortedGlobalIndexScanner implements Serializable {
         snapshotReader = withManifestEntryFilter(snapshotReader.withSnapshot(snapshot));
 
         Preconditions.checkArgument(indexField != null, "indexField must be set before scan.");
-        List<IndexManifestEntry> allCurrentIndexes =
+        List<IndexManifestEntry> currentIndexes =
                 currentIndexEntries(
                         table,
                         snapshot,
                         indexType,
                         Collections.singletonList(indexField),
                         partitionPredicate);
-        List<IndexManifestEntry> currentIndexes = new ArrayList<>();
-        List<IndexManifestEntry> deletedIndexEntries = new ArrayList<>();
-        for (IndexManifestEntry entry : allCurrentIndexes) {
-            if (hasCompatibleIndexKeyType(entry)) {
-                currentIndexes.add(entry);
-            } else {
-                deletedIndexEntries.add(entry);
-            }
-        }
         List<Range> rangesToBuild = new ArrayList<>(unindexedRowRanges(snapshot, currentIndexes));
+        List<IndexManifestEntry> deletedIndexEntries = Collections.emptyList();
         if (detectDataFileChange()) {
             // Scans data manifests through reusable binary views without materializing entries.
-            List<IndexManifestEntry> refreshedIndexes =
+            deletedIndexEntries =
                     DataEvolutionGlobalIndexRefreshPlanner.findIndexesToRefresh(
                             table,
                             snapshot,
                             partitionPredicate,
                             currentIndexes,
                             Collections.singletonList(indexField));
-            deletedIndexEntries.addAll(refreshedIndexes);
-            for (IndexManifestEntry entry : refreshedIndexes) {
+            for (IndexManifestEntry entry : deletedIndexEntries) {
                 rangesToBuild.add(entry.indexFile().globalIndexMeta().rowRange());
             }
         }
@@ -179,17 +167,6 @@ public class SortedGlobalIndexScanner implements Serializable {
                         RowRangeIndex.create(rangesToBuild),
                         snapshotReader.read().dataSplits(),
                         deletedIndexEntries));
-    }
-
-    private boolean hasCompatibleIndexKeyType(IndexManifestEntry entry) {
-        if (!"multivalue".equals(indexType)) {
-            return true;
-        }
-        GlobalIndexMeta indexMeta = entry.indexFile().globalIndexMeta();
-        return indexMeta != null
-                && indexField.type() instanceof ArrayType
-                && MultiValueIndexFileMeta.hasCompatibleElementType(
-                        indexMeta.indexMeta(), ((ArrayType) indexField.type()).getElementType());
     }
 
     private boolean detectDataFileChange() {
