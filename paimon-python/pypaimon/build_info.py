@@ -21,7 +21,7 @@ import subprocess
 from pypaimon._version import VERSION
 
 _UNKNOWN = "UNKNOWN"
-_COMMIT_ID_FILE = os.path.join(os.path.dirname(__file__), "_commit_id")
+_FULL_VERSION_FILE = os.path.join(os.path.dirname(__file__), "_full_version")
 
 
 def _repository_root():
@@ -48,19 +48,19 @@ def git_commit_id():
         return _UNKNOWN
 
 
-def commit_id():
-    """Return the revision embedded in the package, or the checkout revision."""
+def _load_full_version():
+    """Return the embedded full version, or derive it from the checkout."""
     try:
-        with open(_COMMIT_ID_FILE, "r") as commit_file:
-            value = commit_file.read().strip()
+        with open(_FULL_VERSION_FILE, "r") as full_version_file:
+            value = full_version_file.read().strip()
             if value:
                 return value
     except OSError:
         pass
-    return git_commit_id()
+    return "{}-{}".format(VERSION, git_commit_id())
 
 
-_FULL_VERSION = "{}-{}".format(VERSION, commit_id())
+_FULL_VERSION = _load_full_version()
 
 
 def full_version():

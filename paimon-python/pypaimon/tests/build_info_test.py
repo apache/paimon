@@ -33,15 +33,16 @@ class BuildInfoTest(unittest.TestCase):
             r"^2\.1\.dev-(UNKNOWN|[0-9a-f]{40})$",
         )
 
-    def test_embedded_commit_id(self):
-        with tempfile.NamedTemporaryFile(mode="w", delete=False) as commit_file:
-            commit_file.write("0123456789012345678901234567890123456789\n")
-            path = commit_file.name
+    def test_embedded_full_version(self):
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as version_file:
+            version_file.write(
+                "2.1.dev-0123456789012345678901234567890123456789\n")
+            path = version_file.name
         try:
-            with patch.object(build_info, "_COMMIT_ID_FILE", path):
+            with patch.object(build_info, "_FULL_VERSION_FILE", path):
                 self.assertEqual(
-                    "0123456789012345678901234567890123456789",
-                    build_info.commit_id(),
+                    "2.1.dev-0123456789012345678901234567890123456789",
+                    build_info._load_full_version(),
                 )
         finally:
             os.remove(path)

@@ -26,7 +26,7 @@ from setuptools import find_packages, setup
 
 PYTHON_ROOT = os.path.dirname(os.path.abspath(__file__))
 VERSION_FILE = os.path.join(PYTHON_ROOT, "pypaimon", "_version.py")
-COMMIT_ID_FILE = os.path.join(PYTHON_ROOT, "pypaimon", "_commit_id")
+FULL_VERSION_FILE = os.path.join(PYTHON_ROOT, "pypaimon", "_full_version")
 UNKNOWN_COMMIT_ID = "UNKNOWN"
 
 version_scope = {}
@@ -57,36 +57,40 @@ def _git_output(args):
         return None
 
 
-def _embedded_commit_id():
+def _embedded_full_version():
     try:
-        with open(COMMIT_ID_FILE, "r") as commit_file:
-            return commit_file.read().strip() or None
+        with open(FULL_VERSION_FILE, "r") as full_version_file:
+            return full_version_file.read().strip() or None
     except OSError:
         return None
 
 
-commit_id_file_existed = os.path.exists(COMMIT_ID_FILE)
-commit_id_file_content = None
-if commit_id_file_existed:
-    with open(COMMIT_ID_FILE, "rb") as commit_file:
-        commit_id_file_content = commit_file.read()
+full_version_file_existed = os.path.exists(FULL_VERSION_FILE)
+full_version_file_content = None
+if full_version_file_existed:
+    with open(FULL_VERSION_FILE, "rb") as full_version_file:
+        full_version_file_content = full_version_file.read()
 
-commit_id = _git_output(["rev-parse", "HEAD"])
-if commit_id is None:
-    commit_id = _embedded_commit_id() or UNKNOWN_COMMIT_ID
-with open(COMMIT_ID_FILE, "w") as commit_file:
-    commit_file.write(commit_id + "\n")
-
-
-def _restore_commit_id_file():
-    if commit_id_file_existed:
-        with open(COMMIT_ID_FILE, "wb") as commit_file:
-            commit_file.write(commit_id_file_content)
-    elif os.path.exists(COMMIT_ID_FILE):
-        os.remove(COMMIT_ID_FILE)
+git_commit_id = _git_output(["rev-parse", "HEAD"])
+if git_commit_id is None:
+    full_version = _embedded_full_version()
+else:
+    full_version = "{}-{}".format(VERSION, git_commit_id)
+if full_version is None:
+    full_version = "{}-{}".format(VERSION, UNKNOWN_COMMIT_ID)
+with open(FULL_VERSION_FILE, "w") as full_version_file:
+    full_version_file.write(full_version + "\n")
 
 
-atexit.register(_restore_commit_id_file)
+def _restore_full_version_file():
+    if full_version_file_existed:
+        with open(FULL_VERSION_FILE, "wb") as full_version_file:
+            full_version_file.write(full_version_file_content)
+    elif os.path.exists(FULL_VERSION_FILE):
+        os.remove(FULL_VERSION_FILE)
+
+
+atexit.register(_restore_full_version_file)
 
 
 def get_dev_version():
@@ -166,6 +170,16 @@ def _build_dev_package():
             with open(version_file, "w") as f:
                 f.write(content)
 
+        # Keep the embedded full version consistent with the dev package version.
+        full_version_file = os.path.join(dev_dir, "pypaimon", "_full_version")
+        if os.path.exists(full_version_file):
+            with open(full_version_file, "r") as f:
+                content = f.read()
+            if content.startswith(VERSION + "-"):
+                content = dev_version + content[len(VERSION):]
+            with open(full_version_file, "w") as f:
+                f.write(content)
+
         dev_tar = os.path.join("dist", dev_name + ".tar.gz")
         with tarfile.open(dev_tar, "w:gz") as tar:
             tar.add(dev_dir, arcname=dev_name)
@@ -209,7 +223,7 @@ setup(
     version=VERSION,
     packages=PACKAGES,
     include_package_data=True,
-    package_data={"pypaimon": ["_commit_id"]},
+    package_data={"pypaimon": ["_full_version"]},
     install_requires=install_requires,
     entry_points={
         'console_scripts': [
