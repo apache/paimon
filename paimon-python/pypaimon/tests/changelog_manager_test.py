@@ -133,7 +133,7 @@ class TestChangelogManager(unittest.TestCase):
             commit_identifier=3,
             commit_kind="APPEND",
             time_millis=1000,
-            full_version="python-2.1.dev0-commit-id",
+            full_version="python-2.1.dev-commit-id",
         )
 
         changelog = Changelog.from_snapshot(snapshot)

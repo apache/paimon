@@ -32,18 +32,18 @@ class BuildInfoTest(unittest.TestCase):
     def test_full_version(self):
         self.assertRegex(
             build_info.full_version(),
-            r"^python-2\.1\.dev0-(UNKNOWN|[0-9a-f]{40})$",
+            r"^python-2\.1\.dev-(UNKNOWN|[0-9a-f]{40})$",
         )
 
     def test_embedded_full_version(self):
         with tempfile.NamedTemporaryFile(mode="w", delete=False) as version_file:
             version_file.write(
-                "python-2.1.dev0-0123456789012345678901234567890123456789\n")
+                "python-2.1.dev-0123456789012345678901234567890123456789\n")
             path = version_file.name
         try:
             with patch.object(build_info, "_FULL_VERSION_FILE", path):
                 self.assertEqual(
-                    "python-2.1.dev0-0123456789012345678901234567890123456789",
+                    "python-2.1.dev-0123456789012345678901234567890123456789",
                     build_info._load_full_version(),
                 )
         finally:
@@ -104,7 +104,7 @@ class BuildInfoTest(unittest.TestCase):
             embedded_file = os.path.join(extracted, "pypaimon", "_full_version")
             with open(embedded_file, "r") as full_version_file:
                 embedded = full_version_file.read().strip()
-            self.assertEqual("python-2.1.dev0-" + upstream_commit, embedded)
+            self.assertEqual("python-2.1.dev-" + upstream_commit, embedded)
 
             downstream_commit = self._init_git_repository(extracted, "downstream")
             self.assertNotEqual(upstream_commit, downstream_commit)
