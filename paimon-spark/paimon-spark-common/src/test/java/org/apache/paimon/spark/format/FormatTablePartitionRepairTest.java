@@ -25,6 +25,7 @@ import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.format.FormatTablePartitionManager;
@@ -444,7 +445,11 @@ class FormatTablePartitionRepairTest {
         }
 
         @Override
-        public void createPartitions(List<Map<String, String>> partitions, boolean ignoreIfExists) {
+        public void createPartitions(
+                List<Map<String, String>> partitions,
+                boolean ignoreIfExists,
+                @Nullable List<PartitionStatistics> statistics,
+                boolean replaceStatistics) {
             createdPartitions.add(new ArrayList<>(partitions));
             createIgnoreFlags.add(ignoreIfExists);
         }

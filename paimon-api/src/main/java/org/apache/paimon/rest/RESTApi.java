@@ -872,16 +872,39 @@ public class RESTApi {
                 restAuthFunction);
     }
 
-    /** Create partitions for table, ignoring partitions which already exist. */
+    /**
+     * Create partitions for table, optionally reporting their statistics in the same request, so
+     * that a partition is never registered by a request whose statistics failed on their own. A
+     * server that stores no statistics still registers the partitions.
+     *
+     * <p>How a report combines with the stored values is per field. Replacing overwrites all four
+     * of recordCount, fileSizeInBytes, fileCount and lastFileCreationTime; adding sums the three
+     * counts and keeps the later creation time, since two timestamps do not add. A field reported
+     * as unknown leaves the stored one alone either way, and a report never creates or removes a
+     * partition row.
+     *
+     * @param identifier database name and table name
+     * @param partitions partitions to be created
+     * @param ignoreIfExists if false, fail when any partition already exists and apply none of the
+     *     batch
+     * @param statistics statistics to report, matched to {@code partitions} by {@link
+     *     PartitionStatistics#spec()} rather than by position, or null to report none
+     * @param replaceStatistics whether the report replaces the stored values rather than adding to
+     *     them; ignored when {@code statistics} is null, and not sent at all in that case
+     * @return the partitions the server created and the ones it already held
+     */
     public CreatePartitionsResponse createPartitions(
-            Identifier identifier, List<Map<String, String>> partitions) {
-        return createPartitions(identifier, partitions, true);
-    }
-
-    /** Create partitions for table. */
-    public CreatePartitionsResponse createPartitions(
-            Identifier identifier, List<Map<String, String>> partitions, boolean ignoreIfExists) {
-        CreatePartitionsRequest request = new CreatePartitionsRequest(partitions, ignoreIfExists);
+            Identifier identifier,
+            List<Map<String, String>> partitions,
+            boolean ignoreIfExists,
+            @Nullable List<PartitionStatistics> statistics,
+            boolean replaceStatistics) {
+        CreatePartitionsRequest request =
+                new CreatePartitionsRequest(
+                        partitions,
+                        ignoreIfExists,
+                        statistics,
+                        statistics == null ? null : replaceStatistics);
         return client.post(
                 resourcePaths.partitions(identifier.getDatabaseName(), identifier.getObjectName()),
                 request,

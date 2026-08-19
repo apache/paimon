@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.predicate.Predicate;
 
 import javax.annotation.Nullable;
@@ -61,10 +62,31 @@ public interface FormatTablePartitionManager extends Serializable {
     List<Partition> listPartitionsByNames(List<Map<String, String>> partitions);
 
     /**
-     * Register partitions. With {@code ignoreIfExists=false} the whole batch is rejected when any
-     * partition already exists, so such a request is never split.
+     * Register partitions, reporting no statistics for them. With {@code ignoreIfExists=false} the
+     * whole batch is rejected when any partition already exists, so such a request is never split.
      */
-    void createPartitions(List<Map<String, String>> partitions, boolean ignoreIfExists);
+    default void createPartitions(List<Map<String, String>> partitions, boolean ignoreIfExists) {
+        createPartitions(partitions, ignoreIfExists, null, false);
+    }
+
+    /**
+     * Register partitions and report statistics for them in the same call, so a partition is never
+     * registered by a request whose statistics failed on their own.
+     *
+     * <p>Statistics are matched to {@code partitions} by {@link PartitionStatistics#spec()} and may
+     * cover only some of them; {@code replaceStatistics} says whether they replace what the catalog
+     * holds or add to it, and is ignored when {@code statistics} is null. Reporting never
+     * unregisters a partition.
+     *
+     * <p>This is the method an implementation provides, so that none can report nothing by
+     * accident: a decorator that forwards only the two-argument form would otherwise drop every
+     * report and leave the caller no way to notice.
+     */
+    void createPartitions(
+            List<Map<String, String>> partitions,
+            boolean ignoreIfExists,
+            @Nullable List<PartitionStatistics> statistics,
+            boolean replaceStatistics);
 
     /** Unregister partitions. Metadata only; missing partitions are ignored. */
     void dropPartitions(List<Map<String, String>> partitions);

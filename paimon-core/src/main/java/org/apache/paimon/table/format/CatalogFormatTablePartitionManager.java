@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.utils.FunctionWithException;
 import org.apache.paimon.utils.StringUtils;
@@ -31,6 +32,7 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -58,7 +60,7 @@ class CatalogFormatTablePartitionManager implements FormatTablePartitionManager 
     CatalogFormatTablePartitionManager(
             Identifier identifier, List<String> partitionKeys, CatalogLoader catalogLoader) {
         this.identifier = identifier;
-        // Copied: the caller's list must not be able to change what counts as a leading prefix.
+        // Copied so the caller cannot change what counts as a leading prefix.
         this.partitionKeys = Collections.unmodifiableList(new ArrayList<>(partitionKeys));
         this.catalogLoader = catalogLoader;
     }
@@ -107,8 +109,7 @@ class CatalogFormatTablePartitionManager implements FormatTablePartitionManager 
         do {
             PagedList<Partition> page = pageSupplier.page(pageToken);
             if (page == null) {
-                // A missing page cannot be told apart from an empty listing; failing loudly
-                // beats silently reading fewer partitions.
+                // A missing page cannot be told apart from an empty listing, so fail loudly.
                 throw new IllegalStateException(
                         String.format(
                                 "Catalog returned a null partition page for format table %s.",
@@ -154,7 +155,14 @@ class CatalogFormatTablePartitionManager implements FormatTablePartitionManager 
     }
 
     @Override
-    public void createPartitions(List<Map<String, String>> partitions, boolean ignoreIfExists) {
+    public void createPartitions(
+            List<Map<String, String>> partitions,
+            boolean ignoreIfExists,
+            @Nullable List<PartitionStatistics> statistics,
+            boolean replaceStatistics) {
+        // Validated before the empty check: returning early would swallow a malformed report.
+        Map<Map<String, String>, PartitionStatistics> statisticsBySpec =
+                validateAndIndexStatistics(statistics, partitions);
         if (partitions.isEmpty()) {
             return;
         }
@@ -163,17 +171,87 @@ class CatalogFormatTablePartitionManager implements FormatTablePartitionManager 
                     if (!ignoreIfExists) {
                         // Rejecting the whole batch when any partition exists is only meaningful
                         // if the batch stays one request, so a strict create is never split.
-                        catalog.createPartitions(identifier, partitions, false);
+                        catalog.createPartitions(
+                                identifier, partitions, false, statistics, replaceStatistics);
                         return null;
                     }
-                    // An idempotent create is safe to split: a rerun converges from a partially
-                    // applied batch.
+                    // isRetrySafe() bounds the transport retry only: a caller-level rerun of a
+                    // multi-batch ADD still double counts the batches that already landed.
                     for (List<Map<String, String>> batch : batches(partitions)) {
-                        catalog.createPartitions(identifier, batch, true);
+                        // A partition and its statistics travel in the same request.
+                        catalog.createPartitions(
+                                identifier,
+                                batch,
+                                true,
+                                statisticsOf(batch, statisticsBySpec),
+                                replaceStatistics);
                     }
                     return null;
                 },
                 "create partitions");
+    }
+
+    /**
+     * Indexes the reported statistics by the partition they describe, rejecting any that describes
+     * a partition this call does not register: a spec typo would otherwise account for nothing, or
+     * for the wrong partition.
+     *
+     * <p>A spec that appears twice in one request is rejected too, in the partitions as much as in
+     * the report: batching would apply the repeats once, twice, or once each. Registration alone is
+     * an idempotent upsert, so a repeat there is harmless.
+     */
+    @Nullable
+    private Map<Map<String, String>, PartitionStatistics> validateAndIndexStatistics(
+            @Nullable List<PartitionStatistics> statistics, List<Map<String, String>> partitions) {
+        if (statistics == null) {
+            return null;
+        }
+        // Taken once: a repair of a pre-existing table reaches here with every partition of the
+        // table, and getFullName() formats a string on every call.
+        String tableName = identifier.getFullName();
+        Set<Map<String, String>> registered = capacityFor(partitions.size());
+        for (Map<String, String> spec : partitions) {
+            checkArgument(
+                    registered.add(spec),
+                    "Partition %s of table %s is registered twice in one request that reports "
+                            + "statistics; report each partition once.",
+                    spec,
+                    tableName);
+        }
+        Map<Map<String, String>, PartitionStatistics> bySpec =
+                new HashMap<>(hashCapacity(statistics.size()));
+        for (PartitionStatistics statistic : statistics) {
+            checkArgument(
+                    registered.contains(statistic.spec()),
+                    "Statistics were reported for partition %s of table %s, which this request "
+                            + "does not register.",
+                    statistic.spec(),
+                    tableName);
+            checkArgument(
+                    bySpec.put(statistic.spec(), statistic) == null,
+                    "Statistics were reported twice for partition %s of table %s; report each "
+                            + "partition once.",
+                    statistic.spec(),
+                    tableName);
+        }
+        return bySpec;
+    }
+
+    @Nullable
+    private static List<PartitionStatistics> statisticsOf(
+            List<Map<String, String>> batch,
+            @Nullable Map<Map<String, String>, PartitionStatistics> statisticsBySpec) {
+        if (statisticsBySpec == null) {
+            return null;
+        }
+        List<PartitionStatistics> ofBatch = new ArrayList<>(batch.size());
+        for (Map<String, String> spec : batch) {
+            PartitionStatistics statistic = statisticsBySpec.get(spec);
+            if (statistic != null) {
+                ofBatch.add(statistic);
+            }
+        }
+        return ofBatch;
     }
 
     @Override
@@ -191,6 +269,15 @@ class CatalogFormatTablePartitionManager implements FormatTablePartitionManager 
                     return null;
                 },
                 "drop partitions");
+    }
+
+    private static <T> Set<T> capacityFor(int size) {
+        return new HashSet<>(hashCapacity(size));
+    }
+
+    /** Room for {@code size} entries without a rehash, at the default load factor. */
+    private static int hashCapacity(int size) {
+        return (int) (size / 0.75f) + 1;
     }
 
     private static boolean matchesPrefix(Partition partition, Map<String, String> prefix) {

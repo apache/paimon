@@ -1567,7 +1567,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         List<Map<String, String>> partitionSpecs =
                 Arrays.asList(singletonMap("dt", "20260714"), singletonMap("dt", "20260715"));
         CreatePartitionsResponse response =
-                restCatalog.api().createPartitions(identifier, partitionSpecs);
+                restCatalog.api().createPartitions(identifier, partitionSpecs, true, null, false);
 
         assertThat(response.getCreated()).containsExactlyInAnyOrderElementsOf(partitionSpecs);
         assertThat(response.getExisted()).isEmpty();
@@ -1581,7 +1581,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         () ->
                                 restCatalog
                                         .api()
-                                        .createPartitions(identifier, conflictingSpecs, false))
+                                        .createPartitions(
+                                                identifier, conflictingSpecs, false, null, false))
                 .isInstanceOf(AlreadyExistsException.class)
                 .hasMessageContaining("dt=20260714");
 

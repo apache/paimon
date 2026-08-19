@@ -166,8 +166,8 @@ public class FormatTableCommit implements BatchTableCommit {
                 committer.clean(this.fileIO);
             }
             if (partitionManager != null && !partitionSpecs.isEmpty()) {
-                // Concurrent writers may touch the same partition, so registration is an
-                // idempotent ADD rather than a strict create.
+                // Concurrent writers may touch the same partition, so registration ignores the
+                // ones that already exist rather than failing the commit.
                 partitionManager.createPartitions(new ArrayList<>(partitionSpecs), true);
             }
             for (Map<String, String> partitionSpec : partitionSpecs) {
