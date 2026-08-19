@@ -253,8 +253,9 @@ def _checked_object_layout(value, pos, limit):
             value, offset_start + index * offset_width, offset_width)
         offsets.append(offset)
     sentinel = offsets[-1]
-    if ((size and (min(offsets[:-1]) != 0
-                   or len(set(offsets[:-1])) != size))
+    if ((not size and sentinel != 0)
+            or (size and (min(offsets[:-1]) != 0
+                          or len(set(offsets[:-1])) != size))
             or any(offset >= sentinel for offset in offsets[:-1])):
         _malformed("invalid object offsets")
     if size and len({

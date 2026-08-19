@@ -824,6 +824,18 @@ class TestVariantSetErrors(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "MALFORMED_VARIANT"):
             variant_set(column, '$.processed', pa.scalar(True))
 
+    def test_root_splice_rejects_empty_object_with_orphan_data(self):
+        empty = GenericVariant.from_python({})
+        corrupt = bytearray(empty.value())
+        corrupt[-1] = 1
+        corrupt.append(0)
+        column = GenericVariant.to_arrow_array([
+            GenericVariant(bytes(corrupt), empty.metadata()),
+        ])
+
+        with self.assertRaisesRegex(ValueError, "MALFORMED_VARIANT"):
+            variant_set(column, '$.processed', pa.scalar(True))
+
     def test_rejects_unknown_field_id_on_insert(self):
         metadata = GenericVariant.from_python({'value': 0}).metadata()
         orphan = _build_object_value([
