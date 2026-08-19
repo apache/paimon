@@ -310,7 +310,7 @@ under the License.
                                 <property name="paimon.core.commit.id" value="UNKNOWN"/>
                                 <mkdir dir="${project.build.outputDirectory}/META-INF"/>
                                 <echo file="${project.build.outputDirectory}/META-INF/paimon-core.full-version"
-                                      message="${project.version}-${paimon.core.commit.id}"/>
+                                      message="java-${project.version}-${paimon.core.commit.id}"/>
                             </target>
                         </configuration>
                     </execution>

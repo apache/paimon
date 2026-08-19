@@ -71,7 +71,11 @@ def _load_full_version():
     except OSError:
         pass
     version = _source_version()
-    return _UNKNOWN if version is None else "{}-{}".format(version, git_commit_id())
+    return (
+        _UNKNOWN
+        if version is None
+        else "python-{}-{}".format(version, git_commit_id())
+    )
 
 
 _FULL_VERSION = _load_full_version()

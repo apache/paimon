@@ -30,7 +30,7 @@ PYTHON_ROOT = os.path.dirname(os.path.abspath(__file__))
 FULL_VERSION_FILE = os.path.join(PYTHON_ROOT, "pypaimon", "_full_version")
 UNKNOWN_COMMIT_ID = "UNKNOWN"
 
-VERSION = "2.1.dev"
+VERSION = "2.1.dev0"
 
 
 def _repository_root():
@@ -56,10 +56,6 @@ def _git_output(args):
 
 
 def _full_version():
-    git_commit_id = _git_output(["rev-parse", "HEAD"])
-    if git_commit_id is not None:
-        return "{}-{}".format(VERSION, git_commit_id)
-
     try:
         with open(FULL_VERSION_FILE, "r") as full_version_file:
             embedded = full_version_file.read().strip()
@@ -67,7 +63,11 @@ def _full_version():
                 return embedded
     except OSError:
         pass
-    return "{}-{}".format(VERSION, UNKNOWN_COMMIT_ID)
+
+    git_commit_id = _git_output(["rev-parse", "HEAD"])
+    if git_commit_id is None:
+        git_commit_id = UNKNOWN_COMMIT_ID
+    return "python-{}-{}".format(VERSION, git_commit_id)
 
 
 def _write_full_version(root):
@@ -97,7 +97,7 @@ def get_dev_version():
     Format: 2.1.devYYYYMMDD (e.g. 2.1.dev20260415)
     Uses the commit date (author date) for reproducibility.
     """
-    base = VERSION.rstrip(".")
+    base = VERSION[:-1] if VERSION.endswith(".dev0") else VERSION.rstrip(".")
     if not base.endswith("dev"):
         return None
 
@@ -174,8 +174,10 @@ def _build_dev_package():
         if os.path.exists(full_version_file):
             with open(full_version_file, "r") as f:
                 content = f.read()
-            if content.startswith(VERSION + "-"):
-                content = dev_version + content[len(VERSION):]
+            version_prefix = "python-{}-".format(VERSION)
+            if content.startswith(version_prefix):
+                content = "python-{}-{}".format(
+                    dev_version, content[len(version_prefix):])
             with open(full_version_file, "w") as f:
                 f.write(content)
 

@@ -35,7 +35,7 @@ public class CoreFullVersionTest {
         String fullVersion = readResource("/META-INF/paimon-core.full-version");
 
         assertThat(CoreFullVersion.get()).isEqualTo(fullVersion);
-        assertThat(fullVersion).matches(".+-(UNKNOWN|[0-9a-f]{40})");
+        assertThat(fullVersion).matches("java-.+-(UNKNOWN|[0-9a-f]{40})");
     }
 
     private String readResource(String path) throws Exception {

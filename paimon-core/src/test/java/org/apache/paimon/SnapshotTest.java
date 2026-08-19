@@ -81,7 +81,7 @@ public class SnapshotTest {
                         + "  \"baseManifestList\" : \"m-0\",\n"
                         + "  \"deltaManifestList\" : \"m-1\",\n"
                         + "  \"commitUser\" : \"user\",\n"
-                        + "  \"fullVersion\" : \"2.1-SNAPSHOT-0123456789012345678901234567890123456789\",\n"
+                        + "  \"fullVersion\" : \"java-2.1-SNAPSHOT-0123456789012345678901234567890123456789\",\n"
                         + "  \"commitIdentifier\" : 0,\n"
                         + "  \"commitKind\" : \"APPEND\",\n"
                         + "  \"timeMillis\" : 1000,\n"
@@ -90,7 +90,7 @@ public class SnapshotTest {
                         + "}";
         Snapshot snapshot = Snapshot.fromJson(json);
         assertThat(snapshot.fullVersion())
-                .isEqualTo("2.1-SNAPSHOT-0123456789012345678901234567890123456789");
+                .isEqualTo("java-2.1-SNAPSHOT-0123456789012345678901234567890123456789");
         assertThat(Snapshot.fromJson(snapshot.toJson())).isEqualTo(snapshot);
         Changelog changelog = new Changelog(snapshot);
         assertThat(changelog.fullVersion()).isEqualTo(snapshot.fullVersion());
