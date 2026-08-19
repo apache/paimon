@@ -281,6 +281,161 @@ public class VariantShreddingReadTest {
         assertThat(result2.get(1).getArray(0).getRow(0, 1).getInt(0)).isEqualTo(5);
     }
 
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "null",
+                "{\"type\":\"ROW\",\"fields\":["
+                        + "  {\"name\":\"v\",\"type\":{\"type\":\"ROW\",\"fields\":["
+                        + "     {\"name\":\"a\",\"type\":{\"type\":\"ROW\",\"fields\":["
+                        + "         {\"name\":\"a\",\"type\":\"INT\"},"
+                        + "         {\"name\":\"b\",\"type\":\"INT\"},"
+                        + "         {\"name\":\"c\",\"type\":{\"type\":\"ROW\",\"fields\":["
+                        + "             {\"name\":\"d\",\"type\":\"STRING\"},"
+                        + "             {\"name\":\"e\",\"type\":\"INT\"}"
+                        + "         ]}}"
+                        + "     ]}},"
+                        + "     {\"name\":\"b\",\"type\":{\"type\":\"ROW\",\"fields\":["
+                        + "         {\"name\":\"a\",\"type\":\"INT\"},"
+                        + "         {\"name\":\"c\",\"type\":\"INT\"}"
+                        + "     ]}},"
+                        + "     {\"name\":\"d\",\"type\":\"INT\"},"
+                        + "     {\"name\":\"arr\",\"type\":{\"type\":\"ARRAY\",\"element\":{\"type\":\"ROW\",\"fields\":["
+                        + "         {\"name\":\"x\",\"type\":\"INT\"},"
+                        + "         {\"name\":\"y\",\"type\":\"INT\"}"
+                        + "     ]}}}"
+                        + "  ]}}"
+                        + "]}"
+            })
+    public void testReadNestedVariantWithPruning(String shreddingSchema) throws Exception {
+        Options options = new Options();
+        if (!shreddingSchema.equals("null")) {
+            options.set("parquet.variant.shreddingSchema", shreddingSchema);
+        }
+        ParquetFileFormat format =
+                new ParquetFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
+
+        RowType writeType = DataTypes.ROW(DataTypes.FIELD(0, "v", DataTypes.VARIANT()));
+
+        FormatWriterFactory factory = format.createWriterFactory(writeType);
+        writeRows(
+                factory,
+                GenericRow.of(
+                        GenericVariant.fromJson(
+                                " {"
+                                        + "    \"a\": {"
+                                        + "      \"a\": 0,"
+                                        + "      \"b\": 1,"
+                                        + "      \"c\": {"
+                                        + "        \"d\": \"hello\","
+                                        + "        \"e\": 2"
+                                        + "      }"
+                                        + "    },"
+                                        + "    \"b\": {"
+                                        + "      \"a\": 3,"
+                                        + "      \"c\": 4"
+                                        + "    },"
+                                        + "    \"c\": {"
+                                        + "      \"a\": 5,"
+                                        + "      \"c\": 6"
+                                        + "    },"
+                                        + "    \"d\": 7,"
+                                        + "    \"arr\": ["
+                                        + "         {\"x\":10,\"y\":11,\"z\":12},"
+                                        + "         {\"x\":12,\"y\":13,\"z\":14}"
+                                        + "     ]"
+                                        + "  }")));
+
+        // case1: multiple nested projections with a missing top-level typed key ($.c.a).
+        RowType readType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                0,
+                                "v",
+                                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                                        .field(DataTypes.INT(), "$.a.b")
+                                        .field(DataTypes.STRING(), "$.a.c.d")
+                                        .field(DataTypes.INT(), "$.b.a")
+                                        .field(DataTypes.INT(), "$.c.a")
+                                        .build()));
+        List<InternalRow> result = readRows(format, readType);
+        assertThat(result).hasSize(1);
+        InternalRow projected = result.get(0).getRow(0, 4);
+        assertThat(projected.getInt(0)).isEqualTo(1);
+        assertThat(projected.getString(1).toString()).isEqualTo("hello");
+        assertThat(projected.getInt(2)).isEqualTo(3);
+        assertThat(projected.getInt(3)).isEqualTo(5);
+
+        // case2: read a whole shredded object ($.b).
+        readType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                0,
+                                "v",
+                                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                                        .field(
+                                                DataTypes.ROW(
+                                                        DataTypes.FIELD(0, "a", DataTypes.INT()),
+                                                        DataTypes.FIELD(1, "c", DataTypes.INT())),
+                                                "$.b")
+                                        .build()));
+        result = readRows(format, readType);
+        assertThat(result.get(0).getRow(0, 1).getRow(0, 2).getInt(1)).isEqualTo(4);
+
+        // case3: read an object ($.c) that is not described by the shredding schema.
+        readType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                0,
+                                "v",
+                                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                                        .field(
+                                                DataTypes.ROW(
+                                                        DataTypes.FIELD(0, "a", DataTypes.INT()),
+                                                        DataTypes.FIELD(1, "c", DataTypes.INT())),
+                                                "$.c")
+                                        .build()));
+        result = readRows(format, readType);
+        assertThat(result.get(0).getRow(0, 1).getRow(0, 2).getInt(1)).isEqualTo(6);
+
+        // case4: array index path: nested field inside each element can be pruned.
+        readType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                0,
+                                "v",
+                                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                                        .field(DataTypes.INT(), "$.arr[0].x")
+                                        .build()));
+        result = readRows(format, readType);
+        assertThat(result.get(0).getRow(0, 1).getInt(0)).isEqualTo(10);
+
+        // case5: missing field inside array element falls back to binary value.
+        readType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                0,
+                                "v",
+                                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                                        .field(DataTypes.INT(), "$.arr[1].z")
+                                        .build()));
+        result = readRows(format, readType);
+        assertThat(result.get(0).getRow(0, 1).getInt(0)).isEqualTo(14);
+
+        // case6: read the whole array element as a VARIANT.
+        readType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                0,
+                                "v",
+                                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                                        .field(DataTypes.VARIANT(), "$.arr[1]")
+                                        .build()));
+        result = readRows(format, readType);
+        assertThat(result.get(0).getRow(0, 1).getVariant(0).toJson())
+                .isEqualTo("{\"x\":12,\"y\":13,\"z\":14}");
+    }
+
     protected List<InternalRow> readRows(ParquetFileFormat format, RowType rowType)
             throws IOException {
         List<InternalRow> result = new ArrayList<>();
