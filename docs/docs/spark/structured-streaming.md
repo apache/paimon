@@ -150,14 +150,19 @@ Spark checkpoint and Paimon Consumer progress have different granularities:
   recovery is conservative and may replay a completed snapshot if the query
   failed after processing it but before updating the Consumer.
 
-Paimon advances the Consumer only from Spark's successful micro-batch commit
-callback. If read limits divide one snapshot into several micro-batches, the
-Consumer is not advanced until the micro-batch containing the last split of that
-snapshot is committed. A Consumer update failure is propagated, fails the
-running query, and leaves the Consumer at its previous conservative position.
+Paimon updates the Consumer only from Spark's successful micro-batch commit
+callback. When a micro-batch ends partway through a delta snapshot, the Consumer
+may be created or refreshed at that snapshot so that the whole snapshot remains
+protected and can be replayed. The Consumer advances past a snapshot only after
+the micro-batch containing its last split is committed. A Consumer update failure
+is propagated, fails the running query, and leaves the Consumer at its previous
+conservative position.
 
-Spark always advances Consumer progress at complete snapshot boundaries;
-`consumer.mode` does not select a different Spark source implementation.
+Spark never advances Consumer progress past an incomplete snapshot. An incomplete
+initial full snapshot does not create a Consumer because Consumer recovery from
+that snapshot would use a delta scan. `consumer.mode` does not select a different
+Spark source implementation.
+
 Offsets restored from an older Spark checkpoint do not contain snapshot
 completion metadata. Spark logs a warning and leaves the Consumer unchanged for
 those offsets rather than advancing it without proof that the snapshot finished.
@@ -183,12 +188,12 @@ the same Consumer are unsupported because a faster query could move the shared
 position past data still needed by a slower query.
 
 Configure `consumer.expiration-time` according to the longest expected snapshot
-processing time, failure recovery time, and idle interval. The Consumer file is
-refreshed when a complete snapshot is committed; there is no separate Spark
-heartbeat while a snapshot is still being processed. Expired Consumer files are
-cleaned by non-write-only table commits. A write-only writer does not perform
-Consumer expiration, so stale Consumer IDs must be managed explicitly or by a
-separate non-write-only maintenance process.
+processing time, failure recovery time, and idle interval. Eligible Spark source
+commit callbacks refresh the Consumer file, but there is no separate timer-based
+Spark heartbeat. Expired Consumer files are cleaned by non-write-only table
+commits. A write-only writer does not perform Consumer expiration, so stale
+Consumer IDs must be managed explicitly or by a separate non-write-only
+maintenance process.
 
 An initial full scan has no Consumer retention fence until it completes, so
 snapshot retention should be long enough for that scan. If its snapshot expires

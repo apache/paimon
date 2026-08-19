@@ -75,6 +75,34 @@ class PaimonMicroBatchStreamITCase extends PaimonSparkTestBase {
     assert(consumerNextSnapshot(sourceTable) == complete.snapshotId + 1)
   }
 
+  test("protect partial delta snapshot after completing the initial full snapshot") {
+    val sourceTable = withConsumer(createTableWithOneSnapshot())
+    val stream = createStream(sourceTable)
+    val initial = stream.initialOffset().asInstanceOf[PaimonSourceOffset]
+    assert(initial.scanSnapshot)
+
+    // Reuse the initial bucket keys so that both snapshots deterministically contain two splits.
+    spark.sql("INSERT INTO T VALUES (10, 'v_10_2'), (11, 'v_11_2'), (12, 'v_12_2')")
+
+    val partialDelta = latestOffset(stream, initial, ReadLimit.maxFiles(3))
+    assert(partialDelta.snapshotId == initial.snapshotId + 1)
+    assert(partialDelta.index == 0L)
+    assert(partialDelta.totalSplits.contains(2L))
+    assert(!partialDelta.scanSnapshot)
+    assert(stream.planInputPartitions(initial, partialDelta).length == 3)
+
+    stream.commit(partialDelta)
+
+    assert(sourceTable.consumerManager().consumer(consumerId).isPresent)
+    assert(consumerNextSnapshot(sourceTable) == partialDelta.snapshotId)
+
+    val restartedInitial =
+      createStream(sourceTable).initialOffset().asInstanceOf[PaimonSourceOffset]
+    assert(restartedInitial.snapshotId == partialDelta.snapshotId)
+    assert(restartedInitial.index == PaimonSourceOffset.INIT_OFFSET_INDEX)
+    assert(!restartedInitial.scanSnapshot)
+  }
+
   test("restart without Spark checkpoint from consumer progress") {
     val sourceTable = withConsumer(createTableWithOneSnapshot())
     val firstStream = createStream(sourceTable)

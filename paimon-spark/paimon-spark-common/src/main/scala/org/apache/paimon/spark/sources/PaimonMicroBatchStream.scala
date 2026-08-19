@@ -226,8 +226,10 @@ class PaimonMicroBatchStream(
                 s"totalSplits ($totalSplits).")
           case Some(_) if offset.snapshotCompleted =>
             notifyConsumerCheckpointComplete(offset.snapshotId + 1)
+          case Some(_) if !offset.scanSnapshot =>
+            notifyConsumerCheckpointComplete(offset.snapshotId)
           case Some(_) =>
-            // The snapshot has not been fully consumed yet.
+            // An incomplete full snapshot cannot be recovered from a delta-only Consumer.
             ()
           case None =>
             if (warnedLegacyConsumerSnapshots.add(offset.snapshotId)) {

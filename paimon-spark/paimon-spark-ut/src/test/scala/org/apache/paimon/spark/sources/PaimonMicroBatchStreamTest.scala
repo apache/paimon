@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions
 import org.apache.paimon.table.DataTable
 import org.apache.paimon.table.source.{ReadBuilder, StreamDataTableScan}
 
+import org.mockito.ArgumentMatchers.anyLong
 import org.mockito.Mockito.{doNothing, doThrow, mock, never, times, verify, when}
 import org.scalatest.funsuite.AnyFunSuite
 
@@ -30,12 +31,13 @@ import java.util.Collections
 
 class PaimonMicroBatchStreamTest extends AnyFunSuite {
 
-  test("advance consumer only after the last split of a snapshot is committed") {
+  test("never advance consumer past an incomplete snapshot") {
     val (stream, scan) = createStreamWithConsumer()
     val partial = consumerOffset(index = 0L, totalSplits = 2L)
     val complete = consumerOffset(index = 1L, totalSplits = 2L)
 
     stream.commit(partial)
+    verify(scan).notifyCheckpointComplete(5L)
     verify(scan, never()).notifyCheckpointComplete(6L)
 
     stream.commit(complete)
@@ -48,7 +50,7 @@ class PaimonMicroBatchStreamTest extends AnyFunSuite {
 
     stream.commit(legacyOffset)
 
-    verify(scan, never()).notifyCheckpointComplete(6L)
+    verify(scan, never()).notifyCheckpointComplete(anyLong())
   }
 
   test("propagate consumer update failure and allow retry") {
