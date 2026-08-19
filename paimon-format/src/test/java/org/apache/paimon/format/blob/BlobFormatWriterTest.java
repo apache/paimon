@@ -31,6 +31,7 @@ import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
@@ -50,8 +51,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.EOFException;
+import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InterruptedIOException;
+import java.net.SocketTimeoutException;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -547,6 +553,632 @@ public class BlobFormatWriterTest {
         assertThat(readBackBlobs(outputFile, 1)).containsExactly(source);
     }
 
+    @Test
+    public void testMidBodyFailureWritesOnlyMiddleScalarAsNull(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        byte[] first = "first-image".getBytes();
+        byte[] broken = "broken-image-body".getBytes();
+        byte[] last = "last-image".getBytes();
+        MidBodyFailingInputStream failingStream = new MidBodyFailingInputStream(broken, 5, false);
+        UriReader failingReader = ignored -> failingStream;
+        TestingBlobFetchMetricReporter metrics = new TestingBlobFetchMetricReporter();
+        java.nio.file.Path outputFile = tempDir.resolve("blob.out");
+        BlobFormatWriter writer =
+                newWriter(outputFile, RowType.of(DataTypes.BLOB()), false, true, metrics, 3);
+
+        writer.addElement(GenericRow.of(Blob.fromData(first)));
+        writer.addElement(
+                GenericRow.of(
+                        new BlobRef(
+                                failingReader,
+                                new BlobDescriptor("mem://broken", 0, broken.length))));
+        writer.addElement(GenericRow.of(Blob.fromData(last)));
+        writer.close();
+
+        assertThat(readBackNullableBlobs(outputFile, 3)).containsExactly(first, null, last);
+        assertThat(failingStream.closeCount).isEqualTo(1);
+        assertThat(metrics.success).isEqualTo(2);
+        assertThat(metrics.successBytes).isEqualTo(first.length + last.length);
+        assertThat(metrics.fetchFailureNullWritten).isEqualTo(1);
+        assertThat(metrics.failure).isEqualTo(0);
+    }
+
+    @Test
+    public void testMidBodyFailureStillThrowsWhenFallbackDisabled(
+            @TempDir java.nio.file.Path tempDir) throws Exception {
+        byte[] broken = "broken-image-body".getBytes();
+        UriReader failingReader = ignored -> new MidBodyFailingInputStream(broken, 5, false);
+        java.nio.file.Path outputFile = tempDir.resolve("blob.out");
+
+        try (PositionOutputStream out =
+                new LocalFileIO.LocalPositionOutputStream(outputFile.toFile())) {
+            BlobFormatWriter writer =
+                    new BlobFormatWriter(
+                            out,
+                            null,
+                            RowType.of(DataTypes.BLOB()),
+                            false,
+                            false,
+                            BlobFetchMetricReporter.NOOP,
+                            3);
+
+            assertThatThrownBy(
+                            () ->
+                                    writer.addElement(
+                                            GenericRow.of(
+                                                    new BlobRef(
+                                                            failingReader,
+                                                            new BlobDescriptor(
+                                                                    "mem://broken",
+                                                                    0,
+                                                                    broken.length)))))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("body read failed");
+        }
+
+        // The disabled path retains the historical direct-streaming behavior. This partial output
+        // is why the enabled path must stage a complete payload before appending it.
+        assertThat(Files.size(outputFile))
+                .isGreaterThan(BlobFormatWriter.MAGIC_NUMBER_BYTES.length);
+    }
+
+    @Test
+    public void testKnownLengthPrematureEofWritesNullAndContinues(
+            @TempDir java.nio.file.Path tempDir) throws Exception {
+        byte[] shortBody = sequentialBytes(5);
+        RecordingUriReader reader = new RecordingUriReader(singleFile("mem://short", shortBody));
+        java.nio.file.Path outputFile = tempDir.resolve("blob.out");
+        BlobFormatWriter writer = newWriter(outputFile, RowType.of(DataTypes.BLOB()), false, true);
+
+        writer.addElement(
+                GenericRow.of(
+                        new BlobRef(
+                                reader,
+                                new BlobDescriptor("mem://short", 0, shortBody.length + 7))));
+        writer.addElement(GenericRow.of(Blob.fromData("after-eof".getBytes())));
+        writer.close();
+
+        assertThat(readBackNullableBlobs(outputFile, 2))
+                .containsExactly(null, "after-eof".getBytes());
+        assertThat(reader.opened.get(0).closeCount).isEqualTo(1);
+    }
+
+    @Test
+    public void testUnknownLengthBodyReadFailureWritesNullAndContinues(
+            @TempDir java.nio.file.Path tempDir) throws Exception {
+        byte[] broken = sequentialBytes(16);
+        MidBodyFailingInputStream failingStream = new MidBodyFailingInputStream(broken, 7, false);
+        UriReader reader = ignored -> failingStream;
+        java.nio.file.Path outputFile = tempDir.resolve("blob.out");
+        BlobFormatWriter writer =
+                newWriter(
+                        outputFile,
+                        RowType.of(DataTypes.BLOB()),
+                        false,
+                        true,
+                        BlobFetchMetricReporter.NOOP,
+                        4);
+
+        writer.addElement(
+                GenericRow.of(new BlobRef(reader, new BlobDescriptor("mem://unknown", 0, -1))));
+        writer.addElement(GenericRow.of(Blob.fromData("after-failure".getBytes())));
+        writer.close();
+
+        assertThat(readBackNullableBlobs(outputFile, 2))
+                .containsExactly(null, "after-failure".getBytes());
+        assertThat(failingStream.closeCount).isEqualTo(1);
+    }
+
+    @Test
+    public void testArrayMiddleBodyFailureWritesOnlyThatElementAsNull(
+            @TempDir java.nio.file.Path tempDir) throws Exception {
+        byte[] first = "array-first".getBytes();
+        byte[] broken = "array-broken-body".getBytes();
+        byte[] last = "array-last".getBytes();
+        UriReader failingReader = ignored -> new MidBodyFailingInputStream(broken, 6, false);
+        java.nio.file.Path outputFile = tempDir.resolve("blob.out");
+        BlobFormatWriter writer =
+                newWriter(
+                        outputFile,
+                        RowType.of(DataTypes.ARRAY(DataTypes.BLOB())),
+                        false,
+                        true,
+                        BlobFetchMetricReporter.NOOP,
+                        4);
+
+        writer.addElement(
+                GenericRow.of(
+                        new GenericArray(
+                                new Object[] {
+                                    Blob.fromData(first),
+                                    new BlobRef(
+                                            failingReader,
+                                            new BlobDescriptor(
+                                                    "mem://array-broken", 0, broken.length)),
+                                    Blob.fromData(last)
+                                })));
+        writer.close();
+
+        InternalArray array =
+                readSingleRow(outputFile, DataTypes.ARRAY(DataTypes.BLOB())).getArray(0);
+        assertThat(array.size()).isEqualTo(3);
+        assertThat(readAll(array.getBlob(0))).isEqualTo(first);
+        assertThat(array.isNullAt(1)).isTrue();
+        assertThat(readAll(array.getBlob(2))).isEqualTo(last);
+    }
+
+    @Test
+    public void testMapMiddleBodyFailureWritesOnlyThatValueAsNull(
+            @TempDir java.nio.file.Path tempDir) throws Exception {
+        byte[] first = "map-first".getBytes();
+        byte[] broken = "map-broken-body".getBytes();
+        byte[] last = "map-last".getBytes();
+        UriReader failingReader = ignored -> new MidBodyFailingInputStream(broken, 6, false);
+        Map<Object, Object> entries = new LinkedHashMap<>();
+        entries.put(1, Blob.fromData(first));
+        entries.put(
+                2,
+                new BlobRef(
+                        failingReader, new BlobDescriptor("mem://map-broken", 0, broken.length)));
+        entries.put(3, Blob.fromData(last));
+        java.nio.file.Path outputFile = tempDir.resolve("blob.out");
+        BlobFormatWriter writer =
+                newWriter(
+                        outputFile,
+                        RowType.of(DataTypes.MAP(DataTypes.INT(), DataTypes.BLOB())),
+                        false,
+                        true,
+                        BlobFetchMetricReporter.NOOP,
+                        4);
+
+        writer.addElement(GenericRow.of(new GenericMap(entries)));
+        writer.close();
+
+        InternalMap map =
+                readSingleRow(outputFile, DataTypes.MAP(DataTypes.INT(), DataTypes.BLOB()))
+                        .getMap(0);
+        assertThat(map.size()).isEqualTo(3);
+        assertThat(map.keyArray().getInt(0)).isEqualTo(1);
+        assertThat(map.keyArray().getInt(1)).isEqualTo(2);
+        assertThat(map.keyArray().getInt(2)).isEqualTo(3);
+        assertThat(readAll(map.valueArray().getBlob(0))).isEqualTo(first);
+        assertThat(map.valueArray().isNullAt(1)).isTrue();
+        assertThat(readAll(map.valueArray().getBlob(2))).isEqualTo(last);
+    }
+
+    @Test
+    public void testFailedReusableSourceIsDiscardedBeforeNextBlob(
+            @TempDir java.nio.file.Path tempDir) throws Exception {
+        byte[] payload = sequentialBytes(12);
+        int[] openCount = {0};
+        MidBodyFailingInputStream firstStream = new MidBodyFailingInputStream(payload, 5, false);
+        UriReader reader =
+                ignored -> {
+                    openCount[0]++;
+                    return openCount[0] == 1
+                            ? firstStream
+                            : new CountingSeekableInputStream(payload);
+                };
+        BlobDescriptor descriptor = new BlobDescriptor("mem://reused", 0, payload.length);
+        java.nio.file.Path outputFile = tempDir.resolve("blob.out");
+        BlobFormatWriter writer =
+                newWriter(
+                        outputFile,
+                        RowType.of(DataTypes.BLOB()),
+                        false,
+                        true,
+                        BlobFetchMetricReporter.NOOP,
+                        3);
+
+        writer.addElement(GenericRow.of(new BlobRef(reader, descriptor)));
+        writer.addElement(GenericRow.of(new BlobRef(reader, descriptor)));
+        writer.close();
+
+        assertThat(openCount[0]).isEqualTo(2);
+        assertThat(firstStream.closeCount).isEqualTo(1);
+        assertThat(readBackNullableBlobs(outputFile, 2)).containsExactly(null, payload);
+    }
+
+    @Test
+    public void testSourceCloseFailureIsNotConvertedToNull(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        UriReader closeFailing = ignored -> new CloseFailingStream(new byte[] {1, 2, 3});
+        java.nio.file.Path outputFile = tempDir.resolve("blob.out");
+
+        try (PositionOutputStream out =
+                new LocalFileIO.LocalPositionOutputStream(outputFile.toFile())) {
+            BlobFormatWriter writer =
+                    new BlobFormatWriter(
+                            out,
+                            null,
+                            RowType.of(DataTypes.BLOB()),
+                            false,
+                            true,
+                            BlobFetchMetricReporter.NOOP,
+                            2);
+
+            assertThatThrownBy(
+                            () ->
+                                    writer.addElement(
+                                            GenericRow.of(
+                                                    new BlobRef(
+                                                            closeFailing,
+                                                            new BlobDescriptor(
+                                                                    "mem://close-failing",
+                                                                    0,
+                                                                    -1)))))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("close failed");
+            assertThat(out.getPos()).isZero();
+        }
+    }
+
+    @Test
+    public void testInterruptedSourceReadIsNotConvertedToNull() throws Exception {
+        Thread.interrupted();
+        try {
+            TestingBlobFetchMetricReporter metrics = new TestingBlobFetchMetricReporter();
+            UriReader interruptedReader =
+                    ignored ->
+                            new ReadFailingInputStream(
+                                    new InterruptedIOException("source read interrupted"), true);
+            try (PositionOutputStream out = new InMemoryPositionOutputStream()) {
+                BlobFormatWriter writer =
+                        new BlobFormatWriter(
+                                out, null, RowType.of(DataTypes.BLOB()), false, true, metrics, 2);
+
+                assertThatThrownBy(
+                                () ->
+                                        writer.addElement(
+                                                GenericRow.of(
+                                                        new BlobRef(
+                                                                interruptedReader,
+                                                                new BlobDescriptor(
+                                                                        "mem://interrupted",
+                                                                        0,
+                                                                        -1)))))
+                        .isInstanceOf(InterruptedIOException.class)
+                        .hasMessageContaining("source read interrupted");
+                assertThat(Thread.currentThread().isInterrupted()).isTrue();
+                assertThat(out.getPos()).isZero();
+            }
+
+            assertThat(metrics.fetchFailureNullWritten).isEqualTo(0);
+            assertThat(metrics.failure).isEqualTo(1);
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    public void testSocketTimeoutWithoutInterruptWritesNull(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        TestingBlobFetchMetricReporter metrics = new TestingBlobFetchMetricReporter();
+        UriReader timeoutReader =
+                ignored ->
+                        new ReadFailingInputStream(
+                                new SocketTimeoutException("socket read timed out"), false);
+        java.nio.file.Path outputFile = tempDir.resolve("blob.out");
+        BlobFormatWriter writer =
+                newWriter(outputFile, RowType.of(DataTypes.BLOB()), false, true, metrics, 2);
+
+        writer.addElement(
+                GenericRow.of(
+                        new BlobRef(
+                                timeoutReader, new BlobDescriptor("mem://socket-timeout", 0, -1))));
+        writer.close();
+
+        assertThat(Thread.currentThread().isInterrupted()).isFalse();
+        assertThat(readBackNullableBlobs(outputFile, 1)).containsExactly((byte[]) null);
+        assertThat(metrics.fetchFailureNullWritten).isEqualTo(1);
+        assertThat(metrics.failure).isEqualTo(0);
+    }
+
+    @Test
+    public void testReadAndSourceCloseFailureIsNotConvertedToNull(
+            @TempDir java.nio.file.Path tempDir) throws Exception {
+        byte[] body = sequentialBytes(12);
+        UriReader reader = ignored -> new MidBodyFailingInputStream(body, 5, true);
+        java.nio.file.Path outputFile = tempDir.resolve("blob.out");
+
+        try (PositionOutputStream out =
+                new LocalFileIO.LocalPositionOutputStream(outputFile.toFile())) {
+            BlobFormatWriter writer =
+                    new BlobFormatWriter(
+                            out,
+                            null,
+                            RowType.of(DataTypes.BLOB()),
+                            false,
+                            true,
+                            BlobFetchMetricReporter.NOOP,
+                            3);
+
+            assertThatThrownBy(
+                            () ->
+                                    writer.addElement(
+                                            GenericRow.of(
+                                                    new BlobRef(
+                                                            reader,
+                                                            new BlobDescriptor(
+                                                                    "mem://read-close-failing",
+                                                                    0,
+                                                                    -1)))))
+                    .isInstanceOf(IOException.class)
+                    .satisfies(
+                            failure -> {
+                                assertThat(failure).hasMessageContaining("source close failed");
+                                assertThat(failure.getSuppressed())
+                                        .extracting(Throwable::getMessage)
+                                        .contains("body read failed after 5 bytes");
+                            });
+            assertThat(out.getPos()).isZero();
+        }
+    }
+
+    @Test
+    public void testFinalOutputFailureIsNotConvertedToNull(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        TestingBlobFetchMetricReporter metrics = new TestingBlobFetchMetricReporter();
+        java.nio.file.Path outputFile = tempDir.resolve("blob.out");
+
+        try (FailingPositionOutputStream out =
+                new FailingPositionOutputStream(
+                        new LocalFileIO.LocalPositionOutputStream(outputFile.toFile()), 5)) {
+            BlobFormatWriter writer =
+                    new BlobFormatWriter(
+                            out, null, RowType.of(DataTypes.BLOB()), false, true, metrics, 2);
+
+            assertThatThrownBy(
+                            () ->
+                                    writer.addElement(
+                                            GenericRow.of(
+                                                    Blob.fromData(
+                                                            "successfully-staged".getBytes()))))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("final output failed");
+        }
+
+        assertThat(metrics.fetchFailureNullWritten).isEqualTo(0);
+        assertThat(metrics.failure).isEqualTo(0);
+        assertThat(metrics.success).isEqualTo(0);
+    }
+
+    @Test
+    public void testSpillableStagingUsesMemoryAndDiskAndCleansUp(
+            @TempDir java.nio.file.Path tempDir) throws Exception {
+        java.nio.file.Path stagingDirectory = Files.createDirectory(tempDir.resolve("staging"));
+        byte[] inMemoryPayload = sequentialBytes(4);
+        try (SpillableBlobStaging staging =
+                new SpillableBlobStaging(8, stagingDirectory.toFile())) {
+            staging.write(inMemoryPayload, 0, inMemoryPayload.length);
+            staging.finish();
+
+            assertThat(staging.isInMemory()).isTrue();
+            assertThat(staging.spillFile()).isNull();
+            try (InputStream in = staging.openInputStream()) {
+                assertThat(org.apache.paimon.utils.IOUtils.readFully(in, false))
+                        .isEqualTo(inMemoryPayload);
+            }
+        }
+        assertDirectoryEmpty(stagingDirectory);
+
+        byte[] spilledPayload = sequentialBytes(16);
+        File spillFile;
+        try (SpillableBlobStaging staging =
+                new SpillableBlobStaging(4, stagingDirectory.toFile())) {
+            staging.write(spilledPayload, 0, spilledPayload.length);
+            staging.finish();
+
+            assertThat(staging.isInMemory()).isFalse();
+            spillFile = staging.spillFile();
+            assertThat(spillFile).isNotNull().exists();
+            try (InputStream in = staging.openInputStream()) {
+                assertThat(org.apache.paimon.utils.IOUtils.readFully(in, false))
+                        .isEqualTo(spilledPayload);
+            }
+        }
+        assertThat(spillFile).doesNotExist();
+        assertDirectoryEmpty(stagingDirectory);
+
+        SpillableBlobStaging aborted = new SpillableBlobStaging(4, stagingDirectory.toFile());
+        aborted.write(spilledPayload, 0, spilledPayload.length);
+        File abortedSpillFile = aborted.spillFile();
+        assertThat(abortedSpillFile).isNotNull().exists();
+        aborted.close();
+        assertThat(abortedSpillFile).doesNotExist();
+        assertDirectoryEmpty(stagingDirectory);
+    }
+
+    @Test
+    public void testWriterDeletesSpillFilesAfterSuccessFailureAndClose(
+            @TempDir java.nio.file.Path tempDir) throws Exception {
+        java.nio.file.Path stagingDirectory = Files.createDirectory(tempDir.resolve("staging"));
+        java.nio.file.Path outputFile = tempDir.resolve("blob.out");
+        byte[] success = sequentialBytes(16);
+        byte[] broken = sequentialBytes(16);
+        UriReader failingReader = ignored -> new MidBodyFailingInputStream(broken, 7, false);
+
+        try (PositionOutputStream out =
+                new LocalFileIO.LocalPositionOutputStream(outputFile.toFile())) {
+            BlobFormatWriter writer =
+                    new BlobFormatWriter(
+                            out,
+                            null,
+                            RowType.of(DataTypes.BLOB()),
+                            false,
+                            true,
+                            BlobFetchMetricReporter.NOOP,
+                            3,
+                            BlobStagingFactory.spillable(4, stagingDirectory.toFile()));
+
+            writer.addElement(GenericRow.of(Blob.fromData(success)));
+            assertDirectoryEmpty(stagingDirectory);
+
+            writer.addElement(
+                    GenericRow.of(
+                            new BlobRef(
+                                    failingReader,
+                                    new BlobDescriptor("mem://broken-spill", 0, broken.length))));
+            assertDirectoryEmpty(stagingDirectory);
+
+            writer.close();
+            assertDirectoryEmpty(stagingDirectory);
+        }
+
+        assertThat(readBackNullableBlobs(outputFile, 2)).containsExactly(success, null);
+    }
+
+    @Test
+    public void testStagingLocalWriteFailureIsFatal(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        TestingBlobFetchMetricReporter metrics = new TestingBlobFetchMetricReporter();
+        java.nio.file.Path outputFile = tempDir.resolve("blob.out");
+
+        try (PositionOutputStream out =
+                new LocalFileIO.LocalPositionOutputStream(outputFile.toFile())) {
+            BlobFormatWriter writer =
+                    new BlobFormatWriter(
+                            out,
+                            null,
+                            RowType.of(DataTypes.BLOB()),
+                            false,
+                            true,
+                            metrics,
+                            2,
+                            () -> new TestingBlobStaging(StagingFailure.WRITE));
+
+            assertThatThrownBy(
+                            () ->
+                                    writer.addElement(
+                                            GenericRow.of(Blob.fromData("payload".getBytes()))))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("staging write failed");
+            assertThat(out.getPos()).isZero();
+        }
+
+        assertThat(metrics.fetchFailureNullWritten).isEqualTo(0);
+        assertThat(metrics.failure).isEqualTo(0);
+    }
+
+    @Test
+    public void testStagingFactoryFailureClosesSourceAndIsFatal(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        byte[] payload = "payload".getBytes();
+        CountingSeekableInputStream source = new CountingSeekableInputStream(payload);
+        UriReader reader = ignored -> source;
+        java.nio.file.Path outputFile = tempDir.resolve("blob.out");
+
+        try (PositionOutputStream out =
+                new LocalFileIO.LocalPositionOutputStream(outputFile.toFile())) {
+            BlobFormatWriter writer =
+                    new BlobFormatWriter(
+                            out,
+                            null,
+                            RowType.of(DataTypes.BLOB()),
+                            false,
+                            true,
+                            BlobFetchMetricReporter.NOOP,
+                            2,
+                            () -> {
+                                throw new IOException("staging create failed");
+                            });
+
+            assertThatThrownBy(
+                            () ->
+                                    writer.addElement(
+                                            GenericRow.of(
+                                                    new BlobRef(
+                                                            reader,
+                                                            new BlobDescriptor(
+                                                                    "mem://create-failing",
+                                                                    0,
+                                                                    payload.length)))))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("staging create failed");
+            assertThat(out.getPos()).isZero();
+        }
+
+        assertThat(source.closeCount).isEqualTo(1);
+    }
+
+    @Test
+    public void testStagingCleanupFailureAfterReadFailureIsFatal(
+            @TempDir java.nio.file.Path tempDir) throws Exception {
+        byte[] broken = sequentialBytes(12);
+        UriReader reader = ignored -> new MidBodyFailingInputStream(broken, 5, false);
+        TestingBlobFetchMetricReporter metrics = new TestingBlobFetchMetricReporter();
+        java.nio.file.Path outputFile = tempDir.resolve("blob.out");
+
+        try (PositionOutputStream out =
+                new LocalFileIO.LocalPositionOutputStream(outputFile.toFile())) {
+            BlobFormatWriter writer =
+                    new BlobFormatWriter(
+                            out,
+                            null,
+                            RowType.of(DataTypes.BLOB()),
+                            false,
+                            true,
+                            metrics,
+                            3,
+                            () -> new TestingBlobStaging(StagingFailure.CLOSE));
+
+            assertThatThrownBy(
+                            () ->
+                                    writer.addElement(
+                                            GenericRow.of(
+                                                    new BlobRef(
+                                                            reader,
+                                                            new BlobDescriptor(
+                                                                    "mem://broken-cleanup",
+                                                                    0,
+                                                                    -1)))))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("staging close failed")
+                    .satisfies(
+                            failure ->
+                                    assertThat(failure.getSuppressed())
+                                            .extracting(Throwable::getMessage)
+                                            .contains("body read failed after 5 bytes"));
+            assertThat(out.getPos()).isZero();
+        }
+
+        assertThat(metrics.fetchFailureNullWritten).isEqualTo(0);
+        assertThat(metrics.failure).isEqualTo(0);
+    }
+
+    @Test
+    public void testStagingCleanupFailureAfterFinalCopyIsFatal(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        TestingBlobFetchMetricReporter metrics = new TestingBlobFetchMetricReporter();
+        java.nio.file.Path outputFile = tempDir.resolve("blob.out");
+
+        try (PositionOutputStream out =
+                new LocalFileIO.LocalPositionOutputStream(outputFile.toFile())) {
+            BlobFormatWriter writer =
+                    new BlobFormatWriter(
+                            out,
+                            null,
+                            RowType.of(DataTypes.BLOB()),
+                            false,
+                            true,
+                            metrics,
+                            2,
+                            () -> new TestingBlobStaging(StagingFailure.CLOSE));
+
+            assertThatThrownBy(
+                            () ->
+                                    writer.addElement(
+                                            GenericRow.of(Blob.fromData("payload".getBytes()))))
+                    .isInstanceOf(IOException.class)
+                    .hasMessageContaining("staging close failed");
+            assertThat(out.getPos()).isGreaterThan(0);
+        }
+
+        assertThat(metrics.fetchFailureNullWritten).isEqualTo(0);
+        assertThat(metrics.failure).isEqualTo(0);
+        assertThat(metrics.success).isEqualTo(0);
+    }
+
     private static BlobFormatWriter newWriter(java.nio.file.Path outputFile, RowType rowType)
             throws java.io.FileNotFoundException {
         return newWriter(
@@ -636,6 +1268,43 @@ public class BlobFormatWriterTest {
         return result;
     }
 
+    private static List<byte[]> readBackNullableBlobs(
+            java.nio.file.Path outputFile, int expectedCount) throws Exception {
+        LocalFileIO fileIO = new LocalFileIO();
+        Path filePath = new Path(outputFile.toUri());
+        long fileSize = Files.size(outputFile);
+        List<byte[]> result = new ArrayList<>();
+        try (SeekableInputStream in = fileIO.newInputStream(filePath)) {
+            BlobFileMeta fileMeta = new BlobFileMeta(in, fileSize, null);
+            assertThat(fileMeta.recordNumber()).isEqualTo(expectedCount);
+            BlobFormatReader reader =
+                    new BlobFormatReader(
+                            fileIO, filePath, fileMeta, in, 1, 0, DataTypes.BLOB(), false);
+            FileRecordIterator<InternalRow> iterator = reader.readBatch();
+            for (int i = 0; i < expectedCount; i++) {
+                InternalRow row = iterator.next();
+                assertThat(row).isNotNull();
+                result.add(row.isNullAt(0) ? null : readAll(row.getBlob(0)));
+            }
+        }
+        return result;
+    }
+
+    private static InternalRow readSingleRow(
+            java.nio.file.Path outputFile, org.apache.paimon.types.DataType dataType)
+            throws Exception {
+        LocalFileIO fileIO = new LocalFileIO();
+        Path filePath = new Path(outputFile.toUri());
+        long fileSize = Files.size(outputFile);
+        try (SeekableInputStream in = fileIO.newInputStream(filePath)) {
+            BlobFileMeta fileMeta = new BlobFileMeta(in, fileSize, null);
+            assertThat(fileMeta.recordNumber()).isEqualTo(1);
+            BlobFormatReader reader =
+                    new BlobFormatReader(fileIO, filePath, fileMeta, in, 1, 0, dataType, false);
+            return reader.readBatch().next();
+        }
+    }
+
     private static byte[] readAll(Blob blob) throws Exception {
         try (SeekableInputStream in = blob.newInputStream()) {
             return org.apache.paimon.utils.IOUtils.readFully(in, false);
@@ -648,6 +1317,10 @@ public class BlobFormatWriterTest {
             bytes[i] = (byte) i;
         }
         return bytes;
+    }
+
+    private static void assertDirectoryEmpty(java.nio.file.Path directory) {
+        assertThat(directory.toFile().list()).isNotNull().isEmpty();
     }
 
     private static Map<String, byte[]> singleFile(String uri, byte[] data) {
@@ -729,6 +1402,214 @@ public class BlobFormatWriterTest {
         @Override
         public void close() {
             closeCount++;
+        }
+    }
+
+    /** A source which returns a prefix and then fails while its body is being read. */
+    private static final class MidBodyFailingInputStream extends SeekableInputStream {
+
+        private final byte[] data;
+        private final int failAfter;
+        private final boolean failOnClose;
+        private int pos;
+        private int closeCount;
+
+        private MidBodyFailingInputStream(byte[] data, int failAfter, boolean failOnClose) {
+            this.data = data;
+            this.failAfter = failAfter;
+            this.failOnClose = failOnClose;
+        }
+
+        @Override
+        public void seek(long desired) {
+            pos = (int) desired;
+        }
+
+        @Override
+        public long getPos() {
+            return pos;
+        }
+
+        @Override
+        public int read() throws IOException {
+            if (pos >= failAfter) {
+                throw new IOException("body read failed after " + failAfter + " bytes");
+            }
+            if (pos >= data.length) {
+                return -1;
+            }
+            return data[pos++] & 0xff;
+        }
+
+        @Override
+        public int read(byte[] b, int off, int len) throws IOException {
+            if (len == 0) {
+                return 0;
+            }
+            if (pos >= failAfter) {
+                throw new IOException("body read failed after " + failAfter + " bytes");
+            }
+            if (pos >= data.length) {
+                return -1;
+            }
+            int bytesBeforeFailure = failAfter - pos;
+            int bytesRead = Math.min(len, Math.min(data.length - pos, bytesBeforeFailure));
+            System.arraycopy(data, pos, b, off, bytesRead);
+            pos += bytesRead;
+            return bytesRead;
+        }
+
+        @Override
+        public void close() throws IOException {
+            closeCount++;
+            if (failOnClose) {
+                throw new IOException("source close failed");
+            }
+        }
+    }
+
+    /** A source which fails its body read, optionally marking the current thread interrupted. */
+    private static final class ReadFailingInputStream extends SeekableInputStream {
+
+        private final IOException failure;
+        private final boolean interruptThread;
+
+        private ReadFailingInputStream(IOException failure, boolean interruptThread) {
+            this.failure = failure;
+            this.interruptThread = interruptThread;
+        }
+
+        @Override
+        public void seek(long desired) {}
+
+        @Override
+        public long getPos() {
+            return 0;
+        }
+
+        @Override
+        public int read() throws IOException {
+            return fail();
+        }
+
+        @Override
+        public int read(byte[] b, int off, int len) throws IOException {
+            return fail();
+        }
+
+        private int fail() throws IOException {
+            if (interruptThread) {
+                Thread.currentThread().interrupt();
+            }
+            throw failure;
+        }
+
+        @Override
+        public void close() {}
+    }
+
+    /** A final sink whose position remains observable while the test thread is interrupted. */
+    private static final class InMemoryPositionOutputStream extends PositionOutputStream {
+
+        private final ByteArrayOutputStream data = new ByteArrayOutputStream();
+
+        @Override
+        public long getPos() {
+            return data.size();
+        }
+
+        @Override
+        public void write(int b) {
+            data.write(b);
+        }
+
+        @Override
+        public void write(byte[] b) {
+            data.write(b, 0, b.length);
+        }
+
+        @Override
+        public void write(byte[] b, int off, int len) {
+            data.write(b, off, len);
+        }
+
+        @Override
+        public void flush() {}
+
+        @Override
+        public void close() throws IOException {
+            data.close();
+        }
+    }
+
+    /** A final sink which fails once the configured number of bytes has been appended. */
+    private static final class FailingPositionOutputStream extends PositionOutputStreamWrapper {
+
+        private final long failAfter;
+
+        private FailingPositionOutputStream(PositionOutputStream out, long failAfter) {
+            super(out);
+            this.failAfter = failAfter;
+        }
+
+        @Override
+        public void write(int b) throws IOException {
+            if (getPos() >= failAfter) {
+                throw new IOException("final output failed");
+            }
+            super.write(b);
+        }
+
+        @Override
+        public void write(byte[] b, int off, int len) throws IOException {
+            if (getPos() + len > failAfter) {
+                throw new IOException("final output failed");
+            }
+            super.write(b, off, len);
+        }
+    }
+
+    private enum StagingFailure {
+        WRITE,
+        CLOSE
+    }
+
+    /** An injectable staging area used to prove local staging failures remain fatal. */
+    private static final class TestingBlobStaging implements BlobStaging {
+
+        private final StagingFailure failure;
+        private final ByteArrayOutputStream data = new ByteArrayOutputStream();
+
+        private TestingBlobStaging(StagingFailure failure) {
+            this.failure = failure;
+        }
+
+        @Override
+        public void write(byte[] bytes, int offset, int length) throws IOException {
+            if (failure == StagingFailure.WRITE) {
+                throw new IOException("staging write failed");
+            }
+            data.write(bytes, offset, length);
+        }
+
+        @Override
+        public void finish() {}
+
+        @Override
+        public InputStream openInputStream() {
+            return new ByteArrayInputStream(data.toByteArray());
+        }
+
+        @Override
+        public long length() {
+            return data.size();
+        }
+
+        @Override
+        public void close() throws IOException {
+            if (failure == StagingFailure.CLOSE) {
+                throw new IOException("staging close failed");
+            }
         }
     }
 

@@ -61,7 +61,8 @@ final class ArrayBlobElementSerializer implements BlobElementSerializer {
             boolean writeNullOnMissingFile,
             boolean writeNullOnFetchFailure,
             BlobFetchMetricReporter blobFetchMetricReporter,
-            int copyBufferSize) {
+            int copyBufferSize,
+            BlobStagingFactory stagingFactory) {
         return new Writer(
                 out,
                 blobFieldName,
@@ -69,7 +70,8 @@ final class ArrayBlobElementSerializer implements BlobElementSerializer {
                 writeNullOnMissingFile,
                 writeNullOnFetchFailure,
                 blobFetchMetricReporter,
-                copyBufferSize);
+                copyBufferSize,
+                stagingFactory);
     }
 
     @Override
@@ -96,7 +98,8 @@ final class ArrayBlobElementSerializer implements BlobElementSerializer {
                 boolean writeNullOnMissingFile,
                 boolean writeNullOnFetchFailure,
                 BlobFetchMetricReporter blobFetchMetricReporter,
-                int copyBufferSize) {
+                int copyBufferSize,
+                BlobStagingFactory stagingFactory) {
             super(
                     out,
                     blobFieldName,
@@ -104,7 +107,8 @@ final class ArrayBlobElementSerializer implements BlobElementSerializer {
                     writeNullOnMissingFile,
                     writeNullOnFetchFailure,
                     blobFetchMetricReporter,
-                    copyBufferSize);
+                    copyBufferSize,
+                    stagingFactory);
         }
 
         @Override
@@ -143,7 +147,15 @@ final class ArrayBlobElementSerializer implements BlobElementSerializer {
                     elementLengths[i] = NULL_ELEMENT_LENGTH;
                     continue;
                 }
-                BlobDescriptor descriptor = writeBlobData(source);
+                BlobCopySource prepared = prepareBlobForWrite(source);
+                if (prepared == null) {
+                    elementLengths[i] = NULL_ELEMENT_LENGTH;
+                    continue;
+                }
+                final BlobDescriptor descriptor;
+                try (BlobCopySource ignored = prepared) {
+                    descriptor = writeBlobData(prepared);
+                }
                 elementLengths[i] = descriptor.length();
                 flush |= accept(descriptor);
                 recordSuccess(descriptor.length());

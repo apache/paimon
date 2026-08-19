@@ -42,7 +42,8 @@ interface BlobElementSerializer {
             boolean writeNullOnMissingFile,
             boolean writeNullOnFetchFailure,
             BlobFetchMetricReporter blobFetchMetricReporter,
-            int copyBufferSize);
+            int copyBufferSize,
+            BlobStagingFactory stagingFactory);
 
     boolean requiresReadInputStream(boolean blobAsDescriptor);
 

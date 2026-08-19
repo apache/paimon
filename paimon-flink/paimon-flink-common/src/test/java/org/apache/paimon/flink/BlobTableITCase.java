@@ -39,6 +39,7 @@ import org.apache.paimon.utils.UriReaderFactory;
 
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.RecordedRequest;
+import okhttp3.mockwebserver.SocketPolicy;
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
@@ -46,6 +47,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.IOException;
 import java.io.OutputStream;
 import java.net.URI;
 import java.nio.file.Path;
@@ -1084,6 +1086,175 @@ public class BlobTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testTruncatedHttpBodyWritesNullWithoutCorruptingFollowingBlob() throws Exception {
+        TestHttpWebServer httpServer = new TestHttpWebServer("/truncated_blob");
+        httpServer.start();
+        try {
+            String httpUrl = httpServer.getBaseUrl();
+            enqueueTruncatedResponses(httpServer, 6);
+
+            tEnv.executeSql(
+                    "CREATE TABLE truncated_blob_table (id INT, data STRING, picture BYTES)"
+                            + " WITH ('row-tracking.enabled'='true',"
+                            + " 'data-evolution.enabled'='true',"
+                            + " 'blob-field'='picture',"
+                            + " 'blob-as-descriptor'='true',"
+                            + " 'blob-write-null-on-fetch-failure'='true')");
+
+            batchSql(
+                    "INSERT INTO truncated_blob_table"
+                            + " /*+ OPTIONS('sink.parallelism' = '1') */ VALUES"
+                            + " (1, 'truncated', sys.path_to_descriptor('"
+                            + httpUrl
+                            + "')), (2, 'following', X'48656C6C6F')");
+
+            batchSql("ALTER TABLE truncated_blob_table SET ('blob-as-descriptor'='false')");
+            assertThat(batchSql("SELECT * FROM truncated_blob_table ORDER BY id"))
+                    .containsExactly(
+                            Row.of(1, "truncated", null),
+                            Row.of(2, "following", new byte[] {72, 101, 108, 108, 111}));
+            assertThat(batchSql("SELECT COUNT(*) FROM `truncated_blob_table$snapshots`"))
+                    .containsExactly(Row.of(1L));
+        } finally {
+            httpServer.stop();
+        }
+    }
+
+    @Test
+    public void testTruncatedHttpBodyWritesNullWithoutCorruptingFollowingArrayElement()
+            throws Exception {
+        TestHttpWebServer httpServer = new TestHttpWebServer("/truncated_array_blob");
+        httpServer.start();
+        try {
+            String httpUrl = httpServer.getBaseUrl();
+            enqueueTruncatedResponses(httpServer, 6);
+
+            tEnv.executeSql(
+                    "CREATE TABLE truncated_array_blob_table (id INT, pictures ARRAY<BYTES>)"
+                            + " WITH ('row-tracking.enabled'='true',"
+                            + " 'data-evolution.enabled'='true',"
+                            + " 'blob-field'='pictures',"
+                            + " 'blob-as-descriptor'='true',"
+                            + " 'blob-write-null-on-fetch-failure'='true')");
+
+            batchSql(
+                    "INSERT INTO truncated_array_blob_table VALUES"
+                            + " (1, ARRAY[sys.path_to_descriptor('"
+                            + httpUrl
+                            + "'), X'5945'])");
+
+            batchSql("ALTER TABLE truncated_array_blob_table SET ('blob-as-descriptor'='false')");
+            assertThat(
+                            batchSql(
+                                    "SELECT pictures[1], pictures[2]"
+                                            + " FROM truncated_array_blob_table"))
+                    .containsExactly(Row.of(null, new byte[] {89, 69}));
+        } finally {
+            httpServer.stop();
+        }
+    }
+
+    @Test
+    public void testTruncatedHttpBodyWritesNullWithoutCorruptingSurroundingMapValues()
+            throws Exception {
+        TestHttpWebServer httpServer = new TestHttpWebServer("/truncated_map_blob");
+        httpServer.start();
+        try {
+            String httpUrl = httpServer.getBaseUrl();
+            enqueueTruncatedResponses(httpServer, 6);
+
+            tEnv.executeSql(
+                    "CREATE TABLE truncated_map_blob_table (id INT, pictures MAP<STRING, BYTES>)"
+                            + " WITH ('row-tracking.enabled'='true',"
+                            + " 'data-evolution.enabled'='true',"
+                            + " 'blob-field'='pictures',"
+                            + " 'blob-as-descriptor'='true',"
+                            + " 'blob-write-null-on-fetch-failure'='true')");
+
+            batchSql(
+                    "INSERT INTO truncated_map_blob_table VALUES"
+                            + " (1, MAP['before', X'4245', 'truncated',"
+                            + " sys.path_to_descriptor('"
+                            + httpUrl
+                            + "'), 'after', X'4146'])");
+
+            batchSql("ALTER TABLE truncated_map_blob_table SET ('blob-as-descriptor'='false')");
+            assertThat(
+                            batchSql(
+                                    "SELECT pictures['before'], pictures['truncated'],"
+                                            + " pictures['after'] FROM truncated_map_blob_table"))
+                    .containsExactly(Row.of(new byte[] {66, 69}, null, new byte[] {65, 70}));
+        } finally {
+            httpServer.stop();
+        }
+    }
+
+    @Test
+    public void testTruncatedHttpBodyFailsWithoutNullFallback() throws Exception {
+        TestHttpWebServer httpServer = new TestHttpWebServer("/truncated_blob_failure");
+        httpServer.start();
+        try {
+            String httpUrl = httpServer.getBaseUrl();
+            enqueueTruncatedResponses(httpServer, 6);
+
+            tEnv.executeSql(
+                    "CREATE TABLE truncated_blob_failure_table (id INT, picture BYTES)"
+                            + " WITH ('row-tracking.enabled'='true',"
+                            + " 'data-evolution.enabled'='true',"
+                            + " 'blob-field'='picture',"
+                            + " 'blob-as-descriptor'='true')");
+
+            assertThatThrownBy(
+                            () ->
+                                    batchSql(
+                                            "INSERT INTO truncated_blob_failure_table VALUES"
+                                                    + " (1, sys.path_to_descriptor('"
+                                                    + httpUrl
+                                                    + "'))"))
+                    .hasRootCauseInstanceOf(IOException.class);
+
+            assertThat(batchSql("SELECT COUNT(*) FROM truncated_blob_failure_table"))
+                    .containsExactly(Row.of(0L));
+            assertThat(findLatestSnapshot("truncated_blob_failure_table")).isNull();
+        } finally {
+            httpServer.stop();
+        }
+    }
+
+    @Test
+    public void testHttpNotFoundIsNotFetchFailure() throws Exception {
+        TestHttpWebServer httpServer = new TestHttpWebServer("/missing_fetch_failure_blob");
+        httpServer.start();
+        try {
+            String httpUrl = httpServer.getBaseUrl();
+            httpServer.enqueueResponse("", 404);
+
+            tEnv.executeSql(
+                    "CREATE TABLE missing_fetch_failure_blob_table (id INT, picture BYTES)"
+                            + " WITH ('row-tracking.enabled'='true',"
+                            + " 'data-evolution.enabled'='true',"
+                            + " 'blob-field'='picture',"
+                            + " 'blob-as-descriptor'='true',"
+                            + " 'blob-write-null-on-fetch-failure'='true')");
+
+            // HTTP 404 is owned by blob-write-null-on-missing-file and must remain fatal here.
+            assertThatThrownBy(
+                            () ->
+                                    batchSql(
+                                            "INSERT INTO missing_fetch_failure_blob_table VALUES"
+                                                    + " (1, sys.path_to_descriptor('"
+                                                    + httpUrl
+                                                    + "'))"))
+                    .hasRootCauseMessage("HTTP error code: 404");
+
+            assertThat(batchSql("SELECT COUNT(*) FROM missing_fetch_failure_blob_table"))
+                    .containsExactly(Row.of(0L));
+        } finally {
+            httpServer.stop();
+        }
+    }
+
+    @Test
     public void testWriteHttpBadRequestWritesNullWithFetchFailure() throws Exception {
         TestHttpWebServer httpServer = new TestHttpWebServer("/bad_request_blob");
         httpServer.start();
@@ -1407,6 +1578,19 @@ public class BlobTableITCase extends CatalogITCaseBase {
             assertThat(request.getHeader("Range")).isNull();
         }
         assertThat(httpServer.takeRequest(100, TimeUnit.MILLISECONDS)).isNull();
+    }
+
+    private static void enqueueTruncatedResponses(TestHttpWebServer httpServer, int responseCount) {
+        for (int i = 0; i < responseCount; i++) {
+            // MockWebServer advertises the full body length and then closes the socket halfway
+            // through it. Enqueue enough responses for this test to remain valid when composed
+            // with HTTP body resume, where all resume attempts must be exhausted before NULL is
+            // written.
+            httpServer.enqueueResponse(
+                    httpServer
+                            .generateMockResponse("truncated-http-response-body", 200)
+                            .setSocketPolicy(SocketPolicy.DISCONNECT_DURING_RESPONSE_BODY));
+        }
     }
 
     @Test

@@ -44,7 +44,8 @@ final class RawBlobElementSerializer implements BlobElementSerializer {
             boolean writeNullOnMissingFile,
             boolean writeNullOnFetchFailure,
             BlobFetchMetricReporter blobFetchMetricReporter,
-            int copyBufferSize) {
+            int copyBufferSize,
+            BlobStagingFactory stagingFactory) {
         return new Writer(
                 out,
                 blobFieldName,
@@ -52,7 +53,8 @@ final class RawBlobElementSerializer implements BlobElementSerializer {
                 writeNullOnMissingFile,
                 writeNullOnFetchFailure,
                 blobFetchMetricReporter,
-                copyBufferSize);
+                copyBufferSize,
+                stagingFactory);
     }
 
     @Override
@@ -79,7 +81,8 @@ final class RawBlobElementSerializer implements BlobElementSerializer {
                 boolean writeNullOnMissingFile,
                 boolean writeNullOnFetchFailure,
                 BlobFetchMetricReporter blobFetchMetricReporter,
-                int copyBufferSize) {
+                int copyBufferSize,
+                BlobStagingFactory stagingFactory) {
             super(
                     out,
                     blobFieldName,
@@ -87,7 +90,8 @@ final class RawBlobElementSerializer implements BlobElementSerializer {
                     writeNullOnMissingFile,
                     writeNullOnFetchFailure,
                     blobFetchMetricReporter,
-                    copyBufferSize);
+                    copyBufferSize,
+                    stagingFactory);
         }
 
         @Override
@@ -110,9 +114,17 @@ final class RawBlobElementSerializer implements BlobElementSerializer {
             if (source == null) {
                 return writeNullElement();
             }
+            BlobCopySource prepared = prepareBlobForWrite(source);
+            if (prepared == null) {
+                return writeNullElement();
+            }
 
-            long recordPosition = startRecord();
-            BlobDescriptor descriptor = writeBlobData(source);
+            final BlobDescriptor descriptor;
+            final long recordPosition;
+            try (BlobCopySource ignored = prepared) {
+                recordPosition = startRecord();
+                descriptor = writeBlobData(prepared);
+            }
             long recordLength = finishRecord(recordPosition);
             if (accept(descriptor)) {
                 flush();

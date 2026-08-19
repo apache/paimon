@@ -105,7 +105,8 @@ final class MapBlobElementSerializer implements BlobElementSerializer {
             boolean writeNullOnMissingFile,
             boolean writeNullOnFetchFailure,
             BlobFetchMetricReporter blobFetchMetricReporter,
-            int copyBufferSize) {
+            int copyBufferSize,
+            BlobStagingFactory stagingFactory) {
         return new Writer(
                 out,
                 blobFieldName,
@@ -114,6 +115,7 @@ final class MapBlobElementSerializer implements BlobElementSerializer {
                 writeNullOnFetchFailure,
                 blobFetchMetricReporter,
                 copyBufferSize,
+                stagingFactory,
                 keyGetter,
                 keySerializer);
     }
@@ -146,6 +148,7 @@ final class MapBlobElementSerializer implements BlobElementSerializer {
                 boolean writeNullOnFetchFailure,
                 BlobFetchMetricReporter blobFetchMetricReporter,
                 int copyBufferSize,
+                BlobStagingFactory stagingFactory,
                 InternalArray.ElementGetter keyGetter,
                 KeySerializer keySerializer) {
             super(
@@ -155,7 +158,8 @@ final class MapBlobElementSerializer implements BlobElementSerializer {
                     writeNullOnMissingFile,
                     writeNullOnFetchFailure,
                     blobFetchMetricReporter,
-                    copyBufferSize);
+                    copyBufferSize,
+                    stagingFactory);
             this.keyGetter = keyGetter;
             this.keySerializer = keySerializer;
         }
@@ -233,7 +237,15 @@ final class MapBlobElementSerializer implements BlobElementSerializer {
                     valueLengths[i] = NULL_VALUE_LENGTH;
                     continue;
                 }
-                BlobDescriptor descriptor = writeBlobData(source);
+                BlobCopySource prepared = prepareBlobForWrite(source);
+                if (prepared == null) {
+                    valueLengths[i] = NULL_VALUE_LENGTH;
+                    continue;
+                }
+                final BlobDescriptor descriptor;
+                try (BlobCopySource ignored = prepared) {
+                    descriptor = writeBlobData(prepared);
+                }
                 valueLengths[i] = descriptor.length();
                 flush |= accept(descriptor);
                 recordSuccess(descriptor.length());
