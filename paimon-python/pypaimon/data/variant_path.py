@@ -74,6 +74,8 @@ _SLOW_PATH_ROWS = 64
 _STRUCTURE_MATCH_INDEX_BUDGET = 8 * 1024 * 1024
 # Bound encoded variable-width payloads retained while rebuilt rows accumulate.
 _ROOT_INSERT_SPLICE_PAYLOAD_BUDGET = 8 * 1024 * 1024
+# Bound per-row Python and NumPy temporaries for tiny payloads.
+_ROOT_INSERT_SPLICE_MAX_BATCH_ROWS = 64 * 1024
 
 
 @functools.lru_cache(maxsize=256)
@@ -1980,7 +1982,7 @@ def _root_insert_splice_layout(value, key_id, key_name, names_by_id):
 
 
 def _encoded_payload_batches(rows, provider, global_row):
-    """Encode array-backed splice payloads within a byte budget."""
+    """Encode array-backed splice payloads within byte and row budgets."""
     batch_start = 0
     payloads = []
     payload_bytes = 0
@@ -1988,8 +1990,10 @@ def _encoded_payload_batches(rows, provider, global_row):
         payload = provider.encode(
             provider.scalar_at(global_row + int(row)))
         if (payloads
-                and payload_bytes + len(payload)
-                > _ROOT_INSERT_SPLICE_PAYLOAD_BUDGET):
+                and (len(payloads)
+                     >= _ROOT_INSERT_SPLICE_MAX_BATCH_ROWS
+                     or payload_bytes + len(payload)
+                     > _ROOT_INSERT_SPLICE_PAYLOAD_BUDGET)):
             yield batch_start, index, payloads
             batch_start = index
             payloads = []
@@ -1998,6 +2002,20 @@ def _encoded_payload_batches(rows, provider, global_row):
         payload_bytes += len(payload)
     if payloads:
         yield batch_start, len(rows), payloads
+
+
+def _repeated_payload_batches(row_count, payload):
+    """Repeat a scalar payload without creating an unbounded row batch."""
+    for batch_start in range(
+            0, row_count, _ROOT_INSERT_SPLICE_MAX_BATCH_ROWS):
+        batch_end = min(
+            batch_start + _ROOT_INSERT_SPLICE_MAX_BATCH_ROWS,
+            row_count)
+        yield (
+            batch_start,
+            batch_end,
+            [payload] * (batch_end - batch_start),
+        )
 
 
 def _plan_root_insert_splice(
@@ -2275,9 +2293,8 @@ def _set_chunk(chunk, values, parsed, global_row):
                 continue
             if provider._array is None:
                 payload = payload_for(insert_index, provider, 0)
-                batches = (
-                    (0, len(live_rows), [payload] * len(live_rows)),
-                )
+                batches = _repeated_payload_batches(
+                    len(live_rows), payload)
             else:
                 batches = _encoded_payload_batches(
                     live_rows, provider, global_row)

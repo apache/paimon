@@ -718,6 +718,55 @@ class TestVariantSetFastPaths(unittest.TestCase):
             tags.to_pylist(),
         )
 
+    def test_small_variable_insert_bounds_payload_batch_rows(self):
+        column = _variants([
+            {'value': float(index)}
+            for index in range(10)
+        ])
+        tags = pa.array([''] * len(column))
+
+        with patch(
+                'pypaimon.data.variant_path.'
+                '_ROOT_INSERT_SPLICE_MAX_BATCH_ROWS',
+                3,
+        ), patch(
+                'pypaimon.data.variant_path._root_insert_splice',
+                wraps=_root_insert_splice,
+        ) as splice:
+            result = variant_set(column, '$.tag', tags)
+
+        self.assertGreater(splice.call_count, 1)
+        for call in splice.call_args_list:
+            self.assertLessEqual(len(call.args[9]), 3)
+        self.assertEqual(
+            variant_get(result, '$.tag', pa.string()).to_pylist(),
+            tags.to_pylist(),
+        )
+
+    def test_scalar_insert_bounds_splice_batch_rows(self):
+        column = _variants([
+            {'value': float(index)}
+            for index in range(10)
+        ])
+
+        with patch(
+                'pypaimon.data.variant_path.'
+                '_ROOT_INSERT_SPLICE_MAX_BATCH_ROWS',
+                3,
+        ), patch(
+                'pypaimon.data.variant_path._root_insert_splice',
+                wraps=_root_insert_splice,
+        ) as splice:
+            result = variant_set(column, '$.processed', pa.scalar(True))
+
+        self.assertEqual(splice.call_count, 4)
+        for call in splice.call_args_list:
+            self.assertLessEqual(len(call.args[9]), 3)
+        self.assertEqual(
+            variant_get(result, '$.processed', pa.bool_()).to_pylist(),
+            [True] * len(column),
+        )
+
     def test_ineligible_splice_layout_skips_child_validation(self):
         value = _build_object_value([
             (0, _encode_scalar_to_value_bytes(1.0, pa.float64())),
