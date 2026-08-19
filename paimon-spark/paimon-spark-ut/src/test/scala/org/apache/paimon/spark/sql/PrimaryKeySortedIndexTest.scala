@@ -32,6 +32,8 @@ import scala.collection.JavaConverters._
 class PrimaryKeySortedIndexTest extends PaimonSparkTestBase {
 
   test("Spark array predicates use multivalue index") {
+    assume(gteqSpark3_3)
+
     withTable("t") {
       spark.sql("""
                   |CREATE TABLE t (id INT, tags ARRAY<STRING>, probe STRING)
