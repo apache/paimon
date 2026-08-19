@@ -32,6 +32,8 @@ from pypaimon.data.variant_path import (
     _metadata_with_keys,
     _path_positions,
     _rebuilt_offsets,
+    _root_insert_splice,
+    _root_insert_splice_layout,
     _validate_value_field_ids,
     variant_get,
 )
@@ -688,6 +690,47 @@ class TestVariantSetFastPaths(unittest.TestCase):
             [True] * len(column),
         )
 
+    def test_variable_insert_bounds_encoded_payload_memory(self):
+        column = _variants([
+            {'value': float(index)}
+            for index in range(10)
+        ])
+        tags = pa.array(['x' * 10] * len(column))
+
+        with patch(
+                'pypaimon.data.variant_path.'
+                '_ROOT_INSERT_SPLICE_PAYLOAD_BUDGET',
+                24,
+        ), patch(
+                'pypaimon.data.variant_path._root_insert_splice',
+                wraps=_root_insert_splice,
+        ) as splice:
+            result = variant_set(column, '$.tag', tags)
+
+        self.assertGreater(splice.call_count, 1)
+        for call in splice.call_args_list:
+            self.assertLessEqual(
+                sum(len(payload) for payload in call.args[9]),
+                24,
+            )
+        self.assertEqual(
+            variant_get(result, '$.tag', pa.string()).to_pylist(),
+            tags.to_pylist(),
+        )
+
+    def test_ineligible_splice_layout_skips_child_validation(self):
+        value = _build_object_value([
+            (0, _encode_scalar_to_value_bytes(1.0, pa.float64())),
+        ])
+
+        with patch(
+                'pypaimon.data.variant_path._checked_object_child_bounds',
+                side_effect=AssertionError(
+                    "ineligible layout validated children"),
+        ):
+            self.assertIsNone(_root_insert_splice_layout(
+                value, 256, 'new', {0: 'value'}))
+
     def test_insert_validates_deep_unmodified_sibling_iteratively(self):
         metadata = GenericVariant.from_python(
             {'sibling': [], 'target': {}}).metadata()
@@ -835,6 +878,34 @@ class TestVariantSetErrors(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "MALFORMED_VARIANT"):
             variant_set(column, '$.processed', pa.scalar(True))
+
+    def test_root_splice_validates_nested_values_when_metadata_reused(self):
+        metadata = GenericVariant.from_python({
+            'nested': {'bad': None, 'target': 0.0},
+            'new': True,
+        }).metadata()
+        key_ids = _metadata_key_ids(metadata)
+        malformed_null = (
+            _encode_scalar_to_value_bytes(None, pa.null()) + b'\x00')
+        nested = _build_object_value([
+            (key_ids['bad'], malformed_null),
+            (
+                key_ids['target'],
+                _encode_scalar_to_value_bytes(1.0, pa.float64()),
+            ),
+        ])
+        root = _build_object_value([
+            (key_ids['nested'], nested),
+        ])
+        column = GenericVariant.to_arrow_array([
+            GenericVariant(root, metadata),
+        ])
+
+        with self.assertRaisesRegex(ValueError, "MALFORMED_VARIANT"):
+            variant_set(column, {
+                '$.nested.target': pa.scalar(2.0),
+                '$.new': pa.scalar(True),
+            })
 
     def test_rejects_unknown_field_id_on_insert(self):
         metadata = GenericVariant.from_python({'value': 0}).metadata()

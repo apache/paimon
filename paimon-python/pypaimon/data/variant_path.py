@@ -72,6 +72,8 @@ _Path = Tuple[Tuple[str, object], ...]
 _SLOW_PATH_ROWS = 64
 # Bound the dominant temporary allocation during batch structure matching.
 _STRUCTURE_MATCH_INDEX_BUDGET = 8 * 1024 * 1024
+# Bound encoded variable-width payloads retained while rebuilt rows accumulate.
+_ROOT_INSERT_SPLICE_PAYLOAD_BUDGET = 8 * 1024 * 1024
 
 
 @functools.lru_cache(maxsize=256)
@@ -1946,14 +1948,9 @@ def _apply_edits(
 
 def _root_insert_splice_layout(value, key_id, key_name, names_by_id):
     """Return a root layout that can splice the new field."""
-    header = value[0]
     size, id_size, id_start, data_start, first_offsets, _ = (
         _checked_object_layout(value, 0, len(value)))
-    ordered_offsets = sorted(first_offsets)
-    end_by_offset = dict(zip(ordered_offsets, ordered_offsets[1:]))
-    for index in range(size):
-        _checked_object_child_bounds(
-            value, data_start, first_offsets, index, end_by_offset)
+    header = value[0]
     type_info = (header >> 2) & 0x3F
     large_size = ((type_info >> 4) & 0x1) != 0
     size_width = _U32_SIZE if large_size else 1
@@ -1963,6 +1960,11 @@ def _root_insert_splice_layout(value, key_id, key_name, names_by_id):
         return None
     if key_id >= 1 << (8 * id_size):
         return None
+    ordered_offsets = sorted(first_offsets)
+    end_by_offset = dict(zip(ordered_offsets, ordered_offsets[1:]))
+    for index in range(size):
+        _checked_object_child_bounds(
+            value, data_start, first_offsets, index, end_by_offset)
     ids = [
         _read_unsigned(value, id_start + i * id_size, id_size)
         for i in range(size)
@@ -1975,6 +1977,27 @@ def _root_insert_splice_layout(value, key_id, key_name, names_by_id):
         header, size, size_width, id_size, id_start, data_start,
         offset_size, offset_start, ids, slot,
     )
+
+
+def _encoded_payload_batches(rows, provider, global_row):
+    """Encode array-backed splice payloads within a byte budget."""
+    batch_start = 0
+    payloads = []
+    payload_bytes = 0
+    for index, row in enumerate(rows):
+        payload = provider.encode(
+            provider.scalar_at(global_row + int(row)))
+        if (payloads
+                and payload_bytes + len(payload)
+                > _ROOT_INSERT_SPLICE_PAYLOAD_BUDGET):
+            yield batch_start, index, payloads
+            batch_start = index
+            payloads = []
+            payload_bytes = 0
+        payloads.append(payload)
+        payload_bytes += len(payload)
+    if payloads:
+        yield batch_start, len(rows), payloads
 
 
 def _plan_root_insert_splice(
@@ -2050,29 +2073,27 @@ def _root_insert_splice(
         header, size, size_width, id_size, id_start, data_start,
         offset_size, offset_start, slot, sentinels, ok,
     ) = plan
-    matching_structures = None
-    if source_metadata_size is not None:
-        matching_structures = np.zeros(len(rows), dtype=bool)
-        candidates = np.flatnonzero(ok)
-        if len(candidates):
-            lengths = row_lengths[candidates]
-            order = np.argsort(lengths, kind='stable')
-            candidates = candidates[order]
-            lengths = lengths[order]
-            boundaries = np.flatnonzero(lengths[1:] != lengths[:-1]) + 1
-            for group in np.split(candidates, boundaries):
-                exemplar = int(group[0])
-                value = values.view(int(rows[exemplar]))
-                if len(group) == 1:
-                    _validate_value_field_ids(
-                        value, 0, len(value), source_metadata_size)
-                    matching_structures[exemplar] = True
-                    continue
-                matches = _matching_value_structures(
-                    value, source_data, row_starts[group],
-                    source_metadata_size)
-                if matches is not None:
-                    matching_structures[group[matches]] = True
+    matching_structures = np.zeros(len(rows), dtype=bool)
+    candidates = np.flatnonzero(ok)
+    if len(candidates):
+        lengths = row_lengths[candidates]
+        order = np.argsort(lengths, kind='stable')
+        candidates = candidates[order]
+        lengths = lengths[order]
+        boundaries = np.flatnonzero(lengths[1:] != lengths[:-1]) + 1
+        for group in np.split(candidates, boundaries):
+            exemplar = int(group[0])
+            value = values.view(int(rows[exemplar]))
+            if len(group) == 1:
+                _validate_value_field_ids(
+                    value, 0, len(value), source_metadata_size)
+                matching_structures[exemplar] = True
+                continue
+            matches = _matching_value_structures(
+                value, source_data, row_starts[group],
+                source_metadata_size)
+            if matches is not None:
+                matching_structures[group[matches]] = True
 
     if state.data is not None:
         source_view = memoryview(state.data)
@@ -2093,21 +2114,9 @@ def _root_insert_splice(
             fallback_rows.append(row)
             continue
         original = values.view(row)
-        if source_metadata_size is not None:
-            if not matching_structures[index]:
-                _validate_value_field_ids(
-                    original, 0, len(original), source_metadata_size)
-        else:
-            row_size, _, _, row_data_start, offsets, _ = (
-                _checked_object_layout(original, 0, len(original)))
-            if row_size != size:
-                fallback_rows.append(row)
-                continue
-            ordered = sorted(offsets)
-            ends = dict(zip(ordered, ordered[1:]))
-            for child in range(row_size):
-                _checked_object_child_bounds(
-                    original, row_data_start, offsets, child, ends)
+        if not matching_structures[index]:
+            _validate_value_field_ids(
+                original, 0, len(original), source_metadata_size)
         base = int(row_starts[index]) - source_base
         sentinel = int(sentinels[index])
         _check_variant_sizes(
@@ -2220,8 +2229,9 @@ def _set_chunk(chunk, values, parsed, global_row):
         insert_keys = tuple(
             parsed[index][1][-1][1] for index in insert_indices)
         metadata_key_ids = _cached_metadata_key_ids(first_metadata)
-        source_metadata_size = (
-            len(metadata_key_ids)
+        source_metadata_size = len(metadata_key_ids)
+        rebuild_validation_size = (
+            source_metadata_size
             if any(key not in metadata_key_ids for key in insert_keys)
             else None
         )
@@ -2261,27 +2271,37 @@ def _set_chunk(chunk, values, parsed, global_row):
                 live_starts = row_starts
                 live_lengths = parent_limits[insert_index]
             provider = parsed[insert_index][2]
+            if not len(live_rows):
+                continue
             if provider._array is None:
-                payloads = [
-                    payload_for(insert_index, provider, 0)
-                ] * len(live_rows)
+                payload = payload_for(insert_index, provider, 0)
+                batches = (
+                    (0, len(live_rows), [payload] * len(live_rows)),
+                )
             else:
-                payloads = [
-                    provider.encode(
-                        provider.scalar_at(global_row + int(row)))
-                    for row in live_rows
-                ]
+                batches = _encoded_payload_batches(
+                    live_rows, provider, global_row)
             key_name = parsed[insert_index][1][-1][1]
-            spliced = (
-                _root_insert_splice(
-                    values, state, live_rows, live_starts, live_lengths,
+            output_metadata_size = len(
+                new_metadata if new_metadata is not None
+                else first_metadata)
+            for batch_start, batch_end, payloads in batches:
+                batch_rows = live_rows[batch_start:batch_end]
+                spliced = _root_insert_splice(
+                    values, state, batch_rows,
+                    live_starts[batch_start:batch_end],
+                    live_lengths[batch_start:batch_end],
                     source_data, key_ids[key_name], key_name,
                     names_by_id, payloads, source_metadata_size,
-                    len(new_metadata if new_metadata is not None
-                        else first_metadata))
-                if len(live_rows) else ({}, [])
-            )
-            if spliced is not None:
+                    output_metadata_size)
+                if spliced is None:
+                    for row in batch_rows:
+                        row = int(row)
+                        rebuild_row(
+                            row, values.view(row), insert_set, key_ids,
+                            names_by_id, first_metadata, new_metadata,
+                            rebuild_validation_size)
+                    continue
                 rebuilt, fallback_rows = spliced
                 rebuilt_rows.update(rebuilt)
                 if new_metadata is not None:
@@ -2291,15 +2311,15 @@ def _set_chunk(chunk, values, parsed, global_row):
                     rebuild_row(
                         row, values.view(row), insert_set, key_ids,
                         names_by_id, first_metadata, new_metadata,
-                        source_metadata_size)
-                continue
+                        rebuild_validation_size)
+            continue
         for offset_index, row in enumerate(rows):
             row = int(row)
             if row in group_slow:
                 continue
             rebuild_row(
                 row, values.view(row), insert_set, key_ids, names_by_id,
-                first_metadata, new_metadata, source_metadata_size,
+                first_metadata, new_metadata, rebuild_validation_size,
                 [
                     None if target_positions[index] is None
                     else int(target_positions[index][offset_index])
@@ -2333,8 +2353,9 @@ def _set_chunk(chunk, values, parsed, global_row):
             insert_set.add(index)
             insert_keys.append(parsed_path[-1][1])
         metadata_key_ids = _cached_metadata_key_ids(row_metadata)
-        source_metadata_size = (
-            len(metadata_key_ids)
+        source_metadata_size = len(metadata_key_ids)
+        rebuild_validation_size = (
+            source_metadata_size
             if any(key not in metadata_key_ids for key in insert_keys)
             else None
         )
@@ -2342,7 +2363,7 @@ def _set_chunk(chunk, values, parsed, global_row):
             row_metadata, tuple(insert_keys))
         rebuild_row(
             row, view, insert_set, key_ids, names_by_id, row_metadata,
-            new_metadata, source_metadata_size)
+            new_metadata, rebuild_validation_size)
 
     if rebuilt_rows:
         state.ensure()
