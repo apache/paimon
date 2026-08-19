@@ -56,6 +56,7 @@ def _seed_two_snapshots(table):
         commit_identifier=100,
         commit_kind="APPEND",
         time_millis=_T0,
+        full_version="2.1.dev-commit-one",
         watermark=7,
     )
     snapshot_two = Snapshot(
@@ -115,7 +116,7 @@ class SnapshotsTableTest(unittest.TestCase):
             ("changelog_manifest_list", True),
             ("total_record_count", True), ("delta_record_count", True),
             ("changelog_record_count", True), ("watermark", True),
-            ("next_row_id", True),
+            ("next_row_id", True), ("full_version", True),
         ]
         self.assertEqual([n for n, _ in expected],
                          [f.name for f in row_type.fields])
@@ -153,6 +154,8 @@ class SnapshotsTableTest(unittest.TestCase):
                          arrow_table.column("changelog_record_count").to_pylist())
         self.assertEqual([None, None],
                          arrow_table.column("next_row_id").to_pylist())
+        self.assertEqual(["2.1.dev-commit-one", None],
+                         arrow_table.column("full_version").to_pylist())
 
         times = arrow_table.column("commit_time").to_pylist()
         self.assertIsInstance(times[0], datetime.datetime)

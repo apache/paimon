@@ -72,6 +72,7 @@ def _full_snapshot():
         total_record_count=100,
         delta_record_count=10,
         commit_user="u",
+        full_version="2.1.dev-commit-id",
         commit_identifier=42,
         commit_kind="APPEND",
         time_millis=1000,

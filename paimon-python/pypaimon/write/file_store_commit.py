@@ -21,6 +21,7 @@ import time
 import uuid
 from typing import Dict, List, Optional
 
+from pypaimon.build_info import full_version as build_full_version
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
@@ -761,6 +762,7 @@ class FileStoreCommit:
                 total_record_count=total_record_count,
                 delta_record_count=delta_record_count,
                 commit_user=self.commit_user,
+                full_version=build_full_version(),
                 commit_identifier=commit_identifier,
                 commit_kind=commit_kind,
                 time_millis=int(time.time() * 1000),

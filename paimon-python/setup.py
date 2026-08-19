@@ -24,7 +24,69 @@ import tarfile
 import tempfile
 from setuptools import find_packages, setup
 
-VERSION = "2.1.dev"
+PYTHON_ROOT = os.path.dirname(os.path.abspath(__file__))
+VERSION_FILE = os.path.join(PYTHON_ROOT, "pypaimon", "_version.py")
+COMMIT_ID_FILE = os.path.join(PYTHON_ROOT, "pypaimon", "_commit_id")
+UNKNOWN_COMMIT_ID = "UNKNOWN"
+
+version_scope = {}
+with open(VERSION_FILE, "r") as version_file:
+    exec(version_file.read(), version_scope)
+VERSION = version_scope["VERSION"]
+
+
+def _repository_root():
+    parent = os.path.dirname(PYTHON_ROOT)
+    if os.path.basename(PYTHON_ROOT) == "paimon-python" and os.path.exists(
+            os.path.join(parent, "pom.xml")):
+        return parent
+    return PYTHON_ROOT
+
+
+def _git_output(args):
+    repository_root = _repository_root()
+    env = os.environ.copy()
+    env["GIT_CEILING_DIRECTORIES"] = os.path.dirname(repository_root)
+    try:
+        return subprocess.check_output(
+            ["git", "-C", repository_root] + args,
+            stderr=subprocess.DEVNULL,
+            env=env,
+        ).decode("utf-8").strip()
+    except Exception:
+        return None
+
+
+def _embedded_commit_id():
+    try:
+        with open(COMMIT_ID_FILE, "r") as commit_file:
+            return commit_file.read().strip() or None
+    except OSError:
+        return None
+
+
+commit_id_file_existed = os.path.exists(COMMIT_ID_FILE)
+commit_id_file_content = None
+if commit_id_file_existed:
+    with open(COMMIT_ID_FILE, "rb") as commit_file:
+        commit_id_file_content = commit_file.read()
+
+commit_id = _git_output(["rev-parse", "HEAD"])
+if commit_id is None:
+    commit_id = _embedded_commit_id() or UNKNOWN_COMMIT_ID
+with open(COMMIT_ID_FILE, "w") as commit_file:
+    commit_file.write(commit_id + "\n")
+
+
+def _restore_commit_id_file():
+    if commit_id_file_existed:
+        with open(COMMIT_ID_FILE, "wb") as commit_file:
+            commit_file.write(commit_id_file_content)
+    elif os.path.exists(COMMIT_ID_FILE):
+        os.remove(COMMIT_ID_FILE)
+
+
+atexit.register(_restore_commit_id_file)
 
 
 def get_dev_version():
@@ -37,10 +99,10 @@ def get_dev_version():
         return None
 
     try:
-        date_str = subprocess.check_output(
-            ["git", "log", "-1", "--format=%cd", "--date=format:%Y%m%d"],
-            stderr=subprocess.DEVNULL
-        ).decode("utf-8").strip()
+        date_str = _git_output(
+            ["log", "-1", "--format=%cd", "--date=format:%Y%m%d"])
+        if date_str is None:
+            raise RuntimeError("Git commit date is unavailable")
     except Exception:
         print("Warning: git not available, skipping dev package.")
         return None
@@ -92,16 +154,16 @@ def _build_dev_package():
                 with open(pkg_info, "w") as f:
                     f.write(content)
 
-        # Update VERSION in setup.py so pip install gets the correct version
-        setup_py = os.path.join(dev_dir, "setup.py")
-        if os.path.exists(setup_py):
-            with open(setup_py, "r") as f:
+        # Update the package version so pip install gets the correct version
+        version_file = os.path.join(dev_dir, "pypaimon", "_version.py")
+        if os.path.exists(version_file):
+            with open(version_file, "r") as f:
                 content = f.read()
             content = content.replace(
                 'VERSION = "' + VERSION + '"',
                 'VERSION = "' + dev_version + '"'
             )
-            with open(setup_py, "w") as f:
+            with open(version_file, "w") as f:
                 f.write(content)
 
         dev_tar = os.path.join("dist", dev_name + ".tar.gz")
@@ -147,6 +209,7 @@ setup(
     version=VERSION,
     packages=PACKAGES,
     include_package_data=True,
+    package_data={"pypaimon": ["_commit_id"]},
     install_requires=install_requires,
     entry_points={
         'console_scripts': [

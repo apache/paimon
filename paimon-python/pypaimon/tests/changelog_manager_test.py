@@ -128,6 +128,7 @@ class TestChangelogManager(unittest.TestCase):
             self.assertEqual(changelog.id, snapshot.id)
             self.assertEqual(changelog.schema_id, snapshot.schema_id)
             self.assertEqual(changelog.time_millis, snapshot.time_millis)
+            self.assertEqual(changelog.full_version, snapshot.full_version)
 
 
 if __name__ == '__main__':
