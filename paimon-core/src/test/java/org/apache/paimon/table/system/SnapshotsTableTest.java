@@ -31,6 +31,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
@@ -134,6 +135,57 @@ public class SnapshotsTableTest extends TableTestBase {
                 .forEachRemaining(result::add);
 
         assertThat(result).isEmpty();
+    }
+
+    @Test
+    public void testFilterBySnapshotIdEqualAndGreaterOrEqual() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(snapshotsTable.rowType());
+        Predicate predicate =
+                PredicateBuilder.and(builder.equal(0, 2L), builder.greaterOrEqual(0, 0L));
+        ReadBuilder readBuilder = snapshotsTable.newReadBuilder().withFilter(predicate);
+        RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan());
+        List<InternalRow> result = new ArrayList<>();
+        InternalRowSerializer serializer = new InternalRowSerializer(snapshotsTable.rowType());
+        reader.forEachRemaining(row -> result.add(serializer.copy(row)));
+
+        assertThat(result).extracting(row -> row.getLong(0)).containsExactly(2L);
+    }
+
+    @Test
+    public void testFilterBySnapshotIdEqualAndLessOrEqual() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(snapshotsTable.rowType());
+        for (Predicate predicate :
+                Arrays.asList(
+                        PredicateBuilder.and(builder.equal(0, 1L), builder.lessOrEqual(0, 2L)),
+                        PredicateBuilder.and(builder.lessOrEqual(0, 2L), builder.equal(0, 1L)))) {
+            ReadBuilder readBuilder = snapshotsTable.newReadBuilder().withFilter(predicate);
+            RecordReader<InternalRow> reader =
+                    readBuilder.newRead().createReader(readBuilder.newScan().plan());
+            List<InternalRow> result = new ArrayList<>();
+            InternalRowSerializer serializer = new InternalRowSerializer(snapshotsTable.rowType());
+            reader.forEachRemaining(row -> result.add(serializer.copy(row)));
+
+            assertThat(result).extracting(row -> row.getLong(0)).containsExactly(1L);
+        }
+    }
+
+    @Test
+    public void testFilterBySnapshotIdWithEmptyRange() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(snapshotsTable.rowType());
+        for (Predicate predicate :
+                Arrays.asList(
+                        PredicateBuilder.and(builder.equal(0, 1L), builder.greaterOrEqual(0, 2L)),
+                        PredicateBuilder.and(
+                                builder.greaterOrEqual(0, 2L), builder.equal(0, 1L)))) {
+            ReadBuilder readBuilder = snapshotsTable.newReadBuilder().withFilter(predicate);
+            RecordReader<InternalRow> reader =
+                    readBuilder.newRead().createReader(readBuilder.newScan().plan());
+            List<InternalRow> result = new ArrayList<>();
+            reader.forEachRemaining(result::add);
+
+            assertThat(result).isEmpty();
+        }
     }
 
     private List<InternalRow> getExpectedResult(long[] snapshotIds) {

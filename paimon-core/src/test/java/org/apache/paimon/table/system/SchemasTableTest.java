@@ -30,7 +30,9 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.TableTestBase;
@@ -45,6 +47,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.utils.JsonSerdeUtil.toFlatJson;
@@ -116,6 +119,69 @@ public class SchemasTableTest extends TableTestBase {
                 .forEachRemaining(result::add);
 
         assertThat(result).isEmpty();
+    }
+
+    @Test
+    public void testFilterBySchemaIdEqualAndGreaterOrEqual() throws Exception {
+        catalog.alterTable(
+                identifier("T"),
+                Collections.singletonList(SchemaChange.addColumn("col2", DataTypes.INT())),
+                false);
+        schemasTable = (SchemasTable) catalog.getTable(identifier("T$schemas"));
+
+        PredicateBuilder builder = new PredicateBuilder(schemasTable.rowType());
+        Predicate predicate =
+                PredicateBuilder.and(builder.equal(0, 1L), builder.greaterOrEqual(0, 0L));
+        ReadBuilder readBuilder = schemasTable.newReadBuilder().withFilter(predicate);
+        RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan());
+        List<InternalRow> result = new ArrayList<>();
+        InternalRowSerializer serializer = new InternalRowSerializer(schemasTable.rowType());
+        reader.forEachRemaining(row -> result.add(serializer.copy(row)));
+
+        assertThat(result).extracting(row -> row.getLong(0)).containsExactly(1L);
+    }
+
+    @Test
+    public void testFilterBySchemaIdEqualAndLessOrEqual() throws Exception {
+        catalog.alterTable(
+                identifier("T"),
+                Collections.singletonList(SchemaChange.addColumn("col2", DataTypes.INT())),
+                false);
+        schemasTable = (SchemasTable) catalog.getTable(identifier("T$schemas"));
+
+        PredicateBuilder builder = new PredicateBuilder(schemasTable.rowType());
+        for (Predicate predicate :
+                Arrays.asList(
+                        PredicateBuilder.and(builder.equal(0, 0L), builder.lessOrEqual(0, 1L)),
+                        PredicateBuilder.and(builder.lessOrEqual(0, 1L), builder.equal(0, 0L)))) {
+            ReadBuilder readBuilder = schemasTable.newReadBuilder().withFilter(predicate);
+            RecordReader<InternalRow> reader =
+                    readBuilder.newRead().createReader(readBuilder.newScan().plan());
+            List<InternalRow> result = new ArrayList<>();
+            InternalRowSerializer serializer = new InternalRowSerializer(schemasTable.rowType());
+            reader.forEachRemaining(row -> result.add(serializer.copy(row)));
+
+            assertThat(result).extracting(row -> row.getLong(0)).containsExactly(0L);
+        }
+    }
+
+    @Test
+    public void testFilterBySchemaIdWithEmptyRange() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(schemasTable.rowType());
+        for (Predicate predicate :
+                Arrays.asList(
+                        PredicateBuilder.and(builder.equal(0, 0L), builder.greaterOrEqual(0, 1L)),
+                        PredicateBuilder.and(
+                                builder.greaterOrEqual(0, 1L), builder.equal(0, 0L)))) {
+            ReadBuilder readBuilder = schemasTable.newReadBuilder().withFilter(predicate);
+            RecordReader<InternalRow> reader =
+                    readBuilder.newRead().createReader(readBuilder.newScan().plan());
+            List<InternalRow> result = new ArrayList<>();
+            reader.forEachRemaining(result::add);
+
+            assertThat(result).isEmpty();
+        }
     }
 
     private List<InternalRow> getExpectedResult() {

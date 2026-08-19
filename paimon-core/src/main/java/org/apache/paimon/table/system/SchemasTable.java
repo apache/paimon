@@ -229,25 +229,38 @@ public class SchemasTable implements ReadonlyTable {
                     predicate.visit(LeafPredicateExtractor.INSTANCE).get(leafName);
             if (snapshotPred != null) {
                 if (snapshotPred.function() instanceof Equal) {
-                    schemaIdMin = (Long) snapshotPred.literals().get(0);
-                    schemaIdMax = (Long) snapshotPred.literals().get(0);
+                    long schemaId = (Long) snapshotPred.literals().get(0);
+                    updateMinSchemaId(schemaId);
+                    updateMaxSchemaId(schemaId);
                 }
 
                 if (snapshotPred.function() instanceof GreaterThan) {
-                    schemaIdMin = (Long) snapshotPred.literals().get(0) + 1;
+                    updateMinSchemaId((Long) snapshotPred.literals().get(0) + 1);
                 }
 
                 if (snapshotPred.function() instanceof GreaterOrEqual) {
-                    schemaIdMin = (Long) snapshotPred.literals().get(0);
+                    updateMinSchemaId((Long) snapshotPred.literals().get(0));
                 }
 
                 if (snapshotPred.function() instanceof LessThan) {
-                    schemaIdMax = (Long) snapshotPred.literals().get(0) - 1;
+                    updateMaxSchemaId((Long) snapshotPred.literals().get(0) - 1);
                 }
 
                 if (snapshotPred.function() instanceof LessOrEqual) {
-                    schemaIdMax = (Long) snapshotPred.literals().get(0);
+                    updateMaxSchemaId((Long) snapshotPred.literals().get(0));
                 }
+            }
+        }
+
+        private void updateMinSchemaId(long candidate) {
+            if (schemaIdMin == null || candidate > schemaIdMin) {
+                schemaIdMin = candidate;
+            }
+        }
+
+        private void updateMaxSchemaId(long candidate) {
+            if (schemaIdMax == null || candidate < schemaIdMax) {
+                schemaIdMax = candidate;
             }
         }
 
@@ -272,6 +285,8 @@ public class SchemasTable implements ReadonlyTable {
             List<TableSchema> tableSchemas;
             if (!schemaIds.isEmpty()) {
                 tableSchemas = schemasWithId(manager, schemaIds);
+            } else if (isSchemaIdRangeEmpty()) {
+                tableSchemas = Collections.emptyList();
             } else {
                 tableSchemas = listWithRange(manager, schemaIdMin, schemaIdMax);
             }
@@ -288,6 +303,10 @@ public class SchemasTable implements ReadonlyTable {
                                                 .replaceRow(row));
             }
             return new IteratorRecordReader<>(rows);
+        }
+
+        private boolean isSchemaIdRangeEmpty() {
+            return schemaIdMin != null && schemaIdMax != null && schemaIdMin > schemaIdMax;
         }
     }
 

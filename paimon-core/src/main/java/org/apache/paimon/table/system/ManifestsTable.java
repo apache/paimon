@@ -236,25 +236,38 @@ public class ManifestsTable implements ReadonlyTable {
                     predicate.visit(LeafPredicateExtractor.INSTANCE).get(leafName);
             if (schemaPred != null) {
                 if (schemaPred.function() instanceof Equal) {
-                    schemaIdMin = (Long) schemaPred.literals().get(0);
-                    schemaIdMax = (Long) schemaPred.literals().get(0);
+                    long schemaId = (Long) schemaPred.literals().get(0);
+                    updateMinSchemaId(schemaId);
+                    updateMaxSchemaId(schemaId);
                 }
 
                 if (schemaPred.function() instanceof GreaterThan) {
-                    schemaIdMin = (Long) schemaPred.literals().get(0) + 1;
+                    updateMinSchemaId((Long) schemaPred.literals().get(0) + 1);
                 }
 
                 if (schemaPred.function() instanceof GreaterOrEqual) {
-                    schemaIdMin = (Long) schemaPred.literals().get(0);
+                    updateMinSchemaId((Long) schemaPred.literals().get(0));
                 }
 
                 if (schemaPred.function() instanceof LessThan) {
-                    schemaIdMax = (Long) schemaPred.literals().get(0) - 1;
+                    updateMaxSchemaId((Long) schemaPred.literals().get(0) - 1);
                 }
 
                 if (schemaPred.function() instanceof LessOrEqual) {
-                    schemaIdMax = (Long) schemaPred.literals().get(0);
+                    updateMaxSchemaId((Long) schemaPred.literals().get(0));
                 }
+            }
+        }
+
+        private void updateMinSchemaId(long candidate) {
+            if (schemaIdMin == null || candidate > schemaIdMin) {
+                schemaIdMin = candidate;
+            }
+        }
+
+        private void updateMaxSchemaId(long candidate) {
+            if (schemaIdMax == null || candidate < schemaIdMax) {
+                schemaIdMax = candidate;
             }
         }
 
