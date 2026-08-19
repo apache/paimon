@@ -111,7 +111,7 @@ public class SnapshotsTable implements ReadonlyTable {
                             new DataField(13, "next_row_id", new BigIntType(true)),
                             new DataField(14, "operation", SerializationUtils.newStringType(true)),
                             new DataField(
-                                    15, "commit_id", SerializationUtils.newStringType(true))));
+                                    15, "full_version", SerializationUtils.newStringType(true))));
 
     private final FileIO fileIO;
     private final Path location;
@@ -346,7 +346,7 @@ public class SnapshotsTable implements ReadonlyTable {
                     snapshot.operation() == null
                             ? null
                             : BinaryString.fromString(snapshot.operation().toString()),
-                    BinaryString.fromString(snapshot.commitId()));
+                    BinaryString.fromString(snapshot.fullVersion()));
         }
     }
 }

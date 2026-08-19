@@ -27,19 +27,24 @@ import java.nio.charset.StandardCharsets;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link CoreCommitId}. */
-public class CoreCommitIdTest {
+/** Tests for {@link CoreFullVersion}. */
+public class CoreFullVersionTest {
 
     @Test
-    public void testCommitId() throws Exception {
-        InputStream inputStream =
-                CoreCommitId.class.getResourceAsStream("/META-INF/paimon-core.commit-id");
-        assertThat(inputStream).isNotNull();
+    public void testFullVersion() throws Exception {
+        String fullVersion = readResource("/META-INF/paimon-core.full-version");
+        String commitId = readResource("/META-INF/paimon-core.commit-id");
 
+        assertThat(CoreFullVersion.get()).isEqualTo(fullVersion);
+        assertThat(fullVersion).endsWith("-" + commitId).isNotEqualTo(commitId);
+    }
+
+    private String readResource(String path) throws Exception {
+        InputStream inputStream = CoreFullVersion.class.getResourceAsStream(path);
+        assertThat(inputStream).isNotNull();
         try (BufferedReader reader =
                 new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8))) {
-            String commitId = reader.readLine().trim();
-            assertThat(CoreCommitId.get()).isEqualTo("UNKNOWN".equals(commitId) ? null : commitId);
+            return reader.readLine().trim();
         }
     }
 }

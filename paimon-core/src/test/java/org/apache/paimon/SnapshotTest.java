@@ -68,11 +68,11 @@ public class SnapshotTest {
                                 + "  \"unknownKey\" : 22222\n"
                                 + "}");
         assertThat(snapshot.uuid()).isNull();
-        assertThat(snapshot.commitId()).isNull();
+        assertThat(snapshot.fullVersion()).isNull();
     }
 
     @Test
-    public void testSnapshotCommitId() {
+    public void testSnapshotFullVersion() {
         String json =
                 "{\n"
                         + "  \"version\" : 3,\n"
@@ -81,7 +81,7 @@ public class SnapshotTest {
                         + "  \"baseManifestList\" : \"m-0\",\n"
                         + "  \"deltaManifestList\" : \"m-1\",\n"
                         + "  \"commitUser\" : \"user\",\n"
-                        + "  \"commitId\" : \"0123456789012345678901234567890123456789\",\n"
+                        + "  \"fullVersion\" : \"2.1-SNAPSHOT-0123456789012345678901234567890123456789\",\n"
                         + "  \"commitIdentifier\" : 0,\n"
                         + "  \"commitKind\" : \"APPEND\",\n"
                         + "  \"timeMillis\" : 1000,\n"
@@ -89,10 +89,11 @@ public class SnapshotTest {
                         + "  \"deltaRecordCount\" : 5\n"
                         + "}";
         Snapshot snapshot = Snapshot.fromJson(json);
-        assertThat(snapshot.commitId()).isEqualTo("0123456789012345678901234567890123456789");
+        assertThat(snapshot.fullVersion())
+                .isEqualTo("2.1-SNAPSHOT-0123456789012345678901234567890123456789");
         assertThat(Snapshot.fromJson(snapshot.toJson())).isEqualTo(snapshot);
         Changelog changelog = new Changelog(snapshot);
-        assertThat(changelog.commitId()).isEqualTo(snapshot.commitId());
+        assertThat(changelog.fullVersion()).isEqualTo(snapshot.fullVersion());
         assertThat(Changelog.fromJson(changelog.toJson())).isEqualTo(changelog);
     }
 

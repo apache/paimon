@@ -279,7 +279,7 @@ under the License.
                 <artifactId>maven-antrun-plugin</artifactId>
                 <executions>
                     <execution>
-                        <id>generate-commit-id</id>
+                        <id>generate-build-info</id>
                         <phase>process-resources</phase>
                         <goals>
                             <goal>run</goal>
@@ -311,6 +311,8 @@ under the License.
                                 <mkdir dir="${project.build.outputDirectory}/META-INF"/>
                                 <echo file="${project.build.outputDirectory}/META-INF/paimon-core.commit-id"
                                       message="${paimon.core.commit.id}"/>
+                                <echo file="${project.build.outputDirectory}/META-INF/paimon-core.full-version"
+                                      message="${project.version}-${paimon.core.commit.id}"/>
                             </target>
                         </configuration>
                     </execution>

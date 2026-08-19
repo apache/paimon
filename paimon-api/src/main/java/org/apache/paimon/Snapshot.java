@@ -61,7 +61,7 @@ public class Snapshot implements Serializable {
     protected static final String FIELD_CHANGELOG_MANIFEST_LIST_SIZE = "changelogManifestListSize";
     protected static final String FIELD_INDEX_MANIFEST = "indexManifest";
     protected static final String FIELD_COMMIT_USER = "commitUser";
-    protected static final String FIELD_COMMIT_ID = "commitId";
+    protected static final String FIELD_FULL_VERSION = "fullVersion";
     protected static final String FIELD_COMMIT_IDENTIFIER = "commitIdentifier";
     protected static final String FIELD_COMMIT_KIND = "commitKind";
     protected static final String FIELD_TIME_MILLIS = "timeMillis";
@@ -133,12 +133,12 @@ public class Snapshot implements Serializable {
     @JsonProperty(FIELD_COMMIT_USER)
     protected final String commitUser;
 
-    // Git commit ID of the Paimon build which created this snapshot.
-    // Null if the build commit ID is unavailable.
-    @JsonProperty(FIELD_COMMIT_ID)
+    // Full version of the Paimon build which created this snapshot.
+    // Null for snapshots created before full version was introduced.
+    @JsonProperty(FIELD_FULL_VERSION)
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @Nullable
-    protected final String commitId;
+    protected final String fullVersion;
 
     // Mainly for snapshot deduplication.
     //
@@ -214,7 +214,7 @@ public class Snapshot implements Serializable {
             @Nullable Long changelogManifestListSize,
             @Nullable String indexManifest,
             String commitUser,
-            @Nullable String commitId,
+            @Nullable String fullVersion,
             long commitIdentifier,
             CommitKind commitKind,
             long timeMillis,
@@ -239,7 +239,7 @@ public class Snapshot implements Serializable {
                 changelogManifestListSize,
                 indexManifest,
                 commitUser,
-                commitId,
+                fullVersion,
                 commitIdentifier,
                 commitKind,
                 timeMillis,
@@ -268,7 +268,7 @@ public class Snapshot implements Serializable {
                     Long changelogManifestListSize,
             @JsonProperty(FIELD_INDEX_MANIFEST) @Nullable String indexManifest,
             @JsonProperty(FIELD_COMMIT_USER) String commitUser,
-            @JsonProperty(FIELD_COMMIT_ID) @Nullable String commitId,
+            @JsonProperty(FIELD_FULL_VERSION) @Nullable String fullVersion,
             @JsonProperty(FIELD_COMMIT_IDENTIFIER) long commitIdentifier,
             @JsonProperty(FIELD_COMMIT_KIND) CommitKind commitKind,
             @JsonProperty(FIELD_TIME_MILLIS) long timeMillis,
@@ -292,7 +292,7 @@ public class Snapshot implements Serializable {
         this.changelogManifestListSize = changelogManifestListSize;
         this.indexManifest = indexManifest;
         this.commitUser = commitUser;
-        this.commitId = commitId;
+        this.fullVersion = fullVersion;
         this.commitIdentifier = commitIdentifier;
         this.commitKind = commitKind;
         this.timeMillis = timeMillis;
@@ -372,10 +372,10 @@ public class Snapshot implements Serializable {
         return commitUser;
     }
 
-    @JsonGetter(FIELD_COMMIT_ID)
+    @JsonGetter(FIELD_FULL_VERSION)
     @Nullable
-    public String commitId() {
-        return commitId;
+    public String fullVersion() {
+        return fullVersion;
     }
 
     @JsonGetter(FIELD_COMMIT_IDENTIFIER)
@@ -458,7 +458,7 @@ public class Snapshot implements Serializable {
                 changelogManifestListSize,
                 indexManifest,
                 commitUser,
-                commitId,
+                fullVersion,
                 commitIdentifier,
                 commitKind,
                 timeMillis,
@@ -493,7 +493,7 @@ public class Snapshot implements Serializable {
                 && Objects.equals(changelogManifestListSize, that.changelogManifestListSize)
                 && Objects.equals(indexManifest, that.indexManifest)
                 && Objects.equals(commitUser, that.commitUser)
-                && Objects.equals(commitId, that.commitId)
+                && Objects.equals(fullVersion, that.fullVersion)
                 && commitIdentifier == that.commitIdentifier
                 && commitKind == that.commitKind
                 && timeMillis == that.timeMillis

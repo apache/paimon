@@ -162,7 +162,7 @@ public class SnapshotsTableTest extends TableTestBase {
                             snapshot.operation() == null
                                     ? null
                                     : BinaryString.fromString(snapshot.operation().toString()),
-                            BinaryString.fromString(snapshot.commitId())));
+                            BinaryString.fromString(snapshot.fullVersion())));
         }
 
         return expectedRow;

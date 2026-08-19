@@ -26,35 +26,30 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 
-/** Loads the Git commit ID of the current Paimon Core build. */
-final class CoreCommitId {
+/** Loads the full version of the current Paimon Core build. */
+final class CoreFullVersion {
 
-    @Nullable private static final String COMMIT_ID = load();
+    @Nullable private static final String FULL_VERSION = load();
 
-    private CoreCommitId() {}
+    private CoreFullVersion() {}
 
     @Nullable
     static String get() {
-        return COMMIT_ID;
+        return FULL_VERSION;
     }
 
     @Nullable
     private static String load() {
         InputStream inputStream =
-                CoreCommitId.class.getResourceAsStream("/META-INF/paimon-core.commit-id");
+                CoreFullVersion.class.getResourceAsStream("/META-INF/paimon-core.full-version");
         if (inputStream == null) {
             return null;
         }
 
         try (BufferedReader reader =
                 new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8))) {
-            String commitId = reader.readLine();
-            if (commitId == null || commitId.trim().isEmpty()) {
-                return null;
-            }
-
-            commitId = commitId.trim();
-            return "UNKNOWN".equals(commitId) ? null : commitId;
+            String fullVersion = reader.readLine();
+            return fullVersion == null || fullVersion.trim().isEmpty() ? null : fullVersion.trim();
         } catch (IOException e) {
             return null;
         }
