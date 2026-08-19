@@ -26,7 +26,6 @@ import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.SortedIndexFileMeta;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.memory.MemorySlice;
-import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
@@ -42,7 +41,6 @@ import java.util.List;
 public class MultiValueBitmapIndexWriter implements GlobalIndexSingleColumnWriter, Closeable {
 
     private final GlobalIndexFileWriter fileWriter;
-    private final DataType elementType;
     private final KeySerializer keySerializer;
     private final Comparator<Object> comparator;
     private final int dictionaryBlockSize;
@@ -59,12 +57,10 @@ public class MultiValueBitmapIndexWriter implements GlobalIndexSingleColumnWrite
 
     MultiValueBitmapIndexWriter(
             GlobalIndexFileWriter fileWriter,
-            DataType elementType,
             KeySerializer keySerializer,
             int dictionaryBlockSize,
             @Nullable BlockCompressionFactory compressionFactory) {
         this.fileWriter = fileWriter;
-        this.elementType = elementType;
         this.keySerializer = keySerializer;
         this.comparator = keySerializer.createComparator();
         this.dictionaryBlockSize = dictionaryBlockSize;
@@ -125,9 +121,7 @@ public class MultiValueBitmapIndexWriter implements GlobalIndexSingleColumnWrite
             throw new RuntimeException("Error in closing multivalue index writer.", e);
         }
 
-        byte[] meta =
-                MultiValueIndexFileMeta.serialize(
-                        new SortedIndexFileMeta(firstKey, lastKey, false), elementType);
+        byte[] meta = new SortedIndexFileMeta(firstKey, lastKey, false).serialize();
         return Collections.singletonList(new ResultEntry(fileName, sourceRowCount, meta));
     }
 

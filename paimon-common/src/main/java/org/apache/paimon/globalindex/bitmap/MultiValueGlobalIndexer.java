@@ -76,7 +76,7 @@ public class MultiValueGlobalIndexer implements SortedGlobalIndexer {
     public MultiValueBitmapIndexWriter createWriter(GlobalIndexFileWriter fileWriter)
             throws IOException {
         return new MultiValueBitmapIndexWriter(
-                fileWriter, elementType, keySerializer, dictionaryBlockSize, compressionFactory);
+                fileWriter, keySerializer, dictionaryBlockSize, compressionFactory);
     }
 
     @Override
@@ -86,7 +86,7 @@ public class MultiValueGlobalIndexer implements SortedGlobalIndexer {
             long totalRowCount,
             ExecutorService executor) {
         return new MultiValueBitmapIndexReader(
-                fileReader, files, elementType, keySerializer, totalRowCount, executor);
+                fileReader, files, keySerializer, totalRowCount, executor);
     }
 
     private static class ArrayElementKeyExtractor implements GlobalIndexKeyExtractor {

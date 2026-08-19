@@ -24,8 +24,6 @@ import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.predicate.FieldRef;
-import org.apache.paimon.types.ArrayType;
-import org.apache.paimon.types.DataType;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -39,26 +37,16 @@ import java.util.concurrent.ExecutorService;
 /** Exposes array-element membership over the bitmap global index format. */
 public class MultiValueBitmapIndexReader implements GlobalIndexReader {
 
-    private final DataType elementType;
-    private final boolean compatibleElementType;
     private final KeySerializer keySerializer;
     private final LazyFilteredBitmapReader bitmapReader;
 
     MultiValueBitmapIndexReader(
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> files,
-            DataType elementType,
             KeySerializer keySerializer,
             long totalRowCount,
             ExecutorService executor) {
-        this.elementType = elementType;
         this.keySerializer = keySerializer;
-        this.compatibleElementType =
-                files.stream()
-                        .allMatch(
-                                file ->
-                                        MultiValueIndexFileMeta.hasCompatibleElementType(
-                                                file.metadata(), elementType));
         this.bitmapReader =
                 new LazyFilteredBitmapReader(
                         fileReader, files, keySerializer, 0, totalRowCount, executor);
@@ -77,25 +65,19 @@ public class MultiValueBitmapIndexReader implements GlobalIndexReader {
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitArrayContains(
             FieldRef fieldRef, Object literal) {
-        if (!supports(fieldRef)) {
-            return unsupported();
-        }
         return bitmapReader.visitEqual(fieldRef, literal);
     }
 
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitArraysOverlap(
             FieldRef fieldRef, List<Object> literals) {
-        if (!supports(fieldRef)) {
-            return unsupported();
-        }
         return bitmapReader.visitIn(fieldRef, literals);
     }
 
     @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitArrayContainsAll(
             FieldRef fieldRef, List<Object> literals) {
-        if (!supports(fieldRef) || literals.isEmpty()) {
+        if (literals.isEmpty()) {
             return unsupported();
         }
 
@@ -224,11 +206,5 @@ public class MultiValueBitmapIndexReader implements GlobalIndexReader {
 
     private static CompletableFuture<Optional<GlobalIndexResult>> unsupported() {
         return CompletableFuture.completedFuture(Optional.empty());
-    }
-
-    private boolean supports(FieldRef fieldRef) {
-        return compatibleElementType
-                && fieldRef.type() instanceof ArrayType
-                && ((ArrayType) fieldRef.type()).getElementType().equals(elementType);
     }
 }
