@@ -33,10 +33,9 @@ public class CoreFullVersionTest {
     @Test
     public void testFullVersion() throws Exception {
         String fullVersion = readResource("/META-INF/paimon-core.full-version");
-        String commitId = readResource("/META-INF/paimon-core.commit-id");
 
         assertThat(CoreFullVersion.get()).isEqualTo(fullVersion);
-        assertThat(fullVersion).endsWith("-" + commitId).isNotEqualTo(commitId);
+        assertThat(fullVersion).matches(".+-(UNKNOWN|[0-9a-f]{40})");
     }
 
     private String readResource(String path) throws Exception {

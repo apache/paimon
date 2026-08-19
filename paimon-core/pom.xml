@@ -309,8 +309,6 @@ under the License.
                                 <!-- Git metadata is not available in source archives. -->
                                 <property name="paimon.core.commit.id" value="UNKNOWN"/>
                                 <mkdir dir="${project.build.outputDirectory}/META-INF"/>
-                                <echo file="${project.build.outputDirectory}/META-INF/paimon-core.commit-id"
-                                      message="${paimon.core.commit.id}"/>
                                 <echo file="${project.build.outputDirectory}/META-INF/paimon-core.full-version"
                                       message="${project.version}-${paimon.core.commit.id}"/>
                             </target>
