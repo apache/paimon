@@ -109,14 +109,8 @@ class MultiValueBitmapIndexReaderTest {
         Path path = new Path(basePath, result.fileName());
         GlobalIndexIOMeta meta =
                 new GlobalIndexIOMeta(path, fileIO.getFileSize(path), result.meta());
-        assertThat(
-                        MultiValueIndexFileMeta.hasCompatibleElementType(
-                                result.meta(), DataTypes.STRING()))
-                .isTrue();
-        assertThat(
-                        MultiValueIndexFileMeta.hasCompatibleElementType(
-                                result.meta(), DataTypes.BIGINT()))
-                .isFalse();
+        assertThat(result.meta())
+                .isEqualTo(SortedIndexFileMeta.deserialize(result.meta()).serialize());
 
         try (GlobalIndexReader reader =
                 globalIndexer.createReader(
@@ -180,20 +174,6 @@ class MultiValueBitmapIndexReaderTest {
 
             assertThat(reader.visitEqual(fieldRef, array("A")).join()).isEmpty();
             assertThat(reader.visitContains(fieldRef, str("A")).join()).isEmpty();
-        }
-
-        GlobalIndexIOMeta legacyMeta =
-                new GlobalIndexIOMeta(
-                        path,
-                        fileIO.getFileSize(path),
-                        SortedIndexFileMeta.deserialize(result.meta()).serialize());
-        try (GlobalIndexReader reader =
-                globalIndexer.createReader(
-                        fileReader,
-                        Collections.singletonList(legacyMeta),
-                        5,
-                        newDirectExecutorService())) {
-            assertThat(reader.visitArrayContains(fieldRef, str("A")).join()).isEmpty();
         }
     }
 

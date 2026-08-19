@@ -40,7 +40,6 @@ import java.util.concurrent.ExecutorService;
 public class MultiValueBitmapIndexReader implements GlobalIndexReader {
 
     private final DataType elementType;
-    private final boolean compatibleElementType;
     private final KeySerializer keySerializer;
     private final LazyFilteredBitmapReader bitmapReader;
 
@@ -53,12 +52,6 @@ public class MultiValueBitmapIndexReader implements GlobalIndexReader {
             ExecutorService executor) {
         this.elementType = elementType;
         this.keySerializer = keySerializer;
-        this.compatibleElementType =
-                files.stream()
-                        .allMatch(
-                                file ->
-                                        MultiValueIndexFileMeta.hasCompatibleElementType(
-                                                file.metadata(), elementType));
         this.bitmapReader =
                 new LazyFilteredBitmapReader(
                         fileReader, files, keySerializer, 0, totalRowCount, executor);
@@ -227,8 +220,7 @@ public class MultiValueBitmapIndexReader implements GlobalIndexReader {
     }
 
     private boolean supports(FieldRef fieldRef) {
-        return compatibleElementType
-                && fieldRef.type() instanceof ArrayType
+        return fieldRef.type() instanceof ArrayType
                 && ((ArrayType) fieldRef.type()).getElementType().equals(elementType);
     }
 }
