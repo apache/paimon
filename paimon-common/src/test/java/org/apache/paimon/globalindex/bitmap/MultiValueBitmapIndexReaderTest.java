@@ -148,27 +148,6 @@ class MultiValueBitmapIndexReaderTest {
                             .join());
             assertThat(reader.visitArrayContainsAll(fieldRef, Collections.emptyList()).join())
                     .isEmpty();
-            assertThat(
-                            reader.visitArrayContains(
-                                            new FieldRef(
-                                                    1, "tags", DataTypes.ARRAY(DataTypes.BIGINT())),
-                                            1L)
-                                    .join())
-                    .isEmpty();
-            assertThat(
-                            reader.visitArraysOverlap(
-                                            new FieldRef(
-                                                    1, "tags", DataTypes.ARRAY(DataTypes.BIGINT())),
-                                            Collections.singletonList(1L))
-                                    .join())
-                    .isEmpty();
-            assertThat(
-                            reader.visitArrayContainsAll(
-                                            new FieldRef(
-                                                    1, "tags", DataTypes.ARRAY(DataTypes.BIGINT())),
-                                            Collections.singletonList(1L))
-                                    .join())
-                    .isEmpty();
             assertThat(reader.visitIsNull(fieldRef).join()).isEmpty();
             assertThat(reader.visitIsNotNull(fieldRef).join()).isEmpty();
 
