@@ -100,7 +100,11 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
     extensions.injectOptimizerRule(spark => ReplacePaimonFunctions(spark))
     extensions.injectOptimizerRule(spark => OptimizeMetadataOnlyDeleteFromPaimonTable(spark))
     extensions.injectOptimizerRule(_ => MergePaimonScalarSubqueries)
-    extensions.injectOptimizerRule(_ => PushDownArrayPredicates)
+    // Spark 3.2 uses the V1 filter translation path, which cannot translate the
+    // comparison-shaped array predicate bridge used by this rule.
+    if (org.apache.spark.SPARK_VERSION >= "3.3") {
+      extensions.injectOptimizerRule(_ => PushDownArrayPredicates)
+    }
     extensions.injectOptimizerRule(_ => RepartitionLateralVectorSearchInput)
     extensions.injectOptimizerRule(_ => PushDownLateralVectorSearchFilter)
 
