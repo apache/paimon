@@ -91,8 +91,7 @@ public class AutoTagForSavepointCommitterOperatorTest extends CommitterOperatorT
         assertThat(snapshot.id()).isEqualTo(2);
         Map<Snapshot, List<String>> tags = table.tagManager().tags();
         assertThat(tags).containsOnlyKeys(snapshot);
-        assertThat(tags.get(snapshot))
-                .containsOnly(AutoTagForSavepointCommitterOperator.SAVEPOINT_TAG_PREFIX + 2);
+        assertThat(tags.get(snapshot)).containsOnly(SavepointTagUtils.tagNameOf(2));
     }
 
     @Test
@@ -142,9 +141,7 @@ public class AutoTagForSavepointCommitterOperatorTest extends CommitterOperatorT
 
         Map<Snapshot, List<String>> tags = table.tagManager().tags();
         assertThat(tags).containsOnlyKeys(snapshot);
-        assertThat(tags.get(snapshot))
-                .containsOnly(
-                        AutoTagForSavepointCommitterOperator.SAVEPOINT_TAG_PREFIX + checkpointId);
+        assertThat(tags.get(snapshot)).containsOnly(SavepointTagUtils.tagNameOf(checkpointId));
     }
 
     @Test
