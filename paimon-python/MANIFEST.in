@@ -19,7 +19,6 @@ include LICENSE
 include NOTICE
 include dev/requirements.txt
 include README.md
-include pypaimon/_full_version
 recursive-include pypaimon *.py
 recursive-include pypaimon/sample/data *.jsonl
 recursive-exclude pypaimon/tests *

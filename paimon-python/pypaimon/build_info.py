@@ -16,12 +16,12 @@
 # under the License.
 
 import os
+import re
 import subprocess
-
-from pypaimon._version import VERSION
 
 _UNKNOWN = "UNKNOWN"
 _FULL_VERSION_FILE = os.path.join(os.path.dirname(__file__), "_full_version")
+_SETUP_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "setup.py")
 
 
 def _repository_root():
@@ -48,6 +48,19 @@ def git_commit_id():
         return _UNKNOWN
 
 
+def _source_version():
+    try:
+        with open(_SETUP_FILE, "r") as setup_file:
+            match = re.search(
+                r'^VERSION = ["\']([^"\']+)["\']$',
+                setup_file.read(),
+                re.MULTILINE,
+            )
+            return None if match is None else match.group(1)
+    except OSError:
+        return None
+
+
 def _load_full_version():
     """Return the embedded full version, or derive it from the checkout."""
     try:
@@ -57,7 +70,8 @@ def _load_full_version():
                 return value
     except OSError:
         pass
-    return "{}-{}".format(VERSION, git_commit_id())
+    version = _source_version()
+    return _UNKNOWN if version is None else "{}-{}".format(version, git_commit_id())
 
 
 _FULL_VERSION = _load_full_version()

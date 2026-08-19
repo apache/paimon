@@ -23,16 +23,14 @@ import sys
 import tarfile
 import tempfile
 from setuptools import find_packages, setup
+from setuptools.command.build_py import build_py
+from setuptools.command.sdist import sdist
 
 PYTHON_ROOT = os.path.dirname(os.path.abspath(__file__))
-VERSION_FILE = os.path.join(PYTHON_ROOT, "pypaimon", "_version.py")
 FULL_VERSION_FILE = os.path.join(PYTHON_ROOT, "pypaimon", "_full_version")
 UNKNOWN_COMMIT_ID = "UNKNOWN"
 
-version_scope = {}
-with open(VERSION_FILE, "r") as version_file:
-    exec(version_file.read(), version_scope)
-VERSION = version_scope["VERSION"]
+VERSION = "2.1.dev"
 
 
 def _repository_root():
@@ -57,40 +55,41 @@ def _git_output(args):
         return None
 
 
-def _embedded_full_version():
+def _full_version():
+    git_commit_id = _git_output(["rev-parse", "HEAD"])
+    if git_commit_id is not None:
+        return "{}-{}".format(VERSION, git_commit_id)
+
     try:
         with open(FULL_VERSION_FILE, "r") as full_version_file:
-            return full_version_file.read().strip() or None
+            embedded = full_version_file.read().strip()
+            if embedded:
+                return embedded
     except OSError:
-        return None
+        pass
+    return "{}-{}".format(VERSION, UNKNOWN_COMMIT_ID)
 
 
-full_version_file_existed = os.path.exists(FULL_VERSION_FILE)
-full_version_file_content = None
-if full_version_file_existed:
-    with open(FULL_VERSION_FILE, "rb") as full_version_file:
-        full_version_file_content = full_version_file.read()
-
-git_commit_id = _git_output(["rev-parse", "HEAD"])
-if git_commit_id is None:
-    full_version = _embedded_full_version()
-else:
-    full_version = "{}-{}".format(VERSION, git_commit_id)
-if full_version is None:
-    full_version = "{}-{}".format(VERSION, UNKNOWN_COMMIT_ID)
-with open(FULL_VERSION_FILE, "w") as full_version_file:
-    full_version_file.write(full_version + "\n")
+def _write_full_version(root):
+    package_dir = os.path.join(root, "pypaimon")
+    if not os.path.exists(package_dir):
+        os.makedirs(package_dir)
+    with open(os.path.join(package_dir, "_full_version"), "w") as full_version_file:
+        full_version_file.write(_full_version() + "\n")
 
 
-def _restore_full_version_file():
-    if full_version_file_existed:
-        with open(FULL_VERSION_FILE, "wb") as full_version_file:
-            full_version_file.write(full_version_file_content)
-    elif os.path.exists(FULL_VERSION_FILE):
-        os.remove(FULL_VERSION_FILE)
+class PaimonBuildPy(build_py):
+
+    def run(self):
+        build_py.run(self)
+        _write_full_version(self.build_lib)
 
 
-atexit.register(_restore_full_version_file)
+class PaimonSdist(sdist):
+
+    def make_release_tree(self, base_dir, files):
+        sdist.make_release_tree(self, base_dir, files)
+        _write_full_version(base_dir)
 
 
 def get_dev_version():
@@ -158,16 +157,16 @@ def _build_dev_package():
                 with open(pkg_info, "w") as f:
                     f.write(content)
 
-        # Update the package version so pip install gets the correct version
-        version_file = os.path.join(dev_dir, "pypaimon", "_version.py")
-        if os.path.exists(version_file):
-            with open(version_file, "r") as f:
+        # Update VERSION in setup.py so pip install gets the correct version
+        setup_py = os.path.join(dev_dir, "setup.py")
+        if os.path.exists(setup_py):
+            with open(setup_py, "r") as f:
                 content = f.read()
             content = content.replace(
                 'VERSION = "' + VERSION + '"',
                 'VERSION = "' + dev_version + '"'
             )
-            with open(version_file, "w") as f:
+            with open(setup_py, "w") as f:
                 f.write(content)
 
         # Keep the embedded full version consistent with the dev package version.
@@ -224,6 +223,7 @@ setup(
     packages=PACKAGES,
     include_package_data=True,
     package_data={"pypaimon": ["_full_version"]},
+    cmdclass={"build_py": PaimonBuildPy, "sdist": PaimonSdist},
     install_requires=install_requires,
     entry_points={
         'console_scripts': [
