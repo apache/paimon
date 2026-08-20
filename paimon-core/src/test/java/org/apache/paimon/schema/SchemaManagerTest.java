@@ -1533,7 +1533,7 @@ public class SchemaManagerTest {
                 .isInstanceOf(NumberFormatException.class);
 
         // the column is untouched, so the table is still writable
-        TableSchema after = manager.latest().get();
+        TableSchema after = retryArtificialException(() -> manager.latest()).get();
         assertThat(after.fields().get(1).type()).isEqualTo(DataTypes.STRING());
         assertThatCode(
                         () ->
@@ -1549,7 +1549,7 @@ public class SchemaManagerTest {
         retryArtificialException(
                 () -> manager.commitChanges(SchemaChange.updateColumnType("c", DataTypes.INT())));
 
-        TableSchema after = manager.latest().get();
+        TableSchema after = retryArtificialException(() -> manager.latest()).get();
         assertThat(after.fields().get(1).type()).isEqualTo(DataTypes.INT());
         assertThat(after.fields().get(1).defaultValue()).isEqualTo("'123'");
         assertThatCode(
