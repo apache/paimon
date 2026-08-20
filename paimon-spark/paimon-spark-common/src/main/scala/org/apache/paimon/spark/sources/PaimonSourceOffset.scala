@@ -37,11 +37,34 @@ case class PaimonSourceOffset(snapshotId: Long, index: Long, scanSnapshot: Boole
   extends Offset
   with Comparable[PaimonSourceOffset] {
 
+  // Keep this out of the case class constructor so the existing three-argument constructor,
+  // Product3 API and pattern matching remain compatible. It is initialized only by the companion
+  // factory.
+  private var totalSplitsValue: Option[Long] = None
+
+  private[spark] def totalSplits: Option[Long] = totalSplitsValue
+
+  def copy(
+      snapshotId: Long = this.snapshotId,
+      index: Long = this.index,
+      scanSnapshot: Boolean = this.scanSnapshot): PaimonSourceOffset = {
+    val copied = PaimonSourceOffset(snapshotId, index, scanSnapshot)
+    if (snapshotId == this.snapshotId && scanSnapshot == this.scanSnapshot) {
+      copied.totalSplitsValue = totalSplitsValue
+    }
+    copied
+  }
+
+  private[spark] def snapshotCompleted: Boolean = {
+    totalSplits.exists(index == _ - 1)
+  }
+
   override def json(): String = {
     val node = JsonSerdeUtil.OBJECT_MAPPER_INSTANCE.createObjectNode()
     node.put(PaimonSourceOffset.FIELD_SNAPSHOT_ID, snapshotId)
     node.put(PaimonSourceOffset.FIELD_INDEX, index)
     node.put(PaimonSourceOffset.FIELD_SCAN_SNAPSHOT, scanSnapshot)
+    totalSplits.foreach(node.put(PaimonSourceOffset.FIELD_TOTAL_SPLITS, _))
     node.toString
   }
 
@@ -65,6 +88,7 @@ object PaimonSourceOffset {
   private val FIELD_SNAPSHOT_ID = "snapshotId"
   private val FIELD_INDEX = "index"
   private val FIELD_SCAN_SNAPSHOT = "scanSnapshot"
+  private val FIELD_TOTAL_SPLITS = "totalSplits"
 
   def apply(version: Long, index: Long, scanSnapshot: Boolean): PaimonSourceOffset = {
     new PaimonSourceOffset(
@@ -74,15 +98,30 @@ object PaimonSourceOffset {
     )
   }
 
+  private[spark] def withTotalSplits(
+      snapshotId: Long,
+      index: Long,
+      scanSnapshot: Boolean,
+      totalSplits: Long): PaimonSourceOffset = {
+    require(totalSplits > 0, s"Total splits must be positive, but was $totalSplits.")
+    val offset = PaimonSourceOffset(snapshotId, index, scanSnapshot)
+    offset.totalSplitsValue = Some(totalSplits)
+    offset
+  }
+
   def apply(offset: Any): PaimonSourceOffset = {
     offset match {
       case o: PaimonSourceOffset => o
       case json: String =>
         val node = JsonSerdeUtil.OBJECT_MAPPER_INSTANCE.readTree(json)
-        PaimonSourceOffset(
-          node.get(FIELD_SNAPSHOT_ID).asLong(),
-          node.get(FIELD_INDEX).asLong(),
-          node.get(FIELD_SCAN_SNAPSHOT).asBoolean())
+        val snapshotId = node.get(FIELD_SNAPSHOT_ID).asLong()
+        val index = node.get(FIELD_INDEX).asLong()
+        val scanSnapshot = node.get(FIELD_SCAN_SNAPSHOT).asBoolean()
+        Option(node.get(FIELD_TOTAL_SPLITS)) match {
+          case Some(totalSplits) =>
+            withTotalSplits(snapshotId, index, scanSnapshot, totalSplits.asLong())
+          case None => PaimonSourceOffset(snapshotId, index, scanSnapshot)
+        }
       case sc: StartingContext =>
         PaimonSourceOffset(sc.getSnapshotId, INIT_OFFSET_INDEX, sc.getScanFullSnapshot)
       case _ => throw new IllegalArgumentException(s"Can't parse $offset to PaimonSourceOffset.")

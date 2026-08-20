@@ -23,7 +23,7 @@ import org.apache.paimon.options.Options
 import org.apache.paimon.schema.TableSchema
 import org.apache.paimon.spark.{PaimonImplicits, PaimonMicroBatchInputPartition, PaimonMicroBatchMetadata, PaimonPartitionReaderFactory, SparkConnectorOptions}
 import org.apache.paimon.table.DataTable
-import org.apache.paimon.table.source.{DataSplit, ReadBuilder}
+import org.apache.paimon.table.source.{DataSplit, OutOfRangeException, ReadBuilder}
 import org.apache.paimon.utils.DataEvolutionUtils
 
 import org.apache.spark.internal.Logging
@@ -47,13 +47,18 @@ class PaimonMicroBatchStream(
   with Logging {
 
   private val options = Options.fromMap(table.options())
+  private val coreOptions = new CoreOptions(options)
+  private val consumerId = Option(coreOptions.consumerId())
+  private val warnedLegacyConsumerSnapshots = mutable.Set.empty[Long]
+
+  override protected def includeSnapshotCompletionInOffset: Boolean = consumerId.isDefined
 
   lazy val initOffset: PaimonSourceOffset = {
-    val initSnapshotId = Math.max(
-      table.snapshotManager().earliestSnapshotId(),
-      streamScanStartingContext.getSnapshotId)
-    val scanSnapshot = if (initSnapshotId == streamScanStartingContext.getSnapshotId) {
-      streamScanStartingContext.getScanFullSnapshot.booleanValue()
+    val startingSnapshotId = streamScanStartingContext.getSnapshotId
+    val startingScanSnapshot = streamScanStartingContext.getScanFullSnapshot.booleanValue()
+    val initSnapshotId = Math.max(earliestReadableId(startingScanSnapshot), startingSnapshotId)
+    val scanSnapshot = if (initSnapshotId == startingSnapshotId) {
+      startingScanSnapshot
     } else {
       false
     }
@@ -119,8 +124,35 @@ class PaimonMicroBatchStream(
       "That latestOffset(Offset, ReadLimit) method should be called instead of this method.")
   }
 
-  override def latestOffset(start: Offset, limit: ReadLimit): Offset = {
+  private def normalizeStartOffset(start: Offset): PaimonSourceOffset = {
     val startOffset = PaimonSourceOffset(start)
+    val snapshotCompleted = startOffset.snapshotCompleted
+    val resumeSnapshotId = if (snapshotCompleted) {
+      startOffset.snapshotId + 1
+    } else {
+      startOffset.snapshotId
+    }
+    val resumeScanSnapshot = !snapshotCompleted && startOffset.scanSnapshot
+    val earliestReadable = earliestReadableId(resumeScanSnapshot)
+    // Fall back to initOffset only when the checkpointed resume position has expired.
+    // initOffset is recomputed from the current table state on every (re)start,
+    // so with scan modes like latest-full it points at the current snapshot with
+    // scanSnapshot=true. Clamping a still-valid checkpointed offset up to it made
+    // a restarted query silently skip the changelog gap and re-scan the whole
+    // snapshot, re-emitting every row as +I.
+    if (resumeSnapshotId < earliestReadable) {
+      logWarning(
+        s"Checkpointed start offset $startOffset is no longer available " +
+          s"(earliest readable snapshot or changelog: $earliestReadable), " +
+          s"attempting recovery from $initOffset.")
+      initOffset
+    } else {
+      startOffset
+    }
+  }
+
+  override def latestOffset(start: Offset, limit: ReadLimit): Offset = {
+    val startOffset = normalizeStartOffset(start)
     getLatestOffset(startOffset, offsetForTriggerAvailableNow, limit).map {
       offset =>
         lastTriggerMillis = System.currentTimeMillis()
@@ -129,25 +161,23 @@ class PaimonMicroBatchStream(
   }
 
   override def planInputPartitions(start: Offset, end: Offset): Array[InputPartition] = {
-    val startOffset = {
-      val startOffset0 = PaimonSourceOffset(start)
-      // Fall back to initOffset only when the checkpointed snapshot has expired.
-      // initOffset is recomputed from the current table state on every (re)start,
-      // so with scan modes like latest-full it points at the current snapshot with
-      // scanSnapshot=true. Clamping a still-valid checkpointed offset up to it made
-      // a restarted query silently skip the changelog gap and re-scan the whole
-      // snapshot, re-emitting every row as +I.
-      if (startOffset0.snapshotId < table.snapshotManager().earliestSnapshotId()) {
-        logWarning(
-          s"Checkpointed start offset $startOffset0 is no longer available " +
-            s"(earliest snapshot: ${table.snapshotManager().earliestSnapshotId()}), " +
-            s"falling back to $initOffset.")
-        initOffset
-      } else {
-        startOffset0
-      }
-    }
+    val startOffset = normalizeStartOffset(start)
     val endOffset = PaimonSourceOffset(end)
+    if (
+      startOffset.snapshotId == endOffset.snapshotId &&
+      startOffset.scanSnapshot != endOffset.scanSnapshot
+    ) {
+      throw new OutOfRangeException(
+        s"Cannot plan Paimon micro-batch because normalized start offset $startOffset and " +
+          s"logged end offset $endOffset use different scan modes. The checkpointed range " +
+          "is no longer readable without changing its data.")
+    }
+    if (startOffset.compareTo(endOffset) > 0) {
+      throw new OutOfRangeException(
+        s"Cannot plan Paimon micro-batch because normalized start offset $startOffset is " +
+          s"newer than logged end offset $endOffset. The data needed to replay the logged " +
+          "range is no longer readable.")
+    }
 
     val admittedSplits = getBatch(startOffset, Some(endOffset), None)
     val metadata = createMicroBatchMetadata(startOffset, endOffset, admittedSplits)
@@ -186,12 +216,54 @@ class PaimonMicroBatchStream(
   }
 
   override def commit(end: Offset): Unit = {
-    committedOffset = Some(PaimonSourceOffset(end))
+    val offset = PaimonSourceOffset(end)
+    consumerId.foreach {
+      id =>
+        offset.totalSplits match {
+          case Some(totalSplits) if offset.index >= totalSplits =>
+            throw new IllegalStateException(
+              s"Invalid Paimon source offset $offset: split index must be smaller than " +
+                s"totalSplits ($totalSplits).")
+          case Some(_) if offset.snapshotCompleted =>
+            notifyConsumerCheckpointComplete(offset.snapshotId + 1)
+          case Some(_) if !offset.scanSnapshot =>
+            notifyConsumerCheckpointComplete(offset.snapshotId)
+          case Some(_) =>
+            // An incomplete full snapshot cannot be recovered from a delta-only Consumer.
+            ()
+          case None =>
+            if (warnedLegacyConsumerSnapshots.add(offset.snapshotId)) {
+              logWarning(
+                s"Cannot advance Paimon consumer '$id' for snapshot " +
+                  s"${offset.snapshotId} because the committed Spark offset does not contain " +
+                  "totalSplits. This can happen when recovering a checkpoint written by an " +
+                  "older Paimon version. The consumer remains unchanged and the snapshot may " +
+                  "be replayed.")
+            }
+        }
+    }
+
+    committedOffset = Some(offset)
     logInfo(s"$committedOffset is committed.")
   }
 
   override def stop(): Unit = {}
 
   override def table: DataTable = originTable
+
+  private def earliestReadableId(scanSnapshot: Boolean): Long = {
+    val earliestId: JLong =
+      if (!scanSnapshot && coreOptions.changelogLifecycleDecoupled()) {
+        val earliestChangelogId = table.changelogManager().earliestLongLivedChangelogId()
+        if (earliestChangelogId == null) {
+          table.snapshotManager().earliestSnapshotId()
+        } else {
+          earliestChangelogId
+        }
+      } else {
+        table.snapshotManager().earliestSnapshotId()
+      }
+    if (earliestId == null) 0L else earliestId.longValue()
+  }
 
 }
