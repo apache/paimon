@@ -107,6 +107,7 @@ import static org.apache.paimon.catalog.Identifier.UNKNOWN_DATABASE;
 import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.SEQUENCE_GROUP;
 import static org.apache.paimon.schema.ColumnDirectiveUtils.applyAddColumnDirective;
 import static org.apache.paimon.schema.ColumnDirectiveUtils.applyDirectives;
+import static org.apache.paimon.schema.ColumnDirectiveUtils.parseAddColumnComment;
 import static org.apache.paimon.types.BlobType.isBlobFileField;
 import static org.apache.paimon.utils.DefaultValueUtils.validateDefaultValue;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
@@ -577,6 +578,11 @@ public class SchemaManager implements Serializable {
                         lazyIdentifier);
             } else if (change instanceof UpdateColumnComment) {
                 UpdateColumnComment update = (UpdateColumnComment) change;
+                Preconditions.checkArgument(
+                        parseAddColumnComment(update.newDescription()) == null,
+                        "Should not alter existing field's type through column directives: %s",
+                        update.newDescription());
+
                 updateNestedColumn(
                         newFields,
                         update.fieldNames(),
