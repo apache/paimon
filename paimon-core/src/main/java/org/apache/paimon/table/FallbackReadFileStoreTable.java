@@ -308,11 +308,15 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         }
 
         private void writeObject(ObjectOutputStream out) throws IOException {
-            serialize(new DataOutputViewStreamWrapper(out));
+            SplitSerializer.serialize(this, new DataOutputViewStreamWrapper(out));
         }
 
         private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
-            assign(deserialize(new DataInputViewStreamWrapper(in)));
+            Split split = SplitSerializer.deserialize(new DataInputViewStreamWrapper(in));
+            if (!(split instanceof FallbackSplitImpl)) {
+                throw new IOException("Deserialized split is not a FallbackSplitImpl: " + split);
+            }
+            assign((FallbackSplitImpl) split);
         }
 
         private void assign(FallbackSplitImpl other) {
@@ -321,15 +325,14 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         }
 
         public void serialize(DataOutputView out) throws IOException {
-            SplitSerializer.serialize(this, out);
+            out.writeBoolean(isFallback);
+            SplitSerializer.serialize(split, out);
         }
 
         public static FallbackSplitImpl deserialize(DataInputView in) throws IOException {
+            boolean isFallback = in.readBoolean();
             Split split = SplitSerializer.deserialize(in);
-            if (!(split instanceof FallbackSplitImpl)) {
-                throw new IOException("Deserialized split is not a FallbackSplitImpl: " + split);
-            }
-            return (FallbackSplitImpl) split;
+            return new FallbackSplitImpl(split, isFallback);
         }
     }
 
