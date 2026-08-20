@@ -533,14 +533,20 @@ public class SchemaManager implements Serializable {
                                     String.format(
                                             "Column type %s[%s] cannot be converted to %s without losing information.",
                                             field.name(), sourceRootType, targetRootType));
-                            return new DataField(
-                                    field.id(),
-                                    field.name(),
+                            DataType newFieldType =
                                     getArrayMapTypeWithTargetTypeRoot(
                                             field.type(),
                                             targetRootType,
                                             depth,
-                                            update.fieldNames().length),
+                                            update.fieldNames().length);
+                            // the default value is carried over unchanged, so it has to stay
+                            // readable as the new type -- otherwise the table is left with a
+                            // default that createTable and ALTER .. SET DEFAULT would both reject
+                            validateDefaultValue(newFieldType, field.defaultValue());
+                            return new DataField(
+                                    field.id(),
+                                    field.name(),
+                                    newFieldType,
                                     field.description(),
                                     field.defaultValue());
                         },
