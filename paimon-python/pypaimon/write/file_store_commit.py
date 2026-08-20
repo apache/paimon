@@ -672,8 +672,14 @@ class FileStoreCommit:
         next_row_id = None
         if row_tracking_enabled:
             commit_entries = self._assign_snapshot_id(new_snapshot_id, commit_entries)
+            group_by_partition = (
+                self.table.options.row_tracking_partition_group_on_commit())
+            if group_by_partition:
+                commit_entries = self._group_commit_entries_by_partition(
+                    commit_entries)
             first_row_id_start = self._get_next_row_id_start(latest_snapshot)
-            commit_entries, next_row_id = self._assign_row_tracking_meta(first_row_id_start, commit_entries)
+            commit_entries, next_row_id = self._assign_row_tracking_meta(
+                first_row_id_start, commit_entries)
 
         changelog_manifest_list_name = None
         changelog_manifest_list_size = None
@@ -1181,6 +1187,19 @@ class FileStoreCommit:
         if latest_snapshot and hasattr(latest_snapshot, 'next_row_id') and latest_snapshot.next_row_id is not None:
             return latest_snapshot.next_row_id
         return 0
+
+    @staticmethod
+    def _group_commit_entries_by_partition(
+            commit_entries: List[ManifestEntry]) -> List[ManifestEntry]:
+        grouped = {}
+        for entry in commit_entries:
+            key = tuple(entry.partition.values)
+            grouped.setdefault(key, []).append(entry)
+        return [
+            entry
+            for entries in grouped.values()
+            for entry in entries
+        ]
 
     def _assign_row_tracking_meta(self, first_row_id_start: int, commit_entries: List[ManifestEntry]):
         """Assign row tracking metadata (first_row_id) to new files.
