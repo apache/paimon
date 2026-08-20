@@ -92,10 +92,15 @@ class AbstractVectorSearchReadImpl:
     def _index_thread_num(self):
         _opts = self._table.options
         _get = getattr(_opts, 'global_index_thread_num', None)
-        return (
+        value = (
             (_get() if _get else None)
             or CoreOptions.GLOBAL_INDEX_THREAD_NUM._default_value
         )
+        if value < 1:
+            raise ValueError(
+                "global-index.thread-num must be positive, got %d" % value
+            )
+        return value
 
     def _pre_filters(self, splits, snapshot=None):
         # type: (list) -> List[RoaringBitmap64]
@@ -556,7 +561,7 @@ class DataEvolutionVectorRead(AbstractVectorSearchReadImpl, VectorSearchRead):
         pre_filters = self._pre_filters(splits, snapshot)
 
         max_workers = min(self._index_thread_num, len(splits))
-        if max_workers <= 1:
+        if len(splits) == 1:
             # Single split: no thread pool overhead.
             result = self._eval_sync(
                 splits[0].row_range_start, splits[0].row_range_end,
@@ -619,14 +624,14 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
         pre_filters = self._pre_filters(index_splits, snapshot)
 
         max_workers = min(self._index_thread_num, len(index_splits)) if index_splits else 0
-        if max_workers <= 1 and index_splits:
+        if len(index_splits) == 1:
             split = index_splits[0]
             split_results_list = [self._eval_batch_sync(
                 split.row_range_start, split.row_range_end,
                 split.vector_index_files, self._query_vectors,
                 search_limit, pre_filters[0] if pre_filters else None,
             )]
-        elif index_splits:
+        elif len(index_splits) > 1:
             with ThreadPoolExecutor(max_workers=max_workers) as pool:
                 futures = {
                     pool.submit(
@@ -935,9 +940,17 @@ def _raw_search_from_arrow(arrow_table, vector_column_name, query_vector,
                            metric, limit, score_candidates=None):
     """Vectorized raw search directly from Arrow table (avoids Python list intermediary)."""
     import numpy as np
+    import pyarrow.compute as pc
 
     row_ids_col = arrow_table.column(SpecialFields.ROW_ID.name)
     vectors_col = arrow_table.column(vector_column_name)
+
+    # Filter out null vectors at the Arrow level before conversion.
+    valid_mask = pc.is_valid(vectors_col)
+    if not pc.all(valid_mask).as_py():
+        arrow_table = arrow_table.filter(valid_mask)
+        row_ids_col = arrow_table.column(SpecialFields.ROW_ID.name)
+        vectors_col = arrow_table.column(vector_column_name)
 
     # Try fast path: fixed-size list → direct numpy reshape.
     row_id_array = row_ids_col.to_numpy()
