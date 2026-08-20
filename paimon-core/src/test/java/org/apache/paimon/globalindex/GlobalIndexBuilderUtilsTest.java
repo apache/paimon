@@ -331,6 +331,7 @@ class GlobalIndexBuilderUtilsTest {
                         null,
                         null,
                         firstRowId,
+                        null,
                         null);
         return ManifestEntry.create(FileKind.ADD, BinaryRow.EMPTY_ROW, 0, 1, file);
     }
@@ -362,6 +363,7 @@ class GlobalIndexBuilderUtilsTest {
                 null,
                 null,
                 firstRowId,
+                null,
                 null);
     }
 }

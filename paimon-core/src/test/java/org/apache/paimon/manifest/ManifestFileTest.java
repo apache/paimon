@@ -30,6 +30,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFileMetaWriteColsLegacySerializer;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.SchemaManager;
@@ -528,6 +529,50 @@ public class ManifestFileTest {
             assertThat(rows.hasNext()).isFalse();
             assertThat(reader.hasNext()).isFalse();
         }
+    }
+
+    @Test
+    void testLegacyAvroReaderSkipsColumnSequenceNumbers() throws Exception {
+        ManifestEntry expected = gen.next();
+        ManifestEntry source =
+                ManifestEntry.create(
+                        expected.kind(),
+                        expected.partition(),
+                        expected.bucket(),
+                        expected.totalBuckets(),
+                        expected.file().withColumnMaxSequenceNumbers(new long[] {3L, 42L}));
+        List<DataField> legacyManifestFields =
+                ManifestEntry.MANIFEST_ROW_TYPE.getFields().stream()
+                        .map(
+                                field ->
+                                        ManifestEntry.FILE.equals(field.name())
+                                                ? field.newType(
+                                                        DataFileMetaWriteColsLegacySerializer
+                                                                .SCHEMA)
+                                                : field)
+                        .collect(Collectors.toList());
+        RowType legacyManifestType = new RowType(false, legacyManifestFields);
+        Path path = new Path(new Path(tempDir.toUri()), "new-manifest.avro");
+        LocalFileIO fileIO = LocalFileIO.create();
+        ManifestEntrySerializer serializer = new ManifestEntrySerializer();
+
+        try (PositionOutputStream out = fileIO.newOutputStream(path, false);
+                FormatWriter writer =
+                        avro.createWriterFactory(ManifestEntry.MANIFEST_ROW_TYPE)
+                                .create(out, "zstd")) {
+            writer.addElement(serializer.toRow(source));
+        }
+
+        ManifestEntry actual;
+        try (ManifestAvroReader reader = new ManifestAvroReader(fileIO.newInputStream(path));
+                CloseableIterator<InternalRow> rows = reader.read(legacyManifestType, null, null)) {
+            assertThat(rows.hasNext()).isTrue();
+            actual = new ManifestEntryWriteColsLegacySerializer().fromRow(rows.next());
+            assertThat(rows.hasNext()).isFalse();
+        }
+
+        assertThat(actual).isEqualTo(expected);
+        assertThat(actual.file().columnMaxSequenceNumbers()).isNull();
     }
 
     @Test

@@ -560,7 +560,8 @@ public class BlobFallbackRecordReaderTest {
                 null,
                 null,
                 firstRowId,
-                Arrays.asList(BLOB_FIELD));
+                Arrays.asList(BLOB_FIELD),
+                null);
     }
 
     private static List<Range> ranges(long... bounds) {

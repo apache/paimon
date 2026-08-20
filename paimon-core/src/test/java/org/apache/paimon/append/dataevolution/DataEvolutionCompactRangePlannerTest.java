@@ -498,6 +498,7 @@ class DataEvolutionCompactRangePlannerTest extends TableTestBase {
                 null,
                 null,
                 firstRowId,
-                writeColumns);
+                writeColumns,
+                null);
     }
 }
