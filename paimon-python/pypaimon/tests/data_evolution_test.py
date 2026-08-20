@@ -25,6 +25,7 @@ from types import SimpleNamespace
 import pandas as pd
 import pyarrow as pa
 import pyarrow.dataset as ds
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.predicate import Predicate
@@ -413,6 +414,7 @@ class DataEvolutionTest(unittest.TestCase):
             "Full set b mismatch",
         )
 
+    @pytest.mark.python_plan
     def test_multiple_appends(self):
         simple_pa_schema = pa.schema([
             ('f0', pa.int32()),

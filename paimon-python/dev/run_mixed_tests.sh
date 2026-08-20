@@ -660,14 +660,14 @@ ensure_paimon_vindex() {
     fi
 
     echo "Installing Python paimon-vindex dependency..."
-    if python -m pip install 'paimon-vindex==0.1.0'; then
+    if python -m pip install 'paimon-vindex==0.3.0'; then
         return 0
     fi
 
     echo -e "${YELLOW}Direct pip install failed; installing paimon-vindex into a temporary target directory...${NC}"
     local target_dir="${TMPDIR:-/tmp}/paimon-vindex-site"
     rm -rf "$target_dir"
-    if python -m pip install --target "$target_dir" 'paimon-vindex==0.1.0'; then
+    if python -m pip install --target "$target_dir" 'paimon-vindex==0.3.0'; then
         export PYTHONPATH="$target_dir:${PYTHONPATH:-}"
         return 0
     fi
@@ -675,7 +675,7 @@ ensure_paimon_vindex() {
     if python -c "import numpy" >/dev/null 2>&1; then
         echo -e "${YELLOW}Dependency install failed but numpy is already available; retrying paimon-vindex without dependencies...${NC}"
         rm -rf "$target_dir"
-        if python -m pip install --target "$target_dir" --no-deps 'paimon-vindex==0.1.0'; then
+        if python -m pip install --target "$target_dir" --no-deps 'paimon-vindex==0.3.0'; then
             export PYTHONPATH="$target_dir:${PYTHONPATH:-}"
             return 0
         fi
@@ -975,40 +975,40 @@ run_array_blob_interop_test() {
 }
 
 run_map_blob_interop_test() {
-    echo -e "${YELLOW}=== Running MAP<INT, BLOB> Test (Java Write → Python Read, Python Write → Java Read) ===${NC}"
+    echo -e "${YELLOW}=== Running MAP<K, BLOB> Test (Java Write → Python Read, Python Write → Java Read) ===${NC}"
 
     if ! skip_batched_java_write; then
         cd "$PROJECT_ROOT"
         echo "Running Maven test for JavaPyE2ETest.testJavaWriteMapBlobTable..."
         if ! mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testJavaWriteMapBlobTable -pl paimon-core -q -Drun.e2e.tests=true; then
-            echo -e "${RED}✗ Java MAP<INT, BLOB> write test failed${NC}"
+            echo -e "${RED}✗ Java MAP<K, BLOB> write test failed${NC}"
             return 1
         fi
-        echo -e "${GREEN}✓ Java MAP<INT, BLOB> write test completed successfully${NC}"
+        echo -e "${GREEN}✓ Java MAP<K, BLOB> write test completed successfully${NC}"
     fi
 
     cd "$PAIMON_PYTHON_DIR"
-    echo "Running Python MAP<INT, BLOB> read test..."
+    echo "Running Python MAP<K, BLOB> read test..."
     if ! python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_read_map_blob_written_by_java -v; then
-        echo -e "${RED}✗ Python MAP<INT, BLOB> read test failed${NC}"
+        echo -e "${RED}✗ Python MAP<K, BLOB> read test failed${NC}"
         return 1
     fi
-    echo -e "${GREEN}✓ Python MAP<INT, BLOB> read test completed successfully${NC}"
+    echo -e "${GREEN}✓ Python MAP<K, BLOB> read test completed successfully${NC}"
 
-    echo "Running Python MAP<INT, BLOB> write test..."
+    echo "Running Python MAP<K, BLOB> write test..."
     if ! python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_write_map_blob_for_java -v; then
-        echo -e "${RED}✗ Python MAP<INT, BLOB> write test failed${NC}"
+        echo -e "${RED}✗ Python MAP<K, BLOB> write test failed${NC}"
         return 1
     fi
-    echo -e "${GREEN}✓ Python MAP<INT, BLOB> write test completed successfully${NC}"
+    echo -e "${GREEN}✓ Python MAP<K, BLOB> write test completed successfully${NC}"
 
     cd "$PROJECT_ROOT"
     echo "Running Maven test for JavaPyE2ETest.testJavaReadMapBlobTable..."
     if ! mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testJavaReadMapBlobTable -pl paimon-core -q -Drun.e2e.tests=true; then
-        echo -e "${RED}✗ Java MAP<INT, BLOB> read test failed${NC}"
+        echo -e "${RED}✗ Java MAP<K, BLOB> read test failed${NC}"
         return 1
     fi
-    echo -e "${GREEN}✓ Java MAP<INT, BLOB> read test completed successfully${NC}"
+    echo -e "${GREEN}✓ Java MAP<K, BLOB> read test completed successfully${NC}"
 }
 
 # Function to run VARIANT test (Java write, Python read)
@@ -1568,9 +1568,9 @@ main() {
     fi
 
     if [[ $map_blob_interop_result -eq 0 ]]; then
-        echo -e "${GREEN}✓ MAP<INT, BLOB> Interoperability Test (Java ↔ Python): PASSED${NC}"
+        echo -e "${GREEN}✓ MAP<K, BLOB> Interoperability Test (Java ↔ Python): PASSED${NC}"
     else
-        echo -e "${RED}✗ MAP<INT, BLOB> Interoperability Test (Java ↔ Python): FAILED${NC}"
+        echo -e "${RED}✗ MAP<K, BLOB> Interoperability Test (Java ↔ Python): FAILED${NC}"
     fi
 
     if [[ $data_evolution_result -eq 0 ]]; then

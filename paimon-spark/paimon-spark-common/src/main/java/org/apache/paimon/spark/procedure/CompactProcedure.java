@@ -26,8 +26,6 @@ import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.append.cluster.IncrementalClusterManager;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
-import org.apache.paimon.append.dataevolution.DataEvolutionCompactTaskSerializer;
-import org.apache.paimon.append.dataevolution.DataEvolutionCompactionCommitPreparation;
 import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.disk.IOManager;
@@ -38,7 +36,9 @@ import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.partition.PartitionValuesTimeExpireStrategy;
 import org.apache.paimon.spark.SparkUtils;
+import org.apache.paimon.spark.commands.DataEvolutionCompactMergeConflictRewriter;
 import org.apache.paimon.spark.commands.PaimonSparkWriter;
 import org.apache.paimon.spark.sort.TableSorter;
 import org.apache.paimon.spark.util.ScanPlanHelper$;
@@ -58,6 +58,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.ParameterUtils;
 import org.apache.paimon.utils.ProcedureUtils;
 import org.apache.paimon.utils.SerializationUtils;
 import org.apache.paimon.utils.StringUtils;
@@ -69,6 +70,7 @@ import org.apache.spark.api.java.function.FlatMapFunction;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.PaimonUtils;
 import org.apache.spark.sql.Row;
+import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
@@ -90,10 +92,14 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import scala.collection.JavaConverters;
@@ -108,7 +114,16 @@ import static org.apache.spark.sql.types.DataTypes.StringType;
  * Compact procedure. Usage:
  *
  * <pre><code>
- *  CALL sys.compact(table => 'tableId', [partitions => 'p1=0,p2=0;p1=0,p2=1'], [order_strategy => 'xxx'], [order_by => 'xxx'], [where => 'p1>0'])
+ *  CALL sys.compact(
+ *      table => 'tableId',
+ *      [partitions => 'p1=0,p2=0;p1=0,p2=1'],
+ *      [order_strategy => 'xxx'],
+ *      [order_by => 'xxx'],
+ *      [where => 'p1>0'],
+ *      [buckets => '0-99,200-299'])
+ *
+ *  -- Buckets support a single id, comma-separated ids, and closed ranges.
+ *  CALL sys.compact(table => 'tableId', compact_strategy => 'full', buckets => '0-99,200-299')
  * </code></pre>
  */
 public class CompactProcedure extends BaseProcedure {
@@ -125,6 +140,7 @@ public class CompactProcedure extends BaseProcedure {
                 ProcedureParameter.optional("where", StringType),
                 ProcedureParameter.optional("options", StringType),
                 ProcedureParameter.optional("partition_idle_time", StringType),
+                ProcedureParameter.optional("buckets", StringType),
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -164,6 +180,7 @@ public class CompactProcedure extends BaseProcedure {
         String options = args.isNullAt(6) ? null : args.getString(6);
         Duration partitionIdleTime =
                 blank(args, 7) ? null : TimeUtils.parseDuration(args.getString(7));
+        String buckets = blank(args, 8) ? null : args.getString(8);
         if (OrderType.NONE.name().equals(sortType) && !sortColumns.isEmpty()) {
             throw new IllegalArgumentException(
                     "order_strategy \"none\" cannot work with order_by columns.");
@@ -231,7 +248,8 @@ public class CompactProcedure extends BaseProcedure {
                                             sortColumns,
                                             relation,
                                             partitionPredicate,
-                                            partitionIdleTime));
+                                            partitionIdleTime,
+                                            buckets));
                     return new InternalRow[] {internalRow};
                 });
     }
@@ -252,9 +270,26 @@ public class CompactProcedure extends BaseProcedure {
             List<String> sortColumns,
             DataSourceV2Relation relation,
             @Nullable PartitionPredicate partitionPredicate,
-            @Nullable Duration partitionIdleTime) {
+            @Nullable Duration partitionIdleTime,
+            @Nullable String buckets) {
         BucketMode bucketMode = table.bucketMode();
         OrderType orderType = OrderType.of(sortType);
+        final Set<Integer> bucketSet;
+        if (buckets == null) {
+            bucketSet = null;
+        } else {
+            checkArgument(
+                    bucketMode == BucketMode.HASH_FIXED,
+                    "Specifying buckets is only supported for fixed-bucket tables, but the table bucket mode is %s.",
+                    bucketMode);
+            checkArgument(
+                    orderType == OrderType.NONE,
+                    "Specifying buckets is not supported for sort compact.");
+            bucketSet =
+                    new HashSet<>(
+                            ParameterUtils.parseIntegerRanges(
+                                    buckets, table.coreOptions().bucket()));
+        }
 
         boolean clusterIncrementalEnabled = table.coreOptions().clusteringIncrementalEnabled();
         if (compactStrategy == null) {
@@ -263,6 +298,19 @@ public class CompactProcedure extends BaseProcedure {
             compactStrategy = clusterIncrementalEnabled ? MINOR : FULL;
         }
         boolean fullCompact = compactStrategy.equalsIgnoreCase(FULL);
+
+        long startMillis = System.currentTimeMillis();
+        LOG.info(
+                "Starting compact on table {}, bucket mode {}, compact strategy {}, order type {}, "
+                        + "order by {}, partition filtered {}, partition idle time {}.",
+                table.fullName(),
+                bucketMode,
+                compactStrategy,
+                orderType,
+                sortColumns.isEmpty() ? "none" : sortColumns,
+                partitionPredicate != null,
+                partitionIdleTime == null ? "none" : partitionIdleTime);
+
         if (orderType.equals(OrderType.NONE)) {
             JavaSparkContext javaSparkContext = new JavaSparkContext(spark().sparkContext());
             switch (bucketMode) {
@@ -273,12 +321,17 @@ public class CompactProcedure extends BaseProcedure {
                             fullCompact,
                             partitionPredicate,
                             partitionIdleTime,
+                            bucketSet,
                             javaSparkContext);
                     break;
                 case BUCKET_UNAWARE:
                     if (table.coreOptions().dataEvolutionEnabled()) {
                         compactDataEvolutionTable(
-                                table, partitionPredicate, partitionIdleTime, javaSparkContext);
+                                table,
+                                relation,
+                                partitionPredicate,
+                                partitionIdleTime,
+                                javaSparkContext);
                     } else if (clusterIncrementalEnabled) {
                         clusterIncrementalUnAwareBucketTable(
                                 table, partitionPredicate, fullCompact, relation);
@@ -309,6 +362,11 @@ public class CompactProcedure extends BaseProcedure {
                                     + " only support unaware-bucket append-only table yet.");
             }
         }
+
+        LOG.info(
+                "Finished compact on table {}, cost {} ms.",
+                table.fullName(),
+                System.currentTimeMillis() - startMillis);
         return true;
     }
 
@@ -317,18 +375,26 @@ public class CompactProcedure extends BaseProcedure {
             boolean fullCompact,
             @Nullable PartitionPredicate partitionPredicate,
             @Nullable Duration partitionIdleTime,
+            @Nullable Set<Integer> bucketSet,
             JavaSparkContext javaSparkContext) {
         SnapshotReader snapshotReader = table.newSnapshotReader();
         if (partitionPredicate != null) {
             snapshotReader.withPartitionFilter(partitionPredicate);
         }
+        boolean filterByPartitionIdleTime = partitionIdleTime != null;
         Set<BinaryRow> partitionToBeCompacted =
-                getHistoryPartition(snapshotReader, partitionIdleTime);
+                getPartitionsToCompact(snapshotReader, partitionIdleTime);
+        Predicate<BinaryRow> shouldCompactPartition = nonExpiredPartitionPredicate(table);
         List<Pair<byte[], Integer>> partitionBuckets =
                 snapshotReader.bucketEntries().stream()
                         .map(entry -> Pair.of(entry.partition(), entry.bucket()))
                         .distinct()
-                        .filter(pair -> partitionToBeCompacted.contains(pair.getKey()))
+                        .filter(pair -> bucketSet == null || bucketSet.contains(pair.getRight()))
+                        .filter(
+                                pair ->
+                                        !filterByPartitionIdleTime
+                                                || partitionToBeCompacted.contains(pair.getKey()))
+                        .filter(pair -> shouldCompactPartition.test(pair.getKey()))
                         .map(
                                 p ->
                                         Pair.of(
@@ -337,11 +403,18 @@ public class CompactProcedure extends BaseProcedure {
                         .collect(Collectors.toList());
 
         if (partitionBuckets.isEmpty()) {
-            LOG.info("Partition bucket is empty, no compact job to execute.");
+            LOG.info(
+                    "No partition bucket to compact for table {}, skip this compact job.",
+                    table.fullName());
             return;
         }
 
         int readParallelism = readParallelism(partitionBuckets, spark());
+        LOG.info(
+                "Starting to compact {} partition buckets of table {} with read parallelism {}.",
+                partitionBuckets.size(),
+                table.fullName(),
+                readParallelism);
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         JavaRDD<byte[]> commitMessageJavaRDD =
                 javaSparkContext
@@ -381,15 +454,31 @@ public class CompactProcedure extends BaseProcedure {
 
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
             CommitMessageSerializer serializer = new CommitMessageSerializer();
-            List<byte[]> serializedMessages = commitMessageJavaRDD.collect();
-            List<CommitMessage> messages = new ArrayList<>(serializedMessages.size());
-            for (byte[] serializedMessage : serializedMessages) {
-                messages.add(serializer.deserialize(serializer.getVersion(), serializedMessage));
-            }
+            List<byte[]> serializedMessages = new ArrayList<>(commitMessageJavaRDD.collect());
+            List<CommitMessage> messages =
+                    deserializeCommitMessagesAndReleaseSerializedBytes(
+                            serializer, serializedMessages);
             commit.commit(messages);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private static Predicate<BinaryRow> nonExpiredPartitionPredicate(FileStoreTable table) {
+        CoreOptions options = table.coreOptions();
+        if (!options.compactionSkipExpiredPartitions()
+                || options.partitionExpireTime() == null
+                || !CoreOptions.PartitionExpireStrategy.VALUES_TIME
+                        .toString()
+                        .equals(options.partitionExpireStrategy())) {
+            return partition -> true;
+        }
+
+        LocalDateTime expireDateTime = LocalDateTime.now().minus(options.partitionExpireTime());
+        PartitionValuesTimeExpireStrategy expireStrategy =
+                new PartitionValuesTimeExpireStrategy(
+                        options, table.schema().logicalPartitionType());
+        return partition -> !expireStrategy.isExpired(expireDateTime, partition);
     }
 
     private void compactUnAwareBucketTable(
@@ -426,7 +515,9 @@ public class CompactProcedure extends BaseProcedure {
                             .collect(Collectors.toList());
         }
         if (compactionTasks.isEmpty()) {
-            LOG.info("Task plan is empty, no compact job to execute.");
+            LOG.info(
+                    "No append compact task to execute for table {}, skip this compact job.",
+                    table.fullName());
             return;
         }
 
@@ -441,6 +532,11 @@ public class CompactProcedure extends BaseProcedure {
         }
 
         int readParallelism = readParallelism(serializedTasks, spark());
+        LOG.info(
+                "Starting to execute {} append compact tasks of table {} with read parallelism {}.",
+                serializedTasks.size(),
+                table.fullName(),
+                readParallelism);
         String commitUser = createCommitUser(table.coreOptions().toConfiguration());
         JavaRDD<byte[]> commitMessageJavaRDD =
                 javaSparkContext
@@ -480,13 +576,10 @@ public class CompactProcedure extends BaseProcedure {
 
         try (TableCommitImpl commit = table.newCommit(commitUser)) {
             CommitMessageSerializer messageSerializerser = new CommitMessageSerializer();
-            List<byte[]> serializedMessages = commitMessageJavaRDD.collect();
-            List<CommitMessage> messages = new ArrayList<>(serializedMessages.size());
-            for (byte[] serializedMessage : serializedMessages) {
-                messages.add(
-                        messageSerializerser.deserialize(
-                                messageSerializerser.getVersion(), serializedMessage));
-            }
+            List<byte[]> serializedMessages = new ArrayList<>(commitMessageJavaRDD.collect());
+            List<CommitMessage> messages =
+                    deserializeCommitMessagesAndReleaseSerializedBytes(
+                            messageSerializerser, serializedMessages);
             commit.commit(messages);
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -495,133 +588,179 @@ public class CompactProcedure extends BaseProcedure {
 
     private void compactDataEvolutionTable(
             FileStoreTable table,
+            DataSourceV2Relation relation,
             @Nullable PartitionPredicate partitionPredicate,
             @Nullable Duration partitionIdleTime,
             JavaSparkContext javaSparkContext) {
-        List<DataEvolutionCompactTask> compactionTasks;
-        Snapshot snapshot = table.snapshotManager().latestSnapshot();
-        if (snapshot == null) {
-            return;
-        }
-        DataEvolutionCompactCoordinator compactCoordinator =
-                new DataEvolutionCompactCoordinator(
-                        table, partitionPredicate, false, false, snapshot);
-        CommitMessageSerializer messageSerializerser = new CommitMessageSerializer();
-        String commitUser = createCommitUser(table.coreOptions().toConfiguration());
-        try {
-            while (true) {
-                compactionTasks = compactCoordinator.plan();
-                if (partitionIdleTime != null) {
-                    SnapshotReader snapshotReader = table.newSnapshotReader();
-                    if (partitionPredicate != null) {
-                        snapshotReader.withPartitionFilter(partitionPredicate);
-                    }
-                    Map<BinaryRow, Long> partitionInfo =
-                            snapshotReader.partitionEntries().stream()
-                                    .collect(
-                                            Collectors.toMap(
-                                                    PartitionEntry::partition,
-                                                    PartitionEntry::lastFileCreationTime));
-                    long historyMilli =
-                            LocalDateTime.now()
-                                    .minus(partitionIdleTime)
-                                    .atZone(ZoneId.systemDefault())
-                                    .toInstant()
-                                    .toEpochMilli();
-                    compactionTasks =
-                            compactionTasks.stream()
-                                    .filter(
-                                            task ->
-                                                    partitionInfo.get(task.partition())
-                                                            <= historyMilli)
-                                    .collect(Collectors.toList());
-                }
-                if (compactionTasks.isEmpty()) {
-                    LOG.info("Task plan is empty, no compact job to execute.");
-                    continue;
-                }
-
-                DataEvolutionCompactTaskSerializer serializer =
-                        new DataEvolutionCompactTaskSerializer();
-                List<byte[]> serializedTasks = new ArrayList<>();
-                try {
-                    for (DataEvolutionCompactTask compactionTask : compactionTasks) {
-                        serializedTasks.add(serializer.serialize(compactionTask));
-                    }
-                } catch (IOException e) {
-                    throw new RuntimeException("serialize compaction task failed");
-                }
-
-                int readParallelism = readParallelism(serializedTasks, spark());
-                JavaRDD<byte[]> commitMessageJavaRDD =
-                        javaSparkContext
-                                .parallelize(serializedTasks, readParallelism)
-                                .mapPartitions(
-                                        (FlatMapFunction<Iterator<byte[]>, byte[]>)
-                                                taskIterator -> {
-                                                    DataEvolutionCompactTaskSerializer ser =
-                                                            new DataEvolutionCompactTaskSerializer();
-                                                    List<byte[]> messagesBytes = new ArrayList<>();
-                                                    CommitMessageSerializer messageSer =
-                                                            new CommitMessageSerializer();
-                                                    while (taskIterator.hasNext()) {
-                                                        DataEvolutionCompactTask task =
-                                                                ser.deserialize(
-                                                                        ser.getVersion(),
-                                                                        taskIterator.next());
-                                                        messagesBytes.add(
-                                                                messageSer.serialize(
-                                                                        task.doCompact(
-                                                                                table,
-                                                                                commitUser)));
-                                                    }
-                                                    return messagesBytes.iterator();
-                                                });
-
-                List<CommitMessage> messages = new ArrayList<>();
-                List<byte[]> serializedMessages = commitMessageJavaRDD.collect();
-                try (TableCommitImpl commit = table.newCommit(commitUser)) {
-                    for (byte[] serializedMessage : serializedMessages) {
-                        messages.add(
-                                messageSerializerser.deserialize(
-                                        messageSerializerser.getVersion(), serializedMessage));
-                    }
-                    messages.addAll(
-                            new DataEvolutionCompactionCommitPreparation(table, snapshot)
-                                    .prepare(messages));
-                    commit.commit(messages);
-                } catch (Exception e) {
-                    throw new RuntimeException("Deserialize commit message failed", e);
-                }
-            }
-        } catch (EndOfScanException e) {
-            LOG.info("Catching EndOfScanException, the compact job is finishing.");
-        }
+        executeDataEvolutionCompaction(
+                table, relation, partitionPredicate, partitionIdleTime, javaSparkContext, spark());
     }
 
-    private Set<BinaryRow> getHistoryPartition(
-            SnapshotReader snapshotReader, @Nullable Duration partitionIdleTime) {
-        Set<Pair<BinaryRow, Long>> partitionInfo =
-                snapshotReader.partitionEntries().stream()
-                        .map(
-                                partitionEntry ->
-                                        Pair.of(
-                                                partitionEntry.partition(),
-                                                partitionEntry.lastFileCreationTime()))
-                        .collect(Collectors.toSet());
-        if (partitionIdleTime != null) {
-            long historyMilli =
-                    LocalDateTime.now()
-                            .minus(partitionIdleTime)
-                            .atZone(ZoneId.systemDefault())
-                            .toInstant()
-                            .toEpochMilli();
-            partitionInfo =
-                    partitionInfo.stream()
-                            .filter(partition -> partition.getValue() <= historyMilli)
-                            .collect(Collectors.toSet());
+    static void executeDataEvolutionCompaction(
+            FileStoreTable table,
+            DataSourceV2Relation relation,
+            @Nullable PartitionPredicate partitionPredicate,
+            @Nullable Duration partitionIdleTime,
+            JavaSparkContext javaSparkContext,
+            SparkSession sparkSession) {
+        executeDataEvolutionCompaction(
+                table,
+                relation,
+                partitionPredicate,
+                partitionIdleTime,
+                javaSparkContext,
+                sparkSession,
+                null,
+                commit -> {});
+    }
+
+    static void executeDataEvolutionCompaction(
+            FileStoreTable table,
+            @Nullable PartitionPredicate partitionPredicate,
+            @Nullable Duration partitionIdleTime,
+            JavaSparkContext javaSparkContext,
+            SparkSession sparkSession) {
+        executeDataEvolutionCompaction(
+                table,
+                null,
+                partitionPredicate,
+                partitionIdleTime,
+                javaSparkContext,
+                sparkSession,
+                null,
+                commit -> {});
+    }
+
+    static void executeDataEvolutionCompaction(
+            FileStoreTable table,
+            @Nullable PartitionPredicate partitionPredicate,
+            @Nullable Duration partitionIdleTime,
+            JavaSparkContext javaSparkContext,
+            SparkSession sparkSession,
+            @Nullable Integer candidateFilesPerBatch) {
+        executeDataEvolutionCompaction(
+                table,
+                null,
+                partitionPredicate,
+                partitionIdleTime,
+                javaSparkContext,
+                sparkSession,
+                candidateFilesPerBatch,
+                commit -> {});
+    }
+
+    static void executeDataEvolutionCompaction(
+            FileStoreTable table,
+            @Nullable DataSourceV2Relation relation,
+            @Nullable PartitionPredicate partitionPredicate,
+            @Nullable Duration partitionIdleTime,
+            JavaSparkContext javaSparkContext,
+            SparkSession sparkSession,
+            @Nullable Integer candidateFilesPerBatch,
+            DataEvolutionRewriteExecutor.CommitConfigurer commitConfigurer) {
+        DataEvolutionCompactCoordinator.validateOptions(table.coreOptions());
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
+        if (snapshot == null) {
+            LOG.info("Table {} has no snapshot yet, skip this compact job.", table.fullName());
+            return;
         }
-        return partitionInfo.stream().map(Pair::getKey).collect(Collectors.toSet());
+        AtomicReference<DataEvolutionCompactCoordinator> coordinatorRef = new AtomicReference<>();
+        Function<Snapshot, List<DataEvolutionCompactTask>> taskPlanner =
+                planningSnapshot -> {
+                    DataEvolutionCompactCoordinator coordinator = coordinatorRef.get();
+                    if (coordinator == null
+                            || coordinator.snapshot().id() != planningSnapshot.id()) {
+                        coordinator =
+                                candidateFilesPerBatch == null
+                                        ? new DataEvolutionCompactCoordinator(
+                                                table,
+                                                partitionPredicate,
+                                                table.coreOptions().blobCompactionEnabled(),
+                                                false,
+                                                planningSnapshot)
+                                        : new DataEvolutionCompactCoordinator(
+                                                table,
+                                                partitionPredicate,
+                                                table.coreOptions().blobCompactionEnabled(),
+                                                false,
+                                                planningSnapshot,
+                                                candidateFilesPerBatch);
+                        coordinatorRef.set(coordinator);
+                    }
+                    return filterIdlePartitions(
+                            coordinator.plan(), table, partitionPredicate, partitionIdleTime);
+                };
+        DataEvolutionRewriteExecutor.execute(
+                table,
+                snapshot,
+                taskPlanner,
+                javaSparkContext,
+                sparkSession,
+                commitConfigurer,
+                relation == null
+                        ? null
+                        : new DataEvolutionCompactMergeConflictRewriter(table, relation)::rewrite);
+    }
+
+    private static List<DataEvolutionCompactTask> filterIdlePartitions(
+            List<DataEvolutionCompactTask> tasks,
+            FileStoreTable table,
+            @Nullable PartitionPredicate partitionPredicate,
+            @Nullable Duration partitionIdleTime) {
+        if (partitionIdleTime == null) {
+            return tasks;
+        }
+        SnapshotReader snapshotReader = table.newSnapshotReader();
+        if (partitionPredicate != null) {
+            snapshotReader.withPartitionFilter(partitionPredicate);
+        }
+        Map<BinaryRow, Long> partitionInfo =
+                snapshotReader.partitionEntries().stream()
+                        .collect(
+                                Collectors.toMap(
+                                        PartitionEntry::partition,
+                                        PartitionEntry::lastFileCreationTime));
+        long historyMilli =
+                LocalDateTime.now()
+                        .minus(partitionIdleTime)
+                        .atZone(ZoneId.systemDefault())
+                        .toInstant()
+                        .toEpochMilli();
+        return tasks.stream()
+                .filter(task -> partitionInfo.get(task.partition()) <= historyMilli)
+                .collect(Collectors.toList());
+    }
+
+    private static List<CommitMessage> deserializeCommitMessagesAndReleaseSerializedBytes(
+            CommitMessageSerializer serializer, List<byte[]> serializedMessages)
+            throws IOException {
+        List<CommitMessage> messages = new ArrayList<>(serializedMessages.size());
+        for (int i = 0; i < serializedMessages.size(); i++) {
+            byte[] serializedMessage = serializedMessages.set(i, null);
+            messages.add(serializer.deserialize(serializer.getVersion(), serializedMessage));
+        }
+        return messages;
+    }
+
+    static Set<BinaryRow> getPartitionsToCompact(
+            SnapshotReader snapshotReader, @Nullable Duration partitionIdleTime) {
+        return partitionIdleTime == null
+                ? Collections.emptySet()
+                : getHistoryPartition(snapshotReader, partitionIdleTime);
+    }
+
+    private static Set<BinaryRow> getHistoryPartition(
+            SnapshotReader snapshotReader, Duration partitionIdleTime) {
+        long historyMilli =
+                LocalDateTime.now()
+                        .minus(partitionIdleTime)
+                        .atZone(ZoneId.systemDefault())
+                        .toInstant()
+                        .toEpochMilli();
+        return snapshotReader.partitionEntries().stream()
+                .filter(partition -> partition.lastFileCreationTime() <= historyMilli)
+                .map(PartitionEntry::partition)
+                .collect(Collectors.toSet());
     }
 
     private void sortCompactUnAwareBucketTable(
@@ -638,7 +777,21 @@ public class CompactProcedure extends BaseProcedure {
             snapshotReader.withPartitionFilter(partitionPredicate);
         }
         Map<BinaryRow, DataSplit[]> packedSplits = packForSort(snapshotReader.read().dataSplits());
+        // Build the sorter before the emptiness check on purpose: its constructor validates the
+        // order columns, and that validation must keep failing fast even for an empty table.
         TableSorter sorter = TableSorter.getSorter(table, orderType, sortColumns);
+        if (packedSplits.isEmpty()) {
+            LOG.info(
+                    "No data split to sort compact for table {}, skip this compact job.",
+                    table.fullName());
+            return;
+        }
+        LOG.info(
+                "Starting to sort compact {} partitions of table {}, order type {}, order by {}.",
+                packedSplits.size(),
+                table.fullName(),
+                orderType,
+                sortColumns);
         Dataset<Row> datasetForWrite =
                 packedSplits.values().stream()
                         .map(
@@ -655,7 +808,7 @@ public class CompactProcedure extends BaseProcedure {
         if (datasetForWrite != null) {
             PaimonSparkWriter writer = PaimonSparkWriter.apply(table);
             // Use dynamic partition overwrite
-            writer.writeBuilder().withOverwrite();
+            writer.withOverwrite();
             writer.commit(writer.write(datasetForWrite));
         }
     }
@@ -669,6 +822,11 @@ public class CompactProcedure extends BaseProcedure {
                 new IncrementalClusterManager(table, partitionPredicate);
         Map<BinaryRow, CompactUnit> compactUnits =
                 incrementalClusterManager.createCompactUnits(fullCompaction);
+        LOG.info(
+                "Planned {} compact units to incrementally cluster for table {}, full compaction {}.",
+                compactUnits.size(),
+                table.fullName(),
+                fullCompaction);
 
         Map<BinaryRow, Pair<List<DataSplit>, CommitMessage>> partitionSplits =
                 incrementalClusterManager.toSplitsAndRewriteDvFiles(compactUnits);
@@ -679,13 +837,15 @@ public class CompactProcedure extends BaseProcedure {
                         table,
                         incrementalClusterManager.clusterCurve(),
                         incrementalClusterManager.clusterKeys());
-        LOG.info(
-                "Start to sort in partition, cluster curve is {}, cluster keys is {}",
-                incrementalClusterManager.clusterCurve(),
-                incrementalClusterManager.clusterKeys());
-
         CoreOptions.ClusteringIncrementalMode mode =
                 incrementalClusterManager.clusteringIncrementalMode();
+        LOG.info(
+                "Start to sort in partition for table {}, cluster curve is {}, cluster keys is {}, "
+                        + "incremental mode is {}",
+                table.fullName(),
+                incrementalClusterManager.clusterCurve(),
+                incrementalClusterManager.clusterKeys(),
+                mode);
 
         Dataset<Row> datasetForWrite =
                 partitionSplits.values().stream()
@@ -770,6 +930,10 @@ public class CompactProcedure extends BaseProcedure {
             }
 
             writer.commit(JavaConverters.asScalaBuffer(clusterMessages).toSeq());
+        } else {
+            LOG.info(
+                    "No data split to incrementally cluster for table {}, skip this compact job.",
+                    table.fullName());
         }
     }
 

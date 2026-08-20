@@ -73,6 +73,21 @@ class FileSystemCatalogBranchCRUDTest(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
+    @staticmethod
+    def _write(table, data):
+        builder = table.new_batch_write_builder()
+        writer = builder.new_write()
+        try:
+            writer.write_arrow(data)
+            builder.new_commit().commit(writer.prepare_commit())
+        finally:
+            writer.close()
+
+    @staticmethod
+    def _read(table):
+        builder = table.new_read_builder()
+        return builder.new_read().to_arrow(builder.new_scan().plan().splits())
+
     # -- create + list --------------------------------------------------------
 
     def test_create_branch_without_from_tag(self):
@@ -96,6 +111,49 @@ class FileSystemCatalogBranchCRUDTest(unittest.TestCase):
             "branch_col", self.catalog.get_table(self.identifier).field_names)
         self.assertIn(
             "branch_col", self.catalog.get_table(branch_identifier).field_names)
+
+    def test_write_blob_to_data_evolution_branch(self):
+        schema = pa.schema([
+            ("id", pa.int64()),
+            ("payload", pa.large_binary()),
+        ])
+        identifier = Identifier.from_string("default.test_de_blob_branch")
+        self.catalog.create_table(
+            identifier,
+            Schema.from_pyarrow_schema(
+                schema,
+                options={
+                    "data-evolution.enabled": "true",
+                    "row-tracking.enabled": "true",
+                    "blob-field": "payload",
+                },
+            ),
+            False,
+        )
+        main = self.catalog.get_table(identifier)
+        self._write(main, pa.table({
+            "id": [1],
+            "payload": pa.array([b"main"], pa.large_binary()),
+        }, schema=schema))
+        main.create_tag("base")
+        self.catalog.create_branch(identifier, "b1", tag_name="base")
+
+        branch_identifier = Identifier(
+            identifier.get_database_name(), identifier.get_table_name(), branch="b1")
+        branch = self.catalog.get_table(branch_identifier)
+        self._write(branch, pa.table({
+            "id": [2],
+            "payload": pa.array([b"branch"], pa.large_binary()),
+        }, schema=schema))
+
+        self.assertEqual(
+            self._read(main).to_pydict(),
+            {"id": [1], "payload": [b"main"]},
+        )
+        self.assertEqual(
+            self._read(branch).to_pydict(),
+            {"id": [1, 2], "payload": [b"main", b"branch"]},
+        )
 
     def test_create_branch_duplicate_raises(self):
         self.catalog.create_branch(self.identifier, "b1")

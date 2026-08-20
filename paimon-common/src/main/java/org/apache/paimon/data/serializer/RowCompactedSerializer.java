@@ -40,6 +40,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VectorType;
+import org.apache.paimon.utils.SortUtil;
 import org.apache.paimon.utils.TypeCheckUtils;
 import org.apache.paimon.utils.VarLengthIntUtils;
 
@@ -184,6 +185,8 @@ public class RowCompactedSerializer implements Serializer<InternalRow> {
                 break;
             case BINARY:
             case VARBINARY:
+            case GEOMETRY:
+            case GEOGRAPHY:
                 fieldWriter = (writer, pos, value) -> writer.writeBinary((byte[]) value);
                 break;
             case DECIMAL:
@@ -300,6 +303,8 @@ public class RowCompactedSerializer implements Serializer<InternalRow> {
                 break;
             case BINARY:
             case VARBINARY:
+            case GEOMETRY:
+            case GEOGRAPHY:
                 fieldReader = (reader, pos) -> reader.readBinary();
                 break;
             case DECIMAL:
@@ -760,8 +765,16 @@ public class RowCompactedSerializer implements Serializer<InternalRow> {
                         FieldReader fieldReader = fieldReaders[i];
                         Object o1 = fieldReader.readField(reader1, i);
                         Object o2 = fieldReader.readField(reader2, i);
-                        @SuppressWarnings({"unchecked", "rawtypes"})
-                        int comp = ((Comparable) o1).compareTo(o2);
+                        int comp;
+                        if (o1 instanceof byte[]) {
+                            // BINARY / VARBINARY fields read back as byte[], which does not
+                            // implement Comparable; order them like BinaryRow does.
+                            comp = SortUtil.compareBinary((byte[]) o1, (byte[]) o2);
+                        } else {
+                            @SuppressWarnings({"unchecked", "rawtypes"})
+                            int comparableComp = ((Comparable) o1).compareTo(o2);
+                            comp = comparableComp;
+                        }
                         if (comp != 0) {
                             return comp;
                         }

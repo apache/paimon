@@ -16,15 +16,151 @@
 # under the License.
 
 import os
+import types
 import unittest
 import uuid
+from unittest import mock
 
 import pyarrow.fs as pafs
 
 from pyarrow.fs import PyFileSystem
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
+from pypaimon.filesystem import jindo_file_system_handler as jindo_module
 from pypaimon.filesystem.jindo_file_system_handler import JindoFileSystemHandler, JINDO_AVAILABLE
+
+
+class _RecordingConfig:
+    def __init__(self, values=None):
+        self.values = dict(values or {})
+
+    def set(self, key, value):
+        self.values[key] = value
+
+
+class JindoConfigTest(unittest.TestCase):
+
+    def test_forwards_native_options_to_connect(self):
+        created_config = _RecordingConfig()
+        config_factory = mock.Mock(return_value=created_config)
+        read_config = mock.Mock()
+        fake_jutil = types.SimpleNamespace(
+            Config=config_factory,
+            read_config=read_config,
+        )
+        options = Options({
+            "fs.oss.accesskeyid": "ak",
+            "fs.oss.accesskeysecret": "sk",
+            "fs.oss.securitytoken": "token",
+            OssOptions.OSS_ENDPOINT.key(): "https://cache-seed:80",
+            OssOptions.OSS_IMPL.key(): "jindo",
+            "fs.oss.dlf-cache.consistent-hash.enabled": True,
+            "fs.oss.dlf-cache.server.address": "http://cache-server:18101",
+            "fs.oss.https.enable": False,
+            "fs.oss.second.level.domain.enable": "true",
+            "fs.jindocache.client.metrics.enable": True,
+            "logger.dir": "/tmp/jindo-log",
+            "logger.verbose": 3,
+            "logger.console.log.enable": False,
+            "fs.oss.unset.option": None,
+            "metastore": "rest",
+        })
+        connect = mock.Mock(return_value=mock.sentinel.jindo_fs)
+        fake_jfs = types.SimpleNamespace(connect=connect)
+
+        with mock.patch.object(jindo_module, "JINDO_AVAILABLE", True), \
+             mock.patch.object(jindo_module, "jfs", fake_jfs), \
+             mock.patch.object(jindo_module, "jutil", fake_jutil):
+            handler = JindoFileSystemHandler("oss://bucket/", options)
+
+        config_factory.assert_called_once_with()
+        read_config.assert_not_called()
+        connect.assert_called_once_with("oss://bucket/", "root", mock.ANY)
+        self.assertIs(handler._jindo_fs, mock.sentinel.jindo_fs)
+        config = connect.call_args[0][2]
+        self.assertIs(config, created_config)
+        self.assertEqual(config.values["fs.oss.accessKeyId"], "ak")
+        self.assertEqual(config.values["fs.oss.accessKeySecret"], "sk")
+        self.assertEqual(config.values["fs.oss.securityToken"], "token")
+        self.assertEqual(config.values["fs.oss.endpoint"], "cache-seed:80")
+        self.assertEqual(
+            config.values["fs.oss.dlf-cache.consistent-hash.enabled"], "true")
+        self.assertEqual(
+            config.values["fs.oss.dlf-cache.server.address"],
+            "http://cache-server:18101")
+        self.assertEqual(config.values["fs.oss.https.enable"], "false")
+        self.assertEqual(
+            config.values["fs.oss.second.level.domain.enable"], "true")
+        self.assertEqual(
+            config.values["fs.jindocache.client.metrics.enable"], "true")
+        self.assertEqual(config.values["logger.dir"], "/tmp/jindo-log")
+        self.assertEqual(config.values["logger.verbose"], "3")
+        self.assertEqual(config.values["logger.console.log.enable"], "false")
+        self.assertEqual(config.values["fs.oss.user.agent.features"], "pypaimon")
+        self.assertNotIn(OssOptions.OSS_IMPL.key(), config.values)
+        self.assertNotIn("fs.oss.unset.option", config.values)
+        self.assertNotIn("metastore", config.values)
+
+    def test_does_not_load_external_config(self):
+        created_config = _RecordingConfig()
+        config_factory = mock.Mock(return_value=created_config)
+        read_config = mock.Mock(
+            side_effect=AssertionError("external config must not be loaded"))
+        fake_jutil = types.SimpleNamespace(
+            Config=config_factory,
+            read_config=read_config,
+        )
+        options = Options({
+            OssOptions.OSS_ENDPOINT.key(): "http://127.0.0.1:80",
+            "logger.verbose": "3",
+        })
+
+        with mock.patch.object(jindo_module, "JINDO_AVAILABLE", True), \
+             mock.patch.object(jindo_module, "jutil", fake_jutil):
+            config = jindo_module.build_jindo_config(options)
+
+        config_factory.assert_called_once_with()
+        read_config.assert_not_called()
+        self.assertIs(config, created_config)
+        self.assertEqual(config.values["fs.oss.endpoint"], "127.0.0.1:80")
+        self.assertEqual(config.values["logger.verbose"], "3")
+        self.assertNotIn("fs.oss.provider.endpoint", config.values)
+        self.assertNotIn("fs.oss.provider.format", config.values)
+
+    def test_forwards_native_options_to_jindo_oss_filesystem(self):
+        created_config = _RecordingConfig()
+        config_factory = mock.Mock(return_value=created_config)
+        fake_jutil = types.SimpleNamespace(Config=config_factory)
+        jindo_oss_filesystem = mock.Mock(return_value=mock.sentinel.jindo_oss_fs)
+        fake_jossfs = types.SimpleNamespace(JindoOssFileSystem=jindo_oss_filesystem)
+        options = Options({
+            "fs.oss.dlf-cache.consistent-hash.enabled": "true",
+            "fs.oss.dlf-cache.server.address": "http://cache-server:18101",
+            "logger.verbose": 3,
+        })
+
+        with mock.patch.object(jindo_module, "JINDO_AVAILABLE", True), \
+             mock.patch.object(jindo_module, "JINDO_OSSFS_AVAILABLE", True), \
+             mock.patch.object(jindo_module, "jutil", fake_jutil), \
+             mock.patch.object(jindo_module, "jossfs", fake_jossfs):
+            filesystem = jindo_module.create_jindo_oss_filesystem(
+                "oss://bucket/", options)
+
+        self.assertIs(filesystem, mock.sentinel.jindo_oss_fs)
+        config_factory.assert_called_once_with()
+        jindo_oss_filesystem.assert_called_once_with(
+            uri="oss://bucket/",
+            config=created_config,
+            auto_mkdir=False,
+            skip_instance_cache=True,
+        )
+        self.assertEqual(
+            created_config.values["fs.oss.dlf-cache.consistent-hash.enabled"],
+            "true")
+        self.assertEqual(
+            created_config.values["fs.oss.dlf-cache.server.address"],
+            "http://cache-server:18101")
+        self.assertEqual(created_config.values["logger.verbose"], "3")
 
 
 class JindoFileSystemTest(unittest.TestCase):

@@ -180,7 +180,6 @@ class CatalogManagedPartitionScanTest {
         assertThat(entries.get(0).lastFileCreationTime()).isEqualTo(44L);
         assertThat(entries.get(0).totalBuckets()).isEqualTo(5);
         assertThat(fileIO.listedPaths).isEmpty();
-        assertThat(fileIO.statusListedPaths).isEmpty();
     }
 
     @Test
@@ -311,7 +310,7 @@ class CatalogManagedPartitionScanTest {
         LocalFileIO fileIO =
                 new LocalFileIO() {
                     @Override
-                    public FileStatus[] listFiles(Path path, boolean recursive) throws IOException {
+                    public FileStatus[] listStatus(Path path) throws IOException {
                         assertThat(path).isEqualTo(missingPath);
                         throw new FileNotFoundException(path.toString());
                     }
@@ -497,18 +496,11 @@ class CatalogManagedPartitionScanTest {
     private static class TrackingLocalFileIO extends LocalFileIO {
 
         private final List<Path> listedPaths = new ArrayList<>();
-        private final List<Path> statusListedPaths = new ArrayList<>();
 
         @Override
         public FileStatus[] listStatus(Path path) throws IOException {
-            statusListedPaths.add(path);
-            return super.listStatus(path);
-        }
-
-        @Override
-        public FileStatus[] listFiles(Path path, boolean recursive) throws IOException {
             listedPaths.add(path);
-            return super.listFiles(path, recursive);
+            return super.listStatus(path);
         }
     }
 
@@ -546,7 +538,7 @@ class CatalogManagedPartitionScanTest {
                         partition("2025", "10"), partition("2025", "11"), partition("2025", "12"));
         Path oct = writeDataFile(fileIO, tablePath, "year=2025/month=10");
         Path dec = writeDataFile(fileIO, tablePath, "year=2025/month=12");
-        fileIO.failListFilesContaining("month=11", new FileNotFoundException("missing"));
+        fileIO.failListingContaining("month=11", new FileNotFoundException("missing"));
 
         List<Path> files =
                 plannedFiles(
@@ -569,7 +561,7 @@ class CatalogManagedPartitionScanTest {
                 Arrays.asList(partition("2025", "10"), partition("2025", "11"));
         writeDataFile(fileIO, tablePath, "year=2025/month=10");
         writeDataFile(fileIO, tablePath, "year=2025/month=11");
-        fileIO.failListFilesContaining("month=11", new IOException("boom"));
+        fileIO.failListingContaining("month=11", new IOException("boom"));
 
         FormatTable table =
                 stringPartitionTable(fileIO, tablePath, recordingCatalog(partitions), 4);
@@ -585,7 +577,7 @@ class CatalogManagedPartitionScanTest {
         Path tablePath = new Path(tempDir.toUri());
         writeDataFile(fileIO, tablePath, "year=2025/month=10");
         writeDataFile(fileIO, tablePath, "year=2025/month=11");
-        fileIO.failListFilesContaining("month=11", new FileNotFoundException("missing"));
+        fileIO.failListingContaining("month=11", new FileNotFoundException("missing"));
 
         FormatTable table = createStringPartitionTable(fileIO, tablePath, null);
         assertThatThrownBy(() -> new FormatTableScan(table, null, null).plan().splits())
@@ -670,7 +662,7 @@ class CatalogManagedPartitionScanTest {
         private final AtomicInteger maxConcurrentListings = new AtomicInteger();
 
         @Override
-        public FileStatus[] listFiles(Path path, boolean recursive) throws IOException {
+        public FileStatus[] listStatus(Path path) throws IOException {
             int active = activeListings.incrementAndGet();
             maxConcurrentListings.updateAndGet(current -> Math.max(current, active));
             concurrentListings.countDown();
@@ -678,7 +670,7 @@ class CatalogManagedPartitionScanTest {
                 if (!concurrentListings.await(10, TimeUnit.SECONDS)) {
                     throw new IOException("Partition file listings did not run concurrently");
                 }
-                return super.listFiles(path, recursive);
+                return super.listStatus(path);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new IOException("Interrupted while waiting for concurrent listings", e);
@@ -698,12 +690,12 @@ class CatalogManagedPartitionScanTest {
         private final AtomicInteger maxConcurrentListings = new AtomicInteger();
 
         @Override
-        public FileStatus[] listFiles(Path path, boolean recursive) throws IOException {
+        public FileStatus[] listStatus(Path path) throws IOException {
             int active = activeListings.incrementAndGet();
             maxConcurrentListings.updateAndGet(current -> Math.max(current, active));
             try {
                 Thread.sleep(50);
-                return super.listFiles(path, recursive);
+                return super.listStatus(path);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new IOException("Interrupted while tracking file listings", e);
@@ -721,18 +713,18 @@ class CatalogManagedPartitionScanTest {
 
         private final Map<String, IOException> listFailures = new LinkedHashMap<>();
 
-        void failListFilesContaining(String marker, IOException failure) {
+        void failListingContaining(String marker, IOException failure) {
             listFailures.put(marker, failure);
         }
 
         @Override
-        public FileStatus[] listFiles(Path path, boolean recursive) throws IOException {
+        public FileStatus[] listStatus(Path path) throws IOException {
             for (Map.Entry<String, IOException> entry : listFailures.entrySet()) {
                 if (path.toString().contains(entry.getKey())) {
                     throw entry.getValue();
                 }
             }
-            return super.listFiles(path, recursive);
+            return super.listStatus(path);
         }
     }
 

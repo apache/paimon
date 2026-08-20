@@ -24,6 +24,10 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+from pypaimon.manifest.schema.manifest_entry import ManifestEntry
+from pypaimon.read.scanner.data_evolution_split_generator import (
+    DataEvolutionSplitGenerator,
+)
 from pypaimon.read.split import DataSplit
 from pypaimon.read.table_read import TableRead
 from pypaimon.schema.data_types import (
@@ -97,7 +101,7 @@ class TableUpdateByRowId:
         self.commit_messages: List[CommitMessage] = []
 
     def _snapshot_files_info(self) -> _FilesInfo:
-        """Internal: return the current snapshot's file index for broadcast."""
+        """Return the already loaded snapshot file index for broadcast."""
         return _FilesInfo(
             snapshot_id=self.snapshot_id,
             first_row_ids=self.first_row_ids,
@@ -115,8 +119,27 @@ class TableUpdateByRowId:
         """
         scan = self.table.new_read_builder().new_scan()
         plan = scan.plan_for_write()
-        splits = plan.splits()
+        snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
+        return self._files_info_from_splits(snapshot_id, plan.splits())
 
+    @classmethod
+    def _files_info_from_entries(
+            cls,
+            table,
+            snapshot_id: int,
+            entries: List[ManifestEntry],
+    ) -> _FilesInfo:
+        """Build a file index from an already resolved snapshot entry set."""
+        splits = DataEvolutionSplitGenerator(
+            table,
+            table.options.source_split_target_size(),
+            table.options.source_split_open_file_cost(),
+        ).create_splits(entries)
+        return cls._files_info_from_splits(snapshot_id, splits)
+
+    @classmethod
+    def _files_info_from_splits(
+            cls, snapshot_id: int, splits: List[DataSplit]) -> _FilesInfo:
         index: Dict[int, Tuple[DataSplit, List[DataFileMeta]]] = {}
         row_id_ranges: List[Range] = []
         for split in splits:
@@ -128,14 +151,19 @@ class TableUpdateByRowId:
                 if not DataFileMeta.is_blob_file(file.file_name)
             ]
             for file in split.files:
-                if file.first_row_id is None or DataFileMeta.is_blob_file(file.file_name):
+                if (
+                        file.first_row_id is None
+                        or DataFileMeta.is_blob_file(file.file_name)
+                ):
                     continue
                 row_id_ranges.append(file.row_id_range())
             for file in data_files:
                 target_files = [
                     target_file
                     for target_file in files_with_row_id
-                    if self._overlaps(file.row_id_range(), target_file.row_id_range())
+                    if cls._overlaps(
+                        file.row_id_range(), target_file.row_id_range()
+                    )
                 ]
 
                 entry = index.get(file.first_row_id)
@@ -143,7 +171,9 @@ class TableUpdateByRowId:
                     index[file.first_row_id] = (split, target_files)
                 else:
                     existing_files = entry[1]
-                    existing_names = {existing.file_name for existing in existing_files}
+                    existing_names = {
+                        existing.file_name for existing in existing_files
+                    }
                     existing_files.extend(
                         target_file
                         for target_file in target_files
@@ -155,7 +185,6 @@ class TableUpdateByRowId:
         else:
             merged = []
 
-        snapshot_id = plan.snapshot_id if plan.snapshot_id is not None else -1
         return _FilesInfo(
             snapshot_id=snapshot_id,
             first_row_ids=sorted(index.keys()),
@@ -189,12 +218,7 @@ class TableUpdateByRowId:
             if col_name not in self.table.field_names:
                 raise ValueError(f"Column {col_name} not found in table schema")
 
-        sort_keys = [(SpecialFields.ROW_ID.name, "ascending")]
-        if hasattr(data, "sort_by"):
-            sorted_data = data.sort_by(sort_keys)
-        else:
-            sorted_data = data.take(pc.sort_indices(data, sort_keys=sort_keys))
-        data_with_first_row_id = self._calculate_first_row_id(sorted_data)
+        data_with_first_row_id = self._calculate_first_row_id(data)
         self._write_by_first_row_id(data_with_first_row_id, column_names)
 
         return self.commit_messages
@@ -381,8 +405,17 @@ class TableUpdateByRowId:
             bucket=owning_split.bucket,
             raw_convertible=True,
         )
-        table_read = TableRead(self.table, predicate=None, read_type=read_fields)
-        return table_read.to_arrow([origin_split])
+        # Keep _ROW_ID as a row-count anchor. If every requested column was
+        # added after the original file was written, reading only those
+        # missing columns can otherwise produce a zero-row table instead of
+        # one null value per original row.
+        table_read = TableRead(
+            self.table,
+            predicate=None,
+            read_type=read_fields + [SpecialFields.ROW_ID],
+        )
+        original = table_read.to_arrow([origin_split])
+        return original.select([field.name for field in read_fields])
 
     def _merge_update_with_original(
             self,
@@ -423,15 +456,11 @@ class TableUpdateByRowId:
             pa.scalar(first_row_id, type=pa.int64())
         ).cast(pa.int64())
 
-        # Build a boolean mask: True at positions that need to be updated
-        all_indices = pa.array(range(original_data.num_rows), type=pa.int64())
-        mask = pc.is_in(all_indices, value_set=relative_indices)
-
         # Build the merged table column by column
         merged_columns = {}
         blob_columns: Dict[str, List[object]] = {}
         update_by_col = {
-            col_name: update_data[col_name].combine_chunks()
+            col_name: update_data[col_name]
             for col_name in column_names
             if col_name in update_data.column_names
         }
@@ -439,6 +468,7 @@ class TableUpdateByRowId:
             int(relative_index.as_py()): idx
             for idx, relative_index in enumerate(relative_indices)
         }
+        sorted_updates = None
         # Caller (_write_by_first_row_id) only enters this method with a
         # non-empty group, so update_positions is non-empty here.
         blob_row_count = max(update_positions) + 1
@@ -464,34 +494,201 @@ class TableUpdateByRowId:
                 ]
                 continue
             update_col = update_by_col[col_name]
-            original_col = original_data[col_name].combine_chunks()
-            if update_col.type != original_col.type:
-                update_col = self._coerce_column(
-                    update_col, original_col.type)
-            try:
-                merged_columns[col_name] = pc.replace_with_mask(
-                    original_col, mask, update_col)
-            except pa.lib.ArrowNotImplementedError:
-                n = original_data.num_rows
-                combined = pa.concat_arrays(
-                    [original_col, update_col])
-                offset = len(original_col)
-                indices = np.arange(n, dtype=np.int64)
-                for orig_pos, upd_idx in update_positions.items():
-                    indices[orig_pos] = offset + upd_idx
-                merged_columns[col_name] = combined.take(
-                    pa.array(indices))
+            original_col = original_data[col_name]
+            if sorted_updates is None:
+                sorted_updates = sorted(update_positions.items())
+                row_count = len(original_col)
+                for position, _ in sorted_updates:
+                    if position < 0 or position >= row_count:
+                        raise IndexError(
+                            f"Update position {position} is outside column "
+                            f"range [0, {row_count})")
+            merged_columns[col_name] = self._merge_chunked_column(
+                original_col, update_col, sorted_updates)
 
         merged_table = pa.table(merged_columns) if merged_columns else None
 
         return merged_table, blob_columns
 
+    @classmethod
+    def _merge_chunked_column(
+            cls,
+            original_col: pa.ChunkedArray,
+            update_col: pa.ChunkedArray,
+            sorted_updates: List[Tuple[int, int]],
+    ) -> pa.ChunkedArray:
+        """Merge updates without flattening a column into one Arrow Array.
+
+        ``binary``, ``string`` and ``list`` use signed 32-bit offsets, so a
+        valid multi-chunk column can exceed 2 GiB while each individual Array
+        remains below the limit. Keep those chunks independent. If merging an
+        individual chunk still overflows (for example, the struct/list
+        fallback temporarily concatenates original and replacement values),
+        split that row range and retry.
+        """
+        update_chunk_offsets = cls._chunk_offsets(update_col)
+        sorted_updates_idx = 0
+        chunk_start_row = 0
+        merged_chunks: List[pa.Array] = []
+
+        for original_chunk in original_col.chunks:
+            chunk_end = chunk_start_row + len(original_chunk)
+            chunk_updates: List[Tuple[int, int]] = []
+            while (
+                    sorted_updates_idx < len(sorted_updates)
+                    and sorted_updates[sorted_updates_idx][0] < chunk_end
+            ):
+                position, update_index = sorted_updates[sorted_updates_idx]
+                chunk_updates.append((
+                    position - chunk_start_row, update_index))
+                sorted_updates_idx += 1
+
+            merged_chunks.extend(cls._merge_chunk_with_updates(
+                original_chunk,
+                update_col,
+                update_chunk_offsets,
+                chunk_updates,
+            ))
+            chunk_start_row = chunk_end
+
+        return pa.chunked_array(merged_chunks, type=original_col.type)
+
+    @classmethod
+    def _merge_chunk_with_updates(
+            cls,
+            original: pa.Array,
+            update_col: pa.ChunkedArray,
+            update_chunk_offsets: List[int],
+            updates: List[Tuple[int, int]],
+    ) -> List[pa.Array]:
+        if not updates:
+            return [original]
+
+        try:
+            replacements = cls._take_from_chunked_array(
+                update_col,
+                update_chunk_offsets,
+                [update_index for _, update_index in updates],
+            )
+            if replacements.type != original.type:
+                replacements = cls._coerce_column(
+                    replacements, original.type)
+
+            if len(updates) == len(original):
+                return [replacements]
+
+            mask_values = np.zeros(len(original), dtype=np.bool_)
+            for position, _ in updates:
+                mask_values[position] = True
+            mask = pa.array(mask_values)
+
+            try:
+                return [pc.replace_with_mask(original, mask, replacements)]
+            except pa.lib.ArrowNotImplementedError:
+                combined = pa.concat_arrays([original, replacements])
+                indices = np.arange(len(original), dtype=np.int64)
+                replacement_offset = len(original)
+                for replacement_index, (position, _) in enumerate(updates):
+                    indices[position] = replacement_offset + replacement_index
+                return [combined.take(pa.array(indices))]
+        except (pa.lib.ArrowInvalid,
+                pa.lib.ArrowCapacityError) as error:
+            if not cls._is_offset_overflow(error) or len(original) <= 1:
+                raise
+
+            split_at = len(original) // 2
+            left_updates = [
+                update for update in updates if update[0] < split_at
+            ]
+            right_updates = [
+                (position - split_at, update_index)
+                for position, update_index in updates
+                if position >= split_at
+            ]
+            return (
+                cls._merge_chunk_with_updates(
+                    original.slice(0, split_at),
+                    update_col,
+                    update_chunk_offsets,
+                    left_updates,
+                )
+                + cls._merge_chunk_with_updates(
+                    original.slice(split_at),
+                    update_col,
+                    update_chunk_offsets,
+                    right_updates,
+                )
+            )
+
+    @staticmethod
+    def _chunk_offsets(column: pa.ChunkedArray) -> List[int]:
+        offsets = [0]
+        for chunk in column.chunks:
+            offsets.append(offsets[-1] + len(chunk))
+        return offsets
+
+    @staticmethod
+    def _take_from_chunked_array(
+            column: pa.ChunkedArray,
+            chunk_offsets: List[int],
+            indices: List[int],
+    ) -> pa.Array:
+        """Take values without asking Arrow to combine unrelated chunks."""
+        if not indices:
+            return pa.array([], type=column.type)
+
+        pieces: List[pa.Array] = []
+        current_chunk_index = None
+        current_local_indices: List[int] = []
+
+        def append_piece(chunk_index: int, local_indices: List[int]):
+            chunk = column.chunk(chunk_index)
+            start = local_indices[0]
+            if all(value == start + offset
+                   for offset, value in enumerate(local_indices)):
+                pieces.append(chunk.slice(start, len(local_indices)))
+            else:
+                pieces.append(chunk.take(pa.array(
+                    local_indices, type=pa.int64())))
+
+        for index in indices:
+            if index < 0 or index >= len(column):
+                raise IndexError(
+                    f"Update index {index} is outside column range "
+                    f"[0, {len(column)})")
+            chunk_index = bisect.bisect_right(chunk_offsets, index) - 1
+            local_index = index - chunk_offsets[chunk_index]
+            if current_chunk_index is None:
+                current_chunk_index = chunk_index
+            elif chunk_index != current_chunk_index:
+                append_piece(current_chunk_index, current_local_indices)
+                current_chunk_index = chunk_index
+                current_local_indices = []
+            current_local_indices.append(local_index)
+
+        append_piece(current_chunk_index, current_local_indices)
+        if len(pieces) == 1:
+            return pieces[0]
+        return pa.concat_arrays(pieces)
+
+    @staticmethod
+    def _is_offset_overflow(error: pa.lib.ArrowException) -> bool:
+        if isinstance(error, pa.lib.ArrowCapacityError):
+            return True
+        message = str(error).lower()
+        return (
+            "offset overflow" in message
+            or "too large to convert" in message
+        )
+
     @staticmethod
     def _coerce_column(col: pa.Array, target_type: pa.DataType) -> pa.Array:
         try:
             return col.cast(target_type)
+        except pa.lib.ArrowInvalid as error:
+            if TableUpdateByRowId._is_offset_overflow(error):
+                raise
         except (pa.lib.ArrowNotImplementedError,
-                pa.lib.ArrowInvalid,
                 pa.lib.ArrowTypeError):
             pass
         pylist = col.to_pylist()

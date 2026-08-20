@@ -137,7 +137,8 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
                     filter,
                     pinnedSnapshot);
         }
-        return new DataEvolutionVectorScan(table, partitionFilter, filter, vectorColumn, options);
+        return new DataEvolutionVectorScan(
+                table, partitionFilter, filter, vectorColumn, options, pinnedSnapshot);
     }
 
     @Override

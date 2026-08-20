@@ -165,14 +165,20 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
             public InternalRow next() throws IOException {
                 InternalRow result = null;
                 long rowId = -1L;
-                // We should always move each iterator forward
-                // This may significantly increase memory usage and decrease read efficiency
-                // if `blob-as-descriptor` is disabled and many non-null blobs are updated
-                // TODO: Do not read stale records if there's a newer non-placeholder
-                //   record. e.g. introduce a discard method to directly discard the
-                //   next record?
+                // We should always move each iterator forward, but stale blobs do not need to be
+                // materialized after finding a newer non-placeholder record.
                 for (int i = 0; i < iterators.length; i++) {
                     RecordIterator<InternalRow> iterator = iterators[i];
+                    // If result is not null, skip all older blobs.
+                    if (result != null) {
+                        if (!iterator.skip()) {
+                            throw new IllegalStateException(
+                                    "All readers of each max_seq group should have the same number "
+                                            + "of records.");
+                        }
+                        continue;
+                    }
+
                     InternalRow row = iterator.next();
                     if (row == null) {
                         if (i != 0) {
@@ -180,7 +186,7 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
                                     "All readers of each max_seq group should have the same number of records.");
                         }
                         for (int j = i + 1; j < iterators.length; j++) {
-                            if (iterators[j].next() != null) {
+                            if (iterators[j].skip()) {
                                 throw new IllegalStateException(
                                         "All readers of each max_seq group should have the same number of records.");
                             }

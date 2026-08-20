@@ -18,6 +18,8 @@
 
 package org.apache.paimon.data.variant;
 
+import org.apache.paimon.data.Timestamp;
+
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.UUID;
@@ -60,6 +62,8 @@ public class ShreddingUtils {
         byte[] getBinary(int ordinal);
 
         UUID getUuid(int ordinal);
+
+        Timestamp getTimestamp(int ordinal, int precision);
 
         ShreddedRow getStruct(int ordinal, int numFields);
 
@@ -133,10 +137,10 @@ public class ShreddingUtils {
                 } else if (scalar instanceof VariantSchema.DateType) {
                     builder.appendDate(row.getInt(typedIdx));
                 } else if (scalar instanceof VariantSchema.TimestampType) {
-                    builder.appendTimestamp(row.getLong(typedIdx));
+                    builder.appendTimestamp(row.getTimestamp(typedIdx, 6).toMicros());
                 } else {
                     assert scalar instanceof VariantSchema.TimestampNTZType;
-                    builder.appendTimestampNtz(row.getLong(typedIdx));
+                    builder.appendTimestampNtz(row.getTimestamp(typedIdx, 6).toMicros());
                 }
             } else if (schema.arraySchema != null) {
                 VariantSchema elementSchema = schema.arraySchema;

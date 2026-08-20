@@ -252,6 +252,21 @@ abstract class DeleteFromTableTestBase extends PaimonSparkTestBase {
       }
   }
 
+  test("Paimon Delete: first-row table") {
+    withTable("t") {
+      sql("""CREATE TABLE t (id INT, name STRING)
+            |TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '1', 'merge-engine' = 'first-row')
+            |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 'a'), (2, 'b'), (3, 'c')")
+
+      checkAnswer(sql("SELECT * FROM t ORDER BY id"), Seq(Row(1, "a"), Row(2, "b"), Row(3, "c")))
+
+      sql("DELETE FROM t WHERE id = 3")
+
+      checkAnswer(sql("SELECT * FROM t ORDER BY id"), Seq(Row(1, "a"), Row(2, "b")))
+    }
+  }
+
   test(s"test delete with primary key") {
     spark.sql(
       s"""

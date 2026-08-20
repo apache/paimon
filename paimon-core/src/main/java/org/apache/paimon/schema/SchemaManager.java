@@ -25,6 +25,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.schema.ColumnDirectiveUtils.ConvertedColumn;
 import org.apache.paimon.schema.SchemaChange.AddColumn;
 import org.apache.paimon.schema.SchemaChange.DropColumn;
@@ -1202,14 +1203,32 @@ public class SchemaManager implements Serializable {
     @VisibleForTesting
     public boolean commit(TableSchema newSchema) throws Exception {
         SchemaValidation.validateTableSchema(newSchema);
+        validateHistoricalIcebergGeospatialTypes(newSchema);
         SchemaValidation.validateFallbackBranch(this, newSchema);
         Path schemaPath = toSchemaPath(newSchema.id());
         return fileIO.tryToWriteAtomic(schemaPath, newSchema.toString());
     }
 
+    private void validateHistoricalIcebergGeospatialTypes(TableSchema newSchema) {
+        CoreOptions options = new CoreOptions(newSchema.options());
+        IcebergOptions.StorageType storage =
+                options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE);
+        if (storage == IcebergOptions.StorageType.DISABLED) {
+            return;
+        }
+
+        for (TableSchema schema : listAll()) {
+            SchemaValidation.validateIcebergGeospatialTypes(schema.logicalRowType(), options);
+        }
+    }
+
     /** Read schema for schema id. */
     public TableSchema schema(long id) {
         return fromPath(fileIO, toSchemaPath(id));
+    }
+
+    public TableSchema tryGetSchema(long id) throws FileNotFoundException {
+        return tryFromPath(fileIO, toSchemaPath(id));
     }
 
     /** Check if a schema exists. */
@@ -1444,6 +1463,14 @@ public class SchemaManager implements Serializable {
 
         if (CoreOptions.BUCKET.key().equals(key)) {
             throw new UnsupportedOperationException(String.format("Cannot reset %s.", key));
+        }
+
+        if (DELETION_VECTORS_ENABLED.key().equals(key)) {
+            checkAlterTableOption(
+                    options,
+                    key,
+                    options.get(key),
+                    DELETION_VECTORS_ENABLED.defaultValue().toString());
         }
 
         if (options.containsKey(PK_CLUSTERING_OVERRIDE.key())

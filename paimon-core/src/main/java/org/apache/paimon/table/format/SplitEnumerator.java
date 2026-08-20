@@ -40,7 +40,6 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -109,12 +108,11 @@ abstract class SplitEnumerator {
     List<Split> createSplits(FileIO fileIO, Path path, @Nullable BinaryRow partition)
             throws IOException {
         List<FormatDataSplit.FileMeta> segments = new ArrayList<>();
-        FileStatus[] files = fileIO.listFiles(path, true);
-        Arrays.sort(files, Comparator.comparing(file -> file.getPath().toString()));
+        // The listed directory is a single partition, or the table itself when unpartitioned.
+        List<FileStatus> files = FormatTableScan.listDataFiles(fileIO, path);
+        files.sort(Comparator.comparing(file -> file.getPath().toString()));
         for (FileStatus file : files) {
-            if (FormatTableScan.isDataFileName(file.getPath().getName())) {
-                segments.addAll(toSegments(file));
-            }
+            segments.addAll(toSegments(file));
         }
 
         List<Split> splits = new ArrayList<>();

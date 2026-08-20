@@ -138,7 +138,8 @@ class ParquetCaseInsensitiveReadTest {
         List<InternalRow> rows = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
                 factory.createReader(
-                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)))) {
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), null, null))) {
             // Materialize a copy because InternalRow instances are reused across iterations.
             reader.forEachRemaining(row -> rows.add(copy(row, readType)));
         }

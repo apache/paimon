@@ -15,13 +15,19 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import Any, Dict, List, Optional, Set
+import os
+import sys
+import threading
+from collections import OrderedDict, deque
+from concurrent.futures import Future
+from typing import Any, Callable, Deque, Dict, Iterator, List, Optional, Set, Tuple
 
 import pyarrow as pa
 import pyarrow.dataset as ds
 from pyarrow import RecordBatch
 
 from pypaimon.common.file_io import FileIO
+from pypaimon.common.options.config import CatalogOptions
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.data.variant_shredding import (
     VariantSchema,
@@ -42,6 +48,194 @@ from pypaimon.schema.data_types import (
 from pypaimon.table.special_fields import SpecialFields
 
 
+_DEFAULT_FILE_FORMAT_METADATA_CACHE_MAX_SIZE = 50 * 1024 * 1024
+_FILE_FORMAT_METADATA_CACHE_MAX_ENTRIES = 4096
+_FILE_FORMAT_METADATA_CACHE_MIN_ENTRY_SIZE = 8 * 1024
+_FILE_FORMAT_METADATA_CACHE_CONTAINER_OVERHEAD = 256
+
+
+class _FilesystemIdentity:
+    def __init__(self, filesystem):
+        self.filesystem = filesystem
+
+    def __hash__(self):
+        return id(self.filesystem)
+
+    def __eq__(self, other):
+        return (
+            isinstance(other, _FilesystemIdentity)
+            and self.filesystem is other.filesystem
+        )
+
+
+class _FileFormatDatasetCache:
+    def __init__(
+            self,
+            max_size: int,
+            max_entries: int = _FILE_FORMAT_METADATA_CACHE_MAX_ENTRIES):
+        self.max_size = max_size
+        self.max_entries = max_entries
+        self.estimated_size = 0
+        self._entries = OrderedDict()
+        self._loads = {}
+        self._lock = threading.Lock()
+
+    def get_or_load(self, key: Tuple[Any, str, str], loader: Callable[[], Any],
+                    size_estimator: Callable[[Any], Optional[int]]):
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is not None:
+                self._entries.move_to_end(key)
+                return entry[0]
+
+            future = self._loads.get(key)
+            if future is None:
+                future = Future()
+                self._loads[key] = future
+                should_load = True
+            else:
+                should_load = False
+
+        if not should_load:
+            return future.result()
+
+        try:
+            dataset = loader()
+            estimated_size = size_estimator(dataset)
+        except BaseException as exception:
+            future.set_exception(exception)
+            with self._lock:
+                self._loads.pop(key, None)
+            raise
+
+        with self._lock:
+            if estimated_size is not None:
+                estimated_size = max(1, estimated_size)
+                self._entries[key] = (dataset, estimated_size)
+                self.estimated_size += estimated_size
+                self._entries.move_to_end(key)
+                self._evict()
+        future.set_result(dataset)
+        with self._lock:
+            self._loads.pop(key, None)
+        return dataset
+
+    def resize(self, max_size: int):
+        with self._lock:
+            self.max_size = max_size
+            self._evict()
+
+    def _evict(self):
+        while (
+                self.estimated_size > self.max_size
+                or len(self._entries) > self.max_entries):
+            _, (_, evicted_size) = self._entries.popitem(last=False)
+            self.estimated_size -= evicted_size
+
+
+_FILE_FORMAT_DATASET_CACHE = None
+_FILE_FORMAT_DATASET_CACHE_LOCK = threading.Lock()
+_FILE_FORMAT_DATASET_CACHE_PID = os.getpid()
+
+
+def _ensure_file_format_dataset_cache_process():
+    global _FILE_FORMAT_DATASET_CACHE
+    global _FILE_FORMAT_DATASET_CACHE_LOCK
+    global _FILE_FORMAT_DATASET_CACHE_PID
+    current_pid = os.getpid()
+    if current_pid != _FILE_FORMAT_DATASET_CACHE_PID:
+        _FILE_FORMAT_DATASET_CACHE = None
+        _FILE_FORMAT_DATASET_CACHE_LOCK = threading.Lock()
+        _FILE_FORMAT_DATASET_CACHE_PID = current_pid
+
+
+def _file_format_dataset_cache(max_size: int) -> _FileFormatDatasetCache:
+    global _FILE_FORMAT_DATASET_CACHE
+    _ensure_file_format_dataset_cache_process()
+    with _FILE_FORMAT_DATASET_CACHE_LOCK:
+        if _FILE_FORMAT_DATASET_CACHE is None:
+            _FILE_FORMAT_DATASET_CACHE = _FileFormatDatasetCache(max_size)
+        else:
+            _FILE_FORMAT_DATASET_CACHE.resize(max_size)
+        return _FILE_FORMAT_DATASET_CACHE
+
+
+def _reset_file_format_dataset_cache():
+    global _FILE_FORMAT_DATASET_CACHE
+    _ensure_file_format_dataset_cache_process()
+    with _FILE_FORMAT_DATASET_CACHE_LOCK:
+        _FILE_FORMAT_DATASET_CACHE = None
+
+
+def _estimate_file_format_dataset_size(dataset, file_format: str) -> Optional[int]:
+    try:
+        if file_format == 'parquet':
+            footer_size = 0
+            for fragment in dataset.get_fragments():
+                metadata = fragment.metadata
+                if metadata is not None:
+                    footer_size += int(metadata.serialized_size)
+            if footer_size > 0:
+                return footer_size
+        return int(dataset.schema.serialize().size)
+    except Exception:
+        return None
+
+
+def _estimate_file_format_cache_entry_size(
+        key: Tuple[Any, str, str],
+        dataset,
+        file_format: str) -> Optional[int]:
+    metadata_size = _estimate_file_format_dataset_size(dataset, file_format)
+    if metadata_size is None:
+        return None
+
+    # PyArrow does not expose the native size retained by Dataset and Fragment
+    # objects. Account for all visible Python objects and apply a conservative
+    # floor so tiny files cannot turn a byte-bounded cache into an effectively
+    # unbounded object cache.
+    visible_size = (
+        metadata_size
+        + sys.getsizeof(key)
+        + sys.getsizeof(key[0])
+        + sys.getsizeof(key[1])
+        + sys.getsizeof(key[2])
+        + sys.getsizeof(dataset)
+        + sys.getsizeof((dataset, metadata_size))
+        + _FILE_FORMAT_METADATA_CACHE_CONTAINER_OVERHEAD
+    )
+    return max(_FILE_FORMAT_METADATA_CACHE_MIN_ENTRY_SIZE, visible_size)
+
+
+def _file_format_metadata_cache_max_size(file_io: FileIO) -> int:
+    properties = getattr(file_io, 'properties', None)
+    if properties is None:
+        return _DEFAULT_FILE_FORMAT_METADATA_CACHE_MAX_SIZE
+    return properties.get(
+        CatalogOptions.FILE_FORMAT_METADATA_CACHE_MAX_SIZE).get_bytes()
+
+
+def _file_format_dataset(file_io: FileIO, file_format: str, file_path: str,
+                         cache_max_size: int):
+    file_path_for_pyarrow = file_io.to_filesystem_path(file_path)
+    filesystem = file_io.filesystem
+
+    def load():
+        return ds.dataset(
+            file_path_for_pyarrow, format=file_format, filesystem=filesystem)
+
+    key = (_FilesystemIdentity(filesystem), file_format, file_path_for_pyarrow)
+    if cache_max_size <= 0:
+        _reset_file_format_dataset_cache()
+        return load()
+
+    return _file_format_dataset_cache(cache_max_size).get_or_load(
+        key,
+        load,
+        lambda dataset: _estimate_file_format_cache_entry_size(
+            key, dataset, file_format))
+
+
 class FormatPyArrowReader(RecordBatchReader):
     """
     A Format Reader that reads record batch from a Parquet or ORC file using PyArrow,
@@ -57,10 +251,63 @@ class FormatPyArrowReader(RecordBatchReader):
                  push_down_predicate: Any, batch_size: int = 1024,
                  options: CoreOptions = None,
                  nested_name_paths: Optional[List[List[str]]] = None,
-                 predicate_field_names: Optional[Set[str]] = None):
+                 predicate_field_names: Optional[Set[str]] = None,
+                 row_indices: Optional[List[int]] = None,
+                 row_ranges: Optional[List[Tuple[int, int]]] = None):
         self._predicate_field_names = predicate_field_names or set()
         file_path_for_pyarrow = file_io.to_filesystem_path(file_path)
-        self.dataset = ds.dataset(file_path_for_pyarrow, format=file_format, filesystem=file_io.filesystem)
+        cache_max_size = _file_format_metadata_cache_max_size(file_io)
+        self.dataset = _file_format_dataset(
+            file_io, file_format, file_path, cache_max_size)
+        self._range_slicer = None
+        self._selected_parquet_row_groups = None
+        self._exhausted = False
+        if row_indices is not None and row_ranges is not None:
+            raise ValueError(
+                "row_indices and row_ranges cannot both be provided")
+        row_selection_supplied = (
+            row_indices is not None or row_ranges is not None)
+        if row_selection_supplied and file_format == 'parquet':
+            if push_down_predicate is not None:
+                raise ValueError(
+                    "row selections cannot be combined with a scanner-level "
+                    "push-down predicate because filtering shifts row "
+                    "positions")
+            runs = (
+                _normalize_runs(row_ranges)
+                if row_ranges is not None
+                else _to_runs(row_indices)
+            )
+            if not runs:
+                self._exhausted = True
+            else:
+                fragment = next(iter(self.dataset.get_fragments()), None)
+                row_group_fragments = (
+                    list(fragment.split_by_row_group())
+                    if fragment is not None else [])
+                selected_infos = []
+                selected_ids = []
+                offset = 0
+                run_index = 0
+                for row_group_fragment in row_group_fragments:
+                    row_group = row_group_fragment.row_groups[0]
+                    row_count = row_group.num_rows
+                    lower, upper = offset, offset + row_count - 1
+                    while (
+                            run_index < len(runs)
+                            and runs[run_index][1] < lower):
+                        run_index += 1
+                    if (run_index < len(runs)
+                            and runs[run_index][0] <= upper):
+                        selected_infos.append((offset, row_count))
+                        selected_ids.append(row_group.id)
+                    offset += row_count
+                if not selected_ids:
+                    self._exhausted = True
+                else:
+                    self._selected_parquet_row_groups = selected_ids
+                    self._range_slicer = _RowRunSlicer(
+                        selected_infos, runs)
         self._file_format = file_format
         self.read_fields = read_fields
         self._read_field_names = [f.name for f in read_fields]
@@ -115,12 +362,15 @@ class FormatPyArrowReader(RecordBatchReader):
 
         # Read projected VARIANT columns in bounded batches.
         self._parquet_file = None
-        if self._bounded_variant_read:
+        if (self._bounded_variant_read
+                or self._selected_parquet_row_groups is not None):
             import pyarrow.parquet as pq
             # ParquetFile(filesystem=...) is unavailable in PyArrow 6.
             self._parquet_file = pq.ParquetFile(
                 file_io.filesystem.open_input_file(file_path_for_pyarrow))
-        if self._parquet_file is not None:
+        if self._exhausted:
+            self._raw_batches = iter(())
+        elif self._parquet_file is not None:
             self._raw_batches = self._iter_row_group_batches()
         else:
             reader = self.dataset.scanner(
@@ -192,6 +442,8 @@ class FormatPyArrowReader(RecordBatchReader):
         return columns
 
     def _select_existing_fields(self, batch):
+        if not self.existing_fields:
+            return _zero_column_batch(batch.num_rows)
         columns = []
         fields = []
         for name in self.existing_fields:
@@ -218,11 +470,15 @@ class FormatPyArrowReader(RecordBatchReader):
                 column = column.flatten()[index]
             columns.append(column)
             names.append(field.name)
+        if not columns:
+            return _zero_column_batch(batch.num_rows)
         return pa.RecordBatch.from_arrays(columns, names=names)
 
     def _surviving_row_group_ids(self):
         total = self._parquet_file.num_row_groups
         if self._scan_filter is None:
+            if self._selected_parquet_row_groups is not None:
+                return self._selected_parquet_row_groups
             return range(total)
         try:
             ids = set()
@@ -236,7 +492,10 @@ class FormatPyArrowReader(RecordBatchReader):
             return range(total)
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
-        batch = next(self._raw_batches, None)
+        if self._range_slicer is not None:
+            batch = self._range_slicer.next_batch(self._raw_batches)
+        else:
+            batch = next(self._raw_batches, None)
         if batch is None:
             return None
         return self._post_process_batch(batch)
@@ -347,6 +606,124 @@ def _path_exists_in_arrow_schema(schema: pa.Schema, path: List[str]) -> bool:
             return False
         current_type = current_type[idx].type
     return True
+
+
+def _zero_column_batch(num_rows: int) -> RecordBatch:
+    """Build a zero-column batch without losing its logical row count."""
+    empty_struct = pa.Array.from_buffers(
+        pa.struct([]), num_rows, [None], children=[])
+    return pa.RecordBatch.from_struct_array(empty_struct)
+
+
+def _to_runs(row_indices: List[int]) -> List[Tuple[int, int]]:
+    """Collapse row indices into sorted, distinct, inclusive runs."""
+    if not row_indices:
+        return []
+    sorted_indices = sorted(set(row_indices))
+    runs = []
+    start = previous = sorted_indices[0]
+    for index in sorted_indices[1:]:
+        if index == previous + 1:
+            previous = index
+            continue
+        runs.append((start, previous))
+        start = previous = index
+    runs.append((start, previous))
+    return runs
+
+
+def _normalize_runs(
+        row_ranges: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
+    """Sort and merge inclusive row ranges without expanding their rows."""
+    if not row_ranges:
+        return []
+    ranges = sorted(row_ranges)
+    merged = []
+    for lower, upper in ranges:
+        if lower > upper:
+            raise ValueError(
+                "Invalid row range: {} > {}".format(lower, upper))
+        if merged and lower <= merged[-1][1] + 1:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], upper))
+        else:
+            merged.append((lower, upper))
+    return merged
+
+
+class _RowRunSlicer:
+    """Slice selected Parquet row groups down to requested file-local rows."""
+
+    def __init__(
+            self,
+            selected_infos: List[Tuple[int, int]],
+            runs: List[Tuple[int, int]]):
+        self._segments = []
+        concatenated_offset = 0
+        for file_offset, row_count in selected_infos:
+            self._segments.append((
+                concatenated_offset,
+                concatenated_offset + row_count,
+                file_offset,
+            ))
+            concatenated_offset += row_count
+        self._runs = [(lower, upper + 1) for lower, upper in runs]
+        self._stream_offset = 0
+        self._segment_index = 0
+        self._run_index = 0
+        self._pending: Deque[RecordBatch] = deque()
+
+    def next_batch(
+            self, batches: Iterator[RecordBatch]) -> Optional[RecordBatch]:
+        while not self._pending:
+            batch = next(batches, None)
+            if batch is None:
+                return None
+            self._slice_batch(batch)
+        return self._pending.popleft()
+
+    def _slice_batch(self, batch: RecordBatch) -> None:
+        batch_start = self._stream_offset
+        batch_end = batch_start + batch.num_rows
+        self._stream_offset = batch_end
+        position = batch_start
+
+        while position < batch_end:
+            while (
+                    self._segment_index < len(self._segments)
+                    and position >= self._segments[
+                        self._segment_index][1]):
+                self._segment_index += 1
+            if self._segment_index >= len(self._segments):
+                return
+
+            segment_start, segment_end, file_start = self._segments[
+                self._segment_index]
+            part_end = min(batch_end, segment_end)
+            local_start = file_start + position - segment_start
+            local_end = file_start + part_end - segment_start
+
+            while (
+                    self._run_index < len(self._runs)
+                    and self._runs[self._run_index][1] <= local_start):
+                self._run_index += 1
+            run_index = self._run_index
+            while (
+                    run_index < len(self._runs)
+                    and self._runs[run_index][0] < local_end):
+                run_start, run_end = self._runs[run_index]
+                lower = max(local_start, run_start)
+                upper = min(local_end, run_end)
+                if lower < upper:
+                    offset = (
+                        position - batch_start + lower - local_start)
+                    self._pending.append(
+                        batch.slice(offset, upper - lower))
+                if run_end <= local_end:
+                    run_index += 1
+                else:
+                    break
+            self._run_index = run_index
+            position = part_end
 
 
 def _contains_variant(data_type) -> bool:

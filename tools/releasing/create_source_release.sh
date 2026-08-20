@@ -52,6 +52,11 @@ else
     SHASUM="sha512sum"
 fi
 
+# macOS libarchive may otherwise add AppleDouble entries (._*) for filesystem
+# metadata even when --no-xattrs is used. These entries are hidden by the
+# macOS tar listing but are visible, and can break the build, on Linux.
+export COPYFILE_DISABLE=1
+
 ###########################
 
 RELEASE_DIR=${PROJECT_ROOT}/release
@@ -77,8 +82,33 @@ rsync -a \
   --exclude ".travis.yml" \
   . paimon-${RELEASE_VERSION}
 
-tar czf ${RELEASE_DIR}/apache-paimon-${RELEASE_VERSION}-src.tgz --no-xattrs paimon-${RELEASE_VERSION}
-gpg --armor --detach-sig ${RELEASE_DIR}/apache-paimon-${RELEASE_VERSION}-src.tgz
+UNEXPECTED_BINARY=$(find paimon-${RELEASE_VERSION} -type f \
+  \( -name "*.class" -o -name "*.jar" \) -print -quit)
+if [ -n "${UNEXPECTED_BINARY}" ]; then
+    echo "Source release contains a compiled binary: ${UNEXPECTED_BINARY}" >&2
+    exit 1
+fi
+
+SOURCE_ARCHIVE=${RELEASE_DIR}/apache-paimon-${RELEASE_VERSION}-src.tgz
+tar czf ${SOURCE_ARCHIVE} --no-xattrs paimon-${RELEASE_VERSION}
+
+python3 - "${SOURCE_ARCHIVE}" <<'PY'
+import sys
+import tarfile
+
+archive = sys.argv[1]
+with tarfile.open(archive, "r:gz") as source:
+    for member in source.getmembers():
+        parts = [part for part in member.name.split("/") if part not in ("", ".")]
+        if member.name.startswith("/") or ".." in parts:
+            raise ValueError("Source release contains an unsafe path: " + member.name)
+        if "__MACOSX" in parts or any(part.startswith("._") for part in parts):
+            raise ValueError(
+                "Source release contains macOS metadata: " + member.name
+            )
+PY
+
+gpg --armor --detach-sig ${SOURCE_ARCHIVE}
 cd ${RELEASE_DIR}
 ${SHASUM} apache-paimon-${RELEASE_VERSION}-src.tgz > apache-paimon-${RELEASE_VERSION}-src.tgz.sha512
 

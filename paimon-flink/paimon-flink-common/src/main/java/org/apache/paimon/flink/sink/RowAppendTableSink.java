@@ -33,8 +33,6 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.StreamOperator;
 import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 
-import javax.annotation.Nullable;
-
 import java.util.Map;
 
 /** An {@link AppendTableSink} which handles {@link InternalRow}. */
@@ -50,24 +48,15 @@ public class RowAppendTableSink extends AppendTableSink<InternalRow> {
     @Override
     protected OneInputStreamOperatorFactory<InternalRow, Committable> createWriteOperatorFactory(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return createWriteOperatorFactory(writeProvider, commitUser, true, null);
-    }
-
-    @Override
-    protected OneInputStreamOperatorFactory<InternalRow, Committable> createWriteOperatorFactory(
-            StoreSinkWrite.Provider writeProvider,
-            String commitUser,
-            boolean streamingCheckpointEnabled,
-            @Nullable Long endInputWatermark) {
         if (coordinatorCommitEnabled()) {
             return createCoordinatorCommittingRowWriteOperatorFactory(
                     table,
                     writeProvider,
                     commitUser,
-                    streamingCheckpointEnabled,
+                    // checkpointing on by default for the JM-side committer; bounded sources will
+                    // be handled by end-input support in a follow-up PR
                     true,
-                    createCommitterFactory(),
-                    endInputWatermark);
+                    createCommitterFactory());
         }
         return createNoStateRowWriteOperatorFactory(table, writeProvider, commitUser);
     }
@@ -93,17 +82,9 @@ public class RowAppendTableSink extends AppendTableSink<InternalRow> {
                     StoreSinkWrite.Provider writeProvider,
                     String commitUser,
                     boolean streamingCheckpointEnabled,
-                    boolean failoverAfterRecovery,
-                    Committer.Factory<Committable, ManifestCommittable> committerFactory,
-                    @Nullable Long endInputWatermark) {
+                    Committer.Factory<Committable, ManifestCommittable> committerFactory) {
         return new CoordinatorCommittingFactory(
-                table,
-                writeProvider,
-                commitUser,
-                streamingCheckpointEnabled,
-                failoverAfterRecovery,
-                committerFactory,
-                endInputWatermark);
+                table, writeProvider, commitUser, streamingCheckpointEnabled, committerFactory);
     }
 
     private static class CoordinatorCommittingFactory extends RowDataStoreWriteOperator.Factory
@@ -112,35 +93,24 @@ public class RowAppendTableSink extends AppendTableSink<InternalRow> {
         private static final long serialVersionUID = 1L;
 
         private final boolean streamingCheckpointEnabled;
-        private final boolean failoverAfterRecovery;
         private final Committer.Factory<Committable, ManifestCommittable> committerFactory;
-        private final Long endInputWatermark;
 
         CoordinatorCommittingFactory(
                 FileStoreTable table,
                 StoreSinkWrite.Provider storeSinkWriteProvider,
                 String initialCommitUser,
                 boolean streamingCheckpointEnabled,
-                boolean failoverAfterRecovery,
-                Committer.Factory<Committable, ManifestCommittable> committerFactory,
-                @Nullable Long endInputWatermark) {
+                Committer.Factory<Committable, ManifestCommittable> committerFactory) {
             super(table, storeSinkWriteProvider, initialCommitUser);
             this.streamingCheckpointEnabled = streamingCheckpointEnabled;
-            this.failoverAfterRecovery = failoverAfterRecovery;
             this.committerFactory = committerFactory;
-            this.endInputWatermark = endInputWatermark;
         }
 
         @Override
         public OperatorCoordinator.Provider getCoordinatorProvider(
                 String operatorName, OperatorID operatorID) {
             return new CommittingWriteOperatorCoordinator.Provider(
-                    operatorID,
-                    committerFactory,
-                    streamingCheckpointEnabled,
-                    initialCommitUser,
-                    failoverAfterRecovery,
-                    endInputWatermark);
+                    operatorID, committerFactory, streamingCheckpointEnabled, initialCommitUser);
         }
 
         @Override

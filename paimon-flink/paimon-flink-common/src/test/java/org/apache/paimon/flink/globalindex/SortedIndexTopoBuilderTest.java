@@ -20,9 +20,11 @@ package org.apache.paimon.flink.globalindex;
 
 import org.apache.paimon.flink.globalindex.SortedIndexTopoBuilder.SortedBuildTask;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
-import org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder;
+import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
+import org.apache.paimon.globalindex.sorted.SortedGlobalIndexWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.Range;
 
@@ -68,7 +70,8 @@ public class SortedIndexTopoBuilderTest {
                 operatorClass.getDeclaredConstructor(
                         List.class,
                         int.class,
-                        SortedGlobalIndexBuilder.class,
+                        SortedGlobalIndexWriter.class,
+                        long.class,
                         int.class,
                         int.class,
                         int.class,
@@ -78,7 +81,8 @@ public class SortedIndexTopoBuilderTest {
                 constructor.newInstance(
                         Collections.emptyList(),
                         0,
-                        mock(SortedGlobalIndexBuilder.class),
+                        mock(SortedGlobalIndexWriter.class),
+                        1L,
                         0,
                         0,
                         0,
@@ -99,21 +103,43 @@ public class SortedIndexTopoBuilderTest {
 
     @Test
     public void testBuildIndexReturnsFalseWhenNoBuildTask() throws Exception {
-        SortedGlobalIndexBuilder indexBuilder = mock(SortedGlobalIndexBuilder.class);
-        when(indexBuilder.withIndexField("id")).thenReturn(indexBuilder);
-        when(indexBuilder.incrementalScan()).thenReturn(Optional.empty());
+        SortedGlobalIndexScanner indexScanner = mock(SortedGlobalIndexScanner.class);
+        when(indexScanner.withIndexField("id")).thenReturn(indexScanner);
+        when(indexScanner.incrementalScan()).thenReturn(Optional.empty());
         StreamExecutionEnvironment env = mock(StreamExecutionEnvironment.class);
 
         assertThat(
                         SortedIndexTopoBuilder.buildIndex(
                                 env,
-                                () -> indexBuilder,
+                                () -> indexScanner,
                                 mock(FileStoreTable.class),
                                 Collections.singletonList("id"),
+                                "btree",
                                 null,
                                 new Options()))
                 .isFalse();
-        verify(indexBuilder).incrementalScan();
+        verify(indexScanner).incrementalScan();
+        verifyNoInteractions(env);
+    }
+
+    @Test
+    public void testBuildIndexStreamReturnsEmptyWhenNoBuildTask() throws Exception {
+        SortedGlobalIndexScanner indexScanner = mock(SortedGlobalIndexScanner.class);
+        when(indexScanner.withIndexField("id")).thenReturn(indexScanner);
+        when(indexScanner.incrementalScan()).thenReturn(Optional.empty());
+        StreamExecutionEnvironment env = mock(StreamExecutionEnvironment.class);
+
+        assertThat(
+                        SortedIndexTopoBuilder.buildIndexStream(
+                                env,
+                                () -> indexScanner,
+                                mock(FileStoreTable.class),
+                                Collections.singletonList("id"),
+                                "btree",
+                                null,
+                                new Options()))
+                .isEmpty();
+        verify(indexScanner).incrementalScan();
         verifyNoInteractions(env);
     }
 
@@ -143,5 +169,11 @@ public class SortedIndexTopoBuilderTest {
         tasks.add(new SortedBuildTask(0, new Range(0, 1499), new byte[0]));
 
         assertThat(SortedIndexTopoBuilder.calculateParallelism(tasks, 1000L, 16)).isEqualTo(1);
+    }
+
+    @Test
+    public void testSortColumnsUseRowIdAsTieBreaker() {
+        assertThat(SortedIndexTopoBuilder.createSortColumns("task-id", "index-key"))
+                .containsExactly("task-id", "index-key", SpecialFields.ROW_ID.name());
     }
 }

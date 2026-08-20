@@ -18,6 +18,8 @@
 
 package org.apache.paimon.reader;
 
+import org.apache.paimon.fs.Path;
+
 import javax.annotation.Nullable;
 
 import java.io.IOException;
@@ -58,6 +60,9 @@ public final class LimitRecordReader<T> implements RecordReader<T> {
         }
         if (iterator instanceof ScoreRecordIterator) {
             return new LimitScoreRecordIterator<>((ScoreRecordIterator<T>) iterator);
+        }
+        if (iterator instanceof FileRecordIterator) {
+            return new LimitFileRecordIterator<>((FileRecordIterator<T>) iterator);
         }
         return new LimitRecordIterator<>(iterator);
     }
@@ -112,6 +117,27 @@ public final class LimitRecordReader<T> implements RecordReader<T> {
         @Override
         public long returnedRowId() {
             return iterator.returnedRowId();
+        }
+    }
+
+    private class LimitFileRecordIterator<T> extends LimitRecordIterator<T>
+            implements FileRecordIterator<T> {
+
+        private final FileRecordIterator<T> iterator;
+
+        private LimitFileRecordIterator(FileRecordIterator<T> iterator) {
+            super(iterator);
+            this.iterator = iterator;
+        }
+
+        @Override
+        public long returnedPosition() {
+            return iterator.returnedPosition();
+        }
+
+        @Override
+        public Path filePath() {
+            return iterator.filePath();
         }
     }
 }

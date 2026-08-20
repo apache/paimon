@@ -21,6 +21,7 @@ package org.apache.paimon.globalindex;
 import org.apache.paimon.predicate.BatchVectorSearch;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FullTextSearch;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.predicate.VectorSearch;
 
 import java.io.IOException;
@@ -166,6 +167,11 @@ public class OffsetGlobalIndexReader implements GlobalIndexReader {
                             }
                             return offsetResults;
                         });
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitTopN(TopN topN) {
+        return wrapped.visitTopN(topN).thenApply(this::applyOffset);
     }
 
     private Optional<GlobalIndexResult> applyOffset(Optional<GlobalIndexResult> result) {

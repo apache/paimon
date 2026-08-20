@@ -110,7 +110,10 @@ public class LazyFilteredBitmapIndexReaderTest {
 
         try (GlobalIndexReader reader =
                 globalIndexer.createReader(
-                        fileReader, Collections.singletonList(meta), newDirectExecutorService())) {
+                        fileReader,
+                        Collections.singletonList(meta),
+                        6,
+                        newDirectExecutorService())) {
             assertRows(reader.visitEqual(fieldRef, str("A")).join(), 0L, 5L);
             assertRows(reader.visitEqual(fieldRef, null).join());
             assertRows(reader.visitEqual(fieldRef, str("missing")).join());
@@ -134,6 +137,44 @@ public class LazyFilteredBitmapIndexReaderTest {
             assertThat(reader.visitEndsWith(fieldRef, str("A")).join()).isEmpty();
             assertThat(reader.visitContains(fieldRef, str("A")).join()).isEmpty();
             assertThat(reader.visitLike(fieldRef, str("%A")).join()).isEmpty();
+        }
+    }
+
+    @Test
+    public void testTotalRowCountComplementAvoidsOpeningAllBitmapFiles() throws Exception {
+        List<GlobalIndexIOMeta> written = new ArrayList<>();
+        written.add(writeData(Collections.singletonList(Pair.of(null, 0L))));
+        written.add(writeData(Collections.singletonList(Pair.of(str("A"), 1L))));
+        written.add(writeData(Collections.singletonList(Pair.of(str("M"), 2L))));
+        written.add(writeData(Collections.singletonList(Pair.of(str("Z"), 3L))));
+
+        CountingGlobalIndexFileReader countingReader = new CountingGlobalIndexFileReader();
+        try (GlobalIndexReader reader =
+                globalIndexer.createReader(
+                        countingReader, written, 4, newDirectExecutorService())) {
+            assertRows(reader.visitNotEqual(fieldRef, null).join());
+            assertRows(reader.visitNotIn(fieldRef, Arrays.asList(str("M"), null)).join());
+            assertThat(countingReader.openCount()).isZero();
+
+            assertRows(reader.visitNotEqual(fieldRef, str("M")).join(), 1L, 3L);
+            assertThat(countingReader.openCount()).isEqualTo(2);
+
+            assertRows(reader.visitNotIn(fieldRef, Arrays.asList(str("M"), str("Z"))).join(), 1L);
+            assertThat(countingReader.openCount()).isEqualTo(3);
+
+            assertRows(reader.visitIsNotNull(fieldRef).join(), 1L, 2L, 3L);
+            assertThat(countingReader.openCount()).isEqualTo(3);
+        }
+    }
+
+    @Test
+    public void testComplementsEmptyRowDomain() throws Exception {
+        try (GlobalIndexReader reader =
+                globalIndexer.createReader(
+                        fileReader, Collections.emptyList(), 0, newDirectExecutorService())) {
+            assertRows(reader.visitIsNotNull(fieldRef).join());
+            assertRows(reader.visitNotEqual(fieldRef, str("A")).join());
+            assertRows(reader.visitNotIn(fieldRef, Collections.singletonList(str("A"))).join());
         }
     }
 
@@ -222,7 +263,10 @@ public class LazyFilteredBitmapIndexReaderTest {
 
         try (GlobalIndexReader reader =
                 intIndexer.createReader(
-                        fileReader, Collections.singletonList(meta), newDirectExecutorService())) {
+                        fileReader,
+                        Collections.singletonList(meta),
+                        2,
+                        newDirectExecutorService())) {
             assertRows(reader.visitEqual(intFieldRef, 0).join(), 1L);
         }
     }
@@ -240,7 +284,10 @@ public class LazyFilteredBitmapIndexReaderTest {
 
         try (GlobalIndexReader reader =
                 globalIndexer.createReader(
-                        fileReader, Collections.singletonList(meta), newDirectExecutorService())) {
+                        fileReader,
+                        Collections.singletonList(meta),
+                        5,
+                        newDirectExecutorService())) {
             assertRows(reader.visitEndsWith(fieldRef, str("ta")).join(), 1L, 3L);
             assertRows(reader.visitContains(fieldRef, str("ph")).join(), 0L, 2L);
             assertRows(reader.visitLike(fieldRef, str("%ha%")).join(), 0L, 2L);
@@ -283,6 +330,7 @@ public class LazyFilteredBitmapIndexReaderTest {
                 globalIndexer.createReader(
                         fileReader,
                         Collections.singletonList(compressed),
+                        300,
                         newDirectExecutorService())) {
             assertRows(reader.visitEqual(fieldRef, str(prefix + "00123")).join(), 123L);
             assertRows(
@@ -313,7 +361,10 @@ public class LazyFilteredBitmapIndexReaderTest {
 
         try (GlobalIndexReader reader =
                 globalIndexer.createReader(
-                        fileReader, Collections.singletonList(meta), newDirectExecutorService())) {
+                        fileReader,
+                        Collections.singletonList(meta),
+                        2,
+                        newDirectExecutorService())) {
             assertThat(reader.visitEndsWith(fieldRef, str("ta")).join()).isEmpty();
             assertThat(reader.visitContains(fieldRef, str("ph")).join()).isEmpty();
             assertThat(reader.visitLike(fieldRef, str("%ha%")).join()).isEmpty();
@@ -337,7 +388,7 @@ public class LazyFilteredBitmapIndexReaderTest {
 
         try (GlobalIndexReader reader =
                 globalIndexer.createReader(
-                        fileReader, Arrays.asList(first, second), newDirectExecutorService())) {
+                        fileReader, Arrays.asList(first, second), 6, newDirectExecutorService())) {
             assertRows(reader.visitEqual(fieldRef, str("B")).join(), 1L, 3L);
             assertRows(reader.visitNotEqual(fieldRef, str("A")).join(), 1L, 3L, 4L);
             assertRows(
@@ -361,6 +412,7 @@ public class LazyFilteredBitmapIndexReaderTest {
                 globalIndexer.createReader(
                         countingFileReader,
                         Arrays.asList(first, second),
+                        4,
                         newDirectExecutorService())) {
             assertRows(reader.visitEqual(fieldRef, str("Z")).join(), 3L);
 
@@ -395,7 +447,7 @@ public class LazyFilteredBitmapIndexReaderTest {
 
         try (GlobalIndexReader reader =
                 globalIndexer.createReader(
-                        fileReader, Arrays.asList(first, second), newDirectExecutorService())) {
+                        fileReader, Arrays.asList(first, second), 4, newDirectExecutorService())) {
             assertRows(reader.visitGreaterOrEqual(fieldRef, str("Y")).join(), 2L, 3L);
             assertThat(reader.visitContains(fieldRef, str("Z")).join()).isEmpty();
         }
@@ -420,7 +472,10 @@ public class LazyFilteredBitmapIndexReaderTest {
 
         try (GlobalIndexReader reader =
                 globalIndexer.createReader(
-                        fileReader, Collections.singletonList(meta), newDirectExecutorService())) {
+                        fileReader,
+                        Collections.singletonList(meta),
+                        6,
+                        newDirectExecutorService())) {
             assertRows(reader.visitStartsWith(fieldRef, str("tag-")).join(), 2L, 3L);
         }
     }
@@ -450,6 +505,7 @@ public class LazyFilteredBitmapIndexReaderTest {
                 globalIndexer.createReader(
                         countingFileReader,
                         Collections.singletonList(meta),
+                        250,
                         newDirectExecutorService())) {
             assertRows(reader.visitStartsWith(fieldRef, str("tag-match")).join(), 100L, 101L, 102L);
 
@@ -478,6 +534,7 @@ public class LazyFilteredBitmapIndexReaderTest {
                 globalIndexer.createReader(
                         countingFileReader,
                         Collections.singletonList(meta),
+                        100,
                         newDirectExecutorService())) {
             assertRows(reader.visitEqual(fieldRef, str("tag-050")).join(), 50L);
 
@@ -499,6 +556,7 @@ public class LazyFilteredBitmapIndexReaderTest {
                 globalIndexer.createReader(
                         countingFileReader,
                         Collections.singletonList(meta),
+                        3,
                         newDirectExecutorService())) {
             assertRows(reader.visitIsNull(fieldRef).join(), 2L);
 

@@ -83,4 +83,20 @@ public class PostgresTypeUtilsTest {
         assertThat(PostgresTypeUtils.toDataType("_numeric", 0, 0, EMPTY))
                 .isEqualTo(DataTypes.ARRAY(DataTypes.DECIMAL(DecimalType.MAX_PRECISION, 18)));
     }
+
+    /**
+     * Debezium emits {@code uuid} values as plain strings ({@code io.debezium.data.Uuid}), so the
+     * type maps to {@code STRING} preserving the canonical text representation.
+     */
+    @Test
+    public void testUuidMapsToString() {
+        assertThat(PostgresTypeUtils.toDataType("uuid", null, null, EMPTY))
+                .isEqualTo(DataTypes.STRING());
+    }
+
+    @Test
+    public void testJsonbMapsToString() {
+        assertThat(PostgresTypeUtils.toDataType("jsonb", null, null, EMPTY))
+                .isEqualTo(DataTypes.STRING());
+    }
 }

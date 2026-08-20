@@ -90,6 +90,24 @@ public class CoreOptionsTest {
     }
 
     @Test
+    public void testDeletionVectorsMergeOnRead() {
+        Options conf = new Options();
+        conf.set(CoreOptions.DELETION_VECTORS_MERGE_ON_READ, true);
+        CoreOptions options = new CoreOptions(conf);
+
+        assertThat(options.deletionVectorsMergeOnRead()).isTrue();
+        assertThat(options.batchScanSkipLevel0()).isFalse();
+
+        conf.set(CoreOptions.DELETION_VECTORS_ENABLED, true);
+        assertThat(options.deletionVectorsMergeOnRead()).isTrue();
+        assertThat(options.batchScanSkipLevel0()).isFalse();
+
+        conf.set(CoreOptions.DELETION_VECTORS_MERGE_ON_READ, false);
+        assertThat(options.deletionVectorsMergeOnRead()).isFalse();
+        assertThat(options.batchScanSkipLevel0()).isTrue();
+    }
+
+    @Test
     public void testSequenceFieldTrim() {
         Options conf = new Options();
         conf.set(CoreOptions.SEQUENCE_FIELD, " f1 ,f2 ,  f3  ");
@@ -113,7 +131,7 @@ public class CoreOptionsTest {
         CoreOptions options = new CoreOptions(conf);
         assertThat(options.globalIndexSearchMode()).isNull();
         assertThat(options.scalarIndexSearchMode())
-                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FULL);
+                .isEqualTo(CoreOptions.GlobalIndexSearchMode.FAST);
         assertThat(options.vectorIndexSearchMode())
                 .isEqualTo(CoreOptions.GlobalIndexSearchMode.FAST);
         assertThat(options.fullTextIndexSearchMode())

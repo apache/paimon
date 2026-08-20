@@ -18,11 +18,14 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
+import org.apache.paimon.globalindex.GlobalIndexEvaluator;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
@@ -82,6 +85,9 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
     protected final DataField vectorColumn;
     protected final Map<String, String> options;
 
+    /** Snapshot the plan was built against; pins filters and raw reads to it. */
+    @Nullable protected Snapshot planSnapshot;
+
     private static final Comparator<long[]> WEAKEST_SCORE_FIRST =
             Comparator.<long[]>comparingDouble(a -> Float.intBitsToFloat((int) a[1]))
                     .thenComparing((a, b) -> Long.compare(b[0], a[0]));
@@ -133,7 +139,8 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         }
 
         RoaringNavigableMap64 liveRows =
-                GlobalIndexLiveRowFilter.liveRows(table, partitionFilter, indexedRowRanges);
+                GlobalIndexLiveRowFilter.liveRows(
+                        table, planSnapshot, partitionFilter, indexedRowRanges);
         RoaringNavigableMap64 matchedRows = scalarMatchedRows(splits);
 
         List<RoaringNavigableMap64> includeRowIds = new ArrayList<>(splits.size());
@@ -173,7 +180,8 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         }
 
         Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
-                DataEvolutionGlobalIndexScanner.create(table, partitionFilter, scalarIndexFiles);
+                DataEvolutionGlobalIndexScanner.create(
+                        table, planSnapshot, partitionFilter, scalarIndexFiles);
         if (!optionalScanner.isPresent()) {
             return new RoaringNavigableMap64();
         }
@@ -206,19 +214,22 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             scalarIndexFiles.addAll(split.scalarIndexFiles());
         }
         Optional<DataEvolutionGlobalIndexScanner> optionalScanner =
-                DataEvolutionGlobalIndexScanner.create(table, partitionFilter, scalarIndexFiles);
+                DataEvolutionGlobalIndexScanner.create(
+                        table, planSnapshot, partitionFilter, scalarIndexFiles);
         if (!optionalScanner.isPresent()) {
             return null;
         }
 
         RoaringNavigableMap64 include = new RoaringNavigableMap64();
         try (DataEvolutionGlobalIndexScanner scanner = optionalScanner.get()) {
-            Optional<GlobalIndexResult> result = scanner.scan(filter);
+            Optional<GlobalIndexEvaluator.Evaluation> result = scanner.scanWithCoverage(filter);
             if (!result.isPresent()) {
                 return null;
             }
-            include.or(result.get().results());
-            include.or(scanner.unindexedRows(filter).results());
+            include.or(result.get().result().results());
+            include.or(
+                    scanner.unindexedRowsForContributingFields(result.get().contributingFieldIds())
+                            .results());
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -247,7 +258,11 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         FileIO fileIO = table.fileIO();
         GlobalIndexFileReader indexFileReader = m -> fileIO.newInputStream(m.filePath());
         GlobalIndexReader reader =
-                globalIndexer.createReader(indexFileReader, indexIOMetaList, executor);
+                globalIndexer.createReader(
+                        indexFileReader,
+                        indexIOMetaList,
+                        rowRangeEnd - rowRangeStart + 1,
+                        executor);
         VectorSearch vectorSearch =
                 new VectorSearch(vector, searchLimit, vectorColumn.name(), options)
                         .withIncludeRowIds(includeRowIds);
@@ -276,7 +291,11 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
         FileIO fileIO = table.fileIO();
         GlobalIndexFileReader indexFileReader = m -> fileIO.newInputStream(m.filePath());
         GlobalIndexReader reader =
-                globalIndexer.createReader(indexFileReader, indexIOMetaList, executor);
+                globalIndexer.createReader(
+                        indexFileReader,
+                        indexIOMetaList,
+                        rowRangeEnd - rowRangeStart + 1,
+                        executor);
         BatchVectorSearch batchVectorSearch =
                 new BatchVectorSearch(vectors, searchLimit, vectorColumn.name(), options)
                         .withIncludeRowIds(includeRowIds);
@@ -586,7 +605,7 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
     }
 
     private ReadBuilder newRawReadBuilder(RowType readType, boolean includeFilter) {
-        ReadBuilder readBuilder = table.newReadBuilder().withReadType(readType);
+        ReadBuilder readBuilder = rawReadTable().newReadBuilder().withReadType(readType);
         if (partitionFilter != null) {
             readBuilder.withPartitionFilter(partitionFilter);
         }
@@ -594,6 +613,23 @@ public abstract class AbstractDataEvolutionVectorRead implements Serializable {
             readBuilder.withFilter(filter);
         }
         return readBuilder;
+    }
+
+    private FileStoreTable rawReadTable() {
+        if (planSnapshot == null) {
+            return table;
+        }
+
+        Map<String, String> pinOptions = new HashMap<>();
+        pinOptions.put(
+                CoreOptions.SCAN_MODE.key(), CoreOptions.StartupMode.FROM_SNAPSHOT.toString());
+        pinOptions.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), String.valueOf(planSnapshot.id()));
+        pinOptions.put(CoreOptions.SCAN_VERSION.key(), null);
+        pinOptions.put(CoreOptions.SCAN_TAG_NAME.key(), null);
+        pinOptions.put(CoreOptions.SCAN_WATERMARK.key(), null);
+        pinOptions.put(CoreOptions.SCAN_TIMESTAMP.key(), null);
+        pinOptions.put(CoreOptions.SCAN_TIMESTAMP_MILLIS.key(), null);
+        return table.copyWithoutTimeTravel(pinOptions);
     }
 
     protected static void splitSearchSplits(

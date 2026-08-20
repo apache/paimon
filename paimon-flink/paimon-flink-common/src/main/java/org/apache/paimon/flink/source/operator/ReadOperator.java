@@ -21,12 +21,15 @@ package org.apache.paimon.flink.source.operator;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.flink.FlinkRowData;
+import org.apache.paimon.flink.FlinkRowDataWithBlob;
 import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.source.RecordLimiter;
 import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.types.BlobType;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.SerializableSupplier;
 
@@ -42,6 +45,9 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.util.HashSet;
+import java.util.Set;
+
 /**
  * The operator that reads the {@link Split splits} received from the preceding {@link
  * MonitorSource}. Contrary to the {@link MonitorSource} which has a parallelism of 1, this operator
@@ -56,6 +62,8 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
 
     private final SerializableSupplier<TableRead> readSupplier;
     @Nullable private final NestedProjectedRowData nestedProjectedRowData;
+    @Nullable private final RowType readType;
+    private final boolean blobAsDescriptor;
 
     private transient TableRead read;
     private transient StreamRecord<RowData> reuseRecord;
@@ -76,9 +84,20 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
             SerializableSupplier<TableRead> readSupplier,
             @Nullable NestedProjectedRowData nestedProjectedRowData,
             @Nullable Long limit) {
+        this(readSupplier, nestedProjectedRowData, limit, null, false);
+    }
+
+    public ReadOperator(
+            SerializableSupplier<TableRead> readSupplier,
+            @Nullable NestedProjectedRowData nestedProjectedRowData,
+            @Nullable Long limit,
+            @Nullable RowType readType,
+            boolean blobAsDescriptor) {
         this.readSupplier = readSupplier;
         this.nestedProjectedRowData = nestedProjectedRowData;
         this.limit = limit;
+        this.readType = readType;
+        this.blobAsDescriptor = blobAsDescriptor;
     }
 
     @Override
@@ -101,7 +120,18 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
                                 .getSpillingDirectoriesPaths());
         this.read = readSupplier.get().withIOManager(ioManager);
         this.recordLimiter = RecordLimiter.create(limit);
-        this.reuseRow = new FlinkRowData(null);
+        Set<Integer> blobFields = new HashSet<>();
+        if (readType != null) {
+            for (int i = 0; i < readType.getFieldCount(); i++) {
+                if (BlobType.isBlobFileField(readType.getTypeAt(i))) {
+                    blobFields.add(i);
+                }
+            }
+        }
+        this.reuseRow =
+                blobFields.isEmpty()
+                        ? new FlinkRowData(null)
+                        : new FlinkRowDataWithBlob(null, blobFields, blobAsDescriptor);
         this.reuseRecord = new StreamRecord<>(null);
         this.idlingStarted();
     }

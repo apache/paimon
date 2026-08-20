@@ -1,0 +1,154 @@
+################################################################################
+#  Licensed to the Apache Software Foundation (ASF) under one
+#  or more contributor license agreements.  See the NOTICE file
+#  distributed with this work for additional information
+#  regarding copyright ownership.  The ASF licenses this file
+#  to you under the Apache License, Version 2.0 (the
+#  "License"); you may not use this file except in compliance
+#  with the License.  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+################################################################################
+
+# Build the PyPaimon source distribution and universal wheel. Publishing is
+# handled by release-python-publish.yml after this package job passes.
+
+name: Release PyPaimon Package
+
+on:
+  workflow_call:
+    inputs:
+      release_version:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: Paimon release version
+        required: true
+        type: string
+
+concurrency:
+  group: release-python-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: paimon-python/dev/requirements.txt
+
+      - name: Set package version
+        id: package_version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          source_version="$(
+            sed -n 's/^VERSION = "\(.*\)"/\1/p' \
+              paimon-python/setup.py
+          )"
+          release_version="${{ inputs.release_version }}"
+          if [[ "${source_version}" != "${release_version}" ]]; then
+            echo "PyPaimon version ${source_version:-missing} does not match Paimon ${release_version}" >&2
+            exit 1
+          fi
+
+          package_version="${release_version}"
+          if [[ "${GITHUB_REF}" == refs/tags/*-rc* ]]; then
+            rc_number="${GITHUB_REF_NAME##*-rc}"
+            package_version="${release_version}rc${rc_number}"
+            sed -i \
+              "s/^VERSION = \".*\"/VERSION = \"${package_version}\"/" \
+              paimon-python/setup.py
+          fi
+
+          echo "version=${package_version}" >> "${GITHUB_OUTPUT}"
+          echo "Building PyPaimon ${package_version}"
+
+      - name: Build distributions
+        working-directory: paimon-python
+        run: |
+          python -m pip install --upgrade pip setuptools wheel twine
+          python setup.py sdist bdist_wheel
+          python -m twine check dist/*
+
+      - name: Verify distribution contents
+        working-directory: paimon-python
+        env:
+          EXPECTED_VERSION: ${{ steps.package_version.outputs.version }}
+        run: |
+          python - <<'PY'
+          import glob
+          import os
+          import tarfile
+          import zipfile
+
+          expected = os.environ["EXPECTED_VERSION"]
+          sdist = "dist/pypaimon-{}.tar.gz".format(expected)
+          wheels = glob.glob("dist/pypaimon-{}-*.whl".format(expected))
+          if not os.path.isfile(sdist):
+              raise SystemExit("Missing expected sdist: {}".format(sdist))
+          if len(wheels) != 1:
+              raise SystemExit("Expected one wheel, found: {}".format(wheels))
+
+          with tarfile.open(sdist, "r:gz") as archive:
+              names = archive.getnames()
+              prefix = "pypaimon-{}/".format(expected)
+              for required in ("LICENSE", "NOTICE", "README.md", "setup.py"):
+                  if prefix + required not in names:
+                      raise SystemExit("Missing {} from sdist".format(required))
+              sample_data = "pypaimon/sample/data/data.jsonl"
+              if prefix + sample_data not in names:
+                  raise SystemExit("Missing sample data from sdist")
+              for forbidden in ("pypaimon/tests/", "pypaimon/acceptance/"):
+                  if any(name.startswith(prefix + forbidden) for name in names):
+                      raise SystemExit(
+                          "Test content must not be packaged: {}".format(forbidden)
+                      )
+
+          with zipfile.ZipFile(wheels[0]) as archive:
+              names = archive.namelist()
+              license_files = [
+                  name for name in names
+                  if ".dist-info/" in name and name.endswith("/LICENSE")
+              ]
+              notice_files = [
+                  name for name in names
+                  if ".dist-info/" in name and name.endswith("/NOTICE")
+              ]
+              if not license_files or not notice_files:
+                  raise SystemExit("Wheel is missing LICENSE or NOTICE")
+              if "pypaimon/sample/data/data.jsonl" not in names:
+                  raise SystemExit("Wheel is missing sample data")
+              for forbidden in ("pypaimon/tests/", "pypaimon/acceptance/"):
+                  if any(name.startswith(forbidden) for name in names):
+                      raise SystemExit(
+                          "Test content must not be packaged: {}".format(forbidden)
+                      )
+          PY
+
+      - name: Upload PyPaimon distributions
+        uses: actions/upload-artifact@v6
+        with:
+          name: pypaimon-distributions
+          path: |
+            paimon-python/dist/*.tar.gz
+            paimon-python/dist/*.whl
+          if-no-files-found: error

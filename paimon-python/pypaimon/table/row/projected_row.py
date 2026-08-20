@@ -65,7 +65,7 @@ class ProjectedRow(InternalRow):
 
     def __len__(self) -> int:
         """Returns the number of fields in this row."""
-        return len(self.row)
+        return len(self.index_mapping)
 
     def __str__(self) -> str:
         """String representation of the projected row."""

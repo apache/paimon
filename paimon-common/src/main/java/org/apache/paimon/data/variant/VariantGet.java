@@ -25,6 +25,7 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.GenericVariantUtil.Type;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
@@ -146,9 +147,21 @@ public class VariantGet {
                     input = (int) v.getLong();
                     inputType = DataTypes.DATE();
                     break;
+                case TIMESTAMP:
+                    input = Timestamp.fromMicros(v.getLong());
+                    inputType = DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE();
+                    break;
+                case TIMESTAMP_NTZ:
+                    input = Timestamp.fromMicros(v.getLong());
+                    inputType = DataTypes.TIMESTAMP();
+                    break;
                 case FLOAT:
                     input = v.getFloat();
                     inputType = DataTypes.FLOAT();
+                    break;
+                case BINARY:
+                    input = v.getBinary();
+                    inputType = DataTypes.BYTES();
                     break;
                 default:
                     // todo: support other types

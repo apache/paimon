@@ -22,6 +22,7 @@ import org.apache.paimon.partition.PartitionStatistics
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalog.SparkBaseCatalog
 import org.apache.paimon.spark.leafnode.PaimonLeafV2CommandExec
+import org.apache.paimon.spark.util.PartitionStatisticsDisplay
 import org.apache.paimon.spark.utils.CatalogUtils.{checkNamespace, toIdentifier}
 
 import org.apache.spark.sql.catalyst.InternalRow
@@ -91,23 +92,44 @@ case class PaimonDescribeTableExec(
     }
     val dummyStorageFormat =
       CatalogStorageFormat(None, None, None, None, compressed = false, Map.empty)
-    val partParameters: Map[String, String] = Map(
-      PartitionStatistics.FIELD_FILE_COUNT -> partition.head.fileCount().toString,
-      PartitionStatistics.FIELD_FILE_SIZE_IN_BYTES -> partition.head.fileSizeInBytes().toString,
-      PartitionStatistics.FIELD_LAST_FILE_CREATION_TIME -> partition.head
-        .lastFileCreationTime()
-        .toString,
-      PartitionStatistics.FIELD_RECORD_COUNT -> partition.head.recordCount().toString
-    )
-    val partStats =
-      CatalogStatistics(partition.head.fileSizeInBytes(), Some(partition.head.recordCount()))
-    CatalogTablePartition(
+    val statistics = partition.head
+    // Include only reported values. Spark omits the "Partition Parameters" row for an empty map.
+    val partParameters: Map[String, String] = Seq(
+      PartitionStatistics.FIELD_FILE_COUNT -> statistics.fileCount(),
+      PartitionStatistics.FIELD_FILE_SIZE_IN_BYTES -> statistics.fileSizeInBytes(),
+      PartitionStatistics.FIELD_LAST_FILE_CREATION_TIME -> statistics.lastFileCreationTime(),
+      PartitionStatistics.FIELD_RECORD_COUNT -> statistics.recordCount()
+    ).collect {
+      case (field, value) if PartitionStatistics.isKnown(value) => field -> value.toString
+    }.toMap
+    // CatalogTablePartition uses this temporary value only to render its "Partition Statistics"
+    // row. It cannot represent an unknown size, so omit the row when size is unknown and omit an
+    // unknown row count independently.
+    val partStats = if (PartitionStatistics.isKnown(statistics.fileSizeInBytes())) {
+      val rowCount =
+        if (PartitionStatistics.isKnown(statistics.recordCount())) {
+          Some(BigInt(statistics.recordCount()))
+        } else {
+          None
+        }
+      Some(CatalogStatistics(statistics.fileSizeInBytes(), rowCount))
+    } else {
+      None
+    }
+    val partitionDetails = CatalogTablePartition(
       partitionSpec,
       dummyStorageFormat,
       partParameters,
-      partition.head.lastFileCreationTime(),
+      statistics.lastFileCreationTime(),
       -1,
-      Some(partStats)).toLinkedHashMap.foreach(s => rows += toCatalystRow(s._1, s._2, ""))
+      partStats).toLinkedHashMap
+    // Spark formats every createTime as a date; replace an unknown timestamp to avoid a 1969 date.
+    if (!PartitionStatistics.isKnown(statistics.lastFileCreationTime())) {
+      partitionDetails.put(
+        PaimonDescribeTableExec.CREATED_TIME_KEY,
+        PartitionStatisticsDisplay.UNKNOWN)
+    }
+    partitionDetails.foreach(s => rows += toCatalystRow(s._1, s._2, ""))
     rows += emptyRow()
   }
 
@@ -124,6 +146,9 @@ case class PaimonDescribeTableExec(
 }
 
 object PaimonDescribeTableExec {
+  // Key for the partition creation-time row emitted by CatalogTablePartition.toLinkedHashMap.
+  val CREATED_TIME_KEY = "Created Time"
+
   // This column metadata indicates the default value associated with a particular table column that
   // is in effect at any given time. Its value begins at the time of the initial CREATE/REPLACE
   // TABLE statement with DEFAULT column definition(s), if any. It then changes whenever an ALTER

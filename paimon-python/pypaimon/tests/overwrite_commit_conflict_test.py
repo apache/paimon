@@ -114,14 +114,14 @@ class OverwriteCommitConflictTest(unittest.TestCase):
         orig_cas = fsc.snapshot_commit.commit
         cas = {'fails': 0}
 
-        def patched_cas(snapshot, statistics):
+        def patched_cas(base_snapshot_uuid, snapshot, statistics):
             # Each conflict appends to an unrelated partition (f0=99), advancing
             # latest, then fails our CAS.
             if snapshot.commit_kind == "OVERWRITE" and cas['fails'] < K:
                 cas['fails'] += 1
                 self._append(pd.DataFrame({'f0': [99], 'f1': [f'x{cas["fails"]}']}))
                 return False
-            return orig_cas(snapshot, statistics)
+            return orig_cas(base_snapshot_uuid, snapshot, statistics)
 
         fsc.snapshot_commit.commit = patched_cas
 
@@ -178,12 +178,12 @@ class OverwriteCommitConflictTest(unittest.TestCase):
         orig_cas = fsc.snapshot_commit.commit
         cas = {'fails': 0}
 
-        def patched_cas(snapshot, statistics):
+        def patched_cas(base_snapshot_uuid, snapshot, statistics):
             if snapshot.commit_kind == "OVERWRITE" and cas['fails'] < K:
                 cas['fails'] += 1
                 self._append(pd.DataFrame({'f0': [1], 'f1': [f'y{cas["fails"]}']}))
                 return False
-            return orig_cas(snapshot, statistics)
+            return orig_cas(base_snapshot_uuid, snapshot, statistics)
 
         fsc.snapshot_commit.commit = patched_cas
 
@@ -255,12 +255,12 @@ class OverwriteCommitConflictTest(unittest.TestCase):
         orig_cas = fsc.snapshot_commit.commit
         cas = {'fails': 0}
 
-        def patched_cas(snapshot, statistics):
+        def patched_cas(base_snapshot_uuid, snapshot, statistics):
             if snapshot.commit_kind == "OVERWRITE" and cas['fails'] < K:
                 cas['fails'] += 1
                 self._append(pd.DataFrame({'f0': [99], 'f1': ['x']}))
                 return False
-            return orig_cas(snapshot, statistics)
+            return orig_cas(base_snapshot_uuid, snapshot, statistics)
 
         fsc.snapshot_commit.commit = patched_cas
 
@@ -302,12 +302,12 @@ class OverwriteCommitConflictTest(unittest.TestCase):
         orig_cas = fsc.snapshot_commit.commit
         cas = {'fails': 0}
 
-        def patched_cas(snapshot, statistics):
+        def patched_cas(base_snapshot_uuid, snapshot, statistics):
             if snapshot.commit_kind == "OVERWRITE" and cas['fails'] < K:
                 cas['fails'] += 1
                 concurrent_fn(f'z{cas["fails"]}')
                 return False
-            return orig_cas(snapshot, statistics)
+            return orig_cas(base_snapshot_uuid, snapshot, statistics)
 
         fsc.snapshot_commit.commit = patched_cas
 

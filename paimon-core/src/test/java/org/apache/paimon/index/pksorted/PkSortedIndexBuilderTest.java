@@ -238,6 +238,7 @@ class PkSortedIndexBuilderTest {
                         .createReader(
                                 new GlobalIndexFileReadWrite(fileIO, pathFactory),
                                 ioMetas,
+                                payload.rowCount(),
                                 executor)) {
             FieldRef fieldRef = new FieldRef(7, "indexed", DataTypes.INT());
             GlobalIndexResult result =

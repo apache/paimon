@@ -15,12 +15,14 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import logging
 import math
 import random
 import struct
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Tuple
 
+import numpy as np
 import pyarrow as pa
 
 from pypaimon.common.options.core_options import CoreOptions
@@ -29,6 +31,38 @@ from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer
 from pypaimon.table.row.internal_row import RowKind
+
+logger = logging.getLogger(__name__)
+
+
+def _probe_arrow_group_by() -> bool:
+    """Return True only if this pyarrow can run the write path's group-by.
+
+    Two versions matter, and a plain ``hasattr(pa.Table, "group_by")`` conflates
+    them: ``Table.group_by`` (Acero) landed in pyarrow 7.0.0, but the
+    ``hash_list`` aggregate kernel this path relies on only landed in 8.0.0.
+    pyarrow 7 therefore *has* ``group_by`` yet raises ``ArrowKeyError`` for
+    ``hash_list`` -- and the Python 3.7 dependency range still permits
+    ``pyarrow>=7,<13``. Probe the actual aggregate once at import so both
+    pyarrow<7 (no ``group_by``) and pyarrow 7 (no ``hash_list``) fall through to
+    the per-row grouping instead of failing every ``write_arrow_batch``.
+    """
+    if not hasattr(pa.Table, "group_by"):
+        return False
+    try:
+        probe = pa.table({
+            "__k": pa.array([0], type=pa.int32()),
+            "__idx": pa.array([0], type=pa.int64()),
+        })
+        probe.group_by(["__k"]).aggregate([("__idx", "list")])
+    except Exception:  # any failure here means "use the fallback"
+        return False
+    return True
+
+
+# pyarrow < 7.0.0 has no ``Table.group_by`` and pyarrow 7 has no ``hash_list``
+# aggregate kernel; on either the write path must use per-row grouping.
+_ARROW_GROUP_BY_SUPPORTED = _probe_arrow_group_by()
 
 _MURMUR_C1 = 0xCC9E2D51
 _MURMUR_C2 = 0x1B873593
@@ -94,6 +128,102 @@ class RowKeyExtractor(ABC):
     def extract_partitions_batch(self, data: pa.RecordBatch) -> List[Tuple]:
         """Return partition tuples without calculating bucket hashes."""
         return self._extract_partitions_batch(data)
+
+    def extract_partition_bucket_groups(
+            self, data: pa.RecordBatch) -> List[Tuple[Tuple, int, Optional[pa.Array]]]:
+        """Group row indices by (partition, bucket) for the write path.
+
+        Returns a list of ``(partition, bucket, row_indices)`` where
+        ``row_indices`` is an Arrow ``int64`` array of the rows belonging to the
+        group, or ``None`` when the whole batch is a single group (so callers can
+        pass the original batch through without copying large values, e.g. BLOBs).
+
+        The grouping is done in Arrow so only the distinct group keys are
+        materialized into Python objects, instead of one ``.as_py()`` scalar per
+        row. The old per-row loop held the GIL for the entire batch, which
+        serialized multi-threaded writers down to ~1 core.
+
+        Buckets are computed once here, in row order, via ``_extract_buckets_batch``
+        so stateful extractors (dynamic bucket) keep their exact assignment
+        sequence and side effects regardless of which grouping path runs.
+        """
+        buckets = self._extract_buckets_batch(data)
+        if _ARROW_GROUP_BY_SUPPORTED:
+            try:
+                return self._group_indices_arrow(data, buckets)
+            except (pa.ArrowNotImplementedError, pa.ArrowInvalid):
+                # Only Arrow's own "can't group this column type" errors fall
+                # back to the legacy per-row grouping; any other exception is a
+                # real bug and must propagate rather than silently degrade to the
+                # GIL-bound path. `buckets` is reused (never recomputed) so
+                # stateful extractors are not double-notified. Log so the
+                # (GIL-bound) fallback is visible.
+                logger.warning(
+                    "Arrow group_by could not handle the partition/bucket key "
+                    "types; falling back to per-row grouping (GIL-bound).",
+                    exc_info=True)
+        # pyarrow < 7.0.0 has no group_by; use the per-row grouping directly.
+        return self._group_indices_python(data, buckets)
+
+    def _group_indices_arrow(
+            self, data: pa.RecordBatch,
+            buckets: List[int]) -> List[Tuple[Tuple, int, Optional[pa.Array]]]:
+        num_rows = data.num_rows
+        columns = {}
+        key_names = []
+        for k, pi in enumerate(self.partition_indices):
+            name = f"__p{k}"
+            columns[name] = data.column(pi)
+            key_names.append(name)
+        columns["__bucket"] = pa.array(buckets, type=pa.int32())
+        key_names.append("__bucket")
+        # Build the row index with numpy (C speed, releases the GIL). Using a
+        # Python range() here makes pyarrow iterate it element by element under
+        # the GIL, which dominates this method and kills multi-thread scaling.
+        columns["__idx"] = pa.array(np.arange(num_rows, dtype=np.int64))
+
+        grouped = pa.table(columns).group_by(key_names).aggregate([("__idx", "list")])
+        num_groups = grouped.num_rows
+
+        num_part = len(self.partition_indices)
+        part_values = [grouped.column(f"__p{k}").to_pylist() for k in range(num_part)]
+        bucket_values = grouped.column("__bucket").to_pylist()
+        idx_lists = grouped.column("__idx_list")
+
+        groups = []
+        for gi in range(num_groups):
+            partition = tuple(part_values[k][gi] for k in range(num_part))
+            if num_groups == 1:
+                row_indices = None
+            else:
+                # Arrow's threaded ``hash_list`` may return a group's indices out
+                # of input order. The writer assigns sequence numbers in the
+                # order it receives rows, so unordered indices let an earlier
+                # input row (with a repeated primary key) win latest-wins
+                # deduplication / partial update. Sort back to ascending input
+                # order; np.sort runs in C (releases the GIL) so multi-threaded
+                # scaling is preserved.
+                row_indices = pa.array(
+                    np.sort(idx_lists[gi].values.to_numpy(zero_copy_only=False)))
+            groups.append((partition, bucket_values[gi], row_indices))
+        return groups
+
+    def _group_indices_python(
+            self, data: pa.RecordBatch,
+            buckets: List[int]) -> List[Tuple[Tuple, int, Optional[pa.Array]]]:
+        partitions = self._extract_partitions_batch(data)
+        num_rows = data.num_rows
+        partition_bucket_groups = {}
+        for i in range(num_rows):
+            partition_bucket_groups.setdefault(
+                (tuple(partitions[i]), buckets[i]), []).append(i)
+
+        groups = []
+        for (partition, bucket), row_indices in partition_bucket_groups.items():
+            indices = None if len(row_indices) == num_rows \
+                else pa.array(row_indices, type=pa.int64())
+            groups.append((partition, bucket, indices))
+        return groups
 
     def extract_partition_bucket_row(
             self, values_by_name: Dict[str, Any]) -> Tuple[Tuple, int]:
@@ -577,7 +707,7 @@ class DynamicBucketRowKeyExtractor(RowKeyExtractor):
 
 
 class PostponeBucketRowKeyExtractor(RowKeyExtractor):
-    """Extractor for unaware bucket mode (bucket = -1, no primary keys)."""
+    """Extractor for postpone bucket mode which writes to bucket -2."""
 
     def __init__(self, table_schema: TableSchema):
         super().__init__(table_schema)
@@ -590,3 +720,68 @@ class PostponeBucketRowKeyExtractor(RowKeyExtractor):
 
     def _extract_bucket_row(self, values_by_name: Dict[str, Any]) -> int:
         return BucketMode.POSTPONE_BUCKET.value
+
+
+class PostponeFixedBucketRowKeyExtractor(RowKeyExtractor):
+    """Route postpone batches using a resolved bucket plan."""
+
+    def __init__(self, table, bucket_plan):
+        super().__init__(table.table_schema)
+        if table.options.bucket() != BucketMode.POSTPONE_BUCKET.value:
+            raise ValueError(
+                "Postpone fixed bucket writes require bucket = -2, got {}".format(
+                    table.options.bucket()
+                )
+            )
+        bucket_function = str(
+            table.table_schema.options.get("bucket-function.type", "default")
+        ).strip().lower()
+        if bucket_function != "default":
+            raise ValueError(
+                "Postpone fixed bucket writes only support "
+                "bucket-function.type=default, got {}"
+                .format(bucket_function)
+            )
+        self.bucket_keys = table.table_schema.bucket_keys
+        self.bucket_key_indices = self._get_field_indices(self.bucket_keys)
+        self._bucket_key_fields = table.table_schema.logical_bucket_key_fields
+        self._bucket_plan = bucket_plan
+
+    def with_bucket_plan(self, bucket_plan) -> None:
+        self._bucket_plan = bucket_plan
+
+    def num_buckets(self, partition: Tuple) -> int:
+        return self._bucket_plan.num_buckets(partition)
+
+    def extract_partition_bucket_batch(
+        self, data: pa.RecordBatch
+    ) -> Tuple[List[Tuple], List[int]]:
+        partitions = self._extract_partitions_batch(data)
+        columns = [data.column(i) for i in self.bucket_key_indices]
+        buckets = [
+            _bucket_from_hash(
+                self._binary_row_hash_code(
+                    tuple(col[row_idx].as_py() for col in columns),
+                    self._bucket_key_fields,
+                ),
+                self.num_buckets(partition),
+            )
+            for row_idx, partition in enumerate(partitions)
+        ]
+        return partitions, buckets
+
+    def _extract_buckets_batch(self, data: pa.RecordBatch) -> List[int]:
+        return self.extract_partition_bucket_batch(data)[1]
+
+    def _extract_bucket_row(self, values_by_name: Dict[str, Any]) -> int:
+        partition = tuple(
+            values_by_name[self.table_schema.fields[i].name]
+            for i in self.partition_indices
+        )
+        return _bucket_from_hash(
+            self._binary_row_hash_code(
+                tuple(values_by_name[name] for name in self.bucket_keys),
+                self._bucket_key_fields,
+            ),
+            self.num_buckets(partition),
+        )

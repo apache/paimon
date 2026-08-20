@@ -40,19 +40,23 @@ class GlobalIndexLiveRowFilter {
     @Nullable
     static RoaringNavigableMap64 liveRows(
             @Nullable FileStoreTable table, @Nullable PartitionPredicate partitionFilter) {
-        return liveRows(table, partitionFilter, null);
+        return liveRows(table, null, partitionFilter, null);
     }
 
     @Nullable
     static RoaringNavigableMap64 liveRows(
             @Nullable FileStoreTable table,
+            @Nullable Snapshot pinnedSnapshot,
             @Nullable PartitionPredicate partitionFilter,
             @Nullable List<Range> rowRanges) {
         if (table == null || !table.coreOptions().deletionVectorsEnabled()) {
             return null;
         }
 
-        @Nullable Snapshot snapshot = TimeTravelUtil.tryTravelOrLatest(table);
+        // Pin to the index scan's snapshot so row-ids and live rows agree.
+        @Nullable
+        Snapshot snapshot =
+                pinnedSnapshot != null ? pinnedSnapshot : TimeTravelUtil.tryTravelOrLatest(table);
         if (snapshot == null) {
             return null;
         }
@@ -66,10 +70,19 @@ class GlobalIndexLiveRowFilter {
             snapshotReader.withRowRanges(rowRanges);
         }
 
+        List<Split> splits = snapshotReader.read().splits();
         RoaringNavigableMap64 liveRows = new RoaringNavigableMap64();
-        for (Split split : snapshotReader.read().splits()) {
+        // Phase 1: union every file's row-id range.
+        for (Split split : splits) {
             if (split instanceof DataSplit) {
-                addLiveRows(table, liveRows, (DataSplit) split);
+                addRowRanges(liveRows, (DataSplit) split);
+            }
+        }
+        // Phase 2: subtract each DV. Ranges are all unioned first (no re-add),
+        // and peak memory stays at one DV at a time.
+        for (Split split : splits) {
+            if (split instanceof DataSplit) {
+                subtractDeletedRows(table, liveRows, (DataSplit) split);
             }
         }
         return liveRows;
@@ -89,7 +102,15 @@ class GlobalIndexLiveRowFilter {
         return includeRows.getLongCardinality() == range.count() ? null : includeRows;
     }
 
-    private static void addLiveRows(
+    private static void addRowRanges(RoaringNavigableMap64 liveRows, DataSplit split) {
+        for (DataFileMeta file : split.dataFiles()) {
+            if (file.firstRowId() != null) {
+                liveRows.addRange(file.nonNullRowIdRange());
+            }
+        }
+    }
+
+    private static void subtractDeletedRows(
             FileStoreTable table, RoaringNavigableMap64 liveRows, DataSplit split) {
         List<DataFileMeta> files = split.dataFiles();
         List<DeletionFile> deletionFiles = split.deletionFiles().orElse(null);
@@ -100,7 +121,6 @@ class GlobalIndexLiveRowFilter {
                 continue;
             }
             long firstRowId = file.nonNullFirstRowId();
-            liveRows.addRange(file.nonNullRowIdRange());
 
             Optional<DeletionVector> deletionVector;
             try {

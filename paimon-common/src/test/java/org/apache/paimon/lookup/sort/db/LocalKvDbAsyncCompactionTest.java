@@ -26,6 +26,9 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.Queue;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.CountDownLatch;
@@ -54,12 +57,48 @@ public class LocalKvDbAsyncCompactionTest {
             assertThat(compactionExecutor.numQueuedTasks()).isOne();
             assertThat(db.getLevelFileCount(0)).isEqualTo(3);
             assertThat(get(db, "shared")).isEqualTo("v3");
+            assertThat(scan(db, "sha", "shb")).containsExactly("shared=v3");
 
             compactionExecutor.runNext();
             db.awaitCompaction();
 
             assertThat(db.getLevelFileCount(0)).isZero();
             assertThat(get(db, "shared")).isEqualTo("v3");
+            assertThat(scan(db, "sha", "shb")).containsExactly("shared=v3");
+        }
+    }
+
+    @Test
+    void testRangeIteratorPreventsCompactionFromDeletingItsFiles() throws Exception {
+        ManuallyTriggeredExecutor compactionExecutor = new ManuallyTriggeredExecutor();
+        File directory = new File(tempDir.toFile(), "range-compaction");
+        try (LocalKvDb db = createDb("range-compaction", compactionExecutor)) {
+            putAndFlush(db, "shared", "v1");
+            putAndFlush(db, "shared", "v2");
+            putAndFlush(db, "shared", "v3");
+
+            LocalKvDb.RangeIterator iterator =
+                    db.rangeIterator("sha".getBytes(UTF_8), "shb".getBytes(UTF_8));
+            ExecutorService compactionRunner = Executors.newSingleThreadExecutor();
+            Future<?> compactionFuture = compactionRunner.submit(compactionExecutor::runNext);
+            try {
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+                while (sstFileCount(directory) < 4 && System.nanoTime() < deadline) {
+                    Thread.yield();
+                }
+
+                assertThat(sstFileCount(directory)).isGreaterThanOrEqualTo(4);
+                assertThat(compactionFuture).isNotDone();
+                assertThat(iterator.advanceNext()).isTrue();
+                assertThat(new String(iterator.getValue().copyBytes(), UTF_8)).isEqualTo("v3");
+            } finally {
+                iterator.close();
+                compactionFuture.get(10, TimeUnit.SECONDS);
+                compactionRunner.shutdownNow();
+            }
+
+            db.awaitCompaction();
+            assertThat(scan(db, "sha", "shb")).containsExactly("shared=v3");
         }
     }
 
@@ -206,6 +245,21 @@ public class LocalKvDbAsyncCompactionTest {
     private static String get(LocalKvDb db, String key) throws IOException {
         byte[] value = db.get(key.getBytes(UTF_8));
         return value == null ? null : new String(value, UTF_8);
+    }
+
+    private static List<String> scan(LocalKvDb db, String from, String to) throws IOException {
+        List<String> result = new ArrayList<>();
+        for (Map.Entry<byte[], byte[]> entry :
+                db.rangeScan(from.getBytes(UTF_8), to.getBytes(UTF_8))) {
+            result.add(
+                    new String(entry.getKey(), UTF_8) + "=" + new String(entry.getValue(), UTF_8));
+        }
+        return result;
+    }
+
+    private static int sstFileCount(File directory) {
+        File[] files = directory.listFiles((ignored, name) -> name.endsWith(".db"));
+        return files == null ? 0 : files.length;
     }
 
     private static class ManuallyTriggeredExecutor extends AbstractExecutorService {

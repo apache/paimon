@@ -709,7 +709,7 @@ public interface Catalog extends AutoCloseable {
      * will throw an {@link UnsupportedOperationException}, affect the following methods:
      *
      * <ul>
-     *   <li>{@link #commitSnapshot(Identifier, String, Snapshot, List)}.
+     *   <li>{@link #commitSnapshot(Identifier, String, String, Snapshot, List)}.
      *   <li>{@link #loadSnapshot(Identifier)}.
      *   <li>{@link #rollbackTo(Identifier, Instant)}.
      *   <li>{@link #createBranch(Identifier, String, String)}.
@@ -729,6 +729,7 @@ public interface Catalog extends AutoCloseable {
      *
      * @param identifier Path of the table
      * @param tableUuid Uuid of the table to avoid wrong commit
+     * @param baseSnapshotUuid Uuid of the snapshot on which the commit is based
      * @param snapshot Snapshot to be committed
      * @param statistics statistics information of this change
      * @return Success or not
@@ -739,6 +740,7 @@ public interface Catalog extends AutoCloseable {
     boolean commitSnapshot(
             Identifier identifier,
             @Nullable String tableUuid,
+            @Nullable String baseSnapshotUuid,
             Snapshot snapshot,
             List<PartitionStatistics> statistics)
             throws Catalog.TableNotExistException;

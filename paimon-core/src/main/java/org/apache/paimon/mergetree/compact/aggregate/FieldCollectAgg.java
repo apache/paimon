@@ -36,6 +36,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 import java.util.function.BiFunction;
 
 import static org.apache.paimon.codegen.CodeGenUtils.newRecordEqualiser;
@@ -54,11 +55,7 @@ public class FieldCollectAgg extends FieldAggregator {
         this.distinct = distinct;
         this.elementGetter = InternalArray.createElementGetter(dataType.getElementType());
 
-        if (distinct
-                && dataType.getElementType()
-                        .getTypeRoot()
-                        .getFamilies()
-                        .contains(DataTypeFamily.CONSTRUCTED)) {
+        if (distinct && needsEqualiser(dataType.getElementType())) {
             DataType elementType = dataType.getElementType();
             List<DataType> fieldTypes =
                     elementType instanceof RowType
@@ -80,6 +77,20 @@ public class FieldCollectAgg extends FieldAggregator {
         } else {
             equaliser = null;
         }
+    }
+
+    /**
+     * Whether elements of this type need the generated equaliser rather than {@link Object#equals}.
+     *
+     * <p>Constructed types need it because two rows holding the same values are not necessarily
+     * equal objects. Binary types need it for a blunter reason: an element of {@code BINARY} or
+     * {@code VARBINARY} is a {@code byte[]}, which inherits identity equality from {@link Object},
+     * so two arrays with the same content never compare equal and never share a hash bucket.
+     */
+    private static boolean needsEqualiser(DataType elementType) {
+        Set<DataTypeFamily> families = elementType.getTypeRoot().getFamilies();
+        return families.contains(DataTypeFamily.CONSTRUCTED)
+                || families.contains(DataTypeFamily.BINARY_STRING);
     }
 
     @Override

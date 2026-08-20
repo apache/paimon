@@ -44,6 +44,11 @@ public abstract class FileIndexReader implements FunctionVisitor<FileIndexResult
     }
 
     @Override
+    public FileIndexResult visitIsNaN(FieldRef fieldRef) {
+        return REMAIN;
+    }
+
+    @Override
     public FileIndexResult visitStartsWith(FieldRef fieldRef, Object literal) {
         return REMAIN;
     }

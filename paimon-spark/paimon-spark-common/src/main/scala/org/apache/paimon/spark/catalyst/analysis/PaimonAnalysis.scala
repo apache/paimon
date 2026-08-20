@@ -24,6 +24,7 @@ import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation.isPaimonTable
 import org.apache.paimon.spark.catalyst.plans.logical.{PaimonDropPartitions, PaimonHiveDynamicPartitionQuery}
 import org.apache.paimon.spark.commands.{PaimonAnalyzeTableColumnCommand, PaimonDynamicPartitionOverwriteCommand, PaimonShowColumnsCommand, SchemaEvolutionHelper}
+import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.{PaimonUtils, SparkSession}
@@ -109,8 +110,10 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
       options: Options,
       mergeSchemaEnabled: Boolean): LogicalPlan = {
     val query = stripHiveDynamicPartitionMarker(v2WriteCommand.query)
+    val hiveStyleDynamicPartitionEnabled = OptionUtils.hiveStyleDynamicPartitionEnabled()
     hiveDynamicPartitionColumns(v2WriteCommand.query) match {
-      case Some(dynamicPartitionColumns) if !v2WriteCommand.isByName =>
+      case Some(dynamicPartitionColumns)
+          if hiveStyleDynamicPartitionEnabled && !v2WriteCommand.isByName =>
         resolveDynamicPartitionWrite(
           query,
           table,
@@ -119,7 +122,7 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
           mergeSchemaEnabled)
       case _ =>
         v2WriteCommand match {
-          case o: OverwritePartitionsDynamic if !o.isByName =>
+          case o: OverwritePartitionsDynamic if hiveStyleDynamicPartitionEnabled && !o.isByName =>
             resolveDynamicPartitionWrite(
               query,
               table,

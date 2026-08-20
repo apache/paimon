@@ -59,6 +59,7 @@ public class Tag extends Snapshot {
     @JsonCreator
     public Tag(
             @JsonProperty(FIELD_VERSION) int version,
+            @JsonProperty(FIELD_UUID) @Nullable String uuid,
             @JsonProperty(FIELD_ID) long id,
             @JsonProperty(FIELD_SCHEMA_ID) long schemaId,
             @JsonProperty(FIELD_BASE_MANIFEST_LIST) String baseManifestList,
@@ -85,6 +86,7 @@ public class Tag extends Snapshot {
             @JsonProperty(FIELD_TAG_TIME_RETAINED) @Nullable Duration tagTimeRetained) {
         super(
                 version,
+                uuid,
                 id,
                 schemaId,
                 baseManifestList,
@@ -124,6 +126,7 @@ public class Tag extends Snapshot {
             Snapshot snapshot, Duration tagTimeRetained, LocalDateTime tagCreateTime) {
         return new Tag(
                 snapshot.version(),
+                snapshot.uuid(),
                 snapshot.id(),
                 snapshot.schemaId(),
                 snapshot.baseManifestList(),
@@ -152,6 +155,7 @@ public class Tag extends Snapshot {
     public Snapshot trimToSnapshot() {
         return new Snapshot(
                 version,
+                uuid,
                 id,
                 schemaId,
                 baseManifestList,

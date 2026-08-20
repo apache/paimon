@@ -140,14 +140,10 @@ public abstract class FlinkSink<T> implements Serializable {
                 isStreaming && env.getCheckpointConfig().isCheckpointingEnabled();
         Options options = Options.fromMap(table.options());
 
-        boolean writeOnly = table.coreOptions().writeOnly();
+        boolean writeOnly = writeOnly();
         StoreSinkWrite.Provider writeProvider =
-                StoreSinkWrite.createWriteProvider(
-                        table,
-                        env.getCheckpointConfig(),
-                        isStreaming,
-                        ignorePreviousFiles,
-                        hasSinkMaterializer(input));
+                createWriteProvider(
+                        env.getCheckpointConfig(), isStreaming, hasSinkMaterializer(input));
         writeProvider =
                 StoreSinkWrite.withBlobDescriptorReaderFactory(
                         writeProvider, blobDescriptorReaderFactory);
@@ -203,6 +199,20 @@ public abstract class FlinkSink<T> implements Serializable {
         }
 
         return written;
+    }
+
+    protected boolean writeOnly() {
+        return table.coreOptions().writeOnly();
+    }
+
+    protected StoreSinkWrite.Provider createWriteProvider(
+            CheckpointConfig checkpointConfig, boolean isStreaming, boolean hasSinkMaterializer) {
+        return StoreSinkWrite.createWriteProvider(
+                table, checkpointConfig, isStreaming, ignorePreviousFiles, hasSinkMaterializer);
+    }
+
+    protected boolean ignorePreviousFiles() {
+        return ignorePreviousFiles;
     }
 
     public DataStreamSink<?> doCommit(DataStream<Committable> written, String commitUser) {

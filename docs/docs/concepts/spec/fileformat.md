@@ -64,6 +64,16 @@ The following table lists the type mapping from Paimon type to Parquet type.
       <td></td>
     </tr>
     <tr>
+      <td>GEOMETRY(crs)</td>
+      <td>BINARY</td>
+      <td>GEOMETRY(crs)</td>
+    </tr>
+    <tr>
+      <td>GEOGRAPHY(crs, algorithm)</td>
+      <td>BINARY</td>
+      <td>GEOGRAPHY(crs, algorithm)</td>
+    </tr>
+    <tr>
       <td>DECIMAL(P, S)</td>
       <td>P <= 9: INT32, P <= 18: INT64, P > 18: FIXED_LEN_BYTE_ARRAY</td>
       <td>DECIMAL(P, S)</td>
@@ -142,8 +152,10 @@ The following table lists the type mapping from Paimon type to Parquet type.
 </table>
 
 Limitations:
+
 1. [Parquet does not support nullable map keys](https://github.com/apache/parquet-format/blob/master/LogicalTypes#maps).
 2. Parquet TIMESTAMP type with precision 9 will use INT96, but this int96 is a time zone converted value and requires additional adjustments.
+3. Tables containing `GEOMETRY` or `GEOGRAPHY` columns must use Parquet for `file.format`, every entry in `file.format.per.level`, and `changelog-file.format` when configured.
 
 ## AVRO
 
@@ -234,16 +246,16 @@ The following table lists the type mapping from Paimon type to Avro type.
       <td></td>
     </tr>
     <tr>
-      <td><code>MAP</code><br>
-      (key must be string/char/varchar type)</td>
-      <td><code>map</code></td>
-      <td></td>
+      <td><code>MAP</code></td>
+      <td>string/char/varchar key: <code>map</code><br>
+      other key: <code>array</code> of key-value <code>record</code></td>
+      <td>other key: <code>map</code></td>
     </tr>
     <tr>
-      <td><code>MULTISET</code><br>
-      (element must be string/char/varchar type)</td>
-      <td><code>map</code></td>
-      <td></td>
+      <td><code>MULTISET</code></td>
+      <td>string/char/varchar element: <code>map</code><br>
+      other element: <code>array</code> of element-count <code>record</code></td>
+      <td>other element: <code>map</code></td>
     </tr>
     <tr>
       <td><code>ROW</code></td>
@@ -885,9 +897,25 @@ For `MAP<K, BLOB>`, the variable-length data area uses the following nested payl
 ```
 
 The key and Blob length indexes are aligned by entry position. A length of `-1`
-represents null, while zero represents an empty key or Blob. Supported key types are
-the integer family, `CHAR`, and `VARCHAR`. An empty map has an entry count of zero and
-is distinct from a null map.
+represents null, while zero represents an empty key or Blob. Supported key types and
+their encodings are:
+
+| Key type | Encoding |
+|----------|----------|
+| `TINYINT`, `SMALLINT`, `INT`, `BIGINT` | Signed integer in little-endian byte order using the type's fixed width |
+| `BOOLEAN` | One byte: `0` for false and `1` for true |
+| `DECIMAL(p, s)`, `p <= 18` | Eight-byte little-endian signed unscaled integer |
+| `DECIMAL(p, s)`, `p > 18` | Minimal-length signed big-endian two's-complement unscaled integer |
+| `DATE` | Four-byte little-endian signed count of days since 1970-01-01 |
+| `TIME(p)` | Four-byte little-endian signed count of milliseconds since midnight |
+| `BINARY`, `VARBINARY` (`BYTES`) | Raw bytes |
+| `CHAR`, `VARCHAR` | UTF-8 bytes |
+
+The DECIMAL scale is defined by the field type and is not stored in each key. `BINARY`
+and `VARBINARY` keys are not padded, truncated, or validated against the declared length.
+An empty map has an entry count of zero and is distinct from a null map. The `TIME(p)`
+encoding uses Paimon's millisecond internal representation and does not add nanosecond
+precision.
 
 At the outer file index level, `-1` represents a null field and `-2` represents a
 field placeholder used by data evolution.

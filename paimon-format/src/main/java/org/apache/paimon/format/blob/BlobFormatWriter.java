@@ -98,10 +98,27 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
 
     @Override
     public void close() throws IOException {
-        byte[] indexBytes = DeltaVarintCompressor.compress(lengths.toArray());
-        out.write(indexBytes);
-        out.write(intToLittleEndian(indexBytes.length));
-        out.write(VERSION);
+        Throwable primary = null;
+        try {
+            byte[] indexBytes = DeltaVarintCompressor.compress(lengths.toArray());
+            out.write(indexBytes);
+            out.write(intToLittleEndian(indexBytes.length));
+            out.write(VERSION);
+        } catch (RuntimeException | Error | IOException e) {
+            primary = e;
+            throw e;
+        } finally {
+            // Surface the footer error as primary and attach a source-close error as suppressed.
+            if (primary == null) {
+                elementWriter.close();
+            } else {
+                try {
+                    elementWriter.close();
+                } catch (RuntimeException | Error | IOException suppressed) {
+                    primary.addSuppressed(suppressed);
+                }
+            }
+        }
     }
 
     private static BlobElementSerializer.Writer createElementWriter(

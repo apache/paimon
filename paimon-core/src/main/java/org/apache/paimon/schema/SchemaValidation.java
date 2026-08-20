@@ -32,8 +32,10 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexerFactory;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
+import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldLastValueAggFactory;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.BucketMode;
@@ -42,6 +44,8 @@ import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.GeographyType;
+import org.apache.paimon.types.GeometryType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
@@ -75,21 +79,29 @@ import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
 import static org.apache.paimon.CoreOptions.FIELDS_SEPARATOR;
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
+import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_SCAN_MODE;
+import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_TAG_TO_SNAPSHOT;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_TO_AUTO_TAG;
 import static org.apache.paimon.CoreOptions.MAP_STORAGE_LAYOUT;
 import static org.apache.paimon.CoreOptions.PRIMARY_KEY;
+import static org.apache.paimon.CoreOptions.SCAN_CREATION_TIME_MILLIS;
 import static org.apache.paimon.CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS;
 import static org.apache.paimon.CoreOptions.SCAN_MODE;
 import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
 import static org.apache.paimon.CoreOptions.SCAN_TAG_NAME;
 import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP;
 import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP_MILLIS;
+import static org.apache.paimon.CoreOptions.SCAN_VERSION;
 import static org.apache.paimon.CoreOptions.SCAN_WATERMARK;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.STREAMING_READ_OVERWRITE;
 import static org.apache.paimon.format.FileFormat.vectorFileFormat;
+import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.isSequenceGroupOption;
+import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.isSequenceGroupOptionCandidate;
+import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.sequenceGroupOrderingFields;
+import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.sequenceGroupProtectedFields;
 import static org.apache.paimon.schema.TableSchema.PAIMON_07_VERSION;
 import static org.apache.paimon.table.PrimaryKeyTableUtils.createMergeFunctionFactory;
 import static org.apache.paimon.table.SpecialFields.KEY_FIELD_PREFIX;
@@ -115,7 +127,10 @@ public class SchemaValidation {
                     ArrayType.class,
                     RowType.class,
                     MultisetType.class,
-                    VectorType.class);
+                    VectorType.class,
+                    VariantType.class,
+                    GeometryType.class,
+                    GeographyType.class);
 
     /**
      * Validate the {@link TableSchema} and {@link CoreOptions}.
@@ -139,13 +154,11 @@ public class SchemaValidation {
 
         validateOnlyContainPrimitiveType(schema.fields(), schema.primaryKeys(), "primary key");
         validateOnlyContainPrimitiveType(schema.fields(), schema.partitionKeys(), "partition");
-        validateOnlyContainPrimitiveType(schema.fields(), options.upsertKey(), "upsert key");
-
-        if (!options.upsertKey().isEmpty() && !schema.primaryKeys().isEmpty()) {
-            throw new RuntimeException(
+        if (options.primaryKeyNullable() && schema.primaryKeys().isEmpty()) {
+            throw new IllegalArgumentException(
                     String.format(
-                            "Cannot define 'upsert-key' %s with 'primary-key' %s.",
-                            options.upsertKey(), schema.primaryKeys()));
+                            "Option '%s' can only be enabled for a table with primary keys.",
+                            CoreOptions.PRIMARY_KEY_NULLABLE.key()));
         }
 
         validateBucket(schema, options);
@@ -155,6 +168,8 @@ public class SchemaValidation {
         validateFieldsPrefix(schema, options);
 
         validateSequenceField(schema, options);
+
+        validateSequenceGroupOrderingFields(schema, options);
 
         validateMergeFunction(schema);
 
@@ -216,10 +231,12 @@ public class SchemaValidation {
         FileFormat fileFormat =
                 FileFormat.fromIdentifier(options.formatType(), new Options(schema.options()));
         RowType tableRowType = new RowType(schema.fields());
+        validateGeospatialTypes(schema, options, tableRowType);
         validateBlobFields(tableRowType, options);
         Set<String> blobDescriptorFields = validateBlobDescriptorFields(tableRowType, options);
         Set<String> blobViewFields =
                 validateBlobViewFields(tableRowType, options, blobDescriptorFields);
+        validatePrimaryKeyBlobKeyConfiguration(schema, options);
         validatePrimaryKeyBlobConfiguration(schema, options);
         Set<String> blobInlineFields = new HashSet<>(blobDescriptorFields);
         blobInlineFields.addAll(blobViewFields);
@@ -331,10 +348,6 @@ public class SchemaValidation {
 
         if (options.deletionVectorsEnabled()) {
             validateForDeletionVectors(options);
-        } else {
-            checkArgument(
-                    !options.deletionVectorsMergeOnRead(),
-                    "deletion-vectors.merge-on-read requires deletion-vectors.enabled to be true.");
         }
 
         if (options.snapshotSequenceOrdering()) {
@@ -442,6 +455,106 @@ public class SchemaValidation {
         }
     }
 
+    private static void validateGeospatialTypes(
+            TableSchema schema, CoreOptions options, RowType rowType) {
+        boolean hasGeospatial =
+                containsType(
+                        rowType,
+                        type -> type.isAnyOf(DataTypeRoot.GEOMETRY, DataTypeRoot.GEOGRAPHY));
+        if (!hasGeospatial) {
+            return;
+        }
+
+        checkArgument(
+                CoreOptions.FILE_FORMAT_PARQUET.equals(options.formatType()),
+                "Geometry and geography columns require '%s'='parquet', but was '%s'.",
+                CoreOptions.FILE_FORMAT.key(),
+                options.formatType());
+        options.fileFormatPerLevel()
+                .forEach(
+                        (level, format) ->
+                                checkArgument(
+                                        CoreOptions.FILE_FORMAT_PARQUET.equals(format),
+                                        "Geometry and geography columns require parquet at every level, but '%s' contains '%s:%s'.",
+                                        CoreOptions.FILE_FORMAT_PER_LEVEL.key(),
+                                        level,
+                                        format));
+        checkArgument(
+                options.changelogFileFormat() == null
+                        || CoreOptions.FILE_FORMAT_PARQUET.equals(options.changelogFileFormat()),
+                "Geometry and geography columns require '%s' to be parquet, but was '%s'.",
+                CoreOptions.CHANGELOG_FILE_FORMAT.key(),
+                options.changelogFileFormat());
+        validateIcebergGeospatialTypes(rowType, options);
+
+        List<String> geospatialClusteringColumns =
+                schema.fields().stream()
+                        .filter(field -> options.clusteringColumns().contains(field.name()))
+                        .filter(
+                                field ->
+                                        containsType(
+                                                field.type(),
+                                                type ->
+                                                        type.isAnyOf(
+                                                                DataTypeRoot.GEOMETRY,
+                                                                DataTypeRoot.GEOGRAPHY)))
+                        .map(DataField::name)
+                        .collect(Collectors.toList());
+        checkArgument(
+                geospatialClusteringColumns.isEmpty(),
+                "Geometry and geography columns cannot be clustering columns: %s.",
+                geospatialClusteringColumns);
+
+        Set<String> geospatialFields =
+                schema.fields().stream()
+                        .filter(
+                                field ->
+                                        field.type()
+                                                .isAnyOf(
+                                                        DataTypeRoot.GEOMETRY,
+                                                        DataTypeRoot.GEOGRAPHY))
+                        .map(DataField::name)
+                        .collect(Collectors.toSet());
+        Set<String> geospatialBucketKeys = new HashSet<>(schema.bucketKeys());
+        geospatialBucketKeys.retainAll(geospatialFields);
+        checkArgument(
+                geospatialBucketKeys.isEmpty(),
+                "Geometry and geography columns cannot be bucket keys: %s.",
+                geospatialBucketKeys);
+        Set<String> geospatialSequenceFields = new HashSet<>(options.sequenceField());
+        geospatialSequenceFields.retainAll(geospatialFields);
+        checkArgument(
+                geospatialSequenceFields.isEmpty(),
+                "Geometry and geography columns cannot be sequence fields: %s.",
+                geospatialSequenceFields);
+    }
+
+    /** Validate geospatial types in a schema that will be published as Iceberg metadata. */
+    public static void validateIcebergGeospatialTypes(DataType dataType, CoreOptions options) {
+        boolean hasGeospatial =
+                containsType(
+                        dataType,
+                        type -> type.isAnyOf(DataTypeRoot.GEOMETRY, DataTypeRoot.GEOGRAPHY));
+        if (!hasGeospatial) {
+            return;
+        }
+
+        IcebergOptions.StorageType icebergStorage =
+                options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE);
+        if (icebergStorage != IcebergOptions.StorageType.DISABLED) {
+            checkArgument(
+                    options.toConfiguration().get(IcebergOptions.FORMAT_VERSION) == 3,
+                    "Geometry and geography columns require '%s'='3' when Iceberg metadata is enabled.",
+                    IcebergOptions.FORMAT_VERSION.key());
+            checkArgument(
+                    icebergStorage != IcebergOptions.StorageType.REST_CATALOG,
+                    "Geometry and geography columns do not support '%s'='%s' because the bundled Iceberg REST client cannot parse Iceberg v3 geospatial types.",
+                    IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                    IcebergOptions.StorageType.REST_CATALOG);
+            validateIcebergGeographyCrs(dataType);
+        }
+    }
+
     private static void validateStartupMode(CoreOptions options) {
         if (options.startupMode() == CoreOptions.StartupMode.FROM_TIMESTAMP) {
             checkExactOneOptionExistInMode(
@@ -520,6 +633,24 @@ public class SchemaValidation {
                             INCREMENTAL_BETWEEN,
                             INCREMENTAL_TO_AUTO_TAG),
                     Collections.singletonList(SCAN_FILE_CREATION_TIME_MILLIS));
+        } else if (options.startupMode() == CoreOptions.StartupMode.LATEST_DELTA) {
+            for (ConfigOption<?> option :
+                    Arrays.asList(
+                            SCAN_TIMESTAMP_MILLIS,
+                            SCAN_FILE_CREATION_TIME_MILLIS,
+                            SCAN_CREATION_TIME_MILLIS,
+                            SCAN_TIMESTAMP,
+                            SCAN_SNAPSHOT_ID,
+                            SCAN_TAG_NAME,
+                            SCAN_WATERMARK,
+                            SCAN_VERSION,
+                            INCREMENTAL_BETWEEN_TIMESTAMP,
+                            INCREMENTAL_BETWEEN,
+                            INCREMENTAL_TO_AUTO_TAG,
+                            INCREMENTAL_BETWEEN_SCAN_MODE,
+                            INCREMENTAL_BETWEEN_TAG_TO_SNAPSHOT)) {
+                checkOptionNotExistInMode(options, option, options.startupMode());
+            }
         } else {
             checkOptionNotExistInMode(options, SCAN_TIMESTAMP_MILLIS, options.startupMode());
             checkOptionNotExistInMode(
@@ -787,6 +918,30 @@ public class SchemaValidation {
         return false;
     }
 
+    private static void validateIcebergGeographyCrs(DataType dataType) {
+        if (dataType.is(DataTypeRoot.GEOGRAPHY)) {
+            String crs = ((GeographyType) dataType).getCrs();
+            checkArgument(
+                    !crs.contains(","),
+                    "Geography CRS '%s' cannot contain ',' when Iceberg metadata is enabled.",
+                    crs);
+        } else if (dataType instanceof RowType) {
+            for (DataField field : ((RowType) dataType).getFields()) {
+                validateIcebergGeographyCrs(field.type());
+            }
+        } else if (dataType instanceof ArrayType) {
+            validateIcebergGeographyCrs(((ArrayType) dataType).getElementType());
+        } else if (dataType instanceof MultisetType) {
+            validateIcebergGeographyCrs(((MultisetType) dataType).getElementType());
+        } else if (dataType instanceof MapType) {
+            MapType mapType = (MapType) dataType;
+            validateIcebergGeographyCrs(mapType.getKeyType());
+            validateIcebergGeographyCrs(mapType.getValueType());
+        } else if (dataType instanceof VectorType) {
+            validateIcebergGeographyCrs(((VectorType) dataType).getElementType());
+        }
+    }
+
     private static void validateMapSharedShreddingFileFormats(CoreOptions options) {
         validateMapSharedShreddingFileFormat(
                 CoreOptions.FILE_FORMAT.key(), options.fileFormatString());
@@ -976,7 +1131,7 @@ public class SchemaValidation {
                 options.mergeEngine() == MergeEngine.FIRST_ROW || options.deletionVectorsEnabled(),
                 "Primary-key vector index requires deletion-vectors.enabled = true.");
         checkArgument(
-                !options.deletionVectorsMergeOnRead(),
+                !options.deletionVectorsEnabled() || !options.deletionVectorsMergeOnRead(),
                 "Primary-key vector index with merge-engine = %s requires deletion-vectors.merge-on-read = false.",
                 options.mergeEngine());
         checkArgument(
@@ -1034,7 +1189,7 @@ public class SchemaValidation {
                 options.mergeEngine() == MergeEngine.FIRST_ROW || options.deletionVectorsEnabled(),
                 "Primary-key full-text index requires deletion-vectors.enabled = true.");
         checkArgument(
-                !options.deletionVectorsMergeOnRead(),
+                !options.deletionVectorsEnabled() || !options.deletionVectorsMergeOnRead(),
                 "Primary-key full-text index requires deletion-vectors.merge-on-read = false.");
         checkArgument(
                 options.bucket() > 0 || options.bucket() == BucketMode.POSTPONE_BUCKET,
@@ -1201,7 +1356,7 @@ public class SchemaValidation {
         int bucket = options.bucket();
         if (bucket == -1) {
             if (options.toMap().get(BUCKET_KEY.key()) != null) {
-                throw new RuntimeException(
+                throw new IllegalArgumentException(
                         "Cannot define 'bucket-key' with bucket = -1, please remove the 'bucket-key' setting or specify a bucket number.");
             }
 
@@ -1427,6 +1582,90 @@ public class SchemaValidation {
             return;
         }
 
+        checkArgument(
+                options.mergeEngine() == MergeEngine.DEDUPLICATE
+                        || options.mergeEngine() == MergeEngine.PARTIAL_UPDATE
+                        || options.mergeEngine() == MergeEngine.FIRST_ROW,
+                "Primary-key managed BLOB tables only support the deduplicate, "
+                        + "partial-update or first-row merge engine.");
+        checkArgument(
+                options.changelogProducer() == ChangelogProducer.NONE,
+                "Primary-key managed BLOB tables only support changelog-producer 'none'.");
+        checkArgument(
+                options.dataFileExternalPaths() == null,
+                "Primary-key managed BLOB tables do not support '%s'.",
+                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key());
+        checkArgument(
+                !options.pkClusteringOverride(),
+                "Primary-key managed BLOB tables do not support '%s'.",
+                CoreOptions.PK_CLUSTERING_OVERRIDE.key());
+
+        if (options.mergeEngine() == MergeEngine.PARTIAL_UPDATE && !options.ignoreDelete()) {
+            Set<String> fieldsProtectedBySequenceGroup =
+                    options.toMap().entrySet().stream()
+                            .filter(entry -> isSequenceGroupOption(entry.getKey()))
+                            .flatMap(
+                                    entry ->
+                                            sequenceGroupProtectedFields(entry.getValue()).stream())
+                            .collect(Collectors.toSet());
+            for (String field : managedBlobFields) {
+                if (!fieldsProtectedBySequenceGroup.contains(field)) {
+                    continue;
+                }
+                String aggregateFunction = options.fieldAggFunc(field);
+                if (aggregateFunction == null) {
+                    aggregateFunction = options.fieldsDefaultFunc();
+                }
+                checkArgument(
+                        aggregateFunction == null
+                                || FieldLastValueAggFactory.NAME.equals(aggregateFunction)
+                                || options.fieldAggIgnoreRetract(field),
+                        "Managed BLOB field '%s' cannot use aggregate function '%s' because "
+                                + "managed BLOB payloads are not retained in retract messages. "
+                                + "Set 'fields.%s.ignore-retract' to true to ignore retract messages.",
+                        field,
+                        aggregateFunction,
+                        field);
+            }
+        }
+    }
+
+    private static void validateSequenceGroupOrderingFields(
+            TableSchema schema, CoreOptions options) {
+        if (options.mergeEngine() != MergeEngine.PARTIAL_UPDATE) {
+            return;
+        }
+
+        RowType rowType = new RowType(schema.fields());
+        for (String optionKey : options.toMap().keySet()) {
+            if (!isSequenceGroupOptionCandidate(optionKey)) {
+                continue;
+            }
+            for (String fieldName : sequenceGroupOrderingFields(optionKey)) {
+                DataField field = rowType.getField(fieldName);
+                checkArgument(
+                        !containsType(field.type(), type -> type.is(DataTypeRoot.BLOB)),
+                        "Field '%s' with type %s cannot be used as a sequence-group ordering "
+                                + "field in option '%s'.",
+                        fieldName,
+                        field.type(),
+                        optionKey);
+            }
+        }
+    }
+
+    private static void validatePrimaryKeyBlobKeyConfiguration(
+            TableSchema schema, CoreOptions options) {
+        if (schema.primaryKeys().isEmpty()) {
+            return;
+        }
+
+        Set<String> managedBlobFields =
+                fieldNamesInBlobFile(new RowType(schema.fields()), options.blobInlineField());
+        if (managedBlobFields.isEmpty()) {
+            return;
+        }
+
         List<String> primaryKeyBlobFields =
                 managedBlobFields.stream()
                         .filter(schema.primaryKeys()::contains)
@@ -1453,21 +1692,6 @@ public class SchemaValidation {
                 sequenceBlobFields.isEmpty(),
                 "Managed BLOB fields cannot be sequence fields: %s.",
                 sequenceBlobFields);
-
-        checkArgument(
-                options.mergeEngine() == MergeEngine.DEDUPLICATE,
-                "Primary-key managed BLOB tables only support the deduplicate merge engine.");
-        checkArgument(
-                options.changelogProducer() == ChangelogProducer.NONE,
-                "Primary-key managed BLOB tables only support changelog-producer 'none'.");
-        checkArgument(
-                options.dataFileExternalPaths() == null,
-                "Primary-key managed BLOB tables do not support '%s'.",
-                CoreOptions.DATA_FILE_EXTERNAL_PATHS.key());
-        checkArgument(
-                !options.pkClusteringOverride(),
-                "Primary-key managed BLOB tables do not support '%s'.",
-                CoreOptions.PK_CLUSTERING_OVERRIDE.key());
     }
 
     private static void validateIncrementalClustering(TableSchema schema, CoreOptions options) {
@@ -1517,8 +1741,10 @@ public class SchemaValidation {
                             || changelogProducer == ChangelogProducer.INPUT,
                     "Changelog producer must be none or input for chain table.");
             Preconditions.checkArgument(
-                    !options.deletionVectorsEnabled(),
-                    "Chain table do not support enable deletion vector");
+                    !options.deletionVectorsEnabled()
+                            || options.deletionVectorsEnabled()
+                                    && options.mergeEngine() == MergeEngine.DEDUPLICATE,
+                    "Chain tables only support deletion vectors with the deduplicate merge engine.");
             Preconditions.checkArgument(
                     options.partitionTimestampPattern() != null,
                     "Partition timestamp pattern is required for chain table.");

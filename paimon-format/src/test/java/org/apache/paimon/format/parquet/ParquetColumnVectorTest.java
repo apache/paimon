@@ -596,7 +596,8 @@ public class ParquetColumnVectorTest {
 
         RecordReader<InternalRow> reader =
                 readerFactory.createReader(
-                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)));
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), null, null));
 
         RecordReader.RecordIterator<InternalRow> iterator = reader.readBatch();
         return (ColumnarRowIterator) iterator;

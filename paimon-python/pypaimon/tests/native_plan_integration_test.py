@@ -17,10 +17,15 @@
 
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.globalindex.global_index_result import GlobalIndexResult
+from pypaimon.read.native_plan import native_family_search_modes_available
+from pypaimon.table.row.blob import BlobDescriptor
+from pypaimon.utils.range import Range
 
 
 def _has_native_planner():
@@ -29,6 +34,14 @@ def _has_native_planner():
     except Exception:
         return False
     return hasattr(PaimonCatalog, 'get_table') and hasattr(Split, 'serialize')
+
+
+def _has_native_row_ranges():
+    try:
+        from pypaimon_rust.datafusion import ReadBuilder
+    except ImportError:
+        return False
+    return hasattr(ReadBuilder, 'with_row_ranges')
 
 
 @unittest.skipUnless(_has_native_planner(),
@@ -120,6 +133,214 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self._write('ap_t', [{'k': 3, 'v': 'c'}])
         self._assert_matches('ap_t')
 
+    @unittest.skipUnless(native_family_search_modes_available(),
+                         "pypaimon-rust 0.4+ required")
+    def test_dynamic_family_search_mode_uses_native_plan(self):
+        self.cat.create_table(
+            'default.search_mode_t', Schema.from_pyarrow_schema(self.schema), False)
+        self._write('search_mode_t', [{'k': 1, 'v': 'a'}, {'k': 2, 'v': 'b'}])
+
+        table = self.cat.get_table('default.search_mode_t').copy({
+            'scan.native-plan.enabled': 'true',
+            'scalar-index.search-mode': 'full',
+        })
+        builder = table.new_read_builder()
+        plan = builder.new_scan().plan()
+
+        self.assertEqual(
+            sorted(builder.new_read().to_arrow(plan.splits()).to_pylist(),
+                   key=lambda row: row['k']),
+            [{'k': 1, 'v': 'a'}, {'k': 2, 'v': 'b'}],
+        )
+        self.assertTrue(builder.explain().native_planned)
+
+    def test_data_evolution_blob_projection_filter_limit(self):
+        schema = pa.schema([
+            ('k', pa.int64()),
+            ('v', pa.string()),
+            ('media.camera', pa.large_binary()),
+        ])
+        self.cat.create_table('default.de_t', Schema.from_pyarrow_schema(
+            schema, options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            }), False)
+        table = self.cat.get_table('default.de_t')
+        write_builder = table.new_batch_write_builder()
+        write = write_builder.new_write()
+        write.write_arrow(pa.Table.from_pylist([
+            {'k': 1, 'v': 'a', 'media.camera': b'a'},
+            {'k': 2, 'v': 'b', 'media.camera': b'b'},
+            {'k': 3, 'v': 'c', 'media.camera': b'c'},
+        ], schema=schema))
+        write_builder.new_commit().commit(write.prepare_commit())
+        write.close()
+
+        update_builder = table.new_batch_write_builder()
+        update = update_builder.new_update().with_update_type(['v'])
+        messages = update.update_by_arrow_with_row_id(pa.Table.from_pydict({
+            '_ROW_ID': pa.array([1], type=pa.int64()),
+            'v': pa.array(['b2'], type=pa.string()),
+        }))
+        update_builder.new_commit().commit(messages)
+
+        self._assert_matches('de_t')
+
+        native_table = self.cat.get_table('default.de_t').copy(
+            {'scan.native-plan.enabled': 'true'})
+        predicate = native_table.new_read_builder().new_predicate_builder().equal(
+            'v', 'b2')
+        builder = (native_table.new_read_builder()
+                   .with_projection(['k'])
+                   .with_filter(predicate)
+                   .with_limit(1))
+        plan = builder.new_scan().plan()
+        rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
+
+        self.assertEqual(rows, [{'k': 2}])
+        self.assertTrue(builder.explain().native_planned)
+
+        blob_builder = (native_table.new_read_builder()
+                        .with_projection(['media.camera'])
+                        .with_limit(1))
+        blob_plan = blob_builder.new_scan().plan()
+        blob_rows = blob_builder.new_read().to_arrow(
+            blob_plan.splits()).to_pylist()
+        self.assertEqual(blob_rows, [{'media.camera': b'a'}])
+        self.assertTrue(any(
+            data_file.file_name.endswith('.blob')
+            for split in blob_plan.splits()
+            for data_file in split.files
+        ))
+
+        descriptor_table = native_table.copy({'blob-as-descriptor': 'true'})
+        descriptor_builder = (
+            descriptor_table.new_read_builder()
+            .with_projection(['media.camera'])
+            .with_limit(1))
+        descriptor_plan = descriptor_builder.new_scan().plan()
+        descriptor_rows = descriptor_builder.new_read().to_arrow(
+            descriptor_plan.splits()).to_pylist()
+        self.assertEqual(len(descriptor_plan.splits()), 1)
+        self.assertEqual(
+            BlobDescriptor.deserialize(descriptor_rows[0]['media.camera']).length,
+            1,
+        )
+        self.assertTrue(descriptor_builder.explain().native_planned)
+
+    @unittest.skipUnless(_has_native_row_ranges(),
+                         "pypaimon_rust row-range API not installed")
+    def test_data_evolution_global_index_row_ranges(self):
+        self.cat.create_table('default.de_range_t', Schema.from_pyarrow_schema(
+            self.schema, options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            }), False)
+        self._write('de_range_t', [
+            {'k': 1, 'v': 'a'},
+            {'k': 2, 'v': 'b'},
+            {'k': 3, 'v': 'c'},
+        ])
+        table = self.cat.get_table('default.de_range_t').copy(
+            {'scan.native-plan.enabled': 'true'})
+        builder = table.new_read_builder()
+        scan = builder.new_scan().with_global_index_result(
+            GlobalIndexResult.from_range(Range(1, 1)))
+
+        self.assertTrue(scan._native_plan_supported())
+        with patch.object(
+                scan.file_scanner, 'scan', side_effect=AssertionError("fallback")):
+            plan = scan.plan()
+        rows = builder.new_read().to_arrow(plan.splits()).to_pylist()
+
+        self.assertEqual(rows, [{'k': 2, 'v': 'b'}])
+        self.assertEqual(
+            [(range_.from_, range_.to)
+             for range_ in plan.splits()[0].row_ranges()],
+            [(1, 1)],
+        )
+
+        empty_scan = builder.new_scan().with_global_index_result(
+            GlobalIndexResult.create_empty())
+        with patch.object(
+                empty_scan.file_scanner, 'scan',
+                side_effect=AssertionError("fallback")):
+            empty_plan = empty_scan.plan()
+        self.assertEqual(empty_plan.splits(), [])
+
+    def test_filter_is_pushed_to_native_plan(self):
+        options = {
+            'source.split.target-size': '1b',
+            'source.split.open-file-cost': '1b',
+        }
+        self.cat.create_table('default.filter_t', Schema.from_pyarrow_schema(
+            self.schema, options=options), False)
+        for k in range(1, 4):
+            self._write('filter_t', [{'k': k, 'v': 'v%d' % k}])
+
+        table = self.cat.get_table('default.filter_t')
+        normal_builder = table.new_read_builder()
+        predicate = normal_builder.new_predicate_builder().equal('k', 2)
+        normal_builder.with_filter(predicate)
+        normal_plan = normal_builder.new_scan().plan()
+
+        native_builder = table.copy(
+            {'scan.native-plan.enabled': 'true'}).new_read_builder()
+        predicate = native_builder.new_predicate_builder().equal('k', 2)
+        native_builder.with_filter(predicate)
+        native_plan = native_builder.new_scan().plan()
+        rows = native_builder.new_read().to_arrow(native_plan.splits()).to_pylist()
+
+        self.assertEqual(rows, [{'k': 2, 'v': 'v2'}])
+        self.assertEqual(len(native_plan.splits()), len(normal_plan.splits()))
+        self.assertTrue(native_builder.explain().native_planned)
+
+    def test_limit_is_pushed_to_native_plan(self):
+        options = {
+            'source.split.target-size': '1b',
+            'source.split.open-file-cost': '1b',
+        }
+        self.cat.create_table('default.limit_t', Schema.from_pyarrow_schema(
+            self.schema, options=options), False)
+        for k in range(1, 4):
+            self._write('limit_t', [{'k': k, 'v': 'v%d' % k}])
+
+        table = self.cat.get_table('default.limit_t')
+        normal = table.new_read_builder().with_limit(1).new_scan().plan()
+        native_builder = table.copy(
+            {'scan.native-plan.enabled': 'true'}).new_read_builder().with_limit(1)
+        native = native_builder.new_scan().plan()
+        rows = native_builder.new_read().to_arrow(native.splits()).to_pylist()
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(len(native.splits()), len(normal.splits()))
+        self.assertEqual(len(native.splits()), 1)
+        self.assertTrue(native_builder.explain().native_planned)
+
+    def test_snapshot_time_travel_matches_normal_plan(self):
+        self.cat.create_table(
+            'default.travel_t', Schema.from_pyarrow_schema(self.schema), False)
+        self._write('travel_t', [{'k': 1, 'v': 'a'}])
+        self._write('travel_t', [{'k': 2, 'v': 'b'}])
+        options = {'scan.snapshot-id': '1'}
+
+        normal_table = self.cat.get_table('default.travel_t').copy(options)
+        normal_builder = normal_table.new_read_builder()
+        normal_plan = normal_builder.new_scan().plan()
+        normal_rows = normal_builder.new_read().to_arrow(
+            normal_plan.splits()).to_pylist()
+
+        native_table = normal_table.copy({'scan.native-plan.enabled': 'true'})
+        native_builder = native_table.new_read_builder()
+        native_plan = native_builder.new_scan().plan()
+        native_rows = native_builder.new_read().to_arrow(
+            native_plan.splits()).to_pylist()
+
+        self.assertEqual(native_plan.snapshot_id, 1)
+        self.assertEqual(native_rows, normal_rows)
+        self.assertEqual(native_rows, [{'k': 1, 'v': 'a'}])
+        self.assertTrue(native_builder.explain().native_planned)
+
     def test_dynamic_split_target_size_matches_normal_plan(self):
         self.cat.create_table(
             'default.split_t', Schema.from_pyarrow_schema(self.schema), False)
@@ -182,8 +403,8 @@ class NativePlanIntegrationTest(unittest.TestCase):
         self.assertEqual(native.split_count, len(normal.splits()))
         self.assertEqual(native.split_count, 1)
 
-    def test_partitioned_table_falls_back(self):
-        # Rust bucket_path can diverge from the writer's str(value) partition dir -> fall back.
+    def test_partitioned_table_matches_normal_plan(self):
+        # Native decoding restores PyPaimon's legacy unescaped partition path.
         schema = pa.schema([('k', pa.int64()), ('p', pa.string())])
         self.cat.create_table('default.pt_t', Schema.from_pyarrow_schema(
             schema, partition_keys=['p']), False)
@@ -191,14 +412,13 @@ class NativePlanIntegrationTest(unittest.TestCase):
         wb = t.new_batch_write_builder()
         w, c = wb.new_write(), wb.new_commit()
         w.write_arrow(pa.Table.from_pylist(
-            [{'k': 1, 'p': 'a'}, {'k': 2, 'p': 'a'}, {'k': 3, 'p': 'b'}], schema=schema))
+            [{'k': 1, 'p': 'a/b'}, {'k': 2, 'p': 'a/b'}, {'k': 3, 'p': 'c'}],
+            schema=schema))
         c.commit(w.prepare_commit())
         w.close()
         c.close()
 
-        native_table = self.cat.get_table('default.pt_t').copy(
-            {'scan.native-plan.enabled': 'true'})
-        self.assertFalse(native_table.new_read_builder().explain().native_planned)
+        self._assert_matches('pt_t')
 
     def test_explain_reflects_native_plan(self):
         self.cat.create_table(

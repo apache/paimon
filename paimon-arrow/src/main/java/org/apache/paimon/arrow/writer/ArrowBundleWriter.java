@@ -76,14 +76,22 @@ public class ArrowBundleWriter implements BundleFormatWriter {
     @Override
     public void writeBundle(BundleRecords bundleRecords) throws IOException {
         if (bundleRecords instanceof ArrowBundleRecords) {
-            add(((ArrowBundleRecords) bundleRecords).getVectorSchemaRoot());
+            ArrowBundleRecords arrowBundle = (ArrowBundleRecords) bundleRecords;
+            VectorSchemaRoot root = arrowBundle.getVectorSchemaRoot();
+            if (arrowFormatWriter.formatWriter().isArrowBundleSchemaCompatible(arrowBundle)
+                    && ArrowUtils.hasSameRootAllocator(root, root.getVector(0).getAllocator())) {
+                flush();
+                add(root);
+                return;
+            }
         } else if (bundleRecords instanceof VectorizedBundleRecords) {
             VectorizedBundleRecords records = (VectorizedBundleRecords) bundleRecords;
             add(records.batch(), records.selected());
-        } else {
-            for (InternalRow row : bundleRecords) {
-                addElement(row);
-            }
+            return;
+        }
+
+        for (InternalRow row : bundleRecords) {
+            addElement(row);
         }
     }
 
@@ -96,9 +104,11 @@ public class ArrowBundleWriter implements BundleFormatWriter {
                     ArrowUtils.serializeToCStruct(vsr, array, schema, bufferAllocator);
             long t2 = System.currentTimeMillis();
             serializeCost += (t2 - t1);
-            this.nativeWriter.writeIpcBytes(struct.arrayAddress(), struct.schemaAddress());
-            array.release();
-            schema.release();
+            try {
+                this.nativeWriter.writeIpcBytes(struct.arrayAddress(), struct.schemaAddress());
+            } finally {
+                ArrowUtils.releaseCDataIfNeeded(array, schema);
+            }
             jniCost += (System.currentTimeMillis() - t2);
         } catch (RuntimeException e) {
             LOG.error("Exception happens while add vsr", e);

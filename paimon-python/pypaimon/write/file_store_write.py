@@ -44,12 +44,16 @@ class FileStoreWrite:
 
         self.table: FileStoreTable = table
         self.data_writers: Dict[Tuple, DataWriter] = {}
+        self._runtime_total_buckets: Dict[Tuple, int] = {}
         self.max_seq_numbers: dict = {}
         self.write_cols = None
         self.blob_consumer = None
         self.commit_identifier = 0
         self.options = CoreOptions.copy(table.options)
         self.changelog_producer = self.options.changelog_producer()
+        self._configure_data_file_prefix(commit_user)
+
+    def _configure_data_file_prefix(self, commit_user):
         if self.table.bucket_mode() == BucketMode.POSTPONE_MODE:
             self.options.set(CoreOptions.DATA_FILE_PREFIX,
                              (f"{self.options.data_file_prefix()}-u-{commit_user}"
@@ -63,14 +67,29 @@ class FileStoreWrite:
         self.options.set(
             CoreOptions.TARGET_FILE_ROW_NUM, str(max_value))
 
-    def write(self, partition: Tuple, bucket: int, data: pa.RecordBatch):
+    def write(
+        self,
+        partition: Tuple,
+        bucket: int,
+        data: pa.RecordBatch,
+        total_buckets=None,
+    ):
+        self._check_runtime_bucket(partition, bucket, total_buckets)
         key = (partition, bucket)
         if key not in self.data_writers:
             self.data_writers[key] = self._create_data_writer(partition, bucket, self.options)
         writer = self.data_writers[key]
         writer.write(data)
 
-    def write_row(self, partition: Tuple, bucket: int, row, values_by_name: dict):
+    def write_row(
+        self,
+        partition: Tuple,
+        bucket: int,
+        row,
+        values_by_name: dict,
+        total_buckets=None,
+    ):
+        self._check_runtime_bucket(partition, bucket, total_buckets)
         key = (partition, bucket)
         if key not in self.data_writers:
             self.data_writers[key] = self._create_data_writer(partition, bucket, self.options)
@@ -91,6 +110,31 @@ class FileStoreWrite:
         )
         writer.write(data.to_batches()[0])
 
+    def _check_runtime_bucket(self, partition, bucket, total_buckets):
+        if total_buckets is None:
+            return
+        if (isinstance(total_buckets, bool)
+                or not isinstance(total_buckets, int)
+                or total_buckets <= 0):
+            raise ValueError("Total number of buckets must be positive")
+        if bucket < 0 or bucket >= total_buckets:
+            raise ValueError(
+                "Bucket {} is out of range [0, {})".format(
+                    bucket, total_buckets
+                )
+            )
+
+        partition = tuple(partition)
+        previous = self._runtime_total_buckets.get(partition)
+        if previous is not None and previous != total_buckets:
+            raise RuntimeError(
+                "Try to write partition {} with a new bucket num {}, but "
+                "the previous bucket num is {}.".format(
+                    partition, total_buckets, previous
+                )
+            )
+        self._runtime_total_buckets[partition] = total_buckets
+
     def _create_data_writer(self, partition: Tuple, bucket: int, options: CoreOptions) -> DataWriter:
         row_limit = options.target_file_row_num()
         max_value = CoreOptions.TARGET_FILE_ROW_NUM.default_value()
@@ -101,9 +145,20 @@ class FileStoreWrite:
             raise ValueError(
                 f"target-file-row-num should be at most {max_value}")
         if row_limit != max_value:
-            raise NotImplementedError(
-                "target-file-row-num is set on this table but pypaimon file-store writers do not support "
-                "row-count based file rolling yet; unset it or write with Java/Flink/Spark.")
+            # Row-count rolling is implemented in the base append writer only.
+            # DE (data-evolution) append tables are the target; primary-key,
+            # blob and vector writers override rolling and are not supported yet.
+            row_rolling_supported = (
+                self.table.options.data_evolution_enabled()
+                and not self.table.is_primary_key_table
+                and not self._has_blob_columns()
+                and not (self._has_vector_columns()
+                         and options.with_vector_format()))
+            if not row_rolling_supported:
+                raise NotImplementedError(
+                    "target-file-row-num is set on this table but pypaimon supports row-count "
+                    "based file rolling only for data-evolution append tables (no primary key, "
+                    "blob or vector columns); unset it or write with Java/Flink/Spark.")
 
         def max_seq_number():
             return self._seq_number_stats(partition).get(bucket, 1)
@@ -275,6 +330,7 @@ class FileStoreWrite:
                     bucket=bucket,
                     new_files=committed_files,
                     changelog_files=changelog_files,
+                    total_buckets=self._runtime_total_buckets.get(partition),
                 )
                 commit_messages.append(commit_message)
         return commit_messages
@@ -284,6 +340,7 @@ class FileStoreWrite:
         for writer in self.data_writers.values():
             writer.close()
         self.data_writers.clear()
+        self._runtime_total_buckets.clear()
 
     def abort(self):
         """Abort all data writers and clean up files produced by this write."""
@@ -293,6 +350,7 @@ class FileStoreWrite:
             except Exception as e:
                 logger.warning("Failed to abort data writer.", exc_info=e)
         self.data_writers.clear()
+        self._runtime_total_buckets.clear()
 
     def _seq_number_stats(self, partition: Tuple) -> Dict[int, int]:
         buckets = self.max_seq_numbers.get(partition)
@@ -319,3 +377,10 @@ class FileStoreWrite:
             if current_seq_num > existing_max:
                 max_seq_numbers[split.bucket] = current_seq_num
         return max_seq_numbers
+
+
+class PostponeFixedBucketFileStoreWrite(FileStoreWrite):
+    """File store write with runtime bucket counts for postpone tables."""
+
+    def _configure_data_file_prefix(self, commit_user):
+        pass

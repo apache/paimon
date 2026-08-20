@@ -44,6 +44,7 @@ import org.apache.parquet.hadoop.metadata.ColumnPath;
 import org.apache.parquet.internal.column.columnindex.ColumnIndexBuilder;
 import org.apache.parquet.internal.column.columnindex.OffsetIndexBuilder;
 import org.apache.parquet.io.ParquetEncodingException;
+import org.apache.parquet.schema.LogicalTypeAnnotation;
 import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.util.AutoCloseables;
 import org.slf4j.Logger;
@@ -76,6 +77,7 @@ public class ColumnCompressionPageWriteStore implements PageWriteStore, BloomFil
     private static final class ColumnChunkPageWriter implements PageWriter, BloomFilterWriter {
 
         private final ColumnDescriptor path;
+        private final boolean geospatial;
         private final CompressionCodecFactory.BytesInputCompressor compressor;
 
         private final ByteArrayOutputStream tempOutputStream = new ByteArrayOutputStream();
@@ -123,6 +125,11 @@ public class ColumnCompressionPageWriteStore implements PageWriteStore, BloomFil
                 int rowGroupOrdinal,
                 int columnOrdinal) {
             this.path = path;
+            LogicalTypeAnnotation logicalType = path.getPrimitiveType().getLogicalTypeAnnotation();
+            this.geospatial =
+                    logicalType instanceof LogicalTypeAnnotation.GeometryLogicalTypeAnnotation
+                            || logicalType
+                                    instanceof LogicalTypeAnnotation.GeographyLogicalTypeAnnotation;
             this.compressor = compressor;
             this.releaser = new ByteBufferReleaser(allocator);
             this.buf = new ConcatenatingByteBufferCollector(allocator);
@@ -426,6 +433,12 @@ public class ColumnCompressionPageWriteStore implements PageWriteStore, BloomFil
                 Statistics<?> statistics,
                 SizeStatistics sizeStatistics,
                 GeospatialStatistics geospatialStatistics) {
+            if (geospatial && statistics != null && statistics.isNumNullsSet()) {
+                statistics =
+                        Statistics.getBuilderForReading(path.getPrimitiveType())
+                                .withNumNulls(statistics.getNumNulls())
+                                .build();
+            }
             totalSizeStatistics.mergeStatistics(sizeStatistics);
             if (!totalSizeStatistics.isValid()) {
                 sizeStatistics = null;

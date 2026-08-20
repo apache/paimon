@@ -20,6 +20,7 @@ package org.apache.paimon.rest;
 
 import org.apache.hc.client5.http.HttpRequestRetryStrategy;
 import org.apache.hc.client5.http.classic.methods.HttpGet;
+import org.apache.hc.client5.http.protocol.HttpClientContext;
 import org.apache.hc.client5.http.utils.DateUtils;
 import org.apache.hc.core5.http.ConnectionClosedException;
 import org.apache.hc.core5.http.HttpHeaders;
@@ -219,5 +220,22 @@ public class TestExponentialHttpRequestRetryStrategy {
     public void testRetryDoesNotHappenOnUnacceptableStatusCodes(int statusCode) {
         BasicHttpResponse response = new BasicHttpResponse(statusCode, String.valueOf(statusCode));
         assertThat(retryStrategy.retryRequest(response, 3, null)).isFalse();
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {429, 503})
+    public void testRetryDoesNotHappenOnAnExchangeMarkedUnsafe(int statusCode) {
+        BasicHttpResponse response = new BasicHttpResponse(statusCode, String.valueOf(statusCode));
+
+        // The status says the request failed, not that the server never saw it: a 503 can come
+        // from an intermediary after the request already took effect.
+        assertThat(
+                        retryStrategy.retryRequest(
+                                response,
+                                1,
+                                ExponentialHttpRequestRetryStrategy.retryUnsafeContext()))
+                .isFalse();
+        // Only the marked exchange loses the retry; a plain one keeps it.
+        assertThat(retryStrategy.retryRequest(response, 1, HttpClientContext.create())).isTrue();
     }
 }

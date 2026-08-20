@@ -287,7 +287,8 @@ public class VariantShreddingReadTest {
         try (RecordReader<InternalRow> reader =
                 format.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
-                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null))) {
             InternalRowSerializer serializer = new InternalRowSerializer(rowType);
             reader.forEachRemaining(row -> result.add(serializer.copy(row)));
         }

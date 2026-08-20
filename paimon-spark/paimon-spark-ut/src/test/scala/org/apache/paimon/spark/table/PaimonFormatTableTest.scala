@@ -245,6 +245,103 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
     }
   }
 
+  test("PaimonFormatTable: max_pt picks the largest partition") {
+    val tableName = "max_pt_t"
+    withTable(tableName) {
+      sql(
+        s"CREATE TABLE $tableName (f0 INT) USING CSV PARTITIONED BY (ds STRING) " +
+          "TBLPROPERTIES ('format-table.implementation'='paimon', " +
+          "'metastore.partitioned-table'='true')")
+      val table =
+        paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
+      assert(table.partitionManager() != null)
+      sql(s"INSERT INTO $tableName VALUES (1, '20240101')")
+      sql(s"INSERT INTO $tableName VALUES (2, '20240103')")
+      sql(s"INSERT INTO $tableName VALUES (3, '20240102')")
+
+      // Two things used to stop max_pt on a format table: it is not a SparkTable, and
+      // catalog partitions report zero before the partition-statistics contract exists.
+      checkAnswer(sql(s"SELECT sys.max_pt('test_db.$tableName')"), Seq(Row("20240103")))
+      checkAnswer(
+        sql(s"SELECT * FROM $tableName WHERE ds = sys.max_pt('test_db.$tableName')"),
+        Seq(Row(2, "20240103")))
+    }
+  }
+
+  test("PaimonFormatTable: max_pt skips the default partition") {
+    val tableName = "max_pt_null"
+    withTable(tableName) {
+      sql(
+        s"CREATE TABLE $tableName (f0 INT) USING CSV PARTITIONED BY (ds STRING) " +
+          "TBLPROPERTIES ('format-table.implementation'='paimon', " +
+          "'metastore.partitioned-table'='true')")
+      sql(s"INSERT INTO $tableName VALUES (1, '20240101')")
+      // A null partition value comes back as a real null, which the typed comparator would
+      // dereference; it is also not what anyone means by the max partition.
+      sql(s"INSERT INTO $tableName VALUES (2, null)")
+
+      checkAnswer(sql(s"SELECT sys.max_pt('test_db.$tableName')"), Seq(Row("20240101")))
+    }
+  }
+
+  test("PaimonFormatTable: max_pt skips an empty registered partition") {
+    val tableName = "max_pt_empty"
+    withTable(tableName) {
+      sql(
+        s"CREATE TABLE $tableName (f0 INT) USING CSV PARTITIONED BY (ds STRING) " +
+          "TBLPROPERTIES ('format-table.implementation'='paimon', " +
+          "'metastore.partitioned-table'='true')")
+      sql(s"INSERT INTO $tableName VALUES (1, '20240101')")
+      sql(s"ALTER TABLE $tableName ADD PARTITION (ds='20240103')")
+
+      checkAnswer(sql(s"SELECT sys.max_pt('test_db.$tableName')"), Seq(Row("20240101")))
+    }
+  }
+
+  test("PaimonFormatTable: max_pt skips an empty filesystem partition directory") {
+    val tableName = "max_pt_empty_dir"
+    withTable(tableName) {
+      sql(
+        s"CREATE TABLE $tableName (f0 INT) USING CSV PARTITIONED BY (ds STRING) " +
+          "TBLPROPERTIES ('format-table.implementation'='paimon')")
+      sql(s"INSERT INTO $tableName VALUES (1, '20240101')")
+      val table =
+        paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
+      assert(table.partitionManager() == null)
+      table.fileIO().mkdirs(new Path(table.location(), "ds=20240103"))
+
+      checkAnswer(sql(s"SELECT sys.max_pt('test_db.$tableName')"), Seq(Row("20240101")))
+    }
+  }
+
+  test("max_pt on a FileStoreTable skips a null partition instead of failing") {
+    val tableName = "max_pt_fst_null"
+    withTable(tableName) {
+      sql(s"CREATE TABLE $tableName (id INT, ds STRING) USING paimon PARTITIONED BY (ds)")
+      sql(s"INSERT INTO $tableName VALUES (1, '20240101')")
+      sql(s"INSERT INTO $tableName VALUES (2, null)")
+
+      // This is a behaviour change for FileStoreTable, not only for format tables: a null
+      // top-level partition value used to reach InternalRowUtils.compare and throw, and is now
+      // skipped. Pinned here so the change is visible rather than incidental.
+      checkAnswer(sql(s"SELECT sys.max_pt('test_db.$tableName')"), Seq(Row("20240101")))
+    }
+  }
+
+  test("PaimonFormatTable: max_pt rejects an unpartitioned table") {
+    val tableName = "max_pt_flat"
+    withTable(tableName) {
+      sql(
+        s"CREATE TABLE $tableName (f0 INT) USING CSV " +
+          "TBLPROPERTIES ('format-table.implementation'='paimon')")
+      sql(s"INSERT INTO $tableName VALUES (1)")
+      val e = intercept[Exception] {
+        sql(s"SELECT sys.max_pt('test_db.$tableName')").collect()
+      }
+      assert(e.getMessage.contains("not a partitioned table"))
+    }
+  }
+
   test("PaimonFormatTable: non-partitioned table") {
     for {
       (format, compression) <- Seq(

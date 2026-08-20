@@ -23,6 +23,7 @@ import tempfile
 import unittest
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.schema.schema_change import SchemaChange
@@ -1470,7 +1471,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
                     [],
                     [('last', b'blob-4')],
                     [('descriptor', source_descriptor.serialize())],
-                    [('duplicate', b'first'), ('duplicate', b'last')],
+                    [('first', b'first'), ('last', b'last')],
                 ],
                 type=map_blob_type,
             ),
@@ -1496,7 +1497,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
                 3: {},
                 4: {'last': b'blob-4'},
                 5: {'descriptor': descriptor_body},
-                6: {'duplicate': b'last'},
+                6: {'first': b'first', 'last': b'last'},
             },
         )
 
@@ -1575,7 +1576,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
                 3: {},
                 4: {'last': b'blob-4'},
                 5: {'descriptor': descriptor_body},
-                6: {'duplicate': b'last'},
+                6: {'first': b'first', 'last': b'last'},
             },
         )
 
@@ -2254,6 +2255,7 @@ class DedicatedFormatWriterTest(unittest.TestCase):
             5: b'blob-5',
         })
 
+    @pytest.mark.python_plan
     def test_blob_write_read_partition(self):
         """Test complete end-to-end blob functionality: write blob data and read it back to verify correctness."""
         from pypaimon import Schema

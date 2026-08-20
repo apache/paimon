@@ -181,6 +181,21 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
 
     @Nullable
     public SinkRecord writeAndReturn(InternalRow row, int bucket) throws Exception {
+        return writeAndReturn(row, bucket, null);
+    }
+
+    /**
+     * Write a row to a bucket whose partition-level total bucket count is determined at runtime.
+     */
+    @Nullable
+    public SinkRecord writeAndReturn(InternalRow row, int bucket, int totalBuckets)
+            throws Exception {
+        return writeAndReturn(row, bucket, Integer.valueOf(totalBuckets));
+    }
+
+    @Nullable
+    private SinkRecord writeAndReturn(InternalRow row, int bucket, @Nullable Integer totalBuckets)
+            throws Exception {
         checkNullability(row);
         row = wrapDefaultValue(row);
         RowKind rowKind = RowKindGenerator.getRowKind(rowKindGenerator, row);
@@ -188,7 +203,12 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
             return null;
         }
         SinkRecord record = bucket == -1 ? toSinkRecord(row) : toSinkRecord(row, bucket);
-        write.write(record.partition(), record.bucket(), recordExtractor.extract(record, rowKind));
+        T extracted = recordExtractor.extract(record, rowKind);
+        if (totalBuckets == null) {
+            write.write(record.partition(), record.bucket(), extracted);
+        } else {
+            write.write(record.partition(), record.bucket(), totalBuckets, extracted);
+        }
         return record;
     }
 

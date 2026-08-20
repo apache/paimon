@@ -19,20 +19,31 @@
 package org.apache.paimon.hive;
 
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalMap;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.hive.objectinspector.PaimonInternalRowObjectInspector;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
+import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspectorFactory;
 import org.apache.hadoop.hive.serde2.objectinspector.StructField;
+import org.apache.hadoop.hive.serde2.objectinspector.StructObjectInspector;
+import org.apache.hadoop.hive.serde2.objectinspector.primitive.PrimitiveObjectInspectorFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 
 import static org.apache.paimon.hive.RandomGenericRowDataGenerator.FIELD_COMMENTS;
@@ -71,11 +82,51 @@ public class PaimonSerDeTest {
         assertThat(serDe.deserialize(container)).isEqualTo(rowData);
     }
 
+    @Test
+    public void testSerializeMultiset() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.MULTISET(DataTypes.STRING())},
+                        new String[] {"id", "tags"});
+        PaimonSerDe serDe = createInitializedSerDe(rowType);
+
+        // hive represents a multiset column as map<element, count>
+        StructObjectInspector sourceInspector =
+                ObjectInspectorFactory.getStandardStructObjectInspector(
+                        Arrays.asList("id", "tags"),
+                        Arrays.asList(
+                                PrimitiveObjectInspectorFactory.javaIntObjectInspector,
+                                ObjectInspectorFactory.getStandardMapObjectInspector(
+                                        PrimitiveObjectInspectorFactory.javaStringObjectInspector,
+                                        PrimitiveObjectInspectorFactory.javaIntObjectInspector)));
+
+        Map<String, Integer> tags = new LinkedHashMap<>();
+        tags.put("apple", 2);
+        tags.put("banana", 1);
+
+        InternalRow row =
+                ((RowDataContainer) serDe.serialize(Arrays.asList(1, tags), sourceInspector)).get();
+
+        assertThat(row.getInt(0)).isEqualTo(1);
+        InternalMap actual = row.getMap(1);
+        assertThat(actual.size()).isEqualTo(tags.size());
+        Map<String, Integer> actualTags = new HashMap<>();
+        for (int i = 0; i < actual.size(); i++) {
+            actualTags.put(
+                    actual.keyArray().getString(i).toString(), actual.valueArray().getInt(i));
+        }
+        assertThat(actualTags).isEqualTo(tags);
+    }
+
     private PaimonSerDe createInitializedSerDe() throws Exception {
+        return createInitializedSerDe(ROW_TYPE);
+    }
+
+    private PaimonSerDe createInitializedSerDe(RowType rowType) throws Exception {
         new SchemaManager(LocalFileIO.create(), new Path(tempDir.toString()))
                 .createTable(
                         new Schema(
-                                ROW_TYPE.getFields(),
+                                rowType.getFields(),
                                 Collections.emptyList(),
                                 Collections.emptyList(),
                                 new HashMap<>(),

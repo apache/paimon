@@ -114,9 +114,9 @@ public class SparkChainTableITCase {
                         + "    `t1` BIGINT COMMENT 't1',\n"
                         + "    `t2` BIGINT COMMENT 't2',\n"
                         + "    `t3` STRING COMMENT 't3'\n"
-                        + "  ) PARTITIONED BY (`dt` STRING COMMENT 'dt') ROW FORMAT SERDE 'org.apache.paimon.hive.PaimonSerDe'\n"
-                        + "WITH\n"
-                        + "  SERDEPROPERTIES ('serialization.format' = '1') STORED AS INPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonInputFormat' OUTPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonOutputFormat' TBLPROPERTIES (\n"
+                        + "  ) USING paimon\n"
+                        + "PARTITIONED BY (`dt` STRING COMMENT 'dt')\n"
+                        + "TBLPROPERTIES (\n"
                         + "    'bucket-key' = 't1',\n"
                         + "    'primary-key' = 'dt,t1',\n"
                         + "    'partition.timestamp-pattern' = '$dt',\n"
@@ -349,9 +349,9 @@ public class SparkChainTableITCase {
                         + "    `t1` BIGINT COMMENT 't1',\n"
                         + "    `t2` BIGINT COMMENT 't2',\n"
                         + "    `t3` STRING COMMENT 't3'\n"
-                        + "  ) PARTITIONED BY (`dt` STRING COMMENT 'dt', `hour` STRING COMMENT 'hour') ROW FORMAT SERDE 'org.apache.paimon.hive.PaimonSerDe'\n"
-                        + "WITH\n"
-                        + "  SERDEPROPERTIES ('serialization.format' = '1') STORED AS INPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonInputFormat' OUTPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonOutputFormat' TBLPROPERTIES (\n"
+                        + "  ) USING paimon\n"
+                        + "PARTITIONED BY (`dt` STRING COMMENT 'dt', `hour` STRING COMMENT 'hour')\n"
+                        + "TBLPROPERTIES (\n"
                         + "    'bucket-key' = 't1',\n"
                         + "    'primary-key' = 'dt,hour,t1',\n"
                         + "    'partition.timestamp-pattern' = '$dt $hour:00:00',\n"
@@ -592,9 +592,9 @@ public class SparkChainTableITCase {
                         + "    `seq` BIGINT COMMENT 'seq',\n"
                         + "    `v1` STRING COMMENT 'v1',\n"
                         + "    `v2` STRING COMMENT 'v2'\n"
-                        + "  ) PARTITIONED BY (`dt` STRING COMMENT 'dt') ROW FORMAT SERDE 'org.apache.paimon.hive.PaimonSerDe'\n"
-                        + "WITH\n"
-                        + "  SERDEPROPERTIES ('serialization.format' = '1') STORED AS INPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonInputFormat' OUTPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonOutputFormat' TBLPROPERTIES (\n"
+                        + "  ) USING paimon\n"
+                        + "PARTITIONED BY (`dt` STRING COMMENT 'dt')\n"
+                        + "TBLPROPERTIES (\n"
                         + "    'bucket-key' = 'key',\n"
                         + "    'primary-key' = 'dt,key',\n"
                         + "    'partition.timestamp-pattern' = '$dt',\n"
@@ -748,9 +748,9 @@ public class SparkChainTableITCase {
                         + "    `t1` BIGINT COMMENT 't1',\n"
                         + "    `t2` BIGINT COMMENT 't2',\n"
                         + "    `t3` STRING COMMENT 't3'\n"
-                        + "  ) PARTITIONED BY (`dt` STRING COMMENT 'dt') ROW FORMAT SERDE 'org.apache.paimon.hive.PaimonSerDe'\n"
-                        + "WITH\n"
-                        + "  SERDEPROPERTIES ('serialization.format' = '1') STORED AS INPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonInputFormat' OUTPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonOutputFormat' TBLPROPERTIES (\n"
+                        + "  ) USING paimon\n"
+                        + "PARTITIONED BY (`dt` STRING COMMENT 'dt')\n"
+                        + "TBLPROPERTIES (\n"
                         + "    'bucket-key' = 't1',\n"
                         + "    'primary-key' = 'dt,t1',\n"
                         + "    'partition.timestamp-pattern' = '$dt',\n"
@@ -822,7 +822,7 @@ public class SparkChainTableITCase {
                         + "    `t1` string ,"
                         + "    `t2` string ,"
                         + "    `t3` string"
-                        + ") PARTITIONED BY (`date` string)"
+                        + ") USING paimon PARTITIONED BY (`date` string) "
                         + "TBLPROPERTIES ("
                         + "   'chain-table.enabled' = 'true'"
                         + "  ,'primary-key' = 'date,t1'"
@@ -878,9 +878,9 @@ public class SparkChainTableITCase {
                         + "    `t1` BIGINT COMMENT 't1',\n"
                         + "    `t2` BIGINT COMMENT 't2',\n"
                         + "    `t3` STRING COMMENT 't3'\n"
-                        + "  ) PARTITIONED BY (`region` STRING, `dt` STRING COMMENT 'dt') ROW FORMAT SERDE 'org.apache.paimon.hive.PaimonSerDe'\n"
-                        + "WITH\n"
-                        + "  SERDEPROPERTIES ('serialization.format' = '1') STORED AS INPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonInputFormat' OUTPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonOutputFormat' TBLPROPERTIES (\n"
+                        + "  ) USING paimon\n"
+                        + "PARTITIONED BY (`region` STRING, `dt` STRING COMMENT 'dt')\n"
+                        + "TBLPROPERTIES (\n"
                         + "    'bucket-key' = 't1',\n"
                         + "    'primary-key' = 'region,dt,t1',\n"
                         + "    'partition.timestamp-pattern' = '$dt',\n"
@@ -1310,9 +1310,9 @@ public class SparkChainTableITCase {
                         + "    `t1` BIGINT COMMENT 't1',\n"
                         + "    `t2` BIGINT COMMENT 't2',\n"
                         + "    `t3` STRING COMMENT 't3'\n"
-                        + "  ) PARTITIONED BY (`region` STRING, `dt` STRING COMMENT 'dt', `hour` STRING COMMENT 'hour') ROW FORMAT SERDE 'org.apache.paimon.hive.PaimonSerDe'\n"
-                        + "WITH\n"
-                        + "  SERDEPROPERTIES ('serialization.format' = '1') STORED AS INPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonInputFormat' OUTPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonOutputFormat' TBLPROPERTIES (\n"
+                        + "  ) USING paimon\n"
+                        + "PARTITIONED BY (`region` STRING, `dt` STRING COMMENT 'dt', `hour` STRING COMMENT 'hour')\n"
+                        + "TBLPROPERTIES (\n"
                         + "    'bucket-key' = 't1',\n"
                         + "    'primary-key' = 'region,dt,hour,t1',\n"
                         + "    'partition.timestamp-pattern' = '$dt $hour:00:00',\n"
@@ -1767,9 +1767,9 @@ public class SparkChainTableITCase {
                         + "    `t1` BIGINT COMMENT 't1',\n"
                         + "    `t2` BIGINT COMMENT 't2',\n"
                         + "    `t3` STRING COMMENT 't3'\n"
-                        + "  ) PARTITIONED BY (`region` STRING, `biz_type` STRING COMMENT 'biz_type', `dt` STRING COMMENT 'dt') ROW FORMAT SERDE 'org.apache.paimon.hive.PaimonSerDe'\n"
-                        + "WITH\n"
-                        + "  SERDEPROPERTIES ('serialization.format' = '1') STORED AS INPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonInputFormat' OUTPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonOutputFormat' TBLPROPERTIES (\n"
+                        + "  ) USING paimon\n"
+                        + "PARTITIONED BY (`region` STRING, `biz_type` STRING COMMENT 'biz_type', `dt` STRING COMMENT 'dt')\n"
+                        + "TBLPROPERTIES (\n"
                         + "    'bucket-key' = 't1',\n"
                         + "    'primary-key' = 'region,biz_type,dt,t1',\n"
                         + "    'partition.timestamp-pattern' = '$dt',\n"
@@ -2314,7 +2314,7 @@ public class SparkChainTableITCase {
                         + "  `t1` BIGINT,\n"
                         + "  `t2` BIGINT,\n"
                         + "  `t3` STRING\n"
-                        + ") PARTITIONED BY (`dt` STRING)\n"
+                        + ") USING paimon PARTITIONED BY (`dt` STRING)\n"
                         + "TBLPROPERTIES (\n"
                         + "  'bucket-key' = 't1',\n"
                         + "  'primary-key' = 'dt,t1',\n"
@@ -2378,7 +2378,7 @@ public class SparkChainTableITCase {
                         + "  `t1` BIGINT COMMENT 't1',\n"
                         + "  `t2` BIGINT COMMENT 't2',\n"
                         + "  `t3` STRING COMMENT 't3'\n"
-                        + ") PARTITIONED BY (`dt` STRING, `hr` STRING)\n"
+                        + ") USING paimon PARTITIONED BY (`dt` STRING, `hr` STRING)\n"
                         + "TBLPROPERTIES (\n"
                         + "  'bucket-key' = 't1',\n"
                         + "  'primary-key' = 'dt,hr,t1',\n"
@@ -2419,6 +2419,163 @@ public class SparkChainTableITCase {
                         "[4,1,4,20250810,05]", "[5,1,5,20250810,05]", "[6,1,6,20250810,05]");
 
         spark.sql("DROP TABLE IF EXISTS `my_db1`.`chain_test`;");
+        spark.close();
+    }
+
+    @Test
+    public void testChainTableWithMinuteLevelPartitions(@TempDir java.nio.file.Path tempDir)
+            throws IOException {
+        Path warehousePath = new Path("file:" + tempDir.toString());
+        SparkSession.Builder builder = createSparkSessionBuilder(warehousePath);
+        SparkSession spark = builder.getOrCreate();
+        spark.sql("CREATE DATABASE IF NOT EXISTS my_db1");
+        spark.sql("USE spark_catalog.my_db1");
+
+        spark.sql(
+                "CREATE TABLE `chain_test` (\n"
+                        + "  `t1` BIGINT COMMENT 't1',\n"
+                        + "  `t2` BIGINT COMMENT 't2',\n"
+                        + "  `t3` STRING COMMENT 't3'\n"
+                        + ") PARTITIONED BY (`dt` STRING, `hr_min` STRING)\n"
+                        + "TBLPROPERTIES (\n"
+                        + "  'bucket-key' = 't1',\n"
+                        + "  'primary-key' = 'dt,hr_min,t1',\n"
+                        + "  'partition.timestamp-pattern' = '$dt $hr_min:00',\n"
+                        + "  'partition.timestamp-formatter' = 'yyyyMMdd HH:mm:ss',\n"
+                        + "  'chain-table.enabled' = 'true',\n"
+                        + "  'bucket' = '1',\n"
+                        + "  'merge-engine' = 'deduplicate',\n"
+                        + "  'sequence.field' = 't2',\n"
+                        + "  'chain-table.chain-partition-keys' = 'dt,hr_min'\n"
+                        + ");");
+
+        setupChainTableBranches(spark, "chain_test");
+
+        spark.sql(
+                "INSERT INTO TABLE `chain_test$branch_snapshot` PARTITION (dt = '20250810', hr_min='01:01') VALUES (3, 1, '3');");
+        spark.sql(
+                "INSERT INTO TABLE `chain_test$branch_snapshot` PARTITION (dt = '20250810', hr_min='03:30') VALUES (4, 1, '4');");
+
+        spark.sql(
+                "INSERT INTO TABLE `chain_test$branch_delta` PARTITION (dt = '20250810', hr_min='03:35') VALUES (5, 1, '5');");
+        spark.sql(
+                "INSERT INTO TABLE `chain_test$branch_delta` PARTITION (dt = '20250810', hr_min='03:40') VALUES (6, 1, '6');");
+        spark.sql(
+                "INSERT INTO TABLE `chain_test$branch_delta` PARTITION (dt = '20250810', hr_min='03:45') VALUES (7, 1, '7');");
+
+        assertThat(
+                        spark
+                                .sql(
+                                        "select * from `chain_test` where dt='20250810' and hr_min='03:40'")
+                                .collectAsList().stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(
+                        "[4,1,4,20250810,03:40]",
+                        "[5,1,5,20250810,03:40]",
+                        "[6,1,6,20250810,03:40]");
+
+        spark.sql("DROP TABLE IF EXISTS `my_db1`.`chain_test`;");
+        spark.close();
+    }
+
+    @Test
+    public void testChainTableWithDeletionVectors(@TempDir java.nio.file.Path tempDir)
+            throws IOException {
+        Path warehousePath = new Path("file:" + tempDir.toString());
+        SparkSession.Builder builder = createSparkSessionBuilder(warehousePath);
+        SparkSession spark = builder.getOrCreate();
+        spark.sql("CREATE DATABASE IF NOT EXISTS my_db1");
+        spark.sql("USE spark_catalog.my_db1");
+
+        spark.sql(
+                "CREATE TABLE IF NOT EXISTS `chain_dv_t1` (\n"
+                        + "  `t1` BIGINT COMMENT 't1',\n"
+                        + "  `t2` BIGINT COMMENT 't2',\n"
+                        + "  `t3` STRING COMMENT 't3'\n"
+                        + ") USING paimon\n"
+                        + "PARTITIONED BY (`region` STRING COMMENT 'region', `date` STRING COMMENT 'date')\n"
+                        + "TBLPROPERTIES (\n"
+                        + "  'chain-table.enabled' = 'true',\n"
+                        + "  'deletion-vectors.enabled' = 'true',\n"
+                        + "  'primary-key' = 'region,date,t1',\n"
+                        + "  'sequence.field' = 't2',\n"
+                        + "  'bucket-key' = 't1',\n"
+                        + "  'bucket' = '1',\n"
+                        + "  'partition.timestamp-pattern' = '$date',\n"
+                        + "  'partition.timestamp-formatter' = 'yyyyMMdd',\n"
+                        + "  'chain-table.chain-partition-keys' = 'date',\n"
+                        + "  'compaction.min.file-num' = '100',\n"
+                        + "  'num-sorted-run.compaction-trigger' = '20'\n"
+                        + ")");
+
+        setupChainTableBranches(spark, "chain_dv_t1");
+
+        spark.sql(
+                "INSERT INTO TABLE `my_db1`.`chain_dv_t1$branch_snapshot` PARTITION (region = 'CN', date = '20260222') VALUES (1, 1, '1'), (6, 1, '1')");
+        spark.sql(
+                "INSERT INTO TABLE `my_db1`.`chain_dv_t1$branch_snapshot` PARTITION (region = 'CN', date = '20260223') VALUES (1, 2, '2'), (2, 2, '2'), (3, 1, '1')");
+        spark.sql(
+                "INSERT INTO TABLE `my_db1`.`chain_dv_t1$branch_snapshot` PARTITION (region = 'US', date = '20260223') VALUES (11, 1, '1')");
+
+        spark.sql(
+                "INSERT INTO TABLE `my_db1`.`chain_dv_t1$branch_delta` PARTITION (region = 'CN', date = '20260224') VALUES (1, 3, '3'), (4, 1, '1'), (5, 1, '1')");
+        spark.sql(
+                "INSERT INTO TABLE `my_db1`.`chain_dv_t1$branch_delta` PARTITION (region = 'US', date = '20260224') VALUES (12, 1, '1')");
+        // Delete rows from both branches to produce deletion vectors
+        spark.sql("DELETE FROM `my_db1`.`chain_dv_t1$branch_snapshot` WHERE t1 = 3");
+        spark.sql("DELETE FROM `my_db1`.`chain_dv_t1$branch_delta` WHERE t1 = 4");
+
+        assertThat(
+                        spark
+                                .sql(
+                                        "SELECT * FROM `my_db1`.`chain_dv_t1$branch_snapshot` WHERE date = '20260223'")
+                                .collectAsList().stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(
+                        "[1,2,2,CN,20260223]", "[2,2,2,CN,20260223]", "[11,1,1,US,20260223]");
+
+        assertThat(
+                        spark
+                                .sql(
+                                        "SELECT * FROM `my_db1`.`chain_dv_t1$branch_delta` WHERE date = '20260224'")
+                                .collectAsList().stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(
+                        "[1,3,3,CN,20260224]", "[5,1,1,CN,20260224]", "[12,1,1,US,20260224]");
+
+        assertThat(
+                        spark.sql("SELECT * FROM `my_db1`.`chain_dv_t1` WHERE date = '20260224'")
+                                .collectAsList().stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(
+                        "[1,3,3,CN,20260224]",
+                        "[2,2,2,CN,20260224]",
+                        "[5,1,1,CN,20260224]",
+                        "[11,1,1,US,20260224]",
+                        "[12,1,1,US,20260224]");
+
+        spark.sql(
+                "CALL sys.compact_chain_table(table => 'my_db1.chain_dv_t1', partition => 'date=\"20260224\"')");
+
+        assertThat(
+                        spark
+                                .sql(
+                                        "SELECT * FROM `my_db1`.`chain_dv_t1$branch_snapshot` WHERE date = '20260224'")
+                                .collectAsList().stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(
+                        "[1,3,3,CN,20260224]",
+                        "[2,2,2,CN,20260224]",
+                        "[5,1,1,CN,20260224]",
+                        "[11,1,1,US,20260224]",
+                        "[12,1,1,US,20260224]");
+
+        spark.sql("DROP TABLE IF EXISTS `my_db1`.`chain_dv_t1`;");
         spark.close();
     }
 }

@@ -580,6 +580,8 @@ public class PredicateTest {
         assertThat(executeLike("abcde", "%c.e")).isEqualTo(false);
         assertThat(executeLike("a-c", "a\\_c")).isEqualTo(false);
         assertThat(executeLike("a_c", "a\\_c")).isEqualTo(true);
+        assertThat(Arrays.asList(executeLike("a%", "a\\%"), executeLike("a\\anything", "a\\%")))
+                .containsExactly(true, false);
         assertThat(executeLike("startX", "start%")).isEqualTo(true);
         assertThat(executeLike("not_startX", "start%")).isEqualTo(false);
         assertThat(executeLike("xxmiddleyy", "%middle%")).isEqualTo(true);

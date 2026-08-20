@@ -94,16 +94,17 @@ array order, a null array, and null elements are preserved. An empty array write
 
 `MAP<K, BLOB>` is externalized value by value. Keys remain in the normal data file and every non-null value is replaced
 with a descriptor to managed storage. A null map, an empty map, and null values are preserved. Supported key types are
-the integer family, `CHAR`, and `VARCHAR`; `blob-descriptor-field` and `blob-view-field` remain scalar-only declarations.
+the integer family, `BOOLEAN`, `DECIMAL`, `DATE`, `TIME`, `BINARY`, `VARBINARY` (`BYTES`), `CHAR`, and `VARCHAR`;
+`blob-descriptor-field` and `blob-view-field` remain scalar-only declarations.
 
 `blob.target-file-size` controls when a writer rolls to a new managed payload pack. A pack can contain payloads from
 multiple rows, and a row descriptor records its URI, offset, and length.
 
 :::note
 
-On append tables, `blob-descriptor-field` is descriptor-only storage and writes must provide a descriptor. Append-table
-`blob-field` storage still requires row tracking and data evolution. The managed raw-byte externalization described here
-is specific to supported primary-key tables.
+On append tables, `blob-descriptor-field` is descriptor-only storage and non-null values must provide a descriptor.
+Append-table `blob-field` storage still requires row tracking and data evolution. The managed raw-byte externalization
+described here is specific to supported primary-key tables.
 
 :::
 
@@ -114,7 +115,7 @@ Primary-key managed BLOB storage has the following requirements:
 | Item | Requirement |
 |------|-------------|
 | Managed BLOB declaration | `BLOB`, `ARRAY<BLOB>`, and `MAP<K, BLOB>` use `blob-field`; `blob-descriptor-field` remains inline |
-| Merge engine | `deduplicate` only |
+| Merge engine | `deduplicate`, `partial-update`, or `first-row` |
 | Changelog producer | `none` only |
 | Key usage | A managed BLOB column cannot be a primary, partition, bucket, or sequence key |
 | External data paths | `data-file.external-paths` is not supported |
@@ -122,11 +123,112 @@ Primary-key managed BLOB storage has the following requirements:
 
 `row-tracking.enabled` and `data-evolution.enabled` are not required for this primary-key mode.
 
-## Update, Delete, and Compaction
+### Partial-update with BLOB fields
 
-An update writes a new descriptor and managed payload when a scalar value, array element, or map value changes. A delete
-record does not write a new payload. Deduplication determines the final rows of each data file, and its `.blobref`
-sidecar contains only the managed packs referenced by those rows.
+Primary-key tables may use `merge-engine=partial-update` with scalar `blob-descriptor-field`,
+managed `blob-field` (`BLOB`, `ARRAY<BLOB>`, or `MAP<K, BLOB>`), and scalar
+`blob-view-field`:
+
+| Mode | Partial-update | Changelog | Notes |
+|------|----------------|-----------|-------|
+| Scalar `blob-descriptor-field` | Supported | Same as other PU tables | Inline descriptor bytes |
+| `blob-field` (managed scalar, array, or map) | Supported | `changelog-producer=none` only | Payload in `.managed.blob` |
+| Scalar `blob-view-field` | Supported | Same as other PU tables | Resolve on read via catalog |
+| `ARRAY` / `MAP` descriptor or view | Not supported | — | Scalar only |
+
+The ordering fields on the left-hand side of
+`fields.<ordering-field[,ordering-field...]>.sequence-group` cannot contain BLOB values. This
+includes `BLOB`, `ARRAY<BLOB>`, and `MAP<K, BLOB>` fields in any storage mode. BLOB fields are
+supported on the right-hand side as fields protected by the sequence group.
+
+```sql
+CREATE TABLE media_meta (
+    id BIGINT,
+    name STRING,
+    content BYTES COMMENT '__BLOB_DESCRIPTOR_FIELD; external video',
+    ts INT,
+    PRIMARY KEY (id) NOT ENFORCED
+) WITH (
+    'merge-engine' = 'partial-update',
+    'fields.ts.sequence-group' = 'name,content'
+);
+```
+
+For managed BLOB columns, set `changelog-producer=none` (same as deduplicate managed BLOB tables).
+Managed BLOB retract records do not retain payload values. When a managed BLOB field is protected
+by a sequence group and retract records are processed, it therefore cannot use an aggregate
+function that depends on the original retract payload. `last_value` is supported because it always
+clears the field on retract; other aggregate functions require
+`fields.<field-name>.ignore-retract=true`. This restriction does not apply when `ignore-delete=true`
+or when the managed BLOB field is not protected by a sequence group.
+
+```sql
+CREATE TABLE training_chunks (
+    id BIGINT,
+    name STRING,
+    chunk BYTES COMMENT '__BLOB_FIELD; raw training block',
+    PRIMARY KEY (id) NOT ENFORCED
+) WITH (
+    'merge-engine' = 'partial-update',
+    'changelog-producer' = 'none',
+    'blob-field' = 'chunk'
+);
+```
+
+Non-null values update the corresponding column; null values do not update the field (standard partial-update
+semantics). Within a sequence group, a null sequence value skips the entire group. Without aggregate functions, an
+incoming sequence value that is newer or equal replaces every field in the group, including replacing a BLOB value
+with null; an older record is ignored. With aggregate functions, every record with a non-null sequence value
+participates in aggregation or retraction, even when its sequence value is older. For example, `last_value` clears
+the field for both newer and older retract records.
+
+Managed BLOB partial updates externalize each non-null scalar BLOB, array element, or map value into a
+`.managed.blob` pack. Empty collections and collections containing only null values write no payload. BLOB garbage
+collection for orphaned packs is not implemented yet; repeated updates can leave unreachable storage until a future
+collector is available.
+
+`blob-view-field` columns store serialized view structs inline. Reads resolve upstream blob bytes through the catalog
+when `blob-view.resolve.enabled` is true (default). Append upstream tables used by `sys.blob_view(...)` must enable
+`row-tracking.enabled` and `data-evolution.enabled`.
+
+### First-row with BLOB fields
+
+Primary-key tables may use `merge-engine=first-row` with managed `blob-field` (`BLOB`, `ARRAY<BLOB>`, or
+`MAP<K, BLOB>`):
+
+| Mode | First-row | Changelog | Notes |
+|------|-----------|-----------|-------|
+| `blob-field` (managed scalar, array, or map) | Supported | `changelog-producer=none` only | Keeps the first non-retract row and its managed payload |
+
+For managed BLOB columns, set `changelog-producer=none`. `first-row` normally also supports the `lookup` changelog
+producer, but managed BLOB storage requires `none`.
+
+`first-row` keeps the earliest surviving row for the same primary key. Later updates to the same key therefore do not
+replace an existing managed BLOB payload. This differs from `deduplicate`, which keeps the latest row.
+
+By default, `first-row` does not accept `DELETE` or `UPDATE_BEFORE` records. Configure `ignore-delete=true` if your
+pipeline may emit them.
+
+```sql
+CREATE TABLE training_chunks (
+    id BIGINT,
+    name STRING,
+    chunk BYTES COMMENT '__BLOB_FIELD; raw training block',
+    PRIMARY KEY (id) NOT ENFORCED
+) WITH (
+    'merge-engine' = 'first-row',
+    'changelog-producer' = 'none',
+    'blob-field' = 'chunk'
+);
+```
+
+## Managed BLOB Update, Delete, and Compaction
+
+Each incoming non-null scalar BLOB, array element, or map value is written as a new descriptor and payload before merge
+rules are applied. An update later discarded by partial-update or sequence rules can therefore leave an orphaned
+payload pack. A delete record does not write a new payload. The merge engine determines the logical final row during
+reads and compaction. Each data file's `.blobref` sidecar records managed packs referenced by non-retract key-values in
+that file, which may include intermediate partial-update payloads before compaction.
 
 Compaction preserves descriptors for surviving values and creates new `.blobref` sidecars from the compacted output.
 It does not copy the referenced payload bytes into new `.managed.blob` packs. This keeps ordinary compaction cost

@@ -108,7 +108,8 @@ public abstract class FormatReadWriteTest {
         RecordReader<InternalRow> reader =
                 format.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
-                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)));
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null));
         List<InternalRow> result = new ArrayList<>();
         reader.forEachRemaining(row -> result.add(serializer.copy(row)));
 
@@ -143,7 +144,8 @@ public abstract class FormatReadWriteTest {
         try (RecordReader<InternalRow> reader =
                 format.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
-                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null))) {
             InternalRow row = reader.readBatch().next();
             InternalArray blobs = row.getArray(0);
             assertThat(blobs.size()).isEqualTo(3);
@@ -172,7 +174,7 @@ public abstract class FormatReadWriteTest {
                     format.createReaderFactory(rowType, rowType, new ArrayList<>())
                             .createReader(
                                     new FormatReaderContext(
-                                            fileIO, file, fileIO.getFileSize(file)));
+                                            fileIO, file, fileIO.getFileSize(file), null, null));
             InternalRowSerializer internalRowSerializer = new InternalRowSerializer(rowType);
             List<InternalRow> result = new ArrayList<>();
             reader.forEachRemaining(row -> result.add(internalRowSerializer.copy(row)));
@@ -226,7 +228,8 @@ public abstract class FormatReadWriteTest {
         try (RecordReader<InternalRow> reader =
                 format.createReaderFactory(readType, readType, new ArrayList<>())
                         .createReader(
-                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null))) {
             InternalRowSerializer serializer = new InternalRowSerializer(readType);
             reader.forEachRemaining(row -> result.add(serializer.copy(row)));
         }
@@ -254,7 +257,8 @@ public abstract class FormatReadWriteTest {
         try (RecordReader<InternalRow> reader =
                 format.createReaderFactory(writeType, writeType, new ArrayList<>())
                         .createReader(
-                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null))) {
             InternalRowSerializer serializer = new InternalRowSerializer(writeType);
             reader.forEachRemaining(row -> result.add(serializer.copy(row)));
         }
@@ -286,7 +290,8 @@ public abstract class FormatReadWriteTest {
         try (RecordReader<InternalRow> reader =
                 format.createReaderFactory(writeType, writeType, new ArrayList<>())
                         .createReader(
-                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null))) {
             InternalRowSerializer serializer = new InternalRowSerializer(writeType);
             reader.forEachRemaining(row -> result.add(serializer.copy(row)));
         }

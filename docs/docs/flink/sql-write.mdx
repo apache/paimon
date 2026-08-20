@@ -214,11 +214,11 @@ UPDATE my_table SET b = 1, c = 2 WHERE a = 'myTable';
 :::info
 
 Important table properties setting:
-1. Only primary key tables support this feature.
-2. If the table has primary keys, the following [MergeEngine](../primary-key-table/merge-engine/) support this feature:
+1. Primary key tables support this feature. The following [MergeEngine](../primary-key-table/merge-engine/) are supported:
    * [deduplicate](../primary-key-table/merge-engine/#deduplicate).
    * [partial-update](../primary-key-table/merge-engine/partial-update) with option 'partial-update.remove-record-on-delete' enabled.
-3. Do not support deleting from table in streaming mode.
+2. With Flink 1.17 or later, append tables in [Data Evolution](../multimodal-table/data-evolution) mode also support this feature when row tracking and deletion vectors are enabled and bucket is `-1`.
+3. Deleting from a table is not supported in streaming mode.
 
 :::
 

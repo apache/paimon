@@ -25,7 +25,7 @@ import org.apache.paimon.spark.{PaimonFormatTableScan, PaimonHiveTestBase, Paimo
 import org.apache.paimon.spark.PaimonHiveTestBase.hiveUri
 import org.apache.paimon.table.FormatTable
 import org.apache.paimon.table.source.Split
-import org.apache.paimon.utils.CompressUtils
+import org.apache.paimon.utils.{CompressUtils, PartitionPathUtils}
 
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.connector.read.InputPartition
@@ -214,7 +214,9 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase with AdaptiveSpark
         val fileIO = table.fileIO()
         val file = fileIO
           .listStatus(new Path(table.location()))
-          .filter(file => !file.getPath.getName.startsWith("."))
+          // The same rule the reader applies: a writer's staging directory stays behind, and it
+          // is not a data file.
+          .filter(file => !PartitionPathUtils.isHiddenName(file.getPath.getName))
           .head
           .getPath
           .toUri

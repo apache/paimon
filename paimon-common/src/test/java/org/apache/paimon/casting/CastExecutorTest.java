@@ -828,6 +828,24 @@ public class CastExecutorTest {
     }
 
     @Test
+    public void testTimestampToDatePreEpoch() {
+        CastExecutor<?, ?> cast = CastExecutors.resolve(new TimestampType(6), new DateType());
+        LocalDateTime[] timestamps = {
+            LocalDateTime.of(1969, 12, 31, 23, 59, 59),
+            LocalDateTime.of(1960, 6, 15, 10, 30),
+            LocalDateTime.of(1969, 12, 31, 0, 0),
+            LocalDateTime.of(2024, 3, 4, 5, 6, 7)
+        };
+
+        for (LocalDateTime timestamp : timestamps) {
+            compareCastResult(
+                    cast,
+                    Timestamp.fromLocalDateTime(timestamp),
+                    (int) timestamp.toLocalDate().toEpochDay());
+        }
+    }
+
+    @Test
     public void testTimestampToTimePreEpoch() {
         CastExecutor<?, ?> cast = CastExecutors.resolve(new TimestampType(3), new TimeType(3));
 

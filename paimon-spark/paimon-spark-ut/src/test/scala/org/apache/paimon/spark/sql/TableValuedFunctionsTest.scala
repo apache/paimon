@@ -754,6 +754,46 @@ class TableValuedFunctionsTest extends PaimonHiveTestBase with AdaptiveSparkPlan
     }
   }
 
+  test("Table Valued Functions: incremental query with inconsistent postpone bucket") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (a INT, b INT) USING paimon
+            |TBLPROPERTIES ('primary-key'='a', 'bucket' = '-2')
+            |""".stripMargin)
+
+      val table = loadTable("t")
+      var builder = table.newPostponeFixedBucketWriteBuilder()
+      var write = builder.newWrite()
+      var commit = builder.newCommit()
+      try {
+        write.writeAndReturn(GenericRow.of(1, 11), 0, 1)
+        commit.commit(write.prepareCommit())
+      } finally {
+        write.close()
+        commit.close()
+      }
+      table.createTag("2024-01-01", 1)
+
+      builder = table.newPostponeFixedBucketWriteBuilder().withOverwrite(Collections.emptyMap())
+      write = builder.newWrite()
+      commit = builder.newCommit()
+      try {
+        write.writeAndReturn(GenericRow.of(1, 22), 0, 2)
+        write.writeAndReturn(GenericRow.of(2, 22), 1, 2)
+        commit.commit(write.prepareCommit())
+      } finally {
+        write.close()
+        commit.close()
+      }
+      table.createTag("2024-01-02", 2)
+
+      checkAnswer(
+        sql(
+          "SELECT * FROM paimon_incremental_query('t', '2024-01-01', '2024-01-02') ORDER BY a, b"),
+        Seq(Row(1, 22), Row(2, 22)))
+    }
+  }
+
   test("Table Valued Functions: incremental query with delete after minor compact") {
     withTable("t") {
       sql("""

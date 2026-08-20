@@ -25,6 +25,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Arrays;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link RowRangeMappingIndex}. */
 public class RowRangeMappingIndexTest {
@@ -83,6 +84,70 @@ public class RowRangeMappingIndexTest {
         RowRangeMappingIndex absolute = relative.shiftNewStarts(100L);
         assertThat(absolute.map(new Range(10, 14))).hasValue(new Range(100, 104));
         assertThat(absolute.map(new Range(20, 24))).hasValue(new Range(105, 109));
+    }
+
+    @Test
+    public void testPrimitiveArrayMappingsCanBeShifted() {
+        long[] oldStarts = {20, 30};
+        long[] oldEnds = {24, 34};
+        long[] newStarts = {0, 5};
+        RowRangeMappingIndex relative =
+                RowRangeMappingIndex.createFromOwnedArrays(oldStarts, oldEnds, newStarts);
+
+        RowRangeMappingIndex absolute = relative.shiftNewStarts(40L).shiftNewStarts(2L);
+        assertThat(relative.map(new Range(20, 24))).hasValue(new Range(0, 4));
+        assertThat(absolute.map(new Range(20, 24))).hasValue(new Range(42, 46));
+        assertThat(absolute.map(new Range(30, 34))).hasValue(new Range(47, 51));
+    }
+
+    @Test
+    public void testPrimitiveArrayMappingsAreValidated() {
+        assertThatThrownBy(
+                        () ->
+                                RowRangeMappingIndex.createFromOwnedArrays(
+                                        new long[] {10}, new long[] {14, 24}, new long[] {100}))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("same length");
+        assertThatThrownBy(
+                        () ->
+                                RowRangeMappingIndex.createFromOwnedArrays(
+                                        new long[] {10, 14},
+                                        new long[] {14, 24},
+                                        new long[] {100, 105}))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("cannot overlap");
+        assertThatThrownBy(
+                        () ->
+                                RowRangeMappingIndex.createFromOwnedArrays(
+                                        new long[] {20, 10},
+                                        new long[] {24, 14},
+                                        new long[] {100, 105}))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("out of order");
+    }
+
+    @Test
+    public void testMapFailsOnNewRowIdOverflow() {
+        RowRangeMappingIndex index =
+                RowRangeMappingIndex.createFromOwnedArrays(
+                        new long[] {10}, new long[] {11}, new long[] {Long.MAX_VALUE});
+
+        assertThatThrownBy(() -> index.shiftNewStarts(1L)).isInstanceOf(ArithmeticException.class);
+        assertThatThrownBy(() -> index.map(new Range(10, 11)))
+                .isInstanceOf(ArithmeticException.class);
+        assertThatThrownBy(() -> index.shiftNewStarts(Long.MAX_VALUE).shiftNewStarts(1L))
+                .isInstanceOf(ArithmeticException.class);
+    }
+
+    @Test
+    public void testShiftMaterializesWhenOnlyCombinedOffsetOverflows() {
+        RowRangeMappingIndex index =
+                RowRangeMappingIndex.createFromOwnedArrays(
+                        new long[] {10}, new long[] {10}, new long[] {Long.MIN_VALUE});
+
+        RowRangeMappingIndex shifted = index.shiftNewStarts(Long.MAX_VALUE).shiftNewStarts(1L);
+
+        assertThat(shifted.map(new Range(10, 10))).hasValue(new Range(0, 0));
     }
 
     @Test

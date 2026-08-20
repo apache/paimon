@@ -18,13 +18,18 @@
 
 package org.apache.paimon.types;
 
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.data.BlobViewStruct;
 import org.apache.paimon.data.DataGetters;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.utils.UriReader;
 
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -191,5 +196,48 @@ public class InternalRowToSizeVisitorTest {
         Assertions.assertThat(feildSizeCalculator.get(22).apply(row, 22)).isEqualTo(6);
 
         Assertions.assertThat(feildSizeCalculator.get(23).apply(row, 23)).isEqualTo(0);
+    }
+
+    @Test
+    void testBlobSize() {
+        Assertions.assertThat(blobSize(Blob.fromData(new byte[] {1, 2, 3}))).isEqualTo(3);
+        Assertions.assertThat(blobSize(null)).isEqualTo(0);
+    }
+
+    @Test
+    void testBlobRefSize() {
+        Assertions.assertThat(
+                        blobSize(
+                                Blob.fromDescriptor(
+                                        UriReader.fromHttp(),
+                                        new BlobDescriptor("https://example.com/blob", 0, 3))))
+                .isEqualTo(3);
+        Assertions.assertThat(blobSize(Blob.fromHttp("https://example.com/blob"))).isEqualTo(1);
+    }
+
+    @Test
+    void testUnresolvedBlobViewSize() {
+        BlobViewStruct viewStruct = new BlobViewStruct(Identifier.create("db", "t"), 1, 2L);
+        Assertions.assertThat(blobSize(Blob.fromView(viewStruct)))
+                .isEqualTo(viewStruct.serialize().length);
+    }
+
+    @Test
+    void testBlobStreamSize() {
+        Assertions.assertThat(
+                        blobSize(
+                                Blob.fromInputStream(
+                                        () -> {
+                                            throw new AssertionError();
+                                        })))
+                .isEqualTo(1);
+    }
+
+    private int blobSize(Blob blob) {
+        RowType rowType = RowType.builder().field("b", DataTypes.BLOB()).build();
+        InternalRowToSizeVisitor visitor = new InternalRowToSizeVisitor();
+        BiFunction<DataGetters, Integer, Integer> calculator =
+                rowType.getFieldTypes().get(0).accept(visitor);
+        return calculator.apply(GenericRow.of(blob), 0);
     }
 }

@@ -61,6 +61,7 @@ public class DataEvolutionVectorRead extends AbstractDataEvolutionVectorRead imp
 
     @Override
     public GlobalIndexResult read(VectorScan.Plan plan) {
+        this.planSnapshot = plan.snapshot();
         return readSplits(plan.splits());
     }
 

@@ -83,7 +83,8 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         Arrays.asList("asdf", "qwer", "zxcv"));
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
         GlobalIndexMeta globalIndexMeta =
-                new GlobalIndexMeta(1L, 2L, 3, new int[] {5, 6, 7}, new byte[] {0x23, 0x45});
+                new GlobalIndexMeta(
+                        1L, 2L, 3, new int[] {5, 6, 7}, new byte[] {0x23, 0x45}, new byte[] {0x67});
         IndexFileMeta hashIndexFile =
                 new IndexFileMeta(
                         "my_index_type",
@@ -106,6 +107,52 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         dvRanges,
                         "external_path");
 
+        ManifestCommittable manifestCommittable =
+                createManifestCommittable(dataFiles, hashIndexFile, devIndexFile);
+
+        ManifestCommittableSerializer serializer = new ManifestCommittableSerializer();
+        byte[] bytes = serializer.serialize(manifestCommittable);
+        ManifestCommittable deserialized = serializer.deserialize(serializer.getVersion(), bytes);
+        assertThat(deserialized).isEqualTo(manifestCommittable);
+        GlobalIndexMeta deserializedGlobalIndexMeta =
+                ((CommitMessageImpl) deserialized.fileCommittables().get(0))
+                        .newFilesIncrement()
+                        .newIndexFiles()
+                        .get(0)
+                        .globalIndexMeta();
+        assertThat(deserializedGlobalIndexMeta.sourceMeta()).containsExactly(0x67);
+
+        byte[] oldBytes =
+                IOUtils.readFully(
+                        ManifestCommittableSerializerCompatibilityTest.class
+                                .getClassLoader()
+                                .getResourceAsStream("compatibility/" + fileName),
+                        true);
+        deserialized = serializer.deserialize(5, oldBytes);
+        GlobalIndexMeta legacyGlobalIndexMeta =
+                new GlobalIndexMeta(1L, 2L, 3, new int[] {5, 6, 7}, new byte[] {0x23, 0x45});
+        IndexFileMeta legacyHashIndexFile =
+                new IndexFileMeta(
+                        "my_index_type",
+                        "my_index_file",
+                        1024 * 100,
+                        1002,
+                        null,
+                        null,
+                        legacyGlobalIndexMeta);
+        assertThat(deserialized)
+                .isEqualTo(createManifestCommittable(dataFiles, legacyHashIndexFile, devIndexFile));
+        deserializedGlobalIndexMeta =
+                ((CommitMessageImpl) deserialized.fileCommittables().get(0))
+                        .newFilesIncrement()
+                        .newIndexFiles()
+                        .get(0)
+                        .globalIndexMeta();
+        assertThat(deserializedGlobalIndexMeta.sourceMeta()).isNull();
+    }
+
+    private static ManifestCommittable createManifestCommittable(
+            List<DataFileMeta> dataFiles, IndexFileMeta hashIndexFile, IndexFileMeta devIndexFile) {
         CommitMessageImpl commitMessage =
                 new CommitMessageImpl(
                         singleColumn("my_partition"),
@@ -123,25 +170,11 @@ public class ManifestCommittableSerializerCompatibilityTest {
                                 dataFiles,
                                 Collections.singletonList(devIndexFile),
                                 Collections.emptyList()));
-
         ManifestCommittable manifestCommittable =
                 new ManifestCommittable(5, 202020L, Collections.singletonList(commitMessage));
         manifestCommittable.addProperty("k1", "v1");
         manifestCommittable.addProperty("k2", "v2");
-
-        ManifestCommittableSerializer serializer = new ManifestCommittableSerializer();
-        byte[] bytes = serializer.serialize(manifestCommittable);
-        ManifestCommittable deserialized = serializer.deserialize(serializer.getVersion(), bytes);
-        assertThat(deserialized).isEqualTo(manifestCommittable);
-
-        byte[] oldBytes =
-                IOUtils.readFully(
-                        ManifestCommittableSerializerCompatibilityTest.class
-                                .getClassLoader()
-                                .getResourceAsStream("compatibility/" + fileName),
-                        true);
-        deserialized = serializer.deserialize(5, oldBytes);
-        assertThat(deserialized).isEqualTo(manifestCommittable);
+        return manifestCommittable;
     }
 
     @Test

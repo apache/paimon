@@ -32,6 +32,8 @@ import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.GeographyType;
+import org.apache.paimon.types.GeometryType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
@@ -262,6 +264,18 @@ public class SparkTypeUtils {
         }
 
         @Override
+        public DataType visit(GeometryType geometryType) {
+            return SparkShimLoader.shim().SparkGeometryType(geometryType.getCrs());
+        }
+
+        @Override
+        public DataType visit(GeographyType geographyType) {
+            return SparkShimLoader.shim()
+                    .SparkGeographyType(
+                            geographyType.getCrs(), geographyType.getAlgorithm().toString());
+        }
+
+        @Override
         public DataType visit(ArrayType arrayType) {
             org.apache.paimon.types.DataType elementType = arrayType.getElementType();
             return DataTypes.createArrayType(elementType.accept(this), elementType.isNullable());
@@ -449,6 +463,13 @@ public class SparkTypeUtils {
                 return new TimestampType();
             } else if (SparkShimLoader.shim().isSparkVariantType(atomic)) {
                 return new VariantType();
+            } else if (SparkShimLoader.shim().isSparkGeometryType(atomic)) {
+                return new GeometryType(SparkShimLoader.shim().sparkGeometryCrs(atomic));
+            } else if (SparkShimLoader.shim().isSparkGeographyType(atomic)) {
+                return new GeographyType(
+                        SparkShimLoader.shim().sparkGeographyCrs(atomic),
+                        org.apache.paimon.types.EdgeAlgorithm.fromName(
+                                SparkShimLoader.shim().sparkGeographyAlgorithm(atomic)));
             }
 
             throw new UnsupportedOperationException(

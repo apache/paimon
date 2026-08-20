@@ -18,6 +18,10 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.Snapshot;
+
+import javax.annotation.Nullable;
+
 import java.util.List;
 
 /** Vector scan to pre-filter and scan index files. */
@@ -28,5 +32,11 @@ public interface VectorScan {
     /** Plan of vector scan. */
     interface Plan {
         List<VectorSearchSplit> splits();
+
+        /** Snapshot the plan was built against; the read pins live-row filtering to it. */
+        @Nullable
+        default Snapshot snapshot() {
+            return null;
+        }
     }
 }

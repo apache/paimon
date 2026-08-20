@@ -423,8 +423,9 @@ public class RangeBitmapFileIndexTest {
         FieldRef fieldRef = new FieldRef(0, "", intType);
         RangeBitmapFileIndex bitmapFileIndex = new RangeBitmapFileIndex(intType, new Options());
         FileIndexWriter writer = bitmapFileIndex.createWriter();
-        writer.writeRecord(null);
-        writer.writeRecord(null);
+        for (int i = 0; i < 5; i++) {
+            writer.writeRecord(null);
+        }
 
         // build index
         byte[] bytes = writer.serializedBytes();
@@ -433,7 +434,7 @@ public class RangeBitmapFileIndexTest {
 
         // test is null
         assertThat(((BitmapIndexResult) reader.visitIsNull(fieldRef)).get())
-                .isEqualTo(RoaringBitmap32.bitmapOf(0, 1));
+                .isEqualTo(RoaringBitmap32.bitmapOfRange(0, 5));
         // test is not null
         assertThat(((BitmapIndexResult) reader.visitIsNotNull(fieldRef)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf());
@@ -444,6 +445,10 @@ public class RangeBitmapFileIndexTest {
         // test GT
         assertThat(((BitmapIndexResult) reader.visitGreaterThan(fieldRef, 0)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf());
+
+        TopN topN = new TopN(fieldRef, ASCENDING, NULLS_FIRST, 1);
+        assertThat(((BitmapIndexResult) reader.visitTopN(topN, null)).get())
+                .isEqualTo(RoaringBitmap32.bitmapOfRange(0, 5));
     }
 
     @Test

@@ -27,6 +27,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -35,19 +36,40 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.TableTestBase;
+import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /** Unit tests for {@link BinlogTable}. */
 public class BinlogTableTest extends TableTestBase {
+
+    @Test
+    public void testReadBatchSizerPropagatesToDataRead() {
+        FileStoreTable wrapped = mock(FileStoreTable.class);
+        InnerTableRead dataRead = mock(InnerTableRead.class);
+        when(wrapped.options()).thenReturn(Collections.emptyMap());
+        when(wrapped.rowType()).thenReturn(RowType.of(DataTypes.INT()));
+        when(wrapped.newRead()).thenReturn(dataRead);
+        when(dataRead.forceKeepDelete()).thenReturn(dataRead);
+        ReadBatchSizer sizer = new ReadBatchSizer();
+
+        new BinlogTable(wrapped).newRead().withReadBatchSizer(sizer);
+
+        verify(dataRead).withReadBatchSizer(sizer);
+    }
 
     @Test
     public void testReadBinlogFromLatest() throws Exception {

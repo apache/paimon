@@ -19,11 +19,14 @@
 package org.apache.paimon.format.blob;
 
 import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.UriReader;
 
 import javax.annotation.Nullable;
 
@@ -32,7 +35,7 @@ import java.io.IOException;
 /** Common reader functionality shared by blob element formats. */
 abstract class AbstractBlobElementReader implements BlobElementSerializer.Reader {
 
-    private final FileIO fileIO;
+    private final UriReader uriReader;
     private final String filePath;
     private final @Nullable SeekableInputStream in;
     private final boolean blobAsDescriptor;
@@ -42,7 +45,7 @@ abstract class AbstractBlobElementReader implements BlobElementSerializer.Reader
             Path filePath,
             @Nullable SeekableInputStream in,
             boolean blobAsDescriptor) {
-        this.fileIO = fileIO;
+        this.uriReader = UriReader.fromFile(fileIO);
         this.filePath = filePath.toString();
         this.in = in;
         this.blobAsDescriptor = blobAsDescriptor;
@@ -58,7 +61,7 @@ abstract class AbstractBlobElementReader implements BlobElementSerializer.Reader
 
     protected final Blob readBlob(long position, long length) {
         if (blobAsDescriptor) {
-            return Blob.fromFile(fileIO, filePath, position, length);
+            return new BlobRef(uriReader, new BlobDescriptor(filePath, position, length));
         }
         return Blob.fromData(readInlineBlob(position, length));
     }

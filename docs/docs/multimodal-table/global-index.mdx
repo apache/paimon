@@ -158,7 +158,7 @@ added_files = table.create_global_index(
 </Tabs>
 
 PyPaimon global index build currently supports single-column BTree indexes,
-single-column Bitmap indexes, single-column paimon-vindex IVF vector indexes,
+single-column Bitmap indexes, single-column paimon-vindex vector indexes,
 and single-column full-text indexes on tables with row tracking enabled.
 
 Drop index files:
@@ -311,7 +311,7 @@ catalog.alter_table(
 
 Global index files cover row-id ranges. If more rows are appended after an index is built, those
 new rows are not automatically covered by the existing index files. Build the global index again
-to create index files for newly uncovered data. Scalar queries default to `full` search, while
+to create index files for newly uncovered data. Scalar queries default to `fast` search, while
 vector and full-text queries default to `fast` and only search indexed row ranges.
 
 To improve freshness for query types that support raw-data search, set:
@@ -395,11 +395,11 @@ These table options affect global index build and read behavior:
 |---|---|---|
 | `global-index.enabled` | `true` | Whether scans can use global indexes. |
 | `global-index.search-mode` | Not set | Legacy fallback search mode for global-index queries. Family-specific options take precedence. |
-| `scalar-index.search-mode` | `full` | Search mode for BTree and Bitmap queries. |
+| `scalar-index.search-mode` | `fast` | Search mode for BTree and Bitmap queries. |
 | `vector-index.search-mode` | `fast` | Search mode for vector queries. |
 | `full-text-index.search-mode` | `fast` | Search mode for full-text queries. |
 | `global-index.external-path` | Not set | Root directory for global index files. If not set, files are stored under the table index directory. |
-| `global-index.column-update-action` | `THROW_ERROR` | Action for updates to indexed columns. `THROW_ERROR` rejects the update, `DROP_PARTITION_INDEX` drops affected partition indexes, and `IGNORE` keeps existing index files unchanged. Use `IGNORE` only when a stale index is acceptable; for example, a vector updated from `NULL` to a value remains invisible until the index is rebuilt. |
+| `global-index.column-update-action` | `THROW_ERROR` | Action for updates to indexed columns. `THROW_ERROR` rejects the update, `DROP_PARTITION_INDEX` drops affected partition indexes, and `IGNORE` keeps existing index files unchanged during the update and causes the next incremental index build to scan active data manifests and rebuild affected row ranges. Index files created before source metadata was introduced are not refreshed automatically. |
 | `sorted-index.records-per-range` | `10000000` | Expected number of records per sorted global index file for BTree and Bitmap builds. |
 | `sorted-index.build.max-parallelism` | `4096` | Maximum Flink or Spark parallelism for building sorted global indexes. |
 | `global-index.row-count-per-shard` | `100000` | Target row count per shard for non-sorted global index builds such as vector and full-text indexes. |

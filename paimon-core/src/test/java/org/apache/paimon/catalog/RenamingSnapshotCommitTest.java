@@ -58,7 +58,7 @@ public class RenamingSnapshotCommitTest {
 
         Snapshot snapshot = createSnapshot(1L);
 
-        boolean committed = commit.commit(snapshot, "main", Collections.emptyList());
+        boolean committed = commit.commit(null, snapshot, "main", Collections.emptyList());
 
         assertThat(committed).isTrue();
 
@@ -91,7 +91,7 @@ public class RenamingSnapshotCommitTest {
         IOException ex =
                 assertThrows(
                         IOException.class,
-                        () -> commit.commit(snapshot, "main", Collections.emptyList()));
+                        () -> commit.commit(null, snapshot, "main", Collections.emptyList()));
 
         assertThat(ex)
                 .hasMessageContaining("Commit snapshot " + snapshot.id() + " failed")

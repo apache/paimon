@@ -215,13 +215,17 @@ class BlobFormatWriter:
 
         key_serializer = create_map_blob_key_serializer(key_type)
         key_bytes = []
+        seen_keys = set()
         for key, _ in entries:
             if key is None:
-                key_bytes.append(None)
-                continue
-            serialized = key_serializer.serialize(key)
-            if len(serialized) > 0x7fffffff:
-                raise ValueError(f"MAP<X, BLOB> key is too large: {len(serialized)}")
+                serialized = None
+            else:
+                serialized = key_serializer.serialize(key)
+                if len(serialized) > 0x7fffffff:
+                    raise ValueError(f"MAP<X, BLOB> key is too large: {len(serialized)}")
+            if serialized in seen_keys:
+                raise ValueError("MAP<X, BLOB> keys must be unique.")
+            seen_keys.add(serialized)
             key_bytes.append(serialized)
 
         for _, blob_value in entries:

@@ -15,16 +15,20 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import tempfile
 import unittest
 from unittest.mock import patch
 
 import pyarrow as pa
+import pytest
 
+from pypaimon import CatalogFactory, Schema
 from pypaimon.common.options.core_options import CoreOptions, GlobalIndexSearchMode
 from pypaimon.common.options.options import Options
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.globalindex.global_index_meta import GlobalIndexMeta
+from pypaimon.globalindex.global_index_evaluator import GlobalIndexEvaluation
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.index.index_file_meta import IndexFileMeta
 from pypaimon.index.index_file_handler import IndexFileHandler
@@ -34,6 +38,7 @@ from pypaimon.tests.data_evolution_test_helpers import (
     BatchModeMixin,
     DataEvolutionTestBase,
 )
+from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 from pypaimon.utils.range import Range
 
 
@@ -216,8 +221,91 @@ class DataEvolutionGlobalIndexCoverageTest(unittest.TestCase):
 
 class GlobalIndexScalarFallbackTest(unittest.TestCase):
 
-    def test_eval_global_index_merges_unindexed_rows_when_index_scan_succeeds(self):
-        from pypaimon.read.scanner.file_scanner import FileScanner
+    def test_full_fallback_groups_are_pruned_before_split_packing(self):
+        from pypaimon.read.scanner.file_scanner import (
+            _GlobalIndexPlanningResult,
+        )
+
+        with tempfile.TemporaryDirectory() as warehouse:
+            catalog = CatalogFactory.create({'warehouse': warehouse})
+            catalog.create_database('default', False)
+            schema = Schema.from_pyarrow_schema(
+                pa.schema([('key', pa.int64()), ('value', pa.string())]),
+                options={
+                    'data-evolution.enabled': 'true',
+                    'row-tracking.enabled': 'true',
+                    'metadata.stats-mode': 'full',
+                    'target-file-row-num': '10',
+                    'source.split.target-size': '1kb',
+                },
+            )
+            catalog.create_table('default.fallback_stats', schema, False)
+            table = catalog.get_table('default.fallback_stats')
+            for start in range(0, 100, 10):
+                write_builder = table.new_batch_write_builder()
+                writer = write_builder.new_write()
+                commit = write_builder.new_commit()
+                writer.write_arrow(pa.table({
+                    'key': list(range(start, start + 10)),
+                    'value': ['v{}'.format(i)
+                              for i in range(start, start + 10)],
+                }, schema=pa.schema([
+                    ('key', pa.int64()),
+                    ('value', pa.string()),
+                ])))
+                commit.commit(writer.prepare_commit())
+                writer.close()
+                commit.close()
+
+            read_builder = table.new_read_builder()
+            read_builder.with_filter(
+                read_builder.new_predicate_builder().equal('key', 5))
+            index_plan = (
+                _GlobalIndexPlanningResult(
+                    GlobalIndexResult.from_range(Range(5, 5)),
+                    [Range(10, 99)],
+                )
+            )
+
+            baseline_scan = read_builder.new_scan()
+            baseline_scan.file_scanner._global_index_result = index_plan
+            baseline_scan.file_scanner.predicate_for_stats = None
+            baseline_plan = baseline_scan.plan()
+
+            scan = read_builder.new_scan()
+            scan.file_scanner._global_index_result = index_plan
+            plan = scan.plan()
+
+            stats_scan = read_builder.new_scan()
+            stats_scan.file_scanner._global_index_result = index_plan
+            stats_plan, stats = stats_scan.file_scanner.scan_with_stats()
+
+            self.assertEqual(
+                10,
+                sum(len(split.files) for split in baseline_plan.splits()),
+            )
+            self.assertEqual(1, len(plan.splits()))
+            self.assertEqual(
+                1, sum(len(split.files) for split in plan.splits()))
+            self.assertEqual(10, stats.entries_after_bucket)
+            self.assertEqual(1, stats.entries_after_stats)
+            self.assertEqual(
+                1, sum(len(split.files) for split in stats_plan.splits()))
+            baseline_result = read_builder.new_read().to_arrow(
+                baseline_plan.splits()).to_pydict()
+            pruned_result = read_builder.new_read().to_arrow(
+                plan.splits()).to_pydict()
+            self.assertEqual(
+                {'key': [5], 'value': ['v5']},
+                baseline_result,
+            )
+            self.assertEqual(baseline_result, pruned_result)
+
+    def test_eval_global_index_keeps_unindexed_ranges_out_of_bitmap(self):
+        from pypaimon.read.scanner.file_scanner import (
+            FileScanner,
+            _GlobalIndexPlanningResult,
+        )
 
         class _Options:
             def global_index_enabled(self):
@@ -236,24 +324,63 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
         scanner.table = _Table()
 
         index_result = GlobalIndexResult.from_range(Range(1, 1))
-        unindexed = GlobalIndexResult.from_range(Range(5, 6))
+        unindexed = [Range(5, 6)]
         fake_scanner = unittest.mock.MagicMock()
-        fake_scanner.scan.return_value = index_result
-        fake_scanner.unindexed_rows.return_value = unindexed
+        fake_scanner.scan_with_coverage.return_value = GlobalIndexEvaluation(
+            index_result, frozenset([0]))
+        fake_scanner.unindexed_ranges.return_value = unindexed
         fake_scanner.__enter__.return_value = fake_scanner
         fake_scanner.__exit__.return_value = None
 
         with unittest.mock.patch(
                 "pypaimon.globalindex.data_evolution_global_index_scanner.DataEvolutionGlobalIndexScanner.create",
-                return_value=fake_scanner):
+                return_value=fake_scanner), unittest.mock.patch.object(
+                    GlobalIndexResult,
+                    "from_ranges",
+                    side_effect=AssertionError("fallback ranges entered bitmap")):
             result = scanner._eval_global_index(snapshot=object())
 
-        self.assertEqual(
-            [Range(1, 1), Range(5, 6)],
-            result.results().to_range_list(),
+        self.assertIsInstance(result, _GlobalIndexPlanningResult)
+        self.assertIs(index_result, result.indexed_result)
+        self.assertEqual(unindexed, result.unindexed_ranges)
+        fake_scanner.unindexed_ranges.assert_called_once_with(
+            predicate,
+            search_mode=GlobalIndexSearchMode.FULL,
+            contributing_field_ids=frozenset([0]),
         )
-        fake_scanner.unindexed_rows.assert_called_once_with(
-            predicate, search_mode=GlobalIndexSearchMode.FULL)
+
+    def test_split_planning_merges_indexed_and_unindexed_ranges(self):
+        from pypaimon.read.scanner.file_scanner import (
+            FileScanner,
+            _GlobalIndexPlanningResult,
+        )
+
+        scanner = FileScanner.__new__(FileScanner)
+        scanner.manifest_scanner = unittest.mock.MagicMock(
+            return_value=([], unittest.mock.Mock(id=3)))
+        scanner._global_index_result = None
+        scanner._eval_global_index = unittest.mock.MagicMock(
+            return_value=_GlobalIndexPlanningResult(
+                GlobalIndexResult.from_range(Range(1, 1)),
+                [Range(10, 10 ** 12)],
+            ))
+        scanner.predicate = Predicate(
+            method="equal", index=0, field="id", literals=[1])
+        scanner.read_manifest_entries = unittest.mock.MagicMock(return_value=[])
+        scanner.table = unittest.mock.Mock()
+        scanner.target_split_size = 1
+        scanner.open_file_cost = 1
+        scanner._deletion_files_map = unittest.mock.MagicMock(return_value={})
+
+        with unittest.mock.patch(
+                "pypaimon.read.scanner.file_scanner.DataEvolutionSplitGenerator"
+        ) as split_generator:
+            scanner._create_data_evolution_split_generator()
+
+        self.assertEqual(
+            [Range(1, 1), Range(10, 10 ** 12)],
+            split_generator.call_args[0][4],
+        )
 
     def test_eval_global_index_keeps_none_as_full_scan(self):
         from pypaimon.read.scanner.file_scanner import FileScanner
@@ -272,7 +399,7 @@ class GlobalIndexScalarFallbackTest(unittest.TestCase):
         scanner.table = _Table()
 
         fake_scanner = unittest.mock.MagicMock()
-        fake_scanner.scan.return_value = None
+        fake_scanner.scan_with_coverage.return_value = None
         fake_scanner.__enter__.return_value = fake_scanner
         fake_scanner.__exit__.return_value = None
 
@@ -294,6 +421,28 @@ class PlanSnapshotFetchRegressionTest(
         'bucket': '-1',
     }
 
+    @pytest.mark.python_plan
+    def test_plan_accepts_row_ranges_without_bitmap(self):
+        table = self._create_table()
+        self._write_arrow(table, pa.table(
+            {'id': [1, 2, 3], 'name': ['a', 'b', 'c'],
+             'age': [10, 20, 30], 'city': ['x', 'y', 'z']},
+            schema=self.pa_schema))
+
+        read_builder = table.new_read_builder()
+        ranges = [Range(0, 10 ** 12)]
+        with patch.object(
+                RoaringBitmap64,
+                'to_range_list',
+                side_effect=AssertionError('row ranges entered a bitmap')):
+            plan = read_builder.new_scan().with_row_ranges(ranges).plan()
+
+        result = read_builder.new_read().to_arrow(plan.splits())
+        self.assertEqual([1, 2, 3], sorted(result.column('id').to_pylist()))
+        self.assertEqual(
+            [], read_builder.new_scan().with_row_ranges([]).plan().splits())
+
+    @pytest.mark.python_plan
     def test_plan_fetches_latest_snapshot_only_once(self):
         table = self._create_table()
         self._write_arrow(table, pa.table(
@@ -321,6 +470,7 @@ class PlanSnapshotFetchRegressionTest(
                 "duplicate from #7513: manifest_scanner + "
                 "DataEvolutionGlobalIndexScanner.create both fetch independently.")
 
+    @pytest.mark.python_plan
     def test_time_travel_plan(self):
         table = self._create_table()
         self._write_arrow(table, pa.table(

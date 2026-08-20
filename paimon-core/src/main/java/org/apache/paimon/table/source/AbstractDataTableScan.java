@@ -286,6 +286,19 @@ abstract class AbstractDataTableScan implements DataTableScan {
                 return isStreaming
                         ? new ContinuousLatestStartingScanner(snapshotManager)
                         : new FullStartingScanner(snapshotManager);
+            case LATEST_DELTA:
+                checkArgument(
+                        !isStreaming,
+                        "'latest-delta' scan mode is only supported for batch sources.");
+                Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+                if (latestSnapshot == null) {
+                    return new EmptyResultStartingScanner(snapshotManager);
+                }
+                return IncrementalDeltaStartingScanner.betweenSnapshotIds(
+                        latestSnapshot.id() - 1,
+                        latestSnapshot.id(),
+                        snapshotManager,
+                        ScanMode.DELTA);
             case COMPACTED_FULL:
                 if (options.changelogProducer() == ChangelogProducer.FULL_COMPACTION
                         || options.toConfiguration().contains(FULL_COMPACTION_DELTA_COMMITS)) {

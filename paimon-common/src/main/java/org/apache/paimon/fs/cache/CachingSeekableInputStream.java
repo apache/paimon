@@ -22,40 +22,66 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.VectoredReadable;
-
-import javax.annotation.Nullable;
+import org.apache.paimon.utils.IOUtils;
 
 import java.io.IOException;
+import java.util.concurrent.atomic.AtomicReference;
 
-/** A {@link SeekableInputStream} that caches reads at block granularity on local disk. */
+/**
+ * A {@link SeekableInputStream} that caches reads at block granularity on local disk.
+ *
+ * <p>{@link #pread} and {@link #preadFully} are thread-safe, as {@link VectoredReadable} requires,
+ * and open exactly one remote stream between them. {@link #close} is safe to call concurrently with
+ * them and never leaks that stream, but a read already in flight may fail with an
+ * implementation-specific {@link IOException} from the remote. The positional methods {@link
+ * #seek}, {@link #read} and {@link #getPos} are not thread-safe, exactly as for any other stream.
+ */
 public class CachingSeekableInputStream extends SeekableInputStream implements VectoredReadable {
 
     private final FileIO fileIO;
     private final Path path;
     private final LocalCacheManager cache;
+    private final String cacheKey;
+    private final AtomicReference<SeekableInputStream> remoteStream = new AtomicReference<>();
+    // private, so no caller can stall a lazy init by locking the stream itself
+    private final Object lock = new Object();
     private long pos;
-    private long fileSize = -1;
-    @Nullable private SeekableInputStream remoteStream;
+    private volatile long fileSize;
+    private volatile boolean closed;
 
     public CachingSeekableInputStream(FileIO fileIO, Path path, LocalCacheManager cache) {
+        this(fileIO, path, cache, path.toString(), -1);
+    }
+
+    CachingSeekableInputStream(
+            FileIO fileIO, Path path, LocalCacheManager cache, String cacheKey, long fileSize) {
         this.fileIO = fileIO;
         this.path = path;
         this.cache = cache;
+        this.cacheKey = cacheKey;
+        this.fileSize = fileSize;
         this.pos = 0;
     }
 
     private long fileSize() throws IOException {
-        if (fileSize == -1) {
-            String pathStr = path.toString();
-            long cached = cache.getFileSize(pathStr);
-            if (cached >= 0) {
-                fileSize = cached;
-            } else {
-                fileSize = fileIO.getFileStatus(path).getLen();
-                cache.putFileSize(pathStr, fileSize);
+        // guarded like the remote stream below, and for the same reason: a vectored fan-out reaches
+        // this first, and an unguarded lazy init would issue one getFileStatus per thread
+        long current = fileSize;
+        if (current >= 0) {
+            return current;
+        }
+        synchronized (lock) {
+            current = fileSize;
+            if (current < 0) {
+                current = cache.getFileSize(cacheKey);
+                if (current < 0) {
+                    current = fileIO.getFileStatus(path).getLen();
+                    cache.putFileSize(cacheKey, current);
+                }
+                fileSize = current;
             }
         }
-        return fileSize;
+        return current;
     }
 
     @Override
@@ -70,6 +96,7 @@ public class CachingSeekableInputStream extends SeekableInputStream implements V
 
     @Override
     public int read() throws IOException {
+        checkNotClosed();
         if (pos >= fileSize()) {
             return -1;
         }
@@ -83,6 +110,7 @@ public class CachingSeekableInputStream extends SeekableInputStream implements V
 
     @Override
     public int read(byte[] b, int off, int len) throws IOException {
+        checkNotClosed();
         if (len == 0) {
             return 0;
         }
@@ -113,6 +141,7 @@ public class CachingSeekableInputStream extends SeekableInputStream implements V
 
     @Override
     public int pread(long position, byte[] buffer, int offset, int length) throws IOException {
+        checkNotClosed();
         if (length == 0) {
             return 0;
         }
@@ -142,7 +171,7 @@ public class CachingSeekableInputStream extends SeekableInputStream implements V
     }
 
     private byte[] readBlock(int blockIndex) throws IOException {
-        byte[] cached = cache.getBlock(path.toString(), blockIndex);
+        byte[] cached = cache.getBlock(cacheKey, blockIndex);
         if (cached != null) {
             return cached;
         }
@@ -153,7 +182,7 @@ public class CachingSeekableInputStream extends SeekableInputStream implements V
 
         byte[] data = readRemote(offset, readSize);
 
-        cache.putBlock(path.toString(), blockIndex, data);
+        cache.putBlock(cacheKey, blockIndex, data);
         return data;
     }
 
@@ -171,10 +200,40 @@ public class CachingSeekableInputStream extends SeekableInputStream implements V
     }
 
     private SeekableInputStream getRemoteStream() throws IOException {
-        if (remoteStream == null) {
-            remoteStream = fileIO.newInputStream(path);
+        // reached concurrently: readVectored fans preadFully out over an IO thread pool, so an
+        // unguarded lazy init would open one stream per thread and leak all but the last
+        SeekableInputStream current = remoteStream.get();
+        if (current != null) {
+            checkNotClosed();
+            return current;
         }
-        return remoteStream;
+
+        boolean opened = false;
+        synchronized (lock) {
+            current = remoteStream.get();
+            if (current == null) {
+                // close() may have won while this call was queued for the lock
+                checkNotClosed();
+                current = fileIO.newInputStream(path);
+                remoteStream.set(current);
+                opened = true;
+            }
+        }
+
+        // close() does not wait for the open above, so it may have run right through it. Only the
+        // thread that opened the stream hands it back: close() sets the flag before detaching and
+        // this reads it after publishing, so one of the two always sees the other.
+        if (opened && closed) {
+            IOUtils.closeQuietly(remoteStream.getAndSet(null));
+        }
+        checkNotClosed();
+        return current;
+    }
+
+    private void checkNotClosed() throws IOException {
+        if (closed) {
+            throw new IOException("Stream is closed: " + path);
+        }
     }
 
     private static byte[] readFully(SeekableInputStream in, int size) throws IOException {
@@ -194,9 +253,11 @@ public class CachingSeekableInputStream extends SeekableInputStream implements V
 
     @Override
     public void close() throws IOException {
-        if (remoteStream != null) {
-            remoteStream.close();
-            remoteStream = null;
+        // takes no lock, so it never waits behind an in-flight remote open
+        closed = true;
+        SeekableInputStream current = remoteStream.getAndSet(null);
+        if (current != null) {
+            current.close();
         }
     }
 }

@@ -63,7 +63,13 @@ class CompactManifestProcedureTest extends PaimonSparkTestBase with StreamTest {
     Assertions.assertThat(deletedBefore).isGreaterThan(0L)
 
     val dryRunRows = spark
-      .sql("CALL sys.compact_manifest(table => 'T2', dry_run => true)")
+      .sql(
+        "CALL sys.compact_manifest(" +
+          "table => 'T2', " +
+          "dry_run => true, " +
+          "manifest_sort_enabled => true, " +
+          "manifest_sort_partition_field => 'dt', " +
+          "manifest_sort_max_rewrite_size => '1gb')")
       .collectAsList()
     Assertions.assertThat(dryRunRows.get(0).getBoolean(0)).isTrue
 

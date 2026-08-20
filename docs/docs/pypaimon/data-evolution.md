@@ -96,8 +96,10 @@ table_commit.close()
 ## Update Columns By Predicate
 
 You can use `update_by_predicate` for SQL-like `UPDATE ... SET ... WHERE ...`
-operations. The `Predicate` identifies rows to update, and the assignment map
-contains literal values for updated columns.
+operations. Assignments may be literals or callables. Callables require explicit
+`read_columns` and may run in multiple bounded batches. They must be deterministic,
+side-effect-free, and row-local, and return one Arrow value per input row. Inputs
+are read from the same pinned snapshot used to plan the update.
 When global indexes are available, `update_by_predicate` discovers matching
 `_ROW_ID` values with `scalar-index.search-mode=full` on the configured
 point-in-time scan snapshot or, if none is configured, the latest snapshot.
@@ -133,11 +135,15 @@ commit.commit(write.prepare_commit())
 write.close()
 commit.close()
 
-# UPDATE users_update SET age = 99 WHERE id IN (1, 3)
+# UPDATE users_update SET age = age + 1 WHERE id IN (1, 3)
 write_builder = table.new_batch_write_builder()
 table_update = write_builder.new_update()
 predicate = table_update.new_predicate_builder().is_in('id', [1, 3])
-messages = table_update.update_by_predicate(predicate, {'age': 99})
+messages = table_update.update_by_predicate(
+    predicate,
+    {'age': lambda rows: pa.compute.add(rows['age'], 1)},
+    read_columns=['age'],
+)
 
 commit = write_builder.new_commit()
 commit.commit(messages)
@@ -577,6 +583,33 @@ commit.close()
   same order for that shard.
 - **Parallelism**: run multiple shards by calling `new_shard_updator(shard_idx, num_shards)` for each shard.
 
+## Concurrent Compaction Recovery
+
+A partial-column update records the row-ID boundary of each data file it read.
+If compaction merges those files before `commit`, PyPaimon automatically
+rebases regular (non-BLOB and non-VECTOR) staged update files onto the latest
+file boundaries and retries the commit.
+
+The recovery is bounded by the total size of the current data files whose
+row-ID ranges are affected:
+
+```python
+options = {
+    'row-tracking.enabled': 'true',
+    'data-evolution.enabled': 'true',
+    'data-evolution.row-id-conflict-rewrite.max-size': '256 MB',
+}
+```
+
+The default is `256 MB`. Set the option to `0 B` to disable automatic
+rewriting. If the affected files exceed the configured size, or if the row IDs
+were removed by an overwrite, the commit keeps the normal
+`Row ID existence conflict` behavior. Logical concurrent updates are still
+checked and are never hidden by compaction recovery.
+
+Recovery is not attempted when deletion vectors are enabled, or when the same
+commit contains existing-row BLOB or VECTOR staged files.
+
 ## Stream Mode
 
 Data evolution also supports stream mode. The operation semantics are the same
@@ -597,7 +630,7 @@ The API mapping is:
 | --- | --- |
 | `write.prepare_commit()` | `write.prepare_commit(commit_identifier)` |
 | `update.update_by_arrow_with_row_id(table)` | `update.update_by_arrow_with_row_id(table, commit_identifier)` |
-| `update.update_by_predicate(predicate, assignments)` | `update.update_by_predicate(predicate, assignments, commit_identifier)` |
+| `update.update_by_predicate(predicate, assignments, read_columns=...)` | `update.update_by_predicate(predicate, assignments, commit_identifier, read_columns=...)` |
 | `update.delete_by_predicate(predicate)` | `update.delete_by_predicate(predicate, commit_identifier)` |
 | `update.delete_by_row_id(row_ids)` | `update.delete_by_row_id(row_ids, commit_identifier)` |
 | `update.upsert_by_arrow_with_key(table, keys)` | `update.upsert_by_arrow_with_key(table, keys, commit_identifier)` |

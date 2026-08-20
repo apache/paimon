@@ -36,19 +36,31 @@ Supported vector index types:
 |---|---|
 | `ivf-flat` | IVF index with flat vector storage. |
 | `ivf-pq` | IVF index with product quantization. |
-| `ivf-hnsw-flat` | IVF index with HNSW flat quantizer. |
-| `ivf-hnsw-sq` | IVF index with HNSW scalar quantizer. |
-| `lumina` | Lumina DiskANN-based vector index. |
+| `ivf-sq` | IVF index with 8-bit scalar-quantized residuals. |
+| `ivf-rq` | IVF index with rotated residual quantization. |
+| `diskann` | paimon-vindex DiskANN index with graph traversal and persisted rerank vectors. |
 
 Choose the index type based on the trade-off you want:
 
 | Index Type | Best For |
 |---|---|
 | `ivf-flat` | Highest recall among IVF variants when storage and memory are acceptable. |
-| `ivf-pq` | Smaller index files and a balanced recall, latency, and storage trade-off. |
-| `ivf-hnsw-flat` | Better recall inside IVF partitions with raw vector storage. |
-| `ivf-hnsw-sq` | HNSW search quality with scalar quantization to reduce index size. |
-| `lumina` | Large-scale ANN search with DiskANN graph indexing and configurable `rawf32`, `sq8`, or `pq` encodings. |
+| `ivf-pq` | The smallest IVF files when stronger quantization loss is acceptable. |
+| `ivf-sq` | High compact-index throughput with one byte per vector dimension. |
+| `ivf-rq` | Higher compact-IVF recall when additional scan work is acceptable. |
+| `diskann` | High-recall immutable collections served from local SSD or a complete local cache. |
+
+See the [paimon-vindex documentation](https://paimon.apache.org/docs/vector-index/) for its index
+selection guidance, storage architecture, and native API details.
+
+:::warning Upgrading paimon-vindex indexes to 0.3.0
+
+paimon-vindex 0.3.0 does not read the experimental `ivf-hnsw-flat` and `ivf-hnsw-sq` files written
+by 0.2.x. Rebuild those indexes as `ivf-flat`, `ivf-pq`, `ivf-sq`, `ivf-rq`, or `diskann` before
+removing the old runtime. Keep the source vectors or a 0.2-compatible index copy until the upgrade
+is accepted.
+
+:::
 
 ## Build Vector Index
 
@@ -62,15 +74,15 @@ CALL sys.create_global_index(
     table => 'db.my_table',
     index_column => 'embedding',
     index_type => 'ivf-pq',
-    options => 'ivf-pq.distance.metric=cosine,ivf-pq.nlist=256,ivf-pq.pq.m=16'
+    options => 'ivf-pq.distance.metric=cosine,ivf-pq.nlist=256,ivf-pq.pq.code-ratio=0.0625'
 );
 
--- Create Lumina DiskANN vector index on 'embedding' column
+-- Create a paimon-vindex DiskANN vector index
 CALL sys.create_global_index(
     table => 'db.my_table',
     index_column => 'embedding',
-    index_type => 'lumina',
-    options => 'lumina.index.dimension=768,lumina.distance.metric=l2,lumina.encoding.type=sq8'
+    index_type => 'diskann',
+    options => 'diskann.dimension=768,diskann.distance.metric=l2,diskann.build-preset=balanced'
 );
 ```
 
@@ -89,7 +101,7 @@ added_files = table.create_global_index(
         "ivf-pq.dimension": "768",
         "ivf-pq.distance.metric": "cosine",
         "ivf-pq.nlist": "256",
-        "ivf-pq.pq.m": "16",
+        "ivf-pq.pq.code-ratio": "0.0625",
     },
 )
 print(added_files)
@@ -111,22 +123,16 @@ added_files = table.create_global_index(
 print(added_files)
 ```
 
-PyPaimon vector index build currently supports the paimon-vindex IVF identifiers:
-`ivf-flat`, `ivf-pq`, `ivf-hnsw-flat`, and `ivf-hnsw-sq`. Use SQL to build
-Lumina indexes. Install `paimon-vindex` or `pypaimon[vindex]` before building
-or querying IVF vector indexes from Python.
+PyPaimon vector index build supports the paimon-vindex 0.3.0 identifiers `ivf-flat`, `ivf-pq`,
+`ivf-sq`, `ivf-rq`, and `diskann`. Install `paimon-vindex==0.3.0` or `pypaimon[vindex]` before
+building or querying paimon-vindex indexes from Python.
 
 </TabItem>
 
 </Tabs>
 
-Use `index_type => 'lumina'` for new Lumina indexes. The legacy `lumina-vector-ann` identifier is
-kept only so existing tables can still load old indexes.
-
 For `ARRAY<FLOAT>` vector columns, specify the vector dimension with `<index-type>.dimension` for
-IVF indexes or `lumina.index.dimension` for Lumina indexes. For `VECTOR<FLOAT>` columns, Paimon uses
-the dimension from the column type. When `lumina.index.dimension` is explicitly set for a
-`VECTOR<FLOAT>` column, it must match the vector type length.
+paimon-vindex indexes. For `VECTOR<FLOAT>` columns, Paimon uses the dimension from the column type.
 
 ## Drop Vector Index
 
@@ -170,41 +176,36 @@ print(matched_files)
 
 </Tabs>
 
-Supported IVF vector index options:
+Supported paimon-vindex options:
 
 | Option | Default | Description |
 |---|---|---|
 | `<index-type>.dimension` | `128` | Vector dimension for `ARRAY<FLOAT>` columns. Ignored for `VECTOR<FLOAT>` columns. |
 | `<index-type>.distance.metric` | `inner_product` | Distance metric. Supported values: `l2`, `cosine`, `inner_product`. |
 | `<index-type>.train.sample-ratio` | `1.0` | Ratio of vectors sampled for native index training. Must be greater than `0` and less than or equal to `1`. Lower values reduce training memory and build cost, but may reduce index quality. |
-| `<index-type>.nlist` | `256` | Number of IVF clusters used during index build. Higher values create more partitions and can improve recall for large datasets, but may increase build cost. |
-| `<index-type>.pq.m` | `16` | Number of PQ sub-vectors for `ivf-pq`. The vector dimension must be divisible by this value. Higher values usually improve recall with larger index files. |
-| `<index-type>.pq.use-opq` | `false` | Whether to enable OPQ for `ivf-pq`. |
-| `<index-type>.hnsw.m` | `20` | HNSW graph out-degree for `ivf-hnsw-flat` and `ivf-hnsw-sq`. |
-| `<index-type>.hnsw.ef-construction` | `150` | HNSW construction search width for `ivf-hnsw-flat` and `ivf-hnsw-sq`. |
-| `<index-type>.hnsw.max-level` | `7` | Maximum HNSW level for `ivf-hnsw-flat` and `ivf-hnsw-sq`. |
+| `<index-type>.nlist` | Automatic | Number of clusters for the four IVF types. When omitted, paimon-vindex resolves it from the shard's non-null vector count. |
+| `<index-type>.pq.code-ratio` | `0.0625` | Relative PQ-code budget for `ivf-pq` and `diskann`. |
+| `<index-type>.pq.m` | Automatic | Expert override for the PQ sub-vector count used by `ivf-pq` and `diskann`. |
+| `ivf-pq.pq.use-opq` | Automatic | Explicitly enables or disables OPQ. Without an explicit value, a `target-recall` of at least `0.9` enables it. |
+| `ivf-rq.rq.bits` | `4` | Persisted IVF-RQ residual width. Supported values are `1` through `8`; changing it requires rebuilding the index. |
+| `<index-type>.target-recall` | Not set | Build-policy hint used by `ivf-pq` and `diskann`. Validate the resulting recall on held-out queries. |
+| `<index-type>.max-bytes-per-vector` | Not set | Storage objective and conservative preflight bound for `ivf-pq`, `ivf-rq`, and `diskann`. |
 
-Supported Lumina vector index options:
+Additional paimon-vindex DiskANN build options:
 
 | Option | Default | Description |
 |---|---|---|
-| `lumina.index.dimension` | `128` | Vector dimension for `ARRAY<FLOAT>` columns. For `VECTOR<FLOAT>` columns, an explicitly configured value must match the type length. |
-| `lumina.distance.metric` | `inner_product` | Distance metric. Supported values: `l2`, `cosine`, `inner_product`. |
-| `lumina.index.type` | `diskann` | Lumina index type. Currently supports DiskANN. |
-| `lumina.encoding.type` | `pq` | Vector encoding type. Supported values: `rawf32`, `sq8`, `pq`. |
-| `lumina.pretrain.sample_ratio` | `0.2` | Sample ratio used for pretraining. |
-| `lumina.diskann.build.ef_construction` | `1024` | Size of the dynamic candidate list during DiskANN graph construction. |
-| `lumina.diskann.build.neighbor_count` | `64` | Maximum number of neighbors per node in the DiskANN graph. |
-| `lumina.diskann.build.thread_count` | `32` | Number of threads used for DiskANN index building. |
-| `lumina.diskann.search.list_size` | unset; search uses `max(1.5x top_k, 16)` | Default DiskANN search list size used when no query value is supplied. |
-| `lumina.diskann.search.beam_width` | `4` | Beam width for DiskANN search. |
-| `lumina.encoding.pq.m` | `64` | Number of sub-quantizers for PQ encoding. It is capped to the vector dimension when larger than the dimension. |
-| `lumina.search.parallel_number` | `5` | Parallel number for Lumina search. |
-
-Lumina PQ encoding does not support the `cosine` distance metric. Use `rawf32` or `sq8` encoding
-with `cosine`, or use `l2` or `inner_product` with `pq`.
-
-The Lumina native library is currently available only on x86_64 (AMD64) architecture.
+| `diskann.build-preset` | `balanced` | Coherent `fast_build`, `balanced`, or `high_recall` build policy. |
+| `diskann.deployment-profile` | Not set | Deployment objective used to choose a storage layout. |
+| `diskann.pq.bits` | `8` | Resident PQ-code width. Supported values are `4` and `8`. |
+| `diskann.max-degree` | `64` | Maximum graph out-degree. |
+| `diskann.build-search-list-size` | `max(100, max-degree)` | Candidate width during graph construction. |
+| `diskann.alpha` | `1.2` | Robust-prune threshold. |
+| `diskann.seed` | `42` | Reproducible initialization and build-order seed. |
+| `diskann.memory-budget-bytes` | `8 GiB` | Internal graph-build memory estimate used to select normal or sharded construction. |
+| `diskann.storage-layout` | `auto` | Explicit `compact` or `interleaved` layout override. |
+| `diskann.raw-vector-encoding` | `auto` | Explicit `f32` or `f16` persisted rerank-vector encoding. |
+| `diskann.build-distance` | `auto` | Explicit product-quantized or full-precision build traversal override. |
 
 ## Per-Field Options
 
@@ -278,27 +279,19 @@ catalog.create_table("db.my_table", schema, ignore_if_exists=False)
 With the properties above, `title_embedding` is indexed with `nlist=256` while `image_embedding`
 uses `nlist=512` and trains with half of the non-null vectors.
 
-Lumina uses the same field-level convention. For example, `fields.image_embedding.distance.metric`
-overrides `lumina.distance.metric` for `image_embedding`, and
-`fields.image_embedding.index.dimension` overrides `lumina.index.dimension`.
-
 ## Vector Search
 
 Search-time options are passed with each vector search request:
 
 | Option | Default | Description |
 |---|---|---|
-| `ivf.nprobe` | `16` | Number of IVF clusters to probe during search. Higher values usually improve recall but increase latency. |
-| `ivf.refine_factor` | Disabled | Retrieves `top_k * refine_factor` IVF candidates and reranks them with the original vectors stored in the Paimon table. It is disabled by default for every IVF variant and is most useful for compressed indexes such as `ivf-pq` and `ivf-hnsw-sq` when recall is more important than latency. |
-| `hnsw.ef_search` | `0` | HNSW search width during search. Higher values usually improve recall but increase latency. `0` uses the native library default. |
-| `diskann.search.list_size` | `max(1.5x top_k, 16)` | Lumina DiskANN search list size. Higher values usually improve recall but increase latency. |
-| `diskann.search.beam_width` | `4` | Lumina DiskANN search beam width. |
-| `search.parallel_number` | `5` | Lumina search parallel number. |
+| `ivf.nprobe` | Automatic | Explicit number of IVF clusters to probe. When omitted, paimon-vindex derives the width from the index, `top_k`, and filter selectivity. |
+| `ivf.refine_factor` | Disabled | Retrieves `top_k * refine_factor` IVF candidates and reranks them with the original vectors stored in the Paimon table. It is most useful for compressed indexes such as `ivf-pq`, `ivf-sq`, and `ivf-rq` when recall is more important than latency. |
+| `diskann.l_search` | Automatic | paimon-vindex DiskANN graph candidate width. The automatic value uses calibration when available, otherwise `max(100, 2 * top_k)`. |
 
 Use the same distance metric at build time and query time. Search options can be passed per query,
-so you can use a larger `ivf.nprobe` or `hnsw.ef_search` for higher recall queries and a smaller
-value for latency-sensitive queries. Lumina query-time options use the native keys shown above; when
-the same options are configured as table or index options, use the `lumina.` prefix.
+so you can use a larger `ivf.nprobe` or `diskann.l_search` for higher recall queries and a smaller
+value for latency-sensitive queries. Do not set both in one query.
 
 `ivf.refine_factor` can also be configured with `refine_factor`, `rerank_factor`, and hyphenated
 spellings such as `ivf.refine-factor`. Setting `ivf.refine_factor=1` still performs the raw-vector

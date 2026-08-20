@@ -20,13 +20,20 @@ package org.apache.paimon.spark.sources
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.options.Options
-import org.apache.paimon.spark.{PaimonImplicits, PaimonInputPartition, PaimonPartitionReaderFactory, SparkConnectorOptions}
+import org.apache.paimon.schema.TableSchema
+import org.apache.paimon.spark.{PaimonImplicits, PaimonMicroBatchInputPartition, PaimonMicroBatchMetadata, PaimonPartitionReaderFactory, SparkConnectorOptions}
 import org.apache.paimon.table.DataTable
-import org.apache.paimon.table.source.ReadBuilder
+import org.apache.paimon.table.source.{DataSplit, ReadBuilder}
+import org.apache.paimon.utils.DataEvolutionUtils
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.connector.read.{InputPartition, PartitionReaderFactory}
 import org.apache.spark.sql.connector.read.streaming.{MicroBatchStream, Offset, ReadLimit, SupportsTriggerAvailableNow}
+
+import java.lang.{Long => JLong}
+import java.util.{ArrayList, Collections}
+import java.util.concurrent.ConcurrentHashMap
+import java.util.function.Function
 
 import scala.collection.mutable
 
@@ -93,6 +100,14 @@ class PaimonMicroBatchStream(
 
   private lazy val blobAsDescriptor: Boolean = options.get(CoreOptions.BLOB_AS_DESCRIPTOR)
 
+  private[spark] lazy val schemaLoader: Function[JLong, TableSchema] = {
+    val schemaManager = table.schemaManager()
+    val schemaCache = new ConcurrentHashMap[JLong, TableSchema]()
+    val uncachedSchemaLoader: Function[JLong, TableSchema] =
+      schemaId => schemaManager.schema(schemaId.longValue())
+    schemaId => schemaCache.computeIfAbsent(schemaId, uncachedSchemaLoader)
+  }
+
   override def getDefaultReadLimit: ReadLimit = defaultReadLimit
 
   override def prepareForTriggerAvailableNow(): Unit = {
@@ -134,9 +149,28 @@ class PaimonMicroBatchStream(
     }
     val endOffset = PaimonSourceOffset(end)
 
-    getBatch(startOffset, Some(endOffset), None)
-      .map(ids => PaimonInputPartition(ids.entry))
+    val admittedSplits = getBatch(startOffset, Some(endOffset), None)
+    val metadata = createMicroBatchMetadata(startOffset, endOffset, admittedSplits)
+    admittedSplits
+      .map(ids => PaimonMicroBatchInputPartition(Seq(ids.entry), metadata))
       .toArray[InputPartition]
+  }
+
+  private def createMicroBatchMetadata(
+      startOffset: PaimonSourceOffset,
+      endOffset: PaimonSourceOffset,
+      admittedSplits: Array[IndexedDataSplit]): PaimonMicroBatchMetadata = {
+    val splits = new ArrayList[DataSplit](admittedSplits.length)
+    admittedSplits.foreach(split => splits.add(split.entry))
+    val admittedSplitSnapshot = Collections.unmodifiableList(splits)
+
+    new PaimonMicroBatchMetadata(
+      checkpointLocation,
+      startOffset.json(),
+      endOffset.json(),
+      admittedSplits.length,
+      () => DataEvolutionUtils.collectWrittenColumnIds(admittedSplitSnapshot, schemaLoader)
+    )
   }
 
   override def createReaderFactory(): PartitionReaderFactory = {

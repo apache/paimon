@@ -36,6 +36,8 @@ import static org.junit.jupiter.api.condition.JRE.JAVA_11;
 public class SparkE2eTest extends E2eReaderTestBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(SparkE2eTest.class);
+    private static final String COARSE_GRAINED_SCHEDULER_SHUTDOWN_ERROR =
+            "ERROR Utils: Uncaught exception in thread dispatcher-CoarseGrainedScheduler";
 
     public SparkE2eTest() {
         super(false, false, true);
@@ -75,11 +77,23 @@ public class SparkE2eTest extends E2eReaderTestBase {
                         LOG.info(execResult.getStderr());
                         throw new AssertionError("Failed when running spark sql.");
                     }
-                    return Arrays.stream(execResult.getStdout().split("\n"))
+                    String stdout =
+                            stripCoarseGrainedSchedulerShutdownError(execResult.getStdout());
+                    return Arrays.stream(stdout.split("\n"))
                                     .filter(s -> !s.contains("WARN"))
                                     .collect(Collectors.joining("\n"))
                             + "\n";
                 });
+    }
+
+    private static String stripCoarseGrainedSchedulerShutdownError(String stdout) {
+        int errorIndex = stdout.indexOf(COARSE_GRAINED_SCHEDULER_SHUTDOWN_ERROR);
+        if (errorIndex < 0) {
+            return stdout;
+        }
+
+        int errorLineStart = stdout.lastIndexOf('\n', errorIndex);
+        return errorLineStart < 0 ? "" : stdout.substring(0, errorLineStart);
     }
 
     private ContainerState getSpark() {

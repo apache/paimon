@@ -38,7 +38,8 @@ case class PaimonDataWrite(
     fullCompactionDeltaCommits: Option[Int],
     batchId: Option[Long],
     uriReaderFactory: UriReaderFactory,
-    postponePartitionBucketComputer: Option[BinaryRow => Integer])
+    postponePartitionBucketComputer: Option[BinaryRow => Integer],
+    ignorePreviousFiles: Boolean = false)
   extends abstractInnerTableDataWrite[Row]
   with InnerTableV1DataWrite {
 
@@ -47,11 +48,11 @@ case class PaimonDataWrite(
   val write: TableWriteImpl[Row] = {
     val _write = writeBuilder.newWrite().asInstanceOf[TableWriteImpl[Row]]
     _write.withIOManager(ioManager)
+    if (ignorePreviousFiles) {
+      _write.withIgnorePreviousFiles(true)
+    }
     if (writeRowTracking) {
       _write.withWriteType(writeType)
-    }
-    if (postponePartitionBucketComputer.isDefined) {
-      _write.getWrite.withIgnoreNumBucketCheck(true)
     }
     _write
   }
@@ -65,27 +66,17 @@ case class PaimonDataWrite(
   }
 
   def write(row: Row, bucket: Int): Unit = {
-    postWrite(write.writeAndReturn(toPaimonRow(row), bucket))
+    val paimonRow = toPaimonRow(row)
+    val sinkRecord = postponePartitionBucketComputer match {
+      case Some(numBuckets) =>
+        write.writeAndReturn(paimonRow, bucket, numBuckets(write.getPartition(paimonRow)))
+      case None => write.writeAndReturn(paimonRow, bucket)
+    }
+    postWrite(sinkRecord)
   }
 
   override def commitImpl(): Seq[CommitMessage] = {
-    val commitMessages = write.prepareCommit().asScala.toSeq
-
-    if (postponePartitionBucketComputer.isDefined) {
-      commitMessages.map {
-        case message: CommitMessageImpl =>
-          new CommitMessageImpl(
-            message.partition(),
-            message.bucket(),
-            postponePartitionBucketComputer.get.apply(message.partition()),
-            message.newFilesIncrement(),
-            message.compactIncrement()
-          )
-        case _ => throw new RuntimeException()
-      }
-    } else {
-      commitMessages
-    }
+    write.prepareCommit().asScala.toSeq
   }
 
   override def close(): Unit = {

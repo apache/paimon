@@ -319,6 +319,17 @@ class VectorSearchQueryTest extends AnyFunSuite {
     assert(vectorSearch.options().get("hnsw.ef_search") == "64")
   }
 
+  test("reject vector search with too few parameters") {
+    Seq(Seq.empty[Expression], Seq(Literal("v"))).foreach {
+      args =>
+        val exception = intercept[RuntimeException] {
+          VectorSearchQuery(Seq.empty).createVectorSearch(innerTable, args)
+        }
+        assert(exception.getMessage.contains("needs three or four parameters"))
+        assert(!VectorSearchQuery(Seq.empty).hasOuterReference(args))
+    }
+  }
+
   private def createVectorSearch(args: Expression*) =
     VectorSearchQuery(Seq.empty).createVectorSearch(innerTable, args)
 

@@ -27,6 +27,7 @@ import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
+import org.apache.paimon.index.vector.VectorSearchParams;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.BatchVectorSearch;
 import org.apache.paimon.predicate.VectorSearch;
@@ -72,7 +73,6 @@ public class NativeVectorGlobalIndexTest {
 
     private static boolean isNativeAvailable() {
         try {
-            NativeVectorIndexLoader.loadJni();
             Options options = new Options();
             options.setInteger("ivf-flat.dimension", 2);
             options.setString("ivf-flat.metric", "l2");
@@ -240,25 +240,38 @@ public class NativeVectorGlobalIndexTest {
     public void testVectorSearchParameterParsing() {
         Map<String, String> parameters = new HashMap<>();
         parameters.put("ivf.nprobe", "24");
-        parameters.put("hnsw.ef_search", "80");
         parameters.put("ignored", "bad");
 
-        assertThat(NativeVectorGlobalIndexReader.nprobe(parameters)).isEqualTo(24);
-        assertThat(NativeVectorGlobalIndexReader.efSearch(parameters)).isEqualTo(80);
-        assertThat(NativeVectorGlobalIndexReader.nprobe(Collections.emptyMap())).isEqualTo(16);
-        assertThat(NativeVectorGlobalIndexReader.efSearch(Collections.emptyMap())).isEqualTo(0);
+        VectorSearchParams ivfParams = NativeVectorGlobalIndexReader.searchParams(parameters, 10);
+        assertThat(ivfParams.topK()).isEqualTo(10);
+
+        VectorSearchParams automaticParams =
+                NativeVectorGlobalIndexReader.searchParams(Collections.emptyMap(), 5);
+        assertThat(automaticParams.topK()).isEqualTo(5);
+
+        VectorSearchParams diskAnnParams =
+                NativeVectorGlobalIndexReader.searchParams(
+                        Collections.singletonMap("diskann.l_search", "80"), 10);
+        assertThat(diskAnnParams.topK()).isEqualTo(10);
     }
 
     @Test
     public void testVectorSearchParameterRangeValidationDelegatedToNative() {
         assertThat(
-                        NativeVectorGlobalIndexReader.nprobe(
-                                Collections.singletonMap("ivf.nprobe", "0")))
-                .isEqualTo(0);
+                        NativeVectorGlobalIndexReader.searchParams(
+                                Collections.singletonMap("ivf.nprobe", "0"), 10))
+                .isNotNull();
         assertThat(
-                        NativeVectorGlobalIndexReader.efSearch(
-                                Collections.singletonMap("hnsw.ef_search", "-1")))
-                .isEqualTo(-1);
+                        NativeVectorGlobalIndexReader.searchParams(
+                                Collections.singletonMap("diskann.l_search", "-1"), 10))
+                .isNotNull();
+
+        Map<String, String> conflicting = new HashMap<>();
+        conflicting.put("ivf.nprobe", "16");
+        conflicting.put("diskann.l_search", "100");
+        assertThatThrownBy(() -> NativeVectorGlobalIndexReader.searchParams(conflicting, 10))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Cannot set both");
     }
 
     @Test
@@ -317,6 +330,57 @@ public class NativeVectorGlobalIndexTest {
             assertThat(result.results().contains(0L)).isTrue();
             float score = result.scoreGetter().score(0L);
             assertThat(score).isNotNaN();
+        }
+    }
+
+    @Test
+    public void testNewIndexTypesEndToEnd() throws IOException {
+        Assumptions.assumeTrue(isNativeAvailable(), "Vector index native library not available");
+
+        float[][] vectors = new float[32][2];
+        for (int i = 0; i < vectors.length; i++) {
+            double angle = 2 * Math.PI * i / vectors.length;
+            vectors[i][0] = (float) Math.cos(angle);
+            vectors[i][1] = (float) Math.sin(angle);
+        }
+
+        for (String identifier :
+                new String[] {
+                    IvfSqVectorGlobalIndexerFactory.IDENTIFIER,
+                    IvfRqVectorGlobalIndexerFactory.IDENTIFIER,
+                    DiskAnnVectorGlobalIndexerFactory.IDENTIFIER
+                }) {
+            Options options = new Options();
+            options.setInteger(identifier + ".dimension", 2);
+            options.setString(identifier + ".metric", "l2");
+            if (IvfRqVectorGlobalIndexerFactory.IDENTIFIER.equals(identifier)) {
+                options.setInteger(identifier + ".nlist", 1);
+            } else {
+                if (DiskAnnVectorGlobalIndexerFactory.IDENTIFIER.equals(identifier)) {
+                    options.setInteger("diskann.max-degree", 4);
+                    options.setInteger("diskann.build-search-list-size", 8);
+                }
+            }
+
+            NativeVectorGlobalIndexWriter writer =
+                    new NativeVectorGlobalIndexWriter(
+                            createFileWriter(indexPath),
+                            vectorType,
+                            NativeVectorGlobalIndexerFactory.nativeOptions(
+                                    vectorType, options, identifier, fieldName),
+                            identifier);
+            writeVectors(writer, vectors);
+            List<GlobalIndexIOMeta> metas = toIOMetas(writer.finish(), indexPath);
+
+            try (NativeVectorGlobalIndexReader reader =
+                    new NativeVectorGlobalIndexReader(
+                            createFileReader(indexPath), metas, vectorType, executor)) {
+                ScoredGlobalIndexResult result =
+                        reader.visitVectorSearch(new VectorSearch(vectors[0], 2, fieldName))
+                                .join()
+                                .get();
+                assertThat(result.results().contains(0L)).as(identifier).isTrue();
+            }
         }
     }
 
@@ -444,7 +508,8 @@ public class NativeVectorGlobalIndexTest {
 
         GlobalIndexFileReader fileReader = createFileReader(indexPath);
         try (NativeVectorGlobalIndexReader reader =
-                (NativeVectorGlobalIndexReader) indexer.createReader(fileReader, metas, executor)) {
+                (NativeVectorGlobalIndexReader)
+                        indexer.createReader(fileReader, metas, vectors.length, executor)) {
             VectorSearch vectorSearch = new VectorSearch(vectors[0], 2, fieldName);
             ScoredGlobalIndexResult result = reader.visitVectorSearch(vectorSearch).join().get();
             assertThat(result.results().getLongCardinality()).isEqualTo(2);

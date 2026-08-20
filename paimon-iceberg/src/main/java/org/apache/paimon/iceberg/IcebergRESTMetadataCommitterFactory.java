@@ -24,7 +24,7 @@ import org.apache.paimon.table.FileStoreTable;
 public class IcebergRESTMetadataCommitterFactory implements IcebergMetadataCommitterFactory {
     @Override
     public String identifier() {
-        return IcebergOptions.StorageType.REST_CATALOG.toString();
+        return IcebergOptions.StorageType.REST_CATALOG.committerFactoryIdentifier();
     }
 
     @Override

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.io;
 
+import org.apache.paimon.deletionvectors.Bitmap64DeletionVector;
 import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.fileindex.FileIndexPredicate;
@@ -52,6 +53,12 @@ public class FileIndexEvaluator {
             DataFileMeta file,
             @Nullable DeletionVector dv)
             throws IOException {
+        // File index selections use 32-bit positions. Fall back when they cannot safely represent
+        // the file or its deletion vector.
+        if (file.rowCount() > RoaringBitmap32.MAX_VALUE || dv instanceof Bitmap64DeletionVector) {
+            return FileIndexResult.REMAIN;
+        }
+
         if (isNullOrEmpty(dataFilter) && topN == null) {
             if (limit == null) {
                 return FileIndexResult.REMAIN;
@@ -72,7 +79,7 @@ public class FileIndexEvaluator {
             if (!isNullOrEmpty(dataFilter)) {
                 Predicate filter = PredicateBuilder.and(dataFilter.toArray(new Predicate[0]));
                 result = predicate.evaluate(filter);
-                result.and(selection);
+                result = result.and(selection);
             } else if (topN != null) {
                 // 1. TopN cannot work with filter, because a filter may not completely filter out
                 // all records, any unfiltered records can affect the calculation results of TopN

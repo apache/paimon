@@ -51,6 +51,11 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -62,6 +67,62 @@ import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 class PrimaryKeyFullTextBucketSearchTest {
 
     @Test
+    void testStartsPayloadsBeforeWaitingForResults() throws Exception {
+        CompletableFuture<Optional<ScoredGlobalIndexResult>> futureA = new CompletableFuture<>();
+        CompletableFuture<Optional<ScoredGlobalIndexResult>> futureB = new CompletableFuture<>();
+        CountDownLatch started = new CountDownLatch(2);
+        AtomicInteger closes = new AtomicInteger();
+        PrimaryKeyFullTextBucketSearch search =
+                new PrimaryKeyFullTextBucketSearch(
+                        (payload, ignoredTotalRowCount) -> {
+                            String source =
+                                    PrimaryKeyIndexSourceMeta.fromIndexFile(payload)
+                                            .sourceFile()
+                                            .fileName();
+                            return new FullTextOnlyReader() {
+                                @Override
+                                public CompletableFuture<Optional<ScoredGlobalIndexResult>>
+                                        visitFullTextSearch(FullTextSearch fullTextSearch) {
+                                    started.countDown();
+                                    return source.equals("a") ? futureA : futureB;
+                                }
+
+                                @Override
+                                public void close() {
+                                    closes.incrementAndGet();
+                                }
+                            };
+                        });
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+
+        try {
+            Future<CompletableFuture<List<List<PrimaryKeySearchPosition>>>> invocation =
+                    executor.submit(
+                            () ->
+                                    search.searchRankingsAsync(
+                                            split(),
+                                            Collections.emptyMap(),
+                                            "content",
+                                            "hello",
+                                            2));
+            assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
+            CompletableFuture<List<List<PrimaryKeySearchPosition>>> resultFuture =
+                    invocation.get(5, TimeUnit.SECONDS);
+            assertThat(resultFuture.isDone()).isFalse();
+            futureB.complete(Optional.empty());
+            assertThat(resultFuture.isDone()).isFalse();
+            futureA.complete(Optional.empty());
+            assertThat(resultFuture.get(5, TimeUnit.SECONDS)).isEmpty();
+        } finally {
+            futureA.complete(Optional.empty());
+            futureB.complete(Optional.empty());
+            executor.shutdownNow();
+        }
+        assertThat(closes).hasValue(2);
+    }
+
+    @Test
     void testFiltersDeletedRowsAndSelectsGlobalScores() {
         PrimaryKeyFullTextSearchSplit split = split();
         BitmapDeletionVector deletionVector = new BitmapDeletionVector();
@@ -71,7 +132,7 @@ class PrimaryKeyFullTextBucketSearchTest {
 
         PrimaryKeyFullTextBucketSearch search =
                 new PrimaryKeyFullTextBucketSearch(
-                        payload -> {
+                        (payload, ignoredTotalRowCount) -> {
                             String source =
                                     PrimaryKeyIndexSourceMeta.fromIndexFile(payload)
                                             .sourceFile()
@@ -101,7 +162,7 @@ class PrimaryKeyFullTextBucketSearchTest {
         AtomicInteger closes = new AtomicInteger();
         PrimaryKeyFullTextBucketSearch search =
                 new PrimaryKeyFullTextBucketSearch(
-                        payload -> reader(scores(0, 1F, 2, 10F), closes));
+                        (payload, ignoredTotalRowCount) -> reader(scores(0, 1F, 2, 10F), closes));
         PrimaryKeyFullTextSearchSplit split =
                 new PrimaryKeyFullTextSearchSplit(
                         dataSplit(Collections.singletonList(dataFile("a"))),
@@ -125,7 +186,10 @@ class PrimaryKeyFullTextBucketSearchTest {
         AtomicInteger closes = new AtomicInteger();
         PrimaryKeyFullTextBucketSearch search =
                 new PrimaryKeyFullTextBucketSearch(
-                        ignored -> reader(scores(0, 10F, 3, 9F, 4, 8F, 5, 7F), closes));
+                        (ignored, totalRowCount) -> {
+                            assertThat(totalRowCount).isEqualTo(6);
+                            return reader(scores(0, 10F, 3, 9F, 4, 8F, 5, 7F), closes);
+                        });
         PrimaryKeyFullTextSearchSplit split =
                 new PrimaryKeyFullTextSearchSplit(
                         dataSplit(Arrays.asList(dataFile("a"), dataFile("b"))),
@@ -158,7 +222,7 @@ class PrimaryKeyFullTextBucketSearchTest {
         AtomicInteger closes = new AtomicInteger();
         PrimaryKeyFullTextBucketSearch search =
                 new PrimaryKeyFullTextBucketSearch(
-                        ignored -> reader(Collections.emptyMap(), closes));
+                        (ignored, ignoredTotalRowCount) -> reader(Collections.emptyMap(), closes));
         PrimaryKeyFullTextSearchSplit split =
                 new PrimaryKeyFullTextSearchSplit(
                         dataSplit(Collections.singletonList(dataFile("large", rowCount))),
@@ -182,7 +246,7 @@ class PrimaryKeyFullTextBucketSearchTest {
         AtomicInteger closes = new AtomicInteger();
         PrimaryKeyFullTextBucketSearch search =
                 new PrimaryKeyFullTextBucketSearch(
-                        payload ->
+                        (payload, ignoredTotalRowCount) ->
                                 new FullTextOnlyReader() {
                                     @Override
                                     public CompletableFuture<Optional<ScoredGlobalIndexResult>>

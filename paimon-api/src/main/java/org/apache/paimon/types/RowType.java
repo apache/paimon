@@ -70,6 +70,8 @@ public final class RowType extends DataType {
     private transient volatile Map<Integer, DataField> laziedFieldIdToField;
     private transient volatile Map<Integer, Integer> laziedFieldIdToIndex;
 
+    private transient volatile Set<Integer> laziedBlobFieldIndices;
+
     public RowType(boolean isNullable, List<DataField> fields) {
         super(isNullable, DataTypeRoot.ROW);
         this.fields =
@@ -119,6 +121,22 @@ public final class RowType extends DataType {
             projection[i] = getFieldIndex(projectFields.get(i));
         }
         return projection;
+    }
+
+    /** Returns the indices of top-level BLOB fields. */
+    public Set<Integer> getBlobFieldIndices() {
+        Set<Integer> blobFieldIndices = this.laziedBlobFieldIndices;
+        if (blobFieldIndices == null) {
+            Set<Integer> indices = new HashSet<>();
+            for (int i = 0; i < fields.size(); i++) {
+                if (fields.get(i).type().getTypeRoot() == DataTypeRoot.BLOB) {
+                    indices.add(i);
+                }
+            }
+            blobFieldIndices = Collections.unmodifiableSet(indices);
+            this.laziedBlobFieldIndices = blobFieldIndices;
+        }
+        return blobFieldIndices;
     }
 
     public boolean containsField(String fieldName) {

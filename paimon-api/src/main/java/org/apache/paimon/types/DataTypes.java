@@ -163,6 +163,26 @@ public class DataTypes {
         return new BlobType();
     }
 
+    public static GeometryType GEOMETRY() {
+        return new GeometryType();
+    }
+
+    public static GeometryType GEOMETRY(String crs) {
+        return new GeometryType(crs);
+    }
+
+    public static GeographyType GEOGRAPHY() {
+        return new GeographyType();
+    }
+
+    public static GeographyType GEOGRAPHY(String crs) {
+        return new GeographyType(crs);
+    }
+
+    public static GeographyType GEOGRAPHY(String crs, EdgeAlgorithm algorithm) {
+        return new GeographyType(crs, algorithm);
+    }
+
     public static OptionalInt getPrecision(DataType dataType) {
         return dataType.accept(PRECISION_EXTRACTOR);
     }

@@ -71,6 +71,7 @@ public class SparkDataEvolutionVectorRead extends DataEvolutionVectorRead {
 
     @Override
     public GlobalIndexResult read(VectorScan.Plan plan) {
+        this.planSnapshot = plan.snapshot();
         List<IndexVectorSearchSplit> indexSplits = new ArrayList<>();
         List<RawVectorSearchSplit> rawSplits = new ArrayList<>();
         splitSearchSplits(plan.splits(), indexSplits, rawSplits);

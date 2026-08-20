@@ -130,6 +130,26 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         self.assertEqual(got[21], 999)
         self.assertTrue(all(v == 0 for k, v in got.items() if k != 21))
 
+    def test_empty_dataset_after_transform_is_noop(self):
+        target = self._create()
+        self._write(target, pa.Table.from_pydict(
+            {"id": [1], "name": ["a"], "age": [1]}, schema=self.pa_schema))
+        rid = self._rowid_by_id(target)
+        source = ray.data.from_arrow(pa.table({
+            "_ROW_ID": pa.array([rid[1]], pa.int64()),
+            "age": pa.array([9], pa.int32()),
+        })).map_batches(
+            lambda batch: batch.slice(0, 0),
+            batch_format="pyarrow",
+        )
+
+        self.assertEqual(
+            update_by_row_id(
+                target, source, self.catalog_options, update_cols=["age"]),
+            {"num_updated": 0},
+        )
+        self.assertEqual(self._read(target).column("age").to_pylist(), [1])
+
     def test_pins_base_snapshot_for_conflict_detection(self):
         # The update pins its base snapshot and threads it to distributed_update_apply,
         # which uses it for commit-time conflict detection against concurrent writers.
@@ -155,7 +175,7 @@ class RayUpdateByRowIdTest(unittest.TestCase):
             update_by_row_id(target, src, self.catalog_options, update_cols=["age"])
         self.assertEqual(captured["base_snapshot_id"], expected_sid)
 
-    def test_new_commit_failure_aborts_pending_messages(self):
+    def test_new_commit_failure_preserves_pending_messages(self):
         err = RuntimeError("new_commit failed")
         recorder = {}
 
@@ -166,8 +186,8 @@ class RayUpdateByRowIdTest(unittest.TestCase):
             )
 
         self.assertEqual(recorder["commit_calls"], 0)
-        self.assertEqual(recorder["abort_calls"], 1)
-        self.assertEqual(recorder["abort_msgs"], recorder["msgs"])
+        self.assertEqual(recorder["abort_calls"], 0)
+        self.assertEqual(recorder["new_commit_calls"], 1)
 
     def test_commit_failure_does_not_abort_after_commit_started(self):
         err = RuntimeError("commit failed")

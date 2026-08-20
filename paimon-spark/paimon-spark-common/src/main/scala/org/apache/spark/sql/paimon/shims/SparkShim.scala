@@ -270,6 +270,37 @@ trait SparkShim {
 
   def SparkVariantType(): org.apache.spark.sql.types.DataType
 
+  // Geometry and geography are available in Spark 4.1 and later.
+  def toPaimonGeometry(o: Object): Array[Byte]
+
+  def toPaimonGeometry(row: InternalRow, pos: Int): Array[Byte]
+
+  def toPaimonGeometry(array: ArrayData, pos: Int): Array[Byte]
+
+  def toPaimonGeography(o: Object): Array[Byte]
+
+  def toPaimonGeography(row: InternalRow, pos: Int): Array[Byte]
+
+  def toPaimonGeography(array: ArrayData, pos: Int): Array[Byte]
+
+  def toSparkGeometry(wkb: Array[Byte], crs: String): Object
+
+  def toSparkGeography(wkb: Array[Byte], crs: String, algorithm: String): Object
+
+  def isSparkGeometryType(dataType: org.apache.spark.sql.types.DataType): Boolean
+
+  def isSparkGeographyType(dataType: org.apache.spark.sql.types.DataType): Boolean
+
+  def SparkGeometryType(crs: String): org.apache.spark.sql.types.DataType
+
+  def SparkGeographyType(crs: String, algorithm: String): org.apache.spark.sql.types.DataType
+
+  def sparkGeometryCrs(dataType: org.apache.spark.sql.types.DataType): String
+
+  def sparkGeographyCrs(dataType: org.apache.spark.sql.types.DataType): String
+
+  def sparkGeographyAlgorithm(dataType: org.apache.spark.sql.types.DataType): String
+
   // SQL UDFs (`CREATE FUNCTION ... RETURN ...`) are Spark 4.0+; the spark3 shim no-ops these.
 
   /** Parser-stage rule rewriting a Paimon-catalog `CreateUserDefinedFunction` into a create command. */

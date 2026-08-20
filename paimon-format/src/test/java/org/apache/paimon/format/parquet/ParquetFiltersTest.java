@@ -23,6 +23,7 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
@@ -70,6 +71,28 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ParquetFiltersTest {
 
     @Test
+    public void testBoolean() {
+        RowType rowType =
+                new RowType(Collections.singletonList(new DataField(0, "flag", new BooleanType())));
+        MessageType schema = ParquetSchemaConverter.convertToParquetMessageType(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+
+        test(schema, builder.isNull(0), "eq(flag, null)", true);
+
+        test(schema, builder.isNotNull(0), "noteq(flag, null)", true);
+
+        test(schema, builder.equal(0, true), "eq(flag, true)", true);
+
+        test(schema, builder.notEqual(0, false), "noteq(flag, false)", true);
+
+        test(
+                schema,
+                builder.in(0, Arrays.asList(true, false)),
+                "or(eq(flag, true), eq(flag, false))",
+                true);
+    }
+
+    @Test
     public void testLong() {
         RowType rowType =
                 new RowType(Collections.singletonList(new DataField(0, "long1", new BigIntType())));
@@ -97,6 +120,76 @@ class ParquetFiltersTest {
                 builder.notIn(0, Arrays.asList(1L, 2L, 3L)),
                 "and(and(noteq(long1, 1), noteq(long1, 2)), noteq(long1, 3))",
                 true);
+    }
+
+    @Test
+    public void testBigIntPredicateIsNotPushedToDecimalInt32() {
+        RowType rowType =
+                new RowType(Collections.singletonList(new DataField(0, "long1", new BigIntType())));
+        MessageType schema =
+                new MessageType(
+                        "paimon_schema",
+                        Collections.singletonList(
+                                Types.optional(PrimitiveTypeName.INT32)
+                                        .as(LogicalTypeAnnotation.decimalType(2, 9))
+                                        .named("long1")));
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+
+        test(schema, builder.equal(0, 12345L), "", false);
+    }
+
+    @Test
+    public void testBigIntPredicateIsNotPushedToIncompatibleInt64() {
+        RowType rowType =
+                new RowType(Collections.singletonList(new DataField(0, "long1", new BigIntType())));
+        Predicate predicate = new PredicateBuilder(rowType).equal(0, 12345L);
+        List<PrimitiveType> incompatibleTypes =
+                Arrays.asList(
+                        Types.optional(PrimitiveTypeName.INT64)
+                                .as(LogicalTypeAnnotation.decimalType(2, 18))
+                                .named("long1"),
+                        Types.optional(PrimitiveTypeName.INT64)
+                                .as(
+                                        LogicalTypeAnnotation.timeType(
+                                                true, LogicalTypeAnnotation.TimeUnit.MICROS))
+                                .named("long1"),
+                        Types.optional(PrimitiveTypeName.INT64)
+                                .as(
+                                        LogicalTypeAnnotation.timestampType(
+                                                false, LogicalTypeAnnotation.TimeUnit.MICROS))
+                                .named("long1"),
+                        Types.optional(PrimitiveTypeName.INT64)
+                                .as(LogicalTypeAnnotation.intType(64, false))
+                                .named("long1"));
+
+        for (PrimitiveType type : incompatibleTypes) {
+            FilterCompat.Filter filter =
+                    ParquetFilters.convert(
+                            Collections.singletonList(predicate),
+                            new MessageType("paimon_schema", type),
+                            true);
+            assertThat(filter)
+                    .as("logical type %s", type.getLogicalTypeAnnotation())
+                    .isEqualTo(FilterCompat.NOOP);
+        }
+    }
+
+    /**
+     * INTEGER(64,true) means the same as an unannotated INT64, so the predicate is still pushed.
+     */
+    @Test
+    public void testBigIntPredicateIsPushedToSignedAnnotatedInt64() {
+        RowType rowType =
+                new RowType(Collections.singletonList(new DataField(0, "long1", new BigIntType())));
+        MessageType schema =
+                new MessageType(
+                        "paimon_schema",
+                        Types.optional(PrimitiveTypeName.INT64)
+                                .as(LogicalTypeAnnotation.intType(64, true))
+                                .named("long1"));
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+
+        test(schema, builder.equal(0, 12345L), "eq(long1, 12345)", true);
     }
 
     @Test

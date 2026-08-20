@@ -41,15 +41,23 @@ import static org.apache.paimon.utils.SerializationUtils.newBytesType;
 @Public
 public interface ManifestEntry extends FileEntry {
 
+    String KIND = "_KIND";
+    String PARTITION = "_PARTITION";
+    String BUCKET = "_BUCKET";
+    String TOTAL_BUCKETS = "_TOTAL_BUCKETS";
+    String FILE = "_FILE";
+
     RowType SCHEMA =
             new RowType(
                     false,
                     Arrays.asList(
-                            new DataField(0, "_KIND", new TinyIntType(false)),
-                            new DataField(1, "_PARTITION", newBytesType(false)),
-                            new DataField(2, "_BUCKET", new IntType(false)),
-                            new DataField(3, "_TOTAL_BUCKETS", new IntType(false)),
-                            new DataField(4, "_FILE", DataFileMeta.SCHEMA)));
+                            new DataField(0, KIND, new TinyIntType(false)),
+                            new DataField(1, PARTITION, newBytesType(false)),
+                            new DataField(2, BUCKET, new IntType(false)),
+                            new DataField(3, TOTAL_BUCKETS, new IntType(false)),
+                            new DataField(4, FILE, DataFileMeta.SCHEMA)));
+
+    RowType MANIFEST_ROW_TYPE = ManifestSchemaUtils.withFormatIdentifier(SCHEMA);
 
     static ManifestEntry create(
             FileKind kind, BinaryRow partition, int bucket, int totalBuckets, DataFileMeta file) {

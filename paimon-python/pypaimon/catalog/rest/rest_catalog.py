@@ -19,7 +19,7 @@ import logging
 from typing import Any, Callable, Dict, List, Optional, Union
 from pypaimon.api.api_response import GetTableResponse, PagedList, ErrorResponse
 from pypaimon.api.rest_api import RESTApi
-from pypaimon.catalog.catalog_exception import IllegalArgumentError
+from pypaimon.catalog.catalog_exception import IllegalArgumentError, IllegalStateError
 from pypaimon.api.rest_exception import (NoSuchResourceException, AlreadyExistsException,
                                          ForbiddenException, BadRequestException,
                                          ServiceFailureException, NotImplementedException)
@@ -100,6 +100,7 @@ class RESTCatalog(Catalog):
             self,
             identifier: Identifier,
             table_uuid: Optional[str],
+            base_snapshot_uuid: Optional[str],
             snapshot: Snapshot,
             statistics: List[PartitionStatistics]
     ) -> bool:
@@ -109,6 +110,7 @@ class RESTCatalog(Catalog):
         Args:
             identifier: Path of the table
             table_uuid: UUID of the table to avoid wrong commit
+            base_snapshot_uuid: UUID of the snapshot on which the commit is based
             snapshot: Snapshot to be committed
             statistics: Statistics information of this change
 
@@ -120,7 +122,13 @@ class RESTCatalog(Catalog):
             TableNoPermissionException: If no permission to access this table
         """
         try:
-            return self.rest_api.commit_snapshot(identifier, table_uuid, snapshot, statistics)
+            return self.rest_api.commit_snapshot(
+                identifier,
+                table_uuid,
+                base_snapshot_uuid,
+                snapshot,
+                statistics,
+            )
         except NoSuchResourceException as e:
             raise TableNotExistException(identifier) from e
         except ForbiddenException as e:
@@ -283,6 +291,28 @@ class RESTCatalog(Catalog):
                 raise TableNotExistException(identifier) from e
         except ForbiddenException as e:
             raise TableNoPermissionException(identifier) from e
+
+    def create_partitions(
+        self,
+        identifier: Union[str, Identifier],
+        partitions: List[Dict[str, str]],
+        ignore_if_exists: bool = True,
+    ) -> None:
+        """Register partitions. A catalog operation: it does not touch table data."""
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            self.rest_api.create_partitions(identifier, partitions, ignore_if_exists)
+        except NoSuchResourceException as e:
+            raise TableNotExistException(identifier) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(identifier) from e
+        except AlreadyExistsException as e:
+            raise IllegalStateError(
+                "Some partitions of table {} already exist: {}".format(
+                    identifier.get_full_name(), e)) from e
+        except BadRequestException as e:
+            raise IllegalArgumentError(str(e)) from e
 
     def drop_partitions(
         self,

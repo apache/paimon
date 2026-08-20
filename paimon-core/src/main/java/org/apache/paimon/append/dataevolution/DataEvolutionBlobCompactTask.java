@@ -145,7 +145,9 @@ public class DataEvolutionBlobCompactTask extends DataEvolutionCompactTask {
                 false,
                 options.statsDenseStore(),
                 pathFactory.isExternalPath(),
-                Collections.singletonList(blobFieldName));
+                Collections.singletonList(blobFieldName),
+                null,
+                null);
     }
 
     private DataField blobField(

@@ -62,6 +62,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -1659,12 +1660,28 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         if (table.coreOptions().needLookup()) {
             // if table needs lookup, batch query will not get data on level = 0,
             // so we need to wait until all level 0 are compacted
+            long timeoutMs = TIMEOUT * 1000L;
+            long deadline = System.currentTimeMillis() + timeoutMs;
             while (true) {
+                int remaining = 0;
                 try (CloseableIterator<Row> it =
-                        bEnv.executeSql("SELECT * FROM `T$files` WHERE level = 0").collect()) {
-                    if (!it.hasNext()) {
-                        break;
+                        collect(bEnv.executeSql("SELECT * FROM `T$files` WHERE level = 0"))) {
+                    while (it.hasNext()) {
+                        it.next();
+                        remaining++;
                     }
+                }
+                if (remaining == 0) {
+                    break;
+                }
+                // bound this wait: if compaction never finishes, @Timeout cannot interrupt the
+                // loop reliably, so an unbounded wait hangs the whole CI job until the workflow
+                // timeout instead of failing here
+                if (System.currentTimeMillis() >= deadline) {
+                    throw new TimeoutException(
+                            String.format(
+                                    "%d level 0 file(s) are still not compacted after %d seconds.",
+                                    remaining, timeoutMs / 1000));
                 }
                 Thread.sleep(500);
             }

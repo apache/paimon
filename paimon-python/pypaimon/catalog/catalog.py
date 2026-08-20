@@ -157,6 +157,7 @@ class Catalog(ABC):
             self,
             identifier: Identifier,
             table_uuid: Optional[str],
+            base_snapshot_uuid: Optional[str],
             snapshot: Snapshot,
             statistics: List[PartitionStatistics]
     ) -> bool:
@@ -166,6 +167,7 @@ class Catalog(ABC):
         Args:
             identifier: Path of the table
             table_uuid: UUID of the table to avoid wrong commit
+            base_snapshot_uuid: UUID of the snapshot on which the commit is based
             snapshot: Snapshot to be committed
             statistics: Statistics information of this change
 
@@ -189,6 +191,17 @@ class Catalog(ABC):
         """
         raise NotImplementedError(
             "rollback_to is not supported by this catalog."
+        )
+
+    def create_partitions(
+            self,
+            identifier: Union[str, Identifier],
+            partitions: List[Dict[str, str]],
+            ignore_if_exists: bool = True,
+    ) -> None:
+        raise NotImplementedError(
+            "create_partitions is not supported by this catalog. "
+            "Use REST catalog for partition creation."
         )
 
     def drop_partitions(
