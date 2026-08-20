@@ -483,7 +483,7 @@ final class ManifestFileBlockMerger {
             writer.close();
             return writer.result();
         } catch (Exception | Error failure) {
-            writer.abort();
+            writer.abort(failure);
             throw failure;
         } finally {
             reusableIdentifier.release();

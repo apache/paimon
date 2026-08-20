@@ -24,6 +24,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ExceptionUtils;
 
 import javax.annotation.Nullable;
 
@@ -74,12 +75,18 @@ public class ManifestFileMerger {
             }
             return ManifestFileLegacyMerger.merge(
                     input, newFilesForAbort, manifestFile, partitionType, options);
-        } catch (Throwable e) {
+        } catch (Throwable primaryFailure) {
             // exception occurs, clean up and rethrow
             for (ManifestFileMeta manifest : newFilesForAbort) {
-                manifestFile.delete(manifest.fileName());
+                try {
+                    manifestFile.delete(manifest.fileName());
+                } catch (Throwable cleanupFailure) {
+                    primaryFailure =
+                            ExceptionUtils.firstOrSuppressed(cleanupFailure, primaryFailure);
+                }
             }
-            throw new RuntimeException(e);
+            ExceptionUtils.rethrow(primaryFailure);
+            return null;
         }
     }
 

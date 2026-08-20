@@ -33,7 +33,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.ObjectSerializer;
 import org.apache.paimon.utils.PathFactory;
 
@@ -46,6 +46,8 @@ import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
  * Avro writer for manifest entries.
@@ -97,14 +99,19 @@ public final class ManifestAvroWriter implements AutoCloseable {
             currentWriter().write(entry);
             afterWrite(1, false);
         } catch (IOException | RuntimeException | Error failure) {
-            abort();
+            abort(failure);
             throw failure;
         }
     }
 
     public void write(Iterable<? extends ManifestEntry> entries) throws IOException {
-        for (ManifestEntry entry : entries) {
-            write(entry);
+        try {
+            for (ManifestEntry entry : entries) {
+                write(entry);
+            }
+        } catch (IOException | RuntimeException | Error failure) {
+            abort(failure);
+            throw failure;
         }
     }
 
@@ -113,7 +120,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
             currentWriter().writeEncoded(encodedRecord, metadata);
             afterWrite(1, false);
         } catch (IOException | RuntimeException | Error failure) {
-            abort();
+            abort(failure);
             throw failure;
         }
     }
@@ -124,7 +131,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
             currentWriter().writeRow(row, metadata);
             afterWrite(1, false);
         } catch (IOException | RuntimeException | Error failure) {
-            abort();
+            abort(failure);
             throw failure;
         }
     }
@@ -148,7 +155,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
             currentWriter().writeEncodedBlock(block, metadata);
             afterWrite(metadataRecordCount, true);
         } catch (IOException | RuntimeException | Error failure) {
-            abort();
+            abort(failure);
             throw failure;
         }
     }
@@ -180,7 +187,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
             fileWriter.collectStats(metadata);
             afterWrite(copiedRecords, true);
         } catch (IOException | RuntimeException | Error failure) {
-            abort();
+            abort(failure);
             throw failure;
         }
     }
@@ -228,14 +235,44 @@ public final class ManifestAvroWriter implements AutoCloseable {
     }
 
     public void abort() {
+        Throwable cleanupFailure = abortCollecting(null);
+        if (cleanupFailure != null) {
+            ExceptionUtils.rethrow(cleanupFailure);
+        }
+    }
+
+    /** Aborts this writer and adds cleanup failures as suppressed exceptions. */
+    public void abort(Throwable primaryFailure) {
+        abortCollecting(checkNotNull(primaryFailure));
+    }
+
+    private Throwable abortCollecting(@Nullable Throwable primaryFailure) {
         if (currentWriter != null) {
-            currentWriter.abort();
+            primaryFailure = currentWriter.abortCollecting(primaryFailure, true);
         }
         for (Path path : completedPaths) {
-            fileIO.deleteQuietly(path);
+            try {
+                fileIO.deleteQuietly(path);
+            } catch (Throwable cleanupFailure) {
+                primaryFailure = ExceptionUtils.firstOrSuppressed(cleanupFailure, primaryFailure);
+            }
         }
         completedPaths.clear();
         results.clear();
+        return primaryFailure;
+    }
+
+    private static Throwable closeCollecting(
+            @Nullable AutoCloseable closeable, @Nullable Throwable primaryFailure) {
+        if (closeable == null) {
+            return primaryFailure;
+        }
+        try {
+            closeable.close();
+        } catch (Throwable cleanupFailure) {
+            primaryFailure = ExceptionUtils.firstOrSuppressed(cleanupFailure, primaryFailure);
+        }
+        return primaryFailure;
     }
 
     @Override
@@ -246,7 +283,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
         try {
             closeCurrentWriter();
         } catch (IOException | RuntimeException | Error failure) {
-            abort();
+            abort(failure);
             throw failure;
         } finally {
             closed = true;
@@ -365,6 +402,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
         private boolean levelStatsKnown = true;
         private @Nullable RowIdStats rowIdStats = new RowIdStats();
         private boolean closed;
+        private boolean aborted;
 
         private FileWriter(Path path) {
             this.path = path;
@@ -378,19 +416,13 @@ public final class ManifestAvroWriter implements AutoCloseable {
                         avroFileFormat.createBlockWriter(
                                 out, ManifestEntry.MANIFEST_ROW_TYPE, compression);
             } catch (IOException failure) {
-                IOUtils.closeQuietly(writer);
-                IOUtils.closeQuietly(out);
-                if (outputCreated) {
-                    fileIO.deleteQuietly(path);
-                }
-                throw new UncheckedIOException(
-                        "Failed to create manifest Avro writer for " + path, failure);
+                UncheckedIOException primaryFailure =
+                        new UncheckedIOException(
+                                "Failed to create manifest Avro writer for " + path, failure);
+                abortCollecting(primaryFailure, outputCreated);
+                throw primaryFailure;
             } catch (RuntimeException | Error failure) {
-                IOUtils.closeQuietly(writer);
-                IOUtils.closeQuietly(out);
-                if (outputCreated) {
-                    fileIO.deleteQuietly(path);
-                }
+                abortCollecting(failure, outputCreated);
                 throw failure;
             }
         }
@@ -612,13 +644,31 @@ public final class ManifestAvroWriter implements AutoCloseable {
             }
         }
 
-        private void abort() {
-            IOUtils.closeQuietly(writer);
-            writer = null;
-            IOUtils.closeQuietly(out);
-            out = null;
-            fileIO.deleteQuietly(path);
+        private Throwable abortCollecting(@Nullable Throwable primaryFailure, boolean deletePath) {
+            if (aborted) {
+                return primaryFailure;
+            }
+            aborted = true;
             closed = true;
+            outputBytes = null;
+
+            AvroBlockWriter currentBlockWriter = writer;
+            writer = null;
+            primaryFailure = closeCollecting(currentBlockWriter, primaryFailure);
+
+            PositionOutputStream currentOut = out;
+            out = null;
+            primaryFailure = closeCollecting(currentOut, primaryFailure);
+
+            if (deletePath) {
+                try {
+                    fileIO.deleteQuietly(path);
+                } catch (Throwable cleanupFailure) {
+                    primaryFailure =
+                            ExceptionUtils.firstOrSuppressed(cleanupFailure, primaryFailure);
+                }
+            }
+            return primaryFailure;
         }
 
         private void close() throws IOException {
@@ -633,7 +683,7 @@ public final class ManifestAvroWriter implements AutoCloseable {
                 out.close();
                 out = null;
             } catch (IOException | RuntimeException | Error failure) {
-                abort();
+                abortCollecting(failure, true);
                 throw failure;
             } finally {
                 closed = true;

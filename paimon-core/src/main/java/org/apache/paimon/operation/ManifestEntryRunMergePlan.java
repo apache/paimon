@@ -38,6 +38,7 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ProjectedManifestEntry;
 import org.apache.paimon.utils.CloseableIterator;
+import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.Pair;
 
 import javax.annotation.Nullable;
@@ -71,7 +72,8 @@ final class ManifestEntryRunMergePlan {
     List<ManifestFileMeta> mergeToManifest(
             ManifestFile manifestFile, List<ManifestFileMeta> newFilesForAbort) throws Exception {
         List<Cursor> cursors = new ArrayList<>(sources.size());
-        Exception failure = null;
+        List<ManifestFileMeta> files = Collections.emptyList();
+        Throwable primaryFailure = null;
         try {
             for (Source.Spec source : sources) {
                 Cursor cursor = source.open(manifestFile, deletes, minor, partitions);
@@ -79,31 +81,31 @@ final class ManifestEntryRunMergePlan {
                 cursor.advance();
             }
             SelectionTree selectionTree = new SelectionTree(cursors);
-            if (selectionTree.winner() < 0) {
-                return Collections.emptyList();
+            if (selectionTree.winner() >= 0) {
+                files = writeSelected(selectionTree, manifestFile);
+                newFilesForAbort.addAll(files);
             }
-            List<ManifestFileMeta> files = writeSelected(selectionTree, manifestFile);
-            newFilesForAbort.addAll(files);
-            return files;
-        } catch (Exception e) {
-            failure = e;
-            throw e;
+        } catch (Throwable failure) {
+            primaryFailure = failure;
         } finally {
             try {
                 closeCursors(cursors);
-            } catch (Exception closeFailure) {
-                if (failure == null) {
-                    throw closeFailure;
-                }
-                failure.addSuppressed(closeFailure);
+            } catch (Throwable cleanupFailure) {
+                primaryFailure = ExceptionUtils.firstOrSuppressed(cleanupFailure, primaryFailure);
             }
         }
+        if (primaryFailure != null) {
+            ExceptionUtils.rethrowException(primaryFailure);
+        }
+        return files;
     }
 
     Pair<List<ManifestFileMeta>, List<ManifestFileMeta>> mergeMinorToManifest(
             ManifestFile manifestFile, List<ManifestFileMeta> newFilesForAbort) throws Exception {
         List<Cursor> cursors = new ArrayList<>(sources.size());
-        Exception failure = null;
+        Pair<List<ManifestFileMeta>, List<ManifestFileMeta>> files =
+                Pair.of(Collections.emptyList(), Collections.emptyList());
+        Throwable primaryFailure = null;
         try {
             for (Source.Spec source : sources) {
                 Cursor cursor = source.open(manifestFile, deletes, minor, partitions);
@@ -111,33 +113,31 @@ final class ManifestEntryRunMergePlan {
                 cursor.advance();
             }
             SelectionTree selectionTree = new SelectionTree(cursors);
-            if (selectionTree.winner() < 0) {
-                return Pair.of(Collections.emptyList(), Collections.emptyList());
+            if (selectionTree.winner() >= 0) {
+                files = writeMinorSelected(selectionTree, manifestFile, deletes);
+                newFilesForAbort.addAll(files.getLeft());
+                newFilesForAbort.addAll(files.getRight());
             }
-            Pair<List<ManifestFileMeta>, List<ManifestFileMeta>> files =
-                    writeMinorSelected(selectionTree, manifestFile, deletes);
-            newFilesForAbort.addAll(files.getLeft());
-            newFilesForAbort.addAll(files.getRight());
-            return files;
-        } catch (Exception e) {
-            failure = e;
-            throw e;
+        } catch (Throwable failure) {
+            primaryFailure = failure;
         } finally {
             try {
                 closeCursors(cursors);
-            } catch (Exception closeFailure) {
-                if (failure == null) {
-                    throw closeFailure;
-                }
-                failure.addSuppressed(closeFailure);
+            } catch (Throwable cleanupFailure) {
+                primaryFailure = ExceptionUtils.firstOrSuppressed(cleanupFailure, primaryFailure);
             }
         }
+        if (primaryFailure != null) {
+            ExceptionUtils.rethrowException(primaryFailure);
+        }
+        return files;
     }
 
     static List<ManifestFileMeta> writeSelected(
             SelectionTree selectionTree, ManifestFile manifestFile) throws Exception {
         ManifestAvroWriter writer = manifestFile.createAvroWriter();
-        Exception failure = null;
+        List<ManifestFileMeta> files = Collections.emptyList();
+        Throwable primaryFailure = null;
         try {
             int winner;
             while ((winner = selectionTree.winner()) >= 0) {
@@ -152,16 +152,19 @@ final class ManifestEntryRunMergePlan {
                 writeCurrent(writer, cursor);
                 selectionTree.update(winner, cursor.advance());
             }
-        } catch (Exception e) {
-            failure = e;
-        } finally {
-            if (failure != null) {
-                writer.abort();
-                throw failure;
-            }
             writer.close();
+            files = writer.result();
+        } catch (Throwable failure) {
+            primaryFailure = failure;
+        } finally {
+            if (primaryFailure != null) {
+                writer.abort(primaryFailure);
+            }
         }
-        return writer.result();
+        if (primaryFailure != null) {
+            ExceptionUtils.rethrowException(primaryFailure);
+        }
+        return files;
     }
 
     private static Pair<List<ManifestFileMeta>, List<ManifestFileMeta>> writeMinorSelected(
@@ -171,7 +174,9 @@ final class ManifestEntryRunMergePlan {
         ManifestAvroWriter deleteWriter = manifestFile.createAvroWriter();
         CompactFileIdentifierSet matchedEntries = new CompactFileIdentifierSet();
         CompactFileIdentifierSet emittedDeletes = new CompactFileIdentifierSet();
-        Exception failure = null;
+        Pair<List<ManifestFileMeta>, List<ManifestFileMeta>> files =
+                Pair.of(Collections.emptyList(), Collections.emptyList());
+        Throwable primaryFailure = null;
         try {
             int winner;
             while ((winner = selectionTree.winner()) >= 0) {
@@ -203,18 +208,29 @@ final class ManifestEntryRunMergePlan {
             }
             addWriter.close();
             deleteWriter.close();
-        } catch (Exception e) {
-            failure = e;
+            files = Pair.of(addWriter.result(), deleteWriter.result());
+        } catch (Throwable failure) {
+            primaryFailure = failure;
         } finally {
-            matchedEntries.release();
-            emittedDeletes.release();
-            if (failure != null) {
-                addWriter.abort();
-                deleteWriter.abort();
-                throw failure;
+            try {
+                matchedEntries.release();
+            } catch (Throwable cleanupFailure) {
+                primaryFailure = ExceptionUtils.firstOrSuppressed(cleanupFailure, primaryFailure);
+            }
+            try {
+                emittedDeletes.release();
+            } catch (Throwable cleanupFailure) {
+                primaryFailure = ExceptionUtils.firstOrSuppressed(cleanupFailure, primaryFailure);
+            }
+            if (primaryFailure != null) {
+                addWriter.abort(primaryFailure);
+                deleteWriter.abort(primaryFailure);
             }
         }
-        return Pair.of(addWriter.result(), deleteWriter.result());
+        if (primaryFailure != null) {
+            ExceptionUtils.rethrowException(primaryFailure);
+        }
+        return files;
     }
 
     private static void writeCurrent(ManifestAvroWriter writer, Cursor cursor) throws Exception {
@@ -232,20 +248,16 @@ final class ManifestEntryRunMergePlan {
     }
 
     static void closeCursors(List<Cursor> cursors) throws Exception {
-        Exception failure = null;
+        Throwable primaryFailure = null;
         for (Cursor cursor : cursors) {
             try {
                 cursor.close();
-            } catch (Exception e) {
-                if (failure == null) {
-                    failure = e;
-                } else {
-                    failure.addSuppressed(e);
-                }
+            } catch (Throwable cleanupFailure) {
+                primaryFailure = ExceptionUtils.firstOrSuppressed(cleanupFailure, primaryFailure);
             }
         }
-        if (failure != null) {
-            throw failure;
+        if (primaryFailure != null) {
+            ExceptionUtils.rethrowException(primaryFailure);
         }
     }
 
