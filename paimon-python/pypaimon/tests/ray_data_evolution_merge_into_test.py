@@ -2091,6 +2091,98 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             ],
             GlobalIndexSearchMode.FULL.value,
         )
+        self.assertTrue(read_kwargs['_preserve_current_schema'])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_pushdown_handles_evolved_file_groups(self):
+        from pypaimon.schema.data_types import AtomicType
+        from pypaimon.schema.schema_change import SchemaChange
+
+        options = dict(self.de_options)
+        options.update({
+            'global-index.enabled': 'true',
+            'bucket': '-1',
+        })
+        target = self._create_table(options=options)
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2], type=pa.int32()),
+                    'name': ['a', 'b'],
+                    'age': pa.array([10, 20], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        table = self.catalog.get_table(target)
+        self.assertGreater(table.create_global_index('id'), 0)
+
+        # This append is intentionally not covered by the existing index.
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([3, 4], type=pa.int32()),
+                    'name': ['c', 'd'],
+                    'age': pa.array([30, 40], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        from pypaimon.index.index_file_handler import IndexFileHandler
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        indexed_ranges = {
+            (
+                entry.index_file.global_index_meta.row_range_start,
+                entry.index_file.global_index_meta.row_range_end,
+            )
+            for entry in IndexFileHandler(table).scan(snapshot)
+        }
+        self.assertEqual({(0, 1)}, indexed_ranges)
+
+        first_result = merge_into(
+            target=target,
+            source=target,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            when_matched=[WhenMatched.update(
+                {'age': lit(99)}, condition='t.id IN (2, 3)',
+            )],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+        self.assertEqual(first_result['num_matched'], 2)
+
+        self.catalog.alter_table(
+            target,
+            [SchemaChange.add_column('note', AtomicType('STRING'))],
+            False,
+        )
+
+        result = merge_into(
+            target=target,
+            source=target,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            when_matched=[WhenMatched.update(
+                {'name': lit('updated')},
+                condition='t.id IN (1, 4) AND t.note IS NULL',
+            )],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        self.assertEqual(result['num_matched'], 2)
+        self.assertEqual(
+            self._read_sorted(target),
+            {
+                'id': [1, 2, 3, 4],
+                'name': ['updated', 'b', 'c', 'updated'],
+                'age': [10, 99, 99, 40],
+                'note': [None, None, None, None],
+            },
+        )
 
     @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
     def test_self_merge_delete_condition_pushes_down_predicate(self):
@@ -3063,6 +3155,18 @@ class MergeConditionUnitTest(unittest.TestCase):
         self.assertIsNone(try_parse_self_merge_predicate(
             'abs(t.id) > 1', self._predicate_fields(),
         ))
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_predicate_parse_failure_is_logged(self):
+        from pypaimon.ray.merge_condition import (
+            try_parse_self_merge_predicate,
+        )
+        with self.assertLogs(
+                'pypaimon.ray.merge_condition', level='DEBUG') as logs:
+            self.assertIsNone(try_parse_self_merge_predicate(
+                't.id =', self._predicate_fields(),
+            ))
+        self.assertIn('Unable to push down', '\n'.join(logs.output))
 
     @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
     def test_self_merge_unsafe_literal_types_fail_open(self):

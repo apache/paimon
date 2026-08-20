@@ -227,6 +227,7 @@ def build_self_merge_update_ds(
     target_ds = read_paimon(
         target_identifier, catalog_options,
         projection=projection, snapshot_id=snapshot_id,
+        _preserve_current_schema=True,
         **read_kwargs,
     )
     update_schema = build_update_schema(target_pa_schema, update_cols, row_id_name)
@@ -307,6 +308,7 @@ def build_self_merge_delete_ds(
     target_ds = read_paimon(
         target_identifier, catalog_options,
         projection=projection, snapshot_id=snapshot_id,
+        _preserve_current_schema=True,
         **read_kwargs,
     )
     delete_schema = build_delete_schema(row_id_name)

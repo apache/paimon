@@ -16,6 +16,7 @@
 # limitations under the License.
 ################################################################################
 
+import logging
 import re
 from typing import Mapping, Optional, Set
 
@@ -27,6 +28,7 @@ from pypaimon.schema.data_types import AtomicType
 
 
 _COL_REF_PATTERN = re.compile(r'\b([st])\.(\w+)\b')
+logger = logging.getLogger(__name__)
 
 
 def _load_datafusion():
@@ -123,6 +125,11 @@ def try_parse_self_merge_predicate(condition, fields) -> Optional[Predicate]:
             {field.name: field for field in fields},
         )
     except Exception:
+        logger.debug(
+            "Unable to push down self-merge condition %r",
+            condition,
+            exc_info=True,
+        )
         return None
 
 
