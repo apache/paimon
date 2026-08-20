@@ -65,6 +65,7 @@ class _PrepareCtx:
     catalog_options: Dict[str, str]
     is_self_merge: bool = False
     self_merge_scan_predicate: Optional[Predicate] = None
+    read_columns: Tuple[str, ...] = ()
 
 
 def merge_into(
@@ -78,6 +79,7 @@ def merge_into(
     num_partitions: Optional[int] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
     concurrency: Optional[int] = None,
+    read_columns: Optional[Sequence[str]] = None,
 ) -> Dict[str, int]:
     _require_ray_join()
     num_partitions = _resolve_num_partitions(num_partitions)
@@ -85,6 +87,7 @@ def merge_into(
     table, source_ds, matched_specs, not_matched_specs, ctx = _prepare(
         target, source, catalog_options,
         list(when_matched), list(when_not_matched), on,
+        read_columns,
     )
     base_snapshot = table.snapshot_manager().get_latest_snapshot()
 
@@ -100,7 +103,10 @@ def merge_into(
     )
 
 
-def _prepare(target, source, catalog_options, when_matched, when_not_matched, on):
+def _prepare(
+    target, source, catalog_options, when_matched, when_not_matched, on,
+    read_columns=None,
+):
     if not when_matched and not when_not_matched:
         raise ValueError(
             "At least one of when_matched or when_not_matched must be non-empty."
@@ -139,12 +145,18 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
     full_target_field_names = list(table.field_names)
     settable_field_names = list(full_target_field_names)
     on_map = dict(zip(target_on_cols, source_on_cols))
+    is_self_merge = _is_self_merge(
+        target, source, target_on_cols, source_on_cols
+    )
     matched_specs = []
     for c in when_matched:
         spec = {}
         if not c.delete:
             spec = _normalize_set_spec(
-                c.update, settable_field_names, on_map,
+                c.update,
+                settable_field_names,
+                on_map,
+                allow_callables=is_self_merge,
             )
         matched_specs.append(
             _NormalizedClause(
@@ -193,12 +205,28 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
             _NormalizedClause(spec=spec, condition=c.condition)
         )
 
-    is_self_merge = _is_self_merge(target, source, target_on_cols, source_on_cols)
     if is_self_merge and not_matched_specs:
         raise ValueError(
             "Self-merge (source == target with ON _ROW_ID) does not "
             "support WHEN NOT MATCHED clauses."
         )
+
+    read_columns = tuple(dict.fromkeys(read_columns or ()))
+    has_callable = any(
+        callable(value) and not isinstance(value, type)
+        for clause in matched_specs
+        for value in clause.spec.values()
+    )
+    if read_columns and not has_callable:
+        raise ValueError("read_columns requires a callable SET value.")
+    if has_callable:
+        if not read_columns:
+            raise ValueError("Callable SET values require read_columns.")
+        for col in read_columns:
+            if col not in full_target_field_names:
+                raise ValueError(
+                    f"Read column {col!r} is not in target '{target}'."
+                )
 
     if is_self_merge:
         source_ds = None
@@ -280,6 +308,7 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
         catalog_options=catalog_options,
         is_self_merge=is_self_merge,
         self_merge_scan_predicate=self_merge_scan_predicate,
+        read_columns=read_columns,
     )
     return table, source_ds, matched_specs, not_matched_specs, ctx
 
@@ -321,6 +350,7 @@ def _build_datasets(
                     resolve_target_projection=_resolve_target_projection,
                     snapshot_id=base_snapshot_id,
                     scan_predicate=ctx.self_merge_scan_predicate,
+                    read_columns=ctx.read_columns,
                     ray_remote_args=ray_remote_args,
                 )
             if any(c.delete for c in matched_specs):
@@ -588,6 +618,7 @@ def _normalize_set_spec(
     target_field_names: Sequence[str],
     on_map: Optional[Mapping[str, str]] = None,
     allow_target_refs: bool = True,
+    allow_callables: bool = False,
 ) -> Dict[str, Any]:
     on_map = on_map or {}
     if spec == "*":
@@ -610,9 +641,13 @@ def _normalize_set_spec(
     result: Dict[str, Any] = {}
     for key, val in spec.items():
         if callable(val) and not isinstance(val, type):
+            if allow_callables:
+                result[key] = val
+                continue
             raise TypeError(
                 "SET values must be source_col(), target_col(), "
-                "lit(), or literals, not callables"
+                "lit(), or literals; callables are only supported "
+                "for self-merge"
             )
         if isinstance(val, SourceColumnRef):
             result[key] = val

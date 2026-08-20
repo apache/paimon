@@ -73,6 +73,7 @@ def _build_matched_transform(
     update_cols: List[str],
     row_id_name: str,
     update_schema: pa.Schema,
+    callable_input_columns: Optional[Sequence[str]] = None,
 ):
     prepared_clauses = []
     for clause in clauses:
@@ -105,10 +106,20 @@ def _build_matched_transform(
             if matched.num_rows == 0:
                 continue
             if not is_delete:
+                callable_input = None
+                if (callable_input_columns is not None
+                        and any(callable(value) and not isinstance(value, type)
+                                for value in spec.values())):
+                    callable_input = pa.Table.from_arrays(
+                        [matched.column(f"t.{col}")
+                         for col in callable_input_columns],
+                        names=list(callable_input_columns),
+                    )
                 parts.append(vectorized_matched_transform(
                     matched, spec, on_pairs,
                     update_cols, row_id_name,
                     update_schema,
+                    callable_input=callable_input,
                 ))
             if rewritten is not None and matched.num_rows < remaining.num_rows:
                 not_cond = f"COALESCE(NOT ({rewritten}), TRUE)"
@@ -189,6 +200,7 @@ def build_self_merge_update_ds(
     resolve_target_projection,
     snapshot_id: Optional[int] = None,
     scan_predicate=None,
+    read_columns: Sequence[str] = (),
     ray_remote_args: Optional[Dict[str, Any]] = None,
 ) -> Tuple:
     from pypaimon.ray.ray_paimon import read_paimon
@@ -198,6 +210,7 @@ def build_self_merge_update_ds(
     needed_cols = set(resolve_target_projection(
         clauses, [row_id_name], update_cols, target_field_names,
     ))
+    needed_cols.update(read_columns)
     for clause in clauses:
         for value in clause.spec.values():
             if isinstance(value, SourceColumnRef):
@@ -261,6 +274,10 @@ def build_self_merge_update_ds(
         update_cols=list(update_cols),
         row_id_name=row_id_name,
         update_schema=update_schema,
+        callable_input_columns=(
+            list(read_columns) + [row_id_name]
+            if read_columns else None
+        ),
     )
     return aliased.map_batches(_transform, **_map_kwargs(ray_remote_args))
 
