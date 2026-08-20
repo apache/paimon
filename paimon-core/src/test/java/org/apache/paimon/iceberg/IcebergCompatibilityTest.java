@@ -38,6 +38,7 @@ import org.apache.paimon.iceberg.manifest.IcebergManifestEntry;
 import org.apache.paimon.iceberg.manifest.IcebergManifestFile;
 import org.apache.paimon.iceberg.manifest.IcebergManifestFileMeta;
 import org.apache.paimon.iceberg.manifest.IcebergManifestList;
+import org.apache.paimon.iceberg.metadata.IcebergDataField;
 import org.apache.paimon.iceberg.metadata.IcebergMetadata;
 import org.apache.paimon.iceberg.metadata.IcebergRef;
 import org.apache.paimon.iceberg.metadata.IcebergSchema;
@@ -80,6 +81,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -103,6 +105,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for Iceberg compatibility. */
@@ -913,6 +916,444 @@ public class IcebergCompatibilityTest {
 
         write.close();
         commit.close();
+    }
+
+    private static long countDeleteManifests(
+            FileStoreTable table, IcebergPathFactory pathFactory, long snapshotId)
+            throws IOException {
+        IcebergMetadata metadata =
+                IcebergMetadata.fromPath(table.fileIO(), pathFactory.toMetadataPath(snapshotId));
+        IcebergManifestList manifestList = IcebergManifestList.create(table, pathFactory);
+        return manifestList.read(new Path(metadata.currentSnapshot().manifestList()).getName())
+                .stream()
+                .filter(m -> m.content() == IcebergManifestFileMeta.Content.DELETES)
+                .count();
+    }
+
+    @Test
+    public void testRollbackToOlderSchemaMirrorsWithoutThrowing() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        -1,
+                        Collections.singletonMap(IcebergOptions.FORMAT_VERSION.key(), "3"));
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        table.createTag("before-evolution", 1);
+        write.close();
+        commit.close();
+
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        schemaManager.commitChanges(SchemaChange.addColumn("w", DataTypes.INT()));
+        table = table.copyWithLatestSchema();
+        write = table.newWrite(commitUser);
+        commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(2, 20, 200));
+        commit.commit(2, write.prepareCommit(false, 2));
+        int evolvedSchemaId = (int) table.snapshotManager().snapshot(2).schemaId();
+        write.close();
+        commit.close();
+
+        TableCommitImpl rollbackCommit = table.newCommit(commitUser);
+        rollbackCommit.rollbackToAsLatest(table.tagManager().getOrThrow("before-evolution"));
+        rollbackCommit.close();
+        long rolledBackId = table.snapshotManager().latestSnapshotId();
+
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(new Path(table.location(), "metadata"));
+        IcebergMetadata rebuilt =
+                IcebergMetadata.fromPath(table.fileIO(), pathFactory.toMetadataPath(rolledBackId));
+        assertThat(rebuilt.currentSchemaId()).isEqualTo(evolvedSchemaId);
+        assertThat(rebuilt.currentSnapshot().schemaId()).isLessThan(evolvedSchemaId);
+        assertThat(rebuilt.schemas()).anyMatch(s -> s.schemaId() == evolvedSchemaId);
+    }
+
+    @Test
+    public void testLegacyManifestVersionRejectedOnV3() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        Map<String, String> legacyOptions = new HashMap<>();
+        legacyOptions.put(IcebergOptions.MANIFEST_LEGACY_VERSION.key(), "true");
+        FileStoreTable table =
+                createPaimonTable(
+                                rowType,
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                -1,
+                                legacyOptions)
+                        .copy(Collections.singletonMap(IcebergOptions.FORMAT_VERSION.key(), "3"));
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        assertThatThrownBy(() -> commit.commit(1, write.prepareCommit(false, 1)))
+                .hasStackTraceContaining("manifest-legacy-version");
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testLegacyManifestVersionV3AllowsAbort() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        Map<String, String> legacyOptions = new HashMap<>();
+        legacyOptions.put(IcebergOptions.MANIFEST_LEGACY_VERSION.key(), "true");
+        FileStoreTable table =
+                createPaimonTable(
+                                rowType,
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                -1,
+                                legacyOptions)
+                        .copy(Collections.singletonMap(IcebergOptions.FORMAT_VERSION.key(), "3"));
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        List<CommitMessage> messages = write.prepareCommit(false, 1);
+        commit.abort(messages);
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testDroppedVariantSchemaDoesNotBlockV2Commits() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        1,
+                        Collections.singletonMap(CoreOptions.FILE_FORMAT.key(), "parquet"));
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.close();
+        commit.close();
+
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        addUnsupportedColumnWhileMirroringOff(schemaManager, "payload", DataTypes.VARIANT());
+        schemaManager.commitChanges(SchemaChange.dropColumn("payload"));
+        table = table.copyWithLatestSchema();
+
+        TableWriteImpl<?> write2 = table.newWrite(commitUser);
+        TableCommitImpl commit2 = table.newCommit(commitUser);
+        write2.write(GenericRow.of(2, 20));
+        commit2.commit(2, write2.prepareCommit(false, 2));
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(2L);
+        write2.close();
+        commit2.close();
+
+        IcebergMetadata metadata =
+                IcebergMetadata.fromPath(
+                        table.fileIO(), new Path(table.location(), "metadata/v2.metadata.json"));
+        for (IcebergSchema schema : metadata.schemas()) {
+            for (IcebergDataField field : schema.fields()) {
+                assertThat(String.valueOf(field.type())).doesNotContain("variant");
+            }
+        }
+    }
+
+    @Test
+    public void testLegacyInvalidBaseSchemaRebuiltOnNextCommit() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType, Collections.emptyList(), Collections.singletonList("k"), 1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        FileIO fileIO = table.fileIO();
+        Path metadataPath = new Path(table.location(), "metadata/v1.metadata.json");
+        String json = fileIO.readFileUtf8(metadataPath);
+        String doctored = json.replace("\"type\" : \"int\"", "\"type\" : \"variant\"");
+        if (doctored.equals(json)) {
+            doctored = json.replace("\"type\":\"int\"", "\"type\":\"variant\"");
+        }
+        assertThat(doctored).isNotEqualTo(json);
+        fileIO.deleteQuietly(metadataPath);
+        fileIO.overwriteFileUtf8(metadataPath, doctored);
+
+        write.write(GenericRow.of(2, 20));
+        commit.commit(2, write.prepareCommit(false, 2));
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(2L);
+        write.close();
+        commit.close();
+
+        IcebergMetadata rebuilt =
+                IcebergMetadata.fromPath(
+                        fileIO, new Path(table.location(), "metadata/v2.metadata.json"));
+        assertThat(rebuilt.currentSnapshotId()).isEqualTo(2L);
+        for (IcebergSchema schema : rebuilt.schemas()) {
+            for (IcebergDataField field : schema.fields()) {
+                assertThat(String.valueOf(field.type())).doesNotContain("variant");
+            }
+        }
+    }
+
+    @Test
+    public void testRetryDegradesToPublishableSchemaWithoutOrphans() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        1,
+                        Collections.singletonMap(CoreOptions.FILE_FORMAT.key(), "parquet"));
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.write(GenericRow.of(2, 20));
+        List<CommitMessage> messages2 = write.prepareCommit(false, 2);
+        commit.commit(2, messages2);
+        write.close();
+        commit.close();
+
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        addUnsupportedColumnWhileMirroringOff(schemaManager, "payload", DataTypes.VARIANT());
+        table = table.copyWithLatestSchema();
+
+        IcebergPathFactory pf = new IcebergPathFactory(new Path(table.location(), "metadata"));
+        table.fileIO().deleteQuietly(pf.toMetadataPath(2));
+
+        TableCommitImpl commit2 = table.newCommit(commitUser);
+        Map<Long, List<CommitMessage>> retryMessages = new HashMap<>();
+        retryMessages.put(2L, messages2);
+        commit2.filterAndCommit(retryMessages);
+        commit2.close();
+
+        IcebergMetadata metadata = IcebergMetadata.fromPath(table.fileIO(), pf.toMetadataPath(2));
+        assertThat(metadata.currentSnapshotId()).isEqualTo(2L);
+        for (IcebergSchema schema : metadata.schemas()) {
+            for (IcebergDataField field : schema.fields()) {
+                assertThat(String.valueOf(field.type())).doesNotContain("variant");
+            }
+        }
+        assertThat(metadata.schemas())
+                .anySatisfy(schema -> assertThat(schema.schemaId()).isEqualTo(0));
+    }
+
+    @Test
+    public void testRejectedCommitDoesNotLeaveOrphanedManifests() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        Map<String, String> legacyOptions = new HashMap<>();
+        legacyOptions.put(IcebergOptions.MANIFEST_LEGACY_VERSION.key(), "true");
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        1,
+                        legacyOptions);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.close();
+        commit.close();
+
+        FileIO fileIO = table.fileIO();
+        Path manifestDir = new Path(table.location(), "manifest");
+        int manifestFileCountBefore = fileIO.listStatus(manifestDir).length;
+
+        FileStoreTable upgraded =
+                table.copy(Collections.singletonMap(IcebergOptions.FORMAT_VERSION.key(), "3"));
+        TableWriteImpl<?> write2 = upgraded.newWrite(commitUser);
+        TableCommitImpl commit2 = upgraded.newCommit(commitUser);
+        write2.write(GenericRow.of(2, 20));
+        assertThatThrownBy(() -> commit2.commit(2, write2.prepareCommit(false, 2)))
+                .hasStackTraceContaining("cannot be used with Iceberg format version 3");
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(1L);
+
+        int manifestFileCountAfter = fileIO.listStatus(manifestDir).length;
+        assertThat(manifestFileCountAfter).isEqualTo(manifestFileCountBefore);
+
+        write2.close();
+        commit2.close();
+    }
+
+    @Test
+    public void testFormatVersionUpgradeRecoversFromLegacyInvalidBase() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType, Collections.emptyList(), Collections.singletonList("k"), 1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        FileIO fileIO = table.fileIO();
+        Path metadataPath = new Path(table.location(), "metadata/v1.metadata.json");
+        String json = fileIO.readFileUtf8(metadataPath);
+        String doctored = json.replace("\"type\" : \"int\"", "\"type\" : \"variant\"");
+        if (doctored.equals(json)) {
+            doctored = json.replace("\"type\":\"int\"", "\"type\":\"variant\"");
+        }
+        assertThat(doctored).isNotEqualTo(json);
+        fileIO.deleteQuietly(metadataPath);
+        fileIO.overwriteFileUtf8(metadataPath, doctored);
+
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        schemaManager.commitChanges(
+                SchemaChange.setOption(IcebergOptions.FORMAT_VERSION.key(), "3"));
+        table = table.copy(table.schemaManager().latest().get());
+        write.close();
+        commit.close();
+
+        TableWriteImpl<?> write2 = table.newWrite(commitUser);
+        TableCommitImpl commit2 = table.newCommit(commitUser);
+        write2.write(GenericRow.of(2, 20));
+        commit2.commit(2, write2.prepareCommit(false, 2));
+        write2.close();
+        commit2.close();
+
+        IcebergMetadata metadata =
+                IcebergMetadata.fromPath(
+                        fileIO, new Path(table.location(), "metadata/v2.metadata.json"));
+        assertThat(metadata.formatVersion()).isEqualTo(IcebergMetadata.FORMAT_VERSION_V3);
+    }
+
+    @Test
+    public void testRollbackToAsLatestSkipsDroppedIntermediateVariantSchema() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        1,
+                        Collections.singletonMap(CoreOptions.FILE_FORMAT.key(), "parquet"));
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        table.createTag("target", 1);
+
+        write.write(GenericRow.of(2, 20));
+        commit.commit(2, write.prepareCommit(false, 2));
+        write.close();
+        commit.close();
+
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        addUnsupportedColumnWhileMirroringOff(schemaManager, "payload", DataTypes.VARIANT());
+        schemaManager.commitChanges(SchemaChange.dropColumn("payload"));
+        FileStoreTable tableWithEvolvedSchema = table.copyWithLatestSchema();
+
+        TableCommitImpl rollbackCommit = tableWithEvolvedSchema.newCommit(commitUser);
+        rollbackCommit.rollbackToAsLatest(tableWithEvolvedSchema.tagManager().getOrThrow("target"));
+        assertThat(tableWithEvolvedSchema.snapshotManager().latestSnapshotId()).isEqualTo(3L);
+        rollbackCommit.close();
+
+        IcebergMetadata metadata =
+                IcebergMetadata.fromPath(
+                        table.fileIO(), new Path(table.location(), "metadata/v3.metadata.json"));
+        assertThat(metadata.currentSnapshotId()).isEqualTo(3L);
+        for (IcebergSchema schema : metadata.schemas()) {
+            for (IcebergDataField field : schema.fields()) {
+                assertThat(String.valueOf(field.type())).doesNotContain("variant");
+            }
+        }
+    }
+
+    @Test
+    public void testDeleteTagSucceedsAfterUnsafeCurrentSchemaChange() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        1,
+                        Collections.singletonMap(CoreOptions.FILE_FORMAT.key(), "parquet"));
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.close();
+        commit.close();
+
+        table.createTag("t1", 1);
+
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        addUnsupportedColumnWhileMirroringOff(schemaManager, "payload", DataTypes.VARIANT());
+        FileStoreTable tableWithUnsafeSchema = table.copyWithLatestSchema();
+
+        assertThatCode(() -> tableWithUnsafeSchema.deleteTag("t1")).doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testAbortSucceedsWithUnsafeCurrentSchema() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        1,
+                        Collections.singletonMap(CoreOptions.FILE_FORMAT.key(), "parquet"));
+
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        addUnsupportedColumnWhileMirroringOff(schemaManager, "payload", DataTypes.VARIANT());
+        FileStoreTable tableWithUnsafeSchema = table.copyWithLatestSchema();
+
+        String commitUser = UUID.randomUUID().toString();
+        assertThatCode(
+                        () -> {
+                            TableCommitImpl commit = tableWithUnsafeSchema.newCommit(commitUser);
+                            commit.abort(Collections.emptyList());
+                            commit.close();
+                        })
+                .doesNotThrowAnyException();
     }
 
     @Test
@@ -2604,6 +3045,110 @@ public class IcebergCompatibilityTest {
     //  Utils
     // ------------------------------------------------------------------------
 
+    @Test
+    public void testAlterAfterPreflightDoesNotFailDurableCommit() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        -1,
+                        Collections.singletonMap(CoreOptions.FILE_FORMAT.key(), "parquet"));
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.close();
+        commit.close();
+
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        addUnsupportedColumnWhileMirroringOff(schemaManager, "ts", DataTypes.TIMESTAMP(9));
+
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(new Path(table.location(), "metadata"));
+        IcebergCommitCallback callback = new IcebergCommitCallback(table, commitUser);
+        assertThatCode(() -> callback.retry(new ManifestCommittable(1))).doesNotThrowAnyException();
+
+        IcebergMetadata metadata =
+                IcebergMetadata.fromPath(table.fileIO(), pathFactory.toMetadataPath(1));
+        assertThat(metadata.currentSnapshotId()).isEqualTo(1L);
+        for (IcebergSchema schema : metadata.schemas()) {
+            for (IcebergDataField field : schema.fields()) {
+                assertThat(String.valueOf(field.type())).doesNotContain("timestamp_ns");
+            }
+        }
+    }
+
+    @Test
+    public void testUnsupportedSnapshotSchemaIsRefusedBeforeWritingManifests() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        -1,
+                        Collections.singletonMap(CoreOptions.FILE_FORMAT.key(), "parquet"));
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.close();
+        commit.close();
+
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        addUnsupportedColumnWhileMirroringOff(schemaManager, "ts", DataTypes.TIMESTAMP(9));
+        FileStoreTable disabled =
+                table.copy(schemaManager.latest().get())
+                        .copy(
+                                Collections.singletonMap(
+                                        IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "disabled"));
+        TableWriteImpl<?> write2 = disabled.newWrite(commitUser);
+        TableCommitImpl commit2 = disabled.newCommit(commitUser);
+        write2.write(GenericRow.of(2, 20, Timestamp.fromEpochMillis(1000)));
+        commit2.commit(2, write2.prepareCommit(false, 2));
+        write2.close();
+        commit2.close();
+
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(new Path(table.location(), "metadata"));
+        int before = table.fileIO().listStatus(pathFactory.metadataDirectory()).length;
+
+        FileStoreTable mirrored =
+                table.copy(schemaManager.latest().get())
+                        .copy(
+                                Collections.singletonMap(
+                                        IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                                        "table-location"));
+        IcebergCommitCallback callback = new IcebergCommitCallback(mirrored, commitUser);
+        assertThatThrownBy(() -> callback.retry(new ManifestCommittable(2)))
+                .hasStackTraceContaining("cannot be represented in Iceberg metadata");
+        assertThat(table.fileIO().listStatus(pathFactory.metadataDirectory()).length)
+                .isEqualTo(before);
+    }
+
+    private Set<String> listIcebergMetadataFiles(FileStoreTable table) throws Exception {
+        return Arrays.stream(table.fileIO().listStatus(new Path(table.location(), "metadata")))
+                .map(status -> status.getPath().getName())
+                .collect(Collectors.toSet());
+    }
+
+    private void addUnsupportedColumnWhileMirroringOff(
+            SchemaManager schemaManager, String name, DataType type) throws Exception {
+        schemaManager.commitChanges(
+                SchemaChange.setOption(IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "disabled"));
+        schemaManager.commitChanges(SchemaChange.addColumn(name, type));
+    }
+
     private FileStoreTable createPaimonTable(
             RowType rowType, List<String> partitionKeys, List<String> primaryKeys, int numBuckets)
             throws Exception {
@@ -2624,12 +3169,17 @@ public class IcebergCompatibilityTest {
         options.set(CoreOptions.BUCKET, numBuckets);
         options.set(
                 IcebergOptions.METADATA_ICEBERG_STORAGE, IcebergOptions.StorageType.TABLE_LOCATION);
-        options.set(CoreOptions.FILE_FORMAT, "avro");
+        if (!customOptions.containsKey(CoreOptions.FILE_FORMAT.key())) {
+            options.set(CoreOptions.FILE_FORMAT, "avro");
+        }
         options.set(CoreOptions.TARGET_FILE_SIZE, MemorySize.ofKibiBytes(32));
-        options.set(IcebergOptions.COMPACT_MIN_FILE_NUM, 4);
-        options.set(IcebergOptions.COMPACT_MIN_FILE_NUM, 8);
+        if (!customOptions.containsKey(IcebergOptions.COMPACT_MIN_FILE_NUM.key())) {
+            options.set(IcebergOptions.COMPACT_MIN_FILE_NUM, 8);
+        }
         options.set(IcebergOptions.METADATA_DELETE_AFTER_COMMIT, true);
-        options.set(IcebergOptions.METADATA_PREVIOUS_VERSIONS_MAX, 1);
+        if (!customOptions.containsKey(IcebergOptions.METADATA_PREVIOUS_VERSIONS_MAX.key())) {
+            options.set(IcebergOptions.METADATA_PREVIOUS_VERSIONS_MAX, 1);
+        }
         options.set(CoreOptions.MANIFEST_TARGET_FILE_SIZE, MemorySize.ofKibiBytes(8));
         Schema schema =
                 new Schema(rowType.getFields(), partitionKeys, primaryKeys, options.toMap(), "");
@@ -2730,18 +3280,5 @@ public class IcebergCompatibilityTest {
                 }
             }
         }
-    }
-
-    @Test
-    public void testVariantIsNotPublishableToIceberg() {
-        RowType withVariant =
-                RowType.of(
-                        new DataType[] {DataTypes.INT(), DataTypes.VARIANT()},
-                        new String[] {"k", "payload"});
-        assertThatThrownBy(() -> IcebergCommitCallback.checkVariantNotPublishable(withVariant))
-                .hasMessageContaining("VARIANT type");
-
-        IcebergCommitCallback.checkVariantNotPublishable(
-                RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"k"}));
     }
 }

@@ -78,6 +78,7 @@ import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.catalog.CatalogUtils.isSystemDatabase;
 import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSystem;
 import static org.apache.paimon.catalog.CatalogUtils.validateCreateTable;
+import static org.apache.paimon.catalog.CatalogUtils.validateIcebergMirrorableReplacement;
 import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
@@ -528,6 +529,9 @@ public abstract class AbstractCatalog implements Catalog {
             }
             throw e;
         }
+        // the table exists and will be replaced: refuse an unmirrorable schema before the
+        // truncate, but only once this is no longer a documented no-op
+        validateIcebergMirrorableReplacement(existing, newSchema);
 
         TableType targetTableType = Options.fromMap(newSchema.options()).get(TYPE);
         if (!(existing instanceof FileStoreTable) || !targetTableType.equals(TableType.TABLE)) {
