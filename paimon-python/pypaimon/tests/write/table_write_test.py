@@ -28,6 +28,7 @@ from pypaimon import CatalogFactory, Schema
 import pyarrow as pa
 from parameterized import parameterized
 
+from pypaimon.build_info import full_version as build_full_version
 from pypaimon.common.json_util import JSON
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
@@ -426,8 +427,11 @@ class TableWriteTest(unittest.TestCase):
         self.assertEqual(self.expected, actual)
 
         # snapshot
-        snapshot_json: str = JSON.to_json(table.snapshot_manager().get_latest_snapshot())
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        snapshot_json: str = JSON.to_json(snapshot)
         self.assertEqual(True, snapshot_json.__contains__("baseManifestList"))
+        self.assertEqual(build_full_version(), snapshot.writer_version)
+        self.assertEqual(True, snapshot_json.__contains__("writerVersion"))
         self.assertEqual(False, snapshot_json.__contains__("nextRowId"))
 
     def test_write_row_append_only_partitioned_table(self):

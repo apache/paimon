@@ -1540,6 +1540,7 @@ class ConflictDetectionTest {
                 null,
                 null,
                 "commit-user",
+                null,
                 id,
                 Snapshot.CommitKind.APPEND,
                 id,

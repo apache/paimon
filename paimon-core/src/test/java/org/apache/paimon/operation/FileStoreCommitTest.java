@@ -1435,6 +1435,19 @@ public class FileStoreCommitTest {
     }
 
     @Test
+    public void testSnapshotWriterVersion() throws Exception {
+        TestFileStore store = createStore(false);
+
+        try (FileStoreCommit fileStoreCommit = store.newCommit()) {
+            fileStoreCommit.ignoreEmptyCommit(false);
+            fileStoreCommit.commit(new ManifestCommittable(0), false);
+        }
+
+        assertThat(checkNotNull(store.snapshotManager().latestSnapshot()).writerVersion())
+                .isEqualTo(CoreFullVersion.get());
+    }
+
+    @Test
     public void testGlobalIndexCommitChecksExistingRowIds() throws Exception {
         TestFileStore store = createRowTrackingDataEvolutionStore();
 
@@ -2192,6 +2205,7 @@ public class FileStoreCommitTest {
                             null,
                             previousSnapshot == null ? null : previousSnapshot.indexManifest(),
                             "conflict-user",
+                            snapshot.writerVersion(),
                             Long.MAX_VALUE,
                             Snapshot.CommitKind.ANALYZE,
                             System.currentTimeMillis(),

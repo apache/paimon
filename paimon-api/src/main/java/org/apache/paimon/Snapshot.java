@@ -61,6 +61,7 @@ public class Snapshot implements Serializable {
     protected static final String FIELD_CHANGELOG_MANIFEST_LIST_SIZE = "changelogManifestListSize";
     protected static final String FIELD_INDEX_MANIFEST = "indexManifest";
     protected static final String FIELD_COMMIT_USER = "commitUser";
+    protected static final String FIELD_WRITER_VERSION = "writerVersion";
     protected static final String FIELD_COMMIT_IDENTIFIER = "commitIdentifier";
     protected static final String FIELD_COMMIT_KIND = "commitKind";
     protected static final String FIELD_TIME_MILLIS = "timeMillis";
@@ -131,6 +132,13 @@ public class Snapshot implements Serializable {
 
     @JsonProperty(FIELD_COMMIT_USER)
     protected final String commitUser;
+
+    // Version of the Paimon writer which created this snapshot.
+    // Null for snapshots created before writer version was introduced.
+    @JsonProperty(FIELD_WRITER_VERSION)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @Nullable
+    protected final String writerVersion;
 
     // Mainly for snapshot deduplication.
     //
@@ -206,6 +214,7 @@ public class Snapshot implements Serializable {
             @Nullable Long changelogManifestListSize,
             @Nullable String indexManifest,
             String commitUser,
+            @Nullable String writerVersion,
             long commitIdentifier,
             CommitKind commitKind,
             long timeMillis,
@@ -230,6 +239,7 @@ public class Snapshot implements Serializable {
                 changelogManifestListSize,
                 indexManifest,
                 commitUser,
+                writerVersion,
                 commitIdentifier,
                 commitKind,
                 timeMillis,
@@ -258,6 +268,7 @@ public class Snapshot implements Serializable {
                     Long changelogManifestListSize,
             @JsonProperty(FIELD_INDEX_MANIFEST) @Nullable String indexManifest,
             @JsonProperty(FIELD_COMMIT_USER) String commitUser,
+            @JsonProperty(FIELD_WRITER_VERSION) @Nullable String writerVersion,
             @JsonProperty(FIELD_COMMIT_IDENTIFIER) long commitIdentifier,
             @JsonProperty(FIELD_COMMIT_KIND) CommitKind commitKind,
             @JsonProperty(FIELD_TIME_MILLIS) long timeMillis,
@@ -281,6 +292,7 @@ public class Snapshot implements Serializable {
         this.changelogManifestListSize = changelogManifestListSize;
         this.indexManifest = indexManifest;
         this.commitUser = commitUser;
+        this.writerVersion = writerVersion;
         this.commitIdentifier = commitIdentifier;
         this.commitKind = commitKind;
         this.timeMillis = timeMillis;
@@ -358,6 +370,12 @@ public class Snapshot implements Serializable {
     @JsonGetter(FIELD_COMMIT_USER)
     public String commitUser() {
         return commitUser;
+    }
+
+    @JsonGetter(FIELD_WRITER_VERSION)
+    @Nullable
+    public String writerVersion() {
+        return writerVersion;
     }
 
     @JsonGetter(FIELD_COMMIT_IDENTIFIER)
@@ -440,6 +458,7 @@ public class Snapshot implements Serializable {
                 changelogManifestListSize,
                 indexManifest,
                 commitUser,
+                writerVersion,
                 commitIdentifier,
                 commitKind,
                 timeMillis,
@@ -474,6 +493,7 @@ public class Snapshot implements Serializable {
                 && Objects.equals(changelogManifestListSize, that.changelogManifestListSize)
                 && Objects.equals(indexManifest, that.indexManifest)
                 && Objects.equals(commitUser, that.commitUser)
+                && Objects.equals(writerVersion, that.writerVersion)
                 && commitIdentifier == that.commitIdentifier
                 && commitKind == that.commitKind
                 && timeMillis == that.timeMillis

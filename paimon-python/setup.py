@@ -23,8 +23,73 @@ import sys
 import tarfile
 import tempfile
 from setuptools import find_packages, setup
+from setuptools.command.build_py import build_py
+from setuptools.command.sdist import sdist
+
+PYTHON_ROOT = os.path.dirname(os.path.abspath(__file__))
+FULL_VERSION_FILE = os.path.join(PYTHON_ROOT, "pypaimon", "_full_version")
+UNKNOWN_COMMIT_ID = "UNKNOWN"
 
 VERSION = "2.1.dev"
+
+
+def _repository_root():
+    parent = os.path.dirname(PYTHON_ROOT)
+    if os.path.basename(PYTHON_ROOT) == "paimon-python" and os.path.exists(
+            os.path.join(parent, "pom.xml")):
+        return parent
+    return PYTHON_ROOT
+
+
+def _git_output(args):
+    repository_root = _repository_root()
+    env = os.environ.copy()
+    env["GIT_CEILING_DIRECTORIES"] = os.path.dirname(repository_root)
+    try:
+        return subprocess.check_output(
+            ["git", "-C", repository_root] + args,
+            stderr=subprocess.DEVNULL,
+            env=env,
+        ).decode("utf-8").strip()
+    except Exception:
+        return None
+
+
+def _full_version():
+    try:
+        with open(FULL_VERSION_FILE, "r") as full_version_file:
+            embedded = full_version_file.read().strip()
+            if embedded:
+                return embedded
+    except OSError:
+        pass
+
+    git_commit_id = _git_output(["rev-parse", "HEAD"])
+    if git_commit_id is None:
+        git_commit_id = UNKNOWN_COMMIT_ID
+    return "python-{}-{}".format(VERSION, git_commit_id)
+
+
+def _write_full_version(root):
+    package_dir = os.path.join(root, "pypaimon")
+    if not os.path.exists(package_dir):
+        os.makedirs(package_dir)
+    with open(os.path.join(package_dir, "_full_version"), "w") as full_version_file:
+        full_version_file.write(_full_version() + "\n")
+
+
+class PaimonBuildPy(build_py):
+
+    def run(self):
+        build_py.run(self)
+        _write_full_version(self.build_lib)
+
+
+class PaimonSdist(sdist):
+
+    def make_release_tree(self, base_dir, files):
+        sdist.make_release_tree(self, base_dir, files)
+        _write_full_version(base_dir)
 
 
 def get_dev_version():
@@ -37,10 +102,10 @@ def get_dev_version():
         return None
 
     try:
-        date_str = subprocess.check_output(
-            ["git", "log", "-1", "--format=%cd", "--date=format:%Y%m%d"],
-            stderr=subprocess.DEVNULL
-        ).decode("utf-8").strip()
+        date_str = _git_output(
+            ["log", "-1", "--format=%cd", "--date=format:%Y%m%d"])
+        if date_str is None:
+            raise RuntimeError("Git commit date is unavailable")
     except Exception:
         print("Warning: git not available, skipping dev package.")
         return None
@@ -104,6 +169,18 @@ def _build_dev_package():
             with open(setup_py, "w") as f:
                 f.write(content)
 
+        # Keep the embedded full version consistent with the dev package version.
+        full_version_file = os.path.join(dev_dir, "pypaimon", "_full_version")
+        if os.path.exists(full_version_file):
+            with open(full_version_file, "r") as f:
+                content = f.read()
+            version_prefix = "python-{}-".format(VERSION)
+            if content.startswith(version_prefix):
+                content = "python-{}-{}".format(
+                    dev_version, content[len(version_prefix):])
+            with open(full_version_file, "w") as f:
+                f.write(content)
+
         dev_tar = os.path.join("dist", dev_name + ".tar.gz")
         with tarfile.open(dev_tar, "w:gz") as tar:
             tar.add(dev_dir, arcname=dev_name)
@@ -147,6 +224,8 @@ setup(
     version=VERSION,
     packages=PACKAGES,
     include_package_data=True,
+    package_data={"pypaimon": ["_full_version"]},
+    cmdclass={"build_py": PaimonBuildPy, "sdist": PaimonSdist},
     install_requires=install_requires,
     entry_points={
         'console_scripts': [
