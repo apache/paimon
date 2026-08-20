@@ -100,6 +100,7 @@ import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.Random;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -335,6 +336,8 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
         }
 
         int commitThreadNum = 5;
+        CountDownLatch ready = new CountDownLatch(commitThreadNum);
+        CountDownLatch start = new CountDownLatch(1);
         ExecutorService pool = Executors.newFixedThreadPool(commitThreadNum);
         List<Future<?>> futures = new ArrayList<>();
         try {
@@ -343,16 +346,21 @@ public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
                         pool.submit(
                                 () -> {
                                     try (BatchTableCommit commit = writeBuilder.newCommit()) {
+                                        ready.countDown();
+                                        assertThat(start.await(10, TimeUnit.SECONDS)).isTrue();
                                         commit.commit(messages);
                                     } catch (Exception e) {
                                         throw new RuntimeException(e);
                                     }
                                 }));
             }
+            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
             for (Future<?> future : futures) {
                 future.get();
             }
         } finally {
+            start.countDown();
             pool.shutdown();
             assertThat(pool.awaitTermination(1, TimeUnit.MINUTES)).isTrue();
         }
