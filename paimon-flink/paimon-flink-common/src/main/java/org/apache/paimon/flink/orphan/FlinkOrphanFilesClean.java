@@ -506,7 +506,7 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                 result = result == null ? clean : result.union(clean);
             }
 
-            CleanOrphanFilesResult batchResult = sum(result);
+            CleanOrphanFilesResult batchResult = executeAndAggregateResults(result, batchNumber);
             deletedFilesCount += batchResult.getDeletedFileCount();
             deletedFilesLenInBytes += batchResult.getDeletedFileTotalLenInBytes();
             LOG.info(
@@ -519,13 +519,17 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
         return new CleanOrphanFilesResult(deletedFilesCount, deletedFilesLenInBytes);
     }
 
-    private static CleanOrphanFilesResult sum(DataStream<CleanOrphanFilesResult> deleted) {
+    private static CleanOrphanFilesResult executeAndAggregateResults(
+            DataStream<CleanOrphanFilesResult> cleanResults, int batchNumber) {
         long deletedFilesCount = 0;
         long deletedFilesLenInBytes = 0;
-        if (deleted != null) {
+        if (cleanResults != null) {
             try {
                 CloseableIterator<CleanOrphanFilesResult> iterator =
-                        deleted.global().executeAndCollect("OrphanFilesClean");
+                        cleanResults
+                                .global()
+                                .executeAndCollect(
+                                        String.format("OrphanFilesClean-Batch-%d", batchNumber));
                 while (iterator.hasNext()) {
                     CleanOrphanFilesResult cleanOrphanFilesResult = iterator.next();
                     deletedFilesCount += cleanOrphanFilesResult.getDeletedFileCount();

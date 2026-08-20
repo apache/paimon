@@ -40,6 +40,8 @@ import org.apache.paimon.utils.DateTimeUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
+import org.apache.flink.api.common.JobStatus;
+import org.apache.flink.client.program.ClusterClient;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.Test;
@@ -68,6 +70,15 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
 
     private static final String ORPHAN_FILE_1 = "bucket-0/orphan_file1";
     private static final String ORPHAN_FILE_2 = "bucket-0/orphan_file2";
+
+    private long countFinishedOrphanFilesCleanJobs() throws Exception {
+        try (ClusterClient<?> client = MINI_CLUSTER_EXTENSION.createRestClusterClient()) {
+            return client.listJobs().get().stream()
+                    .filter(job -> job.getJobName().startsWith("OrphanFilesClean-Batch-"))
+                    .filter(job -> job.getJobState() == JobStatus.FINISHED)
+                    .count();
+        }
+    }
 
     private FileStoreTable createTableAndWriteData(String tableName) throws Exception {
         RowType rowType =
@@ -248,8 +259,10 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
                         database,
                         "*",
                         olderThan);
+        long defaultBatchJobCountBefore = countFinishedOrphanFilesCleanJobs();
         ImmutableList<Row> actualDryRunDeleteFile = ImmutableList.copyOf(executeSQL(withDryRun));
         assertThat(actualDryRunDeleteFile).containsOnly(Row.of("4"));
+        assertThat(countFinishedOrphanFilesCleanJobs() - defaultBatchJobCountBefore).isEqualTo(1);
 
         String withBatchSize =
                 String.format(
@@ -259,8 +272,11 @@ public abstract class RemoveOrphanFilesActionITCaseBase extends ActionITCaseBase
                         database,
                         "*",
                         olderThan);
+        long configuredBatchJobCountBefore = countFinishedOrphanFilesCleanJobs();
         ImmutableList<Row> actualBatchDeleteFile = ImmutableList.copyOf(executeSQL(withBatchSize));
         assertThat(actualBatchDeleteFile).containsOnly(Row.of("4"));
+        assertThat(countFinishedOrphanFilesCleanJobs() - configuredBatchJobCountBefore)
+                .isEqualTo(2);
 
         String withOlderThan =
                 String.format(
