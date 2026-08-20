@@ -83,6 +83,14 @@ class SubstringTransformTest {
     }
 
     @Test
+    public void testSubstringWithSupplementaryCharacter() {
+        SubstringTransform transform =
+                new SubstringTransform(Arrays.asList(BinaryString.fromString("A😀B"), 2, 1));
+
+        assertThat(transform.transform(GenericRow.of())).isEqualTo(BinaryString.fromString("😀"));
+    }
+
+    @Test
     public void testSubstringRefInputs() {
         List<Object> inputs = new ArrayList<>();
         inputs.add(new FieldRef(1, "f1", DataTypes.STRING()));

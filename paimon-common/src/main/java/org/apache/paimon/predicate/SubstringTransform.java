@@ -75,21 +75,21 @@ public class SubstringTransform implements Transform {
             return null;
         }
 
-        String sourceJavaString = sourceString.toString();
+        int sourceLength = sourceString.numChars();
         int beginIndex = readPosition(inputs.get(1), row);
-        if (beginIndex > sourceJavaString.length()) {
+        if (beginIndex > sourceLength) {
             return BinaryString.EMPTY_UTF8;
         }
 
-        int endIndex = sourceJavaString.length();
+        int endIndex = sourceLength;
         if (hasLength) {
             endIndex = beginIndex + readPosition(inputs.get(2), row) - 1;
         }
-        endIndex = Math.min(endIndex, sourceJavaString.length());
+        endIndex = Math.min(endIndex, sourceLength);
         beginIndex--;
         checkArgument(beginIndex < endIndex);
 
-        return BinaryString.fromString(sourceJavaString.substring(beginIndex, endIndex));
+        return sourceString.substring(beginIndex, endIndex);
     }
 
     private static boolean isNullPosition(Object position, InternalRow row) {
