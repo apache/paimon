@@ -57,6 +57,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.testcontainers.shaded.com.google.common.collect.ImmutableList;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -69,6 +70,7 @@ import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
@@ -127,6 +129,45 @@ public class LookupTableTest extends TableTestBase {
                 new Schema(rowType.getFields(), partitionKeys, primaryKeys, options.toMap(), null);
         catalog.createTable(identifier, schema, false);
         return (FileStoreTable) catalog.getTable(identifier);
+    }
+
+    /**
+     * An asynchronous refresh records its failure in a field; the next refresh has to surface it.
+     * The scan cursor has already advanced past the snapshot whose rows failed to apply, so if the
+     * failure is dropped nothing ever retries it and the cache serves stale rows with the job still
+     * healthy.
+     */
+    @TestTemplate
+    public void testRefreshRethrowsAFailureFromAnEarlierAsyncRefresh() throws Exception {
+        FileStoreTable storeTable = createTable(singletonList("f0"), new Options());
+        FullCacheLookupTable.Context context =
+                new FullCacheLookupTable.Context(
+                        storeTable,
+                        new int[] {0, 1, 2},
+                        null,
+                        null,
+                        tempDir.toFile(),
+                        singletonList("f0"),
+                        null);
+        table = FullCacheLookupTable.create(context, 0);
+        table.open();
+
+        Exception failure = new IOException("refresh failed while applying a snapshot");
+        AtomicReference<Exception> recorded = cachedExceptionOf(table);
+        recorded.set(failure);
+
+        assertThatThrownBy(() -> table.refresh()).isSameAs(failure);
+
+        // Drained, so the same failure does not block every later refresh.
+        assertThat(recorded.get()).isNull();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static AtomicReference<Exception> cachedExceptionOf(FullCacheLookupTable table)
+            throws Exception {
+        Field field = FullCacheLookupTable.class.getDeclaredField("cachedException");
+        field.setAccessible(true);
+        return (AtomicReference<Exception>) field.get(table);
     }
 
     @TestTemplate

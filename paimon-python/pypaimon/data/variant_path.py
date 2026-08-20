@@ -70,6 +70,12 @@ _INDEX_PATTERN = re.compile(r"\[(\d+)]")
 _KEY_PATTERN = re.compile(r"\.([^\.\[]+)|\['([^']+)']|\[\"([^\"]+)\"]")
 _Path = Tuple[Tuple[str, object], ...]
 _SLOW_PATH_ROWS = 64
+# Bound the dominant temporary allocation during batch structure matching.
+_STRUCTURE_MATCH_INDEX_BUDGET = 8 * 1024 * 1024
+# Bound encoded variable-width payloads retained while rebuilt rows accumulate.
+_ROOT_INSERT_SPLICE_PAYLOAD_BUDGET = 8 * 1024 * 1024
+# Bound per-row Python and NumPy temporaries for tiny payloads.
+_ROOT_INSERT_SPLICE_MAX_BATCH_ROWS = 64 * 1024
 
 
 @functools.lru_cache(maxsize=256)
@@ -251,8 +257,9 @@ def _checked_object_layout(value, pos, limit):
             value, offset_start + index * offset_width, offset_width)
         offsets.append(offset)
     sentinel = offsets[-1]
-    if ((size and (min(offsets[:-1]) != 0
-                   or len(set(offsets[:-1])) != size))
+    if ((not size and sentinel != 0)
+            or (size and (min(offsets[:-1]) != 0
+                          or len(set(offsets[:-1])) != size))
             or any(offset >= sentinel for offset in offsets[:-1])):
         _malformed("invalid object offsets")
     if size and len({
@@ -345,19 +352,20 @@ def _checked_value_size(value, pos, limit=None):
     return end - pos
 
 
-def _validate_value_field_ids(value, pos, limit, metadata_size):
+def _validate_value_field_ids(
+        value, pos, limit, metadata_size, structure_ranges=None):
     """Validate object field ids in one unedited value subtree."""
     stack = [(pos, limit)]
     while stack:
         current_pos, current_limit = stack.pop()
-        value_end = current_pos + _checked_value_size(
-            value, current_pos, current_limit)
-        if value_end != current_limit:
-            _malformed("child size does not match container offsets")
+        _require_range(current_pos, 1, current_limit)
         basic_type = value[current_pos] & 0x3
         if basic_type == _OBJECT:
-            size, id_size, id_start, data_start, offsets, _ = (
-                _checked_object_layout(value, current_pos, value_end))
+            size, id_size, id_start, data_start, offsets, value_end = (
+                _checked_object_layout(
+                    value, current_pos, current_limit))
+            if structure_ranges is not None:
+                structure_ranges.append((current_pos, data_start))
             ids = [
                 _read_unsigned(value, id_start + i * id_size, id_size)
                 for i in range(size)
@@ -368,18 +376,78 @@ def _validate_value_field_ids(value, pos, limit, metadata_size):
             end_by_offset = dict(zip(
                 ordered_offsets, ordered_offsets[1:]))
             for slot in range(size):
-                child_start, child_end = _checked_object_child_bounds(
-                    value, data_start, offsets, slot, end_by_offset)
-                if (value[child_start] & 0x3) in (_OBJECT, _ARRAY):
-                    stack.append((child_start, child_end))
+                child_offset = offsets[slot]
+                stack.append((
+                    data_start + child_offset,
+                    data_start + end_by_offset[child_offset],
+                ))
         elif basic_type == _ARRAY:
-            size, data_start, offsets, _ = _checked_array_layout(
-                value, current_pos, value_end)
+            size, data_start, offsets, value_end = _checked_array_layout(
+                value, current_pos, current_limit)
+            if structure_ranges is not None:
+                structure_ranges.append((current_pos, data_start))
             for index in range(size):
                 stack.append((
                     data_start + offsets[index],
                     data_start + offsets[index + 1],
                 ))
+        else:
+            value_end = current_pos + _checked_value_size(
+                value, current_pos, current_limit)
+            if structure_ranges is not None:
+                type_info = (value[current_pos] >> 2) & 0x3F
+                structure_end = current_pos + 1
+                if basic_type == _PRIMITIVE:
+                    if type_info in (_BINARY, _LONG_STR):
+                        structure_end += _U32_SIZE
+                    elif type_info in (
+                            _DECIMAL4, _DECIMAL8, _DECIMAL16):
+                        structure_end = value_end
+                structure_ranges.append((current_pos, structure_end))
+        if value_end != current_limit:
+            _malformed("child size does not match container offsets")
+
+
+def _matching_value_structures(
+        value, source_data, row_starts, metadata_size):
+    """Match equal-length rows against one validated value structure."""
+    ranges = []
+    _validate_value_field_ids(
+        value, 0, len(value), metadata_size, ranges)
+    position_count = sum(end - start for start, end in ranges)
+    index_size = np.dtype(np.int64).itemsize
+    position_bytes = position_count * index_size
+    available_bytes = _STRUCTURE_MATCH_INDEX_BUDGET - position_bytes
+    if available_bytes < index_size:
+        return None
+    max_cells = available_bytes // index_size
+    positions = np.empty(position_count, dtype=np.int64)
+    cursor = 0
+    for start, end in ranges:
+        count = end - start
+        positions[cursor:cursor + count] = np.arange(
+            start, end, dtype=np.int64)
+        cursor += count
+
+    matches = np.ones(len(row_starts), dtype=bool)
+    expected = np.frombuffer(value, dtype=np.uint8)
+    width = max(1, min(position_count, max_cells))
+    row_chunk_size = min(len(matches), max(1, max_cells // width))
+    for row_start in range(0, len(matches), row_chunk_size):
+        row_end = min(row_start + row_chunk_size, len(matches))
+        batch_matches = matches[row_start:row_end]
+        batch_starts = row_starts[row_start:row_end]
+        for start in range(0, position_count, width):
+            offsets = positions[start:start + width]
+            batch_matches &= np.all(
+                source_data[batch_starts[:, None] + offsets]
+                == expected[offsets],
+                axis=1,
+            )
+            if (start + width < position_count
+                    and not np.any(batch_matches)):
+                break
+    return matches
 
 
 def _field_slot(id_table: bytes, id_size: int, key_id: int) -> Optional[int]:
@@ -1880,6 +1948,215 @@ def _apply_edits(
     return _materialize_value(results[0])
 
 
+def _root_insert_splice_layout(value, key_id, key_name, names_by_id):
+    """Return a root layout that can splice the new field."""
+    size, id_size, id_start, data_start, first_offsets, _ = (
+        _checked_object_layout(value, 0, len(value)))
+    header = value[0]
+    type_info = (header >> 2) & 0x3F
+    large_size = ((type_info >> 4) & 0x1) != 0
+    size_width = _U32_SIZE if large_size else 1
+    offset_size = (type_info & 0x3) + 1
+    offset_start = id_start + size * id_size
+    if not large_size and size + 1 > _U8_MAX:
+        return None
+    if key_id >= 1 << (8 * id_size):
+        return None
+    ordered_offsets = sorted(first_offsets)
+    end_by_offset = dict(zip(ordered_offsets, ordered_offsets[1:]))
+    for index in range(size):
+        _checked_object_child_bounds(
+            value, data_start, first_offsets, index, end_by_offset)
+    ids = [
+        _read_unsigned(value, id_start + i * id_size, id_size)
+        for i in range(size)
+    ]
+    names = [names_by_id.get(field_id) for field_id in ids]
+    if any(name is None for name in names) or names != sorted(names):
+        return None
+    slot = sum(name < key_name for name in names)
+    return (
+        header, size, size_width, id_size, id_start, data_start,
+        offset_size, offset_start, ids, slot,
+    )
+
+
+def _encoded_payload_batches(rows, provider, global_row):
+    """Encode array-backed splice payloads within byte and row budgets."""
+    batch_start = 0
+    payloads = []
+    payload_bytes = 0
+    for index, row in enumerate(rows):
+        payload = provider.encode(
+            provider.scalar_at(global_row + int(row)))
+        if (payloads
+                and (len(payloads)
+                     >= _ROOT_INSERT_SPLICE_MAX_BATCH_ROWS
+                     or payload_bytes + len(payload)
+                     > _ROOT_INSERT_SPLICE_PAYLOAD_BUDGET)):
+            yield batch_start, index, payloads
+            batch_start = index
+            payloads = []
+            payload_bytes = 0
+        payloads.append(payload)
+        payload_bytes += len(payload)
+    if payloads:
+        yield batch_start, len(rows), payloads
+
+
+def _repeated_payload_batches(row_count, payload):
+    """Repeat a scalar payload without creating an unbounded row batch."""
+    for batch_start in range(
+            0, row_count, _ROOT_INSERT_SPLICE_MAX_BATCH_ROWS):
+        batch_end = min(
+            batch_start + _ROOT_INSERT_SPLICE_MAX_BATCH_ROWS,
+            row_count)
+        yield (
+            batch_start,
+            batch_end,
+            [payload] * (batch_end - batch_start),
+        )
+
+
+def _plan_root_insert_splice(
+        values, rows, row_starts, row_lengths, source_data,
+        key_id, key_name, names_by_id, payloads):
+    """Plan a splice and identify rows matching one root layout."""
+    layout = None
+    for row in rows:
+        layout = _root_insert_splice_layout(
+            values.view(int(row)), key_id, key_name, names_by_id)
+        if layout is not None:
+            break
+    if layout is None:
+        return None
+    (
+        header, size, size_width, id_size, id_start, data_start,
+        offset_size, offset_start, ids, slot,
+    ) = layout
+
+    widths = np.full(len(rows), size_width, dtype=np.int64)
+    ok = source_data[row_starts] == header
+    ok &= row_lengths >= data_start
+    safe_starts = np.where(ok, row_starts, 0)
+    ok &= _take_unsigned(source_data, safe_starts + 1, widths) == size
+    widths = np.full(len(rows), id_size, dtype=np.int64)
+    for index in range(size):
+        ok &= _take_unsigned(
+            source_data,
+            safe_starts + id_start + index * id_size,
+            widths,
+        ) == ids[index]
+    widths = np.full(len(rows), offset_size, dtype=np.int64)
+    sentinels = _take_unsigned(
+        source_data,
+        safe_starts + offset_start + size * offset_size,
+        widths,
+    )
+    ok &= data_start + sentinels == row_lengths
+    if size:
+        minimum = None
+        for index in range(size):
+            entry = _take_unsigned(
+                source_data,
+                safe_starts + offset_start + index * offset_size,
+                widths,
+            )
+            ok &= entry < sentinels
+            minimum = entry if minimum is None else np.minimum(
+                minimum, entry)
+        ok &= minimum == 0
+    payload_lengths = np.fromiter(
+        (len(payload) for payload in payloads), np.int64, len(payloads))
+    new_sentinels = sentinels + payload_lengths
+    ok &= new_sentinels < 1 << (8 * offset_size)
+
+    return (
+        header, size, size_width, id_size, id_start, data_start,
+        offset_size, offset_start, slot, sentinels, ok,
+    )
+
+
+def _root_insert_splice(
+        values, state, rows, row_starts, row_lengths, source_data,
+        key_id, key_name, names_by_id, payloads,
+        source_metadata_size, output_metadata_size):
+    """Splice one field into uniform root objects."""
+    plan = _plan_root_insert_splice(
+        values, rows, row_starts, row_lengths, source_data,
+        key_id, key_name, names_by_id, payloads)
+    if plan is None:
+        return None
+    (
+        header, size, size_width, id_size, id_start, data_start,
+        offset_size, offset_start, slot, sentinels, ok,
+    ) = plan
+    matching_structures = np.zeros(len(rows), dtype=bool)
+    candidates = np.flatnonzero(ok)
+    if len(candidates):
+        lengths = row_lengths[candidates]
+        order = np.argsort(lengths, kind='stable')
+        candidates = candidates[order]
+        lengths = lengths[order]
+        boundaries = np.flatnonzero(lengths[1:] != lengths[:-1]) + 1
+        for group in np.split(candidates, boundaries):
+            exemplar = int(group[0])
+            value = values.view(int(rows[exemplar]))
+            if len(group) == 1:
+                _validate_value_field_ids(
+                    value, 0, len(value), source_metadata_size)
+                matching_structures[exemplar] = True
+                continue
+            matches = _matching_value_structures(
+                value, source_data, row_starts[group],
+                source_metadata_size)
+            if matches is not None:
+                matching_structures[group[matches]] = True
+
+    if state.data is not None:
+        source_view = memoryview(state.data)
+        source_base = state.data_start
+    else:
+        source_view = values.data
+        source_base = 0
+    prefix = bytes([header]) + (size + 1).to_bytes(size_width, 'little')
+    id_bytes = key_id.to_bytes(id_size, 'little')
+    id_slot = id_start + slot * id_size
+    offset_slot = offset_start + slot * offset_size
+    sentinel_slot = offset_start + size * offset_size
+    rebuilt = {}
+    fallback_rows = []
+    for index, row in enumerate(rows):
+        row = int(row)
+        if not ok[index]:
+            fallback_rows.append(row)
+            continue
+        original = values.view(row)
+        if not matching_structures[index]:
+            _validate_value_field_ids(
+                original, 0, len(original), source_metadata_size)
+        base = int(row_starts[index]) - source_base
+        sentinel = int(sentinels[index])
+        _check_variant_sizes(
+            int(row_lengths[index]) + id_size + offset_size
+            + len(payloads[index]),
+            output_metadata_size,
+        )
+        rebuilt[row] = b''.join((
+            prefix,
+            source_view[base + id_start:base + id_slot],
+            id_bytes,
+            source_view[base + id_slot:base + offset_slot],
+            sentinel.to_bytes(offset_size, 'little'),
+            source_view[base + offset_slot:base + sentinel_slot],
+            (sentinel + len(payloads[index])).to_bytes(
+                offset_size, 'little'),
+            source_view[base + data_start:base + data_start + sentinel],
+            payloads[index],
+        ))
+    return rebuilt, fallback_rows
+
+
 def _set_chunk(chunk, values, parsed, global_row):
     parsed_paths = [parsed_path for _, parsed_path, _ in parsed]
     parent_paths = [parsed_path[:-1] for parsed_path in parsed_paths]
@@ -1939,6 +2216,8 @@ def _set_chunk(chunk, values, parsed, global_row):
         target_positions = positions[:count]
         target_limits = limits[:count]
         parent_positions = positions[count:]
+        parent_limits = limits[count:]
+        group_slow = set()
         insert_indices = []
         for index, (path, parsed_path, provider) in enumerate(parsed):
             if target_positions[index] is not None:
@@ -1968,19 +2247,96 @@ def _set_chunk(chunk, values, parsed, global_row):
         insert_keys = tuple(
             parsed[index][1][-1][1] for index in insert_indices)
         metadata_key_ids = _cached_metadata_key_ids(first_metadata)
-        source_metadata_size = (
-            len(metadata_key_ids)
+        source_metadata_size = len(metadata_key_ids)
+        rebuild_validation_size = (
+            source_metadata_size
             if any(key not in metadata_key_ids for key in insert_keys)
             else None
         )
         new_metadata, key_ids, names_by_id = _metadata_with_keys(
             first_metadata, insert_keys)
         insert_set = set(insert_indices)
+        splice_eligible = (
+            len(insert_indices) == 1
+            and len(parsed[insert_indices[0]][1]) == 1
+            and all(
+                index in insert_set
+                or parsed[index][2]._fixed_size is not None
+                for index in range(count))
+        )
+        if splice_eligible:
+            insert_index = insert_indices[0]
+            replace_indices = [
+                index for index in range(count) if index != insert_index
+            ]
+            if replace_indices:
+                _patch_planned_group(
+                    (rows, row_starts, source_data,
+                     [target_positions[index] for index in replace_indices],
+                     [target_limits[index] for index in replace_indices]),
+                    [parsed[index] for index in replace_indices],
+                    len(chunk), global_row, state, group_slow, False)
+                slow_rows |= group_slow
+            if group_slow:
+                keep = np.fromiter(
+                    (int(row) not in group_slow for row in rows),
+                    bool, len(rows))
+                live_rows = rows[keep]
+                live_starts = row_starts[keep]
+                live_lengths = parent_limits[insert_index][keep]
+            else:
+                live_rows = rows
+                live_starts = row_starts
+                live_lengths = parent_limits[insert_index]
+            provider = parsed[insert_index][2]
+            if not len(live_rows):
+                continue
+            if provider._array is None:
+                payload = payload_for(insert_index, provider, 0)
+                batches = _repeated_payload_batches(
+                    len(live_rows), payload)
+            else:
+                batches = _encoded_payload_batches(
+                    live_rows, provider, global_row)
+            key_name = parsed[insert_index][1][-1][1]
+            output_metadata_size = len(
+                new_metadata if new_metadata is not None
+                else first_metadata)
+            for batch_start, batch_end, payloads in batches:
+                batch_rows = live_rows[batch_start:batch_end]
+                spliced = _root_insert_splice(
+                    values, state, batch_rows,
+                    live_starts[batch_start:batch_end],
+                    live_lengths[batch_start:batch_end],
+                    source_data, key_ids[key_name], key_name,
+                    names_by_id, payloads, source_metadata_size,
+                    output_metadata_size)
+                if spliced is None:
+                    for row in batch_rows:
+                        row = int(row)
+                        rebuild_row(
+                            row, values.view(row), insert_set, key_ids,
+                            names_by_id, first_metadata, new_metadata,
+                            rebuild_validation_size)
+                    continue
+                rebuilt, fallback_rows = spliced
+                rebuilt_rows.update(rebuilt)
+                if new_metadata is not None:
+                    for row in rebuilt:
+                        rebuilt_metadata[row] = new_metadata
+                for row in fallback_rows:
+                    rebuild_row(
+                        row, values.view(row), insert_set, key_ids,
+                        names_by_id, first_metadata, new_metadata,
+                        rebuild_validation_size)
+            continue
         for offset_index, row in enumerate(rows):
             row = int(row)
+            if row in group_slow:
+                continue
             rebuild_row(
                 row, values.view(row), insert_set, key_ids, names_by_id,
-                first_metadata, new_metadata, source_metadata_size,
+                first_metadata, new_metadata, rebuild_validation_size,
                 [
                     None if target_positions[index] is None
                     else int(target_positions[index][offset_index])
@@ -2014,8 +2370,9 @@ def _set_chunk(chunk, values, parsed, global_row):
             insert_set.add(index)
             insert_keys.append(parsed_path[-1][1])
         metadata_key_ids = _cached_metadata_key_ids(row_metadata)
-        source_metadata_size = (
-            len(metadata_key_ids)
+        source_metadata_size = len(metadata_key_ids)
+        rebuild_validation_size = (
+            source_metadata_size
             if any(key not in metadata_key_ids for key in insert_keys)
             else None
         )
@@ -2023,7 +2380,7 @@ def _set_chunk(chunk, values, parsed, global_row):
             row_metadata, tuple(insert_keys))
         rebuild_row(
             row, view, insert_set, key_ids, names_by_id, row_metadata,
-            new_metadata, source_metadata_size)
+            new_metadata, rebuild_validation_size)
 
     if rebuilt_rows:
         state.ensure()

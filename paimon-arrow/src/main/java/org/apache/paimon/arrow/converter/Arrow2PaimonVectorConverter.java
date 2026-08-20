@@ -462,7 +462,8 @@ public interface Arrow2PaimonVectorConverter {
             } else if (precision >= 4 && precision <= 6) {
                 return Timestamp.fromMicros(value);
             } else {
-                return Timestamp.fromEpochMillis(value / 1_000_000, (int) (value % 1_000_000));
+                return Timestamp.fromEpochMillis(
+                        Math.floorDiv(value, 1_000_000L), (int) Math.floorMod(value, 1_000_000L));
             }
         }
 

@@ -196,12 +196,6 @@ public class BinaryExternalSortBuffer implements SortBuffer {
                                 + "or increase the table option 'write-buffer-size'.");
             } else {
                 spill();
-
-                if (spillChannelIDs.size() >= maxNumFileHandles) {
-                    List<ChannelWithMeta> merged = merger.mergeChannelList(spillChannelIDs);
-                    spillChannelIDs.clear();
-                    spillChannelIDs.addAll(merged);
-                }
             }
         }
     }
@@ -216,6 +210,19 @@ public class BinaryExternalSortBuffer implements SortBuffer {
 
     private MutableObjectIterator<BinaryRow> spilledIterator() throws IOException {
         spill();
+
+        // Merge the spilled sorted runs until the number of file handles fits within the
+        // fan-in limit. This is performed once here, after spilling is finished, instead of
+        // incrementally during write(). Doing it during write() would re-add the merged output
+        // to the spill list and re-merge it together with subsequently spilled files, causing
+        // cascading re-merge and degrading the merge IO from O(N*log N) to O(N^2).
+        // This mirrors Flink's SpillingThread#mergeOnDisk: while (channels > maxFanIn)
+        // channels = mergeChannelList(channels).
+        while (spillChannelIDs.size() > maxNumFileHandles) {
+            List<ChannelWithMeta> merged = merger.mergeChannelList(spillChannelIDs);
+            spillChannelIDs.clear();
+            spillChannelIDs.addAll(merged);
+        }
 
         List<FileIOChannel> openChannels = new ArrayList<>();
         BinaryMergeIterator<BinaryRow> iterator =

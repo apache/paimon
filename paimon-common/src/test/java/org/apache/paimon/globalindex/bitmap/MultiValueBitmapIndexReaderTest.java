@@ -109,14 +109,8 @@ class MultiValueBitmapIndexReaderTest {
         Path path = new Path(basePath, result.fileName());
         GlobalIndexIOMeta meta =
                 new GlobalIndexIOMeta(path, fileIO.getFileSize(path), result.meta());
-        assertThat(
-                        MultiValueIndexFileMeta.hasCompatibleElementType(
-                                result.meta(), DataTypes.STRING()))
-                .isTrue();
-        assertThat(
-                        MultiValueIndexFileMeta.hasCompatibleElementType(
-                                result.meta(), DataTypes.BIGINT()))
-                .isFalse();
+        assertThat(result.meta())
+                .isEqualTo(SortedIndexFileMeta.deserialize(result.meta()).serialize());
 
         try (GlobalIndexReader reader =
                 globalIndexer.createReader(
@@ -154,46 +148,11 @@ class MultiValueBitmapIndexReaderTest {
                             .join());
             assertThat(reader.visitArrayContainsAll(fieldRef, Collections.emptyList()).join())
                     .isEmpty();
-            assertThat(
-                            reader.visitArrayContains(
-                                            new FieldRef(
-                                                    1, "tags", DataTypes.ARRAY(DataTypes.BIGINT())),
-                                            1L)
-                                    .join())
-                    .isEmpty();
-            assertThat(
-                            reader.visitArraysOverlap(
-                                            new FieldRef(
-                                                    1, "tags", DataTypes.ARRAY(DataTypes.BIGINT())),
-                                            Collections.singletonList(1L))
-                                    .join())
-                    .isEmpty();
-            assertThat(
-                            reader.visitArrayContainsAll(
-                                            new FieldRef(
-                                                    1, "tags", DataTypes.ARRAY(DataTypes.BIGINT())),
-                                            Collections.singletonList(1L))
-                                    .join())
-                    .isEmpty();
             assertThat(reader.visitIsNull(fieldRef).join()).isEmpty();
             assertThat(reader.visitIsNotNull(fieldRef).join()).isEmpty();
 
             assertThat(reader.visitEqual(fieldRef, array("A")).join()).isEmpty();
             assertThat(reader.visitContains(fieldRef, str("A")).join()).isEmpty();
-        }
-
-        GlobalIndexIOMeta legacyMeta =
-                new GlobalIndexIOMeta(
-                        path,
-                        fileIO.getFileSize(path),
-                        SortedIndexFileMeta.deserialize(result.meta()).serialize());
-        try (GlobalIndexReader reader =
-                globalIndexer.createReader(
-                        fileReader,
-                        Collections.singletonList(legacyMeta),
-                        5,
-                        newDirectExecutorService())) {
-            assertThat(reader.visitArrayContains(fieldRef, str("A")).join()).isEmpty();
         }
     }
 

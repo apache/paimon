@@ -68,6 +68,33 @@ public class SnapshotTest {
                                 + "  \"unknownKey\" : 22222\n"
                                 + "}");
         assertThat(snapshot.uuid()).isNull();
+        assertThat(snapshot.writerVersion()).isNull();
+    }
+
+    @Test
+    public void testSnapshotWriterVersion() {
+        String json =
+                "{\n"
+                        + "  \"version\" : 3,\n"
+                        + "  \"id\" : 1,\n"
+                        + "  \"schemaId\" : 0,\n"
+                        + "  \"baseManifestList\" : \"m-0\",\n"
+                        + "  \"deltaManifestList\" : \"m-1\",\n"
+                        + "  \"commitUser\" : \"user\",\n"
+                        + "  \"writerVersion\" : \"java-2.1-SNAPSHOT-0123456789012345678901234567890123456789\",\n"
+                        + "  \"commitIdentifier\" : 0,\n"
+                        + "  \"commitKind\" : \"APPEND\",\n"
+                        + "  \"timeMillis\" : 1000,\n"
+                        + "  \"totalRecordCount\" : 10,\n"
+                        + "  \"deltaRecordCount\" : 5\n"
+                        + "}";
+        Snapshot snapshot = Snapshot.fromJson(json);
+        assertThat(snapshot.writerVersion())
+                .isEqualTo("java-2.1-SNAPSHOT-0123456789012345678901234567890123456789");
+        assertThat(Snapshot.fromJson(snapshot.toJson())).isEqualTo(snapshot);
+        Changelog changelog = new Changelog(snapshot);
+        assertThat(changelog.writerVersion()).isEqualTo(snapshot.writerVersion());
+        assertThat(Changelog.fromJson(changelog.toJson())).isEqualTo(changelog);
     }
 
     @Test

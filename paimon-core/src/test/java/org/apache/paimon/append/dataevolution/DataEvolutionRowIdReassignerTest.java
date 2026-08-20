@@ -2896,6 +2896,7 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                         latest.changelogManifestListSize(),
                         indexManifest,
                         latest.commitUser(),
+                        latest.writerVersion(),
                         latest.commitIdentifier(),
                         latest.commitKind(),
                         latest.timeMillis(),

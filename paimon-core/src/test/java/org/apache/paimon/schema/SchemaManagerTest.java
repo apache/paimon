@@ -1506,4 +1506,56 @@ public class SchemaManagerTest {
                                         new ChangelogManager(LocalFileIO.create(), path, null)))
                 .hasMessageContaining("Schema 999 does not exist");
     }
+
+    private Schema schemaWithDefault(String defaultValue) {
+        return new Schema(
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "c", DataTypes.STRING(), null, defaultValue)),
+                Collections.emptyList(),
+                Collections.emptyList(),
+                Collections.singletonMap(CoreOptions.BUCKET.key(), "-1"),
+                "");
+    }
+
+    @Test
+    public void testUpdateColumnTypeRejectsADefaultValueTheNewTypeCannotRead() throws Exception {
+        retryArtificialException(() -> manager.createTable(schemaWithDefault("'abc'")));
+
+        assertThatThrownBy(
+                        () ->
+                                retryArtificialException(
+                                        () ->
+                                                manager.commitChanges(
+                                                        SchemaChange.updateColumnType(
+                                                                "c", DataTypes.INT()))))
+                .rootCause()
+                .isInstanceOf(NumberFormatException.class);
+
+        // the column is untouched, so the table is still writable
+        TableSchema after = manager.latest().get();
+        assertThat(after.fields().get(1).type()).isEqualTo(DataTypes.STRING());
+        assertThatCode(
+                        () ->
+                                FileStoreTableFactory.create(LocalFileIO.create(), path, after)
+                                        .newWrite("u"))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testUpdateColumnTypeKeepsADefaultValueTheNewTypeCanRead() throws Exception {
+        retryArtificialException(() -> manager.createTable(schemaWithDefault("'123'")));
+
+        retryArtificialException(
+                () -> manager.commitChanges(SchemaChange.updateColumnType("c", DataTypes.INT())));
+
+        TableSchema after = manager.latest().get();
+        assertThat(after.fields().get(1).type()).isEqualTo(DataTypes.INT());
+        assertThat(after.fields().get(1).defaultValue()).isEqualTo("'123'");
+        assertThatCode(
+                        () ->
+                                FileStoreTableFactory.create(LocalFileIO.create(), path, after)
+                                        .newWrite("u"))
+                .doesNotThrowAnyException();
+    }
 }

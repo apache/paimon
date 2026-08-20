@@ -26,11 +26,14 @@ from pypaimon.data.generic_variant import GenericVariant, _check_variant_sizes
 from pypaimon.data.variant_path import (
     _apply_edits,
     _build_object_value_ordered,
+    _checked_object_layout,
     _materialize_value,
     _metadata_key_ids,
     _metadata_with_keys,
     _path_positions,
     _rebuilt_offsets,
+    _root_insert_splice,
+    _root_insert_splice_layout,
     _validate_value_field_ids,
     variant_get,
 )
@@ -541,36 +544,241 @@ class TestVariantSetFastPaths(unittest.TestCase):
         ) as slow_path, patch(
                 'pypaimon.data.variant_path._metadata_key_ids',
                 wraps=_metadata_key_ids,
-        ) as metadata_parse:
+        ) as metadata_parse, patch(
+                'pypaimon.data.variant_path._apply_edits',
+                wraps=_apply_edits,
+        ) as rebuild:
             result = variant_set(column, '$.processed', pa.scalar(True))
 
         slow_path.assert_not_called()
+        rebuild.assert_not_called()
         self.assertLessEqual(metadata_parse.call_count, 2)
         self.assertEqual(
             variant_get(result, '$.processed', pa.bool_()).to_pylist(),
             [True] * 4096,
         )
 
-    def test_insert_fuses_root_validation_with_rebuild(self):
+    def test_insert_splices_nested_root_after_validation(self):
         column = _variants([
-            {'nested': {'value': float(index)}, 'other': float(index)}
+            {
+                'nested_object': {'value': float(index)},
+                'nested_array': [{'value': float(index)}],
+                'other': float(index),
+            }
             for index in range(100)
         ])
 
         with patch(
                 'pypaimon.data.variant_path._validate_value_field_ids',
                 wraps=_validate_value_field_ids,
-        ) as subtree_validation:
+        ) as subtree_validation, patch(
+                'pypaimon.data.variant_path._apply_edits',
+                wraps=_apply_edits,
+        ) as rebuild:
             result = variant_set(column, '$.processed', pa.scalar(True))
 
-        self.assertFalse(any(
+        self.assertTrue(any(
             args[1] == 0
             for args, _ in subtree_validation.call_args_list
         ))
+        self.assertEqual(subtree_validation.call_count, 1)
+        rebuild.assert_not_called()
         self.assertEqual(
             variant_get(result, '$.processed', pa.bool_()).to_pylist(),
             [True] * 100,
         )
+
+    def test_insert_batches_multiple_nested_structures(self):
+        sequences = [0, 128, 32768]
+        column = _variants([
+            {
+                'nested': {'value': float(index)},
+                'sequence': sequences[index % len(sequences)],
+            }
+            for index in range(300)
+        ])
+
+        with patch(
+                'pypaimon.data.variant_path._validate_value_field_ids',
+                wraps=_validate_value_field_ids,
+        ) as subtree_validation, patch(
+                'pypaimon.data.variant_path._apply_edits',
+                wraps=_apply_edits,
+        ) as rebuild:
+            result = variant_set(column, '$.processed', pa.scalar(True))
+
+        self.assertEqual(subtree_validation.call_count, len(sequences))
+        rebuild.assert_not_called()
+        self.assertEqual(
+            variant_get(result, '$.processed', pa.bool_()).to_pylist(),
+            [True] * len(column),
+        )
+
+    def test_insert_batches_all_nested_structure_lengths(self):
+        lengths = list(range(1, 13))
+        column = _variants([
+            {'nested': {'value': 'x' * length}}
+            for length in lengths
+            for _ in range(10)
+        ])
+
+        with patch(
+                'pypaimon.data.variant_path._validate_value_field_ids',
+                wraps=_validate_value_field_ids,
+        ) as subtree_validation, patch(
+                'pypaimon.data.variant_path._apply_edits',
+                wraps=_apply_edits,
+        ) as rebuild:
+            result = variant_set(column, '$.processed', pa.scalar(True))
+
+        self.assertEqual(subtree_validation.call_count, len(lengths))
+        rebuild.assert_not_called()
+        self.assertEqual(
+            variant_get(result, '$.processed', pa.bool_()).to_pylist(),
+            [True] * len(column),
+        )
+
+    def test_insert_validates_singleton_lengths_without_batching(self):
+        lengths = list(range(1, 13))
+        column = _variants([
+            {'nested': {'value': 'x' * length}}
+            for length in lengths
+        ])
+
+        with patch(
+                'pypaimon.data.variant_path._matching_value_structures',
+        ) as structure_match, patch(
+                'pypaimon.data.variant_path._validate_value_field_ids',
+                wraps=_validate_value_field_ids,
+        ) as subtree_validation:
+            result = variant_set(column, '$.processed', pa.scalar(True))
+
+        structure_match.assert_not_called()
+        self.assertEqual(subtree_validation.call_count, len(lengths))
+        self.assertEqual(
+            variant_get(result, '$.processed', pa.bool_()).to_pylist(),
+            [True] * len(column),
+        )
+
+    def test_insert_uses_layout_after_noncanonical_first_row(self):
+        metadata = GenericVariant.from_python({'a': 0, 'b': 0}).metadata()
+        key_ids = _metadata_key_ids(metadata)
+        a_value = _encode_scalar_to_value_bytes(1.0, pa.float64())
+        b_value = _encode_scalar_to_value_bytes(2.0, pa.float64())
+        noncanonical = _build_object_value_ordered([
+            (key_ids['b'], b_value),
+            (key_ids['a'], a_value),
+        ])
+        canonical = _build_object_value_ordered([
+            (key_ids['a'], a_value),
+            (key_ids['b'], b_value),
+        ])
+        column = GenericVariant.to_arrow_array([
+            GenericVariant(noncanonical, metadata),
+            *[GenericVariant(canonical, metadata) for _ in range(99)],
+        ])
+
+        with patch(
+                'pypaimon.data.variant_path._apply_edits',
+                wraps=_apply_edits,
+        ) as rebuild:
+            result = variant_set(column, '$.processed', pa.scalar(True))
+
+        self.assertEqual(rebuild.call_count, 1)
+        self.assertEqual(
+            variant_get(result, '$.processed', pa.bool_()).to_pylist(),
+            [True] * len(column),
+        )
+
+    def test_variable_insert_bounds_encoded_payload_memory(self):
+        column = _variants([
+            {'value': float(index)}
+            for index in range(10)
+        ])
+        tags = pa.array(['x' * 10] * len(column))
+
+        with patch(
+                'pypaimon.data.variant_path.'
+                '_ROOT_INSERT_SPLICE_PAYLOAD_BUDGET',
+                24,
+        ), patch(
+                'pypaimon.data.variant_path._root_insert_splice',
+                wraps=_root_insert_splice,
+        ) as splice:
+            result = variant_set(column, '$.tag', tags)
+
+        self.assertGreater(splice.call_count, 1)
+        for call in splice.call_args_list:
+            self.assertLessEqual(
+                sum(len(payload) for payload in call.args[9]),
+                24,
+            )
+        self.assertEqual(
+            variant_get(result, '$.tag', pa.string()).to_pylist(),
+            tags.to_pylist(),
+        )
+
+    def test_small_variable_insert_bounds_payload_batch_rows(self):
+        column = _variants([
+            {'value': float(index)}
+            for index in range(10)
+        ])
+        tags = pa.array([''] * len(column))
+
+        with patch(
+                'pypaimon.data.variant_path.'
+                '_ROOT_INSERT_SPLICE_MAX_BATCH_ROWS',
+                3,
+        ), patch(
+                'pypaimon.data.variant_path._root_insert_splice',
+                wraps=_root_insert_splice,
+        ) as splice:
+            result = variant_set(column, '$.tag', tags)
+
+        self.assertGreater(splice.call_count, 1)
+        for call in splice.call_args_list:
+            self.assertLessEqual(len(call.args[9]), 3)
+        self.assertEqual(
+            variant_get(result, '$.tag', pa.string()).to_pylist(),
+            tags.to_pylist(),
+        )
+
+    def test_scalar_insert_bounds_splice_batch_rows(self):
+        column = _variants([
+            {'value': float(index)}
+            for index in range(10)
+        ])
+
+        with patch(
+                'pypaimon.data.variant_path.'
+                '_ROOT_INSERT_SPLICE_MAX_BATCH_ROWS',
+                3,
+        ), patch(
+                'pypaimon.data.variant_path._root_insert_splice',
+                wraps=_root_insert_splice,
+        ) as splice:
+            result = variant_set(column, '$.processed', pa.scalar(True))
+
+        self.assertEqual(splice.call_count, 4)
+        for call in splice.call_args_list:
+            self.assertLessEqual(len(call.args[9]), 3)
+        self.assertEqual(
+            variant_get(result, '$.processed', pa.bool_()).to_pylist(),
+            [True] * len(column),
+        )
+
+    def test_ineligible_splice_layout_skips_child_validation(self):
+        value = _build_object_value([
+            (0, _encode_scalar_to_value_bytes(1.0, pa.float64())),
+        ])
+
+        with patch(
+                'pypaimon.data.variant_path._checked_object_child_bounds',
+                side_effect=AssertionError(
+                    "ineligible layout validated children"),
+        ):
+            self.assertIsNone(_root_insert_splice_layout(
+                value, 256, 'new', {0: 'value'}))
 
     def test_insert_validates_deep_unmodified_sibling_iteratively(self):
         metadata = GenericVariant.from_python(
@@ -708,6 +916,46 @@ class TestVariantSetErrors(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "MALFORMED_VARIANT"):
             variant_set(column, '$.processed', pa.scalar(True))
 
+    def test_root_splice_rejects_empty_object_with_orphan_data(self):
+        empty = GenericVariant.from_python({})
+        corrupt = bytearray(empty.value())
+        corrupt[-1] = 1
+        corrupt.append(0)
+        column = GenericVariant.to_arrow_array([
+            GenericVariant(bytes(corrupt), empty.metadata()),
+        ])
+
+        with self.assertRaisesRegex(ValueError, "MALFORMED_VARIANT"):
+            variant_set(column, '$.processed', pa.scalar(True))
+
+    def test_root_splice_validates_nested_values_when_metadata_reused(self):
+        metadata = GenericVariant.from_python({
+            'nested': {'bad': None, 'target': 0.0},
+            'new': True,
+        }).metadata()
+        key_ids = _metadata_key_ids(metadata)
+        malformed_null = (
+            _encode_scalar_to_value_bytes(None, pa.null()) + b'\x00')
+        nested = _build_object_value([
+            (key_ids['bad'], malformed_null),
+            (
+                key_ids['target'],
+                _encode_scalar_to_value_bytes(1.0, pa.float64()),
+            ),
+        ])
+        root = _build_object_value([
+            (key_ids['nested'], nested),
+        ])
+        column = GenericVariant.to_arrow_array([
+            GenericVariant(root, metadata),
+        ])
+
+        with self.assertRaisesRegex(ValueError, "MALFORMED_VARIANT"):
+            variant_set(column, {
+                '$.nested.target': pa.scalar(2.0),
+                '$.new': pa.scalar(True),
+            })
+
     def test_rejects_unknown_field_id_on_insert(self):
         metadata = GenericVariant.from_python({'value': 0}).metadata()
         orphan = _build_object_value([
@@ -753,6 +1001,34 @@ class TestVariantSetErrors(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "MALFORMED_VARIANT"):
             variant_set(column, '$.child.new', pa.scalar(True))
 
+    def test_root_splice_rejects_nested_unknown_field_id(self):
+        metadata = GenericVariant.from_python({'sibling': {}}).metadata()
+        key_ids = _metadata_key_ids(metadata)
+        valid_sibling = _build_object_value([
+            (
+                key_ids['sibling'],
+                _encode_scalar_to_value_bytes(1.0, pa.float64()),
+            ),
+        ])
+        corrupt_sibling = _build_object_value([
+            (
+                len(key_ids),
+                _encode_scalar_to_value_bytes(2.0, pa.float64()),
+            ),
+        ])
+        corrupt_root = _build_object_value([
+            (key_ids['sibling'], corrupt_sibling),
+        ])
+        column = GenericVariant.to_arrow_array([
+            GenericVariant(_build_object_value([
+                (key_ids['sibling'], valid_sibling),
+            ]), metadata),
+            GenericVariant(corrupt_root, metadata),
+        ])
+
+        with self.assertRaisesRegex(ValueError, "MALFORMED_VARIANT"):
+            variant_set(column, '$.new', pa.scalar(True))
+
     def test_rejects_duplicate_source_field_id(self):
         metadata = GenericVariant.from_python({'value': 0}).metadata()
         corrupt = _build_object_value([
@@ -781,6 +1057,35 @@ class TestVariantSetErrors(unittest.TestCase):
                 with self.assertRaisesRegex(
                         ValueError, "MALFORMED_VARIANT"):
                     updater(column, '$.a', pa.scalar(9.0))
+
+    def test_root_splice_rejects_duplicate_peer_offsets(self):
+        valid = GenericVariant.from_python({'a': 1.0, 'b': 2.0})
+        corrupt = bytearray(valid.value())
+        size, id_size, id_start, _, _, _ = _checked_object_layout(
+            corrupt, 0, len(corrupt))
+        offset_size = ((corrupt[0] >> 2) & 0x3) + 1
+        offset_start = id_start + size * id_size
+        corrupt[offset_start + offset_size:
+                offset_start + 2 * offset_size] = (
+            0).to_bytes(offset_size, 'little')
+        column = GenericVariant.to_arrow_array([
+            valid, GenericVariant(bytes(corrupt), valid.metadata()),
+        ])
+
+        with self.assertRaisesRegex(ValueError, "MALFORMED_VARIANT"):
+            variant_set(column, '$.new', pa.scalar(True))
+
+    def test_root_splice_enforces_value_size_limit(self):
+        variant = GenericVariant.from_python({'padding': 'x' * 100})
+        column = GenericVariant.to_arrow_array([variant])
+
+        with patch(
+                'pypaimon.data.generic_variant._SIZE_LIMIT',
+                len(variant.value()) + 2,
+        ):
+            with self.assertRaisesRegex(
+                    ValueError, 'VARIANT_CONSTRUCTOR_SIZE_LIMIT'):
+                variant_set(column, '$.new', pa.scalar(True))
 
     def test_rejects_truncated_child_offsets(self):
         valid = GenericVariant.from_python({'a': 1.0, 'b': 2.0})

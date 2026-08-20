@@ -101,6 +101,48 @@ class SubstringTransformTest {
     }
 
     @Test
+    public void testNullPositionYieldsNull() {
+        List<Object> literal = new ArrayList<>();
+        literal.add(BinaryString.fromString("123"));
+        literal.add(null);
+        assertThat(new SubstringTransform(literal).transform(GenericRow.of())).isNull();
+
+        literal.set(1, 1);
+        literal.add(null);
+        assertThat(new SubstringTransform(literal).transform(GenericRow.of())).isNull();
+
+        // a null length propagates even when begin is past the end, which on its own
+        // would have yielded an empty string
+        literal.set(1, 99);
+        assertThat(new SubstringTransform(literal).transform(GenericRow.of())).isNull();
+
+        // and it is found before the malformed begin next to it is parsed
+        literal.set(1, BinaryString.fromString("bad"));
+        assertThat(new SubstringTransform(literal).transform(GenericRow.of())).isNull();
+    }
+
+    @Test
+    public void testNullPositionFieldYieldsNull() {
+        List<Object> inputs = new ArrayList<>();
+        inputs.add(new FieldRef(0, "f0", DataTypes.STRING()));
+        inputs.add(new FieldRef(1, "f1", DataTypes.INT()));
+        assertThat(
+                        new SubstringTransform(inputs)
+                                .transform(
+                                        GenericRow.of(
+                                                BinaryString.fromString("123-45-6789"), null)))
+                .isNull();
+
+        inputs.add(new FieldRef(2, "f2", DataTypes.INT()));
+        assertThat(
+                        new SubstringTransform(inputs)
+                                .transform(
+                                        GenericRow.of(
+                                                BinaryString.fromString("123-45-6789"), 8, null)))
+                .isNull();
+    }
+
+    @Test
     public void testSubstringRefInputUsesSourceFieldNullability() {
         List<Object> inputs = new ArrayList<>();
         inputs.add(new FieldRef(1, "f1", DataTypes.STRING()));

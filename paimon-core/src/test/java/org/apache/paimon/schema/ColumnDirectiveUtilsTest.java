@@ -142,6 +142,20 @@ public class ColumnDirectiveUtilsTest {
     }
 
     @Test
+    public void testBlobDirectiveDeduplicatesExistingOptionAndPreservesOrder() {
+        Map<String, String> opts = new HashMap<>();
+        opts.put(CoreOptions.BLOB_FIELD.key(), "first,pic");
+
+        ColumnDirectiveUtils.applyAddColumnDirective(
+                "__BLOB_FIELD", "pic", DataTypes.BYTES(), opts);
+        assertThat(opts).containsEntry(CoreOptions.BLOB_FIELD.key(), "first,pic");
+
+        ColumnDirectiveUtils.applyAddColumnDirective(
+                "__BLOB_FIELD", "last", DataTypes.BYTES(), opts);
+        assertThat(opts).containsEntry(CoreOptions.BLOB_FIELD.key(), "first,pic,last");
+    }
+
+    @Test
     public void testBareDirectiveWithoutComment() {
         Map<String, String> opts = new HashMap<>();
         ColumnDirectiveUtils.ConvertedColumn result =

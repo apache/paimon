@@ -121,7 +121,7 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
     public void close() throws IOException {
         Throwable primary = null;
         try {
-            byte[] indexBytes = DeltaVarintCompressor.compress(lengths.toArray());
+            byte[] indexBytes = DeltaVarintCompressor.compressLongArrayList(lengths);
             out.write(indexBytes);
             out.write(intToLittleEndian(indexBytes.length));
             out.write(VERSION);
