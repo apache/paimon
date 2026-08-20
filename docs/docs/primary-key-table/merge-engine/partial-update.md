@@ -205,6 +205,12 @@ SELECT *
 FROM t; -- output 1, 2, 1, 2, 3
 ```
 
+:::note
+
+Sequence-group aggregate functions are supported since Paimon 2.1.
+
+:::
+
 You can assign the same aggregation function to all fields protected by a sequence group by adding
 `.aggregate-function` to the sequence-group option key:
 
