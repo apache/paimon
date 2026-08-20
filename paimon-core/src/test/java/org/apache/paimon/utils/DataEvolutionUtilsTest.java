@@ -243,6 +243,57 @@ public class DataEvolutionUtilsTest {
     }
 
     @Test
+    public void testFileFieldsFollowWriteColsOrderAndIgnoreSystemFields() {
+        TableSchema schema =
+                new TableSchema(
+                        1L,
+                        Arrays.asList(
+                                new DataField(1, "indexed", new IntType()),
+                                new DataField(2, "other", new IntType())),
+                        2,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<>(),
+                        "");
+
+        assertThat(
+                        DataEvolutionUtils.fileFields(
+                                ignored -> schema,
+                                dataFile(
+                                        "reordered.parquet",
+                                        1,
+                                        Arrays.asList(
+                                                "other", SpecialFields.ROW_ID.name(), "indexed"))))
+                .extracting(DataField::id)
+                .containsExactly(2, 1);
+    }
+
+    @Test
+    public void testFieldMaxSequenceNumberFallsBackForMissingOrMalformedArray() {
+        DataFileMeta legacy = dataFile("legacy.parquet", 10, null);
+        DataFileMeta malformed =
+                dataFile("malformed.parquet", 10, null)
+                        .withColumnMaxSequenceNumbers(new long[] {5L});
+        DataFileMeta valid =
+                dataFile("valid.parquet", 10, null)
+                        .withColumnMaxSequenceNumbers(new long[] {5L, 8L});
+
+        assertThat(
+                        DataEvolutionUtils.fieldMaxSequenceNumber(
+                                legacy, legacy.columnMaxSequenceNumbers(), 0, 2))
+                .isEqualTo(10L);
+        assertThat(
+                        DataEvolutionUtils.fieldMaxSequenceNumber(
+                                malformed, malformed.columnMaxSequenceNumbers(), 0, 2))
+                .isEqualTo(10L);
+        long[] validSequences = valid.columnMaxSequenceNumbers();
+        assertThat(DataEvolutionUtils.fieldMaxSequenceNumber(valid, validSequences, 0, 2))
+                .isEqualTo(5L);
+        assertThat(DataEvolutionUtils.fieldMaxSequenceNumber(valid, validSequences, 1, 2))
+                .isEqualTo(8L);
+    }
+
+    @Test
     public void testRetrieveAnchorFileSkipsSpecialFiles() {
         DataFileMeta blobFile = dataFile("blob-file.blob", 1);
         DataFileMeta vectorFile = dataFile("data.vector.lance", 2);

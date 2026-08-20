@@ -857,7 +857,8 @@ public class DataEvolutionCompactCoordinatorTest {
                 null,
                 null,
                 firstRowId,
-                writeCols);
+                writeCols,
+                null);
     }
 
     private DataEvolutionCompactCoordinator.CompactPlanner blobPlanner(

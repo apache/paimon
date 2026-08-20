@@ -123,8 +123,11 @@ public class CoreOptionsTest {
         Options conf = new Options();
         conf.setString(CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION.key(), "IGNORE");
 
-        assertThat(new CoreOptions(conf).globalIndexColumnUpdateAction())
+        CoreOptions options = new CoreOptions(conf);
+        assertThat(options.globalIndexColumnUpdateAction())
                 .isEqualTo(CoreOptions.GlobalIndexColumnUpdateAction.IGNORE);
+        assertThat(options.ignoreIndexColumnUpdate()).isTrue();
+        assertThat(new CoreOptions(new Options()).ignoreIndexColumnUpdate()).isFalse();
     }
 
     @Test

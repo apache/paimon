@@ -23,6 +23,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ObjectSerializer;
 
 import static org.apache.paimon.utils.InternalRowUtils.fromStringArrayData;
@@ -30,13 +31,36 @@ import static org.apache.paimon.utils.InternalRowUtils.toStringArrayData;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
-/** Serializer for {@link DataFileMeta}. */
-public class DataFileMetaFirstRowIdLegacySerializer extends ObjectSerializer<DataFileMeta> {
+/** Legacy serializer for {@link DataFileMeta} before column sequence numbers were introduced. */
+public class DataFileMetaWriteColsLegacySerializer extends ObjectSerializer<DataFileMeta> {
 
     private static final long serialVersionUID = 1L;
 
-    public DataFileMetaFirstRowIdLegacySerializer() {
-        super(DataFileMetaWriteColsLegacySerializer.SCHEMA);
+    public static final RowType SCHEMA =
+            DataFileMeta.SCHEMA.project(
+                    DataFileMeta.FILE_NAME,
+                    DataFileMeta.FILE_SIZE,
+                    DataFileMeta.ROW_COUNT,
+                    DataFileMeta.MIN_KEY,
+                    DataFileMeta.MAX_KEY,
+                    DataFileMeta.KEY_STATS,
+                    DataFileMeta.VALUE_STATS,
+                    DataFileMeta.MIN_SEQUENCE_NUMBER,
+                    DataFileMeta.MAX_SEQUENCE_NUMBER,
+                    DataFileMeta.SCHEMA_ID,
+                    DataFileMeta.LEVEL,
+                    DataFileMeta.EXTRA_FILES,
+                    DataFileMeta.CREATION_TIME,
+                    DataFileMeta.DELETE_ROW_COUNT,
+                    DataFileMeta.EMBEDDED_FILE_INDEX,
+                    DataFileMeta.FILE_SOURCE,
+                    DataFileMeta.VALUE_STATS_COLS,
+                    DataFileMeta.EXTERNAL_PATH,
+                    DataFileMeta.FIRST_ROW_ID,
+                    DataFileMeta.WRITE_COLS);
+
+    public DataFileMetaWriteColsLegacySerializer() {
+        super(SCHEMA);
     }
 
     @Override
@@ -61,7 +85,7 @@ public class DataFileMetaFirstRowIdLegacySerializer extends ObjectSerializer<Dat
                 toStringArrayData(meta.valueStatsCols()),
                 meta.externalPath().map(BinaryString::fromString).orElse(null),
                 meta.firstRowId(),
-                null);
+                meta.writeCols() == null ? null : toStringArrayData(meta.writeCols()));
     }
 
     @Override
@@ -86,7 +110,7 @@ public class DataFileMetaFirstRowIdLegacySerializer extends ObjectSerializer<Dat
                 row.isNullAt(16) ? null : fromStringArrayData(row.getArray(16)),
                 row.isNullAt(17) ? null : row.getString(17).toString(),
                 row.isNullAt(18) ? null : row.getLong(18),
-                null,
+                row.isNullAt(19) ? null : fromStringArrayData(row.getArray(19)),
                 null);
     }
 }

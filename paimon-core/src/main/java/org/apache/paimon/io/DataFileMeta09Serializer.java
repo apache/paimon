@@ -142,6 +142,7 @@ public class DataFileMeta09Serializer implements Serializable {
                 null,
                 null,
                 null,
+                null,
                 null);
     }
 }

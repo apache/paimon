@@ -454,7 +454,8 @@ class ManifestRewriteCleanupTest extends ManifestFileMetaTestBase {
                         null,
                         null,
                         firstRowId,
-                        Collections.singletonList("f0")));
+                        Collections.singletonList("f0"),
+                        null));
     }
 
     private ManifestFile createManifestFile(long suggestedFileSize) {

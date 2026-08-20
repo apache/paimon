@@ -193,6 +193,7 @@ public class ChangelogCompactSortOperatorTest {
                 null,
                 null,
                 null,
+                null,
                 null);
     }
 

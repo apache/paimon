@@ -191,6 +191,7 @@ public class NoPartitionManifestFileMetaTest extends ManifestFileMetaTestBase {
                         null,
                         null,
                         firstRowId,
-                        Collections.singletonList("f0")));
+                        Collections.singletonList("f0"),
+                        null));
     }
 }

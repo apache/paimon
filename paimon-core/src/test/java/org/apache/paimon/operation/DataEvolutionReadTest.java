@@ -354,7 +354,8 @@ public class DataEvolutionReadTest {
                 null,
                 null,
                 firstRowId,
-                Arrays.asList("blob_col"));
+                Arrays.asList("blob_col"),
+                null);
     }
 
     /** Creates a blob file with custom write columns. */
@@ -384,7 +385,8 @@ public class DataEvolutionReadTest {
                 null,
                 null,
                 firstRowId,
-                writeCols);
+                writeCols,
+                null);
     }
 
     private DataFileMeta createVectorFile(
@@ -445,7 +447,8 @@ public class DataEvolutionReadTest {
                 null,
                 null,
                 firstRowId,
-                writeCols);
+                writeCols,
+                null);
     }
 
     @Test
@@ -523,6 +526,7 @@ public class DataEvolutionReadTest {
                 null,
                 null,
                 firstRowId,
+                null,
                 null);
     }
 

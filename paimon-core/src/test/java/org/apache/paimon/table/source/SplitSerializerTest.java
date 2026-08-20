@@ -250,6 +250,7 @@ public class SplitSerializerTest {
                 null,
                 null,
                 null,
+                null,
                 null);
     }
 
