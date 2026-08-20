@@ -147,6 +147,46 @@ public class RenamingTwoPhaseOutputStreamTest {
     }
 
     @Test
+    void testDiscardRemovesOnlyItsStagedFile() throws IOException {
+        RenamingTwoPhaseOutputStream stream =
+                new RenamingTwoPhaseOutputStream(fileIO, targetPath, false);
+        stream.write("abandoned".getBytes());
+        TwoPhaseOutputStream.Committer committer = stream.closeForCommit();
+
+        Path stagingDir = new Path(targetPath.getParent(), "_temporary");
+        FileStatus[] stagedFiles = fileIO.listStatus(stagingDir);
+        assertThat(stagedFiles).hasSize(1);
+        Path stagedPath = stagedFiles[0].getPath();
+
+        Path otherWriterPending = new Path(stagingDir, "attempt_0001_m_000010_15/part-00010");
+        fileIO.writeFile(otherWriterPending, "concurrent", false);
+        fileIO.writeFile(targetPath, "published", false);
+
+        committer.discard(fileIO);
+
+        assertThat(fileIO.exists(stagedPath)).isFalse();
+        assertThat(fileIO.exists(otherWriterPending)).isTrue();
+        assertThat(fileIO.readFileUtf8(targetPath)).isEqualTo("published");
+    }
+
+    @Test
+    void testOverwriteDoesNotDeleteTargetWhenStagedFileIsMissing() throws IOException {
+        fileIO.writeFile(targetPath, "old", false);
+        RenamingTwoPhaseOutputStream stream =
+                new RenamingTwoPhaseOutputStream(fileIO, targetPath, true);
+        stream.write("new".getBytes());
+        TwoPhaseOutputStream.Committer committer = stream.closeForCommit();
+
+        Path stagingDir = new Path(targetPath.getParent(), "_temporary");
+        FileStatus[] stagedFiles = fileIO.listStatus(stagingDir);
+        assertThat(stagedFiles).hasSize(1);
+        fileIO.delete(stagedFiles[0].getPath(), false);
+
+        assertThatThrownBy(() -> committer.commit(fileIO)).isInstanceOf(IOException.class);
+        assertThat(fileIO.readFileUtf8(targetPath)).isEqualTo("old");
+    }
+
+    @Test
     void testCloseWithoutCommit() throws IOException {
         RenamingTwoPhaseOutputStream stream =
                 new RenamingTwoPhaseOutputStream(fileIO, targetPath, false);

@@ -26,6 +26,7 @@ import org.apache.paimon.TestKeyValueGenerator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.StrictContractFileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.operation.FileStoreTestUtils;
@@ -170,6 +171,58 @@ public class TagManagerTest {
                 Assertions.assertThrows(
                         IllegalArgumentException.class, () -> tagManager.renameTag("tag1", "tag2"));
         Assertions.assertTrue(exception.getMessage().contains("Tag 'tag2' already exists."));
+    }
+
+    @Test
+    public void testRenameTagToExactMissingDestination() throws Exception {
+        LocalFileIO delegate = new LocalFileIO();
+        Path tablePath = new Path(tempDir.toUri().toString());
+        FileIO strictFileIO = new StrictContractFileIO(delegate);
+        TagManager strictTagManager = new TagManager(strictFileIO, tablePath);
+        SnapshotManager snapshotManager =
+                new SnapshotManager(strictFileIO, tablePath, null, null, null);
+        Snapshot snapshot = strictContractSnapshot();
+        Path source = strictTagManager.tagPath("source");
+        Path destination = strictTagManager.tagPath("target");
+        delegate.overwriteFileUtf8(snapshotManager.snapshotPath(snapshot.id()), snapshot.toJson());
+        strictTagManager.createTag(snapshot, "source", null, Collections.emptyList(), false);
+        assertThat(delegate.exists(destination)).isFalse();
+
+        strictTagManager.renameTag("source", "target");
+
+        assertThat(delegate.exists(source)).isFalse();
+        assertThat(delegate.exists(destination)).isTrue();
+        assertThat(strictTagManager.getOrThrow("target").id()).isEqualTo(snapshot.id());
+        assertThat(strictTagManager.tagNames(name -> true)).containsExactly("target");
+
+        strictTagManager.deleteTag("target", null, snapshotManager, Collections.emptyList());
+        assertThat(strictTagManager.tagExists("target")).isFalse();
+        assertThat(strictTagManager.tagNames(name -> true)).isEmpty();
+    }
+
+    private static Snapshot strictContractSnapshot() {
+        return new Snapshot(
+                1,
+                0,
+                "base-manifest-list",
+                null,
+                "delta-manifest-list",
+                null,
+                null,
+                null,
+                null,
+                "strict-contract",
+                1,
+                Snapshot.CommitKind.APPEND,
+                System.currentTimeMillis(),
+                0,
+                0,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null);
     }
 
     private TestFileStore createStore(TestKeyValueGenerator.GeneratorMode mode, int buckets)

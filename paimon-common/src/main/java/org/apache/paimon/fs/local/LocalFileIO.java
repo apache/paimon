@@ -243,11 +243,12 @@ public class LocalFileIO implements FileIO {
     @Override
     public void copyFile(Path sourcePath, Path targetPath, boolean overwrite) throws IOException {
         LOG.debug("Invoking copyFile for {} to {}", sourcePath, targetPath);
-        if (!overwrite && exists(targetPath)) {
-            return;
-        }
         toPath(targetPath.getParent()).toFile().mkdirs();
-        Files.copy(toPath(sourcePath), toPath(targetPath), StandardCopyOption.REPLACE_EXISTING);
+        if (overwrite) {
+            Files.copy(toPath(sourcePath), toPath(targetPath), StandardCopyOption.REPLACE_EXISTING);
+        } else {
+            Files.copy(toPath(sourcePath), toPath(targetPath));
+        }
     }
 
     private java.nio.file.Path toPath(Path path) {

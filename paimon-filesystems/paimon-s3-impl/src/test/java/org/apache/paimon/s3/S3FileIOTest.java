@@ -20,7 +20,7 @@ package org.apache.paimon.s3;
 
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.FileIOBehaviorTestBase;
+import org.apache.paimon.fs.FileIOContractTestBase;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 
@@ -36,7 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Behavior tests for {@link S3FileIO}, backed by a MinIO container. Exercises the file system
  * contract with credentials and, separately, credential-less (anonymous) access.
  */
-class S3FileIOTest extends FileIOBehaviorTestBase {
+class S3FileIOTest extends FileIOContractTestBase {
 
     private static final String TEMPORARY_PROVIDER =
             "org.apache.hadoop.fs.s3a.TemporaryAWSCredentialsProvider";

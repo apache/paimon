@@ -18,30 +18,27 @@
 
 package org.apache.paimon.fs;
 
-import org.apache.paimon.fs.local.LocalFileIO;
-
+import org.apache.hadoop.fs.s3a.RemoteFileChangedException;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
+import static org.apache.paimon.fs.RecordingFileIO.Method.EXISTS;
+import static org.apache.paimon.fs.RecordingFileIO.Method.NEW_INPUT_STREAM;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link LocalFileIO}. */
-public class LocalFileIOBehaviorTest extends FileIOContractTestBase {
-
-    @TempDir private java.nio.file.Path tmp;
-
-    @Override
-    protected FileIO getFileSystem() {
-        return new LocalFileIO();
-    }
-
-    @Override
-    protected Path getBasePath() {
-        return new Path(tmp.toUri());
-    }
+/** Tests S3-specific retry behavior of {@link FileIO}. */
+class S3RemoteFileChangedExceptionTest {
 
     @Test
-    void testIsNotObjectStore() {
-        assertThat(new LocalFileIO().isObjectStore()).isFalse();
+    void overwrittenReadRetriesRemoteFileChangedException() throws Exception {
+        RecordingFileIO fileIO = new RecordingFileIO();
+        Path path = new Path("s3://bucket/overwritten");
+        fileIO.putFile(path, "stable");
+        fileIO.failNext(
+                NEW_INPUT_STREAM,
+                new RemoteFileChangedException(path.toString(), "read", "object changed"));
+
+        assertThat(fileIO.readOverwrittenFileUtf8(path)).contains("stable");
+        assertThat(fileIO.callCount(NEW_INPUT_STREAM)).isEqualTo(2);
+        assertThat(fileIO.callCount(EXISTS)).isLessThanOrEqualTo(1);
     }
 }

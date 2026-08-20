@@ -88,14 +88,14 @@ Snapshot expiration is controlled by the following table properties.
       <td>No</td>
       <td style={{wordWrap: "break-word"}}>false</td>
       <td>Boolean</td>
-      <td>Whether to try to delete empty directories (e.g. partition and bucket directories) left behind after the data files are deleted during snapshot expiration. Defaults to <code>false</code>: empty directories are kept. Enabling it has caveats: HDFS may print exceptions in NameNode, and object stores (OSS/S3) may suffer performance issues due to the extra prefix operations required to list and delete directory markers.</td>
+      <td>Whether Paimon tries to delete empty directories (e.g. partition and bucket directories) left behind after data files are deleted during snapshot expiration. The default is <code>false</code>, so Paimon does not actively delete those directories or their markers. An object-store prefix that was never explicitly created may still cease to be visible after its last object is deleted. Enabling the option has caveats: HDFS may print exceptions in NameNode, and object stores (OSS/S3) may suffer performance issues due to the extra prefix operations required to list and delete directory markers.</td>
     </tr>
     </tbody>
 </table>
 
 When the number of snapshots is less than `snapshot.num-retained.min`, no snapshots will be expired(even the condition `snapshot.time-retained` meet), after which `snapshot.num-retained.max` and `snapshot.time-retained` will be used to control the snapshot expiration until the remaining snapshot meets the condition.
 
-Note that snapshot expiration is also what physically deletes data files dropped by [partition expiration](./manage-partitions#expiring-partitions). However, the empty partition and bucket directories left behind after the data files are deleted are **not** removed by default. To clean them up, enable `snapshot.clean-empty-directories` (see the option above). This is off by default because on object stores (OSS/S3) the prefix operations needed to delete directory markers can be expensive.
+Note that snapshot expiration is also what physically deletes data files dropped by [partition expiration](./manage-partitions#expiring-partitions). By default, Paimon does not actively remove empty partition and bucket directories or their markers. On object stores, an implicit prefix may nevertheless cease to be visible when its last object is deleted. To make Paimon additionally try to remove visible empty directories and markers, enable `snapshot.clean-empty-directories` (see the option above). This is off by default because the required prefix operations can be expensive on object stores (OSS/S3).
 
 The following example show more details(`snapshot.num-retained.min` is 2, `snapshot.time-retained` is 1h, `snapshot.num-retained.max` is 5):
 

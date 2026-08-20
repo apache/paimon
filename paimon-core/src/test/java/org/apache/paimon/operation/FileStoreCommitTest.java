@@ -29,7 +29,9 @@ import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVector;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.StrictContractFileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileHandler;
@@ -114,6 +116,7 @@ import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatch
 import static org.apache.paimon.utils.HintFileUtils.LATEST;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link FileStoreCommitImpl}. */
@@ -138,6 +141,69 @@ public class FileStoreCommitTest {
         Predicate<Path> pathPredicate = path -> path.toString().contains(tempDir.toString());
         assertThat(FailingFileIO.openInputStreams(pathPredicate)).isEmpty();
         assertThat(FailingFileIO.openOutputStreams(pathPredicate)).isEmpty();
+    }
+
+    @Test
+    public void testSnapshotCommitWithStrictFileIO() throws Exception {
+        FileIO strictFileIO = new StrictContractFileIO(new TraceableFileIO());
+        TestFileStore store =
+                createStore(
+                        false,
+                        1,
+                        CoreOptions.ChangelogProducer.NONE,
+                        Collections.emptyMap(),
+                        strictFileIO);
+        KeyValue record = gen.next();
+
+        Snapshot snapshot =
+                store.commitData(Collections.singletonList(record), gen::getPartition, kv -> 0)
+                        .get(0);
+
+        assertThat(store.fileIO()).isSameAs(strictFileIO);
+        assertThat(store.snapshotManager().latestSnapshot()).isEqualTo(snapshot);
+        assertThat(store.toKvMap(store.readKvsFromSnapshot(snapshot.id())))
+                .isEqualTo(store.toKvMap(Collections.singletonList(record)));
+    }
+
+    @Test
+    public void testAbortCleanupWithStrictFileIO() throws Exception {
+        FileIO strictFileIO = new StrictContractFileIO(new TraceableFileIO());
+        TestFileStore store =
+                createStore(
+                        false,
+                        1,
+                        CoreOptions.ChangelogProducer.NONE,
+                        Collections.emptyMap(),
+                        strictFileIO);
+        AtomicReference<Path> abandonedFile = new AtomicReference<>();
+
+        List<Snapshot> snapshots =
+                store.commitDataImpl(
+                        Collections.singletonList(gen.next()),
+                        gen::getPartition,
+                        kv -> 0,
+                        false,
+                        null,
+                        null,
+                        Collections.emptyList(),
+                        (commit, committable) -> {
+                            CommitMessageImpl message =
+                                    (CommitMessageImpl) committable.fileCommittables().get(0);
+                            DataFileMeta dataFile = message.newFilesIncrement().newFiles().get(0);
+                            Path path =
+                                    store.pathFactory()
+                                            .createDataFilePathFactory(
+                                                    message.partition(), message.bucket())
+                                            .toPath(dataFile);
+                            abandonedFile.set(path);
+                            assertThatCode(() -> store.fileIO().getFileStatus(path))
+                                    .doesNotThrowAnyException();
+                            commit.abort(committable.fileCommittables());
+                        });
+
+        assertThat(snapshots).isEmpty();
+        assertThat(store.snapshotManager().latestSnapshotId()).isNull();
+        assertThat(store.fileIO().exists(checkNotNull(abandonedFile.get()))).isFalse();
     }
 
     @ParameterizedTest
@@ -2334,11 +2400,21 @@ public class FileStoreCommitTest {
             CoreOptions.ChangelogProducer changelogProducer,
             Map<String, String> options)
             throws Exception {
+        return createStore(failing, numBucket, changelogProducer, options, null);
+    }
+
+    private TestFileStore createStore(
+            boolean failing,
+            int numBucket,
+            CoreOptions.ChangelogProducer changelogProducer,
+            Map<String, String> options,
+            @Nullable FileIO fileIO)
+            throws Exception {
         String root =
                 failing
                         ? FailingFileIO.getFailingPath(failingName, tempDir.toString())
                         : TraceableFileIO.SCHEME + "://" + tempDir.toString();
-        Path path = new Path(tempDir.toUri());
+        Path path = fileIO == null ? new Path(tempDir.toUri()) : new Path(root);
         List<String> primaryKeys =
                 Boolean.parseBoolean(options.get(CoreOptions.ROW_TRACKING_ENABLED.key()))
                         ? Collections.emptyList()
@@ -2346,25 +2422,29 @@ public class FileStoreCommitTest {
                                 TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
-                        new SchemaManager(new LocalFileIO(), path),
+                        new SchemaManager(fileIO == null ? new LocalFileIO() : fileIO, path),
                         new Schema(
                                 TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields(),
                                 TestKeyValueGenerator.DEFAULT_PART_TYPE.getFieldNames(),
                                 primaryKeys,
                                 options,
                                 null));
-        return new TestFileStore.Builder(
-                        "avro",
-                        root,
-                        numBucket,
-                        TestKeyValueGenerator.DEFAULT_PART_TYPE,
-                        TestKeyValueGenerator.KEY_TYPE,
-                        TestKeyValueGenerator.DEFAULT_ROW_TYPE,
-                        TestKeyValueGenerator.TestKeyValueFieldsExtractor.EXTRACTOR,
-                        DeduplicateMergeFunction.factory(),
-                        tableSchema)
-                .changelogProducer(changelogProducer)
-                .build();
+        TestFileStore.Builder builder =
+                new TestFileStore.Builder(
+                                "avro",
+                                root,
+                                numBucket,
+                                TestKeyValueGenerator.DEFAULT_PART_TYPE,
+                                TestKeyValueGenerator.KEY_TYPE,
+                                TestKeyValueGenerator.DEFAULT_ROW_TYPE,
+                                TestKeyValueGenerator.TestKeyValueFieldsExtractor.EXTRACTOR,
+                                DeduplicateMergeFunction.factory(),
+                                tableSchema)
+                        .changelogProducer(changelogProducer);
+        if (fileIO != null) {
+            builder.fileIO(fileIO);
+        }
+        return builder.build();
     }
 
     private List<KeyValue> generateDataList(int numRecords) {

@@ -43,10 +43,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.entry;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /** Tests for {@link FormatTableCommit}. */
 class FormatTableCommitTest {
@@ -93,11 +95,19 @@ class FormatTableCommitTest {
     }
 
     @Test
-    void testFileCommitFailureStillDiscardsUncommittedFiles() throws Exception {
+    void testFileCommitFailureDiscardsPublishedTarget() throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         Path tablePath = new Path(tempDir.toUri());
+        Path targetPath = new Path(tablePath, "year=2025/month=10/partial.csv");
         TwoPhaseOutputStream.Committer committer = mock(TwoPhaseOutputStream.Committer.class);
-        doThrow(new IOException("data commit failed")).when(committer).commit(fileIO);
+        doAnswer(
+                        ignored -> {
+                            fileIO.writeFile(targetPath, "partial", false);
+                            throw new IOException("data commit failed");
+                        })
+                .when(committer)
+                .commit(fileIO);
+        when(committer.targetPath()).thenReturn(targetPath);
         FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
         FormatTableCommit commit =
                 new FormatTableCommit(
@@ -118,6 +128,7 @@ class FormatTableCommitTest {
                 .isInstanceOf(RuntimeException.class)
                 .hasRootCauseMessage("data commit failed");
 
+        assertThat(fileIO.exists(targetPath)).isFalse();
         verify(committer).discard(fileIO);
         verify(partitionManager, never()).createPartitions(anyList(), eq(true));
     }

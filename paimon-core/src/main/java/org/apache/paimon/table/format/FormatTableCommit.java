@@ -106,6 +106,9 @@ public class FormatTableCommit implements BatchTableCommit {
 
     @Override
     public void commit(List<CommitMessage> commitMessages) {
+        // Format writers own UUID-based target paths. A remote commit may publish before throwing,
+        // so every attempted target belongs to this failed batch and must be rolled back.
+        List<TwoPhaseOutputStream.Committer> attempted = new ArrayList<>();
         try {
             List<TwoPhaseOutputStream.Committer> committers = new ArrayList<>();
             for (CommitMessage commitMessage : commitMessages) {
@@ -153,6 +156,7 @@ public class FormatTableCommit implements BatchTableCommit {
             }
 
             for (TwoPhaseOutputStream.Committer committer : committers) {
+                attempted.add(committer);
                 committer.commit(this.fileIO);
                 if (partitionKeys != null
                         && !partitionKeys.isEmpty()
@@ -190,6 +194,9 @@ public class FormatTableCommit implements BatchTableCommit {
             }
 
         } catch (Exception e) {
+            for (TwoPhaseOutputStream.Committer committer : attempted) {
+                fileIO.deleteQuietly(committer.targetPath());
+            }
             this.abort(commitMessages);
             throw new RuntimeException(e);
         }

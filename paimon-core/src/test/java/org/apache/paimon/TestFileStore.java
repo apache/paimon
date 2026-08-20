@@ -110,6 +110,7 @@ public class TestFileStore extends KeyValueFileStore {
 
     private TestFileStore(
             String root,
+            FileIO fileIO,
             CoreOptions options,
             RowType partitionType,
             RowType keyType,
@@ -118,8 +119,8 @@ public class TestFileStore extends KeyValueFileStore {
             MergeFunctionFactory<KeyValue> mfFactory,
             TableSchema tableSchema) {
         super(
-                FileIOFinder.find(new Path(root)),
-                schemaManager(root, options),
+                fileIO,
+                schemaManager(fileIO, options),
                 tableSchema != null
                         ? tableSchema
                         : new TableSchema(
@@ -140,7 +141,7 @@ public class TestFileStore extends KeyValueFileStore {
                 (new Path(root)).getName(),
                 CatalogEnvironment.empty());
         this.root = root;
-        this.fileIO = FileIOFinder.find(new Path(root));
+        this.fileIO = fileIO;
         this.keySerializer = new InternalRowSerializer(keyType);
         this.valueSerializer = new InternalRowSerializer(valueType);
         this.commitUser = UUID.randomUUID().toString();
@@ -154,8 +155,8 @@ public class TestFileStore extends KeyValueFileStore {
                 .collect(Collectors.toList());
     }
 
-    private static SchemaManager schemaManager(String root, CoreOptions options) {
-        return new SchemaManager(FileIOFinder.find(new Path(root)), options.path());
+    private static SchemaManager schemaManager(FileIO fileIO, CoreOptions options) {
+        return new SchemaManager(fileIO, options.path());
     }
 
     public FileIO fileIO() {
@@ -777,6 +778,7 @@ public class TestFileStore extends KeyValueFileStore {
         private final TableSchema tableSchema;
 
         private CoreOptions.ChangelogProducer changelogProducer;
+        private FileIO fileIO;
 
         public Builder(
                 String format,
@@ -806,6 +808,11 @@ public class TestFileStore extends KeyValueFileStore {
             return this;
         }
 
+        public Builder fileIO(FileIO fileIO) {
+            this.fileIO = fileIO;
+            return this;
+        }
+
         public TestFileStore build() {
             Options conf =
                     tableSchema == null ? new Options() : Options.fromMap(tableSchema.options());
@@ -827,8 +834,10 @@ public class TestFileStore extends KeyValueFileStore {
             // disable dynamic-partition-overwrite in FileStoreCommit layer test
             conf.set(CoreOptions.DYNAMIC_PARTITION_OVERWRITE, false);
 
+            FileIO effectiveFileIO = fileIO == null ? FileIOFinder.find(new Path(root)) : fileIO;
             return new TestFileStore(
                     root,
+                    effectiveFileIO,
                     new CoreOptions(conf),
                     partitionType,
                     keyType,

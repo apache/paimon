@@ -27,6 +27,7 @@ import org.apache.paimon.fs.SeekableInputStream;
 
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
+import org.apache.hadoop.fs.FileAlreadyExistsException;
 import org.apache.hadoop.fs.FileSystem;
 
 import java.io.IOException;
@@ -120,7 +121,11 @@ public abstract class HadoopCompliantFileIO implements FileIO {
     public boolean rename(Path src, Path dst) throws IOException {
         org.apache.hadoop.fs.Path hadoopSrc = path(src);
         org.apache.hadoop.fs.Path hadoopDst = path(dst);
-        return getFileSystem(hadoopSrc).rename(hadoopSrc, hadoopDst);
+        try {
+            return getFileSystem(hadoopSrc).rename(hadoopSrc, hadoopDst);
+        } catch (FileAlreadyExistsException e) {
+            return false;
+        }
     }
 
     protected org.apache.hadoop.fs.Path path(Path path) {

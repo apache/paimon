@@ -38,7 +38,7 @@ import static org.assertj.core.api.Assumptions.assumeThat;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
 /** Behavior tests for HDFS. */
-class HdfsBehaviorTest extends FileIOBehaviorTestBase {
+class HdfsBehaviorTest extends FileIOContractTestBase {
 
     private static MiniDFSCluster hdfsCluster;
 

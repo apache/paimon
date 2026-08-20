@@ -21,6 +21,7 @@ package org.apache.paimon.utils;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.StrictContractFileIO;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.types.DataTypes;
@@ -136,16 +137,29 @@ class FileSystemBranchManagerTest {
 
     @Test
     void testRenameBranchPreservesData() {
+        FileIO strictFileIO = new StrictContractFileIO(fileIO);
+        SchemaManager strictSchemaManager = new SchemaManager(strictFileIO, tablePath);
+        FileSystemBranchManager strictBranchManager =
+                new FileSystemBranchManager(
+                        strictFileIO,
+                        tablePath,
+                        new SnapshotManager(strictFileIO, tablePath, null, null, null),
+                        new TagManager(strictFileIO, tablePath),
+                        strictSchemaManager,
+                        null);
+
         // Create a branch
-        branchManager.createBranch("test_branch");
-        assertThat(branchManager.branchExists("test_branch")).isTrue();
+        strictBranchManager.createBranch("test_branch");
+        assertThat(strictBranchManager.branchExists("test_branch")).isTrue();
 
         // Rename the branch
-        branchManager.renameBranch("test_branch", "renamed_branch");
+        strictBranchManager.renameBranch("test_branch", "renamed_branch");
 
         // Verify the renamed branch exists and the original does not
-        assertThat(branchManager.branchExists("test_branch")).isFalse();
-        assertThat(branchManager.branchExists("renamed_branch")).isTrue();
+        assertThat(strictBranchManager.branchExists("test_branch")).isFalse();
+        assertThat(strictBranchManager.branchExists("renamed_branch")).isTrue();
+        assertThat(strictSchemaManager.copyWithBranch("renamed_branch").latest())
+                .isEqualTo(schemaManager.latest());
     }
 
     @Test
