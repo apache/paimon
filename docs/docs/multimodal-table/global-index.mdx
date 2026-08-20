@@ -50,7 +50,6 @@ without full-table scans. Paimon supports multiple global index types:
 
 Global indexes work on top of Data Evolution tables. To use global indexes, your table **must** have:
 
-- `'bucket' = '-1'` (unaware-bucket mode)
 - `'row-tracking.enabled' = 'true'`
 - `'data-evolution.enabled' = 'true'`
 
@@ -72,7 +71,6 @@ CREATE TABLE my_table (
     embedding ARRAY<FLOAT>,
     content STRING
 ) TBLPROPERTIES (
-    'bucket' = '-1',
     'row-tracking.enabled' = 'true',
     'data-evolution.enabled' = 'true',
     'global-index.enabled' = 'true'
@@ -97,7 +95,6 @@ schema = Schema.from_pyarrow_schema(
         pa.field("content", pa.string()),
     ]),
     options={
-        "bucket": "-1",
         "row-tracking.enabled": "true",
         "data-evolution.enabled": "true",
         "global-index.enabled": "true",

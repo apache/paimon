@@ -227,7 +227,6 @@ CREATE TABLE my_table (
     title_embedding ARRAY<FLOAT>,
     image_embedding ARRAY<FLOAT>
 ) TBLPROPERTIES (
-    'bucket' = '-1',
     'row-tracking.enabled' = 'true',
     'data-evolution.enabled' = 'true',
     'global-index.enabled' = 'true',
@@ -258,7 +257,6 @@ schema = Schema.from_pyarrow_schema(
         pa.field("image_embedding", pa.list_(pa.float32())),
     ]),
     options={
-        "bucket": "-1",
         "row-tracking.enabled": "true",
         "data-evolution.enabled": "true",
         "global-index.enabled": "true",
