@@ -83,6 +83,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.File;
 import java.math.BigDecimal;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -1345,31 +1346,27 @@ public class IcebergCompatibilityTest {
         write.write(GenericRow.of(2.0, 200), 1);
         write.write(GenericRow.of(Double.NaN, 300), 1);
         commit.commit(1, write.prepareCommit(false, 1));
+
+        assertThat(readPartitionSummaries(table, 1))
+                .anySatisfy(
+                        summary -> {
+                            assertThat(summary.get("contains_nan")).isEqualTo(true);
+                            assertThat(readDoubleBound(summary, "lower_bound")).isEqualTo(1.0);
+                            assertThat(readDoubleBound(summary, "upper_bound")).isEqualTo(2.0);
+                        });
+
+        write.write(GenericRow.of(Double.NaN, 400), 1);
+        commit.commit(2, write.prepareCommit(false, 2));
         write.close();
         commit.close();
 
-        FileIO fileIO = table.fileIO();
-        IcebergMetadata metadata =
-                IcebergMetadata.fromPath(
-                        fileIO, new Path(table.location(), "metadata/v1.metadata.json"));
-
-        String currentSnapshotManifest = metadata.currentSnapshot().manifestList();
-        File snapShotAvroFile = new File(currentSnapshotManifest);
-
-        boolean sawNanPartitionSummary = false;
-        try (DataFileReader<GenericRecord> dataFileReader =
-                new DataFileReader<>(
-                        new SeekableFileInput(snapShotAvroFile), new GenericDatumReader<>())) {
-            while (dataFileReader.hasNext()) {
-                GenericRecord record = dataFileReader.next();
-                String partitionSummary = record.get("partitions").toString();
-                if (partitionSummary.contains("contains_nan\": true")) {
-                    sawNanPartitionSummary = true;
-                }
-            }
-        }
-
-        assertThat(sawNanPartitionSummary).isTrue();
+        assertThat(readPartitionSummaries(table, 2))
+                .anySatisfy(
+                        summary -> {
+                            assertThat(summary.get("contains_nan")).isEqualTo(true);
+                            assertThat(summary.get("lower_bound")).isNull();
+                            assertThat(summary.get("upper_bound")).isNull();
+                        });
     }
 
     @Test
@@ -2649,6 +2646,32 @@ public class IcebergCompatibilityTest {
     private List<String> getIcebergResult() throws Exception {
         return getIcebergResult(
                 icebergTable -> IcebergGenerics.read(icebergTable).build(), Record::toString);
+    }
+
+    private List<GenericRecord> readPartitionSummaries(FileStoreTable table, long version)
+            throws Exception {
+        IcebergMetadata metadata =
+                IcebergMetadata.fromPath(
+                        table.fileIO(),
+                        new Path(table.location(), "metadata/v" + version + ".metadata.json"));
+        List<GenericRecord> partitionSummaries = new ArrayList<>();
+        try (DataFileReader<GenericRecord> dataFileReader =
+                new DataFileReader<>(
+                        new SeekableFileInput(new File(metadata.currentSnapshot().manifestList())),
+                        new GenericDatumReader<>())) {
+            while (dataFileReader.hasNext()) {
+                GenericRecord record = dataFileReader.next();
+                partitionSummaries.add((GenericRecord) ((List<?>) record.get("partitions")).get(0));
+            }
+        }
+        return partitionSummaries;
+    }
+
+    private double readDoubleBound(GenericRecord partitionSummary, String field) {
+        return ((ByteBuffer) partitionSummary.get(field))
+                .duplicate()
+                .order(ByteOrder.LITTLE_ENDIAN)
+                .getDouble();
     }
 
     private org.apache.iceberg.Table getIcebergTable() {

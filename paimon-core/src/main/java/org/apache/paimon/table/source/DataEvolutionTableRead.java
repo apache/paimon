@@ -21,6 +21,7 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.splitread.SplitReadConfig;
@@ -57,6 +58,7 @@ public class DataEvolutionTableRead extends AppendTableRead {
         QueryAuthContext queryAuthContext = unwrapQueryAuthSplit(split);
         int[] blobViewFields =
                 BlobViewTableReadSupport.blobViewFieldIndexes(currentReadType(), options);
+        ReadBatchSizer sizer = readBatchSizer();
         if (catalogContext != null && blobViewFields.length > 0) {
             if (readFactory == null) {
                 throw new IllegalStateException(
@@ -75,6 +77,10 @@ public class DataEvolutionTableRead extends AppendTableRead {
                     () -> createDataReader(queryAuthContext.split(), queryAuthContext.authResult()),
                     () -> {
                         InnerTableRead prescanRead = readFactory.get();
+                        if (sizer != null) {
+                            // Blob-view prescan is a separate physical read under the same budget.
+                            prescanRead.withReadBatchSizer(sizer);
+                        }
                         if (executeFilter) {
                             prescanRead.executeFilter();
                         }

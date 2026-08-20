@@ -22,6 +22,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
 
 import org.apache.avro.AvroRuntimeException;
+import org.apache.avro.Schema;
 import org.apache.avro.file.RawBlock;
 import org.apache.avro.file.RawBlockReader;
 
@@ -60,8 +61,51 @@ public final class AvroBlockReader implements Closeable {
 
     /** Returns whether blocks use the default Avro schema for the given row type. */
     public boolean supportsRawBlockCopy(RowType rowType) {
-        return AvroSchemaConverter.convertToSchema(rowType, Collections.emptyMap())
-                .equals(reader.getSchema());
+        return hasSameBinaryLayout(
+                AvroSchemaConverter.convertToSchema(rowType, Collections.emptyMap()),
+                reader.getSchema());
+    }
+
+    static boolean hasSameBinaryLayout(Schema expected, Schema actual) {
+        if (expected.getType() != actual.getType()) {
+            return false;
+        }
+        switch (expected.getType()) {
+            case RECORD:
+                if (expected.getFields().size() != actual.getFields().size()) {
+                    return false;
+                }
+                for (int i = 0; i < expected.getFields().size(); i++) {
+                    if (!expected.getFields().get(i).name().equals(actual.getFields().get(i).name())
+                            || !hasSameBinaryLayout(
+                                    expected.getFields().get(i).schema(),
+                                    actual.getFields().get(i).schema())) {
+                        return false;
+                    }
+                }
+                return true;
+            case ARRAY:
+                return hasSameBinaryLayout(expected.getElementType(), actual.getElementType());
+            case MAP:
+                return hasSameBinaryLayout(expected.getValueType(), actual.getValueType());
+            case UNION:
+                if (expected.getTypes().size() != actual.getTypes().size()) {
+                    return false;
+                }
+                for (int i = 0; i < expected.getTypes().size(); i++) {
+                    if (!hasSameBinaryLayout(
+                            expected.getTypes().get(i), actual.getTypes().get(i))) {
+                        return false;
+                    }
+                }
+                return true;
+            case FIXED:
+                return expected.getFixedSize() == actual.getFixedSize();
+            case ENUM:
+                return expected.getEnumSymbols().equals(actual.getEnumSymbols());
+            default:
+                return true;
+        }
     }
 
     /** Returns whether another block is available. */

@@ -30,7 +30,6 @@ import org.apache.paimon.flink.compact.IncrementalClusterCompact;
 import org.apache.paimon.flink.postpone.PostponeBucketCompactOperator;
 import org.apache.paimon.flink.postpone.PostponeBucketCompactSplitSource;
 import org.apache.paimon.flink.postpone.RewritePostponeBucketCommittableOperator;
-import org.apache.paimon.flink.predicate.SimpleSqlPredicateConvertor;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.CommittableTypeInfo;
 import org.apache.paimon.flink.sink.CompactorSinkBuilder;
@@ -42,19 +41,16 @@ import org.apache.paimon.flink.source.CompactorSourceBuilder;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.predicate.PartitionPredicateVisitor;
-import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateBuilder;
-import org.apache.paimon.predicate.PredicateProjectionConverter;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.PostponeUtils;
 import org.apache.paimon.table.PostponeUtils.CompactBucket;
 import org.apache.paimon.table.PostponeUtils.PostponeBucketNumResolver;
 import org.apache.paimon.table.sink.ChannelComputer;
-import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.ParameterUtils;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ExecutionOptions;
@@ -64,8 +60,6 @@ import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.v2.DiscardingSink;
 import org.apache.flink.table.data.RowData;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -73,6 +67,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -80,14 +75,10 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-import static org.apache.paimon.partition.PartitionPredicate.createBinaryPartitions;
-import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Table compact action for Flink. */
 public class CompactAction extends TableActionBase {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(CompactAction.class);
 
     protected List<Map<String, String>> partitions;
 
@@ -96,6 +87,9 @@ public class CompactAction extends TableActionBase {
     @Nullable protected Duration partitionIdleTime = null;
 
     @Nullable protected Boolean fullCompaction;
+
+    private String bucketsExpression;
+    private Set<Integer> buckets;
 
     public CompactAction(
             String database,
@@ -139,6 +133,12 @@ public class CompactAction extends TableActionBase {
         return this;
     }
 
+    public CompactAction withBucketsExpression(String bucketsExpression) {
+        this.buckets = null;
+        this.bucketsExpression = bucketsExpression;
+        return this;
+    }
+
     @Override
     public void build() throws Exception {
         buildImpl();
@@ -149,6 +149,7 @@ public class CompactAction extends TableActionBase {
         boolean isStreaming =
                 conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING;
         FileStoreTable fileStoreTable = (FileStoreTable) table;
+        resolveBuckets(fileStoreTable);
         PartitionPredicate partitionPredicate = getPartitionPredicate();
         if (fileStoreTable.coreOptions().bucket() == BucketMode.POSTPONE_BUCKET) {
             buildForPostponeBucketCompaction(env, fileStoreTable, isStreaming);
@@ -218,6 +219,7 @@ public class CompactAction extends TableActionBase {
                         .withBucketDistributionStrategy(bucketDistributionStrategy);
 
         sourceBuilder.withPartitionPredicate(getPartitionPredicate());
+        sourceBuilder.withBucketFilter(buckets == null ? null : new SpecifiedBucketFilter(buckets));
         DataStreamSource<RowData> source =
                 sourceBuilder
                         .withEnv(env)
@@ -248,62 +250,27 @@ public class CompactAction extends TableActionBase {
     }
 
     protected PartitionPredicate getPartitionPredicate() throws Exception {
+        return ActionPartitionPredicate.create(
+                (FileStoreTable) table, partitions, whereSql, "compaction");
+    }
+
+    protected boolean bucketsSpecified() {
+        return bucketsExpression != null;
+    }
+
+    private void resolveBuckets(FileStoreTable table) {
+        if (!bucketsSpecified()) {
+            buckets = null;
+            return;
+        }
         checkArgument(
-                partitions == null || whereSql == null,
-                "partitions and where cannot be used together.");
-        Predicate predicate = null;
-        RowType partitionType = table.rowType().project(table.partitionKeys());
-        String partitionDefaultName = ((FileStoreTable) table).coreOptions().partitionDefaultName();
-        if (partitions != null) {
-            boolean fullMode =
-                    partitions.stream()
-                            .allMatch(part -> part.size() == partitionType.getFieldCount());
-            if (fullMode) {
-                List<BinaryRow> binaryPartitions =
-                        createBinaryPartitions(partitions, partitionType, partitionDefaultName);
-                return PartitionPredicate.fromMultiple(partitionType, binaryPartitions);
-            } else {
-                // partitions may be partial partition fields, so here must to use predicate way.
-                predicate =
-                        partitions.stream()
-                                .map(
-                                        partition ->
-                                                createPartitionPredicate(
-                                                        partition,
-                                                        table.rowType(),
-                                                        partitionDefaultName))
-                                .reduce(PredicateBuilder::or)
-                                .orElseThrow(
-                                        () ->
-                                                new RuntimeException(
-                                                        "Failed to get partition filter."));
-            }
-        } else if (whereSql != null) {
-            SimpleSqlPredicateConvertor simpleSqlPredicateConvertor =
-                    new SimpleSqlPredicateConvertor(table.rowType());
-            predicate = simpleSqlPredicateConvertor.convertSqlToPredicate(whereSql);
-        }
-
-        // Check whether predicate contain non partition key.
-        if (predicate != null) {
-            LOGGER.info("the partition predicate of compaction is {}", predicate);
-            PartitionPredicateVisitor partitionPredicateVisitor =
-                    new PartitionPredicateVisitor(table.partitionKeys());
-            checkArgument(
-                    predicate.visit(partitionPredicateVisitor),
-                    "Only partition key can be specialized in compaction action.");
-            predicate =
-                    predicate
-                            .visit(
-                                    PredicateProjectionConverter.fromProjection(
-                                            table.rowType().projectIndexes(table.partitionKeys())))
-                            .orElseThrow(
-                                    () ->
-                                            new RuntimeException(
-                                                    "Failed to convert partition predicate."));
-        }
-
-        return PartitionPredicate.fromPredicate(partitionType, predicate);
+                table.bucketMode() == BucketMode.HASH_FIXED,
+                "Specifying buckets is only supported for fixed-bucket tables, but the table bucket mode is %s.",
+                table.bucketMode());
+        buckets =
+                new HashSet<>(
+                        ParameterUtils.parseIntegerRanges(
+                                bucketsExpression, table.coreOptions().bucket()));
     }
 
     protected boolean buildForPostponeBucketCompaction(
@@ -425,6 +392,22 @@ public class CompactAction extends TableActionBase {
             return true;
         }
         return false;
+    }
+
+    private static class SpecifiedBucketFilter implements Filter<Integer>, java.io.Serializable {
+
+        private static final long serialVersionUID = 1L;
+
+        private final Set<Integer> buckets;
+
+        private SpecifiedBucketFilter(Set<Integer> buckets) {
+            this.buckets = buckets;
+        }
+
+        @Override
+        public boolean test(Integer bucket) {
+            return buckets.contains(bucket);
+        }
     }
 
     private static class CompactBucketChannelComputer implements ChannelComputer<CompactBucket> {

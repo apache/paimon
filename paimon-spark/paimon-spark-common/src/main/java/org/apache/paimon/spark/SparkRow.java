@@ -33,6 +33,8 @@ import org.apache.paimon.spark.util.shim.TypeUtils;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DateType;
+import org.apache.paimon.types.GeographyType;
+import org.apache.paimon.types.GeometryType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
@@ -160,6 +162,12 @@ public class SparkRow implements InternalRow, Serializable {
 
     @Override
     public byte[] getBinary(int i) {
+        if (type.getTypeAt(i) instanceof GeometryType) {
+            return SparkShimLoader.shim().toPaimonGeometry(row.getAs(i));
+        }
+        if (type.getTypeAt(i) instanceof GeographyType) {
+            return SparkShimLoader.shim().toPaimonGeography(row.getAs(i));
+        }
         return row.getAs(i);
     }
 
@@ -345,6 +353,12 @@ public class SparkRow implements InternalRow, Serializable {
 
         @Override
         public byte[] getBinary(int i) {
+            if (elementType instanceof GeometryType) {
+                return SparkShimLoader.shim().toPaimonGeometry(getAs(i));
+            }
+            if (elementType instanceof GeographyType) {
+                return SparkShimLoader.shim().toPaimonGeography(getAs(i));
+            }
             return getAs(i);
         }
 

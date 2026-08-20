@@ -171,7 +171,7 @@ print(matched_files)
 
 | Option | Default | Description |
 |---|---|---|
-| `sorted-index.records-per-range` | `10000000` | Expected number of records per sorted global index file for BTree and Bitmap builds. |
+| `sorted-index.records-per-range` | `10000000` | Expected number of records per sorted global index file for BTree, Bitmap, and Multivalue builds. |
 | `sorted-index.build.max-parallelism` | `4096` | Maximum Flink or Spark parallelism for building sorted global indexes. |
 | `bitmap-index.dictionary-block-size` | `16 kb` | Target size of dictionary blocks in bitmap global index files. Smaller blocks reduce dictionary read amplification for high-cardinality columns; larger blocks reduce dictionary block index size. |
 | `bitmap-index.compression` | `none` | Compression algorithm for bitmap dictionary blocks and the dictionary block index. Supported values are the same block codecs as BTree index, such as `none`, `lz4`, `lzo`, and `zstd`. |

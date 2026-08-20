@@ -331,6 +331,8 @@ public final class DataTypeJsonParser {
         LEGACY,
         VARIANT,
         BLOB,
+        GEOMETRY,
+        GEOGRAPHY,
         NOT
     }
 
@@ -549,6 +551,10 @@ public final class DataTypeJsonParser {
                     return new VariantType();
                 case BLOB:
                     return new BlobType();
+                case GEOMETRY:
+                    return parseGeometryType();
+                case GEOGRAPHY:
+                    return parseGeographyType();
                 case VECTOR:
                     return parseVectorType();
                 default:
@@ -682,6 +688,41 @@ public final class DataTypeJsonParser {
             int length = tokenAsInt();
             nextToken(TokenType.END_SUBTYPE);
             return DataTypes.VECTOR(length, elementType);
+        }
+
+        private DataType parseGeometryType() {
+            if (!hasNextToken(TokenType.BEGIN_PARAMETER)) {
+                return DataTypes.GEOMETRY();
+            }
+            nextToken(TokenType.BEGIN_PARAMETER);
+            String crs = parseGeospatialParameter();
+            nextToken(TokenType.END_PARAMETER);
+            return DataTypes.GEOMETRY(crs);
+        }
+
+        private DataType parseGeographyType() {
+            if (!hasNextToken(TokenType.BEGIN_PARAMETER)) {
+                return DataTypes.GEOGRAPHY();
+            }
+            nextToken(TokenType.BEGIN_PARAMETER);
+            String crs = parseGeospatialParameter();
+            EdgeAlgorithm algorithm = GeographyType.DEFAULT_ALGORITHM;
+            if (hasNextToken(TokenType.LIST_SEPARATOR)) {
+                nextToken(TokenType.LIST_SEPARATOR);
+                algorithm = EdgeAlgorithm.fromName(parseGeospatialParameter());
+            }
+            nextToken(TokenType.END_PARAMETER);
+            return DataTypes.GEOGRAPHY(crs, algorithm);
+        }
+
+        private String parseGeospatialParameter() {
+            nextToken();
+            if (token().type != TokenType.IDENTIFIER
+                    && token().type != TokenType.LITERAL_STRING
+                    && token().type != TokenType.KEYWORD) {
+                throw parsingError("Geospatial type parameter expected.");
+            }
+            return token().value;
         }
     }
 }

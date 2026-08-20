@@ -16,19 +16,11 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.avro;
+package org.apache.paimon.globalindex;
 
-import org.apache.avro.file.DataFileWriter;
+/** A global indexer whose normalized keys must be sorted before they are written. */
+public interface SortedGlobalIndexer extends GlobalIndexer {
 
-import java.io.IOException;
-import java.io.OutputStream;
-import java.io.Serializable;
-
-/** A builder to create an {@link AvroBulkWriter} from an {@link OutputStream}. */
-@FunctionalInterface
-public interface AvroBuilder<T> extends Serializable {
-
-    /** Creates and configures an Avro writer to the given output file. */
-    DataFileWriter<T> createWriter(OutputStream outputStream, String compression)
-            throws IOException;
+    /** Defines how source-column values are normalized into the keys consumed by the writer. */
+    GlobalIndexKeyExtractor keyExtractor();
 }

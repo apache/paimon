@@ -35,6 +35,7 @@ import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.FileRecordReader;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -70,6 +71,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.IntFunction;
 
 import static org.apache.paimon.data.columnar.ColumnVectorUtils.createParquetWritableColumnVector;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.PAIMON_SCHEMA;
@@ -167,14 +169,21 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                     requestedSchema.messageType);
         }
 
-        int actualBatchSize = computeBatchSize(reader, requestedSchema.messageType);
+        int configuredBatchSize = computeBatchSize(reader, requestedSchema.messageType);
         Preconditions.checkArgument(
-                actualBatchSize > 0,
+                configuredBatchSize > 0,
                 "Parquet read batch size should be positive: %s",
-                actualBatchSize);
+                configuredBatchSize);
+        ReadBatchSizer readBatchSizer = context.readBatchSizer();
+        int initialBatchSize =
+                readBatchSizer == null
+                        ? configuredBatchSize
+                        : readBatchSizer.batchSize().orElse(configuredBatchSize);
         reader.setRequestedSchema(requestedSchema.messageType);
         WritableColumnVector[] writableVectors =
-                createWritableVectors(actualBatchSize, physicalReadFields);
+                createWritableVectors(initialBatchSize, physicalReadFields);
+        IntFunction<WritableColumnVector[]> vectorFactory =
+                size -> createWritableVectors(size, physicalReadFields);
 
         VectorizedParquetRecordReader parquetReader =
                 new VectorizedParquetRecordReader(
@@ -183,8 +192,11 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                         fileSchema,
                         requestedSchema.fields,
                         writableVectors,
-                        actualBatchSize,
-                        context.fileIO());
+                        initialBatchSize,
+                        configuredBatchSize,
+                        context.fileIO(),
+                        readBatchSizer,
+                        vectorFactory);
         return readPlan.isIdentity()
                 ? parquetReader
                 : new ShreddingFormatReader(parquetReader, readPlan);

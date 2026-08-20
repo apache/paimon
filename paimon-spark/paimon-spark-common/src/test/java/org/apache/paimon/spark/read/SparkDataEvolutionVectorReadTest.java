@@ -124,6 +124,7 @@ public class SparkDataEvolutionVectorReadTest {
                 null,
                 null,
                 "user",
+                null,
                 0L,
                 Snapshot.CommitKind.APPEND,
                 0L,

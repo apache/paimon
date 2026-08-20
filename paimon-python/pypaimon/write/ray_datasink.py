@@ -82,7 +82,6 @@ class PaimonDatasink(_DatasinkBase):
         self._postpone_bucket_plan = postpone_bucket_plan
         self._table_name = table.identifier.get_full_name()
         self._writer_builder: Optional["WriteBuilder"] = None
-        self._pending_commit_messages: List["CommitMessage"] = []
 
     def _is_overwrite(self) -> bool:
         return self.overwrite or self.static_partition is not None
@@ -192,11 +191,8 @@ class PaimonDatasink(_DatasinkBase):
                 msg for msg in all_commit_messages if not msg.is_empty()
             ]
 
-            self._pending_commit_messages = non_empty_messages
-
             if not non_empty_messages and not self._is_overwrite():
                 logger.info("No data to commit (all commit messages are empty)")
-                self._pending_commit_messages = []
                 return
 
             # Ray does not call on_write_start when the input has no blocks.
@@ -211,16 +207,12 @@ class PaimonDatasink(_DatasinkBase):
             table_commit = self._writer_builder.new_commit()
             table_commit.commit(non_empty_messages)
 
-            self._pending_commit_messages = []
-
             logger.info(f"Successfully committed write job for table {self._table_name}")
         except Exception as e:
             logger.error(
                 f"Error committing write job for table {self._table_name}: {e}",
                 exc_info=e
             )
-            if table_commit is not None:
-                self._pending_commit_messages = []
             raise
         finally:
             if table_commit is not None:
@@ -232,35 +224,13 @@ class PaimonDatasink(_DatasinkBase):
                         exc_info=e
                     )
 
-    def add_pending_commit_messages(self, commit_messages) -> None:
-        self._pending_commit_messages.extend(
-            message for message in commit_messages if not message.is_empty()
-        )
-
     def on_write_failed(self, error: Exception) -> None:
         logger.error(
             f"Write job failed for table {self._table_name}. Error: {error}",
             exc_info=error
         )
-        
-        if self._pending_commit_messages:
-            try:
-                table_commit = self._writer_builder.new_commit()
-                try:
-                    table_commit.abort(self._pending_commit_messages)
-                    logger.info(
-                        f"Aborted {len(self._pending_commit_messages)} commit messages "
-                        f"for table {self._table_name} in on_write_failed()"
-                    )
-                finally:
-                    table_commit.close()
-            except Exception as abort_error:
-                logger.error(
-                    f"Error aborting commit messages in on_write_failed(): {abort_error}",
-                    exc_info=abort_error
-                )
-            finally:
-                self._pending_commit_messages = []
+        # Do not abort files returned by completed write tasks. Ray or an outer
+        # scheduler may replay those commit messages in another attempt.
 
 
 def write_paimon_dataset(
@@ -480,7 +450,6 @@ def _consume_write_results(
             for blob, error in zip(messages, batch_errors):
                 commit_messages = pickle.loads(blob)
                 write_returns.append(commit_messages)
-                coordinator.add_pending_commit_messages(commit_messages)
                 if error is not None:
                     errors.append(error)
         if errors:

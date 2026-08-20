@@ -25,6 +25,9 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.EdgeAlgorithm;
+import org.apache.paimon.types.GeographyType;
+import org.apache.paimon.types.GeometryType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
@@ -34,6 +37,8 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.Pair;
 
+import org.apache.parquet.column.schema.EdgeInterpolationAlgorithm;
+import org.apache.parquet.schema.ColumnOrder;
 import org.apache.parquet.schema.ConversionPatterns;
 import org.apache.parquet.schema.GroupType;
 import org.apache.parquet.schema.LogicalTypeAnnotation;
@@ -126,6 +131,23 @@ public class ParquetSchemaConverter {
             case VARBINARY:
             case BLOB:
                 return Types.primitive(PrimitiveType.PrimitiveTypeName.BINARY, repetition)
+                        .named(name)
+                        .withId(fieldId);
+            case GEOMETRY:
+                return Types.primitive(PrimitiveType.PrimitiveTypeName.BINARY, repetition)
+                        .as(LogicalTypeAnnotation.geometryType(((GeometryType) type).getCrs()))
+                        .columnOrder(ColumnOrder.undefined())
+                        .named(name)
+                        .withId(fieldId);
+            case GEOGRAPHY:
+                GeographyType geographyType = (GeographyType) type;
+                return Types.primitive(PrimitiveType.PrimitiveTypeName.BINARY, repetition)
+                        .as(
+                                LogicalTypeAnnotation.geographyType(
+                                        geographyType.getCrs(),
+                                        EdgeInterpolationAlgorithm.valueOf(
+                                                geographyType.getAlgorithm().name())))
+                        .columnOrder(ColumnOrder.undefined())
                         .named(name)
                         .withId(fieldId);
             case DECIMAL:
@@ -336,6 +358,22 @@ public class ParquetSchemaConverter {
                 case BINARY:
                     if (logicalType instanceof LogicalTypeAnnotation.StringLogicalTypeAnnotation) {
                         paimonDataType = DataTypes.STRING();
+                    } else if (logicalType
+                            instanceof LogicalTypeAnnotation.GeometryLogicalTypeAnnotation) {
+                        paimonDataType =
+                                DataTypes.GEOMETRY(
+                                        ((LogicalTypeAnnotation.GeometryLogicalTypeAnnotation)
+                                                        logicalType)
+                                                .getCrs());
+                    } else if (logicalType
+                            instanceof LogicalTypeAnnotation.GeographyLogicalTypeAnnotation) {
+                        LogicalTypeAnnotation.GeographyLogicalTypeAnnotation geography =
+                                (LogicalTypeAnnotation.GeographyLogicalTypeAnnotation) logicalType;
+                        EdgeAlgorithm algorithm =
+                                geography.getAlgorithm() == null
+                                        ? null
+                                        : EdgeAlgorithm.valueOf(geography.getAlgorithm().name());
+                        paimonDataType = DataTypes.GEOGRAPHY(geography.getCrs(), algorithm);
                     } else {
                         paimonDataType = DataTypes.BYTES();
                     }

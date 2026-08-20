@@ -136,6 +136,9 @@ Notice that:
   to use streaming read or lookup join. Other merge engine types are not supported
   on the delta branch for these incremental read paths. Batch read is not affected.
 - Chain table requires `sequence.field`, so the `FIRST_ROW` and `AGGREGATE` merge engines are not supported.
+- For chain table delta computation, `partition.timestamp-formatter` must specify a complete date
+  (year-month-day or year-day-of-year), only use round-trippable date/time fields
+  (`y/u`, `M/L`, `d`, `D`, `H`, `k`, `m`, `s`), and the minimum step must be at least one second.
 
 ## Write Data
 

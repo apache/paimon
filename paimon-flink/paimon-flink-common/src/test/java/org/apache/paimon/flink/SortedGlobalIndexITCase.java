@@ -19,10 +19,16 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.TableScan;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -105,6 +111,100 @@ public class SortedGlobalIndexITCase extends CatalogITCaseBase {
 
         assertThat(sql("SELECT * FROM T_BITMAP WHERE id = 100"))
                 .containsOnly(Row.of(100, "name_100"));
+    }
+
+    @Test
+    public void testMultiValueIndex() throws Exception {
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, true);
+        sql(
+                "CREATE TABLE T_MULTIVALUE (id INT, tags ARRAY<STRING>) WITH ("
+                        + "'bucket' = '-1', "
+                        + "'global-index.enabled' = 'true', "
+                        + "'row-tracking.enabled' = 'true', "
+                        + "'data-evolution.enabled' = 'true', "
+                        + "'global-index.column-update-action' = 'IGNORE'"
+                        + ")");
+        sql(
+                "INSERT INTO T_MULTIVALUE VALUES "
+                        + "(1, ARRAY['red', 'blue']), "
+                        + "(2, ARRAY['blue']), "
+                        + "(3, ARRAY['green']), "
+                        + "(4, ARRAY['red', 'red']), "
+                        + "(5, CAST(NULL AS ARRAY<STRING>)), "
+                        + "(6, ARRAY[CAST(NULL AS STRING)]), "
+                        + "(7, ARRAY[CAST(NULL AS STRING)]), "
+                        + "(8, ARRAY['red', CAST(NULL AS STRING)])");
+        sql(
+                "CALL sys.create_global_index(`table` => 'default.T_MULTIVALUE', "
+                        + "index_column => 'tags', index_type => 'multivalue', "
+                        + "options => 'sorted-index.records-per-range=2')");
+
+        FileStoreTable table = paimonTable("T_MULTIVALUE");
+        List<IndexFileMeta> entries =
+                table.store().newIndexFileHandler().scanEntries().stream()
+                        .map(IndexManifestEntry::indexFile)
+                        .filter(file -> "multivalue".equals(file.indexType()))
+                        .collect(Collectors.toList());
+        assertThat(entries).hasSizeGreaterThan(1);
+        assertThat(entries).allSatisfy(entry -> assertThat(entry.globalIndexMeta()).isNotNull());
+        assertThat(entries.stream().mapToLong(IndexFileMeta::rowCount).sum()).isEqualTo(8L);
+        Set<String> initialFiles =
+                entries.stream().map(IndexFileMeta::fileName).collect(Collectors.toSet());
+
+        Predicate predicate =
+                new PredicateBuilder(table.rowType())
+                        .arrayContains(1, BinaryString.fromString("red"));
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
+        TableScan.Plan plan = readBuilder.newScan().plan();
+        assertThat(plan.splits()).allMatch(IndexedSplit.class::isInstance);
+        List<Integer> ids = new java.util.ArrayList<>();
+        readBuilder
+                .newRead()
+                .executeFilter()
+                .createReader(plan)
+                .forEachRemaining(row -> ids.add(row.getInt(0)));
+        assertThat(ids).containsExactlyInAnyOrder(1, 4, 8);
+
+        sql("CREATE TABLE S_MULTIVALUE (id INT, tags ARRAY<STRING>)");
+        sql("INSERT INTO S_MULTIVALUE VALUES (2, ARRAY['red'])");
+        sql(
+                "CALL sys.data_evolution_merge_into("
+                        + "'default.T_MULTIVALUE', '', '', 'S_MULTIVALUE', "
+                        + "'T_MULTIVALUE.id=S_MULTIVALUE.id', 'tags=S_MULTIVALUE.tags', 2)");
+        long updateSnapshotId = paimonTable("T_MULTIVALUE").snapshotManager().latestSnapshot().id();
+
+        sql(
+                "CALL sys.create_global_index(`table` => 'default.T_MULTIVALUE', "
+                        + "index_column => 'tags', index_type => 'multivalue', "
+                        + "options => 'sorted-index.records-per-range=2')");
+        table = paimonTable("T_MULTIVALUE");
+        List<IndexFileMeta> refreshed =
+                table.store().newIndexFileHandler().scanEntries().stream()
+                        .map(IndexManifestEntry::indexFile)
+                        .filter(file -> "multivalue".equals(file.indexType()))
+                        .collect(Collectors.toList());
+        assertThat(refreshed.stream().map(IndexFileMeta::fileName).collect(Collectors.toSet()))
+                .doesNotContainAnyElementsOf(initialFiles);
+        assertThat(refreshed)
+                .allSatisfy(
+                        entry ->
+                                assertThat(
+                                                DataEvolutionIndexSourceMeta.fromIndexFile(entry)
+                                                        .scanSnapshotId())
+                                        .isEqualTo(updateSnapshotId));
+
+        predicate =
+                new PredicateBuilder(table.rowType())
+                        .arrayContains(1, BinaryString.fromString("red"));
+        readBuilder = table.newReadBuilder().withFilter(predicate);
+        plan = readBuilder.newScan().plan();
+        ids.clear();
+        readBuilder
+                .newRead()
+                .executeFilter()
+                .createReader(plan)
+                .forEachRemaining(row -> ids.add(row.getInt(0)));
+        assertThat(ids).containsExactlyInAnyOrder(1, 2, 4, 8);
     }
 
     @Test

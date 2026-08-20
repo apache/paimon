@@ -289,23 +289,15 @@ class PaimonDataSink(DataSink[list[Any]]):
     def finalize(self, write_results: list[WriteResult[list[Any]]]) -> MicroPartition:
         all_commit_messages = [msg for wr in write_results for msg in wr.result]
 
-        table_commit = self._write_builder.new_commit()
         non_empty_workers = sum(
             any(not message.is_empty() for message in result.result)
             for result in write_results
         )
         primary_key_error = self._primary_key_write_error(non_empty_workers)
         if primary_key_error is not None:
-            try:
-                table_commit.abort(all_commit_messages)
-            except Exception:
-                logger.warning(
-                    "Failed to abort uncommitted direct Daft PK files.",
-                    exc_info=True,
-                )
-            finally:
-                table_commit.close()
             raise ValueError(primary_key_error)
+
+        table_commit = self._write_builder.new_commit()
         try:
             table_commit.commit(all_commit_messages)
         finally:

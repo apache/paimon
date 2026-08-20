@@ -19,6 +19,7 @@
 package org.apache.paimon.schema;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -131,6 +132,37 @@ class SchemaValidationTest {
         assertThatThrownBy(() -> validateTableSchemaExec(options))
                 .hasMessageContaining(
                         "must set only one key in [scan.timestamp-millis,scan.timestamp] when you use from-timestamp for scan.mode");
+    }
+
+    @Test
+    public void testLatestDeltaOnlyAcceptsScanMode() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.SCAN_MODE.key(), CoreOptions.StartupMode.LATEST_DELTA.toString());
+        assertThatNoException().isThrownBy(() -> validateTableSchemaExec(options));
+
+        Map<String, String> incompatibleOptions = new HashMap<>();
+        incompatibleOptions.put(CoreOptions.SCAN_TIMESTAMP_MILLIS.key(), "1");
+        incompatibleOptions.put(CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS.key(), "1");
+        incompatibleOptions.put(CoreOptions.SCAN_CREATION_TIME_MILLIS.key(), "1");
+        incompatibleOptions.put(CoreOptions.SCAN_TIMESTAMP.key(), "2026-08-10 00:00:00");
+        incompatibleOptions.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1");
+        incompatibleOptions.put(CoreOptions.SCAN_TAG_NAME.key(), "tag1");
+        incompatibleOptions.put(CoreOptions.SCAN_WATERMARK.key(), "1");
+        incompatibleOptions.put(CoreOptions.SCAN_VERSION.key(), "1");
+        incompatibleOptions.put(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key(), "1,2");
+        incompatibleOptions.put(CoreOptions.INCREMENTAL_BETWEEN.key(), "1,2");
+        incompatibleOptions.put(CoreOptions.INCREMENTAL_TO_AUTO_TAG.key(), "tag1");
+        incompatibleOptions.put(CoreOptions.INCREMENTAL_BETWEEN_SCAN_MODE.key(), "delta");
+        incompatibleOptions.put(CoreOptions.INCREMENTAL_BETWEEN_TAG_TO_SNAPSHOT.key(), "true");
+
+        incompatibleOptions.forEach(
+                (key, value) -> {
+                    Map<String, String> invalidOptions = new HashMap<>(options);
+                    invalidOptions.put(key, value);
+                    assertThatThrownBy(() -> validateTableSchemaExec(invalidOptions))
+                            .hasMessageContaining(
+                                    key + " must be null when you use latest-delta for scan.mode");
+                });
     }
 
     @Test
@@ -629,6 +661,22 @@ class SchemaValidationTest {
                 new TableSchema(1, fields, 10, emptyList(), singletonList("id"), options, "");
 
         assertThatCode(() -> validateTableSchema(schema)).doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testPrimaryKeyManagedBlobAllowsFirstRow() {
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "1");
+        options.put(CoreOptions.BLOB_FIELD.key(), "payload");
+        options.put(CoreOptions.MERGE_ENGINE.key(), "first-row");
+        options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "none");
+
+        assertThatCode(
+                        () ->
+                                validateTableSchema(
+                                        primaryKeyBlobSchema(
+                                                options, singletonList("id"), emptyList())))
+                .doesNotThrowAnyException();
     }
 
     @Test
@@ -1572,6 +1620,204 @@ class SchemaValidationTest {
 
         validateTableSchema(
                 new TableSchema(1, fields, 10, emptyList(), singletonList("k"), options, ""));
+    }
+
+    @Test
+    public void testGeospatialTypeValidation() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "geom", DataTypes.GEOMETRY()),
+                        new DataField(2, "geog", DataTypes.GEOGRAPHY()));
+
+        assertThatNoException()
+                .isThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        geospatialSchema(
+                                                fields,
+                                                emptyList(),
+                                                emptyList(),
+                                                new HashMap<>())));
+
+        Map<String, String> avroOptions = new HashMap<>();
+        avroOptions.put(CoreOptions.FILE_FORMAT.key(), "avro");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        geospatialSchema(
+                                                fields, emptyList(), emptyList(), avroOptions)))
+                .hasMessageContaining("require 'file.format'='parquet'");
+
+        Map<String, String> perLevelOptions = new HashMap<>();
+        perLevelOptions.put(CoreOptions.FILE_FORMAT_PER_LEVEL.key(), "0:orc");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        geospatialSchema(
+                                                fields, emptyList(), emptyList(), perLevelOptions)))
+                .hasMessageContaining("require parquet at every level");
+
+        Map<String, String> changelogOptions = new HashMap<>();
+        changelogOptions.put(CoreOptions.CHANGELOG_FILE_FORMAT.key(), "orc");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        geospatialSchema(
+                                                fields,
+                                                emptyList(),
+                                                emptyList(),
+                                                changelogOptions)))
+                .hasMessageContaining("require 'changelog-file.format' to be parquet");
+
+        Map<String, String> icebergV2Options = new HashMap<>();
+        icebergV2Options.put(IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "table-location");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        geospatialSchema(
+                                                fields,
+                                                emptyList(),
+                                                emptyList(),
+                                                icebergV2Options)))
+                .hasMessageContaining("require 'metadata.iceberg.format-version'='3'");
+
+        icebergV2Options.put(IcebergOptions.FORMAT_VERSION.key(), "3");
+        assertThatNoException()
+                .isThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        geospatialSchema(
+                                                fields,
+                                                emptyList(),
+                                                emptyList(),
+                                                icebergV2Options)));
+
+        Map<String, String> icebergRestOptions = new HashMap<>();
+        icebergRestOptions.put(IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "rest-catalog");
+        icebergRestOptions.put(IcebergOptions.FORMAT_VERSION.key(), "3");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        geospatialSchema(
+                                                fields,
+                                                emptyList(),
+                                                emptyList(),
+                                                icebergRestOptions)))
+                .hasMessageContaining("do not support 'metadata.iceberg.storage'='rest-catalog'")
+                .hasMessageContaining("REST client");
+
+        List<DataField> customCrsFields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(
+                                1,
+                                "geographies",
+                                DataTypes.ARRAY(DataTypes.GEOGRAPHY("custom, definition"))));
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        geospatialSchema(
+                                                customCrsFields,
+                                                emptyList(),
+                                                emptyList(),
+                                                icebergV2Options)))
+                .hasMessageContaining("Geography CRS")
+                .hasMessageContaining("custom, definition")
+                .hasMessageContaining("Iceberg metadata");
+    }
+
+    @Test
+    public void testGeospatialTypeRejectsKeyAndOrderingSemantics() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "geom", DataTypes.GEOMETRY()),
+                        new DataField(2, "geog", DataTypes.GEOGRAPHY()));
+
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        geospatialSchema(
+                                                fields,
+                                                singletonList("geom"),
+                                                emptyList(),
+                                                new HashMap<>())))
+                .hasMessage("The type GeometryType in partition field geom is unsupported");
+
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        geospatialSchema(
+                                                fields,
+                                                emptyList(),
+                                                singletonList("geog"),
+                                                new HashMap<>())))
+                .hasMessage("The type GeographyType in primary key field geog is unsupported");
+
+        Map<String, String> bucketOptions = new HashMap<>();
+        bucketOptions.put(CoreOptions.BUCKET_KEY.key(), "geom");
+        bucketOptions.put(BUCKET.key(), "1");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        geospatialSchema(
+                                                fields, emptyList(), emptyList(), bucketOptions)))
+                .hasMessage("Geometry and geography columns cannot be bucket keys: [geom].");
+
+        Map<String, String> sequenceOptions = new HashMap<>();
+        sequenceOptions.put(CoreOptions.SEQUENCE_FIELD.key(), "geog");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        geospatialSchema(
+                                                fields,
+                                                emptyList(),
+                                                singletonList("id"),
+                                                sequenceOptions)))
+                .hasMessage("Geometry and geography columns cannot be sequence fields: [geog].");
+
+        Map<String, String> clusteringOptions = new HashMap<>();
+        clusteringOptions.put(CoreOptions.CLUSTERING_COLUMNS.key(), "geom");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        geospatialSchema(
+                                                fields,
+                                                emptyList(),
+                                                emptyList(),
+                                                clusteringOptions)))
+                .hasMessage("Geometry and geography columns cannot be clustering columns: [geom].");
+
+        List<DataField> nestedFields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(
+                                1,
+                                "nested",
+                                DataTypes.ROW(DataTypes.FIELD(2, "geog", DataTypes.GEOGRAPHY()))));
+        Map<String, String> nestedClusteringOptions = new HashMap<>();
+        nestedClusteringOptions.put(CoreOptions.CLUSTERING_COLUMNS.key(), "nested");
+        assertThatThrownBy(
+                        () ->
+                                validateTableSchema(
+                                        geospatialSchema(
+                                                nestedFields,
+                                                emptyList(),
+                                                emptyList(),
+                                                nestedClusteringOptions)))
+                .hasMessage(
+                        "Geometry and geography columns cannot be clustering columns: [nested].");
+    }
+
+    private TableSchema geospatialSchema(
+            List<DataField> fields,
+            List<String> partitionKeys,
+            List<String> primaryKeys,
+            Map<String, String> options) {
+        options.putIfAbsent(BUCKET.key(), "-1");
+        return new TableSchema(
+                1, fields, 10, partitionKeys, primaryKeys, options, "geospatial test");
     }
 
     @Test

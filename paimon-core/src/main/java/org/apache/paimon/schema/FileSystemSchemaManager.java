@@ -25,6 +25,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.schema.ColumnDirectiveUtils.ConvertedColumn;
 import org.apache.paimon.schema.SchemaChange.AddColumn;
 import org.apache.paimon.schema.SchemaChange.DropColumn;
@@ -105,6 +106,7 @@ import static org.apache.paimon.catalog.Identifier.UNKNOWN_DATABASE;
 import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.SEQUENCE_GROUP;
 import static org.apache.paimon.schema.ColumnDirectiveUtils.applyAddColumnDirective;
 import static org.apache.paimon.schema.ColumnDirectiveUtils.applyDirectives;
+import static org.apache.paimon.schema.ColumnDirectiveUtils.parseAddColumnComment;
 import static org.apache.paimon.types.BlobType.isBlobFileField;
 import static org.apache.paimon.utils.DefaultValueUtils.validateDefaultValue;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
@@ -530,14 +532,17 @@ public class FileSystemSchemaManager implements SchemaManager {
                                     String.format(
                                             "Column type %s[%s] cannot be converted to %s without losing information.",
                                             field.name(), sourceRootType, targetRootType));
-                            return new DataField(
-                                    field.id(),
-                                    field.name(),
+                            DataType newFieldType =
                                     getArrayMapTypeWithTargetTypeRoot(
                                             field.type(),
                                             targetRootType,
                                             depth,
-                                            update.fieldNames().length),
+                                            update.fieldNames().length);
+                            validateDefaultValue(newFieldType, field.defaultValue());
+                            return new DataField(
+                                    field.id(),
+                                    field.name(),
+                                    newFieldType,
                                     field.description(),
                                     field.defaultValue());
                         },
@@ -575,6 +580,11 @@ public class FileSystemSchemaManager implements SchemaManager {
                         lazyIdentifier);
             } else if (change instanceof UpdateColumnComment) {
                 UpdateColumnComment update = (UpdateColumnComment) change;
+                Preconditions.checkArgument(
+                        parseAddColumnComment(update.newDescription()) == null,
+                        "Should not alter existing field's type through column directives: %s",
+                        update.newDescription());
+
                 updateNestedColumn(
                         newFields,
                         update.fieldNames(),
@@ -1013,6 +1023,7 @@ public class FileSystemSchemaManager implements SchemaManager {
         if (options.primaryKeyVectorIndexColumns().contains(fieldName)
                 || options.primaryKeyBTreeIndexColumns().contains(fieldName)
                 || options.primaryKeyBitmapIndexColumns().contains(fieldName)
+                || options.primaryKeyMultiValueIndexColumns().contains(fieldName)
                 || options.primaryKeyFullTextIndexColumns().contains(fieldName)) {
             throw new UnsupportedOperationException(
                     String.format(
@@ -1201,14 +1212,33 @@ public class FileSystemSchemaManager implements SchemaManager {
     @VisibleForTesting
     public boolean commit(TableSchema newSchema) throws Exception {
         SchemaValidation.validateTableSchema(newSchema);
+        validateHistoricalIcebergGeospatialTypes(newSchema);
         SchemaValidation.validateFallbackBranch(this, newSchema);
         Path schemaPath = toSchemaPath(newSchema.id());
         return fileIO.tryToWriteAtomic(schemaPath, newSchema.toString());
     }
 
+    private void validateHistoricalIcebergGeospatialTypes(TableSchema newSchema) {
+        CoreOptions options = new CoreOptions(newSchema.options());
+        IcebergOptions.StorageType storage =
+                options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE);
+        if (storage == IcebergOptions.StorageType.DISABLED) {
+            return;
+        }
+
+        for (TableSchema schema : listAll()) {
+            SchemaValidation.validateIcebergGeospatialTypes(schema.logicalRowType(), options);
+        }
+    }
+
     /** Read schema for schema id. */
     public TableSchema schema(long id) {
         return fromPath(fileIO, toSchemaPath(id));
+    }
+
+    @Override
+    public TableSchema tryGetSchema(long id) throws FileNotFoundException {
+        return tryFromPath(fileIO, toSchemaPath(id));
     }
 
     /** Check if a schema exists. */
@@ -1443,6 +1473,14 @@ public class FileSystemSchemaManager implements SchemaManager {
 
         if (CoreOptions.BUCKET.key().equals(key)) {
             throw new UnsupportedOperationException(String.format("Cannot reset %s.", key));
+        }
+
+        if (DELETION_VECTORS_ENABLED.key().equals(key)) {
+            checkAlterTableOption(
+                    options,
+                    key,
+                    options.get(key),
+                    DELETION_VECTORS_ENABLED.defaultValue().toString());
         }
 
         if (options.containsKey(PK_CLUSTERING_OVERRIDE.key())

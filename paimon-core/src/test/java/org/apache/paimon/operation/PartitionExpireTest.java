@@ -86,6 +86,7 @@ import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.entry;
 
 /** Test for {@link NormalPartitionExpire}. */
 public class PartitionExpireTest {
@@ -446,6 +447,65 @@ public class PartitionExpireTest {
                         "You are writing data to expired partitions, and you can filter "
                                 + "this data to avoid job failover. Otherwise, continuous expired records will cause the"
                                 + " job to failover restart continuously. Expired partitions are: [20230101]");
+    }
+
+    @Test
+    public void testExpirePartitionValueContainingTheDelimiter() throws Exception {
+        SchemaManager schemaManager = new FileSystemSchemaManager(LocalFileIO.create(), path);
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(VarCharType.STRING_TYPE, VarCharType.STRING_TYPE).getFields(),
+                        Arrays.asList("f0", "f1"),
+                        emptyList(),
+                        Collections.emptyMap(),
+                        ""));
+        newTable();
+        // f1 contains the delimiter that the expired partitions are joined on
+        write("20230101", "us,ca");
+        write("20230105", "51");
+
+        NormalPartitionExpire expire = newExpire();
+        expire.setLastCheck(date(1));
+        List<Map<String, String>> expired = expire.expire(date(6), Long.MAX_VALUE);
+
+        assertThat(expired).hasSize(1);
+        assertThat(expired.get(0)).containsExactly(entry("f0", "20230101"), entry("f1", "us,ca"));
+        assertThat(read()).containsExactlyInAnyOrder("20230105:51");
+    }
+
+    @Test
+    public void testExpireKeepsALivePartitionWhoseNeighbourContainsTheDelimiter() throws Exception {
+        SchemaManager schemaManager = new FileSystemSchemaManager(LocalFileIO.create(), path);
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(VarCharType.STRING_TYPE, VarCharType.STRING_TYPE).getFields(),
+                        singletonList("f0"),
+                        emptyList(),
+                        Collections.emptyMap(),
+                        ""));
+        newTable();
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.PARTITION_EXPIRATION_STRATEGY.key(), "update-time");
+        options.put(PARTITION_EXPIRATION_TIME.key(), "1 s");
+        options.put(PARTITION_EXPIRATION_CHECK_INTERVAL.key(), "1 d");
+        table = table.copy(options);
+
+        // "us,ca" is old enough to expire; "us" is written afterwards and must survive. Under
+        // update-time any partition value is accepted, so the delimiter reaches the round trip.
+        write("us,ca", "old");
+        Thread.sleep(2000);
+        write("us", "fresh");
+        // pin the check time now, so a later stall cannot move the cut-off past "us"
+        LocalDateTime checkTime = LocalDateTime.now();
+
+        NormalPartitionExpire expire =
+                (NormalPartitionExpire) table.store().newPartitionExpire("", table);
+        expire.setLastCheck(checkTime.minusDays(2));
+        List<Map<String, String>> expired = expire.expire(checkTime, Long.MAX_VALUE);
+
+        assertThat(expired).hasSize(1);
+        assertThat(expired.get(0)).containsExactly(entry("f0", "us,ca"));
+        assertThat(read()).containsExactlyInAnyOrder("us:fresh");
     }
 
     private List<String> read() throws IOException {

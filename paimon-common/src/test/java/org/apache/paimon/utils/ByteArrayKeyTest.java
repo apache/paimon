@@ -60,6 +60,23 @@ class ByteArrayKeyTest {
     }
 
     @Test
+    void testReusableSliceLookup() {
+        Map<ByteArrayKey, String> values = new HashMap<>();
+        ByteArrayKey key = new ByteArrayKey(new byte[] {1, 2, 3});
+        values.put(key, "value");
+        ByteArrayLookupKey lookup = new ByteArrayLookupKey();
+
+        lookup.reset(new byte[] {9, 1, 2, 3, 8}, 1, 3);
+        assertThat(lookup).isEqualTo(key);
+        assertThat(key).isEqualTo(lookup);
+        assertThat(lookup.hashCode()).isEqualTo(key.hashCode());
+        assertThat(values.get(lookup)).isEqualTo("value");
+
+        lookup.clear();
+        assertThat(new ByteArrayLookupKey(new byte[] {1, 2, 3})).isNotEqualTo(lookup);
+    }
+
+    @Test
     void testLookupEqualityLifecycle() {
         ByteArrayLookupKey first = new ByteArrayLookupKey(new byte[] {1});
         ByteArrayLookupKey second = new ByteArrayLookupKey(new byte[] {1});

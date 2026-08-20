@@ -849,6 +849,24 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
 
         self.assertEqual(self._snapshot_id(target), before)
 
+    def test_matched_update_with_no_matches_is_noop(self):
+        target = self._create_table()
+        self._write(target, self._source(ids=(1,)))
+        before = self._snapshot_id(target)
+
+        result = merge_into(
+            target=target,
+            source=self._source(ids=(2,)),
+            catalog_options=self.catalog_options,
+            on=['id'],
+            when_matched=[WhenMatched.update('*')],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        self.assertEqual(result['num_matched'], 0)
+        self.assertEqual(self._snapshot_id(target), before)
+        self.assertEqual(self._read_sorted(target)['id'], [1])
+
     def test_matched_on_partitioned_table(self):
         pt_schema = pa.schema([
             ('pt', pa.string()),

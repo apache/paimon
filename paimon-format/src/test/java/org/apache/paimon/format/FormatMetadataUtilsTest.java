@@ -145,4 +145,33 @@ public class FormatMetadataUtilsTest {
         assertThat(metadata.get("name"))
                 .doesNotContainKey(FormatMetadataUtils.PARQUET_FIELD_ID_KEY);
     }
+
+    @Test
+    public void testBuildArrowSchemaWithGeospatialMetadata() {
+        RowType rowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "geom", DataTypes.GEOMETRY()),
+                        DataTypes.FIELD(1, "geog", DataTypes.GEOGRAPHY()));
+
+        byte[] schemaBytes =
+                FormatMetadataUtils.buildArrowSchemaMetadata(
+                        rowType,
+                        java.util.Collections.emptyMap(),
+                        FormatMetadataUtils.PARQUET_FIELD_ID_KEY);
+
+        Map<String, Map<String, String>> metadata =
+                FormatMetadataUtils.readFieldMetadata(schemaBytes);
+        assertThat(metadata.get("geom"))
+                .containsEntry("ARROW:extension:name", "geoarrow.wkb")
+                .containsEntry("ARROW:extension:metadata", "{\"crs\":\"OGC:CRS84\"}")
+                .containsEntry(FormatMetadataUtils.PARQUET_FIELD_ID_KEY, "0")
+                .doesNotContainKey("paimon.type");
+        assertThat(metadata.get("geog"))
+                .containsEntry("ARROW:extension:name", "geoarrow.wkb")
+                .containsEntry(
+                        "ARROW:extension:metadata",
+                        "{\"edges\":\"spherical\",\"crs\":\"OGC:CRS84\"}")
+                .containsEntry(FormatMetadataUtils.PARQUET_FIELD_ID_KEY, "1")
+                .doesNotContainKey("paimon.type");
+    }
 }

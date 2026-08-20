@@ -138,7 +138,8 @@ public class AvroFileFormatTest {
         try (RecordReader<InternalRow> reader =
                 format.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
-                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null))) {
             reader.forEachRemainingWithPosition(
                     (rowPosition, row) -> assertThat(row.getInt(0) == rowPosition).isTrue());
         }
@@ -195,6 +196,47 @@ public class AvroFileFormatTest {
 
         assertThat(blocks).isGreaterThan(1);
         assertThat(records).isEqualTo(numRecords);
+    }
+
+    @Test
+    void testRawBlockCompatibilityUsesBinaryLayoutAndFieldIdentity() {
+        Schema expected =
+                SchemaBuilder.record("Expected")
+                        .fields()
+                        .requiredInt("id")
+                        .name("nested")
+                        .type(
+                                SchemaBuilder.record("ExpectedNested")
+                                        .fields()
+                                        .requiredLong("value")
+                                        .endRecord())
+                        .noDefault()
+                        .endRecord();
+        Schema renamedRecords =
+                SchemaBuilder.record("Actual")
+                        .fields()
+                        .requiredInt("id")
+                        .name("nested")
+                        .type(
+                                SchemaBuilder.record("ActualNested")
+                                        .fields()
+                                        .requiredLong("value")
+                                        .endRecord())
+                        .noDefault()
+                        .endRecord();
+        Schema renamedField =
+                SchemaBuilder.record("Actual")
+                        .fields()
+                        .requiredInt("other_id")
+                        .name("nested")
+                        .type(renamedRecords.getField("nested").schema())
+                        .noDefault()
+                        .endRecord();
+        Schema missingField = SchemaBuilder.record("Actual").fields().requiredInt("id").endRecord();
+
+        assertThat(AvroBlockReader.hasSameBinaryLayout(expected, renamedRecords)).isTrue();
+        assertThat(AvroBlockReader.hasSameBinaryLayout(expected, renamedField)).isFalse();
+        assertThat(AvroBlockReader.hasSameBinaryLayout(expected, missingField)).isFalse();
     }
 
     @Test
@@ -317,7 +359,11 @@ public class AvroFileFormatTest {
                 format.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(
-                                        failingFileIO, file, failingFileIO.getFileSize(file)));
+                                        failingFileIO,
+                                        file,
+                                        failingFileIO.getFileSize(file),
+                                        null,
+                                        null));
         assertThatThrownBy(() -> reader.forEachRemaining(row -> {}))
                 .isInstanceOf(IOException.class)
                 .hasMessageContaining("Artificial exception");

@@ -105,6 +105,12 @@ under the License.
             <td>Wait time in milliseconds between retry attempts for Spark V1 UPDATE on data-evolution tables after row-id range update conflicts.</td>
         </tr>
         <tr>
+            <td><h5>write.hive-style-dynamic-partition.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If true, positional SQL inserts with explicit dynamic partitions use Hive's column order, with non-dynamic columns followed by dynamic partition columns. If false, the query output follows the table schema order.</td>
+        </tr>
+        <tr>
             <td><h5>write.merge-schema</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>

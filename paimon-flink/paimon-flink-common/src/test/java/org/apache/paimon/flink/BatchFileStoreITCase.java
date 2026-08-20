@@ -1102,6 +1102,16 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testScanWithPartialSpecifiedPartition() {
+        sql("CREATE TABLE P (dt STRING, hh INT, v INT) PARTITIONED BY (dt, hh)");
+        sql(
+                "INSERT INTO P VALUES ('20260814', CAST(NULL AS INT), 1), ('20260814', 10, 2), ('20260815', CAST(NULL AS INT), 3)");
+
+        assertThat(sql("SELECT COUNT(*) FROM P /*+ OPTIONS('scan.partitions' = 'dt=20260814') */"))
+                .containsExactly(Row.of(1L));
+    }
+
+    @Test
     public void testScanWithSpecifiedPartitionsWithFieldMapping() {
         sql("CREATE TABLE P (id INT, v INT, pt STRING) PARTITIONED BY (pt)");
         sql("CREATE TABLE Q (id INT)");
@@ -1163,6 +1173,19 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     public void testEmptyTableIncrementalBetweenTimestamp() {
         assertThat(sql("SELECT * FROM T /*+ OPTIONS('incremental-between-timestamp'='0,1') */"))
                 .isEmpty();
+    }
+
+    @Test
+    public void testLatestDeltaScanMode() {
+        sql("CREATE TABLE latest_delta (id INT, v STRING)");
+        sql("INSERT INTO latest_delta VALUES (1, 'A'), (2, 'B')");
+        sql("INSERT INTO latest_delta VALUES (3, 'C'), (4, 'D')");
+
+        assertThat(
+                        sql(
+                                "SELECT * FROM latest_delta "
+                                        + "/*+ OPTIONS('scan.mode'='latest-delta') */"))
+                .containsExactlyInAnyOrder(Row.of(3, "C"), Row.of(4, "D"));
     }
 
     @Test

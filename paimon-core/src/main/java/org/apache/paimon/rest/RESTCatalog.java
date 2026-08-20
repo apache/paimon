@@ -748,15 +748,20 @@ public class RESTCatalog implements Catalog {
     @Override
     public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
-        createPartitions(identifier, partitions, true);
+        createPartitions(identifier, partitions, true, null, false);
     }
 
     @Override
     public void createPartitions(
-            Identifier identifier, List<Map<String, String>> partitions, boolean ignoreIfExists)
+            Identifier identifier,
+            List<Map<String, String>> partitions,
+            boolean ignoreIfExists,
+            @Nullable List<PartitionStatistics> statistics,
+            boolean replaceStatistics)
             throws TableNotExistException {
         try {
-            api.createPartitions(identifier, partitions, ignoreIfExists);
+            api.createPartitions(
+                    identifier, partitions, ignoreIfExists, statistics, replaceStatistics);
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {

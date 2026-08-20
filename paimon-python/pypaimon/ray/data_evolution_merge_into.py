@@ -375,8 +375,7 @@ def _execute_and_commit(
     ray_remote_args, concurrency,
 ):
     collect_action_row_ids = update_ds is not None and delete_ds is not None
-    pending_msgs: list = []
-    commit_started = False
+    commit_messages: list = []
 
     update_msgs: list = []
     num_updated = 0
@@ -398,7 +397,7 @@ def _execute_and_commit(
                 ),
                 collect_row_ids=collect_action_row_ids,
             )
-            pending_msgs.extend(update_msgs)
+            commit_messages.extend(update_msgs)
 
         if delete_ds is not None:
             delete_msgs, num_deleted, delete_row_ids = distributed_delete_apply(
@@ -411,7 +410,7 @@ def _execute_and_commit(
                 ),
                 collect_row_ids=collect_action_row_ids,
             )
-            pending_msgs.extend(delete_msgs)
+            commit_messages.extend(delete_msgs)
 
         if collect_action_row_ids:
             _validate_disjoint_action_row_ids(update_row_ids, delete_row_ids)
@@ -421,7 +420,7 @@ def _execute_and_commit(
                 insert_ds, table,
                 ray_remote_args=ray_remote_args, concurrency=concurrency,
             )
-            pending_msgs.extend(insert_msgs)
+            commit_messages.extend(insert_msgs)
             num_inserted = sum(
                 f.row_count
                 for m in insert_msgs
@@ -429,12 +428,11 @@ def _execute_and_commit(
                 if not DataFileMeta.is_blob_file(f.file_name)
             )
 
-        all_msgs: list = list(pending_msgs)
+        all_msgs: list = list(commit_messages)
         if all_msgs:
             table_commit = None
             try:
                 table_commit = table.new_batch_write_builder().new_commit()
-                commit_started = True
                 table_commit.commit(all_msgs)
             finally:
                 if table_commit is not None:
@@ -447,8 +445,6 @@ def _execute_and_commit(
                             exc_info=close_error,
                         )
     except Exception as e:
-        if not commit_started:
-            _abort_pending_merge_messages(table, pending_msgs)
         _reraise_inner(e)
 
     # num_matched = rows that passed a matched condition and changed
@@ -457,32 +453,6 @@ def _execute_and_commit(
         "num_inserted": num_inserted,
         "num_unchanged": 0,
     }
-
-
-def _abort_pending_merge_messages(table, commit_messages) -> None:
-    if not commit_messages:
-        return
-
-    table_commit = None
-    try:
-        table_commit = table.new_batch_write_builder().new_commit()
-        table_commit.abort(commit_messages)
-    except Exception as abort_error:
-        logger.warning(
-            "Failed to abort pending merge_into commit messages: %s",
-            abort_error,
-            exc_info=abort_error,
-        )
-    finally:
-        if table_commit is not None:
-            try:
-                table_commit.close()
-            except Exception as close_error:
-                logger.warning(
-                    "Failed to close merge_into abort commit: %s",
-                    close_error,
-                    exc_info=close_error,
-                )
 
 
 def _normalize_on(on: OnSpec) -> Tuple[List[str], List[str]]:

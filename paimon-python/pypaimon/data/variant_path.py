@@ -14,24 +14,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Read and replace paths in Arrow VARIANT columns."""
+"""Read, replace, and upsert paths in Arrow VARIANT columns."""
 
 import functools
 import re
 import struct
+import threading
 from typing import Dict, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 import pyarrow as pa
+from cachetools import LRUCache
 
 from pypaimon.data._variant_binary import (
     _ARRAY,
     _OBJECT,
     _PRIMITIVE,
     _SHORT_STR,
+    _U8_MAX,
     _U32_SIZE,
     _VERSION,
     _VERSION_MASK,
+    _array_header,
+    _get_int_size,
+    _object_header,
     _primitive_header,
     _read_unsigned,
 )
@@ -50,6 +56,7 @@ from pypaimon.data.generic_variant import (
     _PRIMITIVE_FIXED_SIZES,
     GenericVariant,
     _Type,
+    _check_variant_sizes,
     _variant_get_type,
 )
 from pypaimon.data.variant_shredding import (
@@ -63,6 +70,12 @@ _INDEX_PATTERN = re.compile(r"\[(\d+)]")
 _KEY_PATTERN = re.compile(r"\.([^\.\[]+)|\['([^']+)']|\[\"([^\"]+)\"]")
 _Path = Tuple[Tuple[str, object], ...]
 _SLOW_PATH_ROWS = 64
+# Bound the dominant temporary allocation during batch structure matching.
+_STRUCTURE_MATCH_INDEX_BUDGET = 8 * 1024 * 1024
+# Bound encoded variable-width payloads retained while rebuilt rows accumulate.
+_ROOT_INSERT_SPLICE_PAYLOAD_BUDGET = 8 * 1024 * 1024
+# Bound per-row Python and NumPy temporaries for tiny payloads.
+_ROOT_INSERT_SPLICE_MAX_BATCH_ROWS = 64 * 1024
 
 
 @functools.lru_cache(maxsize=256)
@@ -132,6 +145,91 @@ def _validate_metadata_version(metadata):
         _malformed("invalid metadata version")
 
 
+_metadata_cache = threading.local()
+_NO_METADATA_CACHE = object()
+
+
+def _with_metadata_cache(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        previous = getattr(_metadata_cache, 'value', _NO_METADATA_CACHE)
+        _metadata_cache.value = LRUCache(maxsize=256)
+        try:
+            return func(*args, **kwargs)
+        finally:
+            if previous is _NO_METADATA_CACHE:
+                del _metadata_cache.value
+            else:
+                _metadata_cache.value = previous
+
+    return wrapper
+
+
+def _cached_metadata_key_ids(metadata: bytes) -> Dict[str, int]:
+    cache = getattr(_metadata_cache, 'value', None)
+    if cache is not None:
+        hit = cache.get(metadata)
+        if hit is not None:
+            return hit
+    key_ids = _metadata_key_ids(metadata)
+    if cache is not None:
+        cache[metadata] = key_ids
+    return key_ids
+
+
+def _metadata_with_keys(metadata: bytes, new_keys: Tuple[str, ...]):
+    """Append missing keys to the metadata dictionary, keeping ids.
+
+    Returns read-only ``(new_metadata, key_ids, names_by_id)``;
+    ``new_metadata`` is None when every key already exists.
+    """
+    cache_key = (metadata, new_keys)
+    cache = getattr(_metadata_cache, 'value', None)
+    if cache is not None:
+        hit = cache.get(cache_key)
+        if hit is not None:
+            return hit
+    key_ids = dict(_cached_metadata_key_ids(metadata))
+    names = [None] * len(key_ids)
+    for key, key_id in key_ids.items():
+        names[key_id] = key
+    missing = list(dict.fromkeys(
+        key for key in new_keys if key not in key_ids))
+    for key in missing:
+        key_ids[key] = len(names)
+        names.append(key)
+    names_by_id = {key_id: key for key, key_id in key_ids.items()}
+    if not missing:
+        result = (None, key_ids, names_by_id)
+    else:
+        encoded = [name.encode('utf-8') for name in names]
+        total_size = sum(len(name) for name in encoded)
+        max_size = max(total_size, len(encoded))
+        offset_size = _get_int_size(max_size) if max_size > 0 else 1
+        offset_start = 1 + offset_size
+        string_start = offset_start + (len(encoded) + 1) * offset_size
+        metadata_size = string_start + total_size
+        _check_variant_sizes(0, metadata_size)
+        rebuilt = bytearray(metadata_size)
+        rebuilt[0] = _VERSION | ((offset_size - 1) << 6)
+        rebuilt[1:1 + offset_size] = len(encoded).to_bytes(
+            offset_size, 'little')
+        current = 0
+        for index, name in enumerate(encoded):
+            rebuilt[offset_start + index * offset_size:
+                    offset_start + (index + 1) * offset_size] = (
+                current.to_bytes(offset_size, 'little'))
+            rebuilt[string_start + current:
+                    string_start + current + len(name)] = name
+            current += len(name)
+        rebuilt[offset_start + len(encoded) * offset_size:string_start] = (
+            current.to_bytes(offset_size, 'little'))
+        result = (bytes(rebuilt), key_ids, names_by_id)
+    if cache is not None:
+        cache[cache_key] = result
+    return result
+
+
 def _malformed(message):
     raise ValueError(f"MALFORMED_VARIANT: {message}")
 
@@ -159,10 +257,15 @@ def _checked_object_layout(value, pos, limit):
             value, offset_start + index * offset_width, offset_width)
         offsets.append(offset)
     sentinel = offsets[-1]
-    if ((size and (min(offsets[:-1]) != 0
-                   or len(set(offsets[:-1])) != size))
+    if ((not size and sentinel != 0)
+            or (size and (min(offsets[:-1]) != 0
+                          or len(set(offsets[:-1])) != size))
             or any(offset >= sentinel for offset in offsets[:-1])):
         _malformed("invalid object offsets")
+    if size and len({
+            _read_unsigned(value, id_start + i * id_width, id_width)
+            for i in range(size)}) != size:
+        _malformed("duplicate object field id")
     _require_range(data_start, sentinel, limit)
     return (
         size, id_width, id_start, data_start, offsets,
@@ -249,6 +352,104 @@ def _checked_value_size(value, pos, limit=None):
     return end - pos
 
 
+def _validate_value_field_ids(
+        value, pos, limit, metadata_size, structure_ranges=None):
+    """Validate object field ids in one unedited value subtree."""
+    stack = [(pos, limit)]
+    while stack:
+        current_pos, current_limit = stack.pop()
+        _require_range(current_pos, 1, current_limit)
+        basic_type = value[current_pos] & 0x3
+        if basic_type == _OBJECT:
+            size, id_size, id_start, data_start, offsets, value_end = (
+                _checked_object_layout(
+                    value, current_pos, current_limit))
+            if structure_ranges is not None:
+                structure_ranges.append((current_pos, data_start))
+            ids = [
+                _read_unsigned(value, id_start + i * id_size, id_size)
+                for i in range(size)
+            ]
+            if any(field_id >= metadata_size for field_id in ids):
+                _malformed("object field id is missing from metadata")
+            ordered_offsets = sorted(offsets)
+            end_by_offset = dict(zip(
+                ordered_offsets, ordered_offsets[1:]))
+            for slot in range(size):
+                child_offset = offsets[slot]
+                stack.append((
+                    data_start + child_offset,
+                    data_start + end_by_offset[child_offset],
+                ))
+        elif basic_type == _ARRAY:
+            size, data_start, offsets, value_end = _checked_array_layout(
+                value, current_pos, current_limit)
+            if structure_ranges is not None:
+                structure_ranges.append((current_pos, data_start))
+            for index in range(size):
+                stack.append((
+                    data_start + offsets[index],
+                    data_start + offsets[index + 1],
+                ))
+        else:
+            value_end = current_pos + _checked_value_size(
+                value, current_pos, current_limit)
+            if structure_ranges is not None:
+                type_info = (value[current_pos] >> 2) & 0x3F
+                structure_end = current_pos + 1
+                if basic_type == _PRIMITIVE:
+                    if type_info in (_BINARY, _LONG_STR):
+                        structure_end += _U32_SIZE
+                    elif type_info in (
+                            _DECIMAL4, _DECIMAL8, _DECIMAL16):
+                        structure_end = value_end
+                structure_ranges.append((current_pos, structure_end))
+        if value_end != current_limit:
+            _malformed("child size does not match container offsets")
+
+
+def _matching_value_structures(
+        value, source_data, row_starts, metadata_size):
+    """Match equal-length rows against one validated value structure."""
+    ranges = []
+    _validate_value_field_ids(
+        value, 0, len(value), metadata_size, ranges)
+    position_count = sum(end - start for start, end in ranges)
+    index_size = np.dtype(np.int64).itemsize
+    position_bytes = position_count * index_size
+    available_bytes = _STRUCTURE_MATCH_INDEX_BUDGET - position_bytes
+    if available_bytes < index_size:
+        return None
+    max_cells = available_bytes // index_size
+    positions = np.empty(position_count, dtype=np.int64)
+    cursor = 0
+    for start, end in ranges:
+        count = end - start
+        positions[cursor:cursor + count] = np.arange(
+            start, end, dtype=np.int64)
+        cursor += count
+
+    matches = np.ones(len(row_starts), dtype=bool)
+    expected = np.frombuffer(value, dtype=np.uint8)
+    width = max(1, min(position_count, max_cells))
+    row_chunk_size = min(len(matches), max(1, max_cells // width))
+    for row_start in range(0, len(matches), row_chunk_size):
+        row_end = min(row_start + row_chunk_size, len(matches))
+        batch_matches = matches[row_start:row_end]
+        batch_starts = row_starts[row_start:row_end]
+        for start in range(0, position_count, width):
+            offsets = positions[start:start + width]
+            batch_matches &= np.all(
+                source_data[batch_starts[:, None] + offsets]
+                == expected[offsets],
+                axis=1,
+            )
+            if (start + width < position_count
+                    and not np.any(batch_matches)):
+                break
+    return matches
+
+
 def _field_slot(id_table: bytes, id_size: int, key_id: int) -> Optional[int]:
     for slot in range(len(id_table) // id_size):
         if _read_unsigned(id_table, slot * id_size, id_size) == key_id:
@@ -259,15 +460,19 @@ def _field_slot(id_table: bytes, id_size: int, key_id: int) -> Optional[int]:
 @functools.lru_cache(maxsize=256)
 def _compile_paths(paths: Tuple[_Path, ...]):
     nodes = [(None, None, None)]
-    node_by_prefix = {(): 0}
+    node_by_edge = {}
     results = []
     for path in paths:
-        for length in range(1, len(path) + 1):
-            prefix = path[:length]
-            if prefix not in node_by_prefix:
-                node_by_prefix[prefix] = len(nodes)
-                nodes.append((node_by_prefix[prefix[:-1]],) + prefix[-1])
-        results.append(node_by_prefix[path])
+        parent = 0
+        for segment in path:
+            edge = (parent, segment)
+            node = node_by_edge.get(edge)
+            if node is None:
+                node = len(nodes)
+                node_by_edge[edge] = node
+                nodes.append((parent,) + segment)
+            parent = node
+        results.append(parent)
     return tuple(nodes), tuple(results)
 
 
@@ -282,7 +487,7 @@ def _path_positions(
     nodes, result_nodes = _compile_paths(tuple(paths))
     _validate_metadata_version(metadata)
     key_ids = (
-        _metadata_key_ids(metadata)
+        _cached_metadata_key_ids(bytes(metadata))
         if any(kind == 'key' for _, kind, _ in nodes[1:]) else {}
     )
     bounds = [(0, len(value))]
@@ -596,7 +801,7 @@ def _vectorized_path_positions(
     nodes, result_nodes = _compile_paths(tuple(paths))
     _validate_metadata_version(first_metadata)
     key_ids = (
-        _metadata_key_ids(first_metadata)
+        _cached_metadata_key_ids(first_metadata)
         if any(kind == 'key' for _, kind, _ in nodes[1:]) else {}
     )
     row_offsets = values.numpy_offsets()
@@ -640,15 +845,6 @@ def _vectorized_path_positions(
                 id_table = bytes(
                     first_value[id_start:id_start + size * id_size])
                 slot = _field_slot(id_table, id_size, key_id)
-                if slot is None:
-                    return None
-                successor_slot = min(
-                    (
-                        index for index in range(size + 1)
-                        if first_offsets[index] > first_offsets[slot]
-                    ),
-                    key=lambda index: first_offsets[index],
-                )
 
                 size_widths = np.where(
                     ((type_info >> 4) & 0x1) != 0, _U32_SIZE, 1)
@@ -665,10 +861,24 @@ def _vectorized_path_positions(
                 data_starts = offset_starts + (sizes + 1) * offset_widths
                 if np.any(data_starts > parent_ends):
                     return None
-                ids = _take_unsigned(
-                    data, id_starts + slot * id_widths, id_widths)
-                if np.any(ids != key_id):
-                    return None
+                for index in range(size):
+                    expected_id = _read_unsigned(
+                        first_value, id_start + index * id_size, id_size)
+                    ids = _take_unsigned(
+                        data, id_starts + index * id_widths, id_widths)
+                    if np.any(ids != expected_id):
+                        return None
+                if slot is None:
+                    positions.append(None)
+                    limits.append(None)
+                    continue
+                successor_slot = min(
+                    (
+                        index for index in range(size + 1)
+                        if first_offsets[index] > first_offsets[slot]
+                    ),
+                    key=lambda index: first_offsets[index],
+                )
             else:
                 if np.any((headers & 0x3) != _ARRAY):
                     return None
@@ -1042,8 +1252,7 @@ def _rebuilt_offsets(lengths, value_format):
     return offsets
 
 
-def _sparse_rebuilt_chunk(
-        chunk, values, data, data_start, rebuilt_rows):
+def _sparse_rebuilt_binary(values, data, data_start, rebuilt_rows):
     old_offsets = values.numpy_offsets()
     lengths = old_offsets[1:] - old_offsets[:-1]
     for row, rebuilt in rebuilt_rows.items():
@@ -1068,12 +1277,18 @@ def _sparse_rebuilt_chunk(
         None if values.array.null_count == 0
         else values.array.is_valid().buffers()[1]
     )
-    rebuilt_values = pa.Array.from_buffers(
+    return pa.Array.from_buffers(
         values.array.type,
-        len(chunk),
+        len(values.array),
         [validity, pa.py_buffer(offsets), pa.py_buffer(output)],
         null_count=values.array.null_count,
     )
+
+
+def _sparse_rebuilt_chunk(
+        chunk, values, data, data_start, rebuilt_rows):
+    rebuilt_values = _sparse_rebuilt_binary(
+        values, data, data_start, rebuilt_rows)
     return pa.StructArray.from_arrays(
         [rebuilt_values, chunk.field(1)],
         fields=list(chunk.type),
@@ -1162,6 +1377,70 @@ class _Replacement:
                 f"VARIANT path type does not match {self.type}")
 
 
+class _PatchState:
+    """Lazy copy-on-write buffer shared by per-group in-place patches."""
+
+    def __init__(self, values: _BinaryValues):
+        self._values = values
+        self.data = None
+        self.data_start = 0
+        self.output_data = None
+
+    def ensure(self):
+        if self.data is None:
+            self.data, self.data_start = self._values.copy_used_data()
+            self.output_data = np.frombuffer(self.data, dtype=np.uint8)
+        return self.output_data
+
+
+def _patch_planned_group(
+        planned, parsed, chunk_length, global_row, state, slow_rows, strict):
+    rows, row_starts, source_data, positions, limits = planned
+    replacements = []
+    compatible = np.ones(len(rows), dtype=bool)
+    has_replacement = False
+    for (path, _, provider), pos, limit in zip(parsed, positions, limits):
+        if pos is None:
+            if strict:
+                raise ValueError(
+                    f"VARIANT path does not exist: {path}")
+            replacements.append(None)
+            continue
+        has_replacement = True
+        replacement, replacement_valid = provider.numpy_values(
+            global_row,
+            chunk_length,
+            None if len(rows) == chunk_length else rows,
+        )
+        absolute = row_starts + pos
+        compatible &= (
+            replacement_valid
+            & (source_data[absolute] == provider._type_header)
+            & (absolute + provider._fixed_size == row_starts + limit)
+        )
+        replacements.append((pos, provider, replacement))
+    if not has_replacement:
+        return
+    slow_rows.update(int(row) for row in rows[~compatible])
+    if not np.any(compatible):
+        return
+    output_data = state.ensure()
+    relative_starts = row_starts - state.data_start
+    compatible_rows = rows[compatible]
+    for item in replacements:
+        if item is None:
+            continue
+        pos, provider, replacement = item
+        absolute = (relative_starts + pos)[compatible]
+        output_data[absolute] = provider._type_header
+        value_size = provider._fixed_size - 1
+        replacement_bytes = np.ascontiguousarray(
+            replacement[compatible]).view(np.uint8).reshape(
+                len(compatible_rows), value_size)
+        indices = absolute[:, None] + 1 + np.arange(value_size)
+        output_data[indices] = replacement_bytes
+
+
 def _vectorized_replace_chunk(
         chunk,
         values,
@@ -1179,57 +1458,13 @@ def _vectorized_replace_chunk(
     plans, slow_rows = _partition_path_plans(
         values, chunk.field(1), valid_rows, parsed_paths)
     slow_rows = set(int(row) for row in slow_rows)
-    data = None
-    data_start = 0
-    output_data = None
+    state = _PatchState(values)
     for planned in plans:
-        rows, row_starts, source_data, positions, limits = planned
-        replacements = []
-        compatible = np.ones(len(rows), dtype=bool)
-        has_replacement = False
-        for (path, _, provider), pos, limit in zip(
-                parsed, positions, limits):
-            if pos is None:
-                if strict:
-                    raise ValueError(
-                        f"VARIANT path does not exist: {path}")
-                replacements.append(None)
-                continue
-            has_replacement = True
-            replacement, replacement_valid = provider.numpy_values(
-                global_row,
-                len(chunk),
-                None if len(rows) == len(chunk) else rows,
-            )
-            absolute = row_starts + pos
-            compatible &= (
-                replacement_valid
-                & (source_data[absolute] == provider._type_header)
-                & (absolute + provider._fixed_size == row_starts + limit)
-            )
-            replacements.append((pos, provider, replacement))
-        if not has_replacement:
-            continue
-        slow_rows.update(int(row) for row in rows[~compatible])
-        if not np.any(compatible):
-            continue
-        if data is None:
-            data, data_start = values.copy_used_data()
-            output_data = np.frombuffer(data, dtype=np.uint8)
-        relative_starts = row_starts - data_start
-        compatible_rows = rows[compatible]
-        for item in replacements:
-            if item is None:
-                continue
-            pos, provider, replacement = item
-            absolute = (relative_starts + pos)[compatible]
-            output_data[absolute] = provider._type_header
-            value_size = provider._fixed_size - 1
-            replacement_bytes = np.ascontiguousarray(
-                replacement[compatible]).view(np.uint8).reshape(
-                    len(compatible_rows), value_size)
-            indices = absolute[:, None] + 1 + np.arange(value_size)
-            output_data[indices] = replacement_bytes
+        _patch_planned_group(
+            planned, parsed, len(chunk), global_row, state,
+            slow_rows, strict)
+    data = state.data
+    data_start = state.data_start
 
     metadata = _BinaryValues(chunk.field(1))
     rebuilt_rows = {}
@@ -1278,7 +1513,8 @@ def _vectorized_replace_chunk(
 
 def _supported_replacement_type(data_type: pa.DataType) -> bool:
     return (
-        pa.types.is_boolean(data_type)
+        pa.types.is_null(data_type)
+        or pa.types.is_boolean(data_type)
         or pa.types.is_signed_integer(data_type)
         or pa.types.is_float32(data_type)
         or pa.types.is_float64(data_type)
@@ -1293,6 +1529,8 @@ def _supported_replacement_type(data_type: pa.DataType) -> bool:
 
 
 def _replacement_type_matches(value, pos, data_type):
+    if pa.types.is_null(data_type):
+        return True
     variant_type = _variant_get_type(value, pos)
     if variant_type == _Type.NULL:
         return True
@@ -1395,6 +1633,7 @@ def _variant_get(column, paths: Mapping[str, pa.DataType]):
     }
 
 
+@_with_metadata_cache
 def variant_get(column, path, data_type=None):
     """Read one or more VARIANT paths without implicit casts."""
     if isinstance(path, Mapping):
@@ -1420,6 +1659,7 @@ def _validate_distinct_paths(parsed) -> None:
                     "VARIANT replacement paths must not overlap")
 
 
+@_with_metadata_cache
 def variant_replace(
         column,
         path,
@@ -1468,6 +1708,727 @@ def variant_replace(
                 strict,
             )
         result_chunks.append(result)
+        global_row += len(chunk)
+
+    if not chunked:
+        return result_chunks[0]
+    return pa.chunked_array(result_chunks, type=data_type)
+
+
+class _ValueParts:
+
+    __slots__ = ('parts', 'size')
+
+    def __init__(self, parts, size):
+        _check_variant_sizes(size, 0)
+        self.parts = tuple(parts)
+        self.size = size
+
+    def __len__(self):
+        return self.size
+
+
+def _part_size(part):
+    return part.size if isinstance(part, _ValueParts) else len(part)
+
+
+def _materialize_value(part):
+    if not isinstance(part, _ValueParts):
+        _check_variant_sizes(len(part), 0)
+        return bytes(part)
+    output = bytearray(part.size)
+    output_pos = 0
+    stack = list(reversed(part.parts))
+    while stack:
+        current = stack.pop()
+        if isinstance(current, _ValueParts):
+            stack.extend(reversed(current.parts))
+            continue
+        size = len(current)
+        output[output_pos:output_pos + size] = current
+        output_pos += size
+    return bytes(output)
+
+
+def _build_object_value_parts(fields):
+    """Build an object without copying child values."""
+    size = len(fields)
+    data_size = sum(_part_size(child) for _, child in fields)
+    large_size = size > _U8_MAX
+    size_bytes = _U32_SIZE if large_size else 1
+    max_id = max((field_id for field_id, _ in fields), default=0)
+    id_size = _get_int_size(max_id) if max_id > 0 else 1
+    offset_size = _get_int_size(data_size) if data_size > 0 else 1
+    buf = bytearray()
+    buf.append(_object_header(large_size, id_size, offset_size))
+    buf += size.to_bytes(size_bytes, 'little')
+    for field_id, _ in fields:
+        buf += field_id.to_bytes(id_size, 'little')
+    offset = 0
+    for _, child in fields:
+        buf += offset.to_bytes(offset_size, 'little')
+        offset += _part_size(child)
+    buf += offset.to_bytes(offset_size, 'little')
+    header = bytes(buf)
+    return _ValueParts(
+        [header] + [child for _, child in fields],
+        len(header) + data_size,
+    )
+
+
+def _build_array_value_parts(children):
+    """Build an array without copying child values."""
+    size = len(children)
+    data_size = sum(_part_size(child) for child in children)
+    large_size = size > _U8_MAX
+    size_bytes = _U32_SIZE if large_size else 1
+    offset_size = _get_int_size(data_size) if data_size > 0 else 1
+    buf = bytearray()
+    buf.append(_array_header(large_size, offset_size))
+    buf += size.to_bytes(size_bytes, 'little')
+    offset = 0
+    for child in children:
+        buf += offset.to_bytes(offset_size, 'little')
+        offset += _part_size(child)
+    buf += offset.to_bytes(offset_size, 'little')
+    header = bytes(buf)
+    return _ValueParts([header] + children, len(header) + data_size)
+
+
+def _build_object_value_ordered(fields):
+    """Build object value bytes keeping the given field order."""
+    return _materialize_value(_build_object_value_parts(fields))
+
+
+def _apply_edits(
+        value,
+        pos,
+        limit,
+        edits,
+        key_ids,
+        names_by_id,
+        source_metadata_size=None,
+):
+    """Apply edits and validate source ids before metadata extension."""
+    source = value if isinstance(value, memoryview) else memoryview(value)
+    results = {}
+    next_token = 1
+    stack = [('visit', 0, pos, limit, edits)]
+    while stack:
+        action = stack.pop()
+        kind = action[0]
+        if kind == 'finish_object':
+            _, token, ids, children, inserts, child_tokens = action
+            for slot, child_token in child_tokens:
+                children[slot] = results.pop(child_token)
+            fields = list(zip(ids, children)) + inserts
+            if len({field_id for field_id, _ in fields}) != len(fields):
+                _malformed("duplicate object field id")
+            if inserts:
+                try:
+                    fields.sort(
+                        key=lambda field: names_by_id[
+                            field[0]].encode('utf-8'))
+                except KeyError:
+                    _malformed("object key is missing from metadata")
+            results[token] = _build_object_value_parts(fields)
+            continue
+        if kind == 'finish_array':
+            _, token, children, child_tokens = action
+            for index, child_token in child_tokens:
+                children[index] = results.pop(child_token)
+            results[token] = _build_array_value_parts(children)
+            continue
+
+        _, token, node_pos, node_limit, node_edits = action
+        value_end = node_pos + _checked_value_size(
+            value, node_pos, node_limit)
+        if value_end != node_limit:
+            _malformed("child size does not match container offsets")
+        inserts = []
+        descend = {}
+        replacement = None
+        for segments, op, key_id, payload in node_edits:
+            if op == 'replace' and not segments:
+                replacement = payload
+                break
+            if op == 'insert' and len(segments) == 1:
+                inserts.append((key_id, payload))
+            else:
+                descend.setdefault(segments[0], []).append(
+                    (segments[1:], op, key_id, payload))
+        if replacement is not None:
+            results[token] = replacement
+            continue
+
+        basic_type = value[node_pos] & 0x3
+        child_actions = []
+        if basic_type == _OBJECT:
+            size, id_size, id_start, data_start, offsets, _ = (
+                _checked_object_layout(value, node_pos, value_end))
+            ids = [
+                _read_unsigned(value, id_start + i * id_size, id_size)
+                for i in range(size)
+            ]
+            if (source_metadata_size is not None
+                    and any(field_id >= source_metadata_size
+                            for field_id in ids)):
+                _malformed("object field id is missing from metadata")
+            ordered_offsets = sorted(offsets)
+            end_by_offset = dict(zip(
+                ordered_offsets, ordered_offsets[1:]))
+            slot_by_id = {
+                field_id: index for index, field_id in enumerate(ids)
+            }
+            edits_by_slot = {}
+            for (_, segment), child_edits in descend.items():
+                slot = slot_by_id[key_ids[segment]]
+                edits_by_slot[slot] = child_edits
+            children = []
+            child_tokens = []
+            for slot in range(size):
+                child_pos, child_end = _checked_object_child_bounds(
+                    value, data_start, offsets, slot, end_by_offset)
+                child_edits = edits_by_slot.get(slot)
+                if child_edits is not None:
+                    child_token = next_token
+                    next_token += 1
+                    children.append(None)
+                    child_tokens.append((slot, child_token))
+                    child_actions.append((
+                        'visit', child_token, child_pos, child_end,
+                        child_edits,
+                    ))
+                else:
+                    if (source_metadata_size is not None
+                            and (value[child_pos] & 0x3)
+                            in (_OBJECT, _ARRAY)):
+                        _validate_value_field_ids(
+                            value, child_pos, child_end,
+                            source_metadata_size)
+                    children.append(source[child_pos:child_end])
+            stack.append((
+                'finish_object', token, ids, children, inserts,
+                child_tokens,
+            ))
+        elif basic_type == _ARRAY:
+            size, data_start, offsets, _ = _checked_array_layout(
+                value, node_pos, value_end)
+            edits_by_index = {
+                segment: child_edits
+                for (_, segment), child_edits in descend.items()
+            }
+            children = []
+            child_tokens = []
+            for index in range(size):
+                child_pos = data_start + offsets[index]
+                child_end = data_start + offsets[index + 1]
+                child_edits = edits_by_index.get(index)
+                if child_edits is not None:
+                    child_token = next_token
+                    next_token += 1
+                    children.append(None)
+                    child_tokens.append((index, child_token))
+                    child_actions.append((
+                        'visit', child_token, child_pos, child_end,
+                        child_edits,
+                    ))
+                else:
+                    if source_metadata_size is not None:
+                        _validate_value_field_ids(
+                            value, child_pos, child_end,
+                            source_metadata_size)
+                    children.append(source[child_pos:child_end])
+            stack.append((
+                'finish_array', token, children, child_tokens,
+            ))
+        else:
+            _malformed("path segment does not match the value type")
+        stack.extend(child_actions)
+    return _materialize_value(results[0])
+
+
+def _root_insert_splice_layout(value, key_id, key_name, names_by_id):
+    """Return a root layout that can splice the new field."""
+    size, id_size, id_start, data_start, first_offsets, _ = (
+        _checked_object_layout(value, 0, len(value)))
+    header = value[0]
+    type_info = (header >> 2) & 0x3F
+    large_size = ((type_info >> 4) & 0x1) != 0
+    size_width = _U32_SIZE if large_size else 1
+    offset_size = (type_info & 0x3) + 1
+    offset_start = id_start + size * id_size
+    if not large_size and size + 1 > _U8_MAX:
+        return None
+    if key_id >= 1 << (8 * id_size):
+        return None
+    ordered_offsets = sorted(first_offsets)
+    end_by_offset = dict(zip(ordered_offsets, ordered_offsets[1:]))
+    for index in range(size):
+        _checked_object_child_bounds(
+            value, data_start, first_offsets, index, end_by_offset)
+    ids = [
+        _read_unsigned(value, id_start + i * id_size, id_size)
+        for i in range(size)
+    ]
+    names = [names_by_id.get(field_id) for field_id in ids]
+    if any(name is None for name in names) or names != sorted(names):
+        return None
+    slot = sum(name < key_name for name in names)
+    return (
+        header, size, size_width, id_size, id_start, data_start,
+        offset_size, offset_start, ids, slot,
+    )
+
+
+def _encoded_payload_batches(rows, provider, global_row):
+    """Encode array-backed splice payloads within byte and row budgets."""
+    batch_start = 0
+    payloads = []
+    payload_bytes = 0
+    for index, row in enumerate(rows):
+        payload = provider.encode(
+            provider.scalar_at(global_row + int(row)))
+        if (payloads
+                and (len(payloads)
+                     >= _ROOT_INSERT_SPLICE_MAX_BATCH_ROWS
+                     or payload_bytes + len(payload)
+                     > _ROOT_INSERT_SPLICE_PAYLOAD_BUDGET)):
+            yield batch_start, index, payloads
+            batch_start = index
+            payloads = []
+            payload_bytes = 0
+        payloads.append(payload)
+        payload_bytes += len(payload)
+    if payloads:
+        yield batch_start, len(rows), payloads
+
+
+def _repeated_payload_batches(row_count, payload):
+    """Repeat a scalar payload without creating an unbounded row batch."""
+    for batch_start in range(
+            0, row_count, _ROOT_INSERT_SPLICE_MAX_BATCH_ROWS):
+        batch_end = min(
+            batch_start + _ROOT_INSERT_SPLICE_MAX_BATCH_ROWS,
+            row_count)
+        yield (
+            batch_start,
+            batch_end,
+            [payload] * (batch_end - batch_start),
+        )
+
+
+def _plan_root_insert_splice(
+        values, rows, row_starts, row_lengths, source_data,
+        key_id, key_name, names_by_id, payloads):
+    """Plan a splice and identify rows matching one root layout."""
+    layout = None
+    for row in rows:
+        layout = _root_insert_splice_layout(
+            values.view(int(row)), key_id, key_name, names_by_id)
+        if layout is not None:
+            break
+    if layout is None:
+        return None
+    (
+        header, size, size_width, id_size, id_start, data_start,
+        offset_size, offset_start, ids, slot,
+    ) = layout
+
+    widths = np.full(len(rows), size_width, dtype=np.int64)
+    ok = source_data[row_starts] == header
+    ok &= row_lengths >= data_start
+    safe_starts = np.where(ok, row_starts, 0)
+    ok &= _take_unsigned(source_data, safe_starts + 1, widths) == size
+    widths = np.full(len(rows), id_size, dtype=np.int64)
+    for index in range(size):
+        ok &= _take_unsigned(
+            source_data,
+            safe_starts + id_start + index * id_size,
+            widths,
+        ) == ids[index]
+    widths = np.full(len(rows), offset_size, dtype=np.int64)
+    sentinels = _take_unsigned(
+        source_data,
+        safe_starts + offset_start + size * offset_size,
+        widths,
+    )
+    ok &= data_start + sentinels == row_lengths
+    if size:
+        minimum = None
+        for index in range(size):
+            entry = _take_unsigned(
+                source_data,
+                safe_starts + offset_start + index * offset_size,
+                widths,
+            )
+            ok &= entry < sentinels
+            minimum = entry if minimum is None else np.minimum(
+                minimum, entry)
+        ok &= minimum == 0
+    payload_lengths = np.fromiter(
+        (len(payload) for payload in payloads), np.int64, len(payloads))
+    new_sentinels = sentinels + payload_lengths
+    ok &= new_sentinels < 1 << (8 * offset_size)
+
+    return (
+        header, size, size_width, id_size, id_start, data_start,
+        offset_size, offset_start, slot, sentinels, ok,
+    )
+
+
+def _root_insert_splice(
+        values, state, rows, row_starts, row_lengths, source_data,
+        key_id, key_name, names_by_id, payloads,
+        source_metadata_size, output_metadata_size):
+    """Splice one field into uniform root objects."""
+    plan = _plan_root_insert_splice(
+        values, rows, row_starts, row_lengths, source_data,
+        key_id, key_name, names_by_id, payloads)
+    if plan is None:
+        return None
+    (
+        header, size, size_width, id_size, id_start, data_start,
+        offset_size, offset_start, slot, sentinels, ok,
+    ) = plan
+    matching_structures = np.zeros(len(rows), dtype=bool)
+    candidates = np.flatnonzero(ok)
+    if len(candidates):
+        lengths = row_lengths[candidates]
+        order = np.argsort(lengths, kind='stable')
+        candidates = candidates[order]
+        lengths = lengths[order]
+        boundaries = np.flatnonzero(lengths[1:] != lengths[:-1]) + 1
+        for group in np.split(candidates, boundaries):
+            exemplar = int(group[0])
+            value = values.view(int(rows[exemplar]))
+            if len(group) == 1:
+                _validate_value_field_ids(
+                    value, 0, len(value), source_metadata_size)
+                matching_structures[exemplar] = True
+                continue
+            matches = _matching_value_structures(
+                value, source_data, row_starts[group],
+                source_metadata_size)
+            if matches is not None:
+                matching_structures[group[matches]] = True
+
+    if state.data is not None:
+        source_view = memoryview(state.data)
+        source_base = state.data_start
+    else:
+        source_view = values.data
+        source_base = 0
+    prefix = bytes([header]) + (size + 1).to_bytes(size_width, 'little')
+    id_bytes = key_id.to_bytes(id_size, 'little')
+    id_slot = id_start + slot * id_size
+    offset_slot = offset_start + slot * offset_size
+    sentinel_slot = offset_start + size * offset_size
+    rebuilt = {}
+    fallback_rows = []
+    for index, row in enumerate(rows):
+        row = int(row)
+        if not ok[index]:
+            fallback_rows.append(row)
+            continue
+        original = values.view(row)
+        if not matching_structures[index]:
+            _validate_value_field_ids(
+                original, 0, len(original), source_metadata_size)
+        base = int(row_starts[index]) - source_base
+        sentinel = int(sentinels[index])
+        _check_variant_sizes(
+            int(row_lengths[index]) + id_size + offset_size
+            + len(payloads[index]),
+            output_metadata_size,
+        )
+        rebuilt[row] = b''.join((
+            prefix,
+            source_view[base + id_start:base + id_slot],
+            id_bytes,
+            source_view[base + id_slot:base + offset_slot],
+            sentinel.to_bytes(offset_size, 'little'),
+            source_view[base + offset_slot:base + sentinel_slot],
+            (sentinel + len(payloads[index])).to_bytes(
+                offset_size, 'little'),
+            source_view[base + data_start:base + data_start + sentinel],
+            payloads[index],
+        ))
+    return rebuilt, fallback_rows
+
+
+def _set_chunk(chunk, values, parsed, global_row):
+    parsed_paths = [parsed_path for _, parsed_path, _ in parsed]
+    parent_paths = [parsed_path[:-1] for parsed_path in parsed_paths]
+    query_paths = tuple(parsed_paths) + tuple(parent_paths)
+    count = len(parsed)
+    metadata_column = chunk.field(1)
+    valid_rows = _valid_row_indices(chunk, values, metadata_column)
+    if not len(valid_rows):
+        return chunk
+    plans, slow_rows = _partition_path_plans(
+        values, metadata_column, valid_rows, query_paths)
+    slow_rows = set(int(row) for row in slow_rows)
+    metadata_values = _BinaryValues(metadata_column)
+    state = _PatchState(values)
+    rebuilt_rows = {}
+    rebuilt_metadata = {}
+    scalar_payloads = {}
+
+    def payload_for(index, provider, row):
+        if provider._array is not None:
+            return provider.encode(provider.scalar_at(global_row + row))
+        if index not in scalar_payloads:
+            scalar_payloads[index] = provider.encode(provider.scalar_at(0))
+        return scalar_payloads[index]
+
+    def rebuild_row(row, view, insert_set, key_ids, names_by_id,
+                    original_metadata, new_metadata,
+                    source_metadata_size=None,
+                    validated_positions=None):
+        edits = []
+        for index, (path, parsed_path, provider) in enumerate(parsed):
+            payload = payload_for(index, provider, row)
+            if index in insert_set:
+                edits.append((
+                    parsed_path, 'insert',
+                    key_ids[parsed_path[-1][1]], payload))
+            else:
+                if validated_positions is not None:
+                    provider.validate_source(
+                        view, validated_positions[index])
+                edits.append((parsed_path, 'replace', None, payload))
+        rebuilt = _apply_edits(
+            view, 0, len(view), edits, key_ids, names_by_id,
+            source_metadata_size)
+        _check_variant_sizes(
+            len(rebuilt),
+            len(new_metadata if new_metadata is not None
+                else original_metadata),
+        )
+        if new_metadata is not None or rebuilt != view:
+            rebuilt_rows[row] = rebuilt
+        if new_metadata is not None:
+            rebuilt_metadata[row] = new_metadata
+
+    for planned in plans:
+        rows, row_starts, source_data, positions, limits = planned
+        target_positions = positions[:count]
+        target_limits = limits[:count]
+        parent_positions = positions[count:]
+        parent_limits = limits[count:]
+        group_slow = set()
+        insert_indices = []
+        for index, (path, parsed_path, provider) in enumerate(parsed):
+            if target_positions[index] is not None:
+                continue
+            parent_pos = parent_positions[index]
+            if parent_pos is None:
+                raise ValueError(
+                    f"VARIANT parent path does not exist: {path}")
+            if not parsed_path or parsed_path[-1][0] != 'key':
+                raise ValueError(
+                    "VARIANT array index insertion is not supported: "
+                    + path)
+            parent_headers = source_data[row_starts + parent_pos]
+            if np.any((parent_headers & 0x3) != _OBJECT):
+                raise ValueError(
+                    f"VARIANT parent path is not an object: {path}")
+            insert_indices.append(index)
+        if not insert_indices and all(
+                provider._fixed_size is not None
+                for _, _, provider in parsed):
+            _patch_planned_group(
+                (rows, row_starts, source_data,
+                 target_positions, target_limits),
+                parsed, len(chunk), global_row, state, slow_rows, False)
+            continue
+        first_metadata = bytes(metadata_values.view(int(rows[0])))
+        insert_keys = tuple(
+            parsed[index][1][-1][1] for index in insert_indices)
+        metadata_key_ids = _cached_metadata_key_ids(first_metadata)
+        source_metadata_size = len(metadata_key_ids)
+        rebuild_validation_size = (
+            source_metadata_size
+            if any(key not in metadata_key_ids for key in insert_keys)
+            else None
+        )
+        new_metadata, key_ids, names_by_id = _metadata_with_keys(
+            first_metadata, insert_keys)
+        insert_set = set(insert_indices)
+        splice_eligible = (
+            len(insert_indices) == 1
+            and len(parsed[insert_indices[0]][1]) == 1
+            and all(
+                index in insert_set
+                or parsed[index][2]._fixed_size is not None
+                for index in range(count))
+        )
+        if splice_eligible:
+            insert_index = insert_indices[0]
+            replace_indices = [
+                index for index in range(count) if index != insert_index
+            ]
+            if replace_indices:
+                _patch_planned_group(
+                    (rows, row_starts, source_data,
+                     [target_positions[index] for index in replace_indices],
+                     [target_limits[index] for index in replace_indices]),
+                    [parsed[index] for index in replace_indices],
+                    len(chunk), global_row, state, group_slow, False)
+                slow_rows |= group_slow
+            if group_slow:
+                keep = np.fromiter(
+                    (int(row) not in group_slow for row in rows),
+                    bool, len(rows))
+                live_rows = rows[keep]
+                live_starts = row_starts[keep]
+                live_lengths = parent_limits[insert_index][keep]
+            else:
+                live_rows = rows
+                live_starts = row_starts
+                live_lengths = parent_limits[insert_index]
+            provider = parsed[insert_index][2]
+            if not len(live_rows):
+                continue
+            if provider._array is None:
+                payload = payload_for(insert_index, provider, 0)
+                batches = _repeated_payload_batches(
+                    len(live_rows), payload)
+            else:
+                batches = _encoded_payload_batches(
+                    live_rows, provider, global_row)
+            key_name = parsed[insert_index][1][-1][1]
+            output_metadata_size = len(
+                new_metadata if new_metadata is not None
+                else first_metadata)
+            for batch_start, batch_end, payloads in batches:
+                batch_rows = live_rows[batch_start:batch_end]
+                spliced = _root_insert_splice(
+                    values, state, batch_rows,
+                    live_starts[batch_start:batch_end],
+                    live_lengths[batch_start:batch_end],
+                    source_data, key_ids[key_name], key_name,
+                    names_by_id, payloads, source_metadata_size,
+                    output_metadata_size)
+                if spliced is None:
+                    for row in batch_rows:
+                        row = int(row)
+                        rebuild_row(
+                            row, values.view(row), insert_set, key_ids,
+                            names_by_id, first_metadata, new_metadata,
+                            rebuild_validation_size)
+                    continue
+                rebuilt, fallback_rows = spliced
+                rebuilt_rows.update(rebuilt)
+                if new_metadata is not None:
+                    for row in rebuilt:
+                        rebuilt_metadata[row] = new_metadata
+                for row in fallback_rows:
+                    rebuild_row(
+                        row, values.view(row), insert_set, key_ids,
+                        names_by_id, first_metadata, new_metadata,
+                        rebuild_validation_size)
+            continue
+        for offset_index, row in enumerate(rows):
+            row = int(row)
+            if row in group_slow:
+                continue
+            rebuild_row(
+                row, values.view(row), insert_set, key_ids, names_by_id,
+                first_metadata, new_metadata, rebuild_validation_size,
+                [
+                    None if target_positions[index] is None
+                    else int(target_positions[index][offset_index])
+                    for index in range(count)
+                ],
+            )
+
+    for row in sorted(slow_rows):
+        view = values.view(row)
+        row_metadata = bytes(metadata_values.view(row))
+        positions = _path_positions(view, row_metadata, query_paths)
+        target_positions = positions[:count]
+        parent_positions = positions[count:]
+        insert_keys = []
+        insert_set = set()
+        for index, (path, parsed_path, provider) in enumerate(parsed):
+            if target_positions[index] is not None:
+                provider.validate_source(view, target_positions[index])
+                continue
+            parent_pos = parent_positions[index]
+            if parent_pos is None:
+                raise ValueError(
+                    f"VARIANT parent path does not exist: {path}")
+            if not parsed_path or parsed_path[-1][0] != 'key':
+                raise ValueError(
+                    "VARIANT array index insertion is not supported: "
+                    + path)
+            if (view[parent_pos] & 0x3) != _OBJECT:
+                raise ValueError(
+                    f"VARIANT parent path is not an object: {path}")
+            insert_set.add(index)
+            insert_keys.append(parsed_path[-1][1])
+        metadata_key_ids = _cached_metadata_key_ids(row_metadata)
+        source_metadata_size = len(metadata_key_ids)
+        rebuild_validation_size = (
+            source_metadata_size
+            if any(key not in metadata_key_ids for key in insert_keys)
+            else None
+        )
+        new_metadata, key_ids, names_by_id = _metadata_with_keys(
+            row_metadata, tuple(insert_keys))
+        rebuild_row(
+            row, view, insert_set, key_ids, names_by_id, row_metadata,
+            new_metadata, rebuild_validation_size)
+
+    if rebuilt_rows:
+        state.ensure()
+        new_values = _sparse_rebuilt_binary(
+            values, state.data, state.data_start, rebuilt_rows)
+    elif state.data is not None:
+        return _patched_chunk(chunk, values, state.data, state.data_start)
+    else:
+        return chunk
+    if rebuilt_metadata:
+        new_metadata_column = _sparse_rebuilt_binary(
+            metadata_values, metadata_values.data, 0, rebuilt_metadata)
+    else:
+        new_metadata_column = metadata_column
+    return pa.StructArray.from_arrays(
+        [new_values, new_metadata_column],
+        fields=list(chunk.type),
+        mask=chunk.is_null(),
+    )
+
+
+@_with_metadata_cache
+def variant_set(column, path, value=None):
+    """Replace existing VARIANT paths or insert missing final OBJECT keys.
+
+    Missing intermediate paths and non-OBJECT parents raise ValueError.
+    """
+    if isinstance(path, Mapping):
+        if value is not None:
+            raise TypeError(
+                "VARIANT value must be omitted for path mappings")
+        updates = path
+    else:
+        updates = {path: value}
+    parsed = [
+        (target, _parse_path(target), _Replacement(item, len(column)))
+        for target, item in updates.items()
+    ]
+    _validate_distinct_paths(parsed)
+    if not parsed:
+        return column
+
+    chunks, chunked, data_type = _variant_chunks(column)
+    result_chunks = []
+    global_row = 0
+    for chunk in chunks:
+        values = _BinaryValues(chunk.field(0))
+        result_chunks.append(_set_chunk(chunk, values, parsed, global_row))
         global_row += len(chunk)
 
     if not chunked:

@@ -102,7 +102,7 @@ class TableMergeIntoTest(BatchModeMixin, DataEvolutionTestBase, unittest.TestCas
 
         update_msg = object()
         delete_msg = object()
-        table, table_commit = self._mock_ray_commit_table()
+        table, _ = self._mock_ray_commit_table()
 
         with patch.object(
                 ray_merge,
@@ -125,14 +125,13 @@ class TableMergeIntoTest(BatchModeMixin, DataEvolutionTestBase, unittest.TestCas
                     ray_remote_args=None,
                     concurrency=None,
                 )
-        table_commit.abort.assert_called_once_with([update_msg, delete_msg])
-        table_commit.close.assert_called_once_with()
+        table.new_batch_write_builder.assert_not_called()
 
-    def test_ray_execute_aborts_prepared_messages_on_later_branch_failure(self):
+    def test_ray_execute_preserves_messages_on_later_branch_failure(self):
         import pypaimon.ray.data_evolution_merge_into as ray_merge
 
         update_msg = object()
-        table, table_commit = self._mock_ray_commit_table()
+        table, _ = self._mock_ray_commit_table()
 
         with patch.object(
                 ray_merge,
@@ -155,15 +154,13 @@ class TableMergeIntoTest(BatchModeMixin, DataEvolutionTestBase, unittest.TestCas
                     ray_remote_args=None,
                     concurrency=None,
                 )
-        table_commit.abort.assert_called_once_with([update_msg])
-        table_commit.close.assert_called_once_with()
-        table_commit.commit.assert_not_called()
+        table.new_batch_write_builder.assert_not_called()
 
-    def test_ray_execute_aborts_prepared_messages_on_insert_failure(self):
+    def test_ray_execute_preserves_messages_on_insert_failure(self):
         import pypaimon.ray.data_evolution_merge_into as ray_merge
 
         update_msg = object()
-        table, table_commit = self._mock_ray_commit_table()
+        table, _ = self._mock_ray_commit_table()
 
         with patch.object(
                 ray_merge,
@@ -186,9 +183,7 @@ class TableMergeIntoTest(BatchModeMixin, DataEvolutionTestBase, unittest.TestCas
                     ray_remote_args=None,
                     concurrency=None,
                 )
-        table_commit.abort.assert_called_once_with([update_msg])
-        table_commit.close.assert_called_once_with()
-        table_commit.commit.assert_not_called()
+        table.new_batch_write_builder.assert_not_called()
 
     def test_ray_execute_does_not_abort_after_commit_starts(self):
         import pypaimon.ray.data_evolution_merge_into as ray_merge

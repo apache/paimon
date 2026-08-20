@@ -53,6 +53,8 @@ import org.apache.arrow.vector.IntVector;
 import org.apache.arrow.vector.TimeMicroVector;
 import org.apache.arrow.vector.TimeNanoVector;
 import org.apache.arrow.vector.TimeSecVector;
+import org.apache.arrow.vector.TimeStampNanoTZVector;
+import org.apache.arrow.vector.TimeStampNanoVector;
 import org.apache.arrow.vector.VarBinaryVector;
 import org.apache.arrow.vector.VarCharVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
@@ -588,6 +590,43 @@ public class ArrowFormatWriterTest {
     }
 
     @Test
+    public void testArrowBundleRecordsWithPreEpochNanoTimestamps() {
+        RowType rowType =
+                RowType.of(
+                        new DataField(0, "ts_nano", DataTypes.TIMESTAMP(9)),
+                        new DataField(
+                                1, "ts_ltz_nano", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(9)));
+
+        // 1969-12-31T23:59:59.999999999, i.e. one nanosecond before the epoch
+        long nanos = -1L;
+
+        try (RootAllocator allocator = new RootAllocator()) {
+            TimeStampNanoVector tsVector = new TimeStampNanoVector("ts_nano", allocator);
+            tsVector.allocateNew(1);
+            tsVector.setSafe(0, nanos);
+            tsVector.setValueCount(1);
+
+            TimeStampNanoTZVector tsLtzVector =
+                    new TimeStampNanoTZVector("ts_ltz_nano", allocator, "UTC");
+            tsLtzVector.allocateNew(1);
+            tsLtzVector.setSafe(0, nanos);
+            tsLtzVector.setValueCount(1);
+
+            List<FieldVector> vectors = Arrays.asList(tsVector, tsLtzVector);
+            try (VectorSchemaRoot vectorSchemaRoot = new VectorSchemaRoot(vectors)) {
+                vectorSchemaRoot.setRowCount(1);
+
+                Iterator<InternalRow> iterator =
+                        new ArrowBundleRecords(vectorSchemaRoot, rowType, true).iterator();
+                InternalRow row = iterator.next();
+                Timestamp expected = Timestamp.fromEpochMillis(-1, 999_999);
+                assertThat(row.getTimestamp(0, 9)).isEqualTo(expected);
+                assertThat(row.getTimestamp(1, 9)).isEqualTo(expected);
+            }
+        }
+    }
+
+    @Test
     public void testCWriter() {
         try (ArrowFormatCWriter writer = new ArrowFormatCWriter(PRIMITIVE_TYPE, 4096, true)) {
             writeAndCheck(writer);
@@ -620,6 +659,35 @@ public class ArrowFormatWriterTest {
             assertThat(allocator.closeCount()).isZero();
         } finally {
             allocator.close();
+        }
+    }
+
+    @Test
+    public void testArrowBundleSchemaCompatibilityIgnoresFieldDescription() {
+        RowType writerType = RowType.builder().field("value", DataTypes.INT()).build();
+        RowType bundleType =
+                RowType.builder().field("value", DataTypes.INT(), "different description").build();
+
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(writerType, 1, true)) {
+            assertThat(
+                            writer.isArrowBundleSchemaCompatible(
+                                    new ArrowBundleRecords(
+                                            writer.getVectorSchemaRoot(), bundleType, true)))
+                    .isTrue();
+        }
+    }
+
+    @Test
+    public void testArrowBundleSchemaCompatibilityRequiresLogicalType() {
+        RowType writerType = RowType.builder().field("value", DataTypes.VARCHAR(10)).build();
+        RowType bundleType = RowType.builder().field("value", DataTypes.CHAR(10)).build();
+
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(writerType, 1, true)) {
+            assertThat(
+                            writer.isArrowBundleSchemaCompatible(
+                                    new ArrowBundleRecords(
+                                            writer.getVectorSchemaRoot(), bundleType, true)))
+                    .isFalse();
         }
     }
 

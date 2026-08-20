@@ -64,6 +64,12 @@ SELECT * FROM my_table$snapshots;
 
 By querying the snapshots table, you can know the commit and expiration information about that table and time travel through the data.
 
+`total_record_count` and `delta_record_count` are unmerged counts calculated from data files, not
+logical row counts. All dedicated data files contribute to these values. For example, appending `N`
+logical rows to a table with one [dedicated BLOB column](../multimodal-table/blob#storage-layout)
+adds `N` records to the regular data files and `N` records to the BLOB files, so
+`delta_record_count` increases by `2 * N`. Use `COUNT(*)` when you need the logical row count.
+
 ### Schemas Table
 
 You can query the historical schemas of the table through schemas table.

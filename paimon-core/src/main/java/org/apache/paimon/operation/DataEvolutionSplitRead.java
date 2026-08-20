@@ -46,6 +46,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.DataEvolutionFileReader;
 import org.apache.paimon.reader.EmptyFileRecordReader;
 import org.apache.paimon.reader.FileRecordReader;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaEvolutionUtil;
@@ -128,6 +129,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
     protected RowType readRowType;
     @Nullable private List<Predicate> filters;
+    @Nullable private ReadBatchSizer readBatchSizer;
 
     public DataEvolutionSplitRead(
             FileIO fileIO,
@@ -174,6 +176,12 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             // reconfigured after it created readers, see AppendTableRead#innerWithFilter
             singleFileReaderMappings.clear();
         }
+        return this;
+    }
+
+    @Override
+    public SplitRead<InternalRow> withReadBatchSizer(ReadBatchSizer sizer) {
+        this.readBatchSizer = sizer;
         return this;
     }
 
@@ -451,7 +459,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                     rowRanges,
                                     readRowType,
                                     deletionVector),
-                    (reader, range) -> applyDeletionVector(reader, range, deletionVector),
+                    (reader, range) ->
+                            applyDeletionVector(reader, range, rowRanges, deletionVector),
                     rowRanges,
                     readRowType,
                     blobIndex);
@@ -597,7 +606,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         }
 
         FormatReaderContext formatReaderContext =
-                new FormatReaderContext(fileIO, readTarget.path, readTarget.fileSize, selection);
+                new FormatReaderContext(
+                        fileIO, readTarget.path, readTarget.fileSize, selection, readBatchSizer);
         FileRecordReader<InternalRow> fileRecordReader =
                 new DataFileRecordReader(
                         readRowType,
@@ -618,22 +628,25 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                     new ApplyBitmapIndexRecordReader(fileRecordReader, bitmapIndexResult);
         }
 
-        return applyDeletionVector(fileRecordReader, file.nonNullRowIdRange(), deletionVector);
+        return applyDeletionVector(
+                fileRecordReader, file.nonNullRowIdRange(), rowRanges, deletionVector);
     }
 
     private FileRecordReader<InternalRow> applyDeletionVector(
             FileRecordReader<InternalRow> reader,
             Range readerRange,
+            List<Range> rowRanges,
             @Nullable DeletionVectorWithRange deletionVector) {
         if (deletionVector == null || deletionVector.deletionVector.isEmpty()) {
             return reader;
         }
 
         checkArgument(
-                deletionVector.range.from <= readerRange.from
-                        && deletionVector.range.to >= readerRange.to,
-                "Deletion vector range %s should contain reader range %s.",
+                selectedRangesContainedByDeletionVector(
+                        readerRange, rowRanges, deletionVector.range),
+                "Deletion vector range %s should contain selected ranges %s of reader range %s.",
                 deletionVector.range,
+                rowRanges,
                 readerRange);
 
         return new ApplyDeletionVectorReader(
@@ -641,6 +654,23 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 deletionVector.deletionVector,
                 // Convert anchor-range DV positions to this reader's local returned positions.
                 readerRange.from - deletionVector.range.from);
+    }
+
+    private boolean selectedRangesContainedByDeletionVector(
+            Range readerRange, List<Range> rowRanges, Range deletionVectorRange) {
+        if (rowRanges == null) {
+            return deletionVectorRange.from <= readerRange.from
+                    && deletionVectorRange.to >= readerRange.to;
+        }
+        for (Range rowRange : rowRanges) {
+            Range selectedRange = Range.intersection(readerRange, rowRange);
+            if (selectedRange != null
+                    && (deletionVectorRange.from > selectedRange.from
+                            || deletionVectorRange.to < selectedRange.to)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

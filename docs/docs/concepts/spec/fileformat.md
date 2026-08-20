@@ -64,6 +64,16 @@ The following table lists the type mapping from Paimon type to Parquet type.
       <td></td>
     </tr>
     <tr>
+      <td>GEOMETRY(crs)</td>
+      <td>BINARY</td>
+      <td>GEOMETRY(crs)</td>
+    </tr>
+    <tr>
+      <td>GEOGRAPHY(crs, algorithm)</td>
+      <td>BINARY</td>
+      <td>GEOGRAPHY(crs, algorithm)</td>
+    </tr>
+    <tr>
       <td>DECIMAL(P, S)</td>
       <td>P <= 9: INT32, P <= 18: INT64, P > 18: FIXED_LEN_BYTE_ARRAY</td>
       <td>DECIMAL(P, S)</td>
@@ -142,8 +152,10 @@ The following table lists the type mapping from Paimon type to Parquet type.
 </table>
 
 Limitations:
+
 1. [Parquet does not support nullable map keys](https://github.com/apache/parquet-format/blob/master/LogicalTypes#maps).
 2. Parquet TIMESTAMP type with precision 9 will use INT96, but this int96 is a time zone converted value and requires additional adjustments.
+3. Tables containing `GEOMETRY` or `GEOGRAPHY` columns must use Parquet for `file.format`, every entry in `file.format.per.level`, and `changelog-file.format` when configured.
 
 ## AVRO
 

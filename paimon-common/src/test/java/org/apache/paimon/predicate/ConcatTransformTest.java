@@ -72,4 +72,13 @@ class ConcatTransformTest {
                                 BinaryString.fromString("-he")));
         assertThat(result).isEqualTo(BinaryString.fromString("ha-he"));
     }
+
+    @Test
+    public void testToStringWithNullInput() {
+        List<Object> inputs = new ArrayList<>();
+        inputs.add(BinaryString.fromString("a"));
+        inputs.add(null);
+
+        assertThat(new ConcatTransform(inputs).toString()).isEqualTo("CONCAT(a, null)");
+    }
 }

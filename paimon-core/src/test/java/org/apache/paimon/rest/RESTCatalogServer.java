@@ -1943,16 +1943,112 @@ public class RESTCatalogServer {
                 List<Map<String, String>> existed = new ArrayList<>();
                 for (Map<String, String> spec : request.getPartitionSpecs()) {
                     if (existingSpecs.add(spec)) {
-                        storedPartitions.add(new Partition(spec, 0, 0, 0, 0, -1, false));
+                        // A registration measures nothing, so a new partition starts unknown.
+                        storedPartitions.add(
+                                new Partition(
+                                        spec,
+                                        PartitionStatistics.UNKNOWN,
+                                        PartitionStatistics.UNKNOWN,
+                                        PartitionStatistics.UNKNOWN,
+                                        PartitionStatistics.UNKNOWN,
+                                        PartitionStatistics.UNKNOWN_TOTAL_BUCKETS,
+                                        false));
                         created.add(spec);
                     } else {
                         existed.add(spec);
                     }
                 }
+                applyPartitionStatistics(
+                        storedPartitions,
+                        request.getPartitionStatistics(),
+                        request.replaceStatistics());
                 return mockResponse(new CreatePartitionsResponse(created, existed), 200);
             default:
                 return new MockResponse().setResponseCode(404);
         }
+    }
+
+    /**
+     * Folds reported statistics into the stored partitions, the way a catalog server does:
+     * replacing overwrites, adding accumulates, a field reported as unknown leaves the stored one
+     * alone, and no report adds or removes a partition row.
+     *
+     * <p>All or nothing: if any reported spec names a partition this table does not hold, none of
+     * the report is applied, since a reporter sending it again would count the applied part twice.
+     */
+    private static void applyPartitionStatistics(
+            List<Partition> storedPartitions,
+            @Nullable List<PartitionStatistics> statistics,
+            @Nullable Boolean replaceStatistics) {
+        if (statistics == null) {
+            return;
+        }
+        boolean accumulate = !Boolean.TRUE.equals(replaceStatistics);
+        Map<Map<String, String>, PartitionStatistics> reported = new HashMap<>();
+        for (PartitionStatistics statistic : statistics) {
+            reported.put(statistic.spec(), statistic);
+        }
+        Set<Map<String, String>> storedSpecs =
+                storedPartitions.stream().map(Partition::spec).collect(Collectors.toSet());
+        if (!storedSpecs.containsAll(reported.keySet())) {
+            // Applying the half that matched would count it twice on the next report.
+            return;
+        }
+        for (int i = 0; i < storedPartitions.size(); i++) {
+            Partition stored = storedPartitions.get(i);
+            PartitionStatistics update = reported.get(stored.spec());
+            if (update == null) {
+                continue;
+            }
+            storedPartitions.set(
+                    i,
+                    new Partition(
+                            stored.spec(),
+                            combine(stored.recordCount(), update.recordCount(), accumulate),
+                            combine(stored.fileSizeInBytes(), update.fileSizeInBytes(), accumulate),
+                            combine(stored.fileCount(), update.fileCount(), accumulate),
+                            combineLastFileCreationTime(
+                                    stored.lastFileCreationTime(),
+                                    update.lastFileCreationTime(),
+                                    accumulate),
+                            stored.totalBuckets(),
+                            stored.done()));
+        }
+    }
+
+    /**
+     * Folds a snapshot commit's report onto a stored value. That report is a delta, so a negative
+     * is a decrement rather than an unknown, but a value nobody has measured is replaced rather
+     * than added to: a partition registered and not yet measured holds UNKNOWN, and UNKNOWN plus a
+     * count is a count short by one.
+     */
+    private static long accumulateDelta(long stored, long reported) {
+        return PartitionStatistics.isKnown(stored) ? stored + reported : reported;
+    }
+
+    private static long combine(long stored, long reported, boolean accumulate) {
+        if (!PartitionStatistics.isKnown(reported)) {
+            return stored;
+        }
+        if (!accumulate || !PartitionStatistics.isKnown(stored)) {
+            return reported;
+        }
+        return stored + reported;
+    }
+
+    /**
+     * Folds a reported creation time in: adding takes the later of the two, setting takes what the
+     * report says even when that moves the time backwards.
+     */
+    private static long combineLastFileCreationTime(
+            long stored, long reported, boolean accumulate) {
+        if (!PartitionStatistics.isKnown(reported)) {
+            return stored;
+        }
+        if (!accumulate) {
+            return reported;
+        }
+        return Math.max(stored, reported);
     }
 
     private MockResponse dropPartitionsHandle(String data, Identifier tableIdentifier)
@@ -2869,12 +2965,16 @@ public class RESTCatalogServer {
                                                         }
                                                         return new Partition(
                                                                 oldPartition.spec(),
-                                                                oldPartition.recordCount()
-                                                                        + stats.recordCount(),
-                                                                oldPartition.fileSizeInBytes()
-                                                                        + stats.fileSizeInBytes(),
-                                                                oldPartition.fileCount()
-                                                                        + stats.fileCount(),
+                                                                accumulateDelta(
+                                                                        oldPartition.recordCount(),
+                                                                        stats.recordCount()),
+                                                                accumulateDelta(
+                                                                        oldPartition
+                                                                                .fileSizeInBytes(),
+                                                                        stats.fileSizeInBytes()),
+                                                                accumulateDelta(
+                                                                        oldPartition.fileCount(),
+                                                                        stats.fileCount()),
                                                                 Math.max(
                                                                         oldPartition
                                                                                 .lastFileCreationTime(),

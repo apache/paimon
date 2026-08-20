@@ -134,6 +134,11 @@ public class BlobTableTest extends TableTestBase {
 
         commitDefault(writeDataDefault(1000, 1));
 
+        assertThat(getTableDefault().snapshotManager().latestSnapshot().totalRecordCount())
+                .isEqualTo(2000L);
+        assertThat(getTableDefault().snapshotManager().latestSnapshot().deltaRecordCount())
+                .isEqualTo(2000L);
+
         AtomicInteger integer = new AtomicInteger(0);
 
         List<DataFileMeta> filesMetas =

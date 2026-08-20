@@ -230,6 +230,16 @@ public final class ProjectedDataFileMeta implements DataFileMeta {
         return !currentRow().isNullAt(requiredPosition(Fields.FIRST_ROW_ID));
     }
 
+    @Override
+    public long nonNullFirstRowId() {
+        // Read the primitive value directly on manifest scan hot paths. Calling firstRowId()
+        // here would box every value as Long before immediately unboxing it again.
+        int position = requiredPosition(Fields.FIRST_ROW_ID);
+        InternalRow row = currentRow();
+        checkState(!row.isNullAt(position), "First row id cannot be null.");
+        return row.getLong(position);
+    }
+
     @Nullable
     @Override
     public Long firstRowId() {
@@ -242,6 +252,22 @@ public final class ProjectedDataFileMeta implements DataFileMeta {
     @Override
     public List<String> writeCols() {
         return nullableStringArray(Fields.WRITE_COLS);
+    }
+
+    @Nullable
+    @Override
+    public long[] columnMaxSequenceNumbers() {
+        int position = requiredPosition(Fields.WRITE_COLS_SEQUENCES);
+        InternalRow row = currentRow();
+        if (row.isNullAt(position)) {
+            return null;
+        }
+        InternalArray array = row.getArray(position);
+        long[] result = new long[array.size()];
+        for (int i = 0; i < array.size(); i++) {
+            result[i] = array.getLong(i);
+        }
+        return result;
     }
 
     public boolean containsWriteColumn(BinaryString fieldName) {
@@ -279,6 +305,11 @@ public final class ProjectedDataFileMeta implements DataFileMeta {
     @Override
     public DataFileMeta assignSequenceNumber(long minSequenceNumber, long maxSequenceNumber) {
         throw unsupportedOperation("assignSequenceNumber(long, long)");
+    }
+
+    @Override
+    public DataFileMeta withColumnMaxSequenceNumbers(long[] columnMaxSequenceNumbers) {
+        throw unsupportedOperation("withColumnMaxSequenceNumbers(long[])");
     }
 
     @Override
@@ -378,6 +409,8 @@ public final class ProjectedDataFileMeta implements DataFileMeta {
         private static final int EXTERNAL_PATH = fieldIndex(DataFileMeta.EXTERNAL_PATH);
         private static final int FIRST_ROW_ID = fieldIndex(DataFileMeta.FIRST_ROW_ID);
         private static final int WRITE_COLS = fieldIndex(DataFileMeta.WRITE_COLS);
+        private static final int WRITE_COLS_SEQUENCES =
+                fieldIndex(DataFileMeta.WRITE_COLS_SEQUENCES);
     }
 
     /** Projected data-file schema together with its bound binary field layout. */

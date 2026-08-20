@@ -18,7 +18,10 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.catalog.Identifier
+import org.apache.paimon.schema.Schema
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.types.DataTypes
 
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.execution.SortExec
@@ -186,6 +189,41 @@ class BucketedTableQueryTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
       spark.sql(
         "INSERT INTO t7 VALUES (1, 'x1', '2020'), (2, 'x3', '2020'), (3, 'x3', '2021'), (4, 'x4', '2021'), (5, 'x5', '2021')")
       checkAnswerAndShuffleSorts("SELECT * FROM t1 JOIN t7 on t1.id = t7.id1", 2, 2)
+    }
+  }
+
+  test("Query on a bucketed table - join - bucket key of an unsupported timestamp precision") {
+    assume(gteqSpark3_3)
+
+    // Spark cannot express a parameterized timestamp in DDL, so go through the table API. Spark's
+    // timestamp precision is fixed to 6, hence a bucket key of another precision is not
+    // distinguishable in the reported transform while Paimon buckets it differently.
+    Seq(("ts3", DataTypes.TIMESTAMP_MILLIS()), ("ts6", DataTypes.TIMESTAMP())).foreach {
+      case (name, tsType) =>
+        paimonCatalog.createTable(
+          Identifier.create(dbName0, name),
+          Schema.newBuilder
+            .column("ts", tsType)
+            .column("c", DataTypes.STRING())
+            .option("bucket-key", "ts")
+            .option("bucket", "2")
+            .build,
+          false
+        )
+        spark.sql(s"""
+                     |INSERT INTO $name VALUES
+                     |(timestamp'2024-01-01 00:00:01', 'x1'), (timestamp'2024-01-01 00:00:02', 'x2'),
+                     |(timestamp'2024-01-01 00:00:03', 'x3'), (timestamp'2024-01-01 00:00:04', 'x4'),
+                     |(timestamp'2024-01-01 00:00:05', 'x5'), (timestamp'2024-01-01 00:00:06', 'x6'),
+                     |(timestamp'2024-01-01 00:00:07', 'x7'), (timestamp'2024-01-01 00:00:08', 'x8')
+                     |""".stripMargin)
+    }
+
+    try {
+      checkAnswerAndShuffleSorts("SELECT * FROM ts3 JOIN ts6 on ts3.ts = ts6.ts", 2, 2)
+    } finally {
+      spark.sql("DROP TABLE IF EXISTS ts3")
+      spark.sql("DROP TABLE IF EXISTS ts6")
     }
   }
 

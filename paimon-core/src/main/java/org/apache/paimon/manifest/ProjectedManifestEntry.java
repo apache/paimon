@@ -49,6 +49,7 @@ public final class ProjectedManifestEntry implements ManifestEntry {
     private static final Projection FULL_PROJECTION = Projection.create(MANIFEST_ROW_TYPE);
     public static final Projection DELETE_ENTRY_PROJECTION = createDeleteEntryProjection();
     public static final Projection ROW_RANGE_PROJECTION = createRowRangeProjection();
+    public static final Projection ENTRY_LAYOUT_PROJECTION = createEntryLayoutProjection();
 
     private final Projection projection;
     private final @Nullable ProjectedDataFileMeta file;
@@ -130,6 +131,30 @@ public final class ProjectedManifestEntry implements ManifestEntry {
                                                 DataFileMeta.SCHEMA.project(
                                                         DataFileMeta.ROW_COUNT,
                                                         DataFileMeta.FIRST_ROW_ID)))));
+    }
+
+    private static Projection createEntryLayoutProjection() {
+        RowType manifestType = MANIFEST_ROW_TYPE;
+        return Projection.create(
+                new RowType(
+                        false,
+                        Arrays.asList(
+                                manifestType.getField(ManifestEntry.KIND),
+                                manifestType.getField(ManifestEntry.PARTITION),
+                                manifestType.getField(ManifestEntry.BUCKET),
+                                manifestType
+                                        .getField(ManifestEntry.FILE)
+                                        .newType(
+                                                DataFileMeta.SCHEMA.project(
+                                                        DataFileMeta.FILE_NAME,
+                                                        DataFileMeta.ROW_COUNT,
+                                                        DataFileMeta.LEVEL,
+                                                        DataFileMeta.SCHEMA_ID,
+                                                        DataFileMeta.FIRST_ROW_ID,
+                                                        DataFileMeta.MAX_SEQUENCE_NUMBER,
+                                                        DataFileMeta.EXTRA_FILES,
+                                                        DataFileMeta.EMBEDDED_FILE_INDEX,
+                                                        DataFileMeta.EXTERNAL_PATH)))));
     }
 
     /** Drops references to the current row before its reader batch is released. */
@@ -366,7 +391,7 @@ public final class ProjectedManifestEntry implements ManifestEntry {
             }
         }
 
-        RowType projectedType() {
+        public RowType projectedType() {
             return projectedType;
         }
 

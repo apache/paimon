@@ -27,10 +27,10 @@ under the License.
 
 # Primary-Key Indexes
 
-Primary-key tables can maintain Vector, Full Text, BTree, and Bitmap indexes together with compact
-data files. These indexes are bucket-local and source-backed: every index group records its source data
-files and maps matches back to physical row positions. Deletion vectors are applied when indexed
-rows are read, so updates and deletes remain exact.
+Primary-key tables can maintain Vector, Full Text, BTree, Bitmap, and Multivalue indexes together
+with compact data files. These indexes are bucket-local and source-backed: every index group records
+its source data files and maps matches back to physical row positions. Deletion vectors are applied
+when indexed rows are read, so updates and deletes remain exact.
 
 Primary-key indexes differ from indexes created with `create_global_index`. A regular
 [Global Index](../multimodal-table/global-index) addresses table-wide row IDs and is built
@@ -62,6 +62,22 @@ See [Bitmap Index](../multimodal-table/global-index/bitmap) for predicate and fo
 
 </TabItem>
 
+<TabItem value="multivalue" label="Multivalue">
+
+Use Multivalue for element-membership predicates on an `ARRAY` column. It stores one compressed
+bitmap posting list per distinct non-null element and accelerates Paimon Core `ARRAY_CONTAINS`,
+`ARRAYS_OVERLAP`, and `ARRAY_CONTAINS_ALL` predicates. Null arrays, empty arrays, and null elements
+produce no membership posting; array null checks fall back to the ordinary data path.
+
+The Core predicate and index pushdown are available independently of SQL connectors. A connector
+uses this index after it translates its array-membership expression to the corresponding Paimon
+predicate.
+
+For an append-only or Data Evolution table whose Multivalue index is built independently, see
+[Global Multivalue Index](../multimodal-table/global-index/multivalue).
+
+</TabItem>
+
 <TabItem value="vector" label="Vector">
 
 Use Vector for approximate nearest-neighbor (ANN) Top-K search on embeddings that are updated with
@@ -87,8 +103,8 @@ For an append-only or Data Evolution table whose full-text index is built indepe
 </Tabs>
 
 Different columns in one table can use different index families. One column can occur in at most
-one of `pk-vector.index.columns`, `pk-full-text.index.columns`, `pk-btree.index.columns`, and
-`pk-bitmap.index.columns`.
+one of `pk-vector.index.columns`, `pk-full-text.index.columns`, `pk-btree.index.columns`,
+`pk-bitmap.index.columns`, and `pk-multivalue.index.columns`.
 
 ## Requirements
 
@@ -104,16 +120,17 @@ supported by this configuration.
 
 <Tabs groupId="primary-key-index-requirements">
 
-<TabItem value="scalar" label="BTree and Bitmap">
+<TabItem value="sorted" label="BTree, Bitmap, and Multivalue">
 
-BTree and Bitmap additionally require:
+BTree, Bitmap, and Multivalue additionally require:
 
 - `deletion-vectors.enabled = true`.
 - `deletion-vectors.merge-on-read = false`.
-- A supported scalar column type.
+- A supported scalar column type for BTree and Bitmap, or an `ARRAY` of supported scalar elements
+  for Multivalue.
 
-Each entry creates an independent single-column index. Multiple BTree and Bitmap columns are
-supported as long as a column is not listed by another primary-key index family.
+Each entry creates an independent single-column index. Multiple columns are supported as long as a
+column is not listed by another primary-key index family.
 
 </TabItem>
 
@@ -149,8 +166,8 @@ Exactly one full-text column is currently supported per table.
 
 ## Create a Table
 
-The following table uses all four families on different columns: Vector for `embedding`, Full
-Text for `content`, BTree for `amount`, and Bitmap for `status`.
+The following table uses all five families on different columns: Vector for `embedding`, Full Text
+for `content`, BTree for `amount`, Bitmap for `status`, and Multivalue for `tags`.
 
 <Tabs groupId="primary-key-index-create-table">
 
@@ -161,6 +178,7 @@ CREATE TABLE items (
     id BIGINT,
     status STRING,
     amount DECIMAL(12, 2),
+    tags ARRAY<STRING>,
     content STRING,
     embedding ARRAY<FLOAT> COMMENT '__VECTOR_FIELD;3',
     PRIMARY KEY (id) NOT ENFORCED
@@ -176,7 +194,9 @@ CREATE TABLE items (
     'pk-btree.index.columns' = 'amount',
     'fields.amount.pk-btree.index.options' = '{"block-size":"64 kb"}',
     'pk-bitmap.index.columns' = 'status',
-    'fields.status.pk-bitmap.index.options' = '{"dictionary-block-size":"16 kb"}'
+    'fields.status.pk-bitmap.index.options' = '{"dictionary-block-size":"16 kb"}',
+    'pk-multivalue.index.columns' = 'tags',
+    'fields.tags.pk-multivalue.index.options' = '{"dictionary-block-size":"16 kb"}'
 );
 ```
 
@@ -193,6 +213,7 @@ CREATE TABLE items (
     id BIGINT,
     status STRING,
     amount DECIMAL(12, 2),
+    tags ARRAY<STRING>,
     content STRING,
     embedding ARRAY<FLOAT> COMMENT '__VECTOR_FIELD;3'
 ) USING paimon
@@ -209,7 +230,9 @@ TBLPROPERTIES (
     'pk-btree.index.columns' = 'amount',
     'fields.amount.pk-btree.index.options' = '{"block-size":"64 kb"}',
     'pk-bitmap.index.columns' = 'status',
-    'fields.status.pk-bitmap.index.options' = '{"dictionary-block-size":"16 kb"}'
+    'fields.status.pk-bitmap.index.options' = '{"dictionary-block-size":"16 kb"}',
+    'pk-multivalue.index.columns' = 'tags',
+    'fields.tags.pk-multivalue.index.options' = '{"dictionary-block-size":"16 kb"}'
 );
 ```
 
@@ -234,6 +257,11 @@ schema validation.
 | `fields.<column>.pk-btree.index.options` | Not set | JSON object containing BTree build options. Unqualified keys are scoped to `btree-index`. |
 | `pk-bitmap.index.columns` | Not set | Comma-separated columns which own independent Bitmap indexes. |
 | `fields.<column>.pk-bitmap.index.options` | Not set | JSON object containing Bitmap build options. Unqualified keys are scoped to `bitmap-index`. |
+| `pk-multivalue.index.columns` | Not set | Comma-separated `ARRAY` columns which own independent Multivalue indexes. |
+| `fields.<column>.pk-multivalue.index.options` | Not set | JSON object containing Multivalue build options. Unqualified keys are scoped to `multivalue-index`. |
+| `multivalue-index.dictionary-block-size` | `16 kb` | Target dictionary block size. |
+| `multivalue-index.compression` | `none` | Dictionary-block compression algorithm. |
+| `multivalue-index.compression-level` | `1` | Dictionary-block compression level. |
 | `global-index.search-mode` | Not set | Legacy fallback search mode. Family-specific options take precedence. |
 | `vector-index.search-mode` | `fast` | Search mode for primary-key Vector queries. `full` and `detail` search uncovered files exactly. |
 | `full-text-index.search-mode` | `fast` | Search mode for primary-key Full Text queries. Only `fast` is currently supported. |
@@ -279,8 +307,8 @@ Coverage behavior depends on the index family and search mode. `vector-index.sea
 queries search only data covered by an active index group. Uncovered files are not searched, so
 partial coverage can make results incomplete.
 
-- BTree and Bitmap scans always read uncovered files through the ordinary data path. Partial
-  coverage affects their acceleration, not result completeness. The original scalar predicate and
+- BTree, Bitmap, and Multivalue scans always read uncovered files through the ordinary data path.
+  Partial coverage affects their acceleration, not result completeness. The original predicate and
   deletion vectors are applied after index pruning.
 - Vector search in `full` or `detail` mode evaluates files without an active ANN group exactly and
   merges those results with ANN candidates. In the default `fast` mode, those files are omitted.
@@ -290,13 +318,30 @@ persistent archives and ignores uncovered files; `full` and `detail` are rejecte
 merge-aware logical-row fallback is not implemented. Consequently, newly appended Level-0 rows
 become full-text searchable only after compaction publishes an eligible data file and archive.
 
-## BTree and Bitmap Queries
+## BTree, Bitmap, and Multivalue Queries
 
-BTree and Bitmap indexes are applied automatically to snapshot-scoped batch scans. They can
-accelerate equality, `IN`, null checks, comparisons and ranges, complement predicates, and
-supported string predicates.
+BTree, Bitmap, and Multivalue indexes are applied automatically to snapshot-scoped Core batch
+scans after a supported predicate reaches Paimon. BTree and Bitmap can accelerate equality, `IN`,
+null checks, comparisons and ranges, complement predicates, and supported string predicates.
+Multivalue accelerates `ARRAY_CONTAINS`, `ARRAYS_OVERLAP`, and `ARRAY_CONTAINS_ALL` predicates.
 
-Paimon combines indexed scalar results as follows:
+The Java/Core predicate can be constructed directly:
+
+```java
+Predicate predicate = new PredicateBuilder(rowType)
+        .arraysOverlap(
+                tagsFieldIndex,
+                Arrays.asList(
+                        BinaryString.fromString("blue"),
+                        BinaryString.fromString("green")));
+ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
+TableScan.Plan plan = readBuilder.newScan().plan();
+```
+
+SQL engines need a connector-specific expression conversion before their array-membership
+function reaches the corresponding Core predicate.
+
+Paimon combines indexed predicate results as follows:
 
 - For `AND`, any usable indexed child can narrow a source file; unindexed children remain residual
   filters.
@@ -513,7 +558,10 @@ create a table with the desired definition and migrate the data.
 
 ## Limitations
 
-- BTree and Bitmap definitions are single-column indexes.
+- BTree, Bitmap, and Multivalue definitions are single-column indexes.
+- Multivalue supports arrays of scalar element types accepted by the global-index key serializer.
+  Null elements are not indexed. Higher array and element cardinality increases the expanded-sort
+  I/O and index-file size.
 - Exactly one vector index column is currently supported per table.
 - Exactly one full-text index column is currently supported per table.
 - Only `FLOAT` vectors are supported.

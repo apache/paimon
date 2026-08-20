@@ -34,7 +34,7 @@ env:
   JDK_VERSION: 8
   MAVEN_OPTS: -Dmaven.wagon.httpconnectionManager.ttlSeconds=30 -Dmaven.wagon.http.retryHandler.requestSentEnabled=true
   LUMINA_DATA_VERSION: 0.1.0
-  PYPAIMON_RUST_REV: 7a8512f18f47a0634ee02ae8a09f2fff76c12d37
+  PYPAIMON_RUST_REV: be5456e96b326939570b6ef5d63acddda3311c4f
 
 
 concurrency:
@@ -300,13 +300,16 @@ jobs:
           echo "=========================================="
           echo "Testing Ray version compatibility"
           echo "=========================================="
-          for ray_version in 2.44.0 2.48.0 2.53.0; do
+          for ray_version in 2.44.0 2.48.0 2.50.1 2.53.0; do
             echo "Testing Ray version: $ray_version"
             python -m pip install --no-cache-dir -q ray==$ray_version
             python -c "import ray; print(f'Ray version: {ray.__version__}')"
             python -c "from packaging.version import parse; import ray; assert parse(ray.__version__) == parse('$ray_version'), f'Expected Ray $ray_version, got {ray.__version__}'"
-            python -m pytest pypaimon/tests/ray_data_test.py::RayDataTest \
-              pypaimon/tests/ray_range_join_test.py::RayRangeJoinTest -v --tb=short || {
+            tests="pypaimon/tests/ray_data_test.py::RayDataTest pypaimon/tests/ray_range_join_test.py::RayRangeJoinTest"
+            if [ "$ray_version" = "2.50.1" ]; then
+              tests="$tests pypaimon/tests/ray_update_by_row_id_test.py::RayUpdateByRowIdTest::test_empty_dataset_after_transform_is_noop"
+            fi
+            python -m pytest $tests -v --tb=short || {
               echo "Tests failed for Ray $ray_version"; python -m pip uninstall -y ray; exit 1;
             }
             python -m pip uninstall -y ray

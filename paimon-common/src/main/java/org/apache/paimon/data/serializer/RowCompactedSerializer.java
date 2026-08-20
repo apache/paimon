@@ -185,6 +185,8 @@ public class RowCompactedSerializer implements Serializer<InternalRow> {
                 break;
             case BINARY:
             case VARBINARY:
+            case GEOMETRY:
+            case GEOGRAPHY:
                 fieldWriter = (writer, pos, value) -> writer.writeBinary((byte[]) value);
                 break;
             case DECIMAL:
@@ -301,6 +303,8 @@ public class RowCompactedSerializer implements Serializer<InternalRow> {
                 break;
             case BINARY:
             case VARBINARY:
+            case GEOMETRY:
+            case GEOGRAPHY:
                 fieldReader = (reader, pos) -> reader.readBinary();
                 break;
             case DECIMAL:

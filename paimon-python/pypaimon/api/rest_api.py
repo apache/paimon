@@ -23,8 +23,9 @@ import re
 from pypaimon.api.api_request import (AlterDatabaseRequest, AlterFunctionRequest,
                                       AlterTableRequest, CommitTableRequest,
                                       CreateBranchRequest, CreateDatabaseRequest,
-                                      CreateFunctionRequest, CreateTableRequest,
-                                      CreateTagRequest, ForwardBranchRequest,
+                                      CreateFunctionRequest, CreatePartitionsRequest,
+                                      CreateTableRequest, CreateTagRequest,
+                                      ForwardBranchRequest,
                                       RenameBranchRequest, RenameTableRequest,
                                       RollbackTableRequest)
 from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
@@ -36,6 +37,7 @@ from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
                                        ListFunctionDetailsResponse,
                                        ListFunctionsGloballyResponse,
                                        ListFunctionsResponse,
+                                       CreatePartitionsResponse,
                                        ListPartitionsResponse,
                                        ListTablesResponse, ListTagsResponse,
                                        PagedList,
@@ -450,6 +452,24 @@ class RESTApi:
 
         partitions = response.data() or []
         return PagedList(partitions, response.get_next_page_token())
+
+    def create_partitions(
+            self,
+            identifier: Identifier,
+            partitions: List[Dict[str, str]],
+            ignore_if_exists: bool = True,
+    ) -> CreatePartitionsResponse:
+        database_name, table_name = self.__validate_identifier(identifier)
+        request = CreatePartitionsRequest(
+            partition_specs=partitions,
+            ignore_if_exists=ignore_if_exists,
+        )
+        return self.client.post_with_response_type(
+            self.resource_paths.partitions(database_name, table_name),
+            request,
+            CreatePartitionsResponse,
+            self.rest_auth_function,
+        )
 
     # Tag CRUD wrappers — mirror Java RESTApi tag methods.
     def create_tag(

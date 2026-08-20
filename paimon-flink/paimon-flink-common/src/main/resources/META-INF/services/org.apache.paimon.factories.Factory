@@ -16,6 +16,7 @@
 ### action factories
 org.apache.paimon.flink.action.CopyFilesActionFactory
 org.apache.paimon.flink.action.CompactActionFactory
+org.apache.paimon.flink.action.CompactManifestActionFactory
 org.apache.paimon.flink.action.CompactDatabaseActionFactory
 org.apache.paimon.flink.action.DropPartitionActionFactory
 org.apache.paimon.flink.action.DeleteActionFactory
@@ -103,6 +104,7 @@ org.apache.paimon.flink.procedure.TriggerTagAutomaticCreationProcedure
 org.apache.paimon.flink.procedure.RemoveUnexistingManifestsProcedure
 org.apache.paimon.flink.procedure.DataEvolutionMergeIntoProcedure
 org.apache.paimon.flink.procedure.ReassignRowIdProcedure
+org.apache.paimon.flink.procedure.MaterializeDeletionVectorsProcedure
 org.apache.paimon.flink.procedure.CreateGlobalIndexProcedure
 org.apache.paimon.flink.procedure.VectorSearchProcedure
 org.apache.paimon.flink.procedure.FullTextSearchProcedure

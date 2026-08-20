@@ -30,6 +30,7 @@ import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.RawFileSplitRead;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.ScoreRecordIterator;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
@@ -99,8 +100,11 @@ class PrimaryKeyVectorPositionReaderTest {
                         mock(TableSchema.class),
                         CoreOptions.fromMap(Collections.emptyMap()),
                         null);
+        ReadBatchSizer sizer = new ReadBatchSizer();
+        tableRead.withReadBatchSizer(sizer);
 
         assertThat(tableRead.createReader(split)).isInstanceOf(PrimaryKeyIndexPositionReader.class);
+        verify(rawRead).withReadBatchSizer(sizer);
         verify(rawRead, never()).createReader(split);
     }
 

@@ -41,6 +41,8 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.EmptyFileRecordReader;
 import org.apache.paimon.reader.FileRecordReader;
+import org.apache.paimon.reader.LimitRecordReader;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
@@ -90,6 +92,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     @Nullable private List<Predicate> filters;
     @Nullable private TopN topN;
     @Nullable private Integer limit;
+    @Nullable private ReadBatchSizer readBatchSizer;
 
     public RawFileSplitRead(
             FileIO fileIO,
@@ -148,6 +151,12 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     @Override
     public SplitRead<InternalRow> withLimit(@Nullable Integer limit) {
         this.limit = limit;
+        return this;
+    }
+
+    @Override
+    public SplitRead<InternalRow> withReadBatchSizer(ReadBatchSizer sizer) {
+        this.readBatchSizer = sizer;
         return this;
     }
 
@@ -213,7 +222,12 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                             null));
         }
 
-        return ConcatRecordReader.create(suppliers);
+        RecordReader<InternalRow> reader = ConcatRecordReader.create(suppliers);
+        // Apply the final limit after deletion vectors when no later predicate can drop rows.
+        if (topN == null && (filters == null || filters.isEmpty())) {
+            return LimitRecordReader.limit(reader, limit);
+        }
+        return reader;
     }
 
     FileRecordReader<InternalRow> createFileReader(
@@ -338,7 +352,11 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
 
         FormatReaderContext formatReaderContext =
                 new FormatReaderContext(
-                        fileIO, dataFilePathFactory.toPath(file), file.fileSize(), selection);
+                        fileIO,
+                        dataFilePathFactory.toPath(file),
+                        file.fileSize(),
+                        selection,
+                        readBatchSizer);
         FileRecordReader<InternalRow> fileRecordReader =
                 new DataFileRecordReader(
                         outputRowType,

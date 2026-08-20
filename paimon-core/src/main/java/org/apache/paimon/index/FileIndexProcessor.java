@@ -120,11 +120,11 @@ public class FileIndexProcessor {
                 maintainers.remove(name);
             } else {
                 Map<String, byte[]> indexTypeBytes = maintainers.get(name);
-                for (String indexType : entry.getValue().keySet()) {
-                    if (!indexTypeBytes.containsKey(indexType)) {
-                        indexTypeBytes.remove(indexType);
-                    }
-                }
+                Set<String> configuredIndexTypes =
+                        schemaInfo.projectedIndexTypes.getOrDefault(name, Collections.emptySet());
+                indexTypeBytes
+                        .keySet()
+                        .removeIf(indexType -> !configuredIndexTypes.contains(indexType));
             }
         }
 
@@ -178,11 +178,11 @@ public class FileIndexProcessor {
                 outputStream.write(baos.toByteArray());
             }
             extras.add(newIndexPath.getName());
-            return dataFileMeta.copy(extras);
+            return dataFileMeta.copy(extras).copy((byte[]) null);
         } else if (baos.size() == 0) {
-            return dataFileMeta.copy(extras);
+            return dataFileMeta.copy(extras).copy((byte[]) null);
         } else {
-            return dataFileMeta.copy(baos.toByteArray());
+            return dataFileMeta.copy(extras).copy(baos.toByteArray());
         }
     }
 
@@ -216,6 +216,7 @@ public class FileIndexProcessor {
 
                 List<String> projectedColNames = new ArrayList<>();
                 Set<String> projectedColFullNames = new HashSet<>();
+                Map<String, Set<String>> projectedIndexTypes = new HashMap<>();
                 for (Map.Entry<FileIndexOptions.Column, Map<String, Options>> entry :
                         fileIndexOptions.entrySet()) {
                     FileIndexOptions.Column column = entry.getKey();
@@ -236,6 +237,9 @@ public class FileIndexProcessor {
                                             columnName, column.getNestedColumnName())
                                     : column.getColumnName();
                     projectedColFullNames.add(fullColumnName);
+                    projectedIndexTypes
+                            .computeIfAbsent(fullColumnName, ignored -> new HashSet<>())
+                            .addAll(entry.getValue().keySet());
                 }
 
                 schemaInfos.put(
@@ -246,7 +250,8 @@ public class FileIndexProcessor {
                                 projectedColNames.stream()
                                         .mapToInt(fileSchema::getFieldIndex)
                                         .toArray(),
-                                projectedColFullNames));
+                                projectedColFullNames,
+                                projectedIndexTypes));
                 fileSchemaIds.add(schemaId);
             }
 
@@ -278,16 +283,19 @@ public class FileIndexProcessor {
         private final Map<String, String> colNameMapping;
         private final int[] projectedIndexCols;
         private final Set<String> projectedColFullNames;
+        private final Map<String, Set<String>> projectedIndexTypes;
 
         private SchemaInfo(
                 RowType fileSchema,
                 Map<String, String> colNameMapping,
                 int[] projectedIndexCols,
-                Set<String> projectedColFullNames) {
+                Set<String> projectedColFullNames,
+                Map<String, Set<String>> projectedIndexTypes) {
             this.fileSchema = fileSchema;
             this.colNameMapping = colNameMapping;
             this.projectedIndexCols = projectedIndexCols;
             this.projectedColFullNames = projectedColFullNames;
+            this.projectedIndexTypes = projectedIndexTypes;
         }
     }
 }

@@ -30,6 +30,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFileMetaWriteColsLegacySerializer;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.FileSystemSchemaManager;
@@ -83,6 +84,206 @@ public class ManifestFileTest {
                         .flatMap(m -> manifestFile.read(m.fileName(), m.fileSize()).stream())
                         .collect(Collectors.toList());
         assertThat(actualEntries).isEqualTo(entries);
+    }
+
+    @Test
+    void testWriteManifestFileToExplicitPath() throws Exception {
+        List<ManifestEntry> entries = generateData();
+        ManifestFile manifestFile = createManifestFile(tempDir.toString());
+        Path path = new Path(tempDir.toString() + "/manifest/explicit-manifest");
+
+        ManifestAvroWriter writer = manifestFile.createAvroWriter(path);
+        writer.write(entries);
+        writer.close();
+
+        assertThat(writer.result())
+                .singleElement()
+                .extracting(ManifestFileMeta::fileName)
+                .isEqualTo("explicit-manifest");
+        assertThat(manifestFile.read("explicit-manifest")).isEqualTo(entries);
+    }
+
+    @Test
+    void testAbortedManifestWriterDoesNotExposeResults() throws Exception {
+        ManifestAvroWriter writer = createManifestFile(tempDir.toString()).createAvroWriter();
+        writer.write(gen.next());
+
+        writer.abort();
+
+        assertThatThrownBy(writer::result)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("before closing");
+    }
+
+    @Test
+    void testWriteEncodedMixedBlockCountsDeletes() throws Exception {
+        assertEncodedBlockCounts(FileKind.ADD, FileKind.DELETE);
+    }
+
+    @Test
+    void testWriteEncodedDeleteOnlyBlockCountsDeletes() throws Exception {
+        assertEncodedBlockCounts(FileKind.DELETE, FileKind.DELETE);
+    }
+
+    @Test
+    void testWriteEncodedBlockWithoutRowIds() throws Exception {
+        List<ManifestEntry> entries = Arrays.asList(gen.next(), gen.next());
+        ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
+        ManifestFileMeta sourceMeta = writeSingleManifest(manifestFile, entries);
+        assertThat(sourceMeta.minRowId()).isNull();
+        assertThat(sourceMeta.maxRowId()).isNull();
+
+        ManifestAvroWriter writer = manifestFile.createAvroWriter();
+        try (ManifestAvroReader reader = openManifestReader(sourceMeta)) {
+            assertThat(reader.hasNext()).isTrue();
+            ManifestAvroReader.RawBlock block = reader.next();
+            writer.writeEncodedBlock(block.encodedBlock(), encodedBlockMeta(sourceMeta));
+            assertThat(reader.hasNext()).isFalse();
+        }
+        writer.close();
+
+        ManifestFileMeta result = writer.result().get(0);
+        assertThat(result.minRowId()).isNull();
+        assertThat(result.maxRowId()).isNull();
+        assertThat(manifestFile.read(result.fileName())).containsExactlyElementsOf(entries);
+    }
+
+    @Test
+    void testWriteEncodedRecords() throws Exception {
+        ManifestEntry source = gen.next();
+        List<ManifestEntry> entries =
+                Arrays.asList(
+                        ManifestEntry.create(
+                                FileKind.ADD,
+                                source.partition(),
+                                source.bucket(),
+                                source.totalBuckets(),
+                                source.file().newFirstRowId(10L)),
+                        ManifestEntry.create(
+                                FileKind.DELETE,
+                                source.partition(),
+                                source.bucket(),
+                                source.totalBuckets(),
+                                source.file().newFirstRowId(20L)));
+        ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
+        ManifestFileMeta sourceMeta = writeSingleManifest(manifestFile, entries);
+        ManifestAvroWriter writer = manifestFile.createAvroWriter();
+        ManifestAvroWriter.EncodedEntry metadata = new ManifestAvroWriter.EncodedEntry();
+        int position = 0;
+
+        try (ManifestAvroReader reader = openManifestReader(sourceMeta)) {
+            while (reader.hasNext()) {
+                ManifestAvroReader.RowIterator rows =
+                        reader.next().toRows(ManifestEntry.MANIFEST_ROW_TYPE);
+                while (rows.hasNext()) {
+                    rows.next();
+                    ManifestEntry entry = entries.get(position++);
+                    writer.writeEncoded(
+                            rows.encodedRecord(),
+                            metadata.replace(
+                                    entry.kind().toByteValue(),
+                                    entry.partition(),
+                                    entry.bucket(),
+                                    entry.level(),
+                                    entry.file().schemaId(),
+                                    entry.file().firstRowId(),
+                                    entry.file().rowCount()));
+                }
+            }
+        }
+        writer.close();
+
+        assertThat(position).isEqualTo(entries.size());
+        ManifestFileMeta result = writer.result().get(0);
+        assertThat(result.numAddedFiles()).isEqualTo(sourceMeta.numAddedFiles());
+        assertThat(result.numDeletedFiles()).isEqualTo(sourceMeta.numDeletedFiles());
+        assertThat(result.partitionStats()).isEqualTo(sourceMeta.partitionStats());
+        assertThat(result.schemaId()).isEqualTo(sourceMeta.schemaId());
+        assertThat(result.minBucket()).isEqualTo(sourceMeta.minBucket());
+        assertThat(result.maxBucket()).isEqualTo(sourceMeta.maxBucket());
+        assertThat(result.minLevel()).isEqualTo(sourceMeta.minLevel());
+        assertThat(result.maxLevel()).isEqualTo(sourceMeta.maxLevel());
+        assertThat(result.minRowId()).isEqualTo(sourceMeta.minRowId());
+        assertThat(result.maxRowId()).isEqualTo(sourceMeta.maxRowId());
+        assertThat(manifestFile.read(result.fileName())).containsExactlyElementsOf(entries);
+    }
+
+    @Test
+    void testWriteEncodedRecordsFlushesPartitionStatsBuffer() throws Exception {
+        ManifestEntry generated = gen.next();
+        ManifestEntry source =
+                ManifestEntry.create(
+                        generated.kind(),
+                        generated.partition(),
+                        generated.bucket(),
+                        generated.totalBuckets(),
+                        generated.file().newFirstRowId(0L));
+        ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
+        ManifestFileMeta sourceMeta =
+                writeSingleManifest(manifestFile, Collections.singletonList(source));
+        ManifestAvroWriter writer = manifestFile.createAvroWriter();
+        ManifestAvroWriter.EncodedEntry metadata = new ManifestAvroWriter.EncodedEntry();
+        int recordCount = 8_200;
+
+        try (ManifestAvroReader reader = openManifestReader(sourceMeta)) {
+            ManifestAvroReader.RowIterator rows =
+                    reader.next().toRows(ManifestEntry.MANIFEST_ROW_TYPE);
+            rows.next();
+            ByteBuffer encodedRecord = rows.encodedRecord();
+            for (int i = 0; i < recordCount; i++) {
+                writer.writeEncoded(
+                        encodedRecord.duplicate(),
+                        metadata.replace(
+                                source.kind().toByteValue(),
+                                source.partition().copy(),
+                                source.bucket(),
+                                source.level(),
+                                source.file().schemaId(),
+                                source.file().firstRowId(),
+                                source.file().rowCount()));
+            }
+        }
+        writer.close();
+
+        ManifestFileMeta result = writer.result().get(0);
+        assertThat(result.numAddedFiles()).isEqualTo(recordCount);
+        assertThat(result.numDeletedFiles()).isZero();
+        assertThat(result.partitionStats()).isEqualTo(sourceMeta.partitionStats());
+    }
+
+    @Test
+    void testWriteEncodedManifestPreservesUnknownAggregateStats() throws Exception {
+        List<ManifestEntry> entries = Arrays.asList(gen.next(), gen.next());
+        ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
+        ManifestFileMeta source = writeSingleManifest(manifestFile, entries);
+        ManifestFileMeta unknownStats =
+                new ManifestFileMeta(
+                        source.fileName(),
+                        source.fileSize(),
+                        source.numAddedFiles(),
+                        source.numDeletedFiles(),
+                        source.partitionStats(),
+                        source.schemaId(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        source.minRowId(),
+                        source.maxRowId());
+
+        ManifestAvroWriter writer = manifestFile.createAvroWriter();
+        try (ManifestAvroReader reader = openManifestReader(source)) {
+            writer.writeEncodedManifest(reader, unknownStats);
+        }
+        writer.close();
+
+        ManifestFileMeta result = writer.result().get(0);
+        assertThat(result.minBucket()).isNull();
+        assertThat(result.maxBucket()).isNull();
+        assertThat(result.minLevel()).isNull();
+        assertThat(result.maxLevel()).isNull();
+        assertThat(result.partitionStats()).isEqualTo(source.partitionStats());
+        assertThat(manifestFile.read(result.fileName())).containsExactlyElementsOf(entries);
     }
 
     @Test
@@ -328,6 +529,50 @@ public class ManifestFileTest {
             assertThat(rows.hasNext()).isFalse();
             assertThat(reader.hasNext()).isFalse();
         }
+    }
+
+    @Test
+    void testLegacyAvroReaderSkipsColumnSequenceNumbers() throws Exception {
+        ManifestEntry expected = gen.next();
+        ManifestEntry source =
+                ManifestEntry.create(
+                        expected.kind(),
+                        expected.partition(),
+                        expected.bucket(),
+                        expected.totalBuckets(),
+                        expected.file().withColumnMaxSequenceNumbers(new long[] {3L, 42L}));
+        List<DataField> legacyManifestFields =
+                ManifestEntry.MANIFEST_ROW_TYPE.getFields().stream()
+                        .map(
+                                field ->
+                                        ManifestEntry.FILE.equals(field.name())
+                                                ? field.newType(
+                                                        DataFileMetaWriteColsLegacySerializer
+                                                                .SCHEMA)
+                                                : field)
+                        .collect(Collectors.toList());
+        RowType legacyManifestType = new RowType(false, legacyManifestFields);
+        Path path = new Path(new Path(tempDir.toUri()), "new-manifest.avro");
+        LocalFileIO fileIO = LocalFileIO.create();
+        ManifestEntrySerializer serializer = new ManifestEntrySerializer();
+
+        try (PositionOutputStream out = fileIO.newOutputStream(path, false);
+                FormatWriter writer =
+                        avro.createWriterFactory(ManifestEntry.MANIFEST_ROW_TYPE)
+                                .create(out, "zstd")) {
+            writer.addElement(serializer.toRow(source));
+        }
+
+        ManifestEntry actual;
+        try (ManifestAvroReader reader = new ManifestAvroReader(fileIO.newInputStream(path));
+                CloseableIterator<InternalRow> rows = reader.read(legacyManifestType, null, null)) {
+            assertThat(rows.hasNext()).isTrue();
+            actual = new ManifestEntryWriteColsLegacySerializer().fromRow(rows.next());
+            assertThat(rows.hasNext()).isFalse();
+        }
+
+        assertThat(actual).isEqualTo(expected);
+        assertThat(actual.file().columnMaxSequenceNumbers()).isNull();
     }
 
     @Test
@@ -765,6 +1010,57 @@ public class ManifestFileTest {
             entries.add(gen.next());
         }
         return entries;
+    }
+
+    private void assertEncodedBlockCounts(FileKind... kinds) throws Exception {
+        ManifestEntry source = gen.next();
+        List<ManifestEntry> entries = new ArrayList<>();
+        long firstRowId = 10;
+        for (FileKind kind : kinds) {
+            DataFileMeta file = source.file().newFirstRowId(firstRowId);
+            entries.add(
+                    ManifestEntry.create(
+                            kind,
+                            source.partition(),
+                            source.bucket(),
+                            source.totalBuckets(),
+                            file));
+            firstRowId += file.rowCount();
+        }
+
+        ManifestFile manifestFile = createManifestFile(tempDir.toString(), Long.MAX_VALUE);
+        ManifestFileMeta sourceMeta = writeSingleManifest(manifestFile, entries);
+        ManifestAvroWriter writer = manifestFile.createAvroWriter();
+        try (ManifestAvroReader reader = openManifestReader(sourceMeta)) {
+            assertThat(reader.hasNext()).isTrue();
+            ManifestAvroReader.RawBlock block = reader.next();
+            assertThat(block.recordCount()).isEqualTo(entries.size());
+            writer.writeEncodedBlock(block.encodedBlock(), encodedBlockMeta(sourceMeta));
+            assertThat(reader.hasNext()).isFalse();
+        }
+        writer.close();
+
+        ManifestFileMeta result = writer.result().get(0);
+        assertThat(result.numAddedFiles())
+                .isEqualTo(entries.stream().filter(entry -> entry.kind() == FileKind.ADD).count());
+        assertThat(result.numDeletedFiles())
+                .isEqualTo(
+                        entries.stream().filter(entry -> entry.kind() == FileKind.DELETE).count());
+        assertThat(manifestFile.read(result.fileName())).containsExactlyElementsOf(entries);
+    }
+
+    private ManifestAvroWriter.EncodedBlockMeta encodedBlockMeta(ManifestFileMeta meta) {
+        return new ManifestAvroWriter.EncodedBlockMeta(
+                meta.numAddedFiles(),
+                meta.numDeletedFiles(),
+                meta.schemaId(),
+                meta.minBucket(),
+                meta.maxBucket(),
+                meta.minLevel(),
+                meta.maxLevel(),
+                meta.minRowId() == null ? -1 : meta.minRowId(),
+                meta.maxRowId() == null ? -1 : meta.maxRowId(),
+                meta.partitionStats());
     }
 
     private ManifestAvroReader openManifestReader(ManifestFileMeta manifest) throws IOException {

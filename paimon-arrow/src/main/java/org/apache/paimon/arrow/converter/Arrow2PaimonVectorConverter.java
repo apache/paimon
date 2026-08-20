@@ -57,6 +57,8 @@ import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.GeographyType;
+import org.apache.paimon.types.GeometryType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
@@ -235,6 +237,16 @@ public interface Arrow2PaimonVectorConverter {
                             };
                         }
                     };
+        }
+
+        @Override
+        public Arrow2PaimonVectorConverter visit(GeometryType geometryType) {
+            return visit(new VarBinaryType(geometryType.isNullable(), VarBinaryType.MAX_LENGTH));
+        }
+
+        @Override
+        public Arrow2PaimonVectorConverter visit(GeographyType geographyType) {
+            return visit(new VarBinaryType(geographyType.isNullable(), VarBinaryType.MAX_LENGTH));
         }
 
         @Override
@@ -450,7 +462,8 @@ public interface Arrow2PaimonVectorConverter {
             } else if (precision >= 4 && precision <= 6) {
                 return Timestamp.fromMicros(value);
             } else {
-                return Timestamp.fromEpochMillis(value / 1_000_000, (int) (value % 1_000_000));
+                return Timestamp.fromEpochMillis(
+                        Math.floorDiv(value, 1_000_000L), (int) Math.floorMod(value, 1_000_000L));
             }
         }
 

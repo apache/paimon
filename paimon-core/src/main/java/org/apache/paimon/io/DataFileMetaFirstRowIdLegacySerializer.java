@@ -36,7 +36,7 @@ public class DataFileMetaFirstRowIdLegacySerializer extends ObjectSerializer<Dat
     private static final long serialVersionUID = 1L;
 
     public DataFileMetaFirstRowIdLegacySerializer() {
-        super(DataFileMeta.SCHEMA);
+        super(DataFileMetaWriteColsLegacySerializer.SCHEMA);
     }
 
     @Override
@@ -86,6 +86,7 @@ public class DataFileMetaFirstRowIdLegacySerializer extends ObjectSerializer<Dat
                 row.isNullAt(16) ? null : fromStringArrayData(row.getArray(16)),
                 row.isNullAt(17) ? null : row.getString(17).toString(),
                 row.isNullAt(18) ? null : row.getLong(18),
+                null,
                 null);
     }
 }

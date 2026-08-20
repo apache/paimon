@@ -28,6 +28,7 @@ from pypaimon import CatalogFactory, Schema
 import pyarrow as pa
 from parameterized import parameterized
 
+from pypaimon.build_info import full_version as build_full_version
 from pypaimon.common.json_util import JSON
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
@@ -426,8 +427,11 @@ class TableWriteTest(unittest.TestCase):
         self.assertEqual(self.expected, actual)
 
         # snapshot
-        snapshot_json: str = JSON.to_json(table.snapshot_manager().get_latest_snapshot())
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        snapshot_json: str = JSON.to_json(snapshot)
         self.assertEqual(True, snapshot_json.__contains__("baseManifestList"))
+        self.assertEqual(build_full_version(), snapshot.writer_version)
+        self.assertEqual(True, snapshot_json.__contains__("writerVersion"))
         self.assertEqual(False, snapshot_json.__contains__("nextRowId"))
 
     def test_write_row_append_only_partitioned_table(self):
@@ -1174,8 +1178,6 @@ class TableWriteTest(unittest.TestCase):
         self.assertEqual(1, overwrite_plan.num_buckets(('p',)))
 
     def test_postpone_worker_bucket_plan_mismatch_fails_commit(self):
-        from pypaimon.write.commit.conflict_detection import CommitConflictError
-
         table = self._create_postpone_table(
             'default.test_postpone_worker_plan_mismatch',
             pa_schema=self.postpone_pa_schema,
@@ -1202,7 +1204,7 @@ class TableWriteTest(unittest.TestCase):
             large_messages = large_write.prepare_commit()
             self.assertEqual({1}, {m.total_buckets for m in small_messages})
             self.assertEqual({3}, {m.total_buckets for m in large_messages})
-            with self.assertRaisesRegex(CommitConflictError, 'Total buckets'):
+            with self.assertRaisesRegex(RuntimeError, 'Total buckets'):
                 commit.commit(small_messages + large_messages)
         finally:
             small_write.close()
@@ -1210,8 +1212,6 @@ class TableWriteTest(unittest.TestCase):
             commit.close()
 
     def test_postpone_overwrite_bucket_plan_mismatch_fails_commit(self):
-        from pypaimon.write.commit.conflict_detection import CommitConflictError
-
         table = self._create_postpone_table(
             'default.test_postpone_overwrite_plan_mismatch',
             pa_schema=self.postpone_pa_schema,
@@ -1245,10 +1245,10 @@ class TableWriteTest(unittest.TestCase):
                 for file in message.new_files
             ]
 
-            with self.assertRaisesRegex(CommitConflictError, 'Total buckets'):
+            with self.assertRaisesRegex(RuntimeError, 'Total buckets'):
                 commit.commit(messages)
             self.assertTrue(all(
-                not table.file_io.exists(path) for path in paths))
+                table.file_io.exists(path) for path in paths))
         finally:
             small_write.close()
             large_write.close()
@@ -1468,8 +1468,6 @@ class TableWriteTest(unittest.TestCase):
         )
 
     def test_postpone_concurrent_new_partition_bucket_num_conflict(self):
-        from pypaimon.write.commit.conflict_detection import CommitConflictError
-
         table_two_buckets = self._create_postpone_table(
             'default.test_postpone_concurrent_bucket_num',
             partition_keys=['dt'],
@@ -1530,11 +1528,11 @@ class TableWriteTest(unittest.TestCase):
 
             commit_three.file_store_commit.snapshot_commit.commit = (
                 fail_cas_after_concurrent_commit)
-            with self.assertRaisesRegex(CommitConflictError, "Total buckets"):
+            with self.assertRaisesRegex(RuntimeError, "Total buckets"):
                 commit_three.commit(messages_three)
             self.assertTrue(concurrent_commit['done'])
             self.assertTrue(all(
-                not table_three_buckets.file_io.exists(path)
+                table_three_buckets.file_io.exists(path)
                 for path in losing_paths
             ))
         finally:

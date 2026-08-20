@@ -18,10 +18,13 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.deletionvectors.Bitmap64DeletionVector;
+import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FlushingFileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -29,6 +32,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
@@ -43,11 +47,15 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.IOExceptionSupplier;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -133,12 +141,90 @@ class RawFileSplitReadTest {
         }
     }
 
+    @Test
+    void testLimitAfterBitmap64DeletionVector() throws Exception {
+        List<InternalRow> rows = new ArrayList<>();
+        for (int i = 0; i < 20; i++) {
+            rows.add(GenericRow.of(BinaryString.fromString("value-" + i), i));
+        }
+        FileStoreTable table = createTable("bitmap64-limit", rows);
+        DataSplit split = singleSplit(table);
+        assertThat(split.dataFiles()).hasSize(1);
+
+        DeletionVector deletionVector = new Bitmap64DeletionVector();
+        for (int position = 0; position < 5; position++) {
+            deletionVector.delete(position);
+        }
+        String fileName = split.dataFiles().get(0).fileName();
+        Map<String, IOExceptionSupplier<DeletionVector>> deletionVectorFactories =
+                Collections.singletonMap(fileName, () -> deletionVector);
+
+        RawFileSplitRead read = ((AppendOnlyFileStore) table.store()).newRead();
+        read.withLimit(10);
+        AtomicInteger count = new AtomicInteger();
+        try (RecordReader<InternalRow> reader =
+                read.createReader(
+                        split.partition(),
+                        split.bucket(),
+                        split.dataFiles(),
+                        deletionVectorFactories)) {
+            reader.forEachRemaining(ignored -> count.incrementAndGet());
+        }
+
+        assertThat(count).hasValue(10);
+    }
+
+    @Test
+    void testTableReadSharesBatchSizer() throws Exception {
+        FileStoreTable table = createTable("dynamic-batch-size", 20);
+        ReadBatchSizer sizer = new ReadBatchSizer();
+        sizer.setBatchSize(5);
+        InnerTableRead read = table.newRead().withReadBatchSizer(sizer);
+
+        try (RecordReader<InternalRow> reader = read.createReader(singleSplit(table))) {
+            assertThat(readBatchSize(reader)).isEqualTo(5);
+
+            sizer.setBatchSize(2);
+            assertThat(readBatchSize(reader)).isEqualTo(2);
+
+            sizer.setBatchSize(8);
+            assertThat(readBatchSize(reader)).isEqualTo(8);
+        }
+    }
+
+    private static int readBatchSize(RecordReader<InternalRow> reader) throws Exception {
+        RecordReader.RecordIterator<InternalRow> batch = reader.readBatch();
+        assertThat(batch).isNotNull();
+        int count = 0;
+        while (batch.next() != null) {
+            count++;
+        }
+        batch.releaseBatch();
+        return count;
+    }
+
     private FileStoreTable createTable(String directory) throws Exception {
+        return createTable(
+                directory,
+                Collections.singletonList(GenericRow.of(BinaryString.fromString("value"), 42)));
+    }
+
+    private FileStoreTable createTable(String directory, int rowCount) throws Exception {
+        List<InternalRow> rows = new ArrayList<>();
+        for (int i = 0; i < rowCount; i++) {
+            rows.add(GenericRow.of(BinaryString.fromString("value"), i + 42));
+        }
+        return createTable(directory, rows);
+    }
+
+    private FileStoreTable createTable(String directory, List<? extends InternalRow> rows)
+            throws Exception {
         Path tablePath = new Path(tempDir.resolve(directory).toUri());
         Options options = new Options();
         options.set(CoreOptions.PATH, tablePath.toString());
         options.set(CoreOptions.BUCKET, 1);
         options.set(CoreOptions.BUCKET_KEY, "first");
+        options.set(CoreOptions.READ_BATCH_SIZE, 8);
         Schema schema =
                 Schema.newBuilder()
                         .column("first", DataTypes.STRING())
@@ -154,7 +240,9 @@ class RawFileSplitReadTest {
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         try (BatchTableWrite write = writeBuilder.newWrite();
                 BatchTableCommit commit = writeBuilder.newCommit()) {
-            write.write(GenericRow.of(BinaryString.fromString("value"), 42));
+            for (InternalRow row : rows) {
+                write.write(row);
+            }
             commit.commit(write.prepareCommit());
         }
         return table;

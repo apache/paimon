@@ -21,6 +21,7 @@ import time
 import uuid
 from typing import Dict, List, Optional
 
+from pypaimon.build_info import full_version as build_full_version
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
@@ -39,7 +40,6 @@ from pypaimon.table.row.offset_row import OffsetRow
 from pypaimon.write.commit.commit_rollback import CommitRollback
 from pypaimon.write.commit.commit_scanner import CommitScanner
 from pypaimon.write.commit.conflict_detection import (
-    CommitConflictError,
     ConflictDetection,
     RowIdExistenceConflict,
 )
@@ -53,6 +53,41 @@ from pypaimon.write.commit_callback import CommitCallback, CommitCallbackContext
 from pypaimon.write.commit_message import CommitMessage
 
 logger = logging.getLogger(__name__)
+
+
+def _abort_commit_messages(table, commit_messages: List[CommitMessage]):
+    """Delete files created by messages known to be uncommitted."""
+    for message in commit_messages:
+        for file in list(message.new_files) + list(message.changelog_files):
+            path = None
+            try:
+                path = file.external_path or file.file_path
+                if path:
+                    table.file_io.delete_quietly(str(path))
+            except Exception as error:
+                logger.warning(
+                    "Failed to clean up file %s during abort: %s",
+                    path,
+                    error,
+                )
+        for entry in message.index_adds:
+            file_name = None
+            try:
+                index_file = entry.index_file
+                file_name = index_file.file_name
+                path = (
+                    index_file.external_path
+                    or table.path_factory()
+                    .global_index_path_factory()
+                    .to_path(file_name)
+                )
+                table.file_io.delete_quietly(path)
+            except Exception as error:
+                logger.warning(
+                    "Failed to clean up index file %s during abort: %s",
+                    file_name,
+                    error,
+                )
 
 
 class CommitResult:
@@ -532,8 +567,6 @@ class FileStoreCommit:
                 )
                 if commit_result_may_be_uncertain:
                     raise RuntimeError(error_msg) from uncertain_commit_exception
-                if retry_result is not None and retry_result.exception is None:
-                    raise CommitConflictError(error_msg)
                 if retry_result is not None and retry_result.exception:
                     raise RuntimeError(error_msg) from retry_result.exception
                 else:
@@ -562,15 +595,12 @@ class FileStoreCommit:
             hash_index_base_snapshot is not None
             and latest_snapshot_id != hash_index_base_snapshot
         ):
-            conflict = RuntimeError(
+            raise RuntimeError(
                 "HASH index assignment conflict detected: assigned from "
                 "snapshot {}, but the latest snapshot is {}.".format(
                     hash_index_base_snapshot, latest_snapshot_id
                 )
             )
-            if not commit_result_may_be_uncertain:
-                raise CommitConflictError(str(conflict)) from conflict
-            raise conflict
 
         unique_id = uuid.uuid4()
         base_manifest_list = f"manifest-list-{unique_id}-0"
@@ -636,13 +666,6 @@ class FileStoreCommit:
                         # Rolled back: base/snapshot no longer valid; next attempt
                         # re-scans from scratch (matches Java RollbackRetryResult).
                         return RetryResult(None, conflict_exception)
-                if not commit_result_may_be_uncertain:
-                    raise CommitConflictError(
-                        str(conflict_exception)
-                    ) from conflict_exception
-                # A previous attempt may have committed despite returning an
-                # error. Preserve the generic, uncertain-result semantics so
-                # callers do not delete files which a snapshot may reference.
                 raise conflict_exception
 
         # Apply row tracking logic after conflict detection (matches Java ordering)
@@ -650,8 +673,14 @@ class FileStoreCommit:
         next_row_id = None
         if row_tracking_enabled:
             commit_entries = self._assign_snapshot_id(new_snapshot_id, commit_entries)
+            group_by_partition = (
+                self.table.options.row_tracking_partition_group_on_commit())
+            if group_by_partition:
+                commit_entries = self._group_commit_entries_by_partition(
+                    commit_entries)
             first_row_id_start = self._get_next_row_id_start(latest_snapshot)
-            commit_entries, next_row_id = self._assign_row_tracking_meta(first_row_id_start, commit_entries)
+            commit_entries, next_row_id = self._assign_row_tracking_meta(
+                first_row_id_start, commit_entries)
 
         changelog_manifest_list_name = None
         changelog_manifest_list_size = None
@@ -739,6 +768,7 @@ class FileStoreCommit:
                 total_record_count=total_record_count,
                 delta_record_count=delta_record_count,
                 commit_user=self.commit_user,
+                writer_version=build_full_version(),
                 commit_identifier=commit_identifier,
                 commit_kind=commit_kind,
                 time_millis=int(time.time() * 1000),
@@ -851,7 +881,7 @@ class FileStoreCommit:
             )
         )
         if non_compaction_conflict is not None:
-            raise CommitConflictError(
+            raise RuntimeError(
                 str(non_compaction_conflict)
             ) from non_compaction_conflict
 
@@ -867,7 +897,7 @@ class FileStoreCommit:
                 commit_entries,
             )
         except RuntimeError as rewrite_error:
-            raise CommitConflictError(
+            raise RuntimeError(
                 "{} {}".format(conflict_exception, rewrite_error)
             ) from conflict_exception
 
@@ -1041,29 +1071,7 @@ class FileStoreCommit:
 
     def abort(self, commit_messages: List[CommitMessage]):
         """Abort commit and delete files. Uses external_path if available to ensure proper scheme handling."""
-        for message in commit_messages:
-            for file in list(message.new_files) + list(message.changelog_files):
-                try:
-                    path_to_delete = file.external_path if file.external_path else file.file_path
-                    if path_to_delete:
-                        path_str = str(path_to_delete)
-                        self.table.file_io.delete_quietly(path_str)
-                except Exception as e:
-                    path_to_delete = file.external_path if file.external_path else file.file_path
-                    logger.warning(f"Failed to clean up file {path_to_delete} during abort: {e}")
-            for entry in message.index_adds:
-                try:
-                    file_name = entry.index_file.file_name
-                    index_path = (
-                        entry.index_file.external_path
-                        or self.table.path_factory()
-                        .global_index_path_factory()
-                        .to_path(file_name)
-                    )
-                    self.table.file_io.delete_quietly(index_path)
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to clean up index file {entry.index_file.file_name} during abort: {e}")
+        _abort_commit_messages(self.table, commit_messages)
 
     def close(self):
         """Close the FileStoreCommit and release resources."""
@@ -1181,6 +1189,19 @@ class FileStoreCommit:
         if latest_snapshot and hasattr(latest_snapshot, 'next_row_id') and latest_snapshot.next_row_id is not None:
             return latest_snapshot.next_row_id
         return 0
+
+    @staticmethod
+    def _group_commit_entries_by_partition(
+            commit_entries: List[ManifestEntry]) -> List[ManifestEntry]:
+        grouped = {}
+        for entry in commit_entries:
+            key = tuple(entry.partition.values)
+            grouped.setdefault(key, []).append(entry)
+        return [
+            entry
+            for entries in grouped.values()
+            for entry in entries
+        ]
 
     def _assign_row_tracking_meta(self, first_row_id_start: int, commit_entries: List[ManifestEntry]):
         """Assign row tracking metadata (first_row_id) to new files.

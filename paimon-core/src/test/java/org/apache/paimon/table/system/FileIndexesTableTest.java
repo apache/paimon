@@ -157,6 +157,13 @@ public class FileIndexesTableTest extends TableTestBase {
                 readWithFilter(fileIndexesTable, builder.equal(0, BinaryString.fromString("{1}")));
         assertThat(partitionRows).hasSize(2);
 
+        assertThat(
+                        readWithFilter(
+                                fileIndexesTable,
+                                PredicateBuilder.and(
+                                        builder.greaterThan(1, 0), builder.lessThan(1, 1))))
+                .isEmpty();
+
         String filePath = partitionRows.get(0).getString(2).toString();
         List<InternalRow> fileRows =
                 readWithFilter(

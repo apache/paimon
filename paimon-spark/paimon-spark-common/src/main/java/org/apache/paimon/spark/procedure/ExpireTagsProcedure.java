@@ -34,7 +34,6 @@ import org.apache.spark.unsafe.types.UTF8String;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
-import java.util.TimeZone;
 
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
@@ -86,9 +85,7 @@ public class ExpireTagsProcedure extends BaseProcedure {
                                     .getTagTimeExpire();
                     if (olderThanStr != null) {
                         LocalDateTime olderThanTime =
-                                DateTimeUtils.parseTimestampData(
-                                                olderThanStr, 3, TimeZone.getDefault())
-                                        .toLocalDateTime();
+                                DateTimeUtils.toLocalDateTime(olderThanStr, 3);
                         tagTimeExpire.withOlderThanTime(olderThanTime);
                     }
                     List<String> expired = tagTimeExpire.expire();

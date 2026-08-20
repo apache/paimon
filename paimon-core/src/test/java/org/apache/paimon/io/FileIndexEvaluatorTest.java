@@ -18,12 +18,14 @@
 
 package org.apache.paimon.io;
 
+import org.apache.paimon.deletionvectors.Bitmap64DeletionVector;
 import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.fileindex.FileIndexFormat;
 import org.apache.paimon.fileindex.FileIndexResult;
 import org.apache.paimon.fileindex.FileIndexWriter;
 import org.apache.paimon.fileindex.bitmap.BitmapFileIndex;
 import org.apache.paimon.fileindex.bitmap.BitmapFileIndexFactory;
+import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.TableSchema;
@@ -32,6 +34,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.RoaringBitmap32;
 
 import org.junit.jupiter.api.Test;
 
@@ -45,6 +48,64 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link FileIndexEvaluator}. */
 public class FileIndexEvaluatorTest {
+
+    @Test
+    public void testLimitIntersectsBitmapDeletionVector() throws Exception {
+        BitmapDeletionVector deletionVector = new BitmapDeletionVector();
+        for (int position = 0; position < 5; position++) {
+            deletionVector.delete(position);
+        }
+
+        FileIndexResult result =
+                FileIndexEvaluator.evaluate(
+                        null,
+                        null,
+                        Collections.emptyList(),
+                        null,
+                        10,
+                        null,
+                        DataFileTestUtils.newFile("data.avro", 0, 0, 19, 0L),
+                        deletionVector);
+
+        assertThat(result).isInstanceOf(BitmapIndexResult.class);
+        assertThat(((BitmapIndexResult) result).get())
+                .isEqualTo(RoaringBitmap32.bitmapOfRange(5, 15));
+    }
+
+    @Test
+    public void testBitmap64DeletionVectorFallsBack() throws Exception {
+        Bitmap64DeletionVector deletionVector = new Bitmap64DeletionVector();
+        deletionVector.delete(0);
+
+        FileIndexResult result =
+                FileIndexEvaluator.evaluate(
+                        null,
+                        null,
+                        Collections.emptyList(),
+                        null,
+                        10,
+                        null,
+                        DataFileTestUtils.newFile("data.avro", 0, 0, 19, 0L),
+                        deletionVector);
+
+        assertThat(result).isSameAs(FileIndexResult.REMAIN);
+    }
+
+    @Test
+    public void testLargeFileFallsBack() throws Exception {
+        FileIndexResult result =
+                FileIndexEvaluator.evaluate(
+                        null,
+                        null,
+                        Collections.emptyList(),
+                        null,
+                        10,
+                        null,
+                        fileWithRowCount(Integer.MAX_VALUE + 2L),
+                        null);
+
+        assertThat(result).isSameAs(FileIndexResult.REMAIN);
+    }
 
     @Test
     public void testDataFilterIntersectsDeletionVector() throws Exception {
@@ -92,6 +153,24 @@ public class FileIndexEvaluatorTest {
                 Collections.emptyList(),
                 Collections.emptyList(),
                 Collections.emptyMap(),
+                null);
+    }
+
+    private static DataFileMeta fileWithRowCount(long rowCount) {
+        return DataFileMeta.forAppend(
+                "data.avro",
+                0,
+                rowCount,
+                SimpleStats.EMPTY_STATS,
+                0,
+                0,
+                0,
+                Collections.emptyList(),
+                null,
+                null,
+                null,
+                null,
+                null,
                 null);
     }
 

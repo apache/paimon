@@ -26,7 +26,7 @@ import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.mergetree.SortedRun;
 import org.apache.paimon.mergetree.compact.IntervalPartition;
-import org.apache.paimon.partition.PartitionTimeExtractor;
+import org.apache.paimon.partition.PartitionTimeResolver;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.ChainGroupReadTable;
@@ -39,8 +39,10 @@ import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
+import java.time.temporal.TemporalAmount;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -52,8 +54,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiFunction;
 import java.util.function.Function;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -61,6 +61,7 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Utils for chain table. */
 public class ChainTableUtils {
+    public static final int MAX_DELTA_PARTITIONS = 10_000_000;
 
     public static boolean isChainTable(Map<String, String> tblOptions) {
         return CoreOptions.fromMap(tblOptions).isChainTable();
@@ -92,61 +93,50 @@ public class ChainTableUtils {
             List<String> partitionColumns,
             RowType partType,
             CoreOptions options,
-            RecordComparator partitionComparator,
             InternalRowPartitionComputer partitionComputer) {
         InternalRowSerializer serializer = new InternalRowSerializer(partType);
         List<BinaryRow> deltaPartitions = new ArrayList<>();
-        boolean isDailyPartition = partitionColumns.size() == 1;
         List<String> startPartitionValues =
                 new ArrayList<>(partitionComputer.generatePartValues(beginPartition).values());
         List<String> endPartitionValues =
                 new ArrayList<>(partitionComputer.generatePartValues(endPartition).values());
-        PartitionTimeExtractor timeExtractor =
-                new PartitionTimeExtractor(
-                        options.partitionTimestampPattern(), options.partitionTimestampFormatter());
-        LocalDateTime stratPartitionTime =
-                timeExtractor.extract(partitionColumns, startPartitionValues);
-        LocalDateTime candidateTime = stratPartitionTime;
-        LocalDateTime endPartitionTime =
-                timeExtractor.extract(partitionColumns, endPartitionValues);
+        PartitionTimeResolver timeResolver =
+                new PartitionTimeResolver(
+                        partitionColumns,
+                        options.partitionTimestampPattern(),
+                        options.partitionTimestampFormatter());
+        LocalDateTime startPartitionTime = timeResolver.parsePartitionValues(startPartitionValues);
+        LocalDateTime endPartitionTime = timeResolver.parsePartitionValues(endPartitionValues);
+        TemporalAmount step = timeResolver.extractMinStep();
+        // Period-based steps (year/month) are coarse-grained and cannot explode, so only
+        // fine-grained Duration steps need the partition-count guard.
+        if (step instanceof Duration) {
+            long totalSeconds = ChronoUnit.SECONDS.between(startPartitionTime, endPartitionTime);
+            long stepSeconds = ((Duration) step).getSeconds();
+            long estimatedCount = stepSeconds == 0 ? 0 : totalSeconds / stepSeconds;
+            checkArgument(
+                    estimatedCount < MAX_DELTA_PARTITIONS,
+                    "Too many delta partitions generated between '%s' and '%s' "
+                            + "(exceeds %s). Please widen the partition granularity or reduce "
+                            + "the query range. Pattern: '%s', formatter: '%s'.",
+                    startPartitionValues,
+                    endPartitionValues,
+                    MAX_DELTA_PARTITIONS,
+                    options.partitionTimestampPattern(),
+                    options.partitionTimestampFormatter());
+        }
+        LocalDateTime candidateTime = startPartitionTime.plus(step);
         while (!candidateTime.isAfter(endPartitionTime)) {
-            if (isDailyPartition) {
-                if (candidateTime.isAfter(stratPartitionTime)) {
-                    deltaPartitions.add(
-                            serializer
-                                    .toBinaryRow(
-                                            InternalRowPartitionComputer.convertSpecToInternalRow(
-                                                    calPartValues(
-                                                            candidateTime,
-                                                            partitionColumns,
-                                                            options.partitionTimestampPattern(),
-                                                            options.partitionTimestampFormatter()),
-                                                    partType,
-                                                    options.partitionDefaultName()))
-                                    .copy());
-                }
-            } else {
-                for (int hour = 0; hour <= 23; hour++) {
-                    candidateTime = candidateTime.toLocalDate().atStartOfDay().plusHours(hour);
-                    BinaryRow candidatePartition =
-                            serializer
-                                    .toBinaryRow(
-                                            InternalRowPartitionComputer.convertSpecToInternalRow(
-                                                    calPartValues(
-                                                            candidateTime,
-                                                            partitionColumns,
-                                                            options.partitionTimestampPattern(),
-                                                            options.partitionTimestampFormatter()),
-                                                    partType,
-                                                    options.partitionDefaultName()))
-                                    .copy();
-                    if (partitionComparator.compare(candidatePartition, beginPartition) > 0
-                            && partitionComparator.compare(candidatePartition, endPartition) <= 0) {
-                        deltaPartitions.add(candidatePartition);
-                    }
-                }
-            }
-            candidateTime = candidateTime.toLocalDate().plusDays(1).atStartOfDay();
+            BinaryRow candidatePartition =
+                    serializer
+                            .toBinaryRow(
+                                    InternalRowPartitionComputer.convertSpecToInternalRow(
+                                            timeResolver.resolvePartitionValues(candidateTime),
+                                            partType,
+                                            options.partitionDefaultName()))
+                            .copy();
+            deltaPartitions.add(candidatePartition);
+            candidateTime = candidateTime.plus(step);
         }
         return deltaPartitions;
     }
@@ -181,48 +171,6 @@ public class ChainTableUtils {
             fieldPredicates.add(func.apply(i, partitionObjects[i]));
         }
         return PredicateBuilder.and(fieldPredicates);
-    }
-
-    public static LinkedHashMap<String, String> calPartValues(
-            LocalDateTime dateTime,
-            List<String> partitionKeys,
-            String timestampPattern,
-            String timestampFormatter) {
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern(timestampFormatter);
-        String formattedDateTime = dateTime.format(formatter);
-        Pattern keyPattern = Pattern.compile("\\$(\\w+)");
-        Matcher keyMatcher = keyPattern.matcher(timestampPattern);
-        List<String> keyOrder = new ArrayList<>();
-        StringBuilder regexBuilder = new StringBuilder();
-        int lastPosition = 0;
-        while (keyMatcher.find()) {
-            regexBuilder.append(
-                    Pattern.quote(timestampPattern.substring(lastPosition, keyMatcher.start())));
-            regexBuilder.append("(.+)");
-            keyOrder.add(keyMatcher.group(1));
-            lastPosition = keyMatcher.end();
-        }
-        regexBuilder.append(Pattern.quote(timestampPattern.substring(lastPosition)));
-
-        Matcher valueMatcher = Pattern.compile(regexBuilder.toString()).matcher(formattedDateTime);
-        if (!valueMatcher.matches() || valueMatcher.groupCount() != keyOrder.size()) {
-            throw new IllegalArgumentException(
-                    "Formatted datetime does not match timestamp pattern");
-        }
-
-        Map<String, String> keyValues = new HashMap<>();
-        for (int i = 0; i < keyOrder.size(); i++) {
-            keyValues.put(keyOrder.get(i), valueMatcher.group(i + 1));
-        }
-        List<String> values =
-                partitionKeys.stream()
-                        .map(key -> keyValues.getOrDefault(key, ""))
-                        .collect(Collectors.toList());
-        LinkedHashMap<String, String> res = new LinkedHashMap<>();
-        for (int i = 0; i < partitionKeys.size(); i++) {
-            res.put(partitionKeys.get(i), values.get(i));
-        }
-        return res;
     }
 
     public static boolean isScanFallbackDeltaBranch(CoreOptions options) {
@@ -329,7 +277,6 @@ public class ChainTableUtils {
                         chainPartitionColumns,
                         chainPartType,
                         options,
-                        chainPartitionComparator,
                         chainPartitionComputer);
 
         // Combine each chain-only BinaryRow with the group part into a full partition

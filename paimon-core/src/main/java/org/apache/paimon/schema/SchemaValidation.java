@@ -31,7 +31,9 @@ import org.apache.paimon.fileindex.FileIndexerFactoryUtils;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexerFactory;
+import org.apache.paimon.globalindex.bitmap.MultiValueGlobalIndexerFactory;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
+import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldLastValueAggFactory;
@@ -43,6 +45,8 @@ import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.GeographyType;
+import org.apache.paimon.types.GeometryType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
@@ -76,16 +80,20 @@ import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
 import static org.apache.paimon.CoreOptions.FIELDS_SEPARATOR;
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
+import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_SCAN_MODE;
+import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_TAG_TO_SNAPSHOT;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_TO_AUTO_TAG;
 import static org.apache.paimon.CoreOptions.MAP_STORAGE_LAYOUT;
 import static org.apache.paimon.CoreOptions.PRIMARY_KEY;
+import static org.apache.paimon.CoreOptions.SCAN_CREATION_TIME_MILLIS;
 import static org.apache.paimon.CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS;
 import static org.apache.paimon.CoreOptions.SCAN_MODE;
 import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
 import static org.apache.paimon.CoreOptions.SCAN_TAG_NAME;
 import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP;
 import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP_MILLIS;
+import static org.apache.paimon.CoreOptions.SCAN_VERSION;
 import static org.apache.paimon.CoreOptions.SCAN_WATERMARK;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
@@ -121,7 +129,9 @@ public class SchemaValidation {
                     RowType.class,
                     MultisetType.class,
                     VectorType.class,
-                    VariantType.class);
+                    VariantType.class,
+                    GeometryType.class,
+                    GeographyType.class);
 
     /**
      * Validate the {@link TableSchema} and {@link CoreOptions}.
@@ -222,6 +232,7 @@ public class SchemaValidation {
         FileFormat fileFormat =
                 FileFormat.fromIdentifier(options.formatType(), new Options(schema.options()));
         RowType tableRowType = new RowType(schema.fields());
+        validateGeospatialTypes(schema, options, tableRowType);
         validateBlobFields(tableRowType, options);
         Set<String> blobDescriptorFields = validateBlobDescriptorFields(tableRowType, options);
         Set<String> blobViewFields =
@@ -445,6 +456,106 @@ public class SchemaValidation {
         }
     }
 
+    private static void validateGeospatialTypes(
+            TableSchema schema, CoreOptions options, RowType rowType) {
+        boolean hasGeospatial =
+                containsType(
+                        rowType,
+                        type -> type.isAnyOf(DataTypeRoot.GEOMETRY, DataTypeRoot.GEOGRAPHY));
+        if (!hasGeospatial) {
+            return;
+        }
+
+        checkArgument(
+                CoreOptions.FILE_FORMAT_PARQUET.equals(options.formatType()),
+                "Geometry and geography columns require '%s'='parquet', but was '%s'.",
+                CoreOptions.FILE_FORMAT.key(),
+                options.formatType());
+        options.fileFormatPerLevel()
+                .forEach(
+                        (level, format) ->
+                                checkArgument(
+                                        CoreOptions.FILE_FORMAT_PARQUET.equals(format),
+                                        "Geometry and geography columns require parquet at every level, but '%s' contains '%s:%s'.",
+                                        CoreOptions.FILE_FORMAT_PER_LEVEL.key(),
+                                        level,
+                                        format));
+        checkArgument(
+                options.changelogFileFormat() == null
+                        || CoreOptions.FILE_FORMAT_PARQUET.equals(options.changelogFileFormat()),
+                "Geometry and geography columns require '%s' to be parquet, but was '%s'.",
+                CoreOptions.CHANGELOG_FILE_FORMAT.key(),
+                options.changelogFileFormat());
+        validateIcebergGeospatialTypes(rowType, options);
+
+        List<String> geospatialClusteringColumns =
+                schema.fields().stream()
+                        .filter(field -> options.clusteringColumns().contains(field.name()))
+                        .filter(
+                                field ->
+                                        containsType(
+                                                field.type(),
+                                                type ->
+                                                        type.isAnyOf(
+                                                                DataTypeRoot.GEOMETRY,
+                                                                DataTypeRoot.GEOGRAPHY)))
+                        .map(DataField::name)
+                        .collect(Collectors.toList());
+        checkArgument(
+                geospatialClusteringColumns.isEmpty(),
+                "Geometry and geography columns cannot be clustering columns: %s.",
+                geospatialClusteringColumns);
+
+        Set<String> geospatialFields =
+                schema.fields().stream()
+                        .filter(
+                                field ->
+                                        field.type()
+                                                .isAnyOf(
+                                                        DataTypeRoot.GEOMETRY,
+                                                        DataTypeRoot.GEOGRAPHY))
+                        .map(DataField::name)
+                        .collect(Collectors.toSet());
+        Set<String> geospatialBucketKeys = new HashSet<>(schema.bucketKeys());
+        geospatialBucketKeys.retainAll(geospatialFields);
+        checkArgument(
+                geospatialBucketKeys.isEmpty(),
+                "Geometry and geography columns cannot be bucket keys: %s.",
+                geospatialBucketKeys);
+        Set<String> geospatialSequenceFields = new HashSet<>(options.sequenceField());
+        geospatialSequenceFields.retainAll(geospatialFields);
+        checkArgument(
+                geospatialSequenceFields.isEmpty(),
+                "Geometry and geography columns cannot be sequence fields: %s.",
+                geospatialSequenceFields);
+    }
+
+    /** Validate geospatial types in a schema that will be published as Iceberg metadata. */
+    public static void validateIcebergGeospatialTypes(DataType dataType, CoreOptions options) {
+        boolean hasGeospatial =
+                containsType(
+                        dataType,
+                        type -> type.isAnyOf(DataTypeRoot.GEOMETRY, DataTypeRoot.GEOGRAPHY));
+        if (!hasGeospatial) {
+            return;
+        }
+
+        IcebergOptions.StorageType icebergStorage =
+                options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE);
+        if (icebergStorage != IcebergOptions.StorageType.DISABLED) {
+            checkArgument(
+                    options.toConfiguration().get(IcebergOptions.FORMAT_VERSION) == 3,
+                    "Geometry and geography columns require '%s'='3' when Iceberg metadata is enabled.",
+                    IcebergOptions.FORMAT_VERSION.key());
+            checkArgument(
+                    icebergStorage != IcebergOptions.StorageType.REST_CATALOG,
+                    "Geometry and geography columns do not support '%s'='%s' because the bundled Iceberg REST client cannot parse Iceberg v3 geospatial types.",
+                    IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                    IcebergOptions.StorageType.REST_CATALOG);
+            validateIcebergGeographyCrs(dataType);
+        }
+    }
+
     private static void validateStartupMode(CoreOptions options) {
         if (options.startupMode() == CoreOptions.StartupMode.FROM_TIMESTAMP) {
             checkExactOneOptionExistInMode(
@@ -523,6 +634,24 @@ public class SchemaValidation {
                             INCREMENTAL_BETWEEN,
                             INCREMENTAL_TO_AUTO_TAG),
                     Collections.singletonList(SCAN_FILE_CREATION_TIME_MILLIS));
+        } else if (options.startupMode() == CoreOptions.StartupMode.LATEST_DELTA) {
+            for (ConfigOption<?> option :
+                    Arrays.asList(
+                            SCAN_TIMESTAMP_MILLIS,
+                            SCAN_FILE_CREATION_TIME_MILLIS,
+                            SCAN_CREATION_TIME_MILLIS,
+                            SCAN_TIMESTAMP,
+                            SCAN_SNAPSHOT_ID,
+                            SCAN_TAG_NAME,
+                            SCAN_WATERMARK,
+                            SCAN_VERSION,
+                            INCREMENTAL_BETWEEN_TIMESTAMP,
+                            INCREMENTAL_BETWEEN,
+                            INCREMENTAL_TO_AUTO_TAG,
+                            INCREMENTAL_BETWEEN_SCAN_MODE,
+                            INCREMENTAL_BETWEEN_TAG_TO_SNAPSHOT)) {
+                checkOptionNotExistInMode(options, option, options.startupMode());
+            }
         } else {
             checkOptionNotExistInMode(options, SCAN_TIMESTAMP_MILLIS, options.startupMode());
             checkOptionNotExistInMode(
@@ -788,6 +917,30 @@ public class SchemaValidation {
             return containsType(((VectorType) dataType).getElementType(), predicate);
         }
         return false;
+    }
+
+    private static void validateIcebergGeographyCrs(DataType dataType) {
+        if (dataType.is(DataTypeRoot.GEOGRAPHY)) {
+            String crs = ((GeographyType) dataType).getCrs();
+            checkArgument(
+                    !crs.contains(","),
+                    "Geography CRS '%s' cannot contain ',' when Iceberg metadata is enabled.",
+                    crs);
+        } else if (dataType instanceof RowType) {
+            for (DataField field : ((RowType) dataType).getFields()) {
+                validateIcebergGeographyCrs(field.type());
+            }
+        } else if (dataType instanceof ArrayType) {
+            validateIcebergGeographyCrs(((ArrayType) dataType).getElementType());
+        } else if (dataType instanceof MultisetType) {
+            validateIcebergGeographyCrs(((MultisetType) dataType).getElementType());
+        } else if (dataType instanceof MapType) {
+            MapType mapType = (MapType) dataType;
+            validateIcebergGeographyCrs(mapType.getKeyType());
+            validateIcebergGeographyCrs(mapType.getValueType());
+        } else if (dataType instanceof VectorType) {
+            validateIcebergGeographyCrs(((VectorType) dataType).getElementType());
+        }
     }
 
     private static void validateMapSharedShreddingFileFormats(CoreOptions options) {
@@ -1065,6 +1218,7 @@ public class SchemaValidation {
         List<String> vectorColumns = options.primaryKeyVectorIndexColumns();
         List<String> btreeColumns = options.primaryKeyBTreeIndexColumns();
         List<String> bitmapColumns = options.primaryKeyBitmapIndexColumns();
+        List<String> multiValueColumns = options.primaryKeyMultiValueIndexColumns();
         List<String> fullTextColumns = options.primaryKeyFullTextIndexColumns();
         validateNoDuplicatePrimaryKeyIndexColumns(
                 vectorColumns, CoreOptions.PK_VECTOR_INDEX_COLUMNS.key());
@@ -1073,12 +1227,15 @@ public class SchemaValidation {
         validateNoDuplicatePrimaryKeyIndexColumns(
                 bitmapColumns, CoreOptions.PK_BITMAP_INDEX_COLUMNS.key());
         validateNoDuplicatePrimaryKeyIndexColumns(
+                multiValueColumns, CoreOptions.PK_MULTIVALUE_INDEX_COLUMNS.key());
+        validateNoDuplicatePrimaryKeyIndexColumns(
                 fullTextColumns, CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS.key());
 
         Set<String> indexedColumns = new HashSet<>();
         validateUniquePrimaryKeyIndexColumns(indexedColumns, vectorColumns);
         validateUniquePrimaryKeyIndexColumns(indexedColumns, btreeColumns);
         validateUniquePrimaryKeyIndexColumns(indexedColumns, bitmapColumns);
+        validateUniquePrimaryKeyIndexColumns(indexedColumns, multiValueColumns);
         validateUniquePrimaryKeyIndexColumns(indexedColumns, fullTextColumns);
     }
 
@@ -1103,27 +1260,28 @@ public class SchemaValidation {
 
     private static void validatePrimaryKeySortedIndexes(TableSchema schema, CoreOptions options) {
         if (options.primaryKeyBTreeIndexColumns().isEmpty()
-                && options.primaryKeyBitmapIndexColumns().isEmpty()) {
+                && options.primaryKeyBitmapIndexColumns().isEmpty()
+                && options.primaryKeyMultiValueIndexColumns().isEmpty()) {
             return;
         }
 
         checkArgument(
                 options.deletionVectorsEnabled(),
-                "Primary-key BTree and Bitmap indexes require deletion-vectors.enabled = true.");
+                "Primary-key BTree, Bitmap, and Multivalue indexes require deletion-vectors.enabled = true.");
         checkArgument(
                 !schema.primaryKeys().isEmpty(),
-                "Primary-key BTree and Bitmap indexes require a primary-key table.");
+                "Primary-key BTree, Bitmap, and Multivalue indexes require a primary-key table.");
         checkArgument(
                 options.bucket() > 0 || options.bucket() == BucketMode.POSTPONE_BUCKET,
-                "Primary-key BTree and Bitmap indexes require fixed or postpone bucket mode "
+                "Primary-key BTree, Bitmap, and Multivalue indexes require fixed or postpone bucket mode "
                         + "(bucket > 0 or bucket = -2), but bucket is %s.",
                 options.bucket());
         checkArgument(
                 !options.deletionVectorsMergeOnRead(),
-                "Primary-key BTree and Bitmap indexes require deletion-vectors.merge-on-read = false.");
+                "Primary-key BTree, Bitmap, and Multivalue indexes require deletion-vectors.merge-on-read = false.");
         checkArgument(
                 !options.pkClusteringOverride(),
-                "Primary-key BTree and Bitmap indexes do not support pk-clustering-override.");
+                "Primary-key BTree, Bitmap, and Multivalue indexes do not support pk-clustering-override.");
 
         validatePrimaryKeySortedIndexColumns(
                 schema,
@@ -1133,6 +1291,10 @@ public class SchemaValidation {
                 schema,
                 options.primaryKeyBitmapIndexColumns(),
                 CoreOptions.PK_BITMAP_INDEX_COLUMNS.key());
+        validatePrimaryKeySortedIndexColumns(
+                schema,
+                options.primaryKeyMultiValueIndexColumns(),
+                CoreOptions.PK_MULTIVALUE_INDEX_COLUMNS.key());
 
         Map<String, DataField> fields = schema.nameToFieldMap();
         for (String column : options.primaryKeyBTreeIndexColumns()) {
@@ -1146,6 +1308,12 @@ public class SchemaValidation {
                     BitmapGlobalIndexerFactory.IDENTIFIER,
                     fields.get(column),
                     options.primaryKeyBitmapIndexOptions(column));
+        }
+        for (String column : options.primaryKeyMultiValueIndexColumns()) {
+            GlobalIndexer.create(
+                    MultiValueGlobalIndexerFactory.IDENTIFIER,
+                    fields.get(column),
+                    options.primaryKeyMultiValueIndexOptions(column));
         }
     }
 
@@ -1432,9 +1600,10 @@ public class SchemaValidation {
 
         checkArgument(
                 options.mergeEngine() == MergeEngine.DEDUPLICATE
-                        || options.mergeEngine() == MergeEngine.PARTIAL_UPDATE,
-                "Primary-key managed BLOB tables only support the deduplicate or "
-                        + "partial-update merge engine.");
+                        || options.mergeEngine() == MergeEngine.PARTIAL_UPDATE
+                        || options.mergeEngine() == MergeEngine.FIRST_ROW,
+                "Primary-key managed BLOB tables only support the deduplicate, "
+                        + "partial-update or first-row merge engine.");
         checkArgument(
                 options.changelogProducer() == ChangelogProducer.NONE,
                 "Primary-key managed BLOB tables only support changelog-producer 'none'.");

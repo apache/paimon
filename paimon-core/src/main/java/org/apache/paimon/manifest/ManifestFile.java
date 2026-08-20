@@ -21,19 +21,14 @@ package org.apache.paimon.manifest;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.format.FormatWriterFactory;
-import org.apache.paimon.format.SimpleStatsCollector;
+import org.apache.paimon.format.avro.AvroFileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.io.RollingFileWriter;
-import org.apache.paimon.io.RollingFileWriterImpl;
-import org.apache.paimon.io.SingleFileWriter;
 import org.apache.paimon.manifest.ProjectedManifestEntry.Projection;
 import org.apache.paimon.operation.metrics.CacheMetrics;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -62,15 +57,15 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
 
     private final SchemaManager schemaManager;
     private final RowType partitionType;
-    private final FormatWriterFactory writerFactory;
+    private final AvroFileFormat avroFileFormat;
     private final long suggestedFileSize;
 
     private ManifestFile(
             FileIO fileIO,
             SchemaManager schemaManager,
             RowType partitionType,
+            AvroFileFormat avroFileFormat,
             ManifestEntrySerializer serializer,
-            FormatWriterFactory writerFactory,
             String compression,
             PathFactory pathFactory,
             long suggestedFileSize,
@@ -82,13 +77,13 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                 (path, ignoredFileSize) ->
                         createManifestIterator(
                                 fileIO, path, ManifestEntry.MANIFEST_ROW_TYPE, null, null),
-                writerFactory,
+                avroFileFormat.createWriterFactory(ManifestEntry.MANIFEST_ROW_TYPE),
                 compression,
                 pathFactory,
                 cache);
         this.schemaManager = schemaManager;
         this.partitionType = partitionType;
-        this.writerFactory = writerFactory;
+        this.avroFileFormat = avroFileFormat;
         this.suggestedFileSize = suggestedFileSize;
     }
 
@@ -208,6 +203,20 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         }
     }
 
+    /** Opens a low-allocation reader over raw Avro manifest blocks. */
+    public ManifestAvroReader scanAvroBlocks(String fileName, @Nullable Long fileSize) {
+        try {
+            return new ManifestAvroReader(fileIO.newInputStream(pathFactory.toPath(fileName)));
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to read manifest file " + fileName, e);
+        }
+    }
+
+    /** Opens a low-allocation reader for the encoded manifest fields needed by run merge. */
+    public ManifestAvroReader scanForRunMerge(String fileName, @Nullable Long fileSize) {
+        return scanAvroBlocks(fileName, fileSize);
+    }
+
     @VisibleForTesting
     public long suggestedFileSize() {
         return suggestedFileSize;
@@ -261,7 +270,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
      * <p>NOTE: This method is atomic.
      */
     public List<ManifestFileMeta> write(List<ManifestEntry> entries) {
-        RollingFileWriter<ManifestEntry, ManifestFileMeta> writer = createRollingWriter();
+        ManifestAvroWriter writer = createAvroWriter();
         try {
             writer.write(entries);
             writer.close();
@@ -271,108 +280,52 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         }
     }
 
-    public RollingFileWriter<ManifestEntry, ManifestFileMeta> createRollingWriter() {
-        return new RollingFileWriterImpl<>(
-                () -> new ManifestEntryWriter(writerFactory, pathFactory.newPath(), compression),
-                suggestedFileSize,
+    /** Creates a rolling Avro manifest writer. */
+    public ManifestAvroWriter createAvroWriter() {
+        return new ManifestAvroWriter(
+                fileIO,
+                schemaManager,
+                partitionType,
+                avroFileFormat,
+                serializer,
+                compression,
+                pathFactory,
+                suggestedFileSize);
+    }
+
+    /** Creates an Avro manifest writer for one explicit path. */
+    public ManifestAvroWriter createAvroWriter(Path manifestPath) {
+        return new ManifestAvroWriter(
+                fileIO,
+                schemaManager,
+                partitionType,
+                avroFileFormat,
+                serializer,
+                compression,
+                singlePathFactory(manifestPath),
                 Long.MAX_VALUE);
     }
 
-    public ManifestEntryWriter createManifestEntryWriter(Path manifestPath) {
-        return new ManifestEntryWriter(writerFactory, manifestPath, compression);
-    }
+    private PathFactory singlePathFactory(Path manifestPath) {
+        return new PathFactory() {
 
-    /** Writer for {@link ManifestEntry}. */
-    public class ManifestEntryWriter extends SingleFileWriter<ManifestEntry, ManifestFileMeta> {
+            private boolean created;
 
-        private final SimpleStatsCollector partitionStatsCollector;
-        private final SimpleStatsConverter partitionStatsSerializer;
-
-        private long numAddedFiles = 0;
-        private long numDeletedFiles = 0;
-        private long schemaId = Long.MIN_VALUE;
-        private int minBucket = Integer.MAX_VALUE;
-        private int maxBucket = Integer.MIN_VALUE;
-        private int minLevel = Integer.MAX_VALUE;
-        private int maxLevel = Integer.MIN_VALUE;
-        private @Nullable RowIdStats rowIdStats = new RowIdStats();
-
-        ManifestEntryWriter(FormatWriterFactory factory, Path path, String fileCompression) {
-            super(
-                    ManifestFile.this.fileIO,
-                    factory,
-                    path,
-                    serializer::toRow,
-                    fileCompression,
-                    false);
-            this.partitionStatsCollector = new SimpleStatsCollector(partitionType);
-            this.partitionStatsSerializer = new SimpleStatsConverter(partitionType);
-        }
-
-        @Override
-        public void write(ManifestEntry entry) throws IOException {
-            if (entry instanceof ProjectedManifestEntry) {
-                writeRow(((ProjectedManifestEntry) entry).fullRow());
-            } else {
-                super.write(entry);
-            }
-
-            switch (entry.kind()) {
-                case ADD:
-                    numAddedFiles++;
-                    break;
-                case DELETE:
-                    numDeletedFiles++;
-                    break;
-                default:
-                    throw new UnsupportedOperationException("Unknown entry kind: " + entry.kind());
-            }
-            schemaId = Math.max(schemaId, entry.file().schemaId());
-            minBucket = Math.min(minBucket, entry.bucket());
-            maxBucket = Math.max(maxBucket, entry.bucket());
-            minLevel = Math.min(minLevel, entry.level());
-            maxLevel = Math.max(maxLevel, entry.level());
-            if (rowIdStats != null) {
-                Long firstRowId = entry.file().firstRowId();
-                if (firstRowId == null) {
-                    rowIdStats = null;
-                } else {
-                    rowIdStats.collect(firstRowId, entry.file().rowCount());
+            @Override
+            public Path newPath() {
+                if (created) {
+                    throw new IllegalStateException(
+                            "Cannot create more than one fixed-path manifest file.");
                 }
+                created = true;
+                return manifestPath;
             }
 
-            partitionStatsCollector.collect(entry.partition());
-        }
-
-        @Override
-        public ManifestFileMeta result() throws IOException {
-            return new ManifestFileMeta(
-                    path.getName(),
-                    outputBytes(),
-                    numAddedFiles,
-                    numDeletedFiles,
-                    partitionStatsSerializer.toBinaryAllMode(partitionStatsCollector.extract()),
-                    numAddedFiles + numDeletedFiles > 0
-                            ? schemaId
-                            : schemaManager.latest().get().id(),
-                    minBucket,
-                    maxBucket,
-                    minLevel,
-                    maxLevel,
-                    rowIdStats == null ? null : rowIdStats.minRowId,
-                    rowIdStats == null ? null : rowIdStats.maxRowId);
-        }
-    }
-
-    private static class RowIdStats {
-
-        private long minRowId = Long.MAX_VALUE;
-        private long maxRowId = Long.MIN_VALUE;
-
-        private void collect(long firstRowId, long rowCount) {
-            minRowId = Math.min(minRowId, firstRowId);
-            maxRowId = Math.max(maxRowId, firstRowId + rowCount - 1);
-        }
+            @Override
+            public Path toPath(String fileName) {
+                return pathFactory.toPath(fileName);
+            }
+        };
     }
 
     /** Creator of {@link ManifestFile}. */
@@ -411,13 +364,12 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         }
 
         public ManifestFile create() {
-            RowType entryType = ManifestEntry.MANIFEST_ROW_TYPE;
             return new ManifestFile(
                     fileIO,
                     schemaManager,
                     partitionType,
+                    (AvroFileFormat) fileFormat,
                     new ManifestEntrySerializer(),
-                    fileFormat.createWriterFactory(entryType),
                     compression,
                     pathFactory.manifestFileFactory(),
                     suggestedFileSize,

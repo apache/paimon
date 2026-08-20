@@ -30,6 +30,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FormatTable;
@@ -400,7 +401,10 @@ class CatalogManagedPartitionScanTest {
 
             @Override
             public void createPartitions(
-                    List<Map<String, String>> partitions, boolean ignoreIfExists) {
+                    List<Map<String, String>> partitions,
+                    boolean ignoreIfExists,
+                    @Nullable List<PartitionStatistics> statistics,
+                    boolean replaceStatistics) {
                 throw new UnsupportedOperationException();
             }
 

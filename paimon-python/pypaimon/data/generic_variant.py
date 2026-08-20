@@ -41,6 +41,7 @@ Inspection helpers (for debugging/testing):
     v.metadata()  – raw metadata bytes
 """
 
+import calendar
 import datetime
 import decimal as _decimal
 import enum
@@ -88,6 +89,11 @@ _MAX_DECIMAL16_PRECISION = 38
 _EPOCH_DATE = datetime.date(1970, 1, 1)
 _EPOCH_DT_UTC = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
 _EPOCH_DT_NTZ = datetime.datetime(1970, 1, 1)
+
+
+def _check_variant_sizes(value_size, metadata_size):
+    if value_size > _SIZE_LIMIT or metadata_size > _SIZE_LIMIT:
+        raise ValueError('VARIANT_CONSTRUCTOR_SIZE_LIMIT')
 
 
 class _Type(enum.Enum):
@@ -263,8 +269,9 @@ class _GenericVariantBuilder:
 
     def _ensure(self, n):
         needed = self._pos + n
+        _check_variant_sizes(needed, 0)
         if needed > len(self._buf):
-            new_cap = max(needed, len(self._buf) * 2)
+            new_cap = min(_SIZE_LIMIT, max(needed, len(self._buf) * 2))
             new_buf = bytearray(new_cap)
             new_buf[:self._pos] = self._buf[:self._pos]
             self._buf = new_buf
@@ -367,6 +374,13 @@ class _GenericVariantBuilder:
         self._buf[self._pos:self._pos + len(b)] = b
         self._pos += len(b)
 
+    def append_uuid(self, u):
+        # UUID values are 16-byte big-endian: msb followed by lsb.
+        self._write_byte(_primitive_header(_UUID))
+        self._ensure(16)
+        self._buf[self._pos:self._pos + 16] = u.bytes
+        self._pos += 16
+
     def append_date(self, days_since_epoch):
         self._write_byte(_primitive_header(_DATE))
         self._write_le(days_since_epoch & 0xFFFFFFFF, 4)
@@ -380,7 +394,7 @@ class _GenericVariantBuilder:
         self._write_le(micros_since_epoch & 0xFFFFFFFFFFFFFFFF, 8)
 
     def _finish_writing_object(self, start, fields):
-        fields.sort(key=lambda f: f[0])
+        fields.sort(key=lambda f: f[0].encode('utf-8'))
         for i in range(1, len(fields)):
             if fields[i][0] == fields[i - 1][0]:
                 raise ValueError('Duplicate key in variant object')
@@ -461,8 +475,27 @@ class _GenericVariantBuilder:
             self._finish_writing_array(start, elem_offsets)
         elif isinstance(obj, bytes):
             self.append_binary(obj)
+        elif isinstance(obj, _uuid.UUID):
+            self.append_uuid(obj)
+        elif isinstance(obj, datetime.datetime):
+            micros = self._datetime_to_micros(obj)
+            if obj.tzinfo is not None:
+                self.append_timestamp(micros)
+            else:
+                self.append_timestamp_ntz(micros)
+        elif isinstance(obj, datetime.date):
+            days = (obj - _EPOCH_DATE).days
+            self.append_date(days)
         else:
             raise TypeError(f'Unsupported Python type for variant encoding: {type(obj).__name__}')
+
+    @staticmethod
+    def _datetime_to_micros(dt):
+        """Convert a datetime to microseconds since epoch using pure integer arithmetic. """
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(datetime.timezone.utc)
+        seconds = calendar.timegm(dt.timetuple())
+        return seconds * 1_000_000 + dt.microsecond
 
     def _try_decimal_or_double(self, d):
         try:
@@ -489,6 +522,7 @@ class _GenericVariantBuilder:
         offset_start = 1 + offset_size
         string_start = offset_start + (n_keys + 1) * offset_size
         metadata_size = string_start + total_str_size
+        _check_variant_sizes(self._pos, metadata_size)
 
         metadata = bytearray(metadata_size)
         metadata[0] = _VERSION | ((offset_size - 1) << 6)
@@ -543,6 +577,7 @@ class GenericVariant:
     __slots__ = ('_value', '_metadata', '_pos')
 
     def __init__(self, value: bytes, metadata: bytes, _pos: int = 0):
+        _check_variant_sizes(len(value), len(metadata))
         self._value = bytes(value)
         self._metadata = bytes(metadata)
         self._pos = _pos
@@ -701,9 +736,9 @@ class GenericVariant:
             length = _read_unsigned(value, pos + 1, _U32_SIZE)
             return bytes(value[pos + 1 + _U32_SIZE:pos + 1 + _U32_SIZE + length])
         if vtype == _Type.UUID:
-            # 16 bytes: two little-endian int64 (msb, lsb) → standard UUID
-            msb = _read_unsigned(value, pos + 1, 8)
-            lsb = _read_unsigned(value, pos + 9, 8)
+            # UUID values are 16-byte big-endian: msb followed by lsb.
+            msb = int.from_bytes(value[pos + 1:pos + 9], 'big', signed=False)
+            lsb = int.from_bytes(value[pos + 9:pos + 17], 'big', signed=False)
             return _uuid.UUID(int=(msb << 64) | lsb)
         if vtype == _Type.OBJECT:
             def _build_dict(size, id_size, offset_size, id_start, offset_start, data_start):

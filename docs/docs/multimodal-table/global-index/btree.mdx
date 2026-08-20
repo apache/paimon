@@ -147,7 +147,7 @@ print(matched_files)
 
 | Option | Default | Description |
 |---|---|---|
-| `sorted-index.records-per-range` | `10000000` | Expected number of records per sorted global index file for BTree and Bitmap builds. |
+| `sorted-index.records-per-range` | `10000000` | Expected number of records per sorted global index file for BTree, Bitmap, and Multivalue builds. |
 | `sorted-index.build.max-parallelism` | `4096` | Maximum Flink or Spark parallelism for building sorted global indexes. |
 | `btree-index.block-size` | `64 kb` | Block size used by BTree index files. |
 | `btree-index.cache-size` | `128 mb` | Cache size used by BTree index readers. |

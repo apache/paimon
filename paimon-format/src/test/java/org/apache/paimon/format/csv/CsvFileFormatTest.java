@@ -371,9 +371,11 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
             // Verify results
             assertThat(result).hasSize(3);
             assertThat(result.get(0).getInt(0)).isEqualTo(1);
+            assertThat(result.get(0).getString(1).toString()).isEqualTo("Value\"With\"Quotes");
             assertThat(result.get(1).getInt(0)).isEqualTo(2);
             assertThat(result.get(1).getString(1).toString()).isEqualTo("Normal Value");
             assertThat(result.get(2).getInt(0)).isEqualTo(3);
+            assertThat(result.get(2).getString(1).toString()).isEqualTo("Special\\Characters");
         }
     }
 
@@ -676,7 +678,11 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
                 format.createReaderFactory(fullRowType, readRowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(
-                                        fileIO, testFile, fileIO.getFileSize(testFile)))) {
+                                        fileIO,
+                                        testFile,
+                                        fileIO.getFileSize(testFile),
+                                        null,
+                                        null))) {
 
             InternalRowSerializer serializer = new InternalRowSerializer(readRowType);
             List<InternalRow> result = new ArrayList<>();
@@ -692,7 +698,7 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
                 format.createReaderFactory(rowType, rowType, new ArrayList<>())
                         .createReader(
                                 new FormatReaderContext(
-                                        fileIO, testFile, fileIO.getFileSize(testFile)),
+                                        fileIO, testFile, fileIO.getFileSize(testFile), null, null),
                                 offset,
                                 length)) {
 
@@ -822,6 +828,31 @@ public class CsvFileFormatTest extends FormatReadWriteTest {
      * Performs a complete write-read test with the given options and test data. Returns the data
      * that was read back for further verification.
      */
+    @Test
+    public void testFieldsContainingTheEscapeCharacterRoundTrip() throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.INT().notNull(), DataTypes.STRING());
+        // every one of these is written unquoted or half-quoted unless the escape character is
+        // itself escaped, and CsvParser then drops it
+        String[] inputs = {
+            "Special\\Characters", "trailing\\", "a,b\\", "\\\\double", "\\\"quoteAfterEscape"
+        };
+
+        List<InternalRow> testData = new ArrayList<>();
+        for (int i = 0; i < inputs.length; i++) {
+            testData.add(GenericRow.of(i, BinaryString.fromString(inputs[i])));
+        }
+
+        List<InternalRow> result =
+                writeThenRead(new Options(), rowType, rowType, testData, "escape_round_trip");
+
+        assertThat(result).hasSize(inputs.length);
+        for (int i = 0; i < inputs.length; i++) {
+            assertThat(result.get(i).getInt(0)).isEqualTo(i);
+            assertThat(result.get(i).getString(1)).isNotNull();
+            assertThat(result.get(i).getString(1).toString()).isEqualTo(inputs[i]);
+        }
+    }
+
     private List<InternalRow> writeThenRead(
             Options options,
             RowType fullRowType,

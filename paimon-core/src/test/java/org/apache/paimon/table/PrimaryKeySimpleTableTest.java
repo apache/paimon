@@ -2383,7 +2383,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
 
         FileStoreTable table = createFileStoreTable(optionsSetter);
         StreamTableWrite write = table.newWrite(commitUser);
-        IOManager ioManager = IOManager.create(tablePath.toString());
+        IOManager ioManager = IOManager.create(tempDir.toString());
         write.withIOManager(ioManager);
         StreamTableCommit commit = table.newCommit(commitUser);
 
@@ -2540,7 +2540,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                             options.set(CHANGELOG_PRODUCER, LOOKUP);
                             options.set(CoreOptions.LOOKUP_REMOTE_FILE_ENABLED, true);
                         });
-        IOManager ioManager = IOManager.create(tablePath.toString());
+        IOManager ioManager = IOManager.create(tempDir.toString());
         StreamTableWrite write = table.newWrite(commitUser).withIOManager(ioManager);
         StreamTableCommit commit = table.newCommit(commitUser);
 
@@ -2658,7 +2658,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                                 conf.set(CHANGELOG_FILE_STATS_MODE, "none");
                             }
                         });
-        IOManager ioManager = IOManager.create(tablePath.toString());
+        IOManager ioManager = IOManager.create(tempDir.toString());
         StreamTableWrite write = table.newWrite(commitUser).withIOManager(ioManager);
         StreamTableCommit commit = table.newCommit(commitUser);
         write.write(rowData(1, 1, 100L));
@@ -2844,7 +2844,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     }
 
     private void innerTestTableQuery(FileStoreTable table) throws Exception {
-        IOManager ioManager = IOManager.create(tablePath.toString());
+        IOManager ioManager = IOManager.create(tempDir.toString());
         StreamTableWrite write = table.newWrite(commitUser).withIOManager(ioManager);
         StreamTableCommit commit = table.newCommit(commitUser);
 

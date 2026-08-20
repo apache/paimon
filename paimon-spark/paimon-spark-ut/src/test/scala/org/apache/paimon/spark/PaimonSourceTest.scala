@@ -18,17 +18,35 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.spark.sources.PaimonSourceOffset
+import org.apache.paimon.schema.{SchemaManager, TableSchema}
+import org.apache.paimon.spark.sources.{PaimonMicroBatchStream, PaimonSourceOffset}
+import org.apache.paimon.table.DataTable
+import org.apache.paimon.utils.InstantiationUtil
 
-import org.apache.spark.sql.Row
-import org.apache.spark.sql.streaming.{StreamingQueryException, StreamTest, Trigger}
+import org.apache.spark.sql.{Dataset, Row}
+import org.apache.spark.sql.streaming.{StreamingQuery, StreamingQueryException, StreamTest, Trigger}
 import org.junit.jupiter.api.Assertions
+import org.mockito.Mockito.{mock, times, verify, when}
 
-import java.util.concurrent.TimeUnit
+import java.lang.{Long => JLong}
+import java.util.{Collections, List => JList, Optional}
+import java.util.concurrent.{atomic, TimeUnit}
+
+import scala.collection.JavaConverters._
 
 class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
 
   import testImplicits._
+
+  private def testMetadata(
+      writtenColumnIds: => Optional[JList[Integer]]): PaimonMicroBatchMetadata =
+    new PaimonMicroBatchMetadata("source", "start", "end", 0, () => writtenColumnIds)
+
+  private def withStartedQuery(query: => StreamingQuery)(body: StreamingQuery => Unit): Unit = {
+    val started = query
+    try body(started)
+    finally started.stop()
+  }
 
   test("Paimon Source: EQUAL_NULL_SAFE") {
     withTempDir {
@@ -45,6 +63,233 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
           val nullDF = spark.sql("SELECT * FROM T WHERE b <=> null")
           checkAnswer(nullDF, Seq(Row(1, null), Row(2, null), Row(4, null)))
         }
+    }
+  }
+
+  test("Paimon Source: keep micro-batch metadata on the driver") {
+    val metadata = testMetadata(Optional.of(Collections.singletonList(Integer.valueOf(1))))
+    val partition = PaimonMicroBatchInputPartition(Seq.empty, metadata)
+
+    val restored = InstantiationUtil.clone(partition)
+
+    assert(restored.splits.isEmpty)
+    assert(restored.metadata == null)
+  }
+
+  test("Paimon Source: lazily memoize micro-batch written columns") {
+    val evaluations = new atomic.AtomicInteger()
+    val expected = Collections.singletonList(Integer.valueOf(1))
+    val metadata = testMetadata {
+      evaluations.incrementAndGet()
+      Optional.of(expected)
+    }
+
+    assert(evaluations.get() == 0)
+    assert(metadata.writtenColumnIds == Optional.of(expected))
+    assert(metadata.writtenColumnIds == Optional.of(expected))
+    assert(evaluations.get() == 1)
+
+    val equivalent = testMetadata {
+      throw new AssertionError("Equality must not evaluate the thunk.")
+    }
+    assert(metadata == equivalent)
+    assert(metadata.hashCode() == equivalent.hashCode())
+  }
+
+  test("Paimon Source: cache schemas for the stream lifetime") {
+    val table = mock(classOf[DataTable])
+    val schemaManager = mock(classOf[SchemaManager])
+    val initialSchema = mock(classOf[TableSchema])
+    val evolvedSchema = mock(classOf[TableSchema])
+    when(table.options()).thenReturn(Collections.emptyMap[String, String]())
+    when(table.schemaManager()).thenReturn(schemaManager)
+    when(schemaManager.schema(1L)).thenReturn(initialSchema)
+    when(schemaManager.schema(2L)).thenReturn(evolvedSchema)
+
+    val stream = new PaimonMicroBatchStream(table, null, "checkpoint")
+
+    assert(stream.schemaLoader.apply(JLong.valueOf(1L)) eq initialSchema)
+    assert(stream.schemaLoader.apply(JLong.valueOf(1L)) eq initialSchema)
+    assert(stream.schemaLoader.apply(JLong.valueOf(2L)) eq evolvedSchema)
+    assert(stream.schemaLoader.apply(JLong.valueOf(2L)) eq evolvedSchema)
+    verify(schemaManager, times(1)).schema(1L)
+    verify(schemaManager, times(1)).schema(2L)
+  }
+
+  test("Paimon Source: expose written columns to raw foreachBatch") {
+    withTempDir {
+      checkpointDir =>
+        val TableSnapshotState(_, location, snapshotData, _, _) =
+          prepareTableAndGetLocation(1, hasPk = true)
+        val expectedFieldIds =
+          loadTable("T").schema().fields().asScala.map(field => Integer.valueOf(field.id())).sorted
+        @volatile var writtenColumnIds: JList[Integer] = null
+        @volatile var metadataLookupStartedNoSparkJob = false
+        @volatile var rowCount = 0L
+
+        withStartedQuery(
+          spark.readStream
+            .format("paimon")
+            .load(location)
+            .select("a")
+            .writeStream
+            .option("checkpointLocation", checkpointDir.getCanonicalPath)
+            .foreachBatch {
+              (batch: Dataset[Row], _: Long) =>
+                val jobGroup = s"written-columns-metadata-${System.nanoTime()}"
+                val previousJobGroup = spark.sparkContext.getLocalProperty("spark.jobGroup.id")
+                spark.sparkContext.setLocalProperty("spark.jobGroup.id", jobGroup)
+                val metadata =
+                  try {
+                    PaimonSparkMicroBatchMetadata.writtenColumnIds(batch)
+                  } finally {
+                    metadataLookupStartedNoSparkJob =
+                      spark.sparkContext.statusTracker.getJobIdsForGroup(jobGroup).isEmpty
+                    spark.sparkContext.setLocalProperty("spark.jobGroup.id", previousJobGroup)
+                  }
+                if (metadata.isPresent) {
+                  writtenColumnIds = metadata.get()
+                }
+                rowCount += batch.count()
+                ()
+            }
+            .start()) {
+          query =>
+            query.processAllAvailable()
+            assert(writtenColumnIds == expectedFieldIds.asJava)
+            assert(metadataLookupStartedNoSparkJob)
+            assert(rowCount == snapshotData.size)
+        }
+    }
+  }
+
+  test("Paimon Source: expose written columns for a self-union") {
+    withTempDir {
+      checkpointDir =>
+        val TableSnapshotState(_, location, _, _, _) =
+          prepareTableAndGetLocation(1, hasPk = true)
+        val expectedFieldIds =
+          loadTable("T").schema().fields().asScala.map(field => Integer.valueOf(field.id())).sorted
+        @volatile var writtenColumnIds: JList[Integer] = null
+
+        val source = spark.readStream
+          .format("paimon")
+          .load(location)
+        withStartedQuery(
+          source
+            .union(source)
+            .writeStream
+            .option("checkpointLocation", checkpointDir.getCanonicalPath)
+            .foreachBatch {
+              (batch: Dataset[Row], _: Long) =>
+                val metadata = PaimonSparkMicroBatchMetadata.writtenColumnIds(batch)
+                if (metadata.isPresent) {
+                  writtenColumnIds = metadata.get()
+                }
+                batch.count()
+                ()
+            }
+            .start()) {
+          query =>
+            query.processAllAvailable()
+            assert(writtenColumnIds == expectedFieldIds.asJava)
+        }
+    }
+  }
+
+  test("Paimon Source: written columns metadata is ambiguous with an empty second source") {
+    withTable("written_columns_source_1", "written_columns_source_2") {
+      withTempDir {
+        checkpointDir =>
+          spark.sql("CREATE TABLE written_columns_source_1 (id INT)")
+          spark.sql("CREATE TABLE written_columns_source_2 (id INT)")
+          spark.sql("INSERT INTO written_columns_source_1 VALUES (1)")
+          spark.sql("INSERT INTO written_columns_source_2 VALUES (2)")
+
+          val source1 = spark.readStream
+            .table("written_columns_source_1")
+          val source2 = spark.readStream
+            .table("written_columns_source_2")
+          @volatile var nonEmptyBatchMetadataPresent = Seq.empty[Boolean]
+
+          withStartedQuery(
+            source1
+              .union(source2)
+              .writeStream
+              .option("checkpointLocation", checkpointDir.getCanonicalPath)
+              .foreachBatch {
+                (batch: Dataset[Row], _: Long) =>
+                  val metadataPresent =
+                    PaimonSparkMicroBatchMetadata.writtenColumnIds(batch).isPresent
+                  if (batch.count() > 0) {
+                    nonEmptyBatchMetadataPresent = nonEmptyBatchMetadataPresent :+ metadataPresent
+                  }
+                  ()
+              }
+              .start()) {
+            query =>
+              query.processAllAvailable()
+              nonEmptyBatchMetadataPresent = Seq.empty
+
+              spark.sql("INSERT INTO written_columns_source_1 VALUES (3)")
+              query.processAllAvailable()
+
+              assert(nonEmptyBatchMetadataPresent == Seq(false))
+          }
+      }
+    }
+  }
+
+  test("Paimon Source: expose partial data evolution written columns") {
+    withSparkSQLConf("spark.paimon.write.use-v2-write" -> "false") {
+      withTable("T") {
+        withTempDir {
+          checkpointDir =>
+            spark.sql(
+              "CREATE TABLE T (id INT, b INT, c INT) " +
+                "TBLPROPERTIES ('row-tracking.enabled' = 'true', " +
+                "'data-evolution.enabled' = 'true')")
+            spark.sql("INSERT INTO T VALUES (1, 10, 100), (2, 20, 200)")
+            val fieldIds =
+              loadTable("T")
+                .schema()
+                .fields()
+                .asScala
+                .map(field => field.name() -> field.id())
+                .toMap
+            @volatile var nonEmptyBatchColumns = Seq.empty[JList[Integer]]
+
+            withStartedQuery(
+              spark.readStream
+                .option(SparkConnectorOptions.MAX_FILES_PER_TRIGGER.key(), 1)
+                .option("scan.mode", "latest")
+                .table("`T$row_tracking`")
+                .writeStream
+                .option("checkpointLocation", checkpointDir.getCanonicalPath)
+                .foreachBatch {
+                  (batch: Dataset[Row], _: Long) =>
+                    val metadata = PaimonSparkMicroBatchMetadata.writtenColumnIds(batch)
+                    if (batch.count() > 0 && metadata.isPresent) {
+                      nonEmptyBatchColumns = nonEmptyBatchColumns :+ metadata.get()
+                    }
+                    ()
+                }
+                .start()) {
+              query =>
+                query.processAllAvailable()
+                spark.sql("UPDATE T SET b = 22 WHERE id = 2")
+                spark.sql("UPDATE T SET c = NULL WHERE id = 1")
+                query.processAllAvailable()
+
+                assert(nonEmptyBatchColumns.size >= 2)
+                val partialBatchColumns = nonEmptyBatchColumns.takeRight(2)
+                assert(
+                  partialBatchColumns == Seq(
+                    Seq(Integer.valueOf(fieldIds("b"))).asJava,
+                    Seq(Integer.valueOf(fieldIds("c"))).asJava))
+            }
+        }
+      }
     }
   }
 

@@ -74,6 +74,13 @@ public final class CompactFileIdentifierSet {
         add(partitionId, identifier.bytes(), identifier.length());
     }
 
+    public void addAll(CompactFileIdentifierSet other) {
+        checkArgument(other != null, "Identifier set cannot be null.");
+        for (int entry = 0; entry < other.size; entry++) {
+            add(other.partitionIds[entry], other.arena, other.offsets[entry], other.lengths[entry]);
+        }
+    }
+
     public boolean contains(ProjectedManifestEntry entry) {
         return contains(reusableIdentifier().replaceWithPartition(entry));
     }
@@ -104,9 +111,13 @@ public final class CompactFileIdentifierSet {
     }
 
     void add(int partitionId, byte[] identifier, int length) {
-        checkIdentifier(identifier, length);
-        long hash = hash(partitionId, identifier, length);
-        if (contains(partitionId, identifier, length, hash)) {
+        add(partitionId, identifier, 0, length);
+    }
+
+    private void add(int partitionId, byte[] identifier, int offset, int length) {
+        checkIdentifier(identifier, offset, length);
+        long hash = hash(partitionId, identifier, offset, length);
+        if (contains(partitionId, identifier, offset, length, hash)) {
             return;
         }
         if (size + 1 > (int) (buckets.length * LOAD_FACTOR)) {
@@ -114,14 +125,14 @@ public final class CompactFileIdentifierSet {
         }
         ensureEntryCapacity(size + 1);
         ensureArenaCapacity(length);
-        int offset = arenaSize;
-        System.arraycopy(identifier, 0, arena, offset, length);
+        int arenaOffset = arenaSize;
+        System.arraycopy(identifier, offset, arena, arenaOffset, length);
         arenaSize = Math.addExact(arenaSize, length);
 
         int bucket = bucket(hash);
         hashes[size] = hash;
         partitionIds[size] = partitionId;
-        offsets[size] = offset;
+        offsets[size] = arenaOffset;
         lengths[size] = length;
         next[size] = buckets[bucket];
         buckets[bucket] = size;
@@ -129,16 +140,18 @@ public final class CompactFileIdentifierSet {
     }
 
     boolean contains(int partitionId, byte[] identifier, int length) {
-        checkIdentifier(identifier, length);
-        return contains(partitionId, identifier, length, hash(partitionId, identifier, length));
+        checkIdentifier(identifier, 0, length);
+        return contains(
+                partitionId, identifier, 0, length, hash(partitionId, identifier, 0, length));
     }
 
-    private boolean contains(int partitionId, byte[] identifier, int length, long hash) {
+    private boolean contains(
+            int partitionId, byte[] identifier, int offset, int length, long hash) {
         for (int entry = buckets[bucket(hash)]; entry >= 0; entry = next[entry]) {
             if (hashes[entry] == hash
                     && partitionIds[entry] == partitionId
                     && lengths[entry] == length
-                    && bytesEqual(arena, offsets[entry], identifier, length)) {
+                    && bytesEqual(arena, offsets[entry], identifier, offset, length)) {
                 return true;
             }
         }
@@ -194,20 +207,21 @@ public final class CompactFileIdentifierSet {
         return ((int) (hash ^ (hash >>> 32))) & (bucketCount - 1);
     }
 
-    private static long hash(int partitionId, byte[] bytes, int length) {
+    private static long hash(int partitionId, byte[] bytes, int offset, int length) {
         long hash = 0xcbf29ce484222325L;
         hash ^= Integer.toUnsignedLong(partitionId);
         hash *= 0x100000001b3L;
         for (int i = 0; i < length; i++) {
-            hash ^= bytes[i] & 0xFFL;
+            hash ^= bytes[offset + i] & 0xFFL;
             hash *= 0x100000001b3L;
         }
         return hash;
     }
 
-    private static boolean bytesEqual(byte[] left, int leftOffset, byte[] right, int length) {
+    private static boolean bytesEqual(
+            byte[] left, int leftOffset, byte[] right, int rightOffset, int length) {
         for (int i = 0; i < length; i++) {
-            if (left[leftOffset + i] != right[i]) {
+            if (left[leftOffset + i] != right[rightOffset + i]) {
                 return false;
             }
         }
@@ -225,12 +239,13 @@ public final class CompactFileIdentifierSet {
         return reusableIdentifier;
     }
 
-    private static void checkIdentifier(byte[] identifier, int length) {
+    private static void checkIdentifier(byte[] identifier, int offset, int length) {
         checkArgument(identifier != null, "Identifier bytes cannot be null.");
         checkArgument(
-                length >= 0 && length <= identifier.length,
-                "Invalid identifier length %s.",
-                length);
+                offset >= 0 && length >= 0 && offset <= identifier.length - length,
+                "Invalid identifier range [%s, %s).",
+                offset,
+                offset + length);
     }
 
     private static int[] filledWithMinusOne(int length) {

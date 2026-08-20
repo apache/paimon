@@ -40,7 +40,7 @@ import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 public class DataEvolutionCompactTaskSerializer
         implements VersionedSerializer<DataEvolutionCompactTask> {
 
-    private static final int CURRENT_VERSION = 2;
+    private static final int CURRENT_VERSION = 3;
 
     private final DataFileMetaSerializer dataFileSerializer;
 

@@ -525,6 +525,7 @@ public class SchemaEvolutionTest {
     @Test
     public void testCreateTableWithCommentDirectives() throws Exception {
         Map<String, String> options = blobEnabledOptions();
+        options.put(CoreOptions.BLOB_FIELD.key(), "pic");
         options.put(CoreOptions.VECTOR_FILE_FORMAT.key(), "json");
         schemaManager.createTable(
                 new Schema(
@@ -576,6 +577,37 @@ public class SchemaEvolutionTest {
         assertThat(latest.options().get(CoreOptions.BLOB_FIELD.key())).isEqualTo("pic");
         assertThat(latest.options().get(CoreOptions.BLOB_VIEW_FIELD.key())).isEqualTo("view_col");
         assertThat(latest.options().get(CoreOptions.VECTOR_FIELD.key())).isEqualTo("embedding");
+    }
+
+    @Test
+    public void testUpdateColumnCommentRejectsDirectives() throws Exception {
+        schemaManager.createTable(
+                Schema.newBuilder().column("pic", DataTypes.BYTES(), "original comment").build());
+
+        for (String directive :
+                Arrays.asList(
+                        "__BLOB_FIELD",
+                        "__BLOB_DESCRIPTOR_FIELD",
+                        "__BLOB_VIEW_FIELD",
+                        "__VECTOR_FIELD;64")) {
+            assertThatThrownBy(
+                            () ->
+                                    schemaManager.commitChanges(
+                                            SchemaChange.updateColumnComment("pic", directive)))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining(
+                            "Should not alter existing field's type through column directives");
+        }
+
+        TableSchema latest = schemaManager.latest().get();
+        assertThat(latest.fields().get(0).type()).isEqualTo(DataTypes.BYTES());
+        assertThat(latest.fields().get(0).description()).isEqualTo("original comment");
+        assertThat(latest.options())
+                .doesNotContainKeys(
+                        CoreOptions.BLOB_FIELD.key(),
+                        CoreOptions.BLOB_DESCRIPTOR_FIELD.key(),
+                        CoreOptions.BLOB_VIEW_FIELD.key(),
+                        CoreOptions.VECTOR_FIELD.key());
     }
 
     private static Map<String, String> blobEnabledOptions() {

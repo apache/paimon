@@ -50,6 +50,7 @@ import org.apache.paimon.operation.commit.CommitChanges;
 import org.apache.paimon.operation.commit.ConflictDetection;
 import org.apache.paimon.operation.commit.ManifestEntryChanges;
 import org.apache.paimon.operation.commit.RetryCommitResult;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
@@ -1283,6 +1284,24 @@ public class FileStoreCommitTest {
     }
 
     @Test
+    public void testManifestSortCompactManifestRespectsCompactionThresholds() {
+        Options options = new Options();
+        options.set(CoreOptions.MANIFEST_SORT_ENABLED, true);
+        options.set(CoreOptions.MANIFEST_MERGE_MIN_COUNT, 100);
+        options.set(CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE.key(), Long.MAX_VALUE + "B");
+
+        CoreOptions compactOptions =
+                FileStoreCommitImpl.manifestCompactionOptions(
+                        new CoreOptions(options),
+                        Collections.emptyList(),
+                        TestKeyValueGenerator.DEFAULT_PART_TYPE);
+
+        assertThat(compactOptions.manifestMergeMinCount()).isEqualTo(100);
+        assertThat(compactOptions.manifestFullCompactionThresholdSize().getBytes())
+                .isEqualTo(Long.MAX_VALUE);
+    }
+
+    @Test
     public void testRtasAppendAfterTruncateResetsInheritedIndexAndStats() throws Exception {
         TestFileStore store = createStore(false, 1, CoreOptions.ChangelogProducer.NONE);
         BinaryRow partition = gen.getPartition(gen.next());
@@ -1413,6 +1432,19 @@ public class FileStoreCommitTest {
             assertThat(snapshotProps).isNotNull();
             assertThat(snapshotProps).isEqualTo(expectedProps);
         }
+    }
+
+    @Test
+    public void testSnapshotWriterVersion() throws Exception {
+        TestFileStore store = createStore(false);
+
+        try (FileStoreCommit fileStoreCommit = store.newCommit()) {
+            fileStoreCommit.ignoreEmptyCommit(false);
+            fileStoreCommit.commit(new ManifestCommittable(0), false);
+        }
+
+        assertThat(checkNotNull(store.snapshotManager().latestSnapshot()).writerVersion())
+                .isEqualTo(CoreFullVersion.get());
     }
 
     @Test
@@ -1998,7 +2030,7 @@ public class FileStoreCommitTest {
                 Collections.emptyList(),
                 Collections.emptyList(),
                 scanner ->
-                        new ConflictDetection(
+                        ConflictDetection.create(
                                 tableName,
                                 commitUser,
                                 store.partitionType(),
@@ -2173,6 +2205,7 @@ public class FileStoreCommitTest {
                             null,
                             previousSnapshot == null ? null : previousSnapshot.indexManifest(),
                             "conflict-user",
+                            snapshot.writerVersion(),
                             Long.MAX_VALUE,
                             Snapshot.CommitKind.ANALYZE,
                             System.currentTimeMillis(),

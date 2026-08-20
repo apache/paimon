@@ -85,6 +85,8 @@ public interface SchemaManager extends Serializable {
 
     TableSchema schema(long id);
 
+    TableSchema tryGetSchema(long id) throws FileNotFoundException;
+
     boolean schemaExists(long id);
 
     Path schemaDirectory();

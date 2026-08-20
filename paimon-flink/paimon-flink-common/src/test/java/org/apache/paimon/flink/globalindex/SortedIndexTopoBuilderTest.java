@@ -22,8 +22,10 @@ import org.apache.paimon.flink.globalindex.SortedIndexTopoBuilder.SortedBuildTas
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexWriter;
+import org.apache.paimon.globalindex.sorted.SortedSingleColumnIndexWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.Range;
 
@@ -52,6 +54,7 @@ public class SortedIndexTopoBuilderTest {
     public void testSupportsBitmapAndBTree() {
         assertThat(SortedIndexTopoBuilder.supports("bitmap")).isTrue();
         assertThat(SortedIndexTopoBuilder.supports("btree")).isTrue();
+        assertThat(SortedIndexTopoBuilder.supports("multivalue")).isTrue();
         assertThat(SortedIndexTopoBuilder.supports("inverted")).isFalse();
     }
 
@@ -90,9 +93,11 @@ public class SortedIndexTopoBuilderTest {
                 mock(
                         GlobalIndexSingleColumnWriter.class,
                         org.mockito.Mockito.withSettings().extraInterfaces(Closeable.class));
+        SortedSingleColumnIndexWriter taskWriter =
+                SortedSingleColumnIndexWriter.forSourceRowCount(1, activeWriter);
         Field currentWriter = operatorClass.getDeclaredField("currentWriter");
         currentWriter.setAccessible(true);
-        currentWriter.set(operator, activeWriter);
+        currentWriter.set(operator, taskWriter);
 
         Method close = operatorClass.getMethod("close");
         close.invoke(operator);
@@ -168,5 +173,11 @@ public class SortedIndexTopoBuilderTest {
         tasks.add(new SortedBuildTask(0, new Range(0, 1499), new byte[0]));
 
         assertThat(SortedIndexTopoBuilder.calculateParallelism(tasks, 1000L, 16)).isEqualTo(1);
+    }
+
+    @Test
+    public void testNormalizedSortColumnsUseRowIdAsTieBreaker() {
+        assertThat(SortedIndexTopoBuilder.createSortColumns("task-id", "index-key"))
+                .containsExactly("task-id", "index-key", SpecialFields.ROW_ID.name());
     }
 }

@@ -20,7 +20,7 @@ package org.apache.paimon.spark.sql
 
 import org.apache.paimon.catalog.Identifier
 import org.apache.paimon.fs.Path
-import org.apache.paimon.partition.Partition
+import org.apache.paimon.partition.{Partition, PartitionStatistics}
 import org.apache.paimon.predicate.Predicate
 import org.apache.paimon.spark.{PaimonSparkTestWithRestCatalogBase, SparkCatalog}
 import org.apache.paimon.spark.execution.PaimonRepairFormatTablePartitionsExec
@@ -503,8 +503,7 @@ class CatalogManagedPartitionMsckRepairTest extends PaimonSparkTestWithRestCatal
   private def registerPartitions(tableName: String, partitions: String*): Unit =
     paimonCatalog.createPartitions(
       tableIdentifier(tableName),
-      partitions.map(value => Map("dt" -> value).asJava).asJava,
-      true)
+      partitions.map(value => Map("dt" -> value).asJava).asJava)
 
   private def registeredPartitions(tableName: String): Set[String] =
     paimonCatalog
@@ -557,7 +556,9 @@ private[sql] class StatefulFaultCatalog(initial: Set[Map[String, String]] = Set.
 
   override def createPartitions(
       partitions: JList[JMap[String, String]],
-      ignoreIfExists: Boolean): Unit = {
+      ignoreIfExists: Boolean,
+      statistics: JList[PartitionStatistics],
+      replaceStatistics: Boolean): Unit = {
     createCalls += 1
     state ++= partitions.asScala.map(_.asScala.toMap)
     if (failCreateAfterApply) {
@@ -644,7 +645,9 @@ private[sql] class FaultInjectingFormatTablePartitionManager(delegate: FormatTab
 
   override def createPartitions(
       partitions: JList[JMap[String, String]],
-      ignoreIfExists: Boolean): Unit = {
+      ignoreIfExists: Boolean,
+      statistics: JList[PartitionStatistics],
+      replaceStatistics: Boolean): Unit = {
     delegate.createPartitions(partitions, ignoreIfExists)
     MsckFaultInjection.createCalls += 1
   }

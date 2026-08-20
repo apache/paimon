@@ -273,6 +273,47 @@ public class PredicateConverterTest {
                         BUILDER.equal(3, false)));
     }
 
+    @Test
+    public void testBetweenWithImplicitNumericConversion() {
+        Predicate predicate =
+                call(
+                                BuiltInFunctionDefinitions.BETWEEN,
+                                field(0, DataTypes.BIGINT()),
+                                literal(10),
+                                literal(20))
+                        .accept(new PredicateConverter(RowType.of(new BigIntType())));
+
+        assertThat(predicate.test(GenericRow.of(9L))).isFalse();
+        assertThat(predicate.test(GenericRow.of(10L))).isTrue();
+        assertThat(predicate.test(GenericRow.of(15L))).isTrue();
+        assertThat(predicate.test(GenericRow.of(20L))).isTrue();
+        assertThat(predicate.test(GenericRow.of(21L))).isFalse();
+        assertThat(predicate.test(GenericRow.of((Object) null))).isFalse();
+    }
+
+    @Test
+    public void testBetweenWithNullBounds() {
+        PredicateConverter converter = new PredicateConverter(RowType.of(new BigIntType()));
+        FieldReferenceExpression field = field(0, DataTypes.BIGINT());
+        Predicate nullLowerBound =
+                call(
+                                BuiltInFunctionDefinitions.BETWEEN,
+                                field,
+                                literal(null, DataTypes.BIGINT()),
+                                literal(20))
+                        .accept(converter);
+        Predicate nullUpperBound =
+                call(
+                                BuiltInFunctionDefinitions.BETWEEN,
+                                field,
+                                literal(10),
+                                literal(null, DataTypes.BIGINT()))
+                        .accept(converter);
+
+        assertThat(nullLowerBound.test(GenericRow.of(15L))).isFalse();
+        assertThat(nullUpperBound.test(GenericRow.of(15L))).isFalse();
+    }
+
     @MethodSource("provideLikeExpressions")
     @ParameterizedTest
     public void testStartsWith(
