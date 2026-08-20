@@ -307,6 +307,14 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                         processorFactory = PersistValueAndPosProcessor.factory(valueType);
                     } else {
                         processorFactory = PersistPositionProcessor.factory();
+                        // Record-level expiration still inspects value fields.
+                        if (recordLevelExpire == null) {
+                            lookupReaderFactory =
+                                    readerFactoryBuilder
+                                            .copyWithoutProjection()
+                                            .withReadValueType(RowType.of())
+                                            .build(partition, bucket, dvFactory);
+                        }
                     }
                 } else {
                     processorFactory = PersistValueProcessor.factory(valueType);
