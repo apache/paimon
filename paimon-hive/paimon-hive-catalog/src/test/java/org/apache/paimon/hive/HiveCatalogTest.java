@@ -34,6 +34,8 @@ import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.table.FallbackReadFileStoreTable;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -65,10 +67,22 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTORECONNECTURLKEY;
+import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.CoreOptions.CHAIN_TABLE_ENABLED;
+import static org.apache.paimon.CoreOptions.FILE_COMPRESSION;
+import static org.apache.paimon.CoreOptions.FILE_FORMAT;
+import static org.apache.paimon.CoreOptions.MANIFEST_COMPRESSION;
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.CoreOptions.METASTORE_TAG_TO_PARTITION;
+import static org.apache.paimon.CoreOptions.PARTITION_TIMESTAMP_FORMATTER;
+import static org.apache.paimon.CoreOptions.PARTITION_TIMESTAMP_PATTERN;
+import static org.apache.paimon.CoreOptions.SCAN_FALLBACK_BRANCH;
+import static org.apache.paimon.CoreOptions.SCAN_FALLBACK_DELTA_BRANCH;
+import static org.apache.paimon.CoreOptions.SCAN_FALLBACK_SNAPSHOT_BRANCH;
+import static org.apache.paimon.CoreOptions.SEQUENCE_FIELD;
 import static org.apache.paimon.hive.HiveCatalog.PAIMON_TABLE_IDENTIFIER;
 import static org.apache.paimon.hive.HiveCatalog.TABLE_TYPE_PROP;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -583,6 +597,188 @@ public class HiveCatalogTest extends CatalogTestBase {
                 .containsExactlyInAnyOrder(
                         Collections.singletonMap("dt", "20250102"),
                         Collections.singletonMap("dt", "20250101"));
+    }
+
+    @Test
+    public void testDropPartitionsOnChainTableDoesNotSkipHmsByFallback() throws Exception {
+        String databaseName = "test_chain_drop_partition";
+        String tableName = "chain_table";
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        Identifier identifier = Identifier.create(databaseName, tableName);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(BUCKET.key(), "1")
+                        .option(SEQUENCE_FIELD.key(), "v")
+                        .option(FILE_FORMAT.key(), "avro")
+                        .option(FILE_COMPRESSION.key(), "snappy")
+                        .option(MANIFEST_COMPRESSION.key(), "snappy")
+                        .column("dt", DataTypes.STRING())
+                        .column("pk", DataTypes.STRING())
+                        .column("v", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .primaryKey("pk", "dt")
+                        .build(),
+                false);
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        table.createBranch("snapshot");
+        table.createBranch("delta");
+
+        List<SchemaChange> chainOptions =
+                Arrays.asList(
+                        SchemaChange.setOption(CHAIN_TABLE_ENABLED.key(), "true"),
+                        SchemaChange.setOption(SCAN_FALLBACK_SNAPSHOT_BRANCH.key(), "snapshot"),
+                        SchemaChange.setOption(SCAN_FALLBACK_DELTA_BRANCH.key(), "delta"),
+                        SchemaChange.setOption(PARTITION_TIMESTAMP_PATTERN.key(), "$dt"),
+                        SchemaChange.setOption(PARTITION_TIMESTAMP_FORMATTER.key(), "yyyyMMdd"));
+        catalog.alterTable(identifier, chainOptions, false);
+        catalog.alterTable(
+                new Identifier(databaseName, tableName, "snapshot"), chainOptions, false);
+        catalog.alterTable(new Identifier(databaseName, tableName, "delta"), chainOptions, false);
+
+        Identifier snapshotId = new Identifier(databaseName, tableName, "snapshot");
+        Identifier deltaId = new Identifier(databaseName, tableName, "delta");
+        writePartitionRow(snapshotId, "20250101", "1");
+        writePartitionRow(snapshotId, "20250102", "1");
+        writePartitionRow(deltaId, "20250102", "1");
+        writePartitionRow(identifier, "20250103", "1");
+
+        assertHmsDts(databaseName, tableName, "20250101", "20250102", "20250103");
+        assertPhysicalDts(snapshotId, "20250101", "20250102");
+        assertPhysicalDts(deltaId, "20250102");
+        assertPhysicalDts(identifier, "20250103");
+
+        // Dropping from snapshot must not keep HMS just because main falls back to snapshot.
+        catalog.dropPartitions(snapshotId, partitionSpecs("20250101"));
+        assertHmsDts(databaseName, tableName, "20250102", "20250103");
+        assertPhysicalDts(snapshotId, "20250102");
+
+        // Delta still has 20250102, so HMS must be kept.
+        catalog.dropPartitions(snapshotId, partitionSpecs("20250102"));
+        assertHmsDts(databaseName, tableName, "20250102", "20250103");
+        assertPhysicalDts(snapshotId);
+        assertPhysicalDts(deltaId, "20250102");
+
+        catalog.dropPartitions(deltaId, partitionSpecs("20250102"));
+        assertHmsDts(databaseName, tableName, "20250103");
+        assertPhysicalDts(deltaId);
+
+        // Snapshot still has no 20250103; dropping from main can drop HMS.
+        catalog.dropPartitions(identifier, partitionSpecs("20250103"));
+        assertHmsDts(databaseName, tableName);
+        assertPhysicalDts(identifier);
+
+        // Partition that still exists on snapshot must not be dropped from HMS via main.
+        writePartitionRow(snapshotId, "20250104", "1");
+        assertHmsDts(databaseName, tableName, "20250104");
+        catalog.dropPartitions(identifier, partitionSpecs("20250104"));
+        assertHmsDts(databaseName, tableName, "20250104");
+        assertPhysicalDts(snapshotId, "20250104");
+        assertPhysicalDts(identifier);
+    }
+
+    @Test
+    public void testDropPartitionsOnFallbackBranchTableDoesNotSkipHmsByFallback() throws Exception {
+        String databaseName = "test_fallback_drop_partition";
+        String tableName = "fallback_table";
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        Identifier identifier = Identifier.create(databaseName, tableName);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(FILE_FORMAT.key(), "avro")
+                        .option(FILE_COMPRESSION.key(), "snappy")
+                        .option(MANIFEST_COMPRESSION.key(), "snappy")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build(),
+                false);
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        table.createBranch("fallback");
+        catalog.alterTable(
+                identifier,
+                Collections.singletonList(
+                        SchemaChange.setOption(SCAN_FALLBACK_BRANCH.key(), "fallback")),
+                false);
+
+        Identifier fallbackId = new Identifier(databaseName, tableName, "fallback");
+        writeAppendPartition(fallbackId, "20250101");
+        writeAppendPartition(identifier, "20250102");
+
+        assertHmsDts(databaseName, tableName, "20250101", "20250102");
+        assertPhysicalDts(fallbackId, "20250101");
+        assertPhysicalDts(identifier, "20250102");
+
+        catalog.dropPartitions(identifier, partitionSpecs("20250101"));
+        assertHmsDts(databaseName, tableName, "20250101", "20250102");
+        assertPhysicalDts(fallbackId, "20250101");
+
+        catalog.dropPartitions(fallbackId, partitionSpecs("20250101"));
+        assertHmsDts(databaseName, tableName, "20250102");
+        assertPhysicalDts(fallbackId);
+
+        catalog.dropPartitions(identifier, partitionSpecs("20250102"));
+        assertHmsDts(databaseName, tableName);
+        assertPhysicalDts(identifier);
+    }
+
+    private void writePartitionRow(Identifier identifier, String dt, String pk) throws Exception {
+        BatchWriteBuilder writeBuilder = catalog.getTable(identifier).newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(
+                    GenericRow.of(
+                            BinaryString.fromString(dt),
+                            BinaryString.fromString(pk),
+                            BinaryString.fromString(pk)));
+            commit.commit(write.prepareCommit());
+        }
+    }
+
+    private void writeAppendPartition(Identifier identifier, String dt) throws Exception {
+        BatchWriteBuilder writeBuilder = catalog.getTable(identifier).newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(0, BinaryString.fromString(dt)));
+            commit.commit(write.prepareCommit());
+        }
+    }
+
+    private static List<Map<String, String>> partitionSpecs(String... dts) {
+        List<Map<String, String>> specs = new ArrayList<>();
+        for (String dt : dts) {
+            specs.add(Collections.singletonMap("dt", dt));
+        }
+        return specs;
+    }
+
+    private void assertHmsDts(String databaseName, String tableName, String... dts)
+            throws Exception {
+        assertThat(
+                        ((HiveCatalog) catalog)
+                                .getHmsClient()
+                                .listPartitions(databaseName, tableName, Short.MAX_VALUE))
+                .extracting(p -> p.getValues().get(0))
+                .containsExactlyInAnyOrder(dts);
+    }
+
+    private void assertPhysicalDts(Identifier identifier, String... dts) throws Exception {
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        if (table instanceof FallbackReadFileStoreTable) {
+            table = ((FallbackReadFileStoreTable) table).wrapped();
+        }
+        assertThat(
+                        table.newScan().listPartitions().stream()
+                                .map(p -> p.getString(0).toString())
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(dts);
     }
 
     @Test
