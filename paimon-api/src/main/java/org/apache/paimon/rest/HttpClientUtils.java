@@ -22,18 +22,21 @@ import org.apache.paimon.rest.interceptor.LoggingInterceptor;
 import org.apache.paimon.rest.interceptor.TimingInterceptor;
 import org.apache.paimon.utils.SensitiveConfigUtils;
 
+import org.apache.hc.client5.http.ConnectionKeepAliveStrategy;
 import org.apache.hc.client5.http.classic.methods.HttpDelete;
 import org.apache.hc.client5.http.classic.methods.HttpGet;
 import org.apache.hc.client5.http.classic.methods.HttpHead;
 import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.config.RequestConfig;
 import org.apache.hc.client5.http.entity.DecompressingEntity;
+import org.apache.hc.client5.http.impl.DefaultConnectionKeepAliveStrategy;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
 import org.apache.hc.client5.http.impl.classic.HttpClientBuilder;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
-import org.apache.hc.client5.http.io.HttpClientConnectionManager;
+import org.apache.hc.client5.http.protocol.HttpClientContext;
 import org.apache.hc.client5.http.ssl.DefaultClientTlsStrategy;
 import org.apache.hc.client5.http.ssl.HttpsSupport;
 import org.apache.hc.core5.http.ClassicHttpRequest;
@@ -41,19 +44,27 @@ import org.apache.hc.core5.http.ConnectionClosedException;
 import org.apache.hc.core5.http.Header;
 import org.apache.hc.core5.http.HttpEntity;
 import org.apache.hc.core5.http.HttpHeaders;
+import org.apache.hc.core5.http.HttpResponse;
 import org.apache.hc.core5.http.HttpStatus;
 import org.apache.hc.core5.http.TruncatedChunkException;
+import org.apache.hc.core5.http.protocol.HttpContext;
 import org.apache.hc.core5.reactor.ssl.SSLBufferMode;
 import org.apache.hc.core5.ssl.SSLContexts;
+import org.apache.hc.core5.util.TimeValue;
 import org.apache.hc.core5.util.Timeout;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Utils for {@link HttpClientBuilder}. */
 public class HttpClientUtils {
@@ -66,11 +77,26 @@ public class HttpClientUtils {
                     .setConnectionRequestTimeout(Timeout.ofMinutes(3))
                     .setResponseTimeout(Timeout.ofMinutes(3))
                     .build();
+    static final String KEEP_ALIVE_TIMEOUT_ATTRIBUTE = "org.apache.paimon.http.keep-alive-timeout";
+    static final ConnectionKeepAliveStrategy KEEP_ALIVE_STRATEGY =
+            HttpClientUtils::getKeepAliveDuration;
+    private static final PoolingHttpClientConnectionManager BLOB_HTTP_CONNECTION_MANAGER =
+            configureConnectionManager();
+    private static final CloseableHttpClient BLOB_HTTP_CLIENT =
+            createLoggingBuilder(BLOB_HTTP_CONNECTION_MANAGER).build();
 
     public static final CloseableHttpClient DEFAULT_HTTP_CLIENT = createLoggingBuilder().build();
 
     public static HttpClientBuilder createLoggingBuilder() {
-        HttpClientBuilder clientBuilder = createBuilder();
+        return addLoggingInterceptors(createBuilder());
+    }
+
+    private static HttpClientBuilder createLoggingBuilder(
+            PoolingHttpClientConnectionManager connectionManager) {
+        return addLoggingInterceptors(createBuilder(connectionManager));
+    }
+
+    private static HttpClientBuilder addLoggingInterceptors(HttpClientBuilder clientBuilder) {
         clientBuilder
                 .addRequestInterceptorFirst(new TimingInterceptor())
                 .addResponseInterceptorLast(new LoggingInterceptor());
@@ -78,15 +104,21 @@ public class HttpClientUtils {
     }
 
     public static HttpClientBuilder createBuilder() {
+        return createBuilder(configureConnectionManager());
+    }
+
+    private static HttpClientBuilder createBuilder(
+            PoolingHttpClientConnectionManager connectionManager) {
         HttpClientBuilder clientBuilder = HttpClients.custom();
         clientBuilder.setDefaultRequestConfig(DEFAULT_REQUEST_CONFIG);
 
-        clientBuilder.setConnectionManager(configureConnectionManager());
+        clientBuilder.setConnectionManager(connectionManager);
+        clientBuilder.setKeepAliveStrategy(KEEP_ALIVE_STRATEGY);
         clientBuilder.setRetryStrategy(new ExponentialHttpRequestRetryStrategy(5));
         return clientBuilder;
     }
 
-    private static HttpClientConnectionManager configureConnectionManager() {
+    private static PoolingHttpClientConnectionManager configureConnectionManager() {
         PoolingHttpClientConnectionManagerBuilder connectionManagerBuilder =
                 PoolingHttpClientConnectionManagerBuilder.create();
         connectionManagerBuilder.useSystemProperties().setMaxConnTotal(100).setMaxConnPerRoute(100);
@@ -105,7 +137,13 @@ public class HttpClientUtils {
     }
 
     public static InputStream getAsInputStream(String uri) throws IOException {
-        return new ResumableHttpInputStream(uri);
+        return new ResumableHttpInputStream(uri, null);
+    }
+
+    public static InputStream getAsInputStream(String uri, Duration keepAliveTimeout)
+            throws IOException {
+        validateKeepAliveTimeout(keepAliveTimeout);
+        return new ResumableHttpInputStream(uri, keepAliveTimeout);
     }
 
     /**
@@ -115,11 +153,21 @@ public class HttpClientUtils {
      * different status than GET.
      */
     public static boolean exists(String uri) throws IOException {
-        int headStatusCode = headStatusCode(uri);
+        return existsInternal(uri, null);
+    }
+
+    public static boolean exists(String uri, Duration keepAliveTimeout) throws IOException {
+        validateKeepAliveTimeout(keepAliveTimeout);
+        return existsInternal(uri, keepAliveTimeout);
+    }
+
+    private static boolean existsInternal(String uri, @Nullable Duration keepAliveTimeout)
+            throws IOException {
+        int headStatusCode = headStatusCode(uri, keepAliveTimeout);
         if (headStatusCode == HttpStatus.SC_OK) {
             return true;
         }
-        int rangeStatusCode = getRangeStatusCode(uri);
+        int rangeStatusCode = getRangeStatusCode(uri, keepAliveTimeout);
         if (rangeStatusCode == HttpStatus.SC_OK
                 || rangeStatusCode == HttpStatus.SC_PARTIAL_CONTENT
                 || rangeStatusCode == HttpStatus.SC_REQUESTED_RANGE_NOT_SATISFIABLE) {
@@ -195,17 +243,19 @@ public class HttpClientUtils {
         }
     }
 
-    private static int headStatusCode(String uri) throws IOException {
+    private static int headStatusCode(String uri, @Nullable Duration keepAliveTimeout)
+            throws IOException {
         HttpHead httpHead = newHttpHead(uri);
-        try (CloseableHttpResponse response = execute(httpHead, uri)) {
+        try (CloseableHttpResponse response = execute(httpHead, uri, keepAliveTimeout)) {
             return response.getCode();
         }
     }
 
-    private static int getRangeStatusCode(String uri) throws IOException {
+    private static int getRangeStatusCode(String uri, @Nullable Duration keepAliveTimeout)
+            throws IOException {
         HttpGet httpGet = newHttpGet(uri);
         httpGet.addHeader("Range", "bytes=0-0");
-        try (CloseableHttpResponse response = execute(httpGet, uri)) {
+        try (CloseableHttpResponse response = execute(httpGet, uri, keepAliveTimeout)) {
             return response.getCode();
         }
     }
@@ -216,14 +266,54 @@ public class HttpClientUtils {
      * to &lt;Location&gt;") echo the target URL, which for a signed URL is a credential; only the
      * sanitized request URI is reported.
      */
-    private static CloseableHttpResponse execute(ClassicHttpRequest request, String uri)
+    private static CloseableHttpResponse execute(
+            ClassicHttpRequest request, String uri, @Nullable Duration keepAliveTimeout)
             throws IOException {
         try {
-            return DEFAULT_HTTP_CLIENT.execute(request);
+            if (keepAliveTimeout == null) {
+                return DEFAULT_HTTP_CLIENT.execute(request);
+            }
+
+            TimeValue timeout = TimeValue.of(keepAliveTimeout);
+            // This pool is dedicated to explicitly configured HTTP BLOB reads, so enforcing one
+            // table's cap cannot close idle REST Catalog connections. It is still shared by capped
+            // BLOB reads to avoid creating one client and pool per table.
+            BLOB_HTTP_CONNECTION_MANAGER.closeIdle(timeout);
+            HttpClientContext context = HttpClientContext.create();
+            context.setRequestConfig(
+                    RequestConfig.copy(DEFAULT_REQUEST_CONFIG)
+                            .setConnectionKeepAlive(timeout)
+                            .build());
+            context.setAttribute(KEEP_ALIVE_TIMEOUT_ATTRIBUTE, timeout);
+            return BLOB_HTTP_CLIENT.execute(request, context);
         } catch (IOException | RuntimeException e) {
             throw new IOException(
                     "HTTP request failed for uri: " + SensitiveConfigUtils.sanitizeUri(uri));
         }
+    }
+
+    private static TimeValue getKeepAliveDuration(HttpResponse response, HttpContext context) {
+        TimeValue keepAlive =
+                DefaultConnectionKeepAliveStrategy.INSTANCE.getKeepAliveDuration(response, context);
+        Object configured = context.getAttribute(KEEP_ALIVE_TIMEOUT_ATTRIBUTE);
+        if (!(configured instanceof TimeValue)) {
+            return keepAlive;
+        }
+
+        TimeValue cap = (TimeValue) configured;
+        return keepAlive == null
+                        || !TimeValue.isNonNegative(keepAlive)
+                        || cap.compareTo(keepAlive) < 0
+                ? cap
+                : keepAlive;
+    }
+
+    private static void validateKeepAliveTimeout(Duration keepAliveTimeout) {
+        checkArgument(
+                keepAliveTimeout != null
+                        && !keepAliveTimeout.isZero()
+                        && !keepAliveTimeout.isNegative(),
+                "HTTP connection keep-alive timeout must be greater than 0.");
     }
 
     public static HttpGet newHttpGet(String uri) {
@@ -269,6 +359,7 @@ public class HttpClientUtils {
     private static class ResumableHttpInputStream extends InputStream {
 
         private final String uri;
+        @Nullable private final Duration keepAliveTimeout;
         private final byte[] singleByte = new byte[1];
 
         private CloseableHttpResponse response;
@@ -283,8 +374,10 @@ public class HttpClientUtils {
         private IOException terminalFailure;
         private final MessageDigest deliveredDigest = sha256();
 
-        private ResumableHttpInputStream(String uri) throws IOException {
+        private ResumableHttpInputStream(String uri, @Nullable Duration keepAliveTimeout)
+                throws IOException {
             this.uri = uri;
+            this.keepAliveTimeout = keepAliveTimeout;
             openInitialResponse();
         }
 
@@ -372,7 +465,7 @@ public class HttpClientUtils {
 
         private void openInitialResponse() throws IOException {
             HttpGet request = newBodyGet(uri);
-            CloseableHttpResponse newResponse = execute(request, uri);
+            CloseableHttpResponse newResponse = execute(request, uri, keepAliveTimeout);
             boolean accepted = false;
             try {
                 if (newResponse.getCode() == HttpStatus.SC_NOT_ACCEPTABLE) {
@@ -458,7 +551,7 @@ public class HttpClientUtils {
             request.addHeader(HttpHeaders.RANGE, "bytes=" + position + "-");
             request.addHeader(HttpHeaders.IF_RANGE, strongEtag);
 
-            CloseableHttpResponse newResponse = execute(request, uri);
+            CloseableHttpResponse newResponse = execute(request, uri, keepAliveTimeout);
             boolean accepted = false;
             try {
                 if (newResponse.getCode() != HttpStatus.SC_PARTIAL_CONTENT) {
@@ -514,7 +607,7 @@ public class HttpClientUtils {
             byte[] expectedPrefixDigest = digestSnapshot(deliveredDigest);
             while (true) {
                 HttpGet request = newBodyGet(uri);
-                CloseableHttpResponse newResponse = execute(request, uri);
+                CloseableHttpResponse newResponse = execute(request, uri, keepAliveTimeout);
                 boolean accepted = false;
                 try {
                     if (newResponse.getCode() != HttpStatus.SC_OK) {
@@ -594,7 +687,7 @@ public class HttpClientUtils {
          */
         private void openContentDecodedResponse() throws IOException {
             HttpGet request = newHttpGet(uri);
-            CloseableHttpResponse newResponse = execute(request, uri);
+            CloseableHttpResponse newResponse = execute(request, uri, keepAliveTimeout);
             boolean accepted = false;
             try {
                 if (newResponse.getCode() != HttpStatus.SC_OK) {

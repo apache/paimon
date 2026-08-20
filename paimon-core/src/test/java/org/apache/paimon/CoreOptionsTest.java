@@ -23,6 +23,8 @@ import org.apache.paimon.options.Options;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -265,6 +267,22 @@ public class CoreOptionsTest {
         assertThatThrownBy(() -> new CoreOptions(conf).blobCopyBufferSize())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("blob.copy-buffer-size");
+    }
+
+    @Test
+    public void testBlobDescriptorHttpKeepAliveTimeout() {
+        Options conf = new Options();
+        assertThat(new CoreOptions(conf).blobDescriptorHttpKeepAliveTimeout()).isEmpty();
+
+        conf.setString(CoreOptions.BLOB_DESCRIPTOR_HTTP_KEEP_ALIVE_TIMEOUT.key(), "60s");
+        assertThat(new CoreOptions(conf).blobDescriptorHttpKeepAliveTimeout())
+                .contains(Duration.ofSeconds(60));
+
+        conf.setString(CoreOptions.BLOB_DESCRIPTOR_HTTP_KEEP_ALIVE_TIMEOUT.key(), "0s");
+        assertThatThrownBy(() -> new CoreOptions(conf).blobDescriptorHttpKeepAliveTimeout())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(CoreOptions.BLOB_DESCRIPTOR_HTTP_KEEP_ALIVE_TIMEOUT.key())
+                .hasMessageContaining("greater than 0");
     }
 
     @Test

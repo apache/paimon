@@ -18,9 +18,12 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.ConfigOptions;
 
 import javax.annotation.Nullable;
 
@@ -28,26 +31,51 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.Serializable;
 import java.net.URI;
+import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A factory to create and cache {@link UriReader}. */
 public class UriReaderFactory implements Serializable {
 
     private static final long serialVersionUID = -8477284718943635074L;
+    private static final ConfigOption<Duration> HTTP_KEEP_ALIVE_TIMEOUT =
+            ConfigOptions.key(
+                            CoreOptions.BLOB_DESCRIPTOR_HTTP_KEEP_ALIVE_TIMEOUT
+                                    .key()
+                                    .substring(CoreOptions.BLOB_DESCRIPTOR_PREFIX.length()))
+                    .durationType()
+                    .noDefaultValue();
 
     @Nullable private final CatalogContext context;
+    @Nullable private final Duration httpKeepAliveTimeout;
     private transient Map<UriKey, UriReader> readers;
 
     public UriReaderFactory(@Nullable CatalogContext context) {
+        this(context, keepAliveTimeout(context));
+    }
+
+    public UriReaderFactory(
+            @Nullable CatalogContext context, @Nullable Duration httpKeepAliveTimeout) {
         this.context = context;
+        validateKeepAliveTimeout(httpKeepAliveTimeout);
+        this.httpKeepAliveTimeout = httpKeepAliveTimeout;
         this.readers = new ConcurrentHashMap<>();
     }
 
     /** Creates a factory which uses the provided {@link FileIO} for non-HTTP URIs. */
     public static UriReaderFactory fromFileIO(FileIO fileIO) {
-        return new ProvidedFileIOUriReaderFactory(fileIO);
+        return new ProvidedFileIOUriReaderFactory(fileIO, null);
+    }
+
+    /**
+     * Creates a factory with a keep-alive timeout for HTTP URIs and the provided {@link FileIO}.
+     */
+    public static UriReaderFactory fromFileIO(FileIO fileIO, Duration httpKeepAliveTimeout) {
+        return new ProvidedFileIOUriReaderFactory(fileIO, httpKeepAliveTimeout);
     }
 
     public UriReader create(String input) {
@@ -91,7 +119,9 @@ public class UriReaderFactory implements Serializable {
 
     protected UriReader newReader(URI uri) {
         if (isHttp(uri)) {
-            return UriReader.fromHttp();
+            return httpKeepAliveTimeout == null
+                    ? UriReader.fromHttp()
+                    : UriReader.fromHttp(httpKeepAliveTimeout);
         }
 
         try {
@@ -107,6 +137,22 @@ public class UriReaderFactory implements Serializable {
                 || "https".equalsIgnoreCase(uri.getScheme());
     }
 
+    @Nullable
+    private static Duration keepAliveTimeout(@Nullable CatalogContext context) {
+        return context == null
+                ? null
+                : context.options().getOptional(HTTP_KEEP_ALIVE_TIMEOUT).orElse(null);
+    }
+
+    private static void validateKeepAliveTimeout(@Nullable Duration keepAliveTimeout) {
+        if (keepAliveTimeout != null) {
+            checkArgument(
+                    !keepAliveTimeout.isZero() && !keepAliveTimeout.isNegative(),
+                    "Option '%s' must be greater than 0.",
+                    HTTP_KEEP_ALIVE_TIMEOUT.key());
+        }
+    }
+
     private static final class ProvidedFileIOUriReaderFactory extends UriReaderFactory {
 
         private static final long serialVersionUID = 1L;
@@ -116,8 +162,9 @@ public class UriReaderFactory implements Serializable {
         // rebuild the transient reader cache with table-scoped credentials.
         private final FileIO fileIO;
 
-        private ProvidedFileIOUriReaderFactory(FileIO fileIO) {
-            super(null);
+        private ProvidedFileIOUriReaderFactory(
+                FileIO fileIO, @Nullable Duration httpKeepAliveTimeout) {
+            super(null, httpKeepAliveTimeout);
             this.fileIO = Objects.requireNonNull(fileIO);
         }
 

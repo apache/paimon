@@ -23,6 +23,11 @@ import org.apache.paimon.utils.SensitiveConfigUtils;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
+import org.apache.hc.client5.http.config.RequestConfig;
+import org.apache.hc.client5.http.protocol.HttpClientContext;
+import org.apache.hc.core5.http.HttpHeaders;
+import org.apache.hc.core5.http.message.BasicClassicHttpResponse;
+import org.apache.hc.core5.util.TimeValue;
 import org.assertj.core.api.ThrowableAssert;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -33,8 +38,11 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.time.Duration;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Random;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.GZIPOutputStream;
@@ -74,6 +82,75 @@ public class HttpClientUtilsTest {
     }
 
     @Test
+    public void testConfiguredKeepAliveTimeoutCapsServerTimeout() {
+        assertThat(keepAliveDuration(Duration.ofSeconds(60), "timeout=75").toSeconds())
+                .isEqualTo(60);
+    }
+
+    @Test
+    public void testConfiguredKeepAliveTimeoutKeepsShorterServerTimeout() {
+        assertThat(keepAliveDuration(Duration.ofSeconds(60), "timeout=30").toSeconds())
+                .isEqualTo(30);
+    }
+
+    @Test
+    public void testConfiguredKeepAliveTimeoutIsFallbackWithoutServerHeader() {
+        assertThat(keepAliveDuration(Duration.ofSeconds(60), null).toSeconds()).isEqualTo(60);
+    }
+
+    @Test
+    public void testConfiguredKeepAliveTimeoutCapsIndefiniteServerTimeout() {
+        assertThat(keepAliveDuration(Duration.ofSeconds(60), "timeout=-1").toSeconds())
+                .isEqualTo(60);
+    }
+
+    @Test
+    public void testUnconfiguredKeepAlivePreservesHttpClientDefault() {
+        BasicClassicHttpResponse response = new BasicClassicHttpResponse(200);
+        HttpClientContext context = HttpClientContext.create();
+        context.setRequestConfig(RequestConfig.custom().build());
+
+        assertThat(
+                        HttpClientUtils.KEEP_ALIVE_STRATEGY
+                                .getKeepAliveDuration(response, context)
+                                .toMinutes())
+                .isEqualTo(3);
+    }
+
+    @Test
+    public void testRejectNonPositiveKeepAliveTimeout() {
+        assertThatThrownBy(() -> HttpClientUtils.getAsInputStream(url("/ok"), Duration.ZERO))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("greater than 0");
+        assertThatThrownBy(() -> HttpClientUtils.exists(url("/ok"), Duration.ofSeconds(-1)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("greater than 0");
+    }
+
+    @Test
+    public void testConfiguredKeepAliveUsesDedicatedPoolAndClosesOlderIdleConnection()
+            throws Exception {
+        List<Integer> remotePorts = new CopyOnWriteArrayList<>();
+        registerHandler(
+                "/pool-state",
+                exchange -> {
+                    remotePorts.add(exchange.getRemoteAddress().getPort());
+                    respond(exchange, 200, "ok".getBytes());
+                });
+
+        readAllAndClose(url("/pool-state"), null);
+        readAllAndClose(url("/pool-state"), Duration.ofSeconds(10));
+        readAllAndClose(url("/pool-state"), Duration.ofSeconds(10));
+        Thread.sleep(150);
+        readAllAndClose(url("/pool-state"), Duration.ofMillis(50));
+
+        assertThat(remotePorts).hasSize(4);
+        assertThat(remotePorts.get(1)).isNotEqualTo(remotePorts.get(0));
+        assertThat(remotePorts.get(2)).isEqualTo(remotePorts.get(1));
+        assertThat(remotePorts.get(3)).isNotEqualTo(remotePorts.get(2));
+    }
+
+    @Test
     public void testExistsReturnsFalseForMissingResource() throws Exception {
         registerHandler(
                 "/missing",
@@ -96,7 +173,7 @@ public class HttpClientUtilsTest {
                     respond(exchange, 200, "abc".getBytes());
                 });
 
-        assertThat(HttpClientUtils.exists(url("/no-head"))).isTrue();
+        assertThat(HttpClientUtils.exists(url("/no-head"), Duration.ofSeconds(60))).isTrue();
     }
 
     @Test
@@ -302,7 +379,8 @@ public class HttpClientUtilsTest {
                     respond(exchange, 200, compressed);
                 });
 
-        try (InputStream in = HttpClientUtils.getAsInputStream(url("/encoded-only"))) {
+        try (InputStream in =
+                HttpClientUtils.getAsInputStream(url("/encoded-only"), Duration.ofSeconds(60))) {
             assertThat(readAll(in)).isEqualTo(payload);
         }
         assertThat(requestCount).hasValue(2);
@@ -362,7 +440,8 @@ public class HttpClientUtilsTest {
                     respond(exchange, 206, remaining);
                 });
 
-        try (InputStream in = HttpClientUtils.getAsInputStream(url("/truncated"))) {
+        try (InputStream in =
+                HttpClientUtils.getAsInputStream(url("/truncated"), Duration.ofSeconds(60))) {
             assertThat(readAll(in)).isEqualTo(payload);
         }
         assertThat(requestCount).hasValue(2);
@@ -391,7 +470,9 @@ public class HttpClientUtilsTest {
                     respond(exchange, 200, payload);
                 });
 
-        try (InputStream in = HttpClientUtils.getAsInputStream(url("/truncated-no-validator"))) {
+        try (InputStream in =
+                HttpClientUtils.getAsInputStream(
+                        url("/truncated-no-validator"), Duration.ofSeconds(60))) {
             assertThat(readAll(in)).isEqualTo(payload);
         }
         assertThat(requestCount).hasValue(2);
@@ -779,6 +860,27 @@ public class HttpClientUtilsTest {
 
     private void registerHandler(String path, HttpHandler handler) {
         server.createContext(path, handler);
+    }
+
+    private static TimeValue keepAliveDuration(Duration cap, String serverKeepAlive) {
+        TimeValue timeout = TimeValue.of(cap);
+        BasicClassicHttpResponse response = new BasicClassicHttpResponse(200);
+        if (serverKeepAlive != null) {
+            response.addHeader(HttpHeaders.KEEP_ALIVE, serverKeepAlive);
+        }
+        HttpClientContext context = HttpClientContext.create();
+        context.setRequestConfig(RequestConfig.custom().setConnectionKeepAlive(timeout).build());
+        context.setAttribute(HttpClientUtils.KEEP_ALIVE_TIMEOUT_ATTRIBUTE, timeout);
+        return HttpClientUtils.KEEP_ALIVE_STRATEGY.getKeepAliveDuration(response, context);
+    }
+
+    private static void readAllAndClose(String uri, Duration keepAliveTimeout) throws IOException {
+        try (InputStream inputStream =
+                keepAliveTimeout == null
+                        ? HttpClientUtils.getAsInputStream(uri)
+                        : HttpClientUtils.getAsInputStream(uri, keepAliveTimeout)) {
+            readAll(inputStream);
+        }
     }
 
     private String url(String path) {

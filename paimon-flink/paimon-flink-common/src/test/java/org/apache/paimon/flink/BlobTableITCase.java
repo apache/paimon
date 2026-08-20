@@ -1045,7 +1045,9 @@ public class BlobTableITCase extends CatalogITCaseBase {
 
             // Use sys.path_to_descriptor with HTTP URL
             batchSql(
-                    "INSERT INTO blob_table_descriptor VALUES (1, 'http-blob', sys.path_to_descriptor('"
+                    "INSERT INTO blob_table_descriptor"
+                            + " /*+ OPTIONS('blob-descriptor.http.keep-alive-timeout'='60s') */"
+                            + " VALUES (1, 'http-blob', sys.path_to_descriptor('"
                             + httpUrl
                             + "'))");
 

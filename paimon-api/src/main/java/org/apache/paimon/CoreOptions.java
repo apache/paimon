@@ -2714,6 +2714,18 @@ public class CoreOptions implements Serializable {
                                     + "loader, including external tables in REST catalogs. When set, "
                                     + "other blob-descriptor.* FileIO options are ignored.");
 
+    public static final ConfigOption<Duration> BLOB_DESCRIPTOR_HTTP_KEEP_ALIVE_TIMEOUT =
+            key(BLOB_DESCRIPTOR_PREFIX + "http.keep-alive-timeout")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The maximum idle time for a persistent HTTP connection used to fetch "
+                                    + "descriptor-backed BLOB content. When a server supplies a "
+                                    + "Keep-Alive timeout, the shorter timeout is used. This is not "
+                                    + "an HTTP response timeout. The value must be greater than 0. "
+                                    + "When unset, the HTTP client's existing keep-alive behavior is "
+                                    + "preserved.");
+
     public static final ConfigOption<Boolean> BLOB_WRITE_NULL_ON_MISSING_FILE =
             key("blob-write-null-on-missing-file")
                     .booleanType()
@@ -4455,6 +4467,17 @@ public class CoreOptions implements Serializable {
 
     public boolean blobAsDescriptor() {
         return options.get(BLOB_AS_DESCRIPTOR);
+    }
+
+    public Optional<Duration> blobDescriptorHttpKeepAliveTimeout() {
+        Optional<Duration> timeout = options.getOptional(BLOB_DESCRIPTOR_HTTP_KEEP_ALIVE_TIMEOUT);
+        timeout.ifPresent(
+                value ->
+                        checkArgument(
+                                !value.isZero() && !value.isNegative(),
+                                "Option '%s' must be greater than 0.",
+                                BLOB_DESCRIPTOR_HTTP_KEEP_ALIVE_TIMEOUT.key()));
+        return timeout;
     }
 
     public boolean blobWriteNullOnMissingFile() {
