@@ -188,6 +188,7 @@ def build_self_merge_update_ds(
     catalog_options: Dict[str, str],
     resolve_target_projection,
     snapshot_id: Optional[int] = None,
+    scan_predicate=None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
 ) -> Tuple:
     from pypaimon.ray.ray_paimon import read_paimon
@@ -213,9 +214,20 @@ def build_self_merge_update_ds(
         c for c in target_field_names if c in needed_cols
     ]
 
+    read_kwargs = {}
+    if scan_predicate is not None:
+        from pypaimon.common.options.core_options import (
+            CoreOptions, GlobalIndexSearchMode,
+        )
+        read_kwargs["filter"] = scan_predicate
+        read_kwargs["dynamic_options"] = {
+            CoreOptions.SCALAR_INDEX_SEARCH_MODE.key():
+                GlobalIndexSearchMode.FULL.value,
+        }
     target_ds = read_paimon(
         target_identifier, catalog_options,
         projection=projection, snapshot_id=snapshot_id,
+        **read_kwargs,
     )
     update_schema = build_update_schema(target_pa_schema, update_cols, row_id_name)
 
@@ -260,6 +272,7 @@ def build_self_merge_delete_ds(
     catalog_options: Dict[str, str],
     resolve_target_projection,
     snapshot_id: Optional[int] = None,
+    scan_predicate=None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
 ) -> Tuple:
     from pypaimon.ray.ray_paimon import read_paimon
@@ -281,9 +294,20 @@ def build_self_merge_delete_ds(
         c for c in target_field_names if c in needed_cols
     ]
 
+    read_kwargs = {}
+    if scan_predicate is not None:
+        from pypaimon.common.options.core_options import (
+            CoreOptions, GlobalIndexSearchMode,
+        )
+        read_kwargs["filter"] = scan_predicate
+        read_kwargs["dynamic_options"] = {
+            CoreOptions.SCALAR_INDEX_SEARCH_MODE.key():
+                GlobalIndexSearchMode.FULL.value,
+        }
     target_ds = read_paimon(
         target_identifier, catalog_options,
         projection=projection, snapshot_id=snapshot_id,
+        **read_kwargs,
     )
     delete_schema = build_delete_schema(row_id_name)
 
