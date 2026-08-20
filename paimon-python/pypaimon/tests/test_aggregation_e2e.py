@@ -294,20 +294,19 @@ class AggregationMergeEngineE2ETest(unittest.TestCase):
         )
 
     def test_out_of_scope_field_aggregator_rejected(self):
-        # hll_sketch is one of the aggregator identifiers this engine
-        # doesn't support yet. The guard must reject the config rather
-        # than let the per-field factory build a (silently wrong)
-        # fallback.
+        # rbm64 is the aggregator identifier this engine doesn't support
+        # yet. The guard must reject the config rather than let the
+        # per-field factory build a (silently wrong) fallback.
         self._create_and_expect_unsupported(
-            'agg_reject_hll_sketch',
-            {'fields.label.aggregate-function': 'hll_sketch'},
+            'agg_reject_rbm64',
+            {'fields.label.aggregate-function': 'rbm64'},
             'fields.label.aggregate-function',
         )
 
     def test_out_of_scope_default_aggregator_rejected(self):
         self._create_and_expect_unsupported(
-            'agg_reject_default_hll_sketch',
-            {'fields.default-aggregate-function': 'hll_sketch'},
+            'agg_reject_default_rbm64',
+            {'fields.default-aggregate-function': 'rbm64'},
             'fields.default-aggregate-function',
         )
 
