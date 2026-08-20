@@ -19,36 +19,17 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.table.FormatTable;
-import org.apache.paimon.table.sink.BatchTableCommit;
 
 import org.apache.flink.table.catalog.ObjectIdentifier;
-import org.apache.flink.table.connector.sink.abilities.SupportsTruncate;
 import org.apache.flink.table.factories.DynamicTableFactory;
 
-/** Table sink for format tables. */
-public class FlinkFormatTableSink extends FlinkFormatTableSinkBase implements SupportsTruncate {
+/** Table sink for format tables. Flink 1.16 has no SupportsTruncate. */
+public class FlinkFormatTableSink extends FlinkFormatTableSinkBase {
 
     public FlinkFormatTableSink(
             ObjectIdentifier tableIdentifier,
             FormatTable table,
             DynamicTableFactory.Context context) {
         super(tableIdentifier, table, context);
-    }
-
-    /**
-     * Removes the data of the whole table - of its registered partitions, when the catalog manages
-     * them. The partition directories stay, and so do their catalog registrations: emptying a table
-     * does not redefine which partitions it has.
-     */
-    @Override
-    public void executeTruncation() {
-        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
-            commit.truncateTable();
-        } catch (Exception e) {
-            throw new RuntimeException(
-                    String.format(
-                            "Failed to truncate table %s.", tableIdentifier.asSummaryString()),
-                    e);
-        }
     }
 }

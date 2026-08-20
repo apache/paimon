@@ -23,6 +23,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.RenamingTwoPhaseOutputStream;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.utils.PartitionPathUtils;
 
@@ -49,6 +50,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /** Tests for {@link FormatTableCommit}. */
 class FormatTableCommitTest {
@@ -357,6 +359,215 @@ class FormatTableCommitTest {
                         "Partition value '..' cannot be used as a partition path component.");
         assertThat(fileIO.exists(tablePath)).isTrue();
         assertThat(fileIO.exists(siblingPath)).isTrue();
+    }
+
+    @Test
+    void testTruncateTableEmptiesEveryPartitionAndLeavesThePartitionsThemselves() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        Path october = new Path(tablePath, "year=2025/month=10");
+        Path november = new Path(tablePath, "year=2025/month=11");
+        Path octoberData = new Path(october, "data-1.csv");
+        Path novemberData = new Path(november, "data-2.csv");
+        fileIO.writeFile(octoberData, "1", false);
+        fileIO.writeFile(novemberData, "2", false);
+        // Another writer is mid-write in this partition; its staging tree is not table data.
+        Path stagingFile = new Path(october, "_temporary/attempt/part-00000.csv");
+        fileIO.writeFile(stagingFile, "3", false);
+        FormatTableCommit commit =
+                truncatingCommit(tablePath, fileIO, false, null, "year", "month");
+
+        commit.truncateTable();
+
+        assertThat(fileIO.exists(octoberData)).isFalse();
+        assertThat(fileIO.exists(novemberData)).isFalse();
+        assertThat(fileIO.exists(stagingFile)).isTrue();
+        // Emptying a table does not redefine which partitions it has: the directories stay.
+        assertThat(fileIO.exists(october)).isTrue();
+        assertThat(fileIO.exists(november)).isTrue();
+    }
+
+    @Test
+    void testTruncateTableEmptiesTheRegisteredPartitionsOfACatalogManagedTable() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        Path registered = new Path(tablePath, "year=2025/month=10");
+        Path registeredData = new Path(registered, "data-1.csv");
+        fileIO.writeFile(registeredData, "1", false);
+        // Dropped there by something outside Paimon and not registered yet, so it is not part of
+        // the table: MSCK REPAIR TABLE is what would make it so.
+        Path awaitingRepair = new Path(tablePath, "year=2025/month=11");
+        Path awaitingRepairData = new Path(awaitingRepair, "data-2.csv");
+        fileIO.writeFile(awaitingRepairData, "2", false);
+        FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
+        when(partitionManager.listPartitions(Collections.emptyMap(), null))
+                .thenReturn(
+                        Collections.singletonList(
+                                new Partition(partitionSpec("2025", "10"), 0, 0, 0, 0, -1, false)));
+        FormatTableCommit commit =
+                truncatingCommit(tablePath, fileIO, false, partitionManager, "year", "month");
+
+        commit.truncateTable();
+
+        assertThat(fileIO.exists(registeredData)).isFalse();
+        assertThat(fileIO.exists(registered)).isTrue();
+        assertThat(fileIO.exists(awaitingRepairData)).isTrue();
+    }
+
+    @Test
+    void testTruncateTableOnlyEmptiesTheDirectoriesThatAreItsPartitions() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        Path partitionData = new Path(tablePath, "year=2025/month=10/data-1.csv");
+        fileIO.writeFile(partitionData, "1", false);
+        // Neither of these is a partition: the scan reads the directories that parse into the
+        // partition keys, so nothing else under the table directory is table data.
+        Path atTheTableRoot = new Path(tablePath, "notes.csv");
+        fileIO.writeFile(atTheTableRoot, "2", false);
+        Path outsideThePartitionLayout = new Path(tablePath, "tmp/unknown/x.csv");
+        fileIO.writeFile(outsideThePartitionLayout, "3", false);
+        FormatTableCommit commit =
+                truncatingCommit(tablePath, fileIO, false, null, "year", "month");
+
+        commit.truncateTable();
+
+        assertThat(fileIO.exists(partitionData)).isFalse();
+        assertThat(fileIO.exists(atTheTableRoot)).isTrue();
+        assertThat(fileIO.exists(outsideThePartitionLayout)).isTrue();
+    }
+
+    @Test
+    void testTruncateTableClearsAValueOnlyDefaultPartitionBelowTheTableDirectory()
+            throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        // Value-only layout: a null month is the default partition name, which starts with '_'
+        // without being a staging directory, and here it sits below the listed directory instead
+        // of being it.
+        Path defaultPartition =
+                new Path(tablePath, "2025/" + PARTITION_DEFAULT_NAME.defaultValue());
+        Path staleFile = new Path(defaultPartition, "data-old.csv");
+        fileIO.writeFile(staleFile, "1", false);
+        Path stagingFile = new Path(tablePath, "2025/_temporary/attempt/part-00000.csv");
+        fileIO.writeFile(stagingFile, "2", false);
+        FormatTableCommit commit = truncatingCommit(tablePath, fileIO, true, null, "year", "month");
+
+        commit.truncateTable();
+
+        assertThat(fileIO.exists(staleFile)).isFalse();
+        assertThat(fileIO.exists(stagingFile)).isTrue();
+        assertThat(fileIO.exists(defaultPartition)).isTrue();
+    }
+
+    @Test
+    void testTruncateTableOfAnUnpartitionedTableClearsTheTableDirectory() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        Path dataFile = new Path(tablePath, "data-1.csv");
+        fileIO.writeFile(dataFile, "1", false);
+        Path stagingFile = new Path(tablePath, "_temporary/attempt/part-00000.csv");
+        fileIO.writeFile(stagingFile, "2", false);
+        FormatTableCommit commit = truncatingCommit(tablePath, fileIO, false, null);
+
+        commit.truncateTable();
+
+        assertThat(fileIO.exists(dataFile)).isFalse();
+        assertThat(fileIO.exists(stagingFile)).isTrue();
+        assertThat(fileIO.exists(tablePath)).isTrue();
+    }
+
+    @Test
+    void testTruncatePartitionsStaysInsideThePartitionsItNames() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        Path october = new Path(tablePath, "year=2025/month=10");
+        Path november = new Path(tablePath, "year=2025/month=11");
+        Path octoberData = new Path(october, "data-1.csv");
+        Path novemberData = new Path(november, "data-2.csv");
+        fileIO.writeFile(octoberData, "1", false);
+        fileIO.writeFile(novemberData, "2", false);
+        Map<String, String> october2025 = new LinkedHashMap<>();
+        october2025.put("year", "2025");
+        october2025.put("month", "10");
+        FormatTableCommit commit =
+                truncatingCommit(tablePath, fileIO, false, null, "year", "month");
+
+        commit.truncatePartitions(Collections.singletonList(october2025));
+
+        assertThat(fileIO.exists(octoberData)).isFalse();
+        assertThat(fileIO.exists(october)).isTrue();
+        assertThat(fileIO.exists(novemberData)).isTrue();
+    }
+
+    @Test
+    void testTruncatingAPrefixClearsThePartitionsBelowItButNotStagingTrees() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        Path staleFile = new Path(tablePath, "year=2025/month=10/data-old.csv");
+        fileIO.writeFile(staleFile, "1", false);
+        // A job writing this prefix with the month left dynamic stages exactly where the month
+        // directories sit, so a directory at a partition level is not automatically partition data.
+        Path stagingFile =
+                new Path(tablePath, "year=2025/_temporary/attempt/month=11/part-00011.csv");
+        fileIO.writeFile(stagingFile, "2", false);
+        Path otherYear = new Path(tablePath, "year=2024/month=10/data-old.csv");
+        fileIO.writeFile(otherYear, "3", false);
+        FormatTableCommit commit =
+                truncatingCommit(tablePath, fileIO, false, null, "year", "month");
+
+        commit.truncatePartitions(
+                Collections.singletonList(Collections.singletonMap("year", "2025")));
+
+        assertThat(fileIO.exists(staleFile)).isFalse();
+        assertThat(fileIO.exists(stagingFile)).isTrue();
+        assertThat(fileIO.exists(otherYear)).isTrue();
+    }
+
+    @Test
+    void testTruncatingTheValueOnlyDefaultPartitionClearsIt() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        // Value-only layout: a null partition value is the default partition name, which starts
+        // with '_' without being a staging directory. The scan reads it, so TRUNCATE clears it.
+        Path defaultPartition = new Path(tablePath, PARTITION_DEFAULT_NAME.defaultValue());
+        Path staleFile = new Path(defaultPartition, "data-old.csv");
+        fileIO.writeFile(staleFile, "1", false);
+        FormatTableCommit commit = truncatingCommit(tablePath, fileIO, true, null, "year");
+
+        commit.truncatePartitions(
+                Collections.singletonList(
+                        Collections.singletonMap("year", PARTITION_DEFAULT_NAME.defaultValue())));
+
+        assertThat(fileIO.exists(staleFile)).isFalse();
+        assertThat(fileIO.exists(defaultPartition)).isTrue();
+    }
+
+    private static Map<String, String> partitionSpec(String year, String month) {
+        LinkedHashMap<String, String> spec = new LinkedHashMap<>();
+        spec.put("year", year);
+        spec.put("month", month);
+        return spec;
+    }
+
+    /** The commit TRUNCATE makes: nothing to write, so no overwrite and no static partition. */
+    private FormatTableCommit truncatingCommit(
+            Path tableLocation,
+            LocalFileIO fileIO,
+            boolean onlyValueInPath,
+            FormatTablePartitionManager partitionManager,
+            String... partitionKeys) {
+        return new FormatTableCommit(
+                tableLocation.toString(),
+                Arrays.asList(partitionKeys),
+                fileIO,
+                onlyValueInPath,
+                PARTITION_DEFAULT_NAME.defaultValue(),
+                false,
+                Identifier.create("truncate_db", "truncate_table"),
+                null,
+                null,
+                null,
+                partitionManager);
     }
 
     private FormatTablePartitionManager commitPartitionedFile(

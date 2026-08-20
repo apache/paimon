@@ -67,6 +67,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /** Tests for the partition statistics a {@link FormatTableCommit} reports. */
 class FormatTableCommitStatisticsTest {
@@ -220,6 +221,225 @@ class FormatTableCommitStatisticsTest {
                             // since an unknown replaces nothing.
                             assertThat(statistics.lastFileCreationTime()).isEqualTo(commitTime);
                         });
+    }
+
+    @Test
+    void testTruncatingPartitionsReportsAnExactZeroAsTheTotal() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
+        registered(partitionManager, spec("2025", "10"), spec("2025", "11"));
+        writeDataFile(fileIO, tablePath, "year=2025/month=10", "data.csv", 4096);
+        writeDataFile(fileIO, tablePath, "year=2025/month=11", "data.csv", 2048);
+
+        long before = System.currentTimeMillis();
+        commit(tablePath, fileIO, partitionManager, false, null)
+                .truncatePartitions(Arrays.asList(spec("2025", "10"), spec("2025", "11")));
+        long after = System.currentTimeMillis();
+
+        Reported reported = capture(partitionManager);
+        // What a truncated partition holds is zero, not zero fewer rows than before.
+        assertThat(reported.replaceStatistics).isTrue();
+        assertThat(reported.specs)
+                .containsExactlyInAnyOrder(spec("2025", "10"), spec("2025", "11"));
+        // Red line: emptying a partition zeroes its statistics, it never unregisters it.
+        verify(partitionManager, never()).dropPartitions(anyList());
+        // One catalog request for the complete specs, not one per partition.
+        verify(partitionManager).listPartitionsByNames(anyList());
+        verify(partitionManager, never()).listPartitions(any(), any());
+        // Statistics route by the spec they carry, so every partition needs its own.
+        assertThat(reported.statistics)
+                .extracting(PartitionStatistics::spec)
+                .containsExactlyInAnyOrder(spec("2025", "10"), spec("2025", "11"));
+        assertThat(reported.statistics)
+                .allSatisfy(
+                        statistics -> {
+                            assertThat(statistics.recordCount()).isZero();
+                            assertThat(statistics.fileSizeInBytes()).isZero();
+                            assertThat(statistics.fileCount()).isZero();
+                            // Dated to the truncation. Reporting the time as unknown would leave
+                            // the stored one describing files that are gone, since an unknown
+                            // replaces nothing.
+                            assertThat(statistics.lastFileCreationTime()).isBetween(before, after);
+                        });
+    }
+
+    @Test
+    void testTruncatingAPartitionThatIsAlreadyEmptyStillReportsZero() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
+        // Registered, and its directory holds nothing to delete - whoever emptied it, its stored
+        // statistics still describe the files that used to be there.
+        registered(partitionManager, spec("2025", "10"));
+        fileIO.mkdirs(new Path(tablePath, "year=2025/month=10"));
+
+        commit(tablePath, fileIO, partitionManager, false, null)
+                .truncatePartitions(Collections.singletonList(spec("2025", "10")));
+
+        Reported reported = capture(partitionManager);
+        // Unlike an overwrite, which reports only the files it removed itself, truncation states
+        // that the partition holds nothing.
+        assertThat(reported.replaceStatistics).isTrue();
+        assertThat(reported.specs).containsExactly(spec("2025", "10"));
+        assertThat(reported.statistics).hasSize(1);
+        assertThat(reported.statistics.get(0).spec()).isEqualTo(spec("2025", "10"));
+        assertThat(reported.statistics.get(0).recordCount()).isZero();
+        assertThat(reported.statistics.get(0).fileCount()).isZero();
+    }
+
+    @Test
+    void testTruncatingTheTableReportsARegisteredPartitionWhoseDirectoryIsGone() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
+        registered(partitionManager, spec("2025", "10"), spec("2025", "11"));
+        writeDataFile(fileIO, tablePath, "year=2025/month=10", "data.csv", 4096);
+        // Registered but its directory is not there at all: someone deleted it behind the catalog.
+        // A missing directory is drift to report on, not a reason to fail the truncation of the
+        // partitions that do exist.
+
+        commit(tablePath, fileIO, partitionManager, false, null).truncateTable();
+
+        Reported reported = capture(partitionManager);
+        assertThat(reported.replaceStatistics).isTrue();
+        assertThat(reported.specs)
+                .containsExactlyInAnyOrder(spec("2025", "10"), spec("2025", "11"));
+        assertThat(reported.statistics)
+                .allSatisfy(
+                        statistics -> {
+                            assertThat(statistics.recordCount()).isZero();
+                            assertThat(statistics.fileCount()).isZero();
+                        });
+    }
+
+    @Test
+    void testTruncatingAPrefixReportsThePartitionsUnderneathIt() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
+        Map<String, String> prefix = Collections.singletonMap("year", "2025");
+        when(partitionManager.listPartitions(prefix, null))
+                .thenReturn(
+                        Arrays.asList(
+                                partition(spec("2025", "10")), partition(spec("2025", "11"))));
+        writeDataFile(fileIO, tablePath, "year=2025/month=10", "data.csv", 4096);
+        writeDataFile(fileIO, tablePath, "year=2025/month=11", "data.csv", 2048);
+        writeDataFile(fileIO, tablePath, "year=2024/month=12", "data.csv", 1024);
+        // Under the prefix but not registered: a directory still waiting for MSCK REPAIR TABLE is
+        // not a partition of the table, so truncating neither empties nor registers it.
+        writeDataFile(fileIO, tablePath, "year=2025/month=12", "data.csv", 512);
+
+        commit(tablePath, fileIO, partitionManager, false, null)
+                .truncatePartitions(Collections.singletonList(prefix));
+
+        Reported reported = capture(partitionManager);
+        // The prefix names no partition of its own; the partitions it empties are the registered
+        // ones underneath it.
+        assertThat(reported.specs)
+                .containsExactlyInAnyOrder(spec("2025", "10"), spec("2025", "11"));
+        assertThat(reported.replaceStatistics).isTrue();
+        assertThat(reported.statistics)
+                .allSatisfy(statistics -> assertThat(statistics.recordCount()).isZero());
+        assertThat(fileIO.exists(new Path(tablePath, "year=2025/month=12/data.csv"))).isTrue();
+    }
+
+    @Test
+    void testTruncatingTheTableReportsEveryRegisteredPartition() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
+        registered(partitionManager, spec("2025", "10"), spec("2025", "11"));
+        writeDataFile(fileIO, tablePath, "year=2025/month=10", "data.csv", 4096);
+        writeDataFile(fileIO, tablePath, "year=2025/month=11", "data.csv", 2048);
+        // Not registered, so not part of the table and not reported on.
+        writeDataFile(fileIO, tablePath, "year=2025/month=12", "data.csv", 512);
+
+        commit(tablePath, fileIO, partitionManager, false, null).truncateTable();
+
+        Reported reported = capture(partitionManager);
+        assertThat(reported.replaceStatistics).isTrue();
+        assertThat(reported.specs)
+                .containsExactlyInAnyOrder(spec("2025", "10"), spec("2025", "11"));
+        assertThat(reported.statistics)
+                .allSatisfy(statistics -> assertThat(statistics.fileCount()).isZero());
+        assertThat(fileIO.exists(new Path(tablePath, "year=2025/month=12/data.csv"))).isTrue();
+    }
+
+    @Test
+    void testAFailedTruncationReportsThePartitionsItAlreadyEmptied() throws Exception {
+        Path tablePath = new Path(tempDir.toUri());
+        LocalFileIO fileIO = new UndeletableFileIO(new Path(tablePath, "year=2025/month=11"));
+        FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
+        registered(partitionManager, spec("2025", "10"), spec("2025", "11"));
+        writeDataFile(fileIO, tablePath, "year=2025/month=10", "data.csv", 4096);
+        writeDataFile(fileIO, tablePath, "year=2025/month=11", "data.csv", 2048);
+
+        assertThatThrownBy(
+                        () ->
+                                commit(tablePath, fileIO, partitionManager, false, null)
+                                        .truncateTable())
+                .hasMessageContaining("month=11")
+                .hasMessageContaining(TABLE.getFullName());
+
+        // A Format Table has no snapshot to make the whole truncation atomic, so what it emptied
+        // before the failure is reported anyway: the catalog must not keep describing files that
+        // are gone.
+        Reported reported = capture(partitionManager);
+        assertThat(reported.specs).containsExactly(spec("2025", "10"));
+        assertThat(reported.statistics.get(0).fileCount()).isZero();
+    }
+
+    @Test
+    void testATruncationFailsWhenADeletionIsRefused() throws Exception {
+        Path tablePath = new Path(tempDir.toUri());
+        LocalFileIO fileIO = new RefusingFileIO();
+        FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
+        registered(partitionManager, spec("2025", "10"));
+        writeDataFile(fileIO, tablePath, "year=2025/month=10", "data.csv", 4096);
+
+        assertThatThrownBy(
+                        () ->
+                                commit(tablePath, fileIO, partitionManager, false, null)
+                                        .truncateTable())
+                .hasMessageContaining("month=10")
+                .hasMessageContaining(TABLE.getFullName())
+                .hasStackTraceContaining("data.csv");
+
+        // A refused deletion is not a concurrent one: the rows are still readable, so reporting
+        // the partition as holding nothing would hide them.
+        verify(partitionManager, never())
+                .createPartitions(anyList(), anyBoolean(), anyList(), anyBoolean());
+        assertThat(fileIO.exists(new Path(tablePath, "year=2025/month=10/data.csv"))).isTrue();
+    }
+
+    @Test
+    void testAFailedReportDoesNotHideTheDeletionThatFailedFirst() throws Exception {
+        Path tablePath = new Path(tempDir.toUri());
+        LocalFileIO fileIO = new UndeletableFileIO(new Path(tablePath, "year=2025/month=11"));
+        FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
+        registered(partitionManager, spec("2025", "10"), spec("2025", "11"));
+        doThrow(new RuntimeException("the catalog is unreachable"))
+                .when(partitionManager)
+                .createPartitions(anyList(), anyBoolean(), anyList(), anyBoolean());
+        writeDataFile(fileIO, tablePath, "year=2025/month=10", "data.csv", 4096);
+        writeDataFile(fileIO, tablePath, "year=2025/month=11", "data.csv", 2048);
+
+        assertThatThrownBy(
+                        () ->
+                                commit(tablePath, fileIO, partitionManager, false, null)
+                                        .truncateTable())
+                // The deletion that failed first is what explains the failure; the report that
+                // could not record the rest is attached to it.
+                .hasMessageContaining("month=11")
+                .satisfies(
+                        thrown ->
+                                assertThat(thrown.getSuppressed())
+                                        .anySatisfy(
+                                                suppressed ->
+                                                        assertThat(suppressed)
+                                                                .hasMessageContaining(
+                                                                        "unreachable")));
     }
 
     @Test
@@ -416,6 +636,36 @@ class FormatTableCommitStatisticsTest {
         }
     }
 
+    /** A partition the catalog holds, whose statistics the truncation is meant to replace. */
+    private static Partition partition(Map<String, String> spec) {
+        return new Partition(spec, 3, 4096, 1, 0, PartitionStatistics.UNKNOWN_TOTAL_BUCKETS, false);
+    }
+
+    /** Which partitions the catalog says the table has. */
+    @SafeVarargs
+    private static void registered(
+            FormatTablePartitionManager partitionManager, Map<String, String>... specs) {
+        List<Partition> partitions = new ArrayList<>();
+        for (Map<String, String> spec : specs) {
+            partitions.add(partition(spec));
+            when(partitionManager.listPartitions(spec, null))
+                    .thenReturn(Collections.singletonList(partition(spec)));
+        }
+        when(partitionManager.listPartitions(Collections.emptyMap(), null)).thenReturn(partitions);
+        when(partitionManager.listPartitionsByNames(anyList()))
+                .thenAnswer(
+                        invocation -> {
+                            List<Map<String, String>> asked = invocation.getArgument(0);
+                            List<Partition> found = new ArrayList<>();
+                            for (Partition partition : partitions) {
+                                if (asked.contains(partition.spec())) {
+                                    found.add(partition);
+                                }
+                            }
+                            return found;
+                        });
+    }
+
     private static Map<String, String> spec(String year, String month) {
         LinkedHashMap<String, String> spec = new LinkedHashMap<>();
         spec.put("year", year);
@@ -446,6 +696,37 @@ class FormatTableCommitStatisticsTest {
      * A {@link FileIO} that answers a listing with paths stripped of their scheme, the way a
      * delegating one does when it resolves the caller's scheme to the one it really uses.
      */
+    /** A file IO whose deletions all report failure, leaving the files in place. */
+    private static class RefusingFileIO extends LocalFileIO {
+
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public boolean delete(Path path, boolean recursive) {
+            return false;
+        }
+    }
+
+    /** A file IO that refuses to delete anything under one directory. */
+    private static class UndeletableFileIO extends LocalFileIO {
+
+        private static final long serialVersionUID = 1L;
+
+        private final String directory;
+
+        private UndeletableFileIO(Path directory) {
+            this.directory = directory.toString();
+        }
+
+        @Override
+        public boolean delete(Path path, boolean recursive) throws IOException {
+            if (path.toString().startsWith(directory)) {
+                throw new IOException("Refused to delete " + path);
+            }
+            return super.delete(path, recursive);
+        }
+    }
+
     private static class RescopingFileIO extends LocalFileIO {
 
         private static final long serialVersionUID = 1L;

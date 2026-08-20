@@ -30,6 +30,7 @@ import org.apache.paimon.types.DataTypes
 
 import org.apache.spark.SparkFunSuite
 import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.catalyst.analysis.{NoSuchPartitionException, NoSuchPartitionsException}
 import org.apache.spark.sql.catalyst.expressions.GenericInternalRow
 import org.apache.spark.unsafe.types.UTF8String
 
@@ -233,6 +234,7 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
       // partition stays registered; re-running ADD ... IF NOT EXISTS then creates the directory.
       assert(error eq failure)
       assert(gateway.partitions == Seq(Map("dt" -> "20260715", "hh" -> "10")))
+      assert(gateway.listCalls == 0)
     } finally {
       delegate.delete(tablePath, true)
     }
@@ -585,6 +587,7 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
     // call already created: resolving duplicates is the catalog's job, not Spark's.
     assert(gateway.createRequests == Seq((Seq(first, second), true), (Seq(second, third), true)))
     assert(gateway.lookupCalls == 0)
+    assert(gateway.listCalls == 0)
   }
 
   test("catalog-managed strict ADD asks the catalog to reject duplicates, without looking first") {
@@ -601,9 +604,10 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
     }
 
     assert(error.partition == existing)
-    // Rejecting the batch is the catalog's decision; Spark must not pre-empt it with a lookup,
-    // which is what would break the batch's atomicity.
+    // Rejecting the batch is the catalog's decision; Spark must not pre-empt it with a lookup
+    // or an enumeration, which is what would break the batch's atomicity.
     assert(gateway.lookupCalls == 0)
+    assert(gateway.listCalls == 0)
   }
 
   test("catalog-managed ADD preserves typed special partition values") {
@@ -623,6 +627,100 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
     assert(
       gateway.createRequests == Seq(
         (values.map(value => Map("dt" -> value)) :+ Map("dt" -> "__DEFAULT_PARTITION__"), true)))
+    assert(gateway.listCalls == 0)
+  }
+
+  test("catalog-managed TRUNCATE PARTITION empties the partition without unregistering it") {
+    val fileIO = LocalFileIO.create()
+    val tablePath = new Path(Files.createTempDirectory("catalog-partition-format-truncate").toUri)
+    val registered = Seq(partitionSpec(20260715, 10), partitionSpec(20260716, 11))
+    val gateway = new InMemoryPartitionManager(registered)
+    val table = formatTableWithCatalogManagedPartitions(fileIO, tablePath.toString, gateway)
+    try {
+      val truncated = new Path(tablePath, "dt=20260715/hh=10")
+      val kept = new Path(tablePath, "dt=20260716/hh=11")
+      val truncatedData = new Path(truncated, "data.csv")
+      val keptData = new Path(kept, "data.csv")
+      fileIO.writeFile(truncatedData, "1,20260715,10", false)
+      fileIO.writeFile(keptData, "2,20260716,11", false)
+
+      assert(new PaimonFormatTable(table).truncatePartition(partitionRow(20260715, 10)))
+
+      assert(!fileIO.exists(truncatedData))
+      // The partition survives being emptied: its directory stays and so does its registration,
+      // which is what makes TRUNCATE different from DROP PARTITION.
+      assert(fileIO.exists(truncated))
+      assert(gateway.partitions == registered)
+      assert(fileIO.exists(keptData))
+    } finally {
+      fileIO.delete(tablePath, true)
+    }
+  }
+
+  test("catalog-managed TRUNCATE PARTITION refuses a partition the catalog does not know") {
+    val fileIO = LocalFileIO.create()
+    val tablePath =
+      new Path(Files.createTempDirectory("catalog-partition-format-truncate-unknown").toUri)
+    val gateway = new InMemoryPartitionManager
+    val table = formatTableWithCatalogManagedPartitions(fileIO, tablePath.toString, gateway)
+    try {
+      val awaitingRepair = new Path(tablePath, "dt=20260715/hh=10")
+      val data = new Path(awaitingRepair, "data.csv")
+      fileIO.writeFile(data, "1,20260715,10", false)
+
+      intercept[NoSuchPartitionException] {
+        new PaimonFormatTable(table).truncatePartition(partitionRow(20260715, 10))
+      }
+      intercept[NoSuchPartitionsException] {
+        new PaimonFormatTable(table).truncatePartitions(Array(partitionRow(20260715, 10)))
+      }
+
+      // Data that MSCK REPAIR TABLE has yet to register is not this table's to empty.
+      assert(fileIO.exists(data))
+    } finally {
+      fileIO.delete(tablePath, true)
+    }
+  }
+
+  test("catalog-managed TRUNCATE TABLE empties the registered partitions and nothing else") {
+    val fileIO = LocalFileIO.create()
+    val tablePath =
+      new Path(Files.createTempDirectory("catalog-partition-format-truncate-table").toUri)
+    val registered = Seq(partitionSpec(20260715, 10))
+    val gateway = new InMemoryPartitionManager(registered)
+    val table = formatTableWithCatalogManagedPartitions(fileIO, tablePath.toString, gateway)
+    try {
+      val registeredData = new Path(new Path(tablePath, "dt=20260715/hh=10"), "data.csv")
+      val awaitingRepairData = new Path(new Path(tablePath, "dt=20260716/hh=11"), "data.csv")
+      fileIO.writeFile(registeredData, "1,20260715,10", false)
+      fileIO.writeFile(awaitingRepairData, "2,20260716,11", false)
+
+      assert(new PaimonFormatTable(table).truncateTable())
+
+      assert(!fileIO.exists(registeredData))
+      // The catalog says which partitions this table has, and the table reads only those. A
+      // directory MSCK REPAIR TABLE has yet to register is not the table's to empty.
+      assert(fileIO.exists(awaitingRepairData))
+      assert(gateway.partitions == registered)
+    } finally {
+      fileIO.delete(tablePath, true)
+    }
+  }
+
+  test("catalog-managed TRUNCATE PARTITION rejects a partition value that would escape the table") {
+    val gateway = new InMemoryPartitionManager(Seq(Map("dt" -> "..")))
+    val sparkTable =
+      new PaimonFormatTable(
+        stringFormatTableWithCatalogManagedPartitions(gateway, onlyValueInPath = true))
+
+    val error = intercept[IllegalArgumentException] {
+      sparkTable.truncatePartition(new GenericInternalRow(Array[Any](UTF8String.fromString(".."))))
+    }
+
+    // The value is rejected while the directory is resolved, before the catalog is asked whether
+    // the partition exists and so before anything is deleted.
+    assert(error.getMessage.contains(".."))
+    assert(gateway.lookupCalls == 0)
   }
 
   private def emptyGateway: FormatTablePartitionManager =
@@ -651,6 +749,7 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
     private val storedPartitions = mutable.LinkedHashSet(initialPartitions: _*)
     private var requests = Seq.empty[(Seq[Map[String, String]], Boolean)]
     var lookupCalls = 0
+    var listCalls = 0
 
     def createRequests: Seq[(Seq[Map[String, String]], Boolean)] = synchronized(requests)
 
@@ -683,7 +782,12 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
       }
 
     override def listPartitions(prefix: JMap[String, String], filter: Predicate): JList[Partition] =
-      throw new AssertionError("ADD must not enumerate catalog or filesystem partitions")
+      synchronized {
+        listCalls += 1
+        val required = prefix.asScala.toSet
+        registeredPartitions(
+          storedPartitions.filter(spec => required.subsetOf(spec.toSet)).toSeq: _*)
+      }
   }
 
   private class TestPartitionAlreadyExistsException(val partition: Map[String, String])

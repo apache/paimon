@@ -25,11 +25,13 @@ import org.apache.paimon.spark.{BaseTable, FormatTableScanBuilder}
 import org.apache.paimon.spark.write.{BaseV2WriteBuilder, PaimonWriteRequirement}
 import org.apache.paimon.table.FormatTable
 import org.apache.paimon.table.format.FormatTablePartitionManager
+import org.apache.paimon.table.sink.BatchTableCommit
 import org.apache.paimon.types.RowType
 import org.apache.paimon.utils.PartitionPathUtils
 
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.connector.catalog.{SupportsRead, SupportsWrite, TableCapability, TableCatalog}
+import org.apache.spark.sql.catalyst.analysis.{NoSuchPartitionException, NoSuchPartitionsException}
+import org.apache.spark.sql.connector.catalog.{SupportsRead, SupportsWrite, TableCapability, TableCatalog, TruncatableTable}
 import org.apache.spark.sql.connector.catalog.TableCapability.{BATCH_READ, BATCH_WRITE, OVERWRITE_BY_FILTER, OVERWRITE_DYNAMIC}
 import org.apache.spark.sql.connector.distributions.Distribution
 import org.apache.spark.sql.connector.expressions.SortOrder
@@ -49,7 +51,8 @@ import scala.collection.mutable.{ArrayBuffer, HashSet}
 case class PaimonFormatTable(table: FormatTable)
   extends BaseTable
   with SupportsRead
-  with SupportsWrite {
+  with SupportsWrite
+  with TruncatableTable {
 
   // A Format Table uses catalog-managed partitions exactly when the catalog gave it a partition
   // manager; tables using filesystem partition discovery return null and rely on the directory
@@ -90,6 +93,90 @@ case class PaimonFormatTable(table: FormatTable)
 
   override def newWriteBuilder(info: LogicalWriteInfo): WriteBuilder = {
     PaimonFormatTableWriterBuilder(table, info.schema)
+  }
+
+  /**
+   * Removes the data of the whole table - of its registered partitions, when the catalog manages
+   * them. The partition directories stay, and so do their catalog registrations: emptying a table
+   * does not redefine which partitions it has (SPARK-34418).
+   */
+  override def truncateTable(): Boolean = {
+    withCommit(_.truncateTable())
+    true
+  }
+
+  override def truncatePartitions(idents: Array[InternalRow]): Boolean = {
+    truncateFormatTablePartitions(
+      idents,
+      missing => new NoSuchPartitionsException(name(), missing.toSeq, partitionSchema))
+  }
+
+  override def truncatePartition(ident: InternalRow): Boolean = {
+    truncateFormatTablePartitions(
+      Array(ident),
+      missing => new NoSuchPartitionException(name(), missing.head, partitionSchema))
+  }
+
+  /**
+   * Removes the data of the given partitions, keeping the partitions themselves (see
+   * [[truncateTable]]). Spark resolves a partial spec to the partitions it covers before calling
+   * either entry point, so every spec arriving here is complete.
+   *
+   * A partition the table does not have cannot be truncated, and each entry point reports that the
+   * way Spark expects it to. What the table has is answered by the catalog for catalog-managed
+   * partitions and by the directory for filesystem partition discovery - each kind is asked the
+   * same source it reads its partitions from, so data merely awaiting registration is never emptied
+   * behind MSCK REPAIR TABLE's back.
+   *
+   * The partitions are truncated one after another. A Format Table has no snapshot to make that
+   * atomic, so a failure part-way leaves the partitions handled before it empty - as a failing
+   * `INSERT OVERWRITE` of several partitions does.
+   */
+  private def truncateFormatTablePartitions(
+      idents: Array[InternalRow],
+      noSuchPartitions: Array[InternalRow] => Throwable): Boolean = {
+    if (idents.isEmpty) {
+      return true
+    }
+    val partitionKeys = table.partitionKeys().asScala.toSeq
+    val specs = idents.map {
+      ident =>
+        require(
+          ident.numFields == partitionKeys.size,
+          s"Truncating a partition of Format Table ${table.fullName()} needs a complete spec " +
+            s"for partition keys ${partitionKeys.mkString("[", ", ", "]")}, " +
+            s"but got ${ident.numFields} values."
+        )
+        toPaimonPartition(ident, partitionKeys)
+    }
+    val onlyValueInPath =
+      CoreOptions.fromMap(table.options()).formatTablePartitionOnlyValueInPath()
+    // Resolve (and path-safety validate) every directory before deleting anything, as ADD and DROP
+    // PARTITION do.
+    val partitionPaths =
+      specs.map(spec => resolvePartitionPathWithinTable(orderedSpec(spec), onlyValueInPath))
+    val exists = if (hasCatalogManagedPartitions) {
+      val partitionNames = partitionKeys.toArray
+      formatTablePartitionsRegistered(idents.map(_ => partitionNames), idents)
+    } else {
+      val fileIO = table.fileIO()
+      partitionPaths.map(fileIO.exists)
+    }
+    val missing = idents.zip(exists).collect { case (ident, false) => ident }
+    if (missing.nonEmpty) {
+      throw noSuchPartitions(missing)
+    }
+    withCommit(_.truncatePartitions(specs.toSeq.asJava))
+    true
+  }
+
+  private def withCommit(operation: BatchTableCommit => Unit): Unit = {
+    val commit = table.newBatchWriteBuilder().newCommit()
+    try {
+      operation(commit)
+    } finally {
+      commit.close()
+    }
   }
 
   /**
@@ -233,8 +320,9 @@ case class PaimonFormatTable(table: FormatTable)
   /**
    * Build the partition directory for a spec and verify it stays strictly under the table location.
    * Value-only path components are validated (including rejecting '.'/'..'), and the normalized
-   * path is checked against the table location so neither DROP (recursive delete) nor ADD (mkdirs)
-   * can escape the table directory via crafted or corrupt partition values.
+   * path is checked against the table location so no DROP (recursive delete), ADD (mkdirs) or
+   * TRUNCATE (delete of the files below it) can escape the table directory via crafted or corrupt
+   * partition values.
    */
   private def resolvePartitionPathWithinTable(
       orderedSpec: util.LinkedHashMap[String, String],

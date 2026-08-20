@@ -448,6 +448,39 @@ class CatalogManagedPartitionMsckRepairTest extends PaimonSparkTestWithRestCatal
     }
   }
 
+  test("a measuring MSCK keeps the exact zero a TRUNCATE reported") {
+    val tableName = "msck_statistics_after_truncate"
+    val partition = "20260722"
+
+    withTable(tableName) {
+      createFormatTableWithCatalogManagedPartitions(tableName)
+      writeCsvPartition(tableName, partition, 22, "to-be-truncated")
+
+      val collectStatistics =
+        s"spark.paimon.${SparkConnectorOptions.FORMAT_TABLE_REPAIR_COLLECT_STATISTICS.key()}"
+      withSQLConf(collectStatistics -> "true") {
+        executeCatalogManagedRepair(s"MSCK REPAIR TABLE paimon.$dbName0.$tableName")
+      }
+      assert(statisticsOf(tableName, partition).fileCount() == 1L)
+
+      sql(s"TRUNCATE TABLE paimon.$dbName0.$tableName PARTITION (dt = '$partition')")
+      val truncated = statisticsOf(tableName, partition)
+      assert(truncated.fileCount() == 0L, truncated.toString)
+      assert(truncated.recordCount() == 0L, truncated.toString)
+
+      withSQLConf(collectStatistics -> "true") {
+        executeCatalogManagedRepair(s"MSCK REPAIR TABLE paimon.$dbName0.$tableName")
+      }
+
+      // Measuring an empty partition confirms it is empty; it does not un-measure it.
+      val remeasured = statisticsOf(tableName, partition)
+      assert(remeasured.fileCount() == 0L, remeasured.toString)
+      assert(remeasured.fileSizeInBytes() == 0L, remeasured.toString)
+      assert(remeasured.recordCount() == 0L, remeasured.toString)
+      assertPartitionState(tableName, Set(partition))
+    }
+  }
+
   private def statisticsOf(tableName: String, partition: String): Partition =
     paimonCatalog
       .listPartitions(tableIdentifier(tableName))
