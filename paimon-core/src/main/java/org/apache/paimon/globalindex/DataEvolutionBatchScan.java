@@ -70,6 +70,8 @@ public class DataEvolutionBatchScan implements DataTableScan {
     private Predicate filter;
     private TopN topN;
     private Integer pushDownLimit;
+    // set when part of the filter reaches the reader only, so limit/TopN must not prune ahead of it
+    private boolean rowIdFilterDeferred;
     private RowRangeIndex pushedRowRangeIndex;
     private GlobalIndexResult globalIndexResult;
 
@@ -90,12 +92,28 @@ public class DataEvolutionBatchScan implements DataTableScan {
             return this;
         }
 
-        Optional<List<Range>> rowRanges = predicate.visit(new RowIdPredicateVisitor());
-        if (rowRanges.isPresent()) {
-            withRowRanges(rowRanges.get());
+        // a mask on _ROW_ID makes the predicate's ids the masked ones, so they must not become
+        // a raw row range; the rules are not known yet, so skip the extraction altogether
+        if (!queryAuthEnabled()) {
+            Optional<List<Range>> rowRanges = predicate.visit(new RowIdPredicateVisitor());
+            if (rowRanges.isPresent()) {
+                withRowRanges(rowRanges.get());
+            }
         }
         this.filter = predicate;
 
+        if (queryAuthEnabled()) {
+            // the wrapped scan defers the filter but strips only masked columns; row ids must
+            // go here, since data-evolution statistics carry logical columns only
+            Predicate residual = rowIdSafeResidualFilter(predicate);
+            // what is left out reaches the reader only, so the wrapped scan never learns a
+            // filter exists and would let limit/TopN prune ahead of it
+            rowIdFilterDeferred = containsRowId(predicate);
+            if (residual != null) {
+                batchScan.withFilter(residual);
+            }
+            return this;
+        }
         batchScan.snapshotReader().withFilter(predicate, rowIdSafeResidualFilter(predicate));
         return this;
     }
@@ -168,8 +186,8 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
     @Override
     public InnerTableScan withLimit(int limit) {
+        // forwarded in plan(), once withFilter has said whether a row-id part was deferred
         this.pushDownLimit = limit;
-        batchScan.withLimit(limit);
         return this;
     }
 
@@ -279,7 +297,11 @@ public class DataEvolutionBatchScan implements DataTableScan {
             }
         }
 
-        if (!globalIndexTopNCandidatesFound && topN != null) {
+        if (pushDownLimit != null && !rowIdFilterDeferred) {
+            batchScan.withLimit(pushDownLimit);
+        }
+
+        if (!globalIndexTopNCandidatesFound && topN != null && !rowIdFilterDeferred) {
             batchScan.withTopN(topN);
         }
 
@@ -291,7 +313,19 @@ public class DataEvolutionBatchScan implements DataTableScan {
         return wrapToIndexSplits(splits, rowRangeIndex, scoreGetter);
     }
 
+    private boolean queryAuthEnabled() {
+        // the table is absent in tests that exercise withFilter in isolation
+        CoreOptions options = table == null ? null : table.coreOptions();
+        return options != null && options.queryAuthEnabled();
+    }
+
     private Optional<GlobalIndexResult> evalGlobalIndex() {
+        // the index ranks raw values, which a mask may invalidate; fall back to a full scan.
+        // Checked before the supplied result too: withGlobalIndexResult is public, so a caller
+        // can hand in one that was computed off the raw values.
+        if (queryAuthEnabled()) {
+            return Optional.empty();
+        }
         if (this.globalIndexResult != null) {
             return Optional.of(globalIndexResult);
         }

@@ -72,6 +72,7 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
 
     @Override
     public FullTextScan newFullTextScan() {
+        rejectUnderQueryAuth();
         DataField textColumn = textColumn();
         Optional<PrimaryKeyIndexDefinition> definition = primaryKeyFullTextDefinition(textColumn);
         return definition.isPresent()
@@ -86,6 +87,7 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
 
     @Override
     public FullTextRead newFullTextRead() {
+        rejectUnderQueryAuth();
         checkArgument(limit > 0, "Limit must be positive, set via withLimit()");
         DataField textColumn = textColumn();
         Optional<PrimaryKeyIndexDefinition> definition = primaryKeyFullTextDefinition(textColumn);
@@ -127,5 +129,13 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
     FullTextSearchBuilderImpl withSnapshot(Snapshot snapshot) {
         this.pinnedSnapshot = snapshot;
         return this;
+    }
+
+    private void rejectUnderQueryAuth() {
+        if (table.coreOptions().queryAuthEnabled()) {
+            throw new UnsupportedOperationException(
+                    "Search is not supported on a query-auth table: the index ranks raw values, "
+                            + "which a column mask invalidates.");
+        }
     }
 }
