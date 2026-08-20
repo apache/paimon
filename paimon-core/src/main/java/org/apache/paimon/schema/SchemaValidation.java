@@ -1342,8 +1342,12 @@ public class SchemaValidation {
                                 "Sequence field: '%s' can not be found in table schema.",
                                 field);
 
+                        String aggFuncName =
+                                options.mergeEngine() == MergeEngine.PARTIAL_UPDATE
+                                        ? options.partialUpdateFieldAggFunc(field)
+                                        : options.fieldAggFunc(field);
                         checkArgument(
-                                options.fieldAggFunc(field) == null,
+                                aggFuncName == null,
                                 "Should not define aggregation on sequence field: '%s'.",
                                 field);
 
@@ -1433,7 +1437,10 @@ public class SchemaValidation {
 
         for (int i = 0; i < schema.logicalRowType().getFieldNames().size(); i++) {
             String fieldName = schema.logicalRowType().getFieldNames().get(i);
-            String aggFuncName = options.fieldAggFunc(fieldName);
+            String aggFuncName =
+                    options.mergeEngine() == MergeEngine.PARTIAL_UPDATE
+                            ? options.partialUpdateFieldAggFunc(fieldName)
+                            : options.fieldAggFunc(fieldName);
             aggFuncName = aggFuncName == null ? options.fieldsDefaultFunc() : aggFuncName;
             if (aggFuncName != null) {
                 FactoryUtil.discoverFactory(
@@ -1628,7 +1635,7 @@ public class SchemaValidation {
                 if (!fieldsProtectedBySequenceGroup.contains(field)) {
                     continue;
                 }
-                String aggregateFunction = options.fieldAggFunc(field);
+                String aggregateFunction = options.partialUpdateFieldAggFunc(field);
                 if (aggregateFunction == null) {
                     aggregateFunction = options.fieldsDefaultFunc();
                 }

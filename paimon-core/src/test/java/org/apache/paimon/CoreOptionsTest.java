@@ -117,6 +117,36 @@ public class CoreOptionsTest {
     }
 
     @Test
+    public void testSequenceGroupAggregateFunction() {
+        Options conf = new Options();
+        conf.set(CoreOptions.MERGE_ENGINE, CoreOptions.MergeEngine.PARTIAL_UPDATE);
+        conf.setString("fields.seq1,seq2.sequence-group", "a,b");
+        conf.setString("fields.seq1,seq2.sequence-group.aggregate-function", "sum");
+        conf.setString("fields.b.aggregate-function", "max");
+
+        CoreOptions options = new CoreOptions(conf);
+        assertThat(options.fieldAggFunc("a")).isNull();
+        assertThat(options.partialUpdateFieldAggFunc("a")).isEqualTo("sum");
+        assertThat(options.partialUpdateFieldAggFunc("b")).isEqualTo("max");
+        assertThat(options.partialUpdateFieldAggFunc("c")).isNull();
+        assertThat(options.partialUpdateFieldAggFunc("seq1")).isNull();
+        assertThat(options.partialUpdateFieldAggFunc("seq2")).isNull();
+    }
+
+    @Test
+    public void testSequenceGroupAggregateFunctionWithoutGroup() {
+        Options conf = new Options();
+        conf.set(CoreOptions.MERGE_ENGINE, CoreOptions.MergeEngine.PARTIAL_UPDATE);
+        conf.setString("fields.seq.sequence-group.aggregate-function", "sum");
+
+        CoreOptions options = new CoreOptions(conf);
+        assertThatThrownBy(() -> options.partialUpdateFieldAggFunc("a"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("fields.seq.sequence-group.aggregate-function")
+                .hasMessageContaining("fields.seq.sequence-group");
+    }
+
+    @Test
     public void testIgnoreGlobalIndexColumnUpdateAction() {
         Options conf = new Options();
         conf.setString(CoreOptions.GLOBAL_INDEX_COLUMN_UPDATE_ACTION.key(), "IGNORE");

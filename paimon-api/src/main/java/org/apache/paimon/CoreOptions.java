@@ -3207,6 +3207,43 @@ public class CoreOptions implements Serializable {
                         .noDefaultValue());
     }
 
+    public String partialUpdateFieldAggFunc(String fieldName) {
+        String fieldAggFunc = fieldAggFunc(fieldName);
+        String optionPrefix = FIELDS_PREFIX + ".";
+        String optionSuffix = ".sequence-group." + AGG_FUNCTION;
+        String aggFunctionSuffix = "." + AGG_FUNCTION;
+        String matchedOption = null;
+        String sequenceGroupAggFunc = null;
+        for (Map.Entry<String, String> entry : options.toMap().entrySet()) {
+            String optionKey = entry.getKey();
+            if (!optionKey.startsWith(optionPrefix) || !optionKey.endsWith(optionSuffix)) {
+                continue;
+            }
+
+            String sequenceGroupOption =
+                    optionKey.substring(0, optionKey.length() - aggFunctionSuffix.length());
+            String protectedFields = options.get(sequenceGroupOption);
+            checkArgument(
+                    protectedFields != null,
+                    "Sequence group aggregate function option '%s' requires sequence group option '%s'.",
+                    optionKey,
+                    sequenceGroupOption);
+            if (!Arrays.asList(protectedFields.split(FIELDS_SEPARATOR)).contains(fieldName)) {
+                continue;
+            }
+
+            checkArgument(
+                    matchedOption == null,
+                    "Field %s is defined repeatedly by multiple sequence group aggregate functions: %s and %s.",
+                    fieldName,
+                    matchedOption,
+                    optionKey);
+            matchedOption = optionKey;
+            sequenceGroupAggFunc = entry.getValue();
+        }
+        return fieldAggFunc == null ? sequenceGroupAggFunc : fieldAggFunc;
+    }
+
     public boolean fieldAggIgnoreRetract(String fieldName) {
         return options.get(
                 key(FIELDS_PREFIX + "." + fieldName + "." + IGNORE_RETRACT)

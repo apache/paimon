@@ -569,6 +569,42 @@ public class SchemaManagerTest {
     }
 
     @Test
+    public void testRenameColumnInSequenceGroupAggregateFunction() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.MERGE_ENGINE.key(), "partial-update");
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put("fields.seq.sequence-group", "a,b");
+        options.put("fields.seq.sequence-group.aggregate-function", "sum");
+        Schema schema =
+                new Schema(
+                        Arrays.asList(
+                                new DataField(0, "f0", DataTypes.INT()),
+                                new DataField(1, "a", DataTypes.INT()),
+                                new DataField(2, "b", DataTypes.INT()),
+                                new DataField(3, "seq", DataTypes.INT())),
+                        Collections.emptyList(),
+                        Collections.singletonList("f0"),
+                        options,
+                        "");
+
+        retryArtificialException(() -> manager.createTable(schema));
+        retryArtificialException(
+                () ->
+                        manager.commitChanges(
+                                Arrays.asList(
+                                        SchemaChange.renameColumn("a", "renamed_a"),
+                                        SchemaChange.renameColumn("seq", "renamed_seq"))));
+
+        Optional<TableSchema> latest = retryArtificialException(() -> manager.latest());
+        assertThat(latest).isPresent();
+        assertThat(latest.get().options())
+                .doesNotContainKeys(
+                        "fields.seq.sequence-group", "fields.seq.sequence-group.aggregate-function")
+                .containsEntry("fields.renamed_seq.sequence-group", "renamed_a,b")
+                .containsEntry("fields.renamed_seq.sequence-group.aggregate-function", "sum");
+    }
+
+    @Test
     public void testConcurrentCommit() throws Exception {
         retryArtificialException(
                 () ->

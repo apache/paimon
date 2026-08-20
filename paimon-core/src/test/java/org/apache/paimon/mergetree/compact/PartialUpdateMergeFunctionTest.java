@@ -652,6 +652,33 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
+    public void testSequenceGroupAggregateFunction() {
+        Options options = new Options();
+        options.set("fields.f1.sequence-group", "f2,f3,f4");
+        options.set("fields.f1.sequence-group.aggregate-function", "sum");
+        options.set("fields.f4.aggregate-function", "max");
+        RowType rowType =
+                RowType.of(
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT());
+        MergeFunction<KeyValue> func =
+                PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"))
+                        .create();
+
+        func.reset();
+        add(func, 1, 1, 1, 2, 3);
+        add(func, 1, 2, 3, 4, 2);
+        validate(func, 1, 2, 4, 6, 3);
+
+        // Older records still participate in aggregation while the sequence value is not advanced.
+        add(func, 1, 1, 5, 6, 7);
+        validate(func, 1, 2, 9, 12, 7);
+    }
+
+    @Test
     public void testPartialUpdateWithAggregation() {
         Options options = new Options();
         options.set("fields.f1.sequence-group", "f2,f3,f4");

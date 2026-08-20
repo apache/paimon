@@ -898,20 +898,24 @@ public class SchemaManager implements Serializable {
             }
         }
 
-        // case 3: both option key and option value may contain field names
+        // case 3: compound field-scoped options whose keys, and sometimes values, contain field
+        // names
+        String sequenceGroupAggFunction = SEQUENCE_GROUP + "." + AGG_FUNCTION;
         for (String key : options.keySet()) {
             if (key.startsWith(FIELDS_PREFIX)) {
                 String matchedSuffix = null;
-                if (key.endsWith(SEQUENCE_GROUP)) {
+                boolean renameValueFields = false;
+                if (key.endsWith("." + sequenceGroupAggFunction)) {
+                    matchedSuffix = sequenceGroupAggFunction;
+                } else if (key.endsWith(SEQUENCE_GROUP)) {
                     matchedSuffix = SEQUENCE_GROUP;
+                    renameValueFields = true;
                 } else if (key.endsWith(NESTED_KEY)) {
                     matchedSuffix = NESTED_KEY;
+                    renameValueFields = true;
                 }
 
                 if (matchedSuffix != null) {
-                    // Both the key and value may contain field names. If we were to perform a
-                    // "match then replace" operation, the conditions would become quite complex.
-                    // Instead, we directly make a replacement across all instances
                     String keyFieldsStr =
                             key.substring(
                                     FIELDS_PREFIX.length() + 1,
@@ -920,17 +924,21 @@ public class SchemaManager implements Serializable {
                     List<String> newKeyFields =
                             applyNotNestedColumnRename(keyFields, renameMappings);
 
-                    String valueFieldsStr = newOptions.remove(key);
-                    List<String> valueFields = Arrays.asList(valueFieldsStr.split(","));
-                    List<String> newValueFields =
-                            applyNotNestedColumnRename(valueFields, renameMappings);
+                    String optionValue = newOptions.remove(key);
+                    if (renameValueFields) {
+                        List<String> valueFields = Arrays.asList(optionValue.split(","));
+                        optionValue =
+                                String.join(
+                                        ",",
+                                        applyNotNestedColumnRename(valueFields, renameMappings));
+                    }
                     newOptions.put(
                             FIELDS_PREFIX
                                     + "."
                                     + String.join(",", newKeyFields)
                                     + "."
                                     + matchedSuffix,
-                            String.join(",", newValueFields));
+                            optionValue);
                 }
             }
         }

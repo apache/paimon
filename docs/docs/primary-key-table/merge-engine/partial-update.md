@@ -205,6 +205,31 @@ SELECT *
 FROM t; -- output 1, 2, 1, 2, 3
 ```
 
+You can assign the same aggregation function to all fields protected by a sequence group by adding
+`.aggregate-function` to the sequence-group option key:
+
+```sql
+CREATE TABLE t
+(
+    k   INT,
+    seq INT,
+    a   INT,
+    b   INT,
+    c   INT,
+    PRIMARY KEY (k) NOT ENFORCED
+) WITH (
+      'merge-engine' = 'partial-update',
+      'fields.seq.sequence-group' = 'a,b,c',
+      'fields.seq.sequence-group.aggregate-function' = 'sum'
+      );
+```
+
+For a sequence group with multiple ordering fields, use the corresponding key, for example
+`fields.seq1,seq2.sequence-group.aggregate-function`. The aggregation function resolution order is
+a single-field option, then the sequence-group option, and finally
+`fields.default-aggregate-function`. A single-field option can therefore override the function for
+one protected field. Sequence ordering fields and primary-key fields are not aggregated.
+
 You can also configure an aggregation function for a `sequence-group` within multiple sorted fields.
 
 See example:

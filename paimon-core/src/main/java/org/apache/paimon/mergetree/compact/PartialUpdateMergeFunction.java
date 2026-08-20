@@ -711,7 +711,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             return FieldPrimaryKeyAggFactory.NAME;
         }
 
-        String aggFuncName = options.fieldAggFunc(fieldName);
+        String aggFuncName = options.partialUpdateFieldAggFunc(fieldName);
         if (aggFuncName == null) {
             aggFuncName = options.fieldsDefaultFunc();
         }
