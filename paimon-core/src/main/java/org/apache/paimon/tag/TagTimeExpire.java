@@ -21,6 +21,7 @@ package org.apache.paimon.tag;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.table.sink.TagCallback;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
@@ -44,6 +45,7 @@ public class TagTimeExpire {
     private final TagManager tagManager;
     private final TagDeletion tagDeletion;
     private final List<TagCallback> callbacks;
+    private final BranchManager branchManager;
 
     private LocalDateTime olderThanTime;
 
@@ -51,11 +53,13 @@ public class TagTimeExpire {
             SnapshotManager snapshotManager,
             TagManager tagManager,
             TagDeletion tagDeletion,
-            List<TagCallback> callbacks) {
+            List<TagCallback> callbacks,
+            BranchManager branchManager) {
         this.snapshotManager = snapshotManager;
         this.tagManager = tagManager;
         this.tagDeletion = tagDeletion;
         this.callbacks = callbacks;
+        this.branchManager = branchManager;
     }
 
     public List<String> expire() {
@@ -88,6 +92,15 @@ public class TagTimeExpire {
                             && LocalDateTime.now().isAfter(createTime.plus(timeRetained));
             boolean isOlderThan = olderThanTime != null && olderThanTime.isAfter(createTime);
             if (isReachTimeRetained || isOlderThan) {
+                List<String> referencingBranches = branchManager.branchesCreatedFromTag(tagName);
+                if (!referencingBranches.isEmpty()) {
+                    LOG.warn(
+                            "Skip expiring tag {} because it is still referenced by branches: {}. "
+                                    + "Delete these branches to allow the tag to expire.",
+                            tagName,
+                            referencingBranches);
+                    continue;
+                }
                 LOG.info(
                         "Delete tag {}, because its existence time has reached its timeRetained of {} or"
                                 + " its createTime {} is olderThan olderThanTime {}.",
@@ -111,7 +124,9 @@ public class TagTimeExpire {
             SnapshotManager snapshotManager,
             TagManager tagManager,
             TagDeletion tagDeletion,
-            List<TagCallback> callbacks) {
-        return new TagTimeExpire(snapshotManager, tagManager, tagDeletion, callbacks);
+            List<TagCallback> callbacks,
+            BranchManager branchManager) {
+        return new TagTimeExpire(
+                snapshotManager, tagManager, tagDeletion, callbacks, branchManager);
     }
 }

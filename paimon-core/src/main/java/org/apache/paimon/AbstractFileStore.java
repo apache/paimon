@@ -570,7 +570,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 snapshotManager(),
                 newTagManager(),
                 newTagDeletion(),
-                createTagCallbacks(table));
+                createTagCallbacks(table),
+                table.branchManager());
     }
 
     @Override
