@@ -51,7 +51,14 @@ public class TrimTransform extends StringTransform {
             return null;
         }
         String sourceString = inputs.get(0).toString();
-        String charsToTrim = inputs.size() == 1 ? " " : inputs.get(1).toString();
+        String charsToTrim = " ";
+        if (inputs.size() == 2) {
+            if (inputs.get(1) == null) {
+                // StringUtils.ltrim/rtrim treat a null charsToTrim as a null result
+                return null;
+            }
+            charsToTrim = inputs.get(1).toString();
+        }
         switch (trimFlag) {
             case BOTH:
                 return BinaryString.fromString(StringUtils.trim(sourceString, charsToTrim));
