@@ -21,6 +21,7 @@ package org.apache.paimon.operation;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.BucketFilter;
 import org.apache.paimon.manifest.FileEntry;
@@ -30,6 +31,7 @@ import org.apache.paimon.manifest.ManifestEntrySerializer;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.manifest.ProjectedManifestEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.operation.metrics.ScanMetrics;
 import org.apache.paimon.operation.metrics.ScanStats;
@@ -40,6 +42,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BiFilter;
+import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ListUtils;
 import org.apache.paimon.utils.Pair;
@@ -54,6 +57,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
@@ -74,6 +78,8 @@ import static org.apache.paimon.utils.ThreadPoolUtils.randomlyOnlyExecute;
 public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     private static final Logger LOG = LoggerFactory.getLogger(AbstractFileStoreScan.class);
+    private static final ProjectedManifestEntry.Projection PARTITION_ENTRY_PROJECTION =
+            createPartitionEntryProjection();
 
     private final ManifestsReader manifestsReader;
     private final SnapshotManager snapshotManager;
@@ -367,14 +373,69 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         List<ManifestFileMeta> manifests = readManifests().filteredManifests;
         Map<BinaryRow, PartitionEntry> partitions = new ConcurrentHashMap<>();
         Consumer<ManifestFileMeta> processor =
-                m ->
+                manifest -> {
+                    if (canUseProjectedPartitionScan(manifest)) {
+                        readProjectedPartitionEntries(manifest, partitions);
+                    } else {
                         PartitionEntry.merge(
-                                readManifest(m, PartitionEntry::fromManifestEntry, null, null),
+                                readManifest(
+                                        manifest, PartitionEntry::fromManifestEntry, null, null),
                                 partitions);
+                    }
+                };
         randomlyOnlyExecute(getExecutorService(parallelism), processor, manifests);
         return partitions.values().stream()
                 .filter(p -> p.fileCount() > 0)
                 .collect(Collectors.toList());
+    }
+
+    private boolean canUseProjectedPartitionScan(ManifestFileMeta manifest) {
+        // Projected scans bypass the manifest cache, so preserve the cached read path for files
+        // which are eligible for caching.
+        return !manifestFileFactory.isCacheable(manifest.fileSize())
+                && manifestEntryFilter == null
+                && !requiresFullManifestEntryForPartitionScan();
+    }
+
+    private void readProjectedPartitionEntries(
+            ManifestFileMeta manifest, Map<BinaryRow, PartitionEntry> partitions) {
+        long count = 0;
+        try (CloseableIterator<ProjectedManifestEntry> entries =
+                manifestFileFactory
+                        .create()
+                        .scan(
+                                manifest.fileName(),
+                                PARTITION_ENTRY_PROJECTION,
+                                manifestsReader.partitionFilter(),
+                                createBucketFilter())) {
+            while (entries.hasNext()) {
+                ProjectedManifestEntry entry = entries.next();
+                if (!filterProjectedPartitionEntry(entry)) {
+                    continue;
+                }
+
+                PartitionEntry partitionEntry = PartitionEntry.fromManifestEntry(entry);
+                partitions.compute(
+                        partitionEntry.partition(),
+                        (partition, previous) ->
+                                previous == null ? partitionEntry : previous.merge(partitionEntry));
+                count++;
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to scan manifest " + manifest.fileName(), e);
+        }
+        LOG.info("Read {} projected manifest entries from {}", count, manifest.fileName());
+    }
+
+    private boolean filterProjectedPartitionEntry(ProjectedManifestEntry entry) {
+        int level = entry.level();
+        if (specifiedLevel != null && level != specifiedLevel) {
+            return false;
+        }
+        if (levelFilter != null && !levelFilter.test(level)) {
+            return false;
+        }
+        return fileNameFilter == null || fileNameFilter.test(entry.fileName());
     }
 
     @Override
@@ -476,6 +537,15 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     /** Note: Keep this thread-safe. */
     protected abstract boolean filterByStats(ManifestEntry entry);
 
+    /**
+     * Returns whether partition scanning needs a complete manifest entry for subclass-specific
+     * filtering. Subclasses should opt in to projected scanning only when all active filters can be
+     * evaluated from {@link #PARTITION_ENTRY_PROJECTION}.
+     */
+    protected boolean requiresFullManifestEntryForPartitionScan() {
+        return true;
+    }
+
     protected boolean postFilterManifestEntriesEnabled() {
         return false;
     }
@@ -576,6 +646,32 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
             return fileNameFilter == null || fileNameFilter.test((fileNameGetter.apply(row)));
         };
+    }
+
+    /**
+     * Keeps the fields required to aggregate {@link PartitionEntry}: kind controls the sign of
+     * added/deleted files, partition is the grouping key, total buckets is part of the result, and
+     * file size, row count and creation time form its statistics. File name and level are also kept
+     * to preserve the corresponding structural filters.
+     */
+    private static ProjectedManifestEntry.Projection createPartitionEntryProjection() {
+        RowType manifestType = ManifestEntry.MANIFEST_ROW_TYPE;
+        return ProjectedManifestEntry.Projection.create(
+                new RowType(
+                        false,
+                        Arrays.asList(
+                                manifestType.getField(ManifestEntry.KIND),
+                                manifestType.getField(ManifestEntry.PARTITION),
+                                manifestType.getField(ManifestEntry.TOTAL_BUCKETS),
+                                manifestType
+                                        .getField(ManifestEntry.FILE)
+                                        .newType(
+                                                DataFileMeta.SCHEMA.project(
+                                                        DataFileMeta.FILE_NAME,
+                                                        DataFileMeta.FILE_SIZE,
+                                                        DataFileMeta.ROW_COUNT,
+                                                        DataFileMeta.LEVEL,
+                                                        DataFileMeta.CREATION_TIME)))));
     }
 
     // ------------------------------------------------------------------------

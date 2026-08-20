@@ -563,6 +563,8 @@ class CachingCatalogTest extends CatalogTestBase {
             // test copy too
             table = catalog.getTable(tableIdent).copy(Collections.singletonMap("a", "b"));
             ReadBuilder readBuilder = table.newReadBuilder();
+            // Partition discovery should keep working from cache after the manifest is deleted.
+            assertThat(readBuilder.newScan().listPartitionEntries()).isNotEmpty();
             TableScan scan = readBuilder.newScan();
             TableRead read = readBuilder.newRead();
             read.createReader(scan.plan()).forEachRemaining(r -> {});
