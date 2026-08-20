@@ -814,14 +814,15 @@ public class BlobFormatWriterTest {
     }
 
     @Test
-    public void testInterruptedSourceReadIsNotConvertedToNull() throws Exception {
+    public void testInterruptedSourceReadRestoresClearedInterruptAndIsNotConvertedToNull()
+            throws Exception {
         Thread.interrupted();
         try {
             TestingBlobFetchMetricReporter metrics = new TestingBlobFetchMetricReporter();
             UriReader interruptedReader =
                     ignored ->
                             new ReadFailingInputStream(
-                                    new InterruptedIOException("source read interrupted"), true);
+                                    new InterruptedIOException("source read interrupted"), false);
             try (PositionOutputStream out = new InMemoryPositionOutputStream()) {
                 BlobFormatWriter writer =
                         new BlobFormatWriter(
@@ -848,6 +849,77 @@ public class BlobFormatWriterTest {
         } finally {
             Thread.interrupted();
         }
+    }
+
+    @Test
+    public void testInterruptedSourceReadPreservesInterruptWhenSourceCloseFails() throws Exception {
+        Thread.interrupted();
+        try {
+            TestingBlobFetchMetricReporter metrics = new TestingBlobFetchMetricReporter();
+            UriReader interruptedReader =
+                    ignored ->
+                            new ReadFailingInputStream(
+                                    new InterruptedIOException("source read interrupted"),
+                                    false,
+                                    true);
+            try (PositionOutputStream out = new InMemoryPositionOutputStream()) {
+                BlobFormatWriter writer =
+                        new BlobFormatWriter(
+                                out, null, RowType.of(DataTypes.BLOB()), false, true, metrics, 2);
+
+                assertThatThrownBy(
+                                () ->
+                                        writer.addElement(
+                                                GenericRow.of(
+                                                        new BlobRef(
+                                                                interruptedReader,
+                                                                new BlobDescriptor(
+                                                                        "mem://interrupted-close-failing",
+                                                                        0,
+                                                                        -1)))))
+                        .isInstanceOf(IOException.class)
+                        .hasMessageContaining("source close failed")
+                        .satisfies(
+                                failure ->
+                                        assertThat(failure.getSuppressed())
+                                                .extracting(Throwable::getMessage)
+                                                .contains("source read interrupted"));
+                assertThat(Thread.currentThread().isInterrupted()).isTrue();
+                assertThat(out.getPos()).isZero();
+            }
+
+            assertThat(metrics.fetchFailureNullWritten).isEqualTo(0);
+            assertThat(metrics.failure).isEqualTo(0);
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    public void testLargeInlineBlobBypassesStaging(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        byte[] payload = sequentialBytes(BlobStagingFactory.DEFAULT_MEMORY_THRESHOLD + 1);
+        java.nio.file.Path outputFile = tempDir.resolve("blob.out");
+
+        try (PositionOutputStream out =
+                new LocalFileIO.LocalPositionOutputStream(outputFile.toFile())) {
+            BlobFormatWriter writer =
+                    new BlobFormatWriter(
+                            out,
+                            null,
+                            RowType.of(DataTypes.BLOB()),
+                            false,
+                            true,
+                            BlobFetchMetricReporter.NOOP,
+                            BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE,
+                            () -> {
+                                throw new AssertionError("Inline BlobData must not be staged.");
+                            });
+            writer.addElement(GenericRow.of(Blob.fromData(payload)));
+            writer.close();
+        }
+
+        assertThat(readBackNullableBlobs(outputFile, 1)).containsExactly(payload);
     }
 
     @Test
@@ -1011,7 +1083,7 @@ public class BlobFormatWriterTest {
                             3,
                             BlobStagingFactory.spillable(4, stagingDirectory.toFile()));
 
-            writer.addElement(GenericRow.of(Blob.fromData(success)));
+            writer.addElement(GenericRow.of(blobRefFromBytes("mem://successful-spill", success)));
             assertDirectoryEmpty(stagingDirectory);
 
             writer.addElement(
@@ -1050,7 +1122,10 @@ public class BlobFormatWriterTest {
             assertThatThrownBy(
                             () ->
                                     writer.addElement(
-                                            GenericRow.of(Blob.fromData("payload".getBytes()))))
+                                            GenericRow.of(
+                                                    blobRefFromBytes(
+                                                            "mem://staging-write-failure",
+                                                            "payload".getBytes()))))
                     .isInstanceOf(IOException.class)
                     .hasMessageContaining("staging write failed");
             assertThat(out.getPos()).isZero();
@@ -1168,7 +1243,10 @@ public class BlobFormatWriterTest {
             assertThatThrownBy(
                             () ->
                                     writer.addElement(
-                                            GenericRow.of(Blob.fromData("payload".getBytes()))))
+                                            GenericRow.of(
+                                                    blobRefFromBytes(
+                                                            "mem://staging-cleanup-failure",
+                                                            "payload".getBytes()))))
                     .isInstanceOf(IOException.class)
                     .hasMessageContaining("staging close failed");
             assertThat(out.getPos()).isGreaterThan(0);
@@ -1177,6 +1255,11 @@ public class BlobFormatWriterTest {
         assertThat(metrics.fetchFailureNullWritten).isEqualTo(0);
         assertThat(metrics.failure).isEqualTo(0);
         assertThat(metrics.success).isEqualTo(0);
+    }
+
+    private static BlobRef blobRefFromBytes(String uri, byte[] bytes) {
+        return new BlobRef(
+                ignored -> new CountingSeekableInputStream(bytes), new BlobDescriptor(uri, 0, -1));
     }
 
     private static BlobFormatWriter newWriter(java.nio.file.Path outputFile, RowType rowType)
@@ -1473,10 +1556,17 @@ public class BlobFormatWriterTest {
 
         private final IOException failure;
         private final boolean interruptThread;
+        private final boolean failOnClose;
 
         private ReadFailingInputStream(IOException failure, boolean interruptThread) {
+            this(failure, interruptThread, false);
+        }
+
+        private ReadFailingInputStream(
+                IOException failure, boolean interruptThread, boolean failOnClose) {
             this.failure = failure;
             this.interruptThread = interruptThread;
+            this.failOnClose = failOnClose;
         }
 
         @Override
@@ -1505,7 +1595,11 @@ public class BlobFormatWriterTest {
         }
 
         @Override
-        public void close() {}
+        public void close() throws IOException {
+            if (failOnClose) {
+                throw new IOException("source close failed");
+            }
+        }
     }
 
     /** A final sink whose position remains observable while the test thread is interrupted. */

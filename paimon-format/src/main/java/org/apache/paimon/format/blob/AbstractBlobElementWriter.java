@@ -20,6 +20,7 @@ package org.apache.paimon.format.blob;
 
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobConsumer;
+import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.BlobFetchMetricReporter;
 import org.apache.paimon.data.BlobRef;
@@ -153,7 +154,7 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
                 if (source == null) {
                     return null;
                 }
-                return new BlobCopySource(blob, source, length, true, null);
+                return new BlobCopySource(blob, source, length, true, true, null);
             }
         }
 
@@ -161,7 +162,8 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
         if (source == null) {
             return null;
         }
-        return new BlobCopySource(blob, source, -1L, false, null);
+        return new BlobCopySource(
+                blob, source, -1L, false, blob.getClass() != BlobData.class, null);
     }
 
     @Nullable
@@ -195,7 +197,10 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
      */
     protected final @Nullable BlobCopySource prepareBlobForWrite(BlobCopySource source)
             throws IOException {
-        if (!writeNullOnFetchFailure) {
+        // Exact BlobData owns an already-materialized byte array. It cannot fail while fetching,
+        // so staging it would only add another memory copy and potentially spill a large inline
+        // value to disk. Keep subclasses on the staging path because they may override the stream.
+        if (!writeNullOnFetchFailure || !source.fetchFailurePossible()) {
             return source;
         }
 
@@ -254,7 +259,12 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
 
         try {
             return new BlobCopySource(
-                    source.blob(), staging.openInputStream(), staging.length(), false, staging);
+                    source.blob(),
+                    staging.openInputStream(),
+                    staging.length(),
+                    false,
+                    false,
+                    staging);
         } catch (RuntimeException | Error | IOException e) {
             closeOrSuppress(staging, e);
             throw e;
@@ -275,6 +285,9 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
             try {
                 bytesRead = source.stream().read(copyBuffer, 0, toRead);
             } catch (IOException | RuntimeException e) {
+                // Preserve cancellation immediately. Source or staging cleanup may fail before
+                // handleSourceReadFailure sees the original read failure.
+                restoreInterruptIfCancellation(e);
                 return e;
             }
 
@@ -332,7 +345,7 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
                 copyUntilEof(source.stream());
             }
         } catch (IOException | RuntimeException e) {
-            if (!source.staged()) {
+            if (source.fetchFailurePossible()) {
                 blobFetchMetricReporter.recordFetchFailure(e);
                 if (source.reused()) {
                     // Source is at an unknown position now; drop it so the next blob reopens.
@@ -427,16 +440,24 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
             return true;
         }
 
+        restoreInterruptIfCancellation(failure);
+        return Thread.currentThread().isInterrupted();
+    }
+
+    private static void restoreInterruptIfCancellation(Throwable failure) {
         Throwable current = failure;
         while (current != null) {
             if (current instanceof InterruptedException
-                    || current instanceof ClosedByInterruptException) {
+                    || current instanceof ClosedByInterruptException
+                    // A plain InterruptedIOException is the standard signal used when an
+                    // interruptible wait consumes the thread's interrupt flag before throwing.
+                    // Match the exact class so timeout subclasses remain fetch failures.
+                    || current.getClass() == InterruptedIOException.class) {
                 Thread.currentThread().interrupt();
-                return true;
+                return;
             }
             current = current.getCause();
         }
-        return false;
     }
 
     private void checkNotInterrupted() throws InterruptedIOException {
@@ -530,6 +551,7 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
         private final InputStream stream;
         private final long length;
         private final boolean reused;
+        private final boolean fetchFailurePossible;
         private final @Nullable BlobStaging staging;
 
         private BlobCopySource(
@@ -537,11 +559,13 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
                 InputStream stream,
                 long length,
                 boolean reused,
+                boolean fetchFailurePossible,
                 @Nullable BlobStaging staging) {
             this.blob = blob;
             this.stream = stream;
             this.length = length;
             this.reused = reused;
+            this.fetchFailurePossible = fetchFailurePossible;
             this.staging = staging;
         }
 
@@ -553,8 +577,8 @@ abstract class AbstractBlobElementWriter implements BlobElementSerializer.Writer
             return reused;
         }
 
-        private boolean staged() {
-            return staging != null;
+        private boolean fetchFailurePossible() {
+            return fetchFailurePossible;
         }
 
         private InputStream stream() {

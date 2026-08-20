@@ -44,6 +44,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -143,6 +144,46 @@ public class DedicatedFormatRollingFileWriter
             FileSource fileSource,
             boolean statsDenseStore,
             @Nullable BlobFileContext context) {
+        this(
+                fileIO,
+                schemaId,
+                fileFormat,
+                vectorFileFormat,
+                targetFileSize,
+                blobTargetFileSize,
+                vectorTargetFileSize,
+                targetFileRowNum,
+                writeSchema,
+                pathFactory,
+                seqNumCounterSupplier,
+                fileCompression,
+                statsCollectorFactories,
+                fileIndexOptions,
+                fileSource,
+                statsDenseStore,
+                context,
+                null);
+    }
+
+    DedicatedFormatRollingFileWriter(
+            FileIO fileIO,
+            long schemaId,
+            FileFormat fileFormat,
+            @Nullable FileFormat vectorFileFormat,
+            long targetFileSize,
+            long blobTargetFileSize,
+            long vectorTargetFileSize,
+            long targetFileRowNum,
+            RowType writeSchema,
+            DataFilePathFactory pathFactory,
+            Supplier<LongCounter> seqNumCounterSupplier,
+            String fileCompression,
+            StatsCollectorFactories statsCollectorFactories,
+            FileIndexOptions fileIndexOptions,
+            FileSource fileSource,
+            boolean statsDenseStore,
+            @Nullable BlobFileContext context,
+            @Nullable File blobStagingTempDirectory) {
         // Initialize basic fields
         Preconditions.checkArgument(
                 targetFileRowNum > 0,
@@ -210,7 +251,8 @@ public class DedicatedFormatRollingFileWriter
                                     context.writeNullOnMissingFile(),
                                     context.writeNullOnFetchFailure(),
                                     context.blobFetchMetricReporter(),
-                                    context.copyBufferSize());
+                                    context.copyBufferSize(),
+                                    blobStagingTempDirectory);
         } else {
             this.blobWriterFactory = null;
         }

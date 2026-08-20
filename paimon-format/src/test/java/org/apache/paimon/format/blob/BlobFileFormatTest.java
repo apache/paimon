@@ -22,6 +22,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobArrayPlaceholder;
 import org.apache.paimon.data.BlobData;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.BlobMapPlaceholder;
 import org.apache.paimon.data.BlobPlaceholder;
 import org.apache.paimon.data.BlobRef;
@@ -94,6 +95,37 @@ public class BlobFileFormatTest {
     @Test
     public void testReadBlobInlineBytes() throws IOException {
         innerTest(false);
+    }
+
+    @Test
+    public void testUsesConfiguredBlobStagingTempDirectory() throws IOException {
+        java.nio.file.Path stagingDirectory = Files.createDirectory(tempPath.resolve("staging"));
+        byte[] payload =
+                new byte
+                        [BlobStagingFactory.DEFAULT_MEMORY_THRESHOLD
+                                + 3 * BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE];
+        Arrays.fill(payload, (byte) 7);
+        SpillObservingInputStream input = new SpillObservingInputStream(payload, stagingDirectory);
+
+        BlobFileFormat format =
+                new BlobFileFormat(false, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
+        format.setWriteNullOnFetchFailure(true);
+        format.setBlobStagingTempDirectory(stagingDirectory.toFile());
+        RowType rowType = RowType.of(DataTypes.BLOB());
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
+            FormatWriter writer = format.createWriterFactory(rowType).create(out, null);
+            writer.addElement(
+                    GenericRow.of(
+                            new BlobRef(
+                                    ignored -> input,
+                                    new BlobDescriptor("mem://configured-staging", 0, -1))));
+            writer.close();
+        }
+
+        assertThat(input.observedSpill()).isTrue();
+        try (java.util.stream.Stream<java.nio.file.Path> files = Files.list(stagingDirectory)) {
+            assertThat(files.findAny()).isEmpty();
+        }
     }
 
     @Test
@@ -1177,6 +1209,63 @@ public class BlobFileFormatTest {
             this.lastInputStream = new TrackingSeekableInputStream(super.newInputStream(path));
             return lastInputStream;
         }
+    }
+
+    private static class SpillObservingInputStream extends SeekableInputStream {
+
+        private final byte[] data;
+        private final java.nio.file.Path stagingDirectory;
+        private int position;
+        private boolean observedSpill;
+
+        private SpillObservingInputStream(byte[] data, java.nio.file.Path stagingDirectory) {
+            this.data = data;
+            this.stagingDirectory = stagingDirectory;
+        }
+
+        @Override
+        public void seek(long desired) {
+            position = Math.toIntExact(desired);
+        }
+
+        @Override
+        public long getPos() {
+            return position;
+        }
+
+        @Override
+        public int read() throws IOException {
+            observeSpill();
+            return position < data.length ? data[position++] & 0xff : -1;
+        }
+
+        @Override
+        public int read(byte[] bytes, int offset, int length) throws IOException {
+            observeSpill();
+            if (position >= data.length) {
+                return -1;
+            }
+            int read = Math.min(length, data.length - position);
+            System.arraycopy(data, position, bytes, offset, read);
+            position += read;
+            return read;
+        }
+
+        private void observeSpill() throws IOException {
+            if (observedSpill) {
+                return;
+            }
+            try (java.util.stream.Stream<java.nio.file.Path> files = Files.list(stagingDirectory)) {
+                observedSpill = files.findAny().isPresent();
+            }
+        }
+
+        private boolean observedSpill() {
+            return observedSpill;
+        }
+
+        @Override
+        public void close() {}
     }
 
     private static class TrackingSeekableInputStream extends SeekableInputStream {

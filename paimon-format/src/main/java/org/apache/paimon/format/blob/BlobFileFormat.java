@@ -41,6 +41,7 @@ import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
@@ -54,6 +55,7 @@ public class BlobFileFormat extends FileFormat {
     private final int copyBufferSize;
     private boolean writeNullOnMissingFile;
     private boolean writeNullOnFetchFailure;
+    @Nullable private File blobStagingTempDirectory;
     private BlobFetchMetricReporter blobFetchMetricReporter = BlobFetchMetricReporter.NOOP;
 
     @Nullable public BlobConsumer writeConsumer;
@@ -74,6 +76,10 @@ public class BlobFileFormat extends FileFormat {
 
     public void setWriteNullOnFetchFailure(boolean writeNullOnFetchFailure) {
         this.writeNullOnFetchFailure = writeNullOnFetchFailure;
+    }
+
+    public void setBlobStagingTempDirectory(@Nullable File blobStagingTempDirectory) {
+        this.blobStagingTempDirectory = blobStagingTempDirectory;
     }
 
     public void setWriteConsumer(@Nullable BlobConsumer writeConsumer) {
@@ -130,7 +136,9 @@ public class BlobFileFormat extends FileFormat {
                     writeNullOnMissingFile,
                     writeNullOnFetchFailure,
                     blobFetchMetricReporter,
-                    copyBufferSize);
+                    copyBufferSize,
+                    BlobStagingFactory.spillable(
+                            BlobStagingFactory.DEFAULT_MEMORY_THRESHOLD, blobStagingTempDirectory));
         }
     }
 

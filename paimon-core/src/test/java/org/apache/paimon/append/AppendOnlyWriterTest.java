@@ -26,6 +26,8 @@ import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.BlobData;
+import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalMap;
@@ -41,6 +43,7 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.format.SupportsFieldMetadata;
+import org.apache.paimon.fs.ByteArraySeekableStream;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
@@ -95,7 +98,9 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.apache.paimon.io.DataFileMeta.getMaxSequenceNumber;
 import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
@@ -706,6 +711,77 @@ public class AppendOnlyWriterTest {
                                 1));
     }
 
+    @Test
+    public void testBlobStagingUsesIoManagerTempDirectory() throws Exception {
+        java.nio.file.Path stagingDirectory =
+                Files.createDirectory(tempDir.resolve("blob-staging"));
+        byte[] payload = new byte[2 * 1024 * 1024];
+        AtomicBoolean sawSpillFile = new AtomicBoolean();
+        BlobRef blob =
+                new BlobRef(
+                        ignored ->
+                                new ByteArraySeekableStream(payload) {
+                                    @Override
+                                    public int read(byte[] bytes, int offset, int length)
+                                            throws IOException {
+                                        if (containsRegularFile(stagingDirectory)) {
+                                            sawSpillFile.set(true);
+                                        }
+                                        return super.read(bytes, offset, length);
+                                    }
+                                },
+                        new BlobDescriptor("mem://io-manager-staging", 0, -1));
+
+        RowType writeType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "id", DataTypes.INT()),
+                        DataTypes.FIELD(1, "payload", DataTypes.BLOB()));
+        Options rawOptions = new Options();
+        rawOptions.set(CoreOptions.BLOB_WRITE_NULL_ON_FETCH_FAILURE, true);
+        CoreOptions options = new CoreOptions(rawOptions);
+
+        try (IOManager ioManager = IOManager.create(stagingDirectory.toString())) {
+            AppendOnlyWriter writer =
+                    new AppendOnlyWriter(
+                            LocalFileIO.create(),
+                            ioManager,
+                            SCHEMA_ID,
+                            FileFormat.fromIdentifier(AVRO, rawOptions),
+                            null,
+                            1024 * 1024L,
+                            1024 * 1024L,
+                            1024 * 1024L,
+                            Long.MAX_VALUE,
+                            writeType,
+                            null,
+                            -1L,
+                            new NoopCompactManager(),
+                            null,
+                            false,
+                            pathFactory,
+                            null,
+                            false,
+                            false,
+                            CoreOptions.FILE_COMPRESSION.defaultValue(),
+                            CompressOptions.defaultOptions(),
+                            new StatsCollectorFactories(options),
+                            MemorySize.MAX_VALUE,
+                            new FileIndexOptions(),
+                            true,
+                            false,
+                            options.dataEvolutionEnabled(),
+                            null,
+                            BlobFileContext.create(writeType, options));
+
+            writer.write(GenericRow.of(1, blob));
+            writer.prepareCommit(true);
+            writer.close();
+        }
+
+        assertThat(sawSpillFile).isTrue();
+        assertThat(containsRegularFile(stagingDirectory)).isFalse();
+    }
+
     @ParameterizedTest(name = "{0}")
     @ValueSource(strings = {CoreOptions.FILE_FORMAT_PARQUET, CoreOptions.FILE_FORMAT_ORC})
     public void testSharedShreddingMapAllowsForceBufferSpill(String fileFormat) throws Exception {
@@ -1010,6 +1086,12 @@ public class AppendOnlyWriterTest {
 
     private DataFilePathFactory createPathFactory() {
         return createPathFactory(CoreOptions.FILE_FORMAT_AVRO);
+    }
+
+    private static boolean containsRegularFile(java.nio.file.Path directory) throws IOException {
+        try (Stream<java.nio.file.Path> files = Files.list(directory)) {
+            return files.anyMatch(Files::isRegularFile);
+        }
     }
 
     private DataFilePathFactory createPathFactory(String fileFormat) {
