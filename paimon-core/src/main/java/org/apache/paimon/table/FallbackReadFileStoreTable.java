@@ -193,6 +193,15 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         // then convert millisecond to other branch snapshot id
         String scanSnapshotIdOptionKey = CoreOptions.SCAN_SNAPSHOT_ID.key();
         String scanSnapshotId = options.get(scanSnapshotIdOptionKey);
+        String scanVersionOptionKey = CoreOptions.SCAN_VERSION.key();
+        String scanVersion = options.get(scanVersionOptionKey);
+        if (scanSnapshotId == null
+                && scanVersion != null
+                && scanVersion.chars().allMatch(Character::isDigit)
+                && !wrapped.tagManager().tagExists(scanVersion)) {
+            scanSnapshotId = scanVersion;
+            result.remove(scanVersionOptionKey);
+        }
         if (scanSnapshotId != null) {
             long id = Long.parseLong(scanSnapshotId);
             long millis = wrapped.snapshotManager().snapshot(id).timeMillis();

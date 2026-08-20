@@ -166,6 +166,30 @@ public class FallbackReadFileStoreTableTest {
         assertThat(result).containsExactlyInAnyOrder(Pair.of(1, 1), Pair.of(2, 2));
     }
 
+    @Test
+    public void testScanVersionForFallbackBranch() throws Exception {
+        FileStoreTable mainTable = createTable();
+        writeDataIntoTable(mainTable, 0, rowData(1, 10));
+        mainTable.createTag("base");
+
+        writeDataIntoTable(mainTable, 1, rowData(2, 20));
+        long mainSnapshotTime = mainTable.snapshotManager().snapshot(2).timeMillis();
+        mainTable.createBranch("bc", "base");
+        while (System.currentTimeMillis() <= mainSnapshotTime) {
+            Thread.yield();
+        }
+        FileStoreTable branchTable = mainTable.switchToBranch("bc");
+        writeDataIntoTable(branchTable, 2, rowData(3, 30));
+
+        FallbackReadFileStoreTable table =
+                new FallbackReadFileStoreTable(mainTable, branchTable, true);
+        FileStoreTable versioned =
+                table.copy(Collections.singletonMap(CoreOptions.SCAN_VERSION.key(), "2"));
+
+        assertThat(readAndCollect((FallbackReadFileStoreTable) versioned, scan -> {}))
+                .containsExactlyInAnyOrder(Pair.of(1, 10), Pair.of(2, 20));
+    }
+
     private DataTableScan queryAuthScan(DataTableScan delegate, TableQueryAuthResult authResult) {
         DataTableScan scan =
                 Mockito.mock(DataTableScan.class, AdditionalAnswers.delegatesTo(delegate));
