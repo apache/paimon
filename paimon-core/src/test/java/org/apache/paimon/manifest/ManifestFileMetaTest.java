@@ -2737,6 +2737,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         null,
                         null,
                         null,
+                        null,
                         null));
     }
 
@@ -2804,7 +2805,8 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         null,
                         null,
                         firstRowId,
-                        Collections.singletonList("f0")));
+                        Collections.singletonList("f0"),
+                        null));
     }
 
     private List<String> readFileNames(
@@ -2887,7 +2889,8 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
                         null,
                         externalPath,
                         firstRowId,
-                        Collections.singletonList("f0")));
+                        Collections.singletonList("f0"),
+                        null));
     }
 
     private List<ManifestEntry> readEntries(List<ManifestFileMeta> manifestMetas) {

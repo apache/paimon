@@ -21,11 +21,13 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
+import org.apache.paimon.io.DataFileMetaWriteColsLegacySerializer;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.utils.FunctionWithIOException;
+import org.apache.paimon.utils.ObjectSerializer;
 
 import javax.annotation.Nullable;
 
@@ -45,7 +47,7 @@ public class IncrementalSplit implements Split {
 
     private static final long serialVersionUID = 1L;
 
-    private static final int VERSION = 1;
+    private static final int VERSION = 2;
 
     private long snapshotId;
     private BinaryRow partition;
@@ -239,7 +241,7 @@ public class IncrementalSplit implements Split {
 
     public static IncrementalSplit deserialize(DataInputView in) throws IOException {
         int version = in.readInt();
-        if (version != VERSION) {
+        if (version < 1 || version > VERSION) {
             throw new UnsupportedOperationException("Unsupported version: " + version);
         }
 
@@ -248,7 +250,10 @@ public class IncrementalSplit implements Split {
         int bucket = in.readInt();
         int totalBuckets = in.readInt();
 
-        DataFileMetaSerializer dataFileMetaSerializer = new DataFileMetaSerializer();
+        ObjectSerializer<DataFileMeta> dataFileMetaSerializer =
+                version == 1
+                        ? new DataFileMetaWriteColsLegacySerializer()
+                        : new DataFileMetaSerializer();
         FunctionWithIOException<DataInputView, DeletionFile> deletionFileSerializer =
                 DeletionFile::deserialize;
 
