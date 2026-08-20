@@ -430,8 +430,8 @@ class TableWriteTest(unittest.TestCase):
         snapshot = table.snapshot_manager().get_latest_snapshot()
         snapshot_json: str = JSON.to_json(snapshot)
         self.assertEqual(True, snapshot_json.__contains__("baseManifestList"))
-        self.assertEqual(build_full_version(), snapshot.full_version)
-        self.assertEqual(True, snapshot_json.__contains__("fullVersion"))
+        self.assertEqual(build_full_version(), snapshot.writer_version)
+        self.assertEqual(True, snapshot_json.__contains__("writerVersion"))
         self.assertEqual(False, snapshot_json.__contains__("nextRowId"))
 
     def test_write_row_append_only_partitioned_table(self):

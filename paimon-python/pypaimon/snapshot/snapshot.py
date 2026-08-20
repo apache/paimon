@@ -57,4 +57,4 @@ class Snapshot:
             "json_missing_default": None,
         },
     )
-    full_version: Optional[str] = optional_json_field("fullVersion", "non_null")
+    writer_version: Optional[str] = optional_json_field("writerVersion", "non_null")

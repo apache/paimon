@@ -762,7 +762,7 @@ class FileStoreCommit:
                 total_record_count=total_record_count,
                 delta_record_count=delta_record_count,
                 commit_user=self.commit_user,
-                full_version=build_full_version(),
+                writer_version=build_full_version(),
                 commit_identifier=commit_identifier,
                 commit_kind=commit_kind,
                 time_millis=int(time.time() * 1000),

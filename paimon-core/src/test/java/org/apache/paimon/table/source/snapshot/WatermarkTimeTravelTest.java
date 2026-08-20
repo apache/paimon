@@ -262,7 +262,7 @@ public class WatermarkTimeTravelTest extends ScannerTestBase {
                         s.changelogManifestListSize(),
                         s.indexManifest(),
                         s.commitUser(),
-                        s.fullVersion(),
+                        s.writerVersion(),
                         s.commitIdentifier(),
                         s.commitKind(),
                         s.timeMillis(),

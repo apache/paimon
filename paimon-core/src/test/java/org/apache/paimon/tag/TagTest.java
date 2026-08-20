@@ -69,7 +69,7 @@ public class TagTest {
                         + "  \"baseManifestList\" : null,\n"
                         + "  \"deltaManifestList\" : null,\n"
                         + "  \"commitUser\" : null,\n"
-                        + "  \"fullVersion\" : \"java-2.1-SNAPSHOT-commit-id\",\n"
+                        + "  \"writerVersion\" : \"java-2.1-SNAPSHOT-commit-id\",\n"
                         + "  \"commitIdentifier\" : 0,\n"
                         + "  \"commitKind\" : \"APPEND\",\n"
                         + "  \"timeMillis\" : 1000,\n"
@@ -96,7 +96,7 @@ public class TagTest {
                         + "  \"baseManifestList\" : null,\n"
                         + "  \"deltaManifestList\" : null,\n"
                         + "  \"commitUser\" : null,\n"
-                        + "  \"fullVersion\" : \"java-2.1-SNAPSHOT-commit-id\",\n"
+                        + "  \"writerVersion\" : \"java-2.1-SNAPSHOT-commit-id\",\n"
                         + "  \"commitIdentifier\" : 0,\n"
                         + "  \"commitKind\" : \"APPEND\",\n"
                         + "  \"timeMillis\" : 1000,\n"
@@ -109,6 +109,6 @@ public class TagTest {
 
         Tag newTag = Tag.fromJson(tagJson);
         assertEquals(tag, newTag);
-        assertEquals("java-2.1-SNAPSHOT-commit-id", newTag.trimToSnapshot().fullVersion());
+        assertEquals("java-2.1-SNAPSHOT-commit-id", newTag.trimToSnapshot().writerVersion());
     }
 }

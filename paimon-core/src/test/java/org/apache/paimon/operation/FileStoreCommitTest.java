@@ -1435,7 +1435,7 @@ public class FileStoreCommitTest {
     }
 
     @Test
-    public void testSnapshotFullVersion() throws Exception {
+    public void testSnapshotWriterVersion() throws Exception {
         TestFileStore store = createStore(false);
 
         try (FileStoreCommit fileStoreCommit = store.newCommit()) {
@@ -1443,7 +1443,7 @@ public class FileStoreCommitTest {
             fileStoreCommit.commit(new ManifestCommittable(0), false);
         }
 
-        assertThat(checkNotNull(store.snapshotManager().latestSnapshot()).fullVersion())
+        assertThat(checkNotNull(store.snapshotManager().latestSnapshot()).writerVersion())
                 .isEqualTo(CoreFullVersion.get());
     }
 
@@ -2205,7 +2205,7 @@ public class FileStoreCommitTest {
                             null,
                             previousSnapshot == null ? null : previousSnapshot.indexManifest(),
                             "conflict-user",
-                            snapshot.fullVersion(),
+                            snapshot.writerVersion(),
                             Long.MAX_VALUE,
                             Snapshot.CommitKind.ANALYZE,
                             System.currentTimeMillis(),
