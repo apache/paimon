@@ -102,6 +102,32 @@ class TrimTransformTest {
     }
 
     @Test
+    public void testTrimsWholeCharactersNotUtf16CodeUnits() {
+        List<Object> inputs = new ArrayList<>();
+        inputs.add(new FieldRef(0, "f0", DataTypes.STRING()));
+        inputs.add(BinaryString.fromString("\uD83D\uDE00"));
+        GenericRow row = GenericRow.of(BinaryString.fromString("\uD83D\uDE01x\uD83D\uDE01"));
+
+        // the two emoji share a high surrogate, so a char-at-a-time trim would eat half of one
+        assertThat(new TrimTransform(inputs, TrimTransform.Flag.BOTH).transform(row))
+                .isEqualTo(BinaryString.fromString("\uD83D\uDE01x\uD83D\uDE01"));
+
+        inputs.set(1, BinaryString.fromString("\uD83D\uDE01"));
+        assertThat(new TrimTransform(inputs, TrimTransform.Flag.BOTH).transform(row))
+                .isEqualTo(BinaryString.fromString("x"));
+
+        // U+10200 and U+1F600 share the low surrogate DE00, so a char-at-a-time rtrim
+        // eats the trailing character from the end instead of leaving it alone
+        List<Object> trailing = new ArrayList<>();
+        trailing.add(new FieldRef(0, "f0", DataTypes.STRING()));
+        trailing.add(BinaryString.fromString("\uD83D\uDE00"));
+        assertThat(
+                        new TrimTransform(trailing, TrimTransform.Flag.TRAILING)
+                                .transform(GenericRow.of(BinaryString.fromString("x\uD800\uDE00"))))
+                .isEqualTo(BinaryString.fromString("x\uD800\uDE00"));
+    }
+
+    @Test
     public void testNullCharsToTrimYieldsNull() {
         List<Object> inputs = new ArrayList<>();
         inputs.add(new FieldRef(0, "f0", DataTypes.STRING()));

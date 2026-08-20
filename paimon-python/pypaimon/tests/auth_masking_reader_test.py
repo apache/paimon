@@ -29,6 +29,9 @@ from pypaimon.read.reader.auth_masking_reader import (
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 
 
+_NO_LENGTH = object()
+
+
 class _FakeField:
     def __init__(self, name):
         self.name = name
@@ -248,6 +251,438 @@ class TestAuthMaskingReaderTransforms(unittest.TestCase):
         self.assertEqual(
             result.column("a").to_pylist(), ["x-1", "y|2", "z:3"]
         )
+
+
+class TestSubstringTransform(unittest.TestCase):
+
+    def setUp(self):
+        self.batch = pa.RecordBatch.from_pydict({
+            "ssn": ["123-45-6789", "987-65-4321", None],
+            "begin": [8, 1, 1],
+            "length": [4, 3, 3],
+        })
+        self.fields = [_FakeField("ssn"), _FakeField("begin"), _FakeField("length")]
+
+    def _mask(self, transform, batch=None, fields=None):
+        reader = AuthMaskingReader(
+            _FakeBatchReader([batch if batch is not None else self.batch]),
+            {"ssn": json.dumps(transform)},
+            fields if fields is not None else self.fields,
+        )
+        return reader.read_arrow_batch().column("ssn").to_pylist()
+
+    @staticmethod
+    def _ssn_ref():
+        return {"index": 0, "name": "ssn", "type": "STRING"}
+
+    def test_begin_and_length(self):
+        self.assertEqual(
+            self._mask({"name": "SUBSTRING", "inputs": [self._ssn_ref(), 8, 4]}),
+            ["6789", "4321", None],
+        )
+
+    def test_begin_only_runs_to_end_of_string(self):
+        self.assertEqual(
+            self._mask({"name": "SUBSTRING", "inputs": [self._ssn_ref(), 8]}),
+            ["6789", "4321", None],
+        )
+
+    def test_begin_past_end_yields_empty_string_not_null(self):
+        self.assertEqual(
+            self._mask({"name": "SUBSTRING", "inputs": [self._ssn_ref(), 99, 4]}),
+            ["", "", None],
+        )
+
+    def test_length_longer_than_string_is_clamped(self):
+        self.assertEqual(
+            self._mask({"name": "SUBSTRING", "inputs": [self._ssn_ref(), 8, 100]}),
+            ["6789", "4321", None],
+        )
+
+    def test_positions_read_from_other_fields(self):
+        self.assertEqual(
+            self._mask({
+                "name": "SUBSTRING",
+                "inputs": [
+                    self._ssn_ref(),
+                    {"index": 1, "name": "begin", "type": "INT"},
+                    {"index": 2, "name": "length", "type": "INT"},
+                ],
+            }),
+            ["6789", "987", None],
+        )
+
+    def _mask_with_position_fields(self, begin, length=_NO_LENGTH, ssn="123-45-6789"):
+        cols = {"ssn": pa.array([ssn], type=pa.string()),
+                "begin": pa.array([begin], type=pa.int32())}
+        inputs = [self._ssn_ref(), {"index": 1, "name": "begin", "type": "INT"}]
+        if length is not _NO_LENGTH:
+            cols["length"] = pa.array([length], type=pa.int32())
+            inputs.append({"index": 2, "name": "length", "type": "INT"})
+        batch = pa.RecordBatch.from_arrays(list(cols.values()), names=list(cols))
+        reader = AuthMaskingReader(
+            _FakeBatchReader([batch]),
+            {"ssn": json.dumps({"name": "SUBSTRING", "inputs": inputs})},
+            [_FakeField(n) for n in cols],
+        )
+        return reader.read_arrow_batch().column("ssn").to_pylist()
+
+    def _mask_with_bigint_position(self, begin):
+        batch = pa.RecordBatch.from_arrays(
+            [pa.array(["abcdef"], type=pa.string()), pa.array([begin], type=pa.int64())],
+            names=["ssn", "begin"])
+        reader = AuthMaskingReader(
+            _FakeBatchReader([batch]),
+            {"ssn": json.dumps({"name": "SUBSTRING", "inputs": [
+                self._ssn_ref(), {"index": 1, "name": "begin", "type": "BIGINT"}]})},
+            [_FakeField("ssn"), _FakeField("begin")])
+        return reader.read_arrow_batch().column("ssn").to_pylist()
+
+    def test_wider_position_field_is_rejected_only_once_a_row_reads_it(self):
+        # Java checks a position for null before reading it, so a null propagates
+        # whatever the field type is; only a non-null one reaches the read
+        self.assertEqual(self._mask_with_bigint_position(None), [None])
+        with self.assertRaisesRegex(ValueError, "position field must be INT"):
+            self._mask_with_bigint_position(2)
+
+    def test_begin_past_end_yields_empty_string_for_field_positions(self):
+        self.assertEqual(self._mask_with_position_fields(99, 4), [""])
+
+    def test_non_positive_length_rejected_for_field_positions(self):
+        with self.assertRaisesRegex(ValueError, "SUBSTRING out of bounds"):
+            self._mask_with_position_fields(1, 0)
+
+    def test_begin_only_runs_to_end_for_field_positions(self):
+        self.assertEqual(self._mask_with_position_fields(8), ["6789"])
+
+    def test_null_position_masks_the_row_to_null(self):
+        self.assertEqual(self._mask_with_position_fields(None, 4), [None])
+        self.assertEqual(self._mask_with_position_fields(8, None), [None])
+
+    def test_non_ascii_positions_count_characters_on_both_paths(self):
+        source = "身份证12345678"
+        self.assertEqual(
+            self._mask({"name": "SUBSTRING", "inputs": [self._ssn_ref(), 8, 4]},
+                       batch=pa.RecordBatch.from_arrays(
+                           [pa.array([source], type=pa.string())], names=["ssn"]),
+                       fields=[_FakeField("ssn")]),
+            ["5678"],
+        )
+        self.assertEqual(self._mask_with_position_fields(8, 4, ssn=source), ["5678"])
+
+    def test_fractional_position_rejected(self):
+        for begin in [1.5, 2.0, "1.5", True]:
+            with self.assertRaisesRegex(ValueError, "must be an integer"):
+                self._mask({"name": "SUBSTRING", "inputs": [self._ssn_ref(), begin, 2]})
+
+    def test_textual_position_accepted_like_integer_parse_int(self):
+        for begin in ["8", "+8", "008"]:
+            self.assertEqual(
+                self._mask({"name": "SUBSTRING", "inputs": [self._ssn_ref(), begin, 4]}),
+                ["6789", "4321", None],
+                begin,
+            )
+
+    def test_textual_position_outside_parse_int_syntax_rejected(self):
+        for begin in ["1_0", " 2 ", "2\n"]:
+            with self.assertRaisesRegex(ValueError, "must be an integer"):
+                self._mask({"name": "SUBSTRING", "inputs": [self._ssn_ref(), begin, 4]})
+
+    def test_number_in_the_source_slot_rejected(self):
+        with self.assertRaisesRegex(ValueError, "source must be a string or a field"):
+            self._mask({"name": "SUBSTRING", "inputs": [123, 1, 1]})
+
+    def test_supplementary_plane_digit_rejected(self):
+        with self.assertRaisesRegex(ValueError, "must be an integer"):
+            self._mask({"name": "SUBSTRING", "inputs": [self._ssn_ref(), "\U0001D7DA", 4]})
+
+    def test_invalid_json_position_type_fails_even_when_the_row_short_circuits(self):
+        for length in [1.5, True]:
+            with self.assertRaisesRegex(ValueError, "must be an integer"):
+                self._mask({"name": "SUBSTRING", "inputs": ["abcdef", 99, length]})
+
+    def test_unicode_digit_position_accepted_like_character_digit(self):
+        for begin in ["8", "\u0668", "\uff18"]:
+            self.assertEqual(
+                self._mask({"name": "SUBSTRING", "inputs": [self._ssn_ref(), begin, 4]}),
+                ["6789", "4321", None],
+                begin,
+            )
+
+    def test_explicit_null_position_propagates(self):
+        self.assertEqual(
+            self._mask({"name": "SUBSTRING", "inputs": [self._ssn_ref(), 8, None]}),
+            [None, None, None],
+        )
+        self.assertEqual(
+            self._mask({"name": "SUBSTRING", "inputs": [self._ssn_ref(), None]}),
+            [None, None, None],
+        )
+
+    def test_null_length_propagates_even_when_begin_is_past_the_end(self):
+        self.assertEqual(
+            self._mask({"name": "SUBSTRING", "inputs": [self._ssn_ref(), 99, None]}),
+            [None, None, None],
+        )
+
+    def test_wrong_arity_rejected(self):
+        with self.assertRaisesRegex(ValueError, "SUBSTRING takes 2 or 3 inputs"):
+            self._mask({"name": "SUBSTRING", "inputs": [self._ssn_ref(), 8, 4, 9]})
+        with self.assertRaisesRegex(ValueError, "SUBSTRING takes 2 or 3 inputs"):
+            self._mask({"name": "SUBSTRING", "inputs": [self._ssn_ref()]})
+
+    def test_position_field_of_a_non_integer_type_rejected(self):
+        batch = pa.RecordBatch.from_arrays(
+            [pa.array(["abcdef"], type=pa.string()), pa.array(["2"], type=pa.string())],
+            names=["ssn", "begin"],
+        )
+        reader = AuthMaskingReader(
+            _FakeBatchReader([batch]),
+            {"ssn": json.dumps({
+                "name": "SUBSTRING",
+                "inputs": [self._ssn_ref(), {"index": 1, "name": "begin", "type": "STRING"}],
+            })},
+            [_FakeField("ssn"), _FakeField("begin")],
+        )
+        with self.assertRaisesRegex(ValueError, "must be INT"):
+            reader.read_arrow_batch()
+
+    def test_position_field_of_a_wider_integer_type_rejected(self):
+        for declared, arrow_type in [("BIGINT", pa.int64()), ("SMALLINT", pa.int16()),
+                                     ("TINYINT", pa.int8())]:
+            batch = pa.RecordBatch.from_arrays(
+                [pa.array(["abcdef"], type=pa.string()), pa.array([2], type=arrow_type)],
+                names=["ssn", "begin"],
+            )
+            reader = AuthMaskingReader(
+                _FakeBatchReader([batch]),
+                {"ssn": json.dumps({
+                    "name": "SUBSTRING",
+                    "inputs": [self._ssn_ref(), {"index": 1, "name": "begin", "type": declared}],
+                })},
+                [_FakeField("ssn"), _FakeField("begin")],
+            )
+            with self.assertRaisesRegex(ValueError, "must be INT"):
+                reader.read_arrow_batch()
+
+    def test_null_source_wins_over_a_bad_begin(self):
+        batch = pa.RecordBatch.from_arrays(
+            [pa.array([None], type=pa.string())], names=["ssn"])
+        self.assertEqual(
+            self._mask({"name": "SUBSTRING", "inputs": [None, None]},
+                       batch=batch, fields=[_FakeField("ssn")]),
+            [None],
+        )
+
+    def test_begin_past_end_wins_over_a_malformed_length(self):
+        self.assertEqual(
+            self._mask({"name": "SUBSTRING", "inputs": ["abc", 99, "bad"]}),
+            ["", "", ""],
+        )
+
+    def test_null_length_wins_over_a_malformed_begin(self):
+        # Java checks every position for null before it parses any of them, so the
+        # malformed begin is never reached
+        self.assertEqual(
+            self._mask({"name": "SUBSTRING", "inputs": ["abc", "bad", None]}),
+            [None, None, None],
+        )
+
+    def test_end_overflowing_the_integer_range_rejected(self):
+        with self.assertRaisesRegex(ValueError, "overflows the integer range"):
+            self._mask({"name": "SUBSTRING", "inputs": [self._ssn_ref(), 2, 2 ** 31 - 1]})
+
+    def test_position_outside_the_integer_range_rejected(self):
+        with self.assertRaisesRegex(ValueError, "out of the integer range"):
+            self._mask({"name": "SUBSTRING", "inputs": [self._ssn_ref(), 2 ** 31, 4]})
+
+    def test_null_length_field_propagates_even_when_begin_is_past_the_end(self):
+        self.assertEqual(self._mask_with_position_fields(99, None), [None])
+
+    def test_supplementary_characters_count_code_points_like_java(self):
+        self.assertEqual(
+            self._mask({"name": "SUBSTRING", "inputs": [self._ssn_ref(), 2, 2]},
+                       batch=pa.RecordBatch.from_arrays(
+                           [pa.array(["\U0001F600abc"], type=pa.string())], names=["ssn"]),
+                       fields=[_FakeField("ssn")]),
+            ["ab"],
+        )
+
+    def test_literal_source_instead_of_field(self):
+        self.assertEqual(
+            self._mask({"name": "SUBSTRING", "inputs": ["123-45-6789", 8, 4]}),
+            ["6789", "6789", "6789"],
+        )
+
+    def test_non_positive_length_rejected(self):
+        with self.assertRaisesRegex(ValueError, "SUBSTRING out of bounds"):
+            self._mask({"name": "SUBSTRING", "inputs": [self._ssn_ref(), 1, 0]})
+
+    def test_begin_below_one_rejected(self):
+        with self.assertRaisesRegex(ValueError, "SUBSTRING out of bounds"):
+            self._mask({"name": "SUBSTRING", "inputs": [self._ssn_ref(), 0]})
+
+    def test_begin_below_one_rejected_for_field_positions(self):
+        batch = pa.RecordBatch.from_pydict({"ssn": ["123-45-6789"], "begin": [0]})
+        reader = AuthMaskingReader(
+            _FakeBatchReader([batch]),
+            {"ssn": json.dumps({
+                "name": "SUBSTRING",
+                "inputs": [self._ssn_ref(), {"index": 1, "name": "begin", "type": "INT"}],
+            })},
+            [_FakeField("ssn"), _FakeField("begin")],
+        )
+        with self.assertRaisesRegex(ValueError, "SUBSTRING out of bounds"):
+            reader.read_arrow_batch()
+
+    def test_begin_past_end_wins_over_a_bad_length(self):
+        self.assertEqual(
+            self._mask({"name": "SUBSTRING", "inputs": [self._ssn_ref(), 99, 0]}),
+            ["", "", None],
+        )
+
+
+class TestTrimTransform(unittest.TestCase):
+
+    def setUp(self):
+        self.batch = pa.RecordBatch.from_pydict({
+            "s": ["  x  ", "\ty\t", None],
+            "chars": [" ", "\t", "z"],
+        })
+        self.fields = [_FakeField("s"), _FakeField("chars")]
+
+    def _mask(self, transform):
+        reader = AuthMaskingReader(
+            _FakeBatchReader([self.batch]), {"s": json.dumps(transform)}, self.fields
+        )
+        return reader.read_arrow_batch().column("s").to_pylist()
+
+    @staticmethod
+    def _transform(flag, extra_inputs=()):
+        return {
+            "name": "TRIM",
+            "inputs": [{"index": 0, "name": "s", "type": "STRING"}, *extra_inputs],
+            "trimFlag": flag,
+        }
+
+    def test_both(self):
+        self.assertEqual(self._mask(self._transform("BOTH")), ["x", "\ty\t", None])
+
+    def test_leading(self):
+        self.assertEqual(self._mask(self._transform("LEADING")), ["x  ", "\ty\t", None])
+
+    def test_trailing(self):
+        self.assertEqual(self._mask(self._transform("TRAILING")), ["  x", "\ty\t", None])
+
+    def test_wrong_arity_rejected(self):
+        with self.assertRaisesRegex(ValueError, "TRIM takes 1 or 2 inputs"):
+            self._mask(self._transform("BOTH", ["x", "y"]))
+
+    def test_unknown_flag_rejected(self):
+        for flag in ["both", "LTRIM"]:
+            with self.assertRaisesRegex(ValueError, "Unknown trimFlag"):
+                self._mask(self._transform(flag))
+
+    def test_numeric_trim_flag_rejected(self):
+        # Jackson would read a number as an enum ordinal, so Java must reject it too
+        for flag in (0, "0", 2):
+            with self.assertRaisesRegex(ValueError, "trimFlag"):
+                self._mask({"name": "TRIM", "inputs": ["  x  "], "trimFlag": flag})
+
+    def test_non_string_source_rejected(self):
+        with self.assertRaisesRegex(ValueError, "TRIM source"):
+            self._mask({"name": "TRIM", "inputs": [123], "trimFlag": "BOTH"})
+        with self.assertRaisesRegex(ValueError, "TRIM source"):
+            self._mask({"name": "TRIM", "inputs": ["  x  ", 123], "trimFlag": "BOTH"})
+
+    def test_structured_position_rejected_before_any_shortcut(self):
+        # begin past the end would otherwise short-circuit to an empty string
+        with self.assertRaisesRegex(ValueError, "position must be an integer"):
+            self._mask({"name": "SUBSTRING", "inputs": ["abc", 99, []]})
+        with self.assertRaisesRegex(ValueError, "position must be an integer"):
+            self._mask({"name": "SUBSTRING", "inputs": ["abc", []]})
+
+    def test_unknown_flag_rejected_with_null_chars(self):
+        with self.assertRaisesRegex(ValueError, "Unknown trimFlag"):
+            self._mask({
+                "name": "TRIM",
+                "inputs": [{"index": 0, "name": "s", "type": "STRING"}, None],
+                "trimFlag": "LTRIM",
+            })
+
+    def _trim_by(self, chars, values):
+        batch = pa.RecordBatch.from_arrays(
+            [pa.array(values, type=pa.string())], names=["s"])
+        reader = AuthMaskingReader(
+            _FakeBatchReader([batch]),
+            {"s": json.dumps({
+                "name": "TRIM",
+                "inputs": [{"index": 0, "name": "s", "type": "STRING"}, chars],
+                "trimFlag": "BOTH",
+            })},
+            [_FakeField("s")],
+        )
+        return reader.read_arrow_batch().column("s").to_pylist()
+
+    def test_multibyte_trim_characters(self):
+        self.assertEqual(self._trim_by("。", ["。。x。。", "  y  "]), ["x", "  y  "])
+
+    def test_trim_matches_whole_characters_not_bytes(self):
+        self.assertEqual(self._trim_by("、", ["。x。"]), ["。x。"])
+
+    def test_custom_chars_are_treated_as_a_set(self):
+        batch = pa.RecordBatch.from_pydict({"s": ["xyzaxyz", "zyxaxyz", None]})
+        reader = AuthMaskingReader(
+            _FakeBatchReader([batch]),
+            {"s": json.dumps({
+                "name": "TRIM",
+                "inputs": [{"index": 0, "name": "s", "type": "STRING"}, "xyz"],
+                "trimFlag": "BOTH",
+            })},
+            [_FakeField("s")],
+        )
+        self.assertEqual(
+            reader.read_arrow_batch().column("s").to_pylist(), ["a", "a", None]
+        )
+
+    def test_chars_read_from_another_field(self):
+        self.assertEqual(
+            self._mask(
+                self._transform("BOTH", [{"index": 1, "name": "chars", "type": "STRING"}])
+            ),
+            ["x", "y", None],
+        )
+
+    def test_literal_null_trim_chars_yields_null(self):
+        self.assertEqual(
+            self._mask({
+                "name": "TRIM",
+                "inputs": [{"index": 0, "name": "s", "type": "STRING"}, None],
+                "trimFlag": "BOTH",
+            }),
+            [None, None, None],
+        )
+
+    def test_null_trim_chars_yields_null(self):
+        batch = pa.RecordBatch.from_arrays(
+            [pa.array(["  x  "], type=pa.string()), pa.array([None], type=pa.string())],
+            names=["s", "chars"],
+        )
+        reader = AuthMaskingReader(
+            _FakeBatchReader([batch]),
+            {"s": json.dumps(
+                self._transform("BOTH", [{"index": 1, "name": "chars", "type": "STRING"}])
+            )},
+            [_FakeField("s"), _FakeField("chars")],
+        )
+        self.assertEqual(reader.read_arrow_batch().column("s").to_pylist(), [None])
+
+    def test_missing_flag_rejected(self):
+        with self.assertRaisesRegex(ValueError, "trimFlag"):
+            self._mask({
+                "name": "TRIM",
+                "inputs": [{"index": 0, "name": "s", "type": "STRING"}],
+            })
 
 
 class TestMaskingOrderIndependence(unittest.TestCase):

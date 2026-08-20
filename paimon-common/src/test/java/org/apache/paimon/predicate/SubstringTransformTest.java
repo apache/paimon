@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class SubstringTransformTest {
 
@@ -119,6 +120,32 @@ class SubstringTransformTest {
         // and it is found before the malformed begin next to it is parsed
         literal.set(1, BinaryString.fromString("bad"));
         assertThat(new SubstringTransform(literal).transform(GenericRow.of())).isNull();
+    }
+
+    @Test
+    public void testNonPositiveBeginIsRejected() {
+        List<Object> inputs = new ArrayList<>();
+        inputs.add(BinaryString.fromString("abc"));
+        inputs.add(0);
+
+        for (int begin : new int[] {0, -1, -5}) {
+            inputs.set(1, begin);
+            assertThatThrownBy(() -> new SubstringTransform(inputs).transform(GenericRow.of()))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
+    public void testPositionsCountCharactersNotUtf16CodeUnits() {
+        List<Object> inputs = new ArrayList<>();
+        inputs.add(new FieldRef(0, "f0", DataTypes.STRING()));
+        inputs.add(2);
+        inputs.add(2);
+        BinaryString source = BinaryString.fromString("\uD83D\uDE00abc");
+
+        Object result = new SubstringTransform(inputs).transform(GenericRow.of(source));
+
+        assertThat(result).isEqualTo(BinaryString.fromString("ab"));
     }
 
     @Test
