@@ -71,7 +71,34 @@ public class FieldTransform implements Transform {
 
     @Override
     public Object transform(InternalRow row) {
-        return get(row, fieldRef.index(), fieldRef.type());
+        if (fieldRef.nestedIndexes() == null || fieldRef.nestedIndexes().length == 0) {
+            return get(row, fieldRef.index(), fieldRef.type());
+        }
+
+        InternalRow currentRow = row;
+        if (currentRow == null) {
+            return null;
+        }
+        int[] indexes = fieldRef.nestedIndexes();
+        int[] arities = fieldRef.nestedArities();
+
+        if (currentRow.isNullAt(fieldRef.index())) {
+            return null;
+        }
+        currentRow = currentRow.getRow(fieldRef.index(), arities[0]);
+
+        for (int i = 0; i < indexes.length - 1; i++) {
+            if (currentRow == null || currentRow.isNullAt(indexes[i])) {
+                return null;
+            }
+            currentRow = currentRow.getRow(indexes[i], arities[i + 1]);
+        }
+
+        if (currentRow == null) {
+            return null;
+        }
+        int leafIndex = indexes[indexes.length - 1];
+        return get(currentRow, leafIndex, fieldRef.type());
     }
 
     @Override
