@@ -22,7 +22,7 @@ import org.apache.paimon.catalog.{CatalogContext, Identifier}
 import org.apache.paimon.fs.{FileIO, Path}
 import org.apache.paimon.fs.local.LocalFileIO
 import org.apache.paimon.options.Options
-import org.apache.paimon.partition.Partition
+import org.apache.paimon.partition.{Partition, PartitionStatistics}
 import org.apache.paimon.predicate.Predicate
 import org.apache.paimon.table.FormatTable
 import org.apache.paimon.table.format.FormatTablePartitionManager
@@ -51,7 +51,9 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
     val gateway = new FormatTablePartitionManager {
       override def createPartitions(
           partitions: JList[JMap[String, String]],
-          ignoreIfExists: Boolean): Unit = {
+          ignoreIfExists: Boolean,
+          statistics: JList[PartitionStatistics],
+          replaceStatistics: Boolean): Unit = {
         forwardedPartitions = partitions.asScala.toSeq
         forwardedIgnoreIfExists = ignoreIfExists
       }
@@ -108,7 +110,9 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
     val gateway = new FormatTablePartitionManager {
       override def createPartitions(
           partitions: JList[JMap[String, String]],
-          ignoreIfExists: Boolean): Unit = {}
+          ignoreIfExists: Boolean,
+          statistics: JList[PartitionStatistics],
+          replaceStatistics: Boolean): Unit = {}
 
       override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = dropCalls += 1
 
@@ -141,7 +145,9 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
     val gateway = new FormatTablePartitionManager {
       override def createPartitions(
           partitions: JList[JMap[String, String]],
-          ignoreIfExists: Boolean): Unit = createCalls += 1
+          ignoreIfExists: Boolean,
+          statistics: JList[PartitionStatistics],
+          replaceStatistics: Boolean): Unit = createCalls += 1
 
       override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = {}
 
@@ -173,7 +179,9 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
     val gateway = new FormatTablePartitionManager {
       override def createPartitions(
           partitions: JList[JMap[String, String]],
-          ignoreIfExists: Boolean): Unit = createCalls += 1
+          ignoreIfExists: Boolean,
+          statistics: JList[PartitionStatistics],
+          replaceStatistics: Boolean): Unit = createCalls += 1
 
       override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = {}
 
@@ -242,7 +250,9 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
     val gateway = new FormatTablePartitionManager {
       override def createPartitions(
           partitions: JList[JMap[String, String]],
-          ignoreIfExists: Boolean): Unit = {}
+          ignoreIfExists: Boolean,
+          statistics: JList[PartitionStatistics],
+          replaceStatistics: Boolean): Unit = {}
 
       override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = {
         // Ordering contract: the directory must still exist when the catalog unregisters.
@@ -294,7 +304,9 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
     val gateway = new FormatTablePartitionManager {
       override def createPartitions(
           partitions: JList[JMap[String, String]],
-          ignoreIfExists: Boolean): Unit = {}
+          ignoreIfExists: Boolean,
+          statistics: JList[PartitionStatistics],
+          replaceStatistics: Boolean): Unit = {}
 
       override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = {
         dropped = partitions.asScala.map(_.asScala.toMap).toSeq
@@ -410,7 +422,9 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
     val gateway = new FormatTablePartitionManager {
       override def createPartitions(
           partitions: JList[JMap[String, String]],
-          ignoreIfExists: Boolean): Unit = {}
+          ignoreIfExists: Boolean,
+          statistics: JList[PartitionStatistics],
+          replaceStatistics: Boolean): Unit = {}
 
       override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = {
         dropped = partitions.asScala.map(_.asScala.toMap).toSeq
@@ -453,7 +467,9 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
     val gateway = new FormatTablePartitionManager {
       override def createPartitions(
           partitions: JList[JMap[String, String]],
-          ignoreIfExists: Boolean): Unit = {}
+          ignoreIfExists: Boolean,
+          statistics: JList[PartitionStatistics],
+          replaceStatistics: Boolean): Unit = {}
 
       override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = dropCalls += 1
 
@@ -501,7 +517,9 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
     val gateway = new FormatTablePartitionManager {
       override def createPartitions(
           partitions: JList[JMap[String, String]],
-          ignoreIfExists: Boolean): Unit =
+          ignoreIfExists: Boolean,
+          statistics: JList[PartitionStatistics],
+          replaceStatistics: Boolean): Unit =
         throw new AssertionError("An ambiguous DROP must not recreate catalog partitions")
 
       override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = {
@@ -611,7 +629,9 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
     new FormatTablePartitionManager {
       override def createPartitions(
           partitions: JList[JMap[String, String]],
-          ignoreIfExists: Boolean): Unit = {}
+          ignoreIfExists: Boolean,
+          statistics: JList[PartitionStatistics],
+          replaceStatistics: Boolean): Unit = {}
 
       override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = {}
 
@@ -638,7 +658,9 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
 
     override def createPartitions(
         partitions: JList[JMap[String, String]],
-        ignoreIfExists: Boolean): Unit = synchronized {
+        ignoreIfExists: Boolean,
+        statistics: JList[PartitionStatistics],
+        replaceStatistics: Boolean): Unit = synchronized {
       val requested = partitions.asScala.map(_.asScala.toMap).toSeq
       requests :+= ((requested, ignoreIfExists))
       if (!ignoreIfExists) {
@@ -676,7 +698,9 @@ class FormatTablePartitionManagementTest extends SparkFunSuite {
 
     override def createPartitions(
         partitions: JList[JMap[String, String]],
-        ignoreIfExists: Boolean): Unit = {}
+        ignoreIfExists: Boolean,
+        statistics: JList[PartitionStatistics],
+        replaceStatistics: Boolean): Unit = {}
 
     override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = dropCalls += 1
 

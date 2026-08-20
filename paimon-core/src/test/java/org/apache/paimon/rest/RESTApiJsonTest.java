@@ -19,6 +19,7 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.function.FunctionChange;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterFunctionRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
@@ -64,6 +65,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Test for {@link RESTApi} json. */
@@ -326,6 +328,53 @@ public class RESTApiJsonTest {
         CreatePartitionsRequest parsedExplicitRequest =
                 RESTApi.fromJson(explicitRequestJson, CreatePartitionsRequest.class);
         assertFalse(parsedExplicitRequest.ignoreIfExists());
+
+        // A client that reports nothing sends neither field, so an older server sees exactly the
+        // request it saw before.
+        assertFalse(explicitRequestJson.contains("partitionStatistics"));
+        assertFalse(explicitRequestJson.contains("replaceStatistics"));
+        assertNull(defaultRequest.getPartitionStatistics());
+        assertNull(defaultRequest.replaceStatistics());
+    }
+
+    @Test
+    public void createPartitionsRequestCarriesStatisticsTest() throws Exception {
+        Map<String, String> spec = Collections.singletonMap("dt", "20260728");
+        PartitionStatistics statistics =
+                new PartitionStatistics(spec, 7L, 4096L, 2L, 1753660800000L, -1);
+        CreatePartitionsRequest request =
+                new CreatePartitionsRequest(
+                        Collections.singletonList(spec),
+                        true,
+                        Collections.singletonList(statistics),
+                        true);
+
+        String json = RESTApi.toJson(request);
+        // Asserted literally: renaming both ends together would keep every parse below passing.
+        assertTrue(json.contains("\"partitionStatistics\""));
+        assertTrue(json.contains("\"replaceStatistics\":true"));
+        // How the client treats its own request; the server is not told and would reject the
+        // field. It is a getter on a serialized type, so it only stays off the wire on purpose.
+        assertFalse(json.contains("retrySafe"));
+
+        CreatePartitionsRequest parsed = RESTApi.fromJson(json, CreatePartitionsRequest.class);
+        assertEquals(Boolean.TRUE, parsed.replaceStatistics());
+        assertEquals(Collections.singletonList(statistics), parsed.getPartitionStatistics());
+
+        // An unknown field stays unknown across the wire rather than turning into a zero.
+        PartitionStatistics unknown = PartitionStatistics.unknown(spec);
+        CreatePartitionsRequest unknownRequest =
+                new CreatePartitionsRequest(
+                        Collections.singletonList(spec),
+                        true,
+                        Collections.singletonList(unknown),
+                        false);
+        PartitionStatistics parsedUnknown =
+                RESTApi.fromJson(RESTApi.toJson(unknownRequest), CreatePartitionsRequest.class)
+                        .getPartitionStatistics()
+                        .get(0);
+        assertFalse(PartitionStatistics.isKnown(parsedUnknown.recordCount()));
+        assertFalse(PartitionStatistics.isKnown(parsedUnknown.fileCount()));
     }
 
     @Test
