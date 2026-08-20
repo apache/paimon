@@ -666,17 +666,35 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
         indexed_results = self._maybe_rerank_indexed_results(
             indexed_results, index_type, self._query_vectors, snapshot)
 
-        # Each query: merge indexed results with the raw (brute-force) fallback.
+        # Batch raw search: read Arrow table once, compute all queries in one SGEMM.
         raw_pre_filter = self._raw_pre_filter(raw_splits, snapshot)
         raw_ranges = _raw_row_ranges(raw_splits)
         raw_index_type = _raw_search_index_type(raw_splits)
+        raw_results = self._read_batch_raw_search(
+            raw_ranges, raw_pre_filter, self._query_vectors, raw_index_type,
+            snapshot=snapshot)
+
         results = []
         for i in range(n):
-            raw = self._read_raw_search(
-                raw_ranges, raw_pre_filter, self._query_vectors[i], raw_index_type,
-                snapshot=snapshot)
-            results.append(indexed_results[i].or_(raw).top_k(self._limit))
+            results.append(indexed_results[i].or_(raw_results[i]).top_k(self._limit))
         return results
+
+    def _read_batch_raw_search(self, raw_row_ranges, pre_filter, query_vectors,
+                               index_type=None, snapshot=None):
+        raw_row_ranges = _filtered_raw_row_ranges(raw_row_ranges, pre_filter)
+        n = len(query_vectors)
+        if not raw_row_ranges:
+            return [DictBasedScoredIndexResult({}) for _ in range(n)]
+
+        table = self._read_raw_arrow(raw_row_ranges, True, snapshot)
+        if table is None or table.num_rows == 0:
+            return [DictBasedScoredIndexResult({}) for _ in range(n)]
+
+        metric = _raw_search_metric(
+            self._table, self._vector_column, self._options, index_type)
+
+        return _raw_batch_search_from_arrow(
+            table, self._vector_column.name, query_vectors, metric, self._limit)
 
 
 def _create_vector_reader(index_type, file_io, index_path, index_io_meta_list, options=None):
@@ -1026,3 +1044,102 @@ def _numpy_topk(row_id_array, stored_matrix, query_np, metric, limit):
     return DictBasedScoredIndexResult(
         {int(row_id_array[i]): float(scores[i]) for i in top_indices}
     )
+
+
+def _raw_batch_search_from_arrow(arrow_table, vector_column_name, query_vectors,
+                                 metric, limit, score_candidates=None):
+    """Batch raw search: multiple queries against the same Arrow table in one SGEMM call."""
+    import numpy as np
+    import pyarrow.compute as pc
+
+    row_ids_col = arrow_table.column(SpecialFields.ROW_ID.name)
+    vectors_col = arrow_table.column(vector_column_name)
+
+    valid_mask = pc.is_valid(vectors_col)
+    if not pc.all(valid_mask).as_py():
+        arrow_table = arrow_table.filter(valid_mask)
+        row_ids_col = arrow_table.column(SpecialFields.ROW_ID.name)
+        vectors_col = arrow_table.column(vector_column_name)
+
+    row_id_array = row_ids_col.to_numpy()
+    try:
+        if hasattr(vectors_col, 'combine_chunks'):
+            vectors_arr = vectors_col.combine_chunks()
+        else:
+            vectors_arr = vectors_col
+        flat = vectors_arr.values
+        dim = vectors_arr.type.list_size
+        if dim is not None and flat is not None:
+            stored_matrix = flat.to_numpy(zero_copy_only=False).reshape(-1, dim).astype(
+                np.float32)
+        else:
+            stored_matrix = np.array(vectors_col.to_pylist(), dtype=np.float32)
+    except (AttributeError, TypeError, ValueError):
+        stored_matrix = np.array(vectors_col.to_pylist(), dtype=np.float32)
+
+    query_matrix = np.array(
+        [q if isinstance(q, np.ndarray) else list(q) for q in query_vectors],
+        dtype=np.float32)
+
+    if stored_matrix.shape[1] != query_matrix.shape[1]:
+        raise ValueError(
+            "Query vector dimension mismatch: expected %d, got %d"
+            % (stored_matrix.shape[1], query_matrix.shape[1]))
+
+    if score_candidates is not None:
+        candidate_set = set(score_candidates)
+        mask = np.array([rid in candidate_set for rid in row_id_array], dtype=bool)
+        null_mask = ~np.isnan(stored_matrix).any(axis=1)
+        mask = mask & null_mask
+        row_id_array = row_id_array[mask]
+        stored_matrix = stored_matrix[mask]
+    else:
+        null_mask = ~np.isnan(stored_matrix).any(axis=1)
+        if not null_mask.all():
+            row_id_array = row_id_array[null_mask]
+            stored_matrix = stored_matrix[null_mask]
+
+    if len(row_id_array) == 0:
+        return [DictBasedScoredIndexResult({}) for _ in range(len(query_vectors))]
+
+    return _numpy_batch_topk(row_id_array, stored_matrix, query_matrix, metric, limit)
+
+
+def _numpy_batch_topk(row_id_array, stored_matrix, query_matrix, metric, limit):
+    """Batch SGEMM distance computation + per-query topK. Reuses stored norms."""
+    import numpy as np
+
+    n_queries = query_matrix.shape[0]
+
+    if metric == "l2":
+        stored_sq = np.sum(stored_matrix * stored_matrix, axis=1, keepdims=True)
+        query_sq = np.sum(query_matrix * query_matrix, axis=1, keepdims=True)
+        dots = stored_matrix @ query_matrix.T
+        dists = stored_sq + query_sq.T - 2 * dots
+        np.maximum(dists, 0, out=dists)
+        all_scores = 1.0 / (1.0 + dists)
+    elif metric == "cosine":
+        stored_norms = np.linalg.norm(stored_matrix, axis=1, keepdims=True)
+        query_norms = np.linalg.norm(query_matrix, axis=1, keepdims=True)
+        dots = stored_matrix @ query_matrix.T
+        denom = stored_norms @ query_norms.T
+        denom = np.where(denom == 0, 1.0, denom)
+        all_scores = dots / denom
+    elif metric == "inner_product":
+        all_scores = stored_matrix @ query_matrix.T
+    else:
+        raise ValueError("Unknown vector search metric: %s" % metric)
+
+    results = []
+    n_rows = all_scores.shape[0]
+    for i in range(n_queries):
+        scores = all_scores[:, i]
+        if n_rows <= limit:
+            top_indices = np.argsort(-scores)
+        else:
+            top_indices = np.argpartition(-scores, limit)[:limit]
+            top_indices = top_indices[np.argsort(-scores[top_indices])]
+        results.append(DictBasedScoredIndexResult(
+            {int(row_id_array[j]): float(scores[j]) for j in top_indices}
+        ))
+    return results
