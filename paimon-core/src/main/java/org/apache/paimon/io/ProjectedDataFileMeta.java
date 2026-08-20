@@ -257,7 +257,7 @@ public final class ProjectedDataFileMeta implements DataFileMeta {
     @Nullable
     @Override
     public long[] columnMaxSequenceNumbers() {
-        int position = requiredPosition(Fields.COLUMN_MAX_SEQUENCE_NUMBERS);
+        int position = requiredPosition(Fields.WRITE_COLS_SEQUENCES);
         InternalRow row = currentRow();
         if (row.isNullAt(position)) {
             return null;
@@ -409,8 +409,8 @@ public final class ProjectedDataFileMeta implements DataFileMeta {
         private static final int EXTERNAL_PATH = fieldIndex(DataFileMeta.EXTERNAL_PATH);
         private static final int FIRST_ROW_ID = fieldIndex(DataFileMeta.FIRST_ROW_ID);
         private static final int WRITE_COLS = fieldIndex(DataFileMeta.WRITE_COLS);
-        private static final int COLUMN_MAX_SEQUENCE_NUMBERS =
-                fieldIndex(DataFileMeta.COLUMN_MAX_SEQUENCE_NUMBERS);
+        private static final int WRITE_COLS_SEQUENCES =
+                fieldIndex(DataFileMeta.WRITE_COLS_SEQUENCES);
     }
 
     /** Projected data-file schema together with its bound binary field layout. */

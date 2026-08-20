@@ -80,7 +80,7 @@ public interface DataFileMeta {
     String EXTERNAL_PATH = "_EXTERNAL_PATH";
     String FIRST_ROW_ID = "_FIRST_ROW_ID";
     String WRITE_COLS = "_WRITE_COLS";
-    String COLUMN_MAX_SEQUENCE_NUMBERS = "_COLUMN_MAX_SEQUENCE_NUMBERS";
+    String WRITE_COLS_SEQUENCES = "_WRITE_COLS_SEQUENCES";
 
     RowType SCHEMA =
             new RowType(
@@ -113,7 +113,7 @@ public interface DataFileMeta {
                                     19, WRITE_COLS, new ArrayType(true, newStringType(false))),
                             new DataField(
                                     20,
-                                    COLUMN_MAX_SEQUENCE_NUMBERS,
+                                    WRITE_COLS_SEQUENCES,
                                     new ArrayType(true, new BigIntType(false)))));
 
     BinaryRow EMPTY_MIN_KEY = EMPTY_ROW;
