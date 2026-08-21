@@ -151,7 +151,7 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
             boolean discardDuplicate,
             @Nullable CommitFailRetryResult previousAttempt,
             boolean hasOverwriteSincePreviousAttempt) {
-        if (discardDuplicate) {
+        if (discardDuplicate && !deltaFiles.isEmpty()) {
             return super.scanBaseDataFiles(
                     latestSnapshot,
                     changedPartitions,

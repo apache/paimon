@@ -452,7 +452,7 @@ class ConflictDetectionTest {
                                                 changedRange.from,
                                                 changedRange.to)),
                                 Snapshot.CommitKind.APPEND,
-                                false,
+                                true,
                                 null,
                                 false))
                 .containsExactlyElementsOf(expected);
