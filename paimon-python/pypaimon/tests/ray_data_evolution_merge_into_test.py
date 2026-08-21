@@ -25,6 +25,7 @@ import uuid
 from unittest.mock import Mock, patch
 
 import pyarrow as pa
+import pyarrow.compute as pc
 import ray
 
 from pypaimon import CatalogFactory, Schema
@@ -2036,6 +2037,253 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         out = self._read_sorted(target)
         self.assertEqual(out['age'], [99, 99, 99])
         self.assertEqual(out['name'], ['a', 'b', 'c'])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_callable_assignment(self):
+        from pypaimon.ray.ray_paimon import read_paimon as real_read_paimon
+
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2, 3], type=pa.int32()),
+                    'name': ['a', 'b', 'c'],
+                    'age': pa.array([10, 20, 30], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        def increment_age(rows):
+            if rows.column_names != ['age', '_ROW_ID']:
+                raise AssertionError(rows.column_names)
+            return pc.add(rows['age'], 1)
+
+        with patch(
+                'pypaimon.ray.ray_paimon.read_paimon',
+                wraps=real_read_paimon,
+        ) as mock_read:
+            result = merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                read_columns=['age'],
+                when_matched=[WhenMatched.update(
+                    {
+                        'age': increment_age,
+                        'name': lit('updated'),
+                    },
+                    condition='t.id IN (1, 3)',
+                )],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        self.assertEqual(result['num_matched'], 2)
+        self.assertEqual(
+            self._read_sorted(target),
+            {
+                'id': [1, 2, 3],
+                'name': ['updated', 'b', 'updated'],
+                'age': [11, 20, 31],
+            },
+        )
+        self.assertEqual(
+            mock_read.call_args[1]['projection'], ['_ROW_ID', 'id', 'age']
+        )
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_callable_updates_variant_path(self):
+        from pypaimon.data.generic_variant import GenericVariant
+        from pypaimon.data.variant_path import variant_get, variant_replace
+
+        variant_type = pa.struct([
+            pa.field('value', pa.binary(), nullable=False),
+            pa.field('metadata', pa.binary(), nullable=False),
+        ])
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('payload', variant_type),
+        ])
+        target = f'default.tbl_{uuid.uuid4().hex[:8]}'
+        self.catalog.create_table(
+            target,
+            Schema.from_pyarrow_schema(pa_schema, options=self.de_options),
+            False,
+        )
+        payload = GenericVariant.to_arrow_array([
+            GenericVariant.from_python({'value': 1.5}),
+            GenericVariant.from_python({'value': 2.5}),
+        ])
+        self._write(target, pa.table({
+            'id': pa.array([1, 2], type=pa.int32()),
+            'payload': payload,
+        }, schema=pa_schema))
+
+        def negate_value(rows):
+            values = variant_get(
+                rows['payload'], '$.value', pa.float64()
+            )
+            return variant_replace(
+                rows['payload'], '$.value', pc.negate(values), strict=True
+            )
+
+        result = merge_into(
+            target=target,
+            source=target,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            read_columns=['payload'],
+            when_matched=[WhenMatched.update(
+                {'payload': negate_value}, condition='t.id = 2',
+            )],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        self.assertEqual(result['num_matched'], 1)
+        output = self._read_sorted(target)['payload']
+        decoded = [
+            GenericVariant.from_arrow_struct(value).to_python()
+            for value in output
+        ]
+        self.assertEqual(decoded, [{'value': 1.5}, {'value': -2.5}])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_no_match_does_not_invoke_callable(self):
+        target = self._create_table()
+        self._write(target, self._source())
+
+        def should_not_run(_rows):
+            raise AssertionError("Callable must not run without matched rows")
+
+        result = merge_into(
+            target=target,
+            source=target,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            read_columns=['age'],
+            when_matched=[WhenMatched.update(
+                {'age': should_not_run}, condition='t.id = 99',
+            )],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        self.assertEqual(result['num_matched'], 0)
+        self.assertEqual(self._read_sorted(target)['age'], [10])
+
+    def test_self_merge_callable_validation(self):
+        target = self._create_table()
+
+        with self.assertRaisesRegex(
+                ValueError, 'Callable SET values require read_columns'):
+            merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                when_matched=[WhenMatched.update({
+                    'age': lambda rows: rows['age'],
+                })],
+            )
+
+        with self.assertRaisesRegex(
+                ValueError, 'read_columns requires a callable SET value'):
+            merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                read_columns=['age'],
+                when_matched=[WhenMatched.update({'age': lit(99)})],
+            )
+
+        with self.assertRaisesRegex(
+                ValueError, "Read column 'missing' is not in target"):
+            merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                read_columns=['missing'],
+                when_matched=[WhenMatched.update({
+                    'age': lambda rows: rows['missing'],
+                })],
+            )
+
+        source = self._create_table()
+        with self.assertRaisesRegex(
+                TypeError, 'callables are only supported for self-merge'):
+            merge_into(
+                target=target,
+                source=source,
+                catalog_options=self.catalog_options,
+                on=['id'],
+                read_columns=['age'],
+                when_matched=[WhenMatched.update({
+                    'age': lambda rows: rows['age'],
+                })],
+            )
+
+    def test_self_merge_callable_rejects_invalid_result(self):
+        from pypaimon.ray.data_evolution_merge_transform import (
+            _resolve_spec_array,
+        )
+
+        batch = pa.table({'t.age': pa.array([10], type=pa.int32())})
+        callable_input = pa.table({
+            'age': pa.array([10], type=pa.int32()),
+        })
+
+        with self.assertRaisesRegex(
+                ValueError, 'must return a pyarrow.Array'):
+            _resolve_spec_array(
+                lambda rows: rows['age'].to_pylist(),
+                batch,
+                set(batch.column_names),
+                [],
+                pa.int32(),
+                callable_input=callable_input,
+            )
+
+        with self.assertRaisesRegex(
+                ValueError, 'length must match matched row count'):
+            _resolve_spec_array(
+                lambda _rows: pa.array([], type=pa.int32()),
+                batch,
+                set(batch.column_names),
+                [],
+                pa.int32(),
+                callable_input=callable_input,
+            )
+
+    def test_self_merge_callable_preserves_chunked_result(self):
+        from pypaimon.ray.data_evolution_merge_transform import (
+            _resolve_spec_array,
+        )
+
+        batch = pa.table({'t.age': pa.array([10, 20], type=pa.int32())})
+        callable_input = pa.table({
+            'age': pa.array([10, 20], type=pa.int32()),
+        })
+
+        def chunked_result(_rows):
+            return pa.chunked_array([
+                pa.array([10], type=pa.int64()),
+                pa.array([20], type=pa.int64()),
+            ])
+
+        result = _resolve_spec_array(
+            chunked_result,
+            batch,
+            set(batch.column_names),
+            [],
+            pa.int32(),
+            callable_input=callable_input,
+        )
+        self.assertIsInstance(result, pa.ChunkedArray)
+        self.assertEqual(result.num_chunks, 2)
+        self.assertEqual(result.type, pa.int32())
 
     @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
     def test_self_merge_condition_pushes_down_predicate(self):
