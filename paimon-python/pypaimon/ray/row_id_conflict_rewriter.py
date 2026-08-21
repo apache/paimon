@@ -33,6 +33,7 @@ from pypaimon.table.special_fields import SpecialFields
 from pypaimon.utils.range import Range
 from pypaimon.write.commit.conflict_detection import RowIdExistenceConflict
 from pypaimon.write.commit_message import CommitMessage
+from pypaimon.write.file_store_commit import CommitResultUncertainError
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +108,9 @@ def commit_self_merge_with_compaction_retry(
             # ordinary FileStoreCommit retries remain enabled.
             commit.file_store_commit.rollback = None
             commit.commit(current_updates + other_messages)
+        except CommitResultUncertainError:
+            # An unobservable snapshot may reference these files.
+            raise
         except Exception as error:
             conflict = _find_row_id_conflict(error)
             if conflict is None:
