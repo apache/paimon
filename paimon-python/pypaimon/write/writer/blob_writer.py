@@ -113,7 +113,10 @@ class BlobWriter(AppendOnlyDataWriter):
         if self.current_writer is None:
             return False
 
-        return self.current_writer.reach_target_size(self.blob_target_file_size)
+        return (
+            self.current_writer.row_count >= self.target_file_row_num
+            or self.current_writer.reach_target_size(self.blob_target_file_size)
+        )
 
     def close_current_writer(self):
         """Close current writer and create metadata."""
@@ -237,6 +240,9 @@ class BlobWriter(AppendOnlyDataWriter):
         # Call parent to handle pending_data fallback.
         super().close()
 
+    def delete_file_upon_abort(self) -> bool:
+        return self._blob_consumer is None
+
     def abort(self):
         if self.current_writer is not None:
             try:
@@ -245,7 +251,7 @@ class BlobWriter(AppendOnlyDataWriter):
                 logger.warning(f"Error aborting blob writer: {e}", exc_info=e)
             self.current_writer = None
             self.current_file_path = None
-        if self._blob_consumer is not None:
+        if not self.delete_file_upon_abort():
             self.pending_data = None
             self.committed_files.clear()
         else:
