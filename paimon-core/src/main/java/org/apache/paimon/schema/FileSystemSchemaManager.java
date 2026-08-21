@@ -27,6 +27,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.SchemaModification;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.ShiftFieldId;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.LazyField;
@@ -145,6 +146,7 @@ public class FileSystemSchemaManager implements SchemaManager {
             }
 
             schema = applyDirectives(schema);
+            schema = applyFieldIdOneBased(schema);
             TableSchema newSchema = TableSchema.create(0, schema);
 
             // validate table from creating table
@@ -155,6 +157,18 @@ public class FileSystemSchemaManager implements SchemaManager {
                 return newSchema;
             }
         }
+    }
+
+    /**
+     * Shift all field ids of a new table by one when {@link CoreOptions#FIELD_ID_ONE_BASED} is set.
+     * Applied only at table creation: data files embed these ids (Parquet footers, Iceberg
+     * metadata), so the id space of an existing table must never be re-based.
+     */
+    private static Schema applyFieldIdOneBased(Schema schema) {
+        if (!CoreOptions.fromMap(schema.options()).fieldIdOneBased()) {
+            return schema;
+        }
+        return schema.copy((RowType) ShiftFieldId.shift(schema.rowType(), 1));
     }
 
     private void checkSchemaForExternalTable(Schema existsSchema, Schema newSchema) {
