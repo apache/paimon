@@ -163,6 +163,30 @@ public class SavepointTaggerTest extends CommitterTestBase {
         assertThat(table.tagManager().tagCount()).isEqualTo(0);
     }
 
+    @Test
+    public void testDropAbortedKeepsTagFromDifferentCommitUser() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        SavepointTagger tagger = createTagger(table);
+
+        createSavepointTag(table, UUID.randomUUID().toString(), 1L, 1L);
+
+        tagger.dropAborted(1L);
+
+        assertThat(table.tagManager().tagExists(savepointTag(1L))).isTrue();
+    }
+
+    @Test
+    public void testDropAbortedKeepsTagForDifferentCommitIdentifier() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        SavepointTagger tagger = createTagger(table);
+
+        createSavepointTag(table, commitUser, 1L, 2L);
+
+        tagger.dropAborted(1L);
+
+        assertThat(table.tagManager().tagExists(savepointTag(1L))).isTrue();
+    }
+
     private SavepointTagger createTagger(FileStoreTable table) {
         return new SavepointTagger(
                 table.snapshotManager(),
@@ -174,6 +198,27 @@ public class SavepointTaggerTest extends CommitterTestBase {
     }
 
     private void commitSnapshot(FileStoreTable table, long commitIdentifier) throws Exception {
+        commitSnapshot(table, commitUser, commitIdentifier);
+    }
+
+    private void createSavepointTag(
+            FileStoreTable table,
+            String commitUser,
+            long commitIdentifier,
+            long snapshotCommitIdentifier)
+            throws Exception {
+        commitSnapshot(table, commitUser, snapshotCommitIdentifier);
+        table.tagManager()
+                .createTag(
+                        table.snapshotManager().latestSnapshot(),
+                        savepointTag(commitIdentifier),
+                        table.coreOptions().tagDefaultTimeRetained(),
+                        table.store().createTagCallbacks(table),
+                        false);
+    }
+
+    private void commitSnapshot(FileStoreTable table, String commitUser, long commitIdentifier)
+            throws Exception {
         try (StreamTableWrite write =
                         table.newStreamWriteBuilder().withCommitUser(commitUser).newWrite();
                 StreamTableCommit commit =

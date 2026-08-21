@@ -90,7 +90,8 @@ public class SavepointTagger {
     /** Drops an aborted savepoint's pending intent and removes any tag already created for it. */
     public void dropAborted(long checkpointId) {
         pendingIdentifiers.remove(checkpointId);
-        deleteTagIfExists(checkpointId);
+        SavepointTagUtils.deleteTagIfMatches(
+                tagManager, commitUser, checkpointId, tagDeletion, snapshotManager, callbacks);
     }
 
     private void createTags(Collection<Long> identifiers) {
@@ -102,13 +103,6 @@ public class SavepointTagger {
             // ignoreIfExists: a later checkpoint's completion may re-tag an already-tagged
             // snapshot.
             tagManager.createTag(snapshot, tagName, tagTimeRetained, callbacks, true);
-        }
-    }
-
-    private void deleteTagIfExists(long id) {
-        String tagName = SavepointTagUtils.tagNameOf(id);
-        if (tagManager.tagExists(tagName)) {
-            tagManager.deleteTag(tagName, tagDeletion, snapshotManager, callbacks);
         }
     }
 

@@ -18,6 +18,14 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.operation.TagDeletion;
+import org.apache.paimon.table.sink.TagCallback;
+import org.apache.paimon.tag.Tag;
+import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TagManager;
+
+import java.util.List;
+
 /** Helpers for savepoint tags — the tags Paimon auto-creates to mark Flink savepoints. */
 public class SavepointTagUtils {
 
@@ -27,5 +35,33 @@ public class SavepointTagUtils {
     /** Name of the auto-tag for a savepoint committed under {@code commitIdentifier}. */
     public static String tagNameOf(long commitIdentifier) {
         return PREFIX + commitIdentifier;
+    }
+
+    /**
+     * Whether the tag belongs to the savepoint committed by the given user and identifier.
+     *
+     * <p>Checkpoint identifiers restart with each job, so a matching tag name alone does not prove
+     * ownership.
+     */
+    public static boolean isSavepointTagFor(Tag tag, String commitUser, long commitIdentifier) {
+        return commitUser.equals(tag.commitUser()) && tag.commitIdentifier() == commitIdentifier;
+    }
+
+    /** Deletes the savepoint tag if it belongs to the given commit user and identifier. */
+    public static void deleteTagIfMatches(
+            TagManager tagManager,
+            String commitUser,
+            long commitIdentifier,
+            TagDeletion tagDeletion,
+            SnapshotManager snapshotManager,
+            List<TagCallback> callbacks) {
+        String tagName = tagNameOf(commitIdentifier);
+        tagManager
+                .get(tagName)
+                .filter(tag -> isSavepointTagFor(tag, commitUser, commitIdentifier))
+                .ifPresent(
+                        ignored ->
+                                tagManager.deleteTag(
+                                        tagName, tagDeletion, snapshotManager, callbacks));
     }
 }

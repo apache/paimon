@@ -151,10 +151,13 @@ public class AutoTagForSavepointCommitterOperator<CommitT, GlobalCommitT>
     public void notifyCheckpointAborted(long checkpointId) throws Exception {
         commitOperator.notifyCheckpointAborted(checkpointId);
         identifiersForTags.remove(checkpointId);
-        String tagName = SavepointTagUtils.tagNameOf(checkpointId);
-        if (tagManager.tagExists(tagName)) {
-            tagManager.deleteTag(tagName, tagDeletion, snapshotManager, callbacks);
-        }
+        SavepointTagUtils.deleteTagIfMatches(
+                tagManager,
+                commitOperator.getCommitUser(),
+                checkpointId,
+                tagDeletion,
+                snapshotManager,
+                callbacks);
     }
 
     private void createTagForIdentifiers(List<Long> identifiers) {
