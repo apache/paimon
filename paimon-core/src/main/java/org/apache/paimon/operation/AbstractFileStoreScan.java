@@ -373,69 +373,23 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         List<ManifestFileMeta> manifests = readManifests().filteredManifests;
         Map<BinaryRow, PartitionEntry> partitions = new ConcurrentHashMap<>();
         Consumer<ManifestFileMeta> processor =
-                manifest -> {
-                    if (canUseProjectedPartitionScan(manifest)) {
-                        readProjectedPartitionEntries(manifest, partitions);
-                    } else {
-                        PartitionEntry.merge(
-                                readManifest(
-                                        manifest, PartitionEntry::fromManifestEntry, null, null),
-                                partitions);
-                    }
-                };
+                manifest ->
+                        readManifest(
+                                manifest,
+                                PartitionEntry::fromManifestEntry,
+                                PARTITION_ENTRY_PROJECTION,
+                                this::filterProjectedPartitionEntry,
+                                entry ->
+                                        partitions.compute(
+                                                entry.partition(),
+                                                (partition, previous) ->
+                                                        previous == null
+                                                                ? entry
+                                                                : previous.merge(entry)));
         randomlyOnlyExecute(getExecutorService(parallelism), processor, manifests);
         return partitions.values().stream()
                 .filter(p -> p.fileCount() > 0)
                 .collect(Collectors.toList());
-    }
-
-    private boolean canUseProjectedPartitionScan(ManifestFileMeta manifest) {
-        // Projected scans bypass the manifest cache, so preserve the cached read path for files
-        // which are eligible for caching.
-        return !manifestFileFactory.isCacheable(manifest.fileSize())
-                && manifestEntryFilter == null
-                && !requiresFullManifestEntryForPartitionScan();
-    }
-
-    private void readProjectedPartitionEntries(
-            ManifestFileMeta manifest, Map<BinaryRow, PartitionEntry> partitions) {
-        long count = 0;
-        try (CloseableIterator<ProjectedManifestEntry> entries =
-                manifestFileFactory
-                        .create()
-                        .scan(
-                                manifest.fileName(),
-                                PARTITION_ENTRY_PROJECTION,
-                                manifestsReader.partitionFilter(),
-                                createBucketFilter())) {
-            while (entries.hasNext()) {
-                ProjectedManifestEntry entry = entries.next();
-                if (!filterProjectedPartitionEntry(entry)) {
-                    continue;
-                }
-
-                PartitionEntry partitionEntry = PartitionEntry.fromManifestEntry(entry);
-                partitions.compute(
-                        partitionEntry.partition(),
-                        (partition, previous) ->
-                                previous == null ? partitionEntry : previous.merge(partitionEntry));
-                count++;
-            }
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to scan manifest " + manifest.fileName(), e);
-        }
-        LOG.info("Read {} projected manifest entries from {}", count, manifest.fileName());
-    }
-
-    private boolean filterProjectedPartitionEntry(ProjectedManifestEntry entry) {
-        int level = entry.level();
-        if (specifiedLevel != null && level != specifiedLevel) {
-            return false;
-        }
-        if (levelFilter != null && !levelFilter.test(level)) {
-            return false;
-        }
-        return fileNameFilter == null || fileNameFilter.test(entry.fileName());
     }
 
     @Override
@@ -558,6 +512,55 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     @Override
     public List<ManifestEntry> readManifest(ManifestFileMeta manifest) {
         return readManifest(manifest, Function.identity(), null, null);
+    }
+
+    private <T> void readManifest(
+            ManifestFileMeta manifest,
+            Function<ManifestEntry, T> converter,
+            ProjectedManifestEntry.Projection projection,
+            Filter<ProjectedManifestEntry> projectedFilter,
+            Consumer<T> consumer) {
+        // A projected scan reads the file directly, so use the normal path when this manifest can
+        // benefit from the cache or an active filter needs fields outside the projection.
+        if (manifestFileFactory.isCacheable(manifest.fileSize())
+                || manifestEntryFilter != null
+                || requiresFullManifestEntryForPartitionScan()) {
+            readManifest(manifest, converter, null, null).forEach(consumer);
+            return;
+        }
+
+        long count = 0;
+        try (CloseableIterator<ProjectedManifestEntry> entries =
+                manifestFileFactory
+                        .create()
+                        .scan(
+                                manifest.fileName(),
+                                projection,
+                                manifestsReader.partitionFilter(),
+                                createBucketFilter())) {
+            while (entries.hasNext()) {
+                ProjectedManifestEntry entry = entries.next();
+                if (!projectedFilter.test(entry)) {
+                    continue;
+                }
+                consumer.accept(converter.apply(entry));
+                count++;
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to scan manifest " + manifest.fileName(), e);
+        }
+        LOG.info("Read {} projected manifest entries from {}", count, manifest.fileName());
+    }
+
+    private boolean filterProjectedPartitionEntry(ProjectedManifestEntry entry) {
+        int level = entry.level();
+        if (specifiedLevel != null && level != specifiedLevel) {
+            return false;
+        }
+        if (levelFilter != null && !levelFilter.test(level)) {
+            return false;
+        }
+        return fileNameFilter == null || fileNameFilter.test(entry.fileName());
     }
 
     private <T> List<T> readManifest(
