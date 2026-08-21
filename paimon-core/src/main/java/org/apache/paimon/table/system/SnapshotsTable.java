@@ -26,7 +26,6 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.predicate.And;
 import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.GreaterOrEqual;
@@ -74,6 +73,7 @@ import java.util.Optional;
 import java.util.OptionalLong;
 
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
+import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 
 /** A {@link Table} for showing committing snapshots of table. */
 public class SnapshotsTable implements ReadonlyTable {
@@ -213,6 +213,7 @@ public class SnapshotsTable implements ReadonlyTable {
         private Optional<Long> optionalFilterSnapshotIdMax = Optional.empty();
         private Optional<Long> optionalFilterSnapshotIdMin = Optional.empty();
         private final List<Long> snapshotIds = new ArrayList<>();
+        private boolean emptyRange;
 
         public SnapshotsRead(FileIO fileIO) {
             this.fileIO = fileIO;
@@ -225,18 +226,10 @@ public class SnapshotsTable implements ReadonlyTable {
             }
 
             String leafName = "snapshot_id";
-            if (predicate instanceof CompoundPredicate) {
-                CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
-                List<Predicate> children = compoundPredicate.children();
-                if ((compoundPredicate.function()) instanceof And) {
-                    for (Predicate leaf : children) {
-                        handleLeafPredicate(leaf, leafName);
-                    }
-                }
-
-                // optimize for IN filter
-                if ((compoundPredicate.function()) instanceof Or) {
-                    InPredicateVisitor.extractInElements(predicate, leafName)
+            for (Predicate child : splitAnd(predicate)) {
+                if (child instanceof CompoundPredicate
+                        && ((CompoundPredicate) child).function() instanceof Or) {
+                    InPredicateVisitor.extractInElements(child, leafName)
                             .ifPresent(
                                     leafs ->
                                             leafs.forEach(
@@ -244,9 +237,9 @@ public class SnapshotsTable implements ReadonlyTable {
                                                             snapshotIds.add(
                                                                     Long.parseLong(
                                                                             leaf.toString()))));
+                } else {
+                    handleLeafPredicate(child, leafName);
                 }
-            } else {
-                handleLeafPredicate(predicate, leafName);
             }
 
             return this;
@@ -257,31 +250,50 @@ public class SnapshotsTable implements ReadonlyTable {
                     predicate.visit(LeafPredicateExtractor.INSTANCE).get(leafName);
             if (snapshotPred != null) {
                 if (snapshotPred.function() instanceof Equal) {
-                    optionalFilterSnapshotIdMin =
-                            Optional.of((Long) snapshotPred.literals().get(0));
-                    optionalFilterSnapshotIdMax =
-                            Optional.of((Long) snapshotPred.literals().get(0));
+                    long snapshotId = (Long) snapshotPred.literals().get(0);
+                    updateMinSnapshotId(snapshotId);
+                    updateMaxSnapshotId(snapshotId);
                 }
 
                 if (snapshotPred.function() instanceof GreaterThan) {
-                    optionalFilterSnapshotIdMin =
-                            Optional.of((Long) snapshotPred.literals().get(0) + 1);
+                    long snapshotId = (Long) snapshotPred.literals().get(0);
+                    if (snapshotId == Long.MAX_VALUE) {
+                        emptyRange = true;
+                    } else {
+                        updateMinSnapshotId(snapshotId + 1);
+                    }
                 }
 
                 if (snapshotPred.function() instanceof GreaterOrEqual) {
-                    optionalFilterSnapshotIdMin =
-                            Optional.of((Long) snapshotPred.literals().get(0));
+                    updateMinSnapshotId((Long) snapshotPred.literals().get(0));
                 }
 
                 if (snapshotPred.function() instanceof LessThan) {
-                    optionalFilterSnapshotIdMax =
-                            Optional.of((Long) snapshotPred.literals().get(0) - 1);
+                    long snapshotId = (Long) snapshotPred.literals().get(0);
+                    if (snapshotId == Long.MIN_VALUE) {
+                        emptyRange = true;
+                    } else {
+                        updateMaxSnapshotId(snapshotId - 1);
+                    }
                 }
 
                 if (snapshotPred.function() instanceof LessOrEqual) {
-                    optionalFilterSnapshotIdMax =
-                            Optional.of((Long) snapshotPred.literals().get(0));
+                    updateMaxSnapshotId((Long) snapshotPred.literals().get(0));
                 }
+            }
+        }
+
+        private void updateMinSnapshotId(long candidate) {
+            if (!optionalFilterSnapshotIdMin.isPresent()
+                    || candidate > optionalFilterSnapshotIdMin.get()) {
+                optionalFilterSnapshotIdMin = Optional.of(candidate);
+            }
+        }
+
+        private void updateMaxSnapshotId(long candidate) {
+            if (!optionalFilterSnapshotIdMax.isPresent()
+                    || candidate < optionalFilterSnapshotIdMax.get()) {
+                optionalFilterSnapshotIdMax = Optional.of(candidate);
             }
         }
 
@@ -304,8 +316,14 @@ public class SnapshotsTable implements ReadonlyTable {
 
             SnapshotManager snapshotManager = dataTable.snapshotManager();
             Iterator<Snapshot> snapshots;
-            if (!snapshotIds.isEmpty()) {
-                snapshots = snapshotManager.snapshotsWithId(snapshotIds);
+            if (isSnapshotIdRangeEmpty()) {
+                snapshots = Collections.emptyIterator();
+            } else if (!snapshotIds.isEmpty()) {
+                List<Long> filteredSnapshotIds = filterSnapshotIdsByRange(snapshotIds);
+                snapshots =
+                        filteredSnapshotIds.isEmpty()
+                                ? Collections.emptyIterator()
+                                : snapshotManager.snapshotsWithId(filteredSnapshotIds);
             } else {
                 snapshots =
                         snapshotManager.snapshotsWithinRange(
@@ -322,6 +340,30 @@ public class SnapshotsTable implements ReadonlyTable {
                                                 .replaceRow(row));
             }
             return new IteratorRecordReader<>(rows);
+        }
+
+        private boolean isSnapshotIdRangeEmpty() {
+            return emptyRange
+                    || (optionalFilterSnapshotIdMin.isPresent()
+                            && optionalFilterSnapshotIdMax.isPresent()
+                            && optionalFilterSnapshotIdMin.get()
+                                    > optionalFilterSnapshotIdMax.get());
+        }
+
+        private List<Long> filterSnapshotIdsByRange(List<Long> ids) {
+            List<Long> filteredIds = new ArrayList<>();
+            for (long id : ids) {
+                if (optionalFilterSnapshotIdMin.isPresent()
+                        && id < optionalFilterSnapshotIdMin.get()) {
+                    continue;
+                }
+                if (optionalFilterSnapshotIdMax.isPresent()
+                        && id > optionalFilterSnapshotIdMax.get()) {
+                    continue;
+                }
+                filteredIds.add(id);
+            }
+            return filteredIds;
         }
 
         private InternalRow toRow(Snapshot snapshot) {

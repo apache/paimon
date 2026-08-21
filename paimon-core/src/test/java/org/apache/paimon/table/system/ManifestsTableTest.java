@@ -38,6 +38,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableTestBase;
@@ -176,9 +177,75 @@ public class ManifestsTableTest extends TableTestBase {
     }
 
     @Test
+    public void testFilterBySchemaIdEqualAndGreaterOrEqual() throws Exception {
+        catalog.alterTable(
+                identifier("T"),
+                Collections.singletonList(SchemaChange.addColumn("col2", DataTypes.INT())),
+                false);
+        table = catalog.getTable(identifier("T"));
+        write(table, GenericRow.of(3, 3, 1, 1));
+        manifestsTable = (ManifestsTable) catalog.getTable(identifier("T$manifests"));
+
+        PredicateBuilder builder = new PredicateBuilder(ManifestsTable.TABLE_TYPE);
+        Predicate predicate =
+                PredicateBuilder.and(builder.equal(4, 1L), builder.greaterOrEqual(4, 0L));
+        List<InternalRow> result = readWithFilter(manifestsTable, predicate);
+
+        assertThat(result).isNotEmpty();
+        assertThat(result).allMatch(row -> row.getLong(4) == 1L);
+    }
+
+    @Test
+    public void testFilterBySchemaIdEqualAndLessOrEqual() throws Exception {
+        catalog.alterTable(
+                identifier("T"),
+                Collections.singletonList(SchemaChange.addColumn("col2", DataTypes.INT())),
+                false);
+        table = catalog.getTable(identifier("T"));
+        write(table, GenericRow.of(3, 3, 1, 1));
+        manifestsTable = (ManifestsTable) catalog.getTable(identifier("T$manifests"));
+
+        PredicateBuilder builder = new PredicateBuilder(ManifestsTable.TABLE_TYPE);
+        for (Predicate predicate :
+                Arrays.asList(
+                        PredicateBuilder.and(builder.equal(4, 0L), builder.lessOrEqual(4, 1L)),
+                        PredicateBuilder.and(builder.lessOrEqual(4, 1L), builder.equal(4, 0L)))) {
+            List<InternalRow> result = readWithFilter(manifestsTable, predicate);
+
+            assertThat(result).isNotEmpty();
+            assertThat(result).allMatch(row -> row.getLong(4) == 0L);
+        }
+    }
+
+    @Test
     public void testFilterBySchemaIdEqualNoMatch() throws Exception {
         List<InternalRow> result = readWithFilter(manifestsTable, schemaIdEqual(999L));
         assertThat(result).isEmpty();
+    }
+
+    @Test
+    public void testFilterBySchemaIdNestedAnd() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(ManifestsTable.TABLE_TYPE);
+        Predicate predicate =
+                PredicateBuilder.and(
+                        builder.greaterOrEqual(4, 0L),
+                        builder.equal(4, 999L),
+                        builder.lessThan(4, 3L));
+
+        List<InternalRow> result = readWithFilter(manifestsTable, predicate);
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    public void testFilterBySchemaIdExclusiveBoundOverflow() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(ManifestsTable.TABLE_TYPE);
+        for (Predicate predicate :
+                Arrays.asList(
+                        builder.greaterThan(4, Long.MAX_VALUE),
+                        builder.lessThan(4, Long.MIN_VALUE))) {
+            List<InternalRow> result = readWithFilter(manifestsTable, predicate);
+            assertThat(result).isEmpty();
+        }
     }
 
     @Test
@@ -205,6 +272,30 @@ public class ManifestsTableTest extends TableTestBase {
         List<InternalRow> expectedRow = getExpectedResult(2L);
         List<InternalRow> result = readWithFilter(manifestsTable, predicate);
         assertThat(result).containsExactlyElementsOf(expectedRow);
+    }
+
+    @Test
+    public void testFilterBySchemaIdInAndRange() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(ManifestsTable.TABLE_TYPE);
+        List<Predicate> predicates =
+                Arrays.asList(
+                        PredicateBuilder.and(
+                                builder.in(4, Arrays.asList(0L, 99L)),
+                                builder.greaterOrEqual(4, 0L)),
+                        PredicateBuilder.and(
+                                builder.in(4, Collections.singletonList(0L)),
+                                builder.greaterOrEqual(4, 1L)));
+        for (int i = 0; i < predicates.size(); i++) {
+            Predicate predicate = predicates.get(i);
+            List<InternalRow> result = readWithFilter(manifestsTable, predicate);
+
+            if (i == 0) {
+                assertThat(result).isNotEmpty();
+                assertThat(result).allMatch(row -> row.getLong(4) == 0L);
+            } else {
+                assertThat(result).isEmpty();
+            }
+        }
     }
 
     @Test

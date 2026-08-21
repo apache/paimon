@@ -25,7 +25,6 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.predicate.And;
 import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.GreaterOrEqual;
@@ -79,6 +78,7 @@ import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
+import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 
 /** A {@link Table} for showing schemas of table. */
 public class SchemasTable implements ReadonlyTable {
@@ -189,6 +189,7 @@ public class SchemasTable implements ReadonlyTable {
         private @Nullable Long schemaIdMin = null;
         private @Nullable Long schemaIdMax = null;
         private final List<Long> schemaIds = new ArrayList<>();
+        private boolean emptyRange;
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
@@ -197,18 +198,10 @@ public class SchemasTable implements ReadonlyTable {
             }
 
             String leafName = "schema_id";
-            if (predicate instanceof CompoundPredicate) {
-                CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
-                if ((compoundPredicate.function()) instanceof And) {
-                    List<Predicate> children = compoundPredicate.children();
-                    for (Predicate leaf : children) {
-                        handleLeafPredicate(leaf, leafName);
-                    }
-                }
-
-                // optimize for IN filter
-                if ((compoundPredicate.function()) instanceof Or) {
-                    InPredicateVisitor.extractInElements(predicate, leafName)
+            for (Predicate child : splitAnd(predicate)) {
+                if (child instanceof CompoundPredicate
+                        && ((CompoundPredicate) child).function() instanceof Or) {
+                    InPredicateVisitor.extractInElements(child, leafName)
                             .ifPresent(
                                     leafs ->
                                             leafs.forEach(
@@ -216,9 +209,9 @@ public class SchemasTable implements ReadonlyTable {
                                                             schemaIds.add(
                                                                     Long.parseLong(
                                                                             leaf.toString()))));
+                } else {
+                    handleLeafPredicate(child, leafName);
                 }
-            } else {
-                handleLeafPredicate(predicate, leafName);
             }
 
             return this;
@@ -229,25 +222,48 @@ public class SchemasTable implements ReadonlyTable {
                     predicate.visit(LeafPredicateExtractor.INSTANCE).get(leafName);
             if (snapshotPred != null) {
                 if (snapshotPred.function() instanceof Equal) {
-                    schemaIdMin = (Long) snapshotPred.literals().get(0);
-                    schemaIdMax = (Long) snapshotPred.literals().get(0);
+                    long schemaId = (Long) snapshotPred.literals().get(0);
+                    updateMinSchemaId(schemaId);
+                    updateMaxSchemaId(schemaId);
                 }
 
                 if (snapshotPred.function() instanceof GreaterThan) {
-                    schemaIdMin = (Long) snapshotPred.literals().get(0) + 1;
+                    long schemaId = (Long) snapshotPred.literals().get(0);
+                    if (schemaId == Long.MAX_VALUE) {
+                        emptyRange = true;
+                    } else {
+                        updateMinSchemaId(schemaId + 1);
+                    }
                 }
 
                 if (snapshotPred.function() instanceof GreaterOrEqual) {
-                    schemaIdMin = (Long) snapshotPred.literals().get(0);
+                    updateMinSchemaId((Long) snapshotPred.literals().get(0));
                 }
 
                 if (snapshotPred.function() instanceof LessThan) {
-                    schemaIdMax = (Long) snapshotPred.literals().get(0) - 1;
+                    long schemaId = (Long) snapshotPred.literals().get(0);
+                    if (schemaId == Long.MIN_VALUE) {
+                        emptyRange = true;
+                    } else {
+                        updateMaxSchemaId(schemaId - 1);
+                    }
                 }
 
                 if (snapshotPred.function() instanceof LessOrEqual) {
-                    schemaIdMax = (Long) snapshotPred.literals().get(0);
+                    updateMaxSchemaId((Long) snapshotPred.literals().get(0));
                 }
+            }
+        }
+
+        private void updateMinSchemaId(long candidate) {
+            if (schemaIdMin == null || candidate > schemaIdMin) {
+                schemaIdMin = candidate;
+            }
+        }
+
+        private void updateMaxSchemaId(long candidate) {
+            if (schemaIdMax == null || candidate < schemaIdMax) {
+                schemaIdMax = candidate;
             }
         }
 
@@ -270,8 +286,10 @@ public class SchemasTable implements ReadonlyTable {
             SchemaManager manager = dataTable.schemaManager();
 
             List<TableSchema> tableSchemas;
-            if (!schemaIds.isEmpty()) {
-                tableSchemas = schemasWithId(manager, schemaIds);
+            if (isSchemaIdRangeEmpty()) {
+                tableSchemas = Collections.emptyList();
+            } else if (!schemaIds.isEmpty()) {
+                tableSchemas = schemasWithId(manager, filterSchemaIdsByRange(schemaIds));
             } else {
                 tableSchemas = listWithRange(manager, schemaIdMin, schemaIdMax);
             }
@@ -288,6 +306,25 @@ public class SchemasTable implements ReadonlyTable {
                                                 .replaceRow(row));
             }
             return new IteratorRecordReader<>(rows);
+        }
+
+        private boolean isSchemaIdRangeEmpty() {
+            return emptyRange
+                    || (schemaIdMin != null && schemaIdMax != null && schemaIdMin > schemaIdMax);
+        }
+
+        private List<Long> filterSchemaIdsByRange(List<Long> ids) {
+            List<Long> filteredIds = new ArrayList<>();
+            for (long id : ids) {
+                if (schemaIdMin != null && id < schemaIdMin) {
+                    continue;
+                }
+                if (schemaIdMax != null && id > schemaIdMax) {
+                    continue;
+                }
+                filteredIds.add(id);
+            }
+            return filteredIds;
         }
     }
 
