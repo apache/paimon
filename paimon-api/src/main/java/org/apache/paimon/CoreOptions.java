@@ -2486,6 +2486,21 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether enable unique row id for append table.");
 
+    @Immutable
+    public static final ConfigOption<Boolean> FIELD_ID_ONE_BASED =
+            key("field-id.one-based")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to assign field ids starting from 1 instead of 0 when creating "
+                                    + "a table (ids of all columns, including nested ones, are "
+                                    + "shifted by one). Paimon historically starts field ids at 0, "
+                                    + "but some external Iceberg readers (e.g. Snowflake) reject "
+                                    + "field id 0 in Iceberg metadata. Enable when creating tables "
+                                    + "with Iceberg compatibility for such readers. Only affects "
+                                    + "table creation; existing tables (and their data files, which "
+                                    + "embed field ids) keep their original ids.");
+
     public static final ConfigOption<Boolean> ROW_TRACKING_PARTITION_GROUP_ON_COMMIT =
             key("row-tracking.partition-group-on-commit")
                     .booleanType()
@@ -4255,6 +4270,10 @@ public class CoreOptions implements Serializable {
 
     public boolean rowTrackingEnabled() {
         return options.get(ROW_TRACKING_ENABLED);
+    }
+
+    public boolean fieldIdOneBased() {
+        return options.get(FIELD_ID_ONE_BASED);
     }
 
     public boolean rowTrackingPartitionGroupOnCommit() {
