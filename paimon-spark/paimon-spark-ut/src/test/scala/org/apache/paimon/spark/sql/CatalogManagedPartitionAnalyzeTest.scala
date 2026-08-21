@@ -42,6 +42,33 @@ import scala.collection.JavaConverters._
  */
 class CatalogManagedPartitionAnalyzeTest extends PaimonSparkTestWithRestCatalogBase {
 
+  test("ANALYZE after a TRUNCATE keeps the exact zero the truncation reported") {
+    val tableName = "analyze_after_truncate"
+    withTable(tableName) {
+      createTable(tableName)
+      writeCsvPartition(tableName, "20260101", "00", 1)
+      repair(tableName)
+      sql(s"ANALYZE TABLE ${qualified(tableName)} COMPUTE STATISTICS NOSCAN").collect()
+      assert(statisticsOf(tableName, "20260101", "00").fileCount() == 1L)
+
+      sql(s"TRUNCATE TABLE ${qualified(tableName)} PARTITION (dt = '20260101', hour = '00')")
+      val truncated = statisticsOf(tableName, "20260101", "00")
+      assert(truncated.fileCount() == 0L, truncated.toString)
+      assert(truncated.recordCount() == 0L, truncated.toString)
+
+      // Measuring an empty partition must not turn "nothing is here" back into "nobody measured".
+      sql(s"ANALYZE TABLE ${qualified(tableName)} COMPUTE STATISTICS NOSCAN").collect()
+      val listed = statisticsOf(tableName, "20260101", "00")
+      assert(listed.fileCount() == 0L, listed.toString)
+      assert(listed.recordCount() == 0L, listed.toString)
+
+      sql(s"ANALYZE TABLE ${qualified(tableName)} COMPUTE STATISTICS").collect()
+      val scanned = statisticsOf(tableName, "20260101", "00")
+      assert(scanned.fileCount() == 0L, scanned.toString)
+      assert(scanned.recordCount() == 0L, scanned.toString)
+    }
+  }
+
   test("ANALYZE with a full partition spec measures only that partition") {
     val tableName = "analyze_full_spec"
     withTable(tableName) {
