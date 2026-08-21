@@ -46,6 +46,8 @@ import org.apache.iceberg.catalog.Catalog;
 import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.exceptions.AlreadyExistsException;
+import org.apache.iceberg.exceptions.CommitStateUnknownException;
+import org.apache.iceberg.exceptions.ValidationException;
 import org.apache.iceberg.rest.Endpoint;
 import org.apache.iceberg.rest.RESTCatalog;
 import org.apache.iceberg.types.Types;
@@ -58,11 +60,13 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -140,6 +144,8 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
             IcebergMetadata newIcebergMetadata, @Nullable IcebergMetadata baseIcebergMetadata) {
         try {
             commitMetadataImpl(newIcebergMetadata, baseIcebergMetadata);
+        } catch (IcebergRestCatalogOutOfSyncException e) {
+            throw e;
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -215,27 +221,66 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                     updateBuilder = updatesForCorrectBase(metadata, newMetadata, true);
                 } else {
                     boolean withBase = checkBase(metadata, newMetadata, baseIcebergMetadata);
+                    if (withBase
+                            && !icebergOptions.restAutoRecreate()
+                            && !Objects.equals(
+                                    metadata.currentSnapshot().manifestListLocation(),
+                                    baseIcebergMetadata.currentSnapshot().manifestList())) {
+                        // The catalog head has the expected snapshot id but not the expected
+                        // content: the local metadata was regenerated (e.g. a full-history
+                        // rebuild) and the catalog still holds entries of the previous build.
+                        // The id-based check cannot see this; route through reconciliation so
+                        // the stale entries are cleaned up instead of being appended to.
+                        LOG.info(
+                                "catalog head {} matches the expected base snapshot id but not "
+                                        + "its manifest list, reconciling.",
+                                metadata.currentSnapshot().snapshotId());
+                        withBase = false;
+                    }
                     if (withBase) {
                         LOG.info("create updates with base metadata.");
                         updateBuilder = updatesForCorrectBase(metadata, newMetadata, false);
                     } else {
                         LOG.info(
-                                "create updates without base metadata. currentSnapshotId for base metadata: {}, for new metadata:{}",
+                                "catalog state diverged from the expected base. currentSnapshotId"
+                                        + " in catalog: {}, in new metadata: {}",
                                 metadata.currentSnapshot().snapshotId(),
                                 newMetadata.currentSnapshot() != null
                                         ? newMetadata.currentSnapshot().snapshotId()
                                         : "No snapshot");
-                        if (requiresRegistration(newIcebergMetadata)) {
+                        if (newMetadata.currentSnapshot() != null
+                                && sameSnapshot(
+                                        metadata.currentSnapshot(),
+                                        newMetadata.currentSnapshot())) {
+                            // in every mode: recreating or reconciling the table here would
+                            // only reproduce identical content under a new table identity
+                            LOG.info(
+                                    "Iceberg table {} already contains snapshot {}; nothing to"
+                                            + " publish.",
+                                    icebergTableIdentifier,
+                                    newMetadata.currentSnapshot().snapshotId());
+                            return;
+                        }
+                        if (!icebergOptions.restAutoRecreate()) {
+                            updateBuilder = updatesForDivergedBase(metadata, newMetadata);
+                            if (updateBuilder == null) {
+                                // the catalog already holds the intended snapshot
+                                return;
+                            }
+                        } else if (requiresRegistration(newIcebergMetadata)) {
                             LOG.info(
                                     "the base metadata is incorrect, re-registering the iceberg"
                                             + " table from local metadata.");
                             registerAsCurrent(newIcebergMetadata, newMetadata, true);
                             return;
+                        } else {
+                            updateBuilder = updatesForIncorrectBase(newMetadata);
                         }
-                        updateBuilder = updatesForIncorrectBase(newMetadata);
                     }
                 }
             }
+        } catch (IcebergRestCatalogOutOfSyncException e) {
+            throw e;
         } catch (Exception e) {
             throw new RuntimeException(
                     "Fail to create table or get table: " + icebergTableIdentifier, e);
@@ -247,12 +292,67 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
             LOG.debug("updates:{}", updatesToString(updatedForCommit.changes()));
         }
 
+        commitToRestCatalog(updatedForCommit);
+    }
+
+    /**
+     * Commit to the REST catalog, resolving ambiguous outcomes instead of failing pessimistically.
+     *
+     * <p>By the time this runs the Paimon snapshot and the local Iceberg metadata file are already
+     * durable, so an ambiguous catalog failure ({@link CommitStateUnknownException}, e.g. an AWS
+     * Glue timeout or 500 after the change was applied) must not be treated as fatal outright: the
+     * catalog is reloaded to check whether the commit actually landed, and if it verifiably did
+     * not, the same update set is retried once against the unchanged base. Only then is the
+     * ambiguity surfaced; a later commit still recovers by replaying the gap from the local
+     * metadata files through {@link #updatesForDivergedBase}, never by dropping the catalog table.
+     */
+    private void commitToRestCatalog(TableMetadata updatedForCommit) {
+        TableMetadata base = ((BaseTable) icebergTable).operations().current();
         try {
-            ((BaseTable) icebergTable)
-                    .operations()
-                    .commit(((BaseTable) icebergTable).operations().current(), updatedForCommit);
+            ((BaseTable) icebergTable).operations().commit(base, updatedForCommit);
+            return;
+        } catch (CommitStateUnknownException e) {
+            if (commitLanded(updatedForCommit)) {
+                LOG.info(
+                        "Ambiguous commit to iceberg table {} verified as applied after reloading "
+                                + "the catalog state.",
+                        icebergTableIdentifier);
+                return;
+            }
+            LOG.warn(
+                    "Commit to iceberg table {} finished in an unknown state and the catalog does "
+                            + "not show it as applied; retrying once against the unchanged base.",
+                    icebergTableIdentifier,
+                    e);
+            try {
+                ((BaseTable) icebergTable).operations().commit(base, updatedForCommit);
+                return;
+            } catch (Exception retryFailure) {
+                e.addSuppressed(retryFailure);
+            }
+            throw e;
         } catch (Exception e) {
             throw new RuntimeException("Fail to commit metadata to rest catalog.", e);
+        }
+    }
+
+    /** Whether the catalog's current snapshot is exactly the one {@code updatedForCommit} sets. */
+    private boolean commitLanded(TableMetadata updatedForCommit) {
+        try {
+            Table reloaded = getTable();
+            org.apache.iceberg.Snapshot current = reloaded.currentSnapshot();
+            org.apache.iceberg.Snapshot intended = updatedForCommit.currentSnapshot();
+            boolean landed = current != null && intended != null && sameSnapshot(current, intended);
+            if (landed) {
+                icebergTable = reloaded;
+            }
+            return landed;
+        } catch (Exception e) {
+            LOG.warn(
+                    "Failed to reload iceberg table {} while verifying an ambiguous commit.",
+                    icebergTableIdentifier,
+                    e);
+            return false;
         }
     }
 
@@ -276,7 +376,7 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
             updateBuilder.setDefaultPartitionSpec(newMetadata.defaultSpecId());
 
             // add snapshot
-            addNewSnapshot(newMetadata.currentSnapshot(), updateBuilder);
+            addNewSnapshot(base, newMetadata.currentSnapshot(), updateBuilder);
 
         } else {
             // add new schema if needed
@@ -293,7 +393,7 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
             }
 
             // add snapshot
-            addNewSnapshot(newMetadata.currentSnapshot(), updateBuilder);
+            addNewSnapshot(base, newMetadata.currentSnapshot(), updateBuilder);
 
             // remove snapshots not in new metadata
             Set<Long> snapshotIdsToRemove = new HashSet<>();
@@ -310,6 +410,209 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
 
         updateProperties(updateBuilder);
         return updateBuilder;
+    }
+
+    /**
+     * Reconcile a catalog whose state is not exactly one snapshot behind the new metadata, without
+     * ever dropping the catalog table ({@link IcebergOptions#REST_AUTO_RECREATE} set to false). The
+     * local metadata file records that metadata was <b>generated</b>, not that it was published to
+     * the catalog, so after an ambiguous or failed publication the catalog may be an arbitrary
+     * number of snapshots behind; publication completion is derived here by loading the catalog
+     * state rather than tracked separately.
+     *
+     * <p>Every Iceberg snapshot is self-contained through its manifest list, so a behind catalog is
+     * brought up to date by adding, in order, each retained snapshot it is missing and removing the
+     * entries the new metadata no longer retains, which is exactly the state that consecutive
+     * successful commits would have produced. Snapshots whose sequence number the catalog has
+     * already consumed (leftovers of a locally regenerated history) cannot be re-added, since
+     * Iceberg requires strictly increasing sequence numbers; they are removed without replacement,
+     * costing only catalog-side time travel to them.
+     *
+     * <p>The catalog table is never dropped or recreated. States that cannot be reconciled
+     * non-destructively (the catalog being ahead of the new metadata, or holding a different
+     * snapshot under the id being published) fail with {@link IcebergRestCatalogOutOfSyncException}
+     * instead.
+     *
+     * @return the updates to commit, or null if the catalog already holds the intended snapshot (a
+     *     previously ambiguous commit actually landed) and there is nothing to publish
+     */
+    @Nullable
+    private TableMetadata.Builder updatesForDivergedBase(
+            TableMetadata currentMetadata, TableMetadata newMetadata) {
+        long catalogSnapshotId = currentMetadata.currentSnapshot().snapshotId();
+        Snapshot newCurrentSnapshot = newMetadata.currentSnapshot();
+        if (newCurrentSnapshot == null) {
+            throw new IcebergRestCatalogOutOfSyncException(
+                    String.format(
+                            "Cannot reconcile iceberg table %s: the newly generated metadata "
+                                    + "contains no snapshot while the catalog is at snapshot %s. "
+                                    + "Remediation: investigate why Paimon generated empty Iceberg "
+                                    + "metadata; the catalog table was left untouched.",
+                            icebergTableIdentifier, catalogSnapshotId));
+        }
+        long newSnapshotId = newCurrentSnapshot.snapshotId();
+
+        if (catalogSnapshotId == newSnapshotId) {
+            if (sameSnapshot(currentMetadata.currentSnapshot(), newCurrentSnapshot)) {
+                LOG.info(
+                        "Iceberg table {} already contains snapshot {}; a previously ambiguous "
+                                + "commit landed, nothing to publish.",
+                        icebergTableIdentifier,
+                        newSnapshotId);
+                return null;
+            }
+            throw new IcebergRestCatalogOutOfSyncException(
+                    String.format(
+                            "Cannot reconcile iceberg table %s: the catalog is at snapshot %s "
+                                    + "with manifest list %s, but the metadata to publish carries "
+                                    + "a different snapshot under the same id (manifest list %s). "
+                                    + "The catalog head cannot be replaced in place because "
+                                    + "Iceberg sequence numbers are single-use. Remediation: the "
+                                    + "next Paimon commit publishes a higher snapshot and "
+                                    + "re-aligns the head; to discard the catalog state instead, "
+                                    + "drop or rename the catalog table manually. The catalog "
+                                    + "table was left untouched.",
+                            icebergTableIdentifier,
+                            catalogSnapshotId,
+                            currentMetadata.currentSnapshot().manifestListLocation(),
+                            newCurrentSnapshot.manifestListLocation()));
+        }
+
+        if (catalogSnapshotId > newSnapshotId) {
+            throw new IcebergRestCatalogOutOfSyncException(
+                    String.format(
+                            "Cannot reconcile iceberg table %s: the catalog is at snapshot %s, "
+                                    + "ahead of snapshot %s being published. The catalog table "
+                                    + "either belongs to a different (foreign or recreated) table "
+                                    + "history, or was advanced by another writer; rolling it "
+                                    + "back would be destructive. Remediation: verify the catalog "
+                                    + "table really mirrors this Paimon table, and drop or rename "
+                                    + "it manually if its history must be discarded. The catalog "
+                                    + "table was left untouched.",
+                            icebergTableIdentifier, catalogSnapshotId, newSnapshotId));
+        }
+
+        // The catalog is behind: replay, in order, every retained snapshot it is missing. A
+        // snapshot the catalog already holds with identical content (e.g. after an external
+        // rollback) is re-activated by a plain ref move; a genuinely new snapshot must be added,
+        // which Iceberg only allows with a sequence number above the catalog's high-water mark.
+        // Leftovers of a regenerated history below that mark cannot be re-added and are skipped
+        // (their stale entries are removed below).
+        long lastSequenceNumber = currentMetadata.lastSequenceNumber();
+        Map<Long, Snapshot> catalogSnapshotsById =
+                currentMetadata.snapshots().stream()
+                        .collect(Collectors.toMap(Snapshot::snapshotId, s -> s));
+        List<Snapshot> toReplay =
+                newMetadata.snapshots().stream()
+                        .filter(s -> s.snapshotId() > catalogSnapshotId)
+                        .filter(
+                                s -> {
+                                    Snapshot inCatalog = catalogSnapshotsById.get(s.snapshotId());
+                                    return inCatalog != null
+                                            ? sameSnapshot(s, inCatalog)
+                                            : s.sequenceNumber() > lastSequenceNumber;
+                                })
+                        .sorted(Comparator.comparingLong(Snapshot::snapshotId))
+                        .collect(Collectors.toList());
+        if (toReplay.isEmpty() || toReplay.get(toReplay.size() - 1).snapshotId() != newSnapshotId) {
+            throw new IcebergRestCatalogOutOfSyncException(
+                    String.format(
+                            "Cannot reconcile iceberg table %s: the catalog is at snapshot %s "
+                                    + "with last sequence number %s, and snapshot %s to be "
+                                    + "published cannot be added because its sequence number was "
+                                    + "already consumed by the catalog. Remediation: the next "
+                                    + "Paimon commit publishes a higher snapshot and re-aligns "
+                                    + "the catalog; to discard the catalog state instead, drop or "
+                                    + "rename the catalog table manually. The catalog table was "
+                                    + "left untouched.",
+                            icebergTableIdentifier,
+                            catalogSnapshotId,
+                            lastSequenceNumber,
+                            newSnapshotId));
+        }
+
+        Map<Long, Snapshot> newSnapshotsById =
+                newMetadata.snapshots().stream()
+                        .collect(Collectors.toMap(Snapshot::snapshotId, s -> s));
+        // Catalog entries the new metadata does not retain with identical content: snapshots
+        // expired locally, plus leftovers of a regenerated history (same id, different manifest
+        // list) whose manifest files may no longer exist.
+        Set<Long> staleSnapshotIds = new HashSet<>();
+        long replaced = 0;
+        for (Snapshot snapshot : currentMetadata.snapshots()) {
+            Snapshot inNew = newSnapshotsById.get(snapshot.snapshotId());
+            if (inNew == null || !sameSnapshot(snapshot, inNew)) {
+                staleSnapshotIds.add(snapshot.snapshotId());
+                if (inNew != null) {
+                    replaced++;
+                }
+            }
+        }
+        if (replaced > 0) {
+            LOG.warn(
+                    "Reconciling iceberg table {}: {} snapshot(s) in the catalog were generated "
+                            + "by an earlier metadata build and their regenerated replacements "
+                            + "cannot be re-added under already-consumed sequence numbers; they "
+                            + "are removed from the catalog without replacement. Time travel to "
+                            + "them through the catalog is unavailable; the full history remains "
+                            + "in the file-based Iceberg metadata.",
+                    icebergTableIdentifier,
+                    replaced);
+        }
+        LOG.info(
+                "Reconciling iceberg table {} from snapshot {} to snapshot {}: replaying {} "
+                        + "snapshot(s), removing {} stale snapshot(s).",
+                icebergTableIdentifier,
+                catalogSnapshotId,
+                newSnapshotId,
+                toReplay.size(),
+                staleSnapshotIds.size());
+
+        try {
+            TableMetadata.Builder updateBuilder = TableMetadata.buildFrom(currentMetadata);
+            if (newMetadata.formatVersion() > currentMetadata.formatVersion()) {
+                updateBuilder.upgradeFormatVersion(newMetadata.formatVersion());
+            }
+
+            int schemaId = icebergTable.schema().schemaId();
+            if (newMetadata.currentSchemaId() > schemaId) {
+                addAndSetCurrentSchema(
+                        newMetadata.schemas().stream()
+                                .filter(schema -> schema.schemaId() > schemaId)
+                                .collect(Collectors.toList()),
+                        newMetadata.currentSchemaId(),
+                        updateBuilder);
+            }
+
+            for (Snapshot snapshot : toReplay) {
+                addNewSnapshot(currentMetadata, snapshot, updateBuilder);
+            }
+            removeSnapshots(staleSnapshotIds, updateBuilder);
+            updateProperties(updateBuilder);
+            // build eagerly so Iceberg's own validation failures (e.g. a version 3 row-id space
+            // that restarted behind the catalog's next-row-id watermark) surface as a precise
+            // out-of-sync error instead of a generic commit failure
+            updateBuilder.build();
+            return updateBuilder;
+        } catch (ValidationException e) {
+            throw new IcebergRestCatalogOutOfSyncException(
+                    String.format(
+                            "Cannot reconcile iceberg table %s from snapshot %s to snapshot %s: "
+                                    + "the replayed snapshots are not addable on top of the "
+                                    + "catalog state (%s). Remediation: drop or rename the "
+                                    + "catalog table manually to republish from scratch. The "
+                                    + "catalog table was left untouched.",
+                            icebergTableIdentifier,
+                            catalogSnapshotId,
+                            newSnapshotId,
+                            e.getMessage()));
+        }
+    }
+
+    /** Whether two snapshot entries describe the same physical snapshot. */
+    private static boolean sameSnapshot(Snapshot a, Snapshot b) {
+        return a.snapshotId() == b.snapshotId()
+                && Objects.equals(a.manifestListLocation(), b.manifestListLocation());
     }
 
     private TableMetadata.Builder updatesForIncorrectBase(TableMetadata newMetadata) {
@@ -626,9 +929,16 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
     // metadata updates
     // -------------------------------------------------------------------------------------
 
-    // add a new snapshot and point it as current snapshot
-    private void addNewSnapshot(Snapshot newSnapshot, TableMetadata.Builder update) {
-        update.setBranchSnapshot(newSnapshot, SnapshotRef.MAIN_BRANCH);
+    // point the main branch at the given snapshot, adding it first unless the base metadata
+    // already contains it (Iceberg's Snapshot-taking overload always adds and rejects an existing
+    // id, e.g. when re-activating a snapshot after an external rollback)
+    private void addNewSnapshot(
+            TableMetadata base, Snapshot newSnapshot, TableMetadata.Builder update) {
+        if (base.snapshot(newSnapshot.snapshotId()) != null) {
+            update.setBranchSnapshot(newSnapshot.snapshotId(), SnapshotRef.MAIN_BRANCH);
+        } else {
+            update.setBranchSnapshot(newSnapshot, SnapshotRef.MAIN_BRANCH);
+        }
     }
 
     // remove snapshots recorded in table metadata
