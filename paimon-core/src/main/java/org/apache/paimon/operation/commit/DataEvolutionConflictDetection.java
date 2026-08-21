@@ -150,19 +150,8 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
             CommitKind commitKind,
             @Nullable CommitFailRetryResult previousAttempt,
             boolean hasOverwriteSincePreviousAttempt) {
-        if (commitKind == CommitKind.APPEND && !deltaFiles.isEmpty()) {
-            return super.scanBaseDataFiles(
-                    latestSnapshot,
-                    changedPartitions,
-                    deltaFiles,
-                    indexFiles,
-                    commitKind,
-                    previousAttempt,
-                    hasOverwriteSincePreviousAttempt);
-        }
-
         List<Range> changedRowRanges = changedRowRanges(deltaFiles, indexFiles);
-        Set<String> referencedDataFiles = referencedDataFiles(deltaFiles, indexFiles);
+        Set<String> referencedDataFiles = referencedDataFiles(deltaFiles, indexFiles, commitKind);
         if (!changedRowRanges.isEmpty()) {
             return scanChangedRowRanges(
                     latestSnapshot, changedPartitions, changedRowRanges, referencedDataFiles);
@@ -207,10 +196,16 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
     }
 
     private Set<String> referencedDataFiles(
-            List<ManifestEntry> deltaFiles, List<IndexManifestEntry> indexFiles) {
+            List<ManifestEntry> deltaFiles,
+            List<IndexManifestEntry> indexFiles,
+            CommitKind commitKind) {
+        // APPEND files may not have row IDs assigned yet, so use their names to detect replay.
         Set<String> referencedDataFiles =
                 deltaFiles.stream()
-                        .filter(entry -> entry.kind() == FileKind.DELETE)
+                        .filter(
+                                entry ->
+                                        entry.kind() == FileKind.DELETE
+                                                || commitKind == CommitKind.APPEND)
                         .map(entry -> entry.file().fileName())
                         .collect(Collectors.toSet());
         for (IndexManifestEntry indexFile : indexFiles) {

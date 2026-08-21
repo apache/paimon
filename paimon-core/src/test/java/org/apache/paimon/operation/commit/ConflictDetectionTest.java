@@ -359,14 +359,15 @@ class ConflictDetectionTest {
     }
 
     @Test
-    void testDataEvolutionAppendDataFileWithoutRowIdScansChangedPartitions() {
+    void testDataEvolutionAppendDataFileWithoutRowIdScansReferencedFile() {
         CommitScanner scanner = mock(CommitScanner.class);
         DataEvolutionConflictDetection detection =
                 (DataEvolutionConflictDetection) createConflictDetection(scanner, true, false);
         Snapshot snapshot = snapshot(1);
         List<BinaryRow> changedPartitions = Collections.singletonList(BinaryRow.singleColumn(1));
-        List<SimpleFileEntry> expected = Collections.singletonList(createFileEntry("base", ADD));
-        when(scanner.readAllEntriesFromChangedPartitions(snapshot, changedPartitions))
+        Set<String> referencedDataFiles = Collections.singleton("new");
+        List<SimpleFileEntry> expected = Collections.singletonList(createFileEntry("new", ADD));
+        when(scanner.readAllEntriesFromDataFiles(snapshot, changedPartitions, referencedDataFiles))
                 .thenReturn(expected);
 
         assertThat(
@@ -379,11 +380,13 @@ class ConflictDetectionTest {
                                 null,
                                 false))
                 .isSameAs(expected);
-        verify(scanner).readAllEntriesFromChangedPartitions(snapshot, changedPartitions);
+        verify(scanner)
+                .readAllEntriesFromDataFiles(snapshot, changedPartitions, referencedDataFiles);
+        verify(scanner, never()).readAllEntriesFromChangedPartitions(snapshot, changedPartitions);
     }
 
     @Test
-    void testDataEvolutionAppendDataFilesPreferDefaultPartitionScan() {
+    void testDataEvolutionAppendDataFilesUseSelectiveScans() {
         CommitScanner scanner = mock(CommitScanner.class);
         DataEvolutionConflictDetection detection =
                 (DataEvolutionConflictDetection) createConflictDetection(scanner, true, false);
@@ -391,10 +394,15 @@ class ConflictDetectionTest {
         BinaryRow partition = BinaryRow.singleColumn(1);
         List<BinaryRow> changedPartitions = Collections.singletonList(partition);
         Range changedRange = new Range(10, 19);
-        List<SimpleFileEntry> expected =
-                Collections.singletonList(createFileEntry("duplicate", ADD));
-        when(scanner.readAllEntriesFromChangedPartitions(snapshot, changedPartitions))
-                .thenReturn(expected);
+        SimpleFileEntry rangeBase =
+                createFileEntryWithRowId("updated", ADD, partition, 0, 10L, 10L);
+        SimpleFileEntry referencedBase = createFileEntry("duplicate", ADD);
+        when(scanner.readAllEntriesFromChangedRowRanges(
+                        snapshot, changedPartitions, Collections.singletonList(changedRange)))
+                .thenReturn(Collections.singletonList(rangeBase));
+        when(scanner.readAllEntriesFromDataFiles(
+                        snapshot, changedPartitions, Collections.singleton("duplicate")))
+                .thenReturn(Collections.singletonList(referencedBase));
 
         assertThat(
                         detection.scanBaseDataFiles(
@@ -407,11 +415,14 @@ class ConflictDetectionTest {
                                 Snapshot.CommitKind.APPEND,
                                 null,
                                 false))
-                .isSameAs(expected);
-        verify(scanner).readAllEntriesFromChangedPartitions(snapshot, changedPartitions);
-        verify(scanner, never())
+                .containsExactly(rangeBase, referencedBase);
+        verify(scanner)
                 .readAllEntriesFromChangedRowRanges(
                         snapshot, changedPartitions, Collections.singletonList(changedRange));
+        verify(scanner)
+                .readAllEntriesFromDataFiles(
+                        snapshot, changedPartitions, Collections.singleton("duplicate"));
+        verify(scanner, never()).readAllEntriesFromChangedPartitions(snapshot, changedPartitions);
     }
 
     @Test
