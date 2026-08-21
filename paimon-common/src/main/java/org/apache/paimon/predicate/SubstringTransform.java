@@ -107,7 +107,20 @@ public class SubstringTransform implements Transform {
 
     private static int readPosition(Object position, InternalRow row) {
         if (position instanceof FieldRef) {
-            return row.getInt(((FieldRef) position).index());
+            FieldRef ref = (FieldRef) position;
+            switch (ref.type().getTypeRoot()) {
+                case TINYINT:
+                    return row.getByte(ref.index());
+                case SMALLINT:
+                    return row.getShort(ref.index());
+                case INTEGER:
+                    return row.getInt(ref.index());
+                case BIGINT:
+                    return Math.toIntExact(row.getLong(ref.index()));
+                default:
+                    throw new IllegalArgumentException(
+                            "Unsupported substring position type: " + ref.type());
+            }
         }
         return Integer.parseInt(position.toString());
     }

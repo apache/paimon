@@ -20,11 +20,13 @@ package org.apache.paimon.predicate;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -98,6 +100,32 @@ class SubstringTransformTest {
                                 2,
                                 3));
         assertThat(result).isEqualTo(BinaryString.fromString("ell"));
+    }
+
+    @Test
+    public void testSubstringRefInputsWithDifferentIntegerTypes() {
+        List<Object> positions = Arrays.asList((byte) 2, (short) 2, 2, 2L);
+        List<DataType> types =
+                Arrays.asList(
+                        DataTypes.TINYINT(),
+                        DataTypes.SMALLINT(),
+                        DataTypes.INT(),
+                        DataTypes.BIGINT());
+
+        for (int i = 0; i < positions.size(); i++) {
+            SubstringTransform transform =
+                    new SubstringTransform(
+                            Arrays.asList(
+                                    new FieldRef(0, "value", DataTypes.STRING()),
+                                    new FieldRef(1, "position", types.get(i)),
+                                    3));
+
+            assertThat(
+                            transform.transform(
+                                    GenericRow.of(
+                                            BinaryString.fromString("hello"), positions.get(i))))
+                    .isEqualTo(BinaryString.fromString("ell"));
+        }
     }
 
     @Test
