@@ -75,8 +75,10 @@ public interface FormatTablePartitionManager extends Serializable {
      *
      * <p>Statistics are matched to {@code partitions} by {@link PartitionStatistics#spec()} and may
      * cover only some of them; {@code replaceStatistics} says whether they replace what the catalog
-     * holds or add to it, and is ignored when {@code statistics} is null. Reporting never
-     * unregisters a partition.
+     * holds or add to it, and is ignored when {@code statistics} is null. A field reported as
+     * unknown says nothing about itself and leaves the stored one as it was, so a measurement that
+     * could not take a number does not erase the last one that could. Reporting never unregisters a
+     * partition.
      *
      * <p>This is the method an implementation provides, so that none can report nothing by
      * accident: a decorator that forwards only the two-argument form would otherwise drop every
