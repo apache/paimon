@@ -389,6 +389,44 @@ class ConflictDetectionTest {
     }
 
     @Test
+    void testDataEvolutionIndexOnlyAppendScansChangedRowRanges() {
+        CommitScanner scanner = mock(CommitScanner.class);
+        DataEvolutionConflictDetection detection =
+                (DataEvolutionConflictDetection) createConflictDetection(scanner, true, false);
+        Snapshot snapshot = snapshot(1);
+        BinaryRow partition = BinaryRow.singleColumn(1);
+        List<BinaryRow> changedPartitions = Collections.singletonList(partition);
+        Range changedRange = new Range(10, 19);
+        List<SimpleFileEntry> expected =
+                Collections.singletonList(
+                        createFileEntryWithRowId("base", ADD, partition, 0, 10L, 10L));
+        when(scanner.readAllEntriesFromChangedRowRanges(
+                        snapshot, changedPartitions, Collections.singletonList(changedRange)))
+                .thenReturn(expected);
+
+        assertThat(
+                        detection.scanBaseDataFiles(
+                                snapshot,
+                                changedPartitions,
+                                Collections.emptyList(),
+                                Collections.singletonList(
+                                        createGlobalIndexEntry(
+                                                "idx",
+                                                ADD,
+                                                partition,
+                                                changedRange.from,
+                                                changedRange.to)),
+                                Snapshot.CommitKind.APPEND,
+                                null,
+                                false))
+                .containsExactlyElementsOf(expected);
+        verify(scanner)
+                .readAllEntriesFromChangedRowRanges(
+                        snapshot, changedPartitions, Collections.singletonList(changedRange));
+        verify(scanner, never()).readAllEntriesFromChangedPartitions(snapshot, changedPartitions);
+    }
+
+    @Test
     void testAppendScansChangedPartitions() {
         CommitScanner scanner = mock(CommitScanner.class);
         ConflictDetection detection = createConflictDetection(scanner, false, false);

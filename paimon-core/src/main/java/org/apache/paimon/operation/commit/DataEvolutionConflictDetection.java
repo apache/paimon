@@ -149,7 +149,8 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
             CommitKind commitKind,
             @Nullable CommitFailRetryResult previousAttempt,
             boolean hasOverwriteSincePreviousAttempt) {
-        if (commitKind == CommitKind.COMPACT) {
+        if (commitKind == CommitKind.COMPACT
+                || (commitKind == CommitKind.APPEND && deltaFiles.isEmpty())) {
             return scanCompactBaseDataFiles(
                     latestSnapshot,
                     changedPartitions,
