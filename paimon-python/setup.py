@@ -263,7 +263,7 @@ setup(
             'lumina-data>=0.1.0'
         ],
         'vindex': [
-            'paimon-vindex==0.3.0; python_version>="3.9"',
+            'paimon-vindex==0.4.0; python_version>="3.9"',
         ],
         'full-text': [
             'paimon-ftindex==0.1.0; python_version>="3.8"',

@@ -102,7 +102,7 @@ class VindexVectorIndexWriter:
             except ImportError as e:
                 raise ImportError(
                     "paimon-vindex is required to build vindex vector indexes. "
-                    "Install paimon-vindex==0.3.0 or pypaimon[vindex].") from e
+                    "Install paimon-vindex==0.4.0 or pypaimon[vindex].") from e
 
             self._close_temp_files()
             self._file_io.check_or_mkdirs(self._index_path)

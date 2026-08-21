@@ -160,7 +160,7 @@ class VindexVectorGlobalIndexReader(GlobalIndexReader):
             except ImportError as e:
                 raise ImportError(
                     "paimon-vindex is required to read vindex vector indexes. "
-                    "Install paimon-vindex==0.3.0 or pypaimon[vindex].") from e
+                    "Install paimon-vindex==0.4.0 or pypaimon[vindex].") from e
 
             file_path = (self._io_meta.external_path
                          if self._io_meta.external_path
