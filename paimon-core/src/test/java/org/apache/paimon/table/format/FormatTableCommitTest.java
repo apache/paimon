@@ -41,6 +41,8 @@ import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.entry;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
@@ -65,7 +67,9 @@ class FormatTableCommitTest {
         FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
         RuntimeException registrationFailure =
                 new RuntimeException("Catalog partition registration unavailable");
-        doThrow(registrationFailure).when(partitionManager).createPartitions(anyList(), eq(true));
+        doThrow(registrationFailure)
+                .when(partitionManager)
+                .createPartitions(anyList(), eq(true), any(), anyBoolean());
 
         FormatTableCommit commit =
                 new FormatTableCommit(
@@ -89,7 +93,7 @@ class FormatTableCommitTest {
         // A failed write leaves nothing behind, whichever step failed: rerunning it converges,
         // and an idempotent registration makes a partition that was registered anyway harmless.
         assertThat(fileIO.exists(targetPath)).isFalse();
-        verify(partitionManager).createPartitions(anyList(), eq(true));
+        verify(partitionManager).createPartitions(anyList(), eq(true), any(), anyBoolean());
     }
 
     @Test
@@ -119,7 +123,8 @@ class FormatTableCommitTest {
                 .hasRootCauseMessage("data commit failed");
 
         verify(committer).discard(fileIO);
-        verify(partitionManager, never()).createPartitions(anyList(), eq(true));
+        verify(partitionManager, never())
+                .createPartitions(anyList(), eq(true), any(), anyBoolean());
     }
 
     @Test
@@ -385,7 +390,7 @@ class FormatTableCommitTest {
             FormatTablePartitionManager partitionManager) {
         ArgumentCaptor<List<Map<String, String>>> captor =
                 ArgumentCaptor.forClass((Class) List.class);
-        verify(partitionManager).createPartitions(captor.capture(), eq(true));
+        verify(partitionManager).createPartitions(captor.capture(), eq(true), any(), anyBoolean());
         assertThat(captor.getValue()).hasSize(1);
         return captor.getValue().get(0);
     }

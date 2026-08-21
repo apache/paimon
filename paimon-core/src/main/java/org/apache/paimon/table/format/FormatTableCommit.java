@@ -30,11 +30,15 @@ import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.TableCommit;
 import org.apache.paimon.utils.PartitionPathUtils;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -45,6 +49,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -53,6 +58,8 @@ import static org.apache.paimon.table.format.FormatBatchWriteBuilder.validateSta
 
 /** Commit for Format Table. */
 public class FormatTableCommit implements BatchTableCommit {
+
+    private static final Logger LOG = LoggerFactory.getLogger(FormatTableCommit.class);
 
     private String location;
     private final boolean formatTablePartitionOnlyValueInPath;
@@ -107,10 +114,13 @@ public class FormatTableCommit implements BatchTableCommit {
     @Override
     public void commit(List<CommitMessage> commitMessages) {
         try {
-            List<TwoPhaseOutputStream.Committer> committers = new ArrayList<>();
+            // One reading for the whole commit: stat-ing each file back costs a request per
+            // file for a coarser number.
+            long commitTime = System.currentTimeMillis();
+            List<TwoPhaseCommitMessage> messages = new ArrayList<>();
             for (CommitMessage commitMessage : commitMessages) {
                 if (commitMessage instanceof TwoPhaseCommitMessage) {
-                    committers.add(((TwoPhaseCommitMessage) commitMessage).getCommitter());
+                    messages.add((TwoPhaseCommitMessage) commitMessage);
                 } else {
                     throw new RuntimeException(
                             "Unsupported commit message type: "
@@ -119,6 +129,7 @@ public class FormatTableCommit implements BatchTableCommit {
             }
 
             Set<Map<String, String>> partitionSpecs = new HashSet<>();
+            Set<Path> clearedPartitionPaths = new HashSet<>();
 
             if (staticPartitions != null && !staticPartitions.isEmpty()) {
                 Path partitionPath =
@@ -133,39 +144,63 @@ public class FormatTableCommit implements BatchTableCommit {
                 if (overwrite) {
                     // A static partition may name only the leading keys, in which case the path
                     // is a prefix and the partition directories of the remaining keys sit below.
-                    deletePreviousDataFile(
-                            partitionPath, partitionKeys.size() - staticPartitions.size());
+                    clearedPartitionPaths.addAll(
+                            deletePreviousDataFile(
+                                    partitionPath, partitionKeys.size() - staticPartitions.size()));
                 }
                 if (!fileIO.exists(partitionPath)) {
                     fileIO.mkdirs(partitionPath);
                 }
             } else if (overwrite) {
                 Set<Path> partitionPaths = new HashSet<>();
-                for (TwoPhaseOutputStream.Committer c : committers) {
-                    partitionPaths.add(c.targetPath().getParent());
+                for (TwoPhaseCommitMessage message : messages) {
+                    partitionPaths.add(message.getCommitter().targetPath().getParent());
                 }
                 for (Path p : partitionPaths) {
                     // The parent of a written file is a complete partition directory - the table
                     // directory itself when the table is unpartitioned - so there is no partition
-                    // level below it to descend.
+                    // level below it to descend, and it is a partition this commit writes anyway.
                     deletePreviousDataFile(p, 0);
                 }
             }
 
-            for (TwoPhaseOutputStream.Committer committer : committers) {
+            boolean registersPartitions =
+                    partitionKeys != null
+                            && !partitionKeys.isEmpty()
+                            && (hiveCatalog != null || partitionManager != null);
+            boolean reportsStatistics = registersPartitions && partitionManager != null;
+            Map<Map<String, String>, PartitionStatistics> statisticsByPartition =
+                    new LinkedHashMap<>();
+            for (TwoPhaseCommitMessage message : messages) {
+                TwoPhaseOutputStream.Committer committer = message.getCommitter();
                 committer.commit(this.fileIO);
-                if (partitionKeys != null
-                        && !partitionKeys.isEmpty()
-                        && (hiveCatalog != null || partitionManager != null)) {
-                    partitionSpecs.add(
+                if (registersPartitions) {
+                    // Extracted once: registration and statistics must key on the same spec.
+                    Map<String, String> spec =
                             extractPartitionSpecFromPath(
-                                    committer.targetPath().getParent(), partitionKeys));
+                                    committer.targetPath().getParent(), partitionKeys);
+                    partitionSpecs.add(spec);
+                    if (reportsStatistics) {
+                        statisticsByPartition.merge(
+                                spec,
+                                new PartitionStatistics(
+                                        spec,
+                                        message.recordCount(),
+                                        message.fileSizeInBytes(),
+                                        1,
+                                        commitTime,
+                                        PartitionStatistics.UNKNOWN_TOTAL_BUCKETS),
+                                FormatTableCommit::sum);
+                    }
                 }
             }
-            for (TwoPhaseOutputStream.Committer committer : committers) {
-                committer.clean(this.fileIO);
+            for (TwoPhaseCommitMessage message : messages) {
+                message.getCommitter().clean(this.fileIO);
             }
-            if (partitionManager != null && !partitionSpecs.isEmpty()) {
+            if (reportsStatistics) {
+                reportPartitions(
+                        partitionSpecs, statisticsByPartition, clearedPartitionPaths, commitTime);
+            } else if (partitionManager != null && !partitionSpecs.isEmpty()) {
                 // Concurrent writers may touch the same partition, so registration ignores the
                 // ones that already exist rather than failing the commit.
                 partitionManager.createPartitions(new ArrayList<>(partitionSpecs), true);
@@ -193,6 +228,120 @@ public class FormatTableCommit implements BatchTableCommit {
             this.abort(commitMessages);
             throw new RuntimeException(e);
         }
+    }
+
+    /**
+     * Registers the partitions this commit touched, carrying the statistics of what it wrote. A
+     * static prefix overwrite also empties partitions it writes nothing to; those report an exact
+     * zero and are registered with the rest, since a statistic can only be reported for a partition
+     * its own request registers.
+     */
+    private void reportPartitions(
+            Set<Map<String, String>> writtenPartitionSpecs,
+            Map<Map<String, String>, PartitionStatistics> statisticsByPartition,
+            Set<Path> clearedPartitionPaths,
+            long commitTime) {
+        for (Path cleared : clearedPartitionPaths) {
+            Map<String, String> spec = clearedPartitionSpec(cleared);
+            if (spec != null) {
+                // Emptied and not written to: an exact zero, dated to the commit that did it.
+                statisticsByPartition.putIfAbsent(
+                        spec,
+                        new PartitionStatistics(
+                                spec,
+                                0,
+                                0,
+                                0,
+                                commitTime,
+                                PartitionStatistics.UNKNOWN_TOTAL_BUCKETS));
+            }
+        }
+
+        // Statistics are matched by spec, not by position: the specs need only be a superset.
+        Set<Map<String, String>> specs = new LinkedHashSet<>(writtenPartitionSpecs);
+        specs.addAll(statisticsByPartition.keySet());
+        if (specs.isEmpty()) {
+            return;
+        }
+        // An overwriting commit replaced what the partitions held, so what it wrote is the total;
+        // an appending one saw only its own files, so its numbers are an increment.
+        partitionManager.createPartitions(
+                new ArrayList<>(specs),
+                true,
+                new ArrayList<>(statisticsByPartition.values()),
+                overwrite);
+    }
+
+    /** What one commit wrote into a partition, with one more of its files folded in. */
+    private static PartitionStatistics sum(PartitionStatistics summed, PartitionStatistics file) {
+        return new PartitionStatistics(
+                summed.spec(),
+                add(summed.recordCount(), file.recordCount()),
+                add(summed.fileSizeInBytes(), file.fileSizeInBytes()),
+                summed.fileCount() + file.fileCount(),
+                summed.lastFileCreationTime(),
+                PartitionStatistics.UNKNOWN_TOTAL_BUCKETS);
+    }
+
+    /** A count nobody took leaves that field unknown for the whole partition. */
+    private static long add(long sum, long value) {
+        return PartitionStatistics.isKnown(sum) && PartitionStatistics.isKnown(value)
+                ? sum + value
+                : PartitionStatistics.UNKNOWN;
+    }
+
+    /**
+     * The partition a cleared directory belongs to, or null when it is none of this table's.
+     * Requiring the spec to rebuild the same directory rules out one nested below a partition,
+     * whose trailing components would otherwise read as some other partition; such a directory is
+     * left alone, since stale statistics beat statistics of the wrong partition.
+     */
+    @Nullable
+    private Map<String, String> clearedPartitionSpec(Path clearedPath) {
+        LinkedHashMap<String, String> spec =
+                formatTablePartitionOnlyValueInPath
+                        ? PartitionPathUtils.extractPartitionSpecFromPathOnlyValue(
+                                clearedPath, partitionKeys)
+                        : PartitionPathUtils.extractPartitionSpecFromPath(
+                                clearedPath, partitionKeys);
+        if (spec == null) {
+            LOG.warn(
+                    "Cleared directory {} of table {} is not one of its partition directories; "
+                            + "its partition statistics are left unchanged.",
+                    clearedPath,
+                    tableIdentifier.getFullName());
+            return null;
+        }
+        Path rebuilt =
+                buildPartitionPath(
+                        location, spec, formatTablePartitionOnlyValueInPath, partitionKeys);
+        if (!samePathComponent(rebuilt, clearedPath)) {
+            LOG.warn(
+                    "Cleared directory {} of table {} does not rebuild from partition spec {}; "
+                            + "its partition statistics are left unchanged.",
+                    clearedPath,
+                    tableIdentifier.getFullName(),
+                    spec);
+            return null;
+        }
+        return spec;
+    }
+
+    /**
+     * Whether two paths name the same directory, ignoring scheme and authority: a {@link FileIO}
+     * that delegates answers a listing under the scheme it used, not the one it was asked with.
+     */
+    private static boolean samePathComponent(Path left, Path right) {
+        return trimTrailingSeparators(left.toUri().normalize().getPath())
+                .equals(trimTrailingSeparators(right.toUri().normalize().getPath()));
+    }
+
+    private static String trimTrailingSeparators(String path) {
+        String trimmed = path;
+        while (trimmed.length() > 1 && trimmed.endsWith(Path.SEPARATOR)) {
+            trimmed = trimmed.substring(0, trimmed.length() - 1);
+        }
+        return trimmed;
     }
 
     private Method getHiveCreatePartitionsInHmsMethod() throws NoSuchMethodException {
@@ -276,8 +425,13 @@ public class FormatTableCommit implements BatchTableCommit {
     @Override
     public void close() throws Exception {}
 
-    private void deletePreviousDataFile(Path partitionPath, int partitionLevels)
+    /**
+     * Deletes the data files below a path and returns the directories they sat in, which for a
+     * static prefix overwrite can be partitions this commit never writes.
+     */
+    private Set<Path> deletePreviousDataFile(Path partitionPath, int partitionLevels)
             throws IOException {
+        Set<Path> clearedPartitionPaths = new HashSet<>();
         if (fileIO.exists(partitionPath)) {
             // Committed data files only: what sits under a staging directory is another writer's
             // uncommitted output, whatever its name looks like.
@@ -289,13 +443,18 @@ public class FormatTableCommit implements BatchTableCommit {
                             formatTablePartitionOnlyValueInPath,
                             defaultPartName)) {
                 try {
-                    fileIO.delete(file.getPath(), false);
+                    // Only what this commit removed: a file another writer deleted first would
+                    // have every concurrent writer report the whole subtree.
+                    if (fileIO.delete(file.getPath(), false)) {
+                        clearedPartitionPaths.add(file.getPath().getParent());
+                    }
                 } catch (FileNotFoundException ignore) {
                 } catch (IOException e) {
                     throw new RuntimeException(e);
                 }
             }
         }
+        return clearedPartitionPaths;
     }
 
     @Override
