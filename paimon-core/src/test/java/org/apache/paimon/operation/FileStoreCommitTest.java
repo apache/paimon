@@ -683,6 +683,29 @@ public class FileStoreCommitTest {
     }
 
     @Test
+    public void testCommitOldSnapshotAgainForDataEvolution() throws Exception {
+        TestFileStore store = createRowTrackingDataEvolutionStore();
+        List<ManifestCommittable> committables = new ArrayList<>();
+
+        store.commitDataImpl(
+                generateDataList(10),
+                gen::getPartition,
+                kv -> 0,
+                false,
+                0L,
+                null,
+                Collections.emptyList(),
+                (commit, committable) -> {
+                    commit.commit(committable, false);
+                    committables.add(committable);
+                });
+
+        assertThatThrownBy(() -> store.newCommit().commit(committables.get(0), true))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Give up committing.");
+    }
+
+    @Test
     public void testCommitWatermarkWithValue() throws Exception {
         TestFileStore store = createStore(false, 2);
 
