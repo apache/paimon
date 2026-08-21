@@ -148,17 +148,15 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
             List<ManifestEntry> deltaFiles,
             List<IndexManifestEntry> indexFiles,
             CommitKind commitKind,
-            boolean discardDuplicate,
             @Nullable CommitFailRetryResult previousAttempt,
             boolean hasOverwriteSincePreviousAttempt) {
-        if (discardDuplicate && !deltaFiles.isEmpty()) {
+        if (commitKind == CommitKind.APPEND && !deltaFiles.isEmpty()) {
             return super.scanBaseDataFiles(
                     latestSnapshot,
                     changedPartitions,
                     deltaFiles,
                     indexFiles,
                     commitKind,
-                    discardDuplicate,
                     previousAttempt,
                     hasOverwriteSincePreviousAttempt);
         }

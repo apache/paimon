@@ -1061,7 +1061,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             deltaFiles,
                             indexFiles,
                             commitKind,
-                            discardDuplicate,
                             commitFailRetry,
                             hasOverwriteSinceLastAttempt);
             if (discardDuplicate) {
