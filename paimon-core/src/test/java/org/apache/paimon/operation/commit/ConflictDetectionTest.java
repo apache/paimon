@@ -369,15 +369,12 @@ class ConflictDetectionTest {
     }
 
     @Test
-    void testDataEvolutionAppendUsesDefaultPartitionScan() {
+    void testDataEvolutionAppendWithoutSelectorsSkipsScan() {
         CommitScanner scanner = mock(CommitScanner.class);
         DataEvolutionConflictDetection detection =
                 (DataEvolutionConflictDetection) createConflictDetection(scanner, true, false);
         Snapshot snapshot = snapshot(1);
         List<BinaryRow> changedPartitions = Collections.singletonList(BinaryRow.singleColumn(1));
-        List<SimpleFileEntry> expected = Collections.singletonList(createFileEntry("base", ADD));
-        when(scanner.readAllEntriesFromChangedPartitions(snapshot, changedPartitions))
-                .thenReturn(expected);
 
         assertThat(
                         detection.scanBaseDataFiles(
@@ -389,7 +386,8 @@ class ConflictDetectionTest {
                                 false,
                                 null,
                                 false))
-                .isSameAs(expected);
+                .isEmpty();
+        verifyNoInteractions(scanner);
     }
 
     @Test

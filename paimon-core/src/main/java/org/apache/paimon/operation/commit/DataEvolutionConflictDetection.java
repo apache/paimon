@@ -174,18 +174,7 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
                     .readAllEntriesFromDataFiles(
                             latestSnapshot, changedPartitions, referencedDataFiles);
         }
-        if (commitKind == CommitKind.COMPACT || deltaFiles.isEmpty()) {
-            return Collections.emptyList();
-        }
-        return super.scanBaseDataFiles(
-                latestSnapshot,
-                changedPartitions,
-                deltaFiles,
-                indexFiles,
-                commitKind,
-                discardDuplicate,
-                previousAttempt,
-                hasOverwriteSincePreviousAttempt);
+        return Collections.emptyList();
     }
 
     private List<SimpleFileEntry> scanChangedRowRanges(
