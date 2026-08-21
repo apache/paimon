@@ -151,7 +151,7 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
             @Nullable CommitFailRetryResult previousAttempt,
             boolean hasOverwriteSincePreviousAttempt) {
         List<Range> changedRowRanges = changedRowRanges(deltaFiles, indexFiles);
-        Set<String> referencedDataFiles = referencedDataFiles(deltaFiles, indexFiles, commitKind);
+        Set<String> referencedDataFiles = referencedDataFiles(deltaFiles, indexFiles);
         if (!changedRowRanges.isEmpty()) {
             return scanChangedRowRanges(
                     latestSnapshot, changedPartitions, changedRowRanges, referencedDataFiles);
@@ -196,16 +196,10 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
     }
 
     private Set<String> referencedDataFiles(
-            List<ManifestEntry> deltaFiles,
-            List<IndexManifestEntry> indexFiles,
-            CommitKind commitKind) {
-        // APPEND files may not have row IDs assigned yet, so use their names to detect replay.
+            List<ManifestEntry> deltaFiles, List<IndexManifestEntry> indexFiles) {
+        // Include ADD files to detect replay even if their row IDs have changed or are unassigned.
         Set<String> referencedDataFiles =
                 deltaFiles.stream()
-                        .filter(
-                                entry ->
-                                        entry.kind() == FileKind.DELETE
-                                                || commitKind == CommitKind.APPEND)
                         .map(entry -> entry.file().fileName())
                         .collect(Collectors.toSet());
         for (IndexManifestEntry indexFile : indexFiles) {

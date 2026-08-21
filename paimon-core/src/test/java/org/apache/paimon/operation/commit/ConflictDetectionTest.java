@@ -97,7 +97,7 @@ class ConflictDetectionTest {
     }
 
     @Test
-    void testDataEvolutionCompactScansChangedRowRanges() {
+    void testDataEvolutionCompactScansChangedRowRangesAndAddedFile() {
         CommitScanner scanner = mock(CommitScanner.class);
         DataEvolutionConflictDetection detection =
                 (DataEvolutionConflictDetection) createConflictDetection(scanner, true, false);
@@ -110,10 +110,14 @@ class ConflictDetectionTest {
         DataFileMeta dataFile = mock(DataFileMeta.class);
         when(delta.kind()).thenReturn(ADD);
         when(delta.file()).thenReturn(dataFile);
+        when(dataFile.fileName()).thenReturn("added");
         when(dataFile.firstRowId()).thenReturn(10L);
         when(dataFile.nonNullRowIdRange()).thenReturn(changedRange);
         when(scanner.readAllEntriesFromChangedRowRanges(
                         snapshot, changedPartitions, Collections.singletonList(changedRange)))
+                .thenReturn(Collections.emptyList());
+        when(scanner.readAllEntriesFromDataFiles(
+                        snapshot, changedPartitions, Collections.singleton("added")))
                 .thenReturn(Collections.emptyList());
 
         assertThat(
@@ -129,6 +133,9 @@ class ConflictDetectionTest {
         verify(scanner)
                 .readAllEntriesFromChangedRowRanges(
                         snapshot, changedPartitions, Collections.singletonList(changedRange));
+        verify(scanner)
+                .readAllEntriesFromDataFiles(
+                        snapshot, changedPartitions, Collections.singleton("added"));
     }
 
     @Test
@@ -147,7 +154,7 @@ class ConflictDetectionTest {
                 createFileEntryWithRowId("range-base", ADD, partition, 0, 10L, 10L);
         SimpleFileEntry legacyBase = createFileEntry("legacy", ADD);
         SimpleFileEntry dvBase = createFileEntry("dv-base", ADD);
-        Set<String> referencedFiles = new HashSet<>(Arrays.asList("legacy", "dv-base"));
+        Set<String> referencedFiles = new HashSet<>(Arrays.asList("added", "legacy", "dv-base"));
         when(scanner.readAllEntriesFromChangedRowRanges(
                         snapshot, changedPartitions, Collections.singletonList(changedRange)))
                 .thenReturn(Collections.singletonList(rangeBase));
@@ -321,7 +328,9 @@ class ConflictDetectionTest {
                         snapshot, changedPartitions, Collections.singletonList(changedRange)))
                 .thenReturn(Collections.singletonList(rangeBase));
         when(scanner.readAllEntriesFromDataFiles(
-                        snapshot, changedPartitions, Collections.singleton("legacy")))
+                        snapshot,
+                        changedPartitions,
+                        new HashSet<>(Arrays.asList("added", "legacy"))))
                 .thenReturn(Collections.singletonList(legacyBase));
 
         assertThat(
