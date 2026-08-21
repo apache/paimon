@@ -38,8 +38,8 @@ public class CheckpointCommittablesSerializerTest {
                     new CommittableSerializer(new CommitMessageSerializer()));
 
     @Test
-    public void testCurrentVersionIsV2() {
-        assertThat(serializer.getVersion()).isEqualTo(2);
+    public void testCurrentVersionIsV3() {
+        assertThat(serializer.getVersion()).isEqualTo(3);
     }
 
     @Test
@@ -53,7 +53,21 @@ public class CheckpointCommittablesSerializerTest {
             assertThat(decoded.checkpointId()).isEqualTo(42L);
             assertThat(decoded.watermark()).isEqualTo(4242L);
             assertThat(decoded.idle()).isEqualTo(idle);
+            assertThat(decoded.shouldCreateSavepointTag()).isFalse();
             assertThat(decoded.committables()).isEmpty();
+        }
+    }
+
+    @Test
+    public void testRoundTripPreservesSavepointFlag() throws IOException {
+        for (boolean savepoint : new boolean[] {true, false}) {
+            CheckpointCommittables original =
+                    new CheckpointCommittables(
+                            42L, Collections.emptyList(), /* watermark */ 4242L, false, savepoint);
+            CheckpointCommittables decoded =
+                    serializer.deserialize(serializer.getVersion(), serializer.serialize(original));
+            assertThat(decoded.checkpointId()).isEqualTo(42L);
+            assertThat(decoded.shouldCreateSavepointTag()).isEqualTo(savepoint);
         }
     }
 
@@ -73,6 +87,25 @@ public class CheckpointCommittablesSerializerTest {
         // v1 predates idle tracking; readers must default to ACTIVE so pre-upgrade payloads keep
         // participating in the min just like they did before.
         assertThat(decoded.idle()).isFalse();
+        assertThat(decoded.shouldCreateSavepointTag()).isFalse();
+        assertThat(decoded.committables()).isEmpty();
+    }
+
+    @Test
+    public void testV2PayloadDeserializesWithSavepointFalse() throws IOException {
+        // Hand-encode a v2 payload (idle bit but no savepoint bit) to exercise the v2->v3 fallback.
+        DataOutputSerializer out = new DataOutputSerializer(32);
+        out.writeLong(7L); // checkpointId
+        out.writeLong(1234L); // watermark
+        out.writeBoolean(true); // idle
+        out.writeInt(new CommittableSerializer(new CommitMessageSerializer()).getVersion());
+        out.writeInt(0); // empty committables
+
+        CheckpointCommittables decoded = serializer.deserialize(2, out.getCopyOfBuffer());
+        assertThat(decoded.checkpointId()).isEqualTo(7L);
+        assertThat(decoded.idle()).isTrue();
+        // v2 predates savepoint tracking; default to false (a normal checkpoint).
+        assertThat(decoded.shouldCreateSavepointTag()).isFalse();
         assertThat(decoded.committables()).isEmpty();
     }
 
