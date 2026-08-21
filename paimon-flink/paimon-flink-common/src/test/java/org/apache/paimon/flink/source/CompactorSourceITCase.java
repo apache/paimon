@@ -27,6 +27,7 @@ import org.apache.paimon.flink.FlinkConnectorOptions.CompactionBucketDistributio
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.Schema;
@@ -37,15 +38,18 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.apache.flink.connector.testutils.source.reader.TestingSplitEnumeratorContext;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.graph.StreamEdge;
 import org.apache.flink.streaming.api.graph.StreamGraph;
 import org.apache.flink.streaming.api.graph.StreamNode;
+import org.apache.flink.streaming.api.transformations.SourceTransformation;
 import org.apache.flink.streaming.runtime.partitioner.ForwardPartitioner;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.util.CloseableIterator;
@@ -65,6 +69,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -208,6 +213,81 @@ public class CompactorSourceITCase extends AbstractTestBase {
         write.close();
         commit.close();
         it.close();
+    }
+
+    @Test
+    public void testStreamingReadPreservesStatsWhenDeleteManifestStatsAreDropped()
+            throws Exception {
+        FileStoreTable table =
+                createFileStoreTable()
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.MANIFEST_DELETE_FILE_DROP_STATS.key(), "true"));
+        StreamWriteBuilder streamWriteBuilder =
+                table.newStreamWriteBuilder().withCommitUser(commitUser);
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
+        write.write(rowData(1, 1510, BinaryString.fromString("20221208"), 15));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        StreamExecutionEnvironment env =
+                streamExecutionEnvironmentBuilder().streamingMode().build();
+        DataStreamSource<RowData> compactorSource =
+                new CompactorSourceBuilder("test", table)
+                        .withContinuousMode(true)
+                        .withEnv(env)
+                        .build();
+        CloseableIterator<RowData> it = compactorSource.executeAndCollect();
+
+        List<DataFileMeta> files = dataFileMetaSerializer.deserializeList(it.next().getBinary(3));
+        assertThat(files).hasSize(1);
+        assertThat(files.get(0).valueStats()).isNotEqualTo(EMPTY_STATS);
+
+        write.close();
+        commit.close();
+        it.close();
+    }
+
+    @Test
+    public void testBatchReadDropsStatsWhenDeleteManifestStatsAreDropped() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable()
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.MANIFEST_DELETE_FILE_DROP_STATS.key(), "true"));
+        StreamWriteBuilder streamWriteBuilder =
+                table.newStreamWriteBuilder().withCommitUser(commitUser);
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
+        write.write(rowData(1, 1510, BinaryString.fromString("20221208"), 15));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        StreamExecutionEnvironment env =
+                streamExecutionEnvironmentBuilder().streamingMode().build();
+        DataStreamSource<RowData> compactorSource =
+                new CompactorSourceBuilder("test", table)
+                        .withContinuousMode(false)
+                        .withEnv(env)
+                        .build();
+        StaticFileStoreSource source =
+                (StaticFileStoreSource)
+                        ((SourceTransformation<?, ?, ?>) compactorSource.getTransformation())
+                                .getSource();
+        TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
+                new TestingSplitEnumeratorContext<>(1);
+        StaticFileStoreSplitEnumerator enumerator =
+                (StaticFileStoreSplitEnumerator) source.createEnumerator(context);
+
+        assertThat(enumerator.getSplitAssigner().remainingSplits()).hasSize(1);
+        FileStoreSourceSplit sourceSplit =
+                enumerator.getSplitAssigner().remainingSplits().iterator().next();
+        DataSplit dataSplit = (DataSplit) sourceSplit.split();
+        assertThat(dataSplit.dataFiles()).hasSize(1);
+        assertThat(dataSplit.dataFiles().get(0).valueStats()).isEqualTo(EMPTY_STATS);
+
+        enumerator.close();
+        write.close();
+        commit.close();
     }
 
     @Test

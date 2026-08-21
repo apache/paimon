@@ -2115,7 +2115,8 @@ public class FileStoreCommitTest {
 
     private static List<ManifestEntry> tableFilesFrom(
             ManifestCommittable committable, CoreOptions options) {
-        ManifestEntryChanges changes = new ManifestEntryChanges(options.bucket());
+        ManifestEntryChanges changes =
+                new ManifestEntryChanges(options.bucket(), options.manifestDeleteFileDropStats());
         committable.fileCommittables().forEach(changes::collect);
         return new ArrayList<>(changes.appendTableFiles);
     }
