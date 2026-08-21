@@ -30,7 +30,7 @@ import org.apache.paimon.fs.Path
 import org.apache.paimon.index.{BucketAssigner, SimpleHashBucketAssigner}
 import org.apache.paimon.io.{CompactIncrement, DataIncrement}
 import org.apache.paimon.manifest.FileKind
-import org.apache.paimon.spark.{SparkPostponeStagedCommitter, SparkRow, SparkTypeUtils}
+import org.apache.paimon.spark.{SparkPostponeStagedCommitter, SparkRow}
 import org.apache.paimon.spark.catalog.functions.BucketFunction
 import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_COL}
 import org.apache.paimon.spark.sort.TableSorter
@@ -40,7 +40,7 @@ import org.apache.paimon.spark.write.{PaimonDataWrite, WriteHelper, WriteTaskRes
 import org.apache.paimon.table.{FileStoreTable, SpecialFields}
 import org.apache.paimon.table.BucketMode._
 import org.apache.paimon.table.sink._
-import org.apache.paimon.types.{RowKind, RowType}
+import org.apache.paimon.types.RowKind
 import org.apache.paimon.utils.{SerializationUtils, UriReaderFactory}
 
 import org.apache.spark.{Partitioner, TaskContext}
@@ -247,7 +247,6 @@ case class PaimonSparkWriter(
     val written: Dataset[_ <: WriteTaskResult] = bucketMode match {
       case KEY_DYNAMIC =>
         // Topology: input -> bootstrap -> shuffle by key hash -> bucket-assigner -> shuffle by partition & bucket
-        val rowType = SparkTypeUtils.toPaimonType(withInitBucketCol.schema).asInstanceOf[RowType]
         val assignerParallelism = Option(coreOptions.dynamicBucketAssignerParallelism)
           .map(_.toInt)
           .getOrElse(sparkParallelism)
@@ -259,11 +258,7 @@ case class PaimonSparkWriter(
             uriReaderFactory)
 
         val globalDynamicBucketProcessor =
-          GlobalDynamicBucketProcessor(
-            table,
-            rowType,
-            assignerParallelism,
-            encoderGroupWithBucketCol)
+          GlobalDynamicBucketProcessor(table, assignerParallelism, encoderGroupWithBucketCol)
         val repartitioned = repartitionByPartitionsAndBucket(
           sparkSession.createDataFrame(
             bootstrapped.mapPartitions(globalDynamicBucketProcessor.processPartition),
