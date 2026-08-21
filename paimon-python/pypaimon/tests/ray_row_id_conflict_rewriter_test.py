@@ -18,6 +18,7 @@
 import unittest
 from unittest.mock import Mock, patch
 
+from pypaimon.ray.data_evolution_merge_into import _reraise_inner
 from pypaimon.ray.row_id_conflict_rewriter import (
     commit_self_merge_with_compaction_retry,
 )
@@ -75,6 +76,16 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
         rewrite_updates.assert_not_called()
         abort_messages.assert_not_called()
         commit.close.assert_called_once_with()
+
+    def test_public_error_preserves_uncertain_commit(self):
+        conflict = RuntimeError('inner conflict')
+        uncertain = CommitResultUncertainError('uncertain commit')
+        uncertain.__cause__ = conflict
+
+        with self.assertRaises(CommitResultUncertainError) as context:
+            _reraise_inner(uncertain)
+
+        self.assertIs(uncertain, context.exception)
 
 
 if __name__ == '__main__':

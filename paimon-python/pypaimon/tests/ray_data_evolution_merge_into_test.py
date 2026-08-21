@@ -2362,6 +2362,64 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertIn("multiple 'MERGE INTO'", str(ctx.exception))
         self.assertEqual(self._read_sorted(target)['age'][1], 100)
 
+    def test_self_merge_missing_logical_snapshot_fails_closed(self):
+        from pypaimon.ray import data_evolution_merge_into as merge_module
+        from pypaimon.snapshot.snapshot_manager import SnapshotManager
+
+        target = self._create_table()
+        self._write(target, self._source(ids=(1, 2)))
+        self._write(target, self._source(ids=(3, 4)))
+        table = self.catalog.get_table(target)
+        real_apply = merge_module.distributed_self_merge_update_apply
+        real_get_snapshot = SnapshotManager.get_snapshot_by_id
+        hidden_snapshot = {'id': None}
+
+        def get_snapshot_except_hidden(manager, snapshot_id):
+            if snapshot_id == hidden_snapshot['id']:
+                return None
+            return real_get_snapshot(manager, snapshot_id)
+
+        def stage_then_update_and_compact(*args, **kwargs):
+            result = real_apply(*args, **kwargs)
+            write_builder = table.new_batch_write_builder()
+            update = write_builder.new_update()
+            predicate = update.new_predicate_builder().equal('id', 2)
+            messages = update.update_by_predicate(predicate, {'age': 100})
+            write_builder.new_commit().commit(messages)
+            logical_snapshot_id = self._snapshot_id(target)
+            self._compact_all_data_files(table)
+            hidden_snapshot['id'] = logical_snapshot_id
+            return result
+
+        def increment_age(rows):
+            return pc.add(rows['age'], 1)
+
+        with patch.object(
+                merge_module,
+                'distributed_self_merge_update_apply',
+                side_effect=stage_then_update_and_compact,
+        ), patch.object(
+                SnapshotManager,
+                'get_snapshot_by_id',
+                new=get_snapshot_except_hidden,
+        ), self.assertRaisesRegex(
+                RuntimeError,
+                "snapshot .* cannot be found",
+        ):
+            merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                read_columns=['age'],
+                when_matched=[WhenMatched.update({
+                    'age': increment_age,
+                })],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        self.assertEqual(self._read_sorted(target)['age'][1], 100)
+
     def test_self_merge_compaction_rebase_preserves_other_column_update(self):
         from pypaimon.ray import data_evolution_merge_into as merge_module
 

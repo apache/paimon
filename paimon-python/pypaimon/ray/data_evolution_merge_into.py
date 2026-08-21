@@ -570,11 +570,21 @@ def _require_ray_join() -> None:
 
 def _reraise_inner(err: BaseException) -> None:
     """Unwrap Ray's RayTaskError so callers see the worker-side exception."""
+    from pypaimon.write.file_store_commit import CommitResultUncertainError
+
     inner = err
-    cause = getattr(err, "cause", None) or getattr(err, "__cause__", None)
-    while cause is not None:
+    while True:
+        if isinstance(inner, CommitResultUncertainError):
+            if inner is err:
+                raise err
+            raise inner from err
+        cause = (
+            getattr(inner, "cause", None)
+            or getattr(inner, "__cause__", None)
+        )
+        if cause is None:
+            break
         inner = cause
-        cause = getattr(inner, "cause", None) or getattr(inner, "__cause__", None)
     if inner is err:
         raise err
     raise inner from err

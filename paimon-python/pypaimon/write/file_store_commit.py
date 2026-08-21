@@ -963,19 +963,21 @@ class FileStoreCommit:
             for snapshot_id in range(start_check_snapshot_id, latest_snapshot.id + 1):
                 snapshot = self.snapshot_manager.get_snapshot_by_id(snapshot_id)
                 if snapshot is None:
-                    message = (
-                        "Cannot determine whether commit {} by user {} "
-                        "succeeded because snapshot {} is unavailable."
-                    ).format(
-                        commit_identifier,
-                        self.commit_user,
-                        snapshot_id,
-                    )
                     if uncertain_commit_state.pending:
+                        message = (
+                            "Cannot determine whether commit {} by user {} "
+                            "succeeded because snapshot {} is unavailable."
+                        ).format(
+                            commit_identifier,
+                            self.commit_user,
+                            snapshot_id,
+                        )
                         raise CommitResultUncertainError(
                             message
                         ) from uncertain_commit_state.exception
-                    raise RuntimeError(message)
+                    # A deterministic retry has no unresolved snapshot commit.
+                    # Conflict detection handles any history it must read.
+                    continue
                 if (snapshot.commit_user == self.commit_user and
                         snapshot.commit_identifier == commit_identifier and
                         snapshot.commit_kind == commit_kind):
