@@ -49,6 +49,7 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -149,67 +150,6 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
             CommitKind commitKind,
             @Nullable CommitFailRetryResult previousAttempt,
             boolean hasOverwriteSincePreviousAttempt) {
-        if (commitKind == CommitKind.COMPACT
-                || (commitKind == CommitKind.APPEND && deltaFiles.isEmpty())) {
-            return scanCompactBaseDataFiles(
-                    latestSnapshot,
-                    changedPartitions,
-                    deltaFiles,
-                    indexFiles,
-                    previousAttempt,
-                    hasOverwriteSincePreviousAttempt);
-        }
-        if (commitKind == CommitKind.OVERWRITE) {
-            return scanOverwriteBaseDataFiles(
-                    latestSnapshot,
-                    changedPartitions,
-                    deltaFiles,
-                    indexFiles,
-                    previousAttempt,
-                    hasOverwriteSincePreviousAttempt);
-        }
-        return super.scanBaseDataFiles(
-                latestSnapshot,
-                changedPartitions,
-                deltaFiles,
-                indexFiles,
-                commitKind,
-                previousAttempt,
-                hasOverwriteSincePreviousAttempt);
-    }
-
-    private List<SimpleFileEntry> scanCompactBaseDataFiles(
-            Snapshot latestSnapshot,
-            List<BinaryRow> changedPartitions,
-            List<ManifestEntry> deltaFiles,
-            List<IndexManifestEntry> indexFiles,
-            @Nullable CommitFailRetryResult previousAttempt,
-            boolean hasOverwriteSincePreviousAttempt) {
-        List<Range> changedRowRanges = changedRowRanges(deltaFiles, indexFiles);
-        if (changedRowRanges.isEmpty()) {
-            return super.scanBaseDataFiles(
-                    latestSnapshot,
-                    changedPartitions,
-                    deltaFiles,
-                    indexFiles,
-                    CommitKind.COMPACT,
-                    previousAttempt,
-                    hasOverwriteSincePreviousAttempt);
-        }
-        return scanChangedRowRanges(
-                latestSnapshot,
-                changedPartitions,
-                changedRowRanges,
-                referencedDataFiles(deltaFiles, indexFiles));
-    }
-
-    private List<SimpleFileEntry> scanOverwriteBaseDataFiles(
-            Snapshot latestSnapshot,
-            List<BinaryRow> changedPartitions,
-            List<ManifestEntry> deltaFiles,
-            List<IndexManifestEntry> indexFiles,
-            @Nullable CommitFailRetryResult previousAttempt,
-            boolean hasOverwriteSincePreviousAttempt) {
         List<Range> changedRowRanges = changedRowRanges(deltaFiles, indexFiles);
         Set<String> referencedDataFiles = referencedDataFiles(deltaFiles, indexFiles);
         if (!changedRowRanges.isEmpty()) {
@@ -221,12 +161,15 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
                     .readAllEntriesFromDataFiles(
                             latestSnapshot, changedPartitions, referencedDataFiles);
         }
+        if (commitKind == CommitKind.COMPACT || deltaFiles.isEmpty()) {
+            return Collections.emptyList();
+        }
         return super.scanBaseDataFiles(
                 latestSnapshot,
                 changedPartitions,
                 deltaFiles,
                 indexFiles,
-                CommitKind.OVERWRITE,
+                commitKind,
                 previousAttempt,
                 hasOverwriteSincePreviousAttempt);
     }

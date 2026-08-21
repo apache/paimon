@@ -62,6 +62,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class ConflictDetectionTest {
@@ -169,7 +170,7 @@ class ConflictDetectionTest {
     }
 
     @Test
-    void testDataEvolutionCompactWithoutRowRangesReusesRetryScan() {
+    void testDataEvolutionCompactWithoutRowRangesSkipsScan() {
         CommitScanner scanner = mock(CommitScanner.class);
         DataEvolutionConflictDetection detection =
                 (DataEvolutionConflictDetection) createConflictDetection(scanner, true, false);
@@ -177,12 +178,8 @@ class ConflictDetectionTest {
         Snapshot latestSnapshot = snapshot(2);
         List<BinaryRow> changedPartitions = Collections.singletonList(BinaryRow.singleColumn(1));
         SimpleFileEntry oldBase = createFileEntry("old", ADD);
-        SimpleFileEntry removedBase = createFileEntry("old", DELETE);
-        SimpleFileEntry newBase = createFileEntry("new", ADD);
         List<SimpleFileEntry> cachedBase = Collections.singletonList(oldBase);
         CommitFailRetryResult previousAttempt = commitFailRetryResult(previousSnapshot, cachedBase);
-        when(scanner.readIncrementalChanges(previousSnapshot, latestSnapshot, changedPartitions))
-                .thenReturn(Arrays.asList(removedBase, newBase));
 
         assertThat(
                         detection.scanBaseDataFiles(
@@ -193,10 +190,8 @@ class ConflictDetectionTest {
                                 Snapshot.CommitKind.COMPACT,
                                 previousAttempt,
                                 false))
-                .containsExactly(newBase);
-        assertThat(cachedBase).containsExactly(oldBase);
-        verify(scanner, never())
-                .readAllEntriesFromChangedPartitions(latestSnapshot, changedPartitions);
+                .isEmpty();
+        verifyNoInteractions(scanner);
     }
 
     @Test
@@ -343,15 +338,12 @@ class ConflictDetectionTest {
     }
 
     @Test
-    void testDataEvolutionOverwriteFallsBackWithoutSelectors() {
+    void testDataEvolutionOverwriteWithoutSelectorsSkipsScan() {
         CommitScanner scanner = mock(CommitScanner.class);
         DataEvolutionConflictDetection detection =
                 (DataEvolutionConflictDetection) createConflictDetection(scanner, true, false);
         Snapshot snapshot = snapshot(1);
         List<BinaryRow> changedPartitions = Collections.singletonList(BinaryRow.singleColumn(1));
-        List<SimpleFileEntry> expected = Collections.singletonList(createFileEntry("base", ADD));
-        when(scanner.readAllEntriesFromChangedPartitions(snapshot, changedPartitions))
-                .thenReturn(expected);
 
         assertThat(
                         detection.scanBaseDataFiles(
@@ -362,7 +354,8 @@ class ConflictDetectionTest {
                                 Snapshot.CommitKind.OVERWRITE,
                                 null,
                                 false))
-                .isSameAs(expected);
+                .isEmpty();
+        verifyNoInteractions(scanner);
     }
 
     @Test
@@ -380,7 +373,7 @@ class ConflictDetectionTest {
                         detection.scanBaseDataFiles(
                                 snapshot,
                                 changedPartitions,
-                                Collections.emptyList(),
+                                Collections.singletonList(manifestEntry(ADD, "new", null, null)),
                                 Collections.emptyList(),
                                 Snapshot.CommitKind.APPEND,
                                 null,
