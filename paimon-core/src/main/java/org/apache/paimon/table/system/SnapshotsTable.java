@@ -344,8 +344,9 @@ public class SnapshotsTable implements ReadonlyTable {
         private boolean isSnapshotIdRangeEmpty() {
             return emptyRange
                     || (optionalFilterSnapshotIdMin.isPresent()
-                    && optionalFilterSnapshotIdMax.isPresent()
-                    && optionalFilterSnapshotIdMin.get() > optionalFilterSnapshotIdMax.get());
+                            && optionalFilterSnapshotIdMax.isPresent()
+                            && optionalFilterSnapshotIdMin.get()
+                                    > optionalFilterSnapshotIdMax.get());
         }
 
         private List<Long> filterSnapshotIdsByRange(List<Long> ids) {

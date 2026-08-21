@@ -298,8 +298,7 @@ public class ManifestsTable implements ReadonlyTable {
                 manifestFileMetas = allManifests(dataTable);
                 if (!schemaIds.isEmpty()) {
                     manifestFileMetas =
-                            filterBySchemaIds(
-                                    manifestFileMetas, filterSchemaIdsByRange(schemaIds));
+                            filterBySchemaIds(manifestFileMetas, filterSchemaIdsByRange(schemaIds));
                 } else if (schemaIdMin != null || schemaIdMax != null) {
                     manifestFileMetas =
                             filterBySchemaIdRange(
