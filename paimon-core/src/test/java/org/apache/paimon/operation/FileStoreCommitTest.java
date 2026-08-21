@@ -99,6 +99,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicReference;
@@ -2401,5 +2402,106 @@ public class FileStoreCommitTest {
                             TestKeyValueGenerator.DEFAULT_ROW_TYPE));
         }
         LOG.debug("========== End of " + name + " ==========");
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Tests for replaceManifest
+    // ---------------------------------------------------------------------------------------------
+
+    @Test
+    public void testReplaceManifestsIdentity() throws Exception {
+        TestFileStore store = createStore(false, 2);
+        store.commitData(generateDataList(20), gen::getPartition, kv -> 0);
+
+        Snapshot snapshot = store.snapshotManager().latestSnapshot();
+        ManifestList manifestList = store.manifestListFactory().create();
+        List<ManifestFileMeta> manifests = manifestList.readDataManifests(snapshot);
+        assertThat(manifests).isNotEmpty();
+
+        Set<String> fileNamesBefore =
+                manifests.stream().map(ManifestFileMeta::fileName).collect(Collectors.toSet());
+
+        try (FileStoreCommit commit = store.newCommit()) {
+            commit.replaceManifest(manifests, manifests);
+        }
+
+        Snapshot newSnapshot = store.snapshotManager().latestSnapshot();
+        assertThat(newSnapshot.id()).isEqualTo(snapshot.id() + 1);
+        assertThat(newSnapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
+        List<ManifestFileMeta> newManifests = manifestList.readDataManifests(newSnapshot);
+        Set<String> fileNamesAfter =
+                newManifests.stream().map(ManifestFileMeta::fileName).collect(Collectors.toSet());
+        assertThat(fileNamesAfter).isEqualTo(fileNamesBefore);
+    }
+
+    @Test
+    public void testReplaceManifestsPreservesConcurrentDelta() throws Exception {
+        TestFileStore store = createStore(false, 2);
+        store.commitData(generateDataList(20), gen::getPartition, kv -> 0);
+
+        Snapshot snapshotBefore = store.snapshotManager().latestSnapshot();
+        ManifestList manifestList = store.manifestListFactory().create();
+        List<ManifestFileMeta> manifestsBefore = manifestList.readDataManifests(snapshotBefore);
+
+        store.commitData(generateDataList(20), gen::getPartition, kv -> 0);
+        Snapshot snapshotAfter = store.snapshotManager().latestSnapshot();
+        List<ManifestFileMeta> manifestsAfter = manifestList.readDataManifests(snapshotAfter);
+
+        Set<String> beforeNames =
+                manifestsBefore.stream()
+                        .map(ManifestFileMeta::fileName)
+                        .collect(Collectors.toSet());
+        List<ManifestFileMeta> deltaManifests =
+                manifestsAfter.stream()
+                        .filter(m -> !beforeNames.contains(m.fileName()))
+                        .collect(Collectors.toList());
+        assertThat(deltaManifests).isNotEmpty();
+
+        try (FileStoreCommit commit = store.newCommit()) {
+            commit.replaceManifest(manifestsBefore, manifestsBefore);
+        }
+
+        Snapshot finalSnapshot = store.snapshotManager().latestSnapshot();
+        List<ManifestFileMeta> finalManifests = manifestList.readDataManifests(finalSnapshot);
+        Set<String> finalNames =
+                finalManifests.stream().map(ManifestFileMeta::fileName).collect(Collectors.toSet());
+
+        for (String name : beforeNames) {
+            assertThat(finalNames).contains(name);
+        }
+        for (ManifestFileMeta delta : deltaManifests) {
+            assertThat(finalNames).contains(delta.fileName());
+        }
+    }
+
+    @Test
+    public void testReplaceManifestsThrowsOnConcurrentCompact() throws Exception {
+        TestFileStore store = createStore(false, 2);
+        for (int i = 0; i < 3; i++) {
+            store.commitData(generateDataList(10), gen::getPartition, kv -> 0);
+        }
+
+        Snapshot snapshotBefore = store.snapshotManager().latestSnapshot();
+        ManifestList manifestList = store.manifestListFactory().create();
+        List<ManifestFileMeta> manifestsBefore = manifestList.readDataManifests(snapshotBefore);
+
+        // read all entries and write them to a new manifest file, then replace — this changes
+        // the manifest file names, so the stale manifestsBefore will be absent from currentBase
+        org.apache.paimon.manifest.ManifestFile manifestFile = store.manifestFileFactory().create();
+        List<org.apache.paimon.manifest.ManifestEntry> entries = new ArrayList<>();
+        for (ManifestFileMeta meta : manifestsBefore) {
+            entries.addAll(manifestFile.read(meta.fileName(), meta.fileSize()));
+        }
+        List<ManifestFileMeta> rewrittenManifests = manifestFile.write(entries);
+
+        try (FileStoreCommit commit = store.newCommit()) {
+            commit.replaceManifest(manifestsBefore, rewrittenManifests);
+        }
+
+        // now the original manifests are gone; using them again must throw
+        try (FileStoreCommit commit = store.newCommit()) {
+            assertThatThrownBy(() -> commit.replaceManifest(manifestsBefore, manifestsBefore))
+                    .hasMessageContaining("Manifest conflict");
+        }
     }
 }

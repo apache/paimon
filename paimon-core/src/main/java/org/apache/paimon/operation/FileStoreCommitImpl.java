@@ -1581,6 +1581,98 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
     }
 
+    @Override
+    public void replaceManifest(
+            List<ManifestFileMeta> removedManifests, List<ManifestFileMeta> addedManifests) {
+        int retryCount = 0;
+        long startMillis = System.currentTimeMillis();
+        Set<String> removedPathSet =
+                removedManifests.stream()
+                        .map(ManifestFileMeta::fileName)
+                        .collect(Collectors.toSet());
+        while (true) {
+            Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+            if (latestSnapshot == null) {
+                throw new RuntimeException("Cannot replace manifests: the table has no snapshot.");
+            }
+
+            List<ManifestFileMeta> currentBase = manifestList.readDataManifests(latestSnapshot);
+            Set<String> currentPathSet =
+                    currentBase.stream()
+                            .map(ManifestFileMeta::fileName)
+                            .collect(Collectors.toSet());
+
+            if (!currentPathSet.containsAll(removedPathSet)) {
+                cleanUpRewrittenManifests(addedManifests);
+                throw new RuntimeException(
+                        "Manifest conflict: the current snapshot does not contain all the "
+                                + "manifests to replace. Another manifest rewrite may have "
+                                + "happened concurrently; please retry.");
+            }
+
+            List<ManifestFileMeta> manifestsKept =
+                    currentBase.stream()
+                            .filter(m -> !removedPathSet.contains(m.fileName()))
+                            .collect(Collectors.toList());
+
+            List<ManifestFileMeta> manifestsToCommit = new ArrayList<>(manifestsKept);
+            manifestsToCommit.addAll(addedManifests);
+
+            Pair<String, Long> baseManifestList = manifestList.write(manifestsToCommit);
+            Pair<String, Long> deltaManifestList = manifestList.write(emptyList());
+
+            Snapshot newSnapshot =
+                    new Snapshot(
+                            latestSnapshot.id() + 1,
+                            latestSnapshot.schemaId(),
+                            baseManifestList.getLeft(),
+                            baseManifestList.getRight(),
+                            deltaManifestList.getLeft(),
+                            deltaManifestList.getRight(),
+                            null,
+                            null,
+                            latestSnapshot.indexManifest(),
+                            commitUser,
+                            Long.MAX_VALUE,
+                            CommitKind.COMPACT,
+                            System.currentTimeMillis(),
+                            latestSnapshot.totalRecordCount(),
+                            0L,
+                            null,
+                            latestSnapshot.watermark(),
+                            latestSnapshot.statistics(),
+                            latestSnapshot.properties(),
+                            latestSnapshot.nextRowId(),
+                            null);
+
+            if (commitSnapshotImpl(latestSnapshot, newSnapshot, emptyList())) {
+                return;
+            }
+
+            manifestList.delete(deltaManifestList.getLeft());
+            manifestList.delete(baseManifestList.getLeft());
+
+            if (System.currentTimeMillis() - startMillis > options.commitTimeout()
+                    || retryCount >= options.commitMaxRetries()) {
+                cleanUpRewrittenManifests(addedManifests);
+                throw new RuntimeException(
+                        String.format(
+                                "Commit failed after %s millis with %s retries, there maybe exist commit conflicts between multiple jobs.",
+                                options.commitTimeout(), retryCount));
+            }
+
+            retryWaiter.retryWait(retryCount);
+            retryCount++;
+        }
+    }
+
+    /** Delete the rewritten manifest files produced by this rewrite. */
+    private void cleanUpRewrittenManifests(List<ManifestFileMeta> addedManifests) {
+        for (ManifestFileMeta manifest : addedManifests) {
+            manifestFile.delete(manifest.fileName());
+        }
+    }
+
     private boolean compactManifestOnce() {
         Snapshot latestSnapshot = snapshotManager.latestSnapshot();
 
