@@ -146,6 +146,14 @@ object OptionUtils extends SQLConfHelper with Logging {
     getOptionString(SparkConnectorOptions.SOURCE_SPLIT_TARGET_SIZE_WITH_COLUMN_PRUNING).toBoolean
   }
 
+  def formatTableRepairCollectStatistics(): Boolean = {
+    getOptionString(SparkConnectorOptions.FORMAT_TABLE_REPAIR_COLLECT_STATISTICS).toBoolean
+  }
+
+  def formatTableStatisticsParallelism(): Int = {
+    getOptionString(SparkConnectorOptions.FORMAT_TABLE_STATISTICS_PARALLELISM).toInt
+  }
+
   private def mergeSQLConf(extraOptions: JMap[String, String]): JMap[String, String] = {
     val mergedOptions = new JHashMap[String, String](
       conf.getAllConfs

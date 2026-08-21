@@ -155,6 +155,23 @@ public class SparkConnectorOptions {
                     .withDescription(
                             "Whether to allow full scan when reading a partitioned table.");
 
+    public static final ConfigOption<Boolean> FORMAT_TABLE_REPAIR_COLLECT_STATISTICS =
+            key("format-table.repair.collect-statistics")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether MSCK REPAIR TABLE on a Format Table also measures the partitions it "
+                                    + "finds. Off by default: measuring lists the files inside every partition, "
+                                    + "not only the partition directories.");
+
+    public static final ConfigOption<Integer> FORMAT_TABLE_STATISTICS_PARALLELISM =
+            key("format-table.statistics.parallelism")
+                    .intType()
+                    .defaultValue(8)
+                    .withDescription(
+                            "How many Format Table partitions MSCK REPAIR TABLE measures at once, so that a "
+                                    + "table with many partitions does not burst listing requests at storage.");
+
     public static final ConfigOption<Boolean> SOURCE_SPLIT_TARGET_SIZE_WITH_COLUMN_PRUNING =
             key("source.split.target-size-with-column-pruning")
                     .booleanType()

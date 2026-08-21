@@ -22,7 +22,7 @@ import org.apache.paimon.catalog.Identifier
 import org.apache.paimon.fs.Path
 import org.apache.paimon.partition.{Partition, PartitionStatistics}
 import org.apache.paimon.predicate.Predicate
-import org.apache.paimon.spark.{PaimonSparkTestWithRestCatalogBase, SparkCatalog}
+import org.apache.paimon.spark.{PaimonSparkTestWithRestCatalogBase, SparkCatalog, SparkConnectorOptions}
 import org.apache.paimon.spark.execution.PaimonRepairFormatTablePartitionsExec
 import org.apache.paimon.spark.format.PaimonFormatTable
 import org.apache.paimon.table.FormatTable
@@ -415,6 +415,46 @@ class CatalogManagedPartitionMsckRepairTest extends PaimonSparkTestWithRestCatal
     }
   }
 
+  test("MSCK leaves statistics unknown until it is asked to measure") {
+    val tableName = "msck_statistics"
+    val partition = "20260721"
+
+    withTable(tableName) {
+      createFormatTableWithCatalogManagedPartitions(tableName)
+      writeCsvPartition(tableName, partition, 21, "measured")
+
+      executeCatalogManagedRepair(s"MSCK REPAIR TABLE paimon.$dbName0.$tableName")
+      // Registering a partition measures nothing about it, so every statistic stays unknown —
+      // an exact zero here would be a number nobody took.
+      val registered = statisticsOf(tableName, partition)
+      assert(!PartitionStatistics.isKnown(registered.fileCount()), registered.toString)
+      assert(!PartitionStatistics.isKnown(registered.fileSizeInBytes()), registered.toString)
+      assert(!PartitionStatistics.isKnown(registered.recordCount()), registered.toString)
+
+      val collectStatistics =
+        s"spark.paimon.${SparkConnectorOptions.FORMAT_TABLE_REPAIR_COLLECT_STATISTICS.key()}"
+      withSQLConf(collectStatistics -> "true") {
+        executeCatalogManagedRepair(s"MSCK REPAIR TABLE paimon.$dbName0.$tableName")
+      }
+
+      val measured = statisticsOf(tableName, partition)
+      assert(measured.fileCount() == 1L, measured.toString)
+      assert(measured.fileSizeInBytes() > 0L, measured.toString)
+      assert(measured.lastFileCreationTime() > 0L, measured.toString)
+      // A repair only lists; CSV carries no footer, so the row count is still nobody's measurement.
+      assert(!PartitionStatistics.isKnown(measured.recordCount()), measured.toString)
+      // Measuring is not a way to change which partitions exist.
+      assertPartitionState(tableName, Set(partition))
+    }
+  }
+
+  private def statisticsOf(tableName: String, partition: String): Partition =
+    paimonCatalog
+      .listPartitions(tableIdentifier(tableName))
+      .asScala
+      .find(_.spec().get("dt") == partition)
+      .getOrElse(fail(s"partition dt=$partition of $tableName is not registered"))
+
   private def createFormatTableWithCatalogManagedPartitions(tableName: String): Unit =
     sql(s"""CREATE TABLE $tableName (id INT, payload STRING, dt STRING)
            |USING CSV
@@ -648,7 +688,7 @@ private[sql] class FaultInjectingFormatTablePartitionManager(delegate: FormatTab
       ignoreIfExists: Boolean,
       statistics: JList[PartitionStatistics],
       replaceStatistics: Boolean): Unit = {
-    delegate.createPartitions(partitions, ignoreIfExists)
+    delegate.createPartitions(partitions, ignoreIfExists, statistics, replaceStatistics)
     MsckFaultInjection.createCalls += 1
   }
 
