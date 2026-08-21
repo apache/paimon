@@ -184,21 +184,24 @@ public class ClusteringCompactManager extends CompactFutureManager {
         if (taskFuture != null) {
             return;
         }
-        taskFuture =
-                executor.submit(
-                        new CompactTask(metricsReporter, "") {
-                            @Override
-                            protected CompactResult doCompact() throws Exception {
-                                return compact(fullCompaction);
-                            }
-                        });
+        submitTask(
+                executor,
+                new CompactTask(metricsReporter, "") {
+                    @Override
+                    protected CompactResult doCompact() throws Exception {
+                        return compact(fullCompaction, produced());
+                    }
+
+                    @Override
+                    protected void deleteProduced(List<DataFileMeta> files) {
+                        fileRewriter.deleteProduced(files);
+                    }
+                });
     }
 
-    private CompactResult compact(boolean fullCompaction) throws Exception {
+    private CompactResult compact(boolean fullCompaction, CompactResult result) throws Exception {
         KeyValueSerializer kvSerializer = new KeyValueSerializer(keyType, valueType);
         RowType kvSchemaType = KeyValue.schema(keyType, valueType);
-
-        CompactResult result = new CompactResult();
 
         // Phase 1: Sort and rewrite all unsorted (level 0) files
         List<DataFileMeta> unsortedFiles = fileLevels.unsortedFiles();

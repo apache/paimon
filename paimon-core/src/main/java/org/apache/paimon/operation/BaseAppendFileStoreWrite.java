@@ -260,6 +260,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
             }
         }
         if (collectedExceptions != null) {
+            rewriter.abort();
             throw collectedExceptions;
         }
         return rewriter.result();
@@ -297,10 +298,21 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         }
 
         if (collectedExceptions != null) {
+            rewriter.abort();
             throw collectedExceptions;
         }
 
         return rewriter.result();
+    }
+
+    /**
+     * Delete data files which can never be committed, for example the output of a compaction whose
+     * result has been discarded.
+     */
+    protected void deleteFiles(BinaryRow partition, int bucket, List<DataFileMeta> files) {
+        DataFilePathFactory dataPathFactory =
+                pathFactory.createDataFilePathFactory(partition, bucket);
+        files.forEach(file -> file.collectFiles(dataPathFactory).forEach(fileIO::deleteQuietly));
     }
 
     private RowDataRollingFileWriter createRollingFileWriter(

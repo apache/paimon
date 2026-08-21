@@ -127,6 +127,11 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
                 mergeSorter);
     }
 
+    @Override
+    public void deleteProduced(List<DataFileMeta> files) {
+        files.forEach(writerFactory::deleteFile);
+    }
+
     protected void notifyRewriteCompactBefore(List<DataFileMeta> files) {}
 
     protected List<DataFileMeta> notifyRewriteCompactAfter(List<DataFileMeta> files) {

@@ -134,25 +134,33 @@ public class FullCompactTaskTest {
     }
 
     private BucketedAppendCompactManager.CompactRewriter rewriter() {
-        return compactBefore -> {
-            List<DataFileMeta> compactAfter = new ArrayList<>();
-            long totalFileSize = 0L;
-            long minSeq = -1L;
-            for (int i = 0; i < compactBefore.size(); i++) {
-                DataFileMeta file = compactBefore.get(i);
-                if (i == 0) {
-                    minSeq = file.minSequenceNumber();
+        return new BucketedAppendCompactManager.CompactRewriter() {
+            @Override
+            public List<DataFileMeta> rewrite(List<DataFileMeta> compactBefore) {
+                List<DataFileMeta> compactAfter = new ArrayList<>();
+                long totalFileSize = 0L;
+                long minSeq = -1L;
+                for (int i = 0; i < compactBefore.size(); i++) {
+                    DataFileMeta file = compactBefore.get(i);
+                    if (i == 0) {
+                        minSeq = file.minSequenceNumber();
+                    }
+                    totalFileSize += file.fileSize();
+                    if (totalFileSize >= TARGET_FILE_SIZE) {
+                        compactAfter.add(newFile(minSeq, minSeq + TARGET_FILE_SIZE - 1));
+                        minSeq += TARGET_FILE_SIZE;
+                    }
+                    if (i == compactBefore.size() - 1 && minSeq <= file.maxSequenceNumber()) {
+                        compactAfter.add(newFile(minSeq, file.maxSequenceNumber()));
+                    }
                 }
-                totalFileSize += file.fileSize();
-                if (totalFileSize >= TARGET_FILE_SIZE) {
-                    compactAfter.add(newFile(minSeq, minSeq + TARGET_FILE_SIZE - 1));
-                    minSeq += TARGET_FILE_SIZE;
-                }
-                if (i == compactBefore.size() - 1 && minSeq <= file.maxSequenceNumber()) {
-                    compactAfter.add(newFile(minSeq, file.maxSequenceNumber()));
-                }
+                return compactAfter;
             }
-            return compactAfter;
+
+            @Override
+            public void delete(List<DataFileMeta> files) {
+                // the output of this rewriter is not backed by real files
+            }
         };
     }
 }

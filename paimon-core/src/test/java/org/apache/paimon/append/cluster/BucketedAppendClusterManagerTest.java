@@ -30,6 +30,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.operation.BaseAppendFileStoreWrite;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.schema.Schema;
@@ -76,6 +77,27 @@ public class BucketedAppendClusterManagerTest {
         }
     }
 
+    private BucketedAppendClusterManager.CompactRewriter clusterRewriter() {
+        return new BucketedAppendClusterManager.CompactRewriter() {
+            @Override
+            public List<DataFileMeta> rewrite(List<DataFileMeta> compactBefore) throws Exception {
+                return write.clusterRewrite(BinaryRow.EMPTY_ROW, 0, compactBefore);
+            }
+
+            @Override
+            public void delete(List<DataFileMeta> files) {
+                DataFilePathFactory pathFactory =
+                        table.store()
+                                .pathFactory()
+                                .createDataFilePathFactory(BinaryRow.EMPTY_ROW, 0);
+                files.forEach(
+                        file ->
+                                file.collectFiles(pathFactory)
+                                        .forEach(table.fileIO()::deleteQuietly));
+            }
+        };
+    }
+
     @Test
     public void testBucketedAppendClusterTask() throws Exception {
         List<DataFileMeta> toCluster =
@@ -83,7 +105,7 @@ public class BucketedAppendClusterManagerTest {
 
         BucketedAppendClusterManager.BucketedAppendClusterTask task =
                 new BucketedAppendClusterManager.BucketedAppendClusterTask(
-                        toCluster, 5, files -> write.clusterRewrite(BinaryRow.EMPTY_ROW, 0, files));
+                        toCluster, 5, clusterRewriter());
 
         CompactResult result = task.doCompact();
         assertThat(result.before().size()).isEqualTo(9);
@@ -121,7 +143,7 @@ public class BucketedAppendClusterManagerTest {
                         options.sortedRunSizeRatio(),
                         options.numSortedRunCompactionTrigger(),
                         options.numLevels(),
-                        files -> write.clusterRewrite(BinaryRow.EMPTY_ROW, 0, files));
+                        clusterRewriter());
         assertThat(manager.levels().levelSortedRuns().size()).isEqualTo(9);
 
         manager.triggerCompaction(false);

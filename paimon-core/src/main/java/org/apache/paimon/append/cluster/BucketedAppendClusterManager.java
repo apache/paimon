@@ -151,7 +151,7 @@ public class BucketedAppendClusterManager extends CompactFutureManager {
                                                     file.fileName(), file.level(), file.fileSize()))
                             .collect(Collectors.joining(", ")));
         }
-        taskFuture = executor.submit(task);
+        submitTask(executor, task);
     }
 
     @Override
@@ -202,7 +202,14 @@ public class BucketedAppendClusterManager extends CompactFutureManager {
         @Override
         protected CompactResult doCompact() throws Exception {
             List<DataFileMeta> rewrite = rewriter.rewrite(toCluster);
-            return new CompactResult(toCluster, upgrade(rewrite));
+            CompactResult result = produced();
+            result.merge(new CompactResult(toCluster, upgrade(rewrite)));
+            return result;
+        }
+
+        @Override
+        protected void deleteProduced(List<DataFileMeta> files) {
+            rewriter.delete(files);
         }
 
         protected List<DataFileMeta> upgrade(List<DataFileMeta> files) {
@@ -215,5 +222,11 @@ public class BucketedAppendClusterManager extends CompactFutureManager {
     /** Compact rewriter for append-only table. */
     public interface CompactRewriter {
         List<DataFileMeta> rewrite(List<DataFileMeta> compactBefore) throws Exception;
+
+        /**
+         * Delete files produced by this rewriter, used when a cluster result is discarded and its
+         * files can never be committed.
+         */
+        void delete(List<DataFileMeta> files);
     }
 }

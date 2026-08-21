@@ -112,6 +112,14 @@ public class ClusteringFileRewriter {
     }
 
     /**
+     * Delete files produced by this rewriter, used when a clustering result is discarded and its
+     * files can never be committed.
+     */
+    public void deleteProduced(List<DataFileMeta> files) {
+        files.forEach(writerFactory::deleteFile);
+    }
+
+    /**
      * Sort and rewrite unsorted file by clustering columns. Reads all KeyValue records, sorts them
      * using an external sort buffer, and writes to new level-1 files. Checks the key index inline
      * during writing to handle deduplication (FIRST_ROW skips duplicates, DEDUPLICATE marks old
