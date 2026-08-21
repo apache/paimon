@@ -98,6 +98,7 @@ public abstract class ManifestFileMetaTestBase {
                         null,
                         null,
                         null,
+                        null,
                         null));
     }
 

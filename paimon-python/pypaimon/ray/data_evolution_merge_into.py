@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import pyarrow as pa
 
+from pypaimon.common.predicate import Predicate
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.ray.data_evolution_merge_join import (
     _resolve_source_projection,
@@ -31,8 +32,10 @@ from pypaimon.ray.data_evolution_merge_join import (
     build_matched_update_ds,
     build_not_matched_insert_ds,
     build_self_merge_delete_ds,
-    build_self_merge_update_ds,
+    _SelfMergeUpdatePlan,
+    build_self_merge_update_plan,
     distributed_delete_apply,
+    distributed_self_merge_update_apply,
     distributed_update_apply,
     distributed_write_collect_msgs,
 )
@@ -63,6 +66,8 @@ class _PrepareCtx:
     full_pa_schema: pa.Schema
     catalog_options: Dict[str, str]
     is_self_merge: bool = False
+    self_merge_scan_predicate: Optional[Predicate] = None
+    read_columns: Tuple[str, ...] = ()
 
 
 def merge_into(
@@ -76,6 +81,7 @@ def merge_into(
     num_partitions: Optional[int] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
     concurrency: Optional[int] = None,
+    read_columns: Optional[Sequence[str]] = None,
 ) -> Dict[str, int]:
     _require_ray_join()
     num_partitions = _resolve_num_partitions(num_partitions)
@@ -83,11 +89,12 @@ def merge_into(
     table, source_ds, matched_specs, not_matched_specs, ctx = _prepare(
         target, source, catalog_options,
         list(when_matched), list(when_not_matched), on,
+        read_columns,
     )
     base_snapshot = table.snapshot_manager().get_latest_snapshot()
 
     update_ds, delete_ds, insert_ds, update_cols_union = _build_datasets(
-        target, source_ds, matched_specs, not_matched_specs,
+        table, target, source_ds, matched_specs, not_matched_specs,
         ctx, base_snapshot, num_partitions, ray_remote_args,
     )
 
@@ -98,7 +105,10 @@ def merge_into(
     )
 
 
-def _prepare(target, source, catalog_options, when_matched, when_not_matched, on):
+def _prepare(
+    target, source, catalog_options, when_matched, when_not_matched, on,
+    read_columns=None,
+):
     if not when_matched and not when_not_matched:
         raise ValueError(
             "At least one of when_matched or when_not_matched must be non-empty."
@@ -137,12 +147,18 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
     full_target_field_names = list(table.field_names)
     settable_field_names = list(full_target_field_names)
     on_map = dict(zip(target_on_cols, source_on_cols))
+    is_self_merge = _is_self_merge(
+        target, source, target_on_cols, source_on_cols
+    )
     matched_specs = []
     for c in when_matched:
         spec = {}
         if not c.delete:
             spec = _normalize_set_spec(
-                c.update, settable_field_names, on_map,
+                c.update,
+                settable_field_names,
+                on_map,
+                allow_callables=is_self_merge,
             )
         matched_specs.append(
             _NormalizedClause(
@@ -191,12 +207,28 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
             _NormalizedClause(spec=spec, condition=c.condition)
         )
 
-    is_self_merge = _is_self_merge(target, source, target_on_cols, source_on_cols)
     if is_self_merge and not_matched_specs:
         raise ValueError(
             "Self-merge (source == target with ON _ROW_ID) does not "
             "support WHEN NOT MATCHED clauses."
         )
+
+    read_columns = tuple(dict.fromkeys(read_columns or ()))
+    has_callable = any(
+        callable(value) and not isinstance(value, type)
+        for clause in matched_specs
+        for value in clause.spec.values()
+    )
+    if read_columns and not has_callable:
+        raise ValueError("read_columns requires a callable SET value.")
+    if has_callable:
+        if not read_columns:
+            raise ValueError("Callable SET values require read_columns.")
+        for col in read_columns:
+            if col not in full_target_field_names:
+                raise ValueError(
+                    f"Read column {col!r} is not in target '{target}'."
+                )
 
     if is_self_merge:
         source_ds = None
@@ -251,6 +283,23 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
     update_pa_schema = pa.schema(
         [full_pa_schema.field(c) for c in settable_field_names]
     )
+    self_merge_scan_predicate = None
+    if (is_self_merge and matched_specs
+            and all(c.condition is not None for c in matched_specs)):
+        from pypaimon.common.predicate_builder import PredicateBuilder
+        from pypaimon.ray.merge_condition import (
+            try_parse_self_merge_predicate,
+        )
+        predicates = [
+            try_parse_self_merge_predicate(
+                c.condition, table.table_schema.fields,
+            )
+            for c in matched_specs
+        ]
+        if all(predicate is not None for predicate in predicates):
+            self_merge_scan_predicate = PredicateBuilder.or_predicates(
+                predicates
+            )
     ctx = _PrepareCtx(
         target_on_cols=target_on_cols,
         source_on_cols=source_on_cols,
@@ -260,6 +309,8 @@ def _prepare(target, source, catalog_options, when_matched, when_not_matched, on
         full_pa_schema=full_pa_schema,
         catalog_options=catalog_options,
         is_self_merge=is_self_merge,
+        self_merge_scan_predicate=self_merge_scan_predicate,
+        read_columns=read_columns,
     )
     return table, source_ds, matched_specs, not_matched_specs, ctx
 
@@ -274,7 +325,7 @@ def _is_self_merge(target, source, target_on_cols, source_on_cols) -> bool:
 
 
 def _build_datasets(
-    target, source_ds, matched_specs, not_matched_specs,
+    table, target, source_ds, matched_specs, not_matched_specs,
     ctx: "_PrepareCtx", base_snapshot, num_partitions, ray_remote_args,
 ):
     # Pin every target read to base_snapshot so all branches see the same
@@ -291,16 +342,16 @@ def _build_datasets(
         if matched_specs and base_snapshot is not None:
             update_cols_union = _union_update_cols(matched_specs)
             if update_cols_union:
-                update_ds = build_self_merge_update_ds(
-                    target_identifier=target,
+                update_ds = build_self_merge_update_plan(
+                    table=table,
                     clauses=matched_specs,
                     target_field_names=ctx.full_target_field_names,
                     target_pa_schema=ctx.update_pa_schema,
                     update_cols=update_cols_union,
-                    catalog_options=ctx.catalog_options,
                     resolve_target_projection=_resolve_target_projection,
                     snapshot_id=base_snapshot_id,
-                    ray_remote_args=ray_remote_args,
+                    scan_predicate=ctx.self_merge_scan_predicate,
+                    read_columns=ctx.read_columns,
                 )
             if any(c.delete for c in matched_specs):
                 delete_ds = build_self_merge_delete_ds(
@@ -310,6 +361,7 @@ def _build_datasets(
                     catalog_options=ctx.catalog_options,
                     resolve_target_projection=_resolve_target_projection,
                     snapshot_id=base_snapshot_id,
+                    scan_predicate=ctx.self_merge_scan_predicate,
                     ray_remote_args=ray_remote_args,
                 )
         return update_ds, delete_ds, insert_ds, update_cols_union
@@ -387,16 +439,28 @@ def _execute_and_commit(
 
     try:
         if update_ds is not None:
-            update_msgs, num_updated, update_row_ids = distributed_update_apply(
-                update_ds, table, update_cols_union,
-                num_partitions=num_partitions,
-                ray_remote_args=ray_remote_args,
-                base_snapshot_id=(
-                    base_snapshot.id
-                    if base_snapshot is not None else None
-                ),
-                collect_row_ids=collect_action_row_ids,
-            )
+            if isinstance(update_ds, _SelfMergeUpdatePlan):
+                update_msgs, num_updated, update_row_ids = (
+                    distributed_self_merge_update_apply(
+                        update_ds,
+                        num_partitions=num_partitions,
+                        ray_remote_args=ray_remote_args,
+                        collect_row_ids=collect_action_row_ids,
+                    )
+                )
+            else:
+                update_msgs, num_updated, update_row_ids = (
+                    distributed_update_apply(
+                        update_ds, table, update_cols_union,
+                        num_partitions=num_partitions,
+                        ray_remote_args=ray_remote_args,
+                        base_snapshot_id=(
+                            base_snapshot.id
+                            if base_snapshot is not None else None
+                        ),
+                        collect_row_ids=collect_action_row_ids,
+                    )
+                )
             commit_messages.extend(update_msgs)
 
         if delete_ds is not None:
@@ -566,6 +630,7 @@ def _normalize_set_spec(
     target_field_names: Sequence[str],
     on_map: Optional[Mapping[str, str]] = None,
     allow_target_refs: bool = True,
+    allow_callables: bool = False,
 ) -> Dict[str, Any]:
     on_map = on_map or {}
     if spec == "*":
@@ -588,9 +653,13 @@ def _normalize_set_spec(
     result: Dict[str, Any] = {}
     for key, val in spec.items():
         if callable(val) and not isinstance(val, type):
+            if allow_callables:
+                result[key] = val
+                continue
             raise TypeError(
                 "SET values must be source_col(), target_col(), "
-                "lit(), or literals, not callables"
+                "lit(), or literals; callables are only supported "
+                "for self-merge"
             )
         if isinstance(val, SourceColumnRef):
             result[key] = val

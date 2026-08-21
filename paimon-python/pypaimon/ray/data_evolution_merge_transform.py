@@ -101,6 +101,7 @@ def vectorized_matched_transform(
     update_cols: Sequence[str],
     row_id_name: str,
     update_schema: pa.Schema,
+    callable_input: Optional[pa.Table] = None,
 ) -> pa.Table:
     available = set(batch.schema.names)
     arrays: list = [batch.column(f"t.{row_id_name}")]
@@ -109,7 +110,8 @@ def vectorized_matched_transform(
         if col in spec:
             arrays.append(
                 _resolve_spec_array(
-                    spec[col], batch, available, on_pairs, out_type
+                    spec[col], batch, available, on_pairs, out_type,
+                    callable_input=callable_input,
                 )
             )
         else:
@@ -173,7 +175,33 @@ def _resolve_spec_array(
     available: set,
     on_pairs: Sequence[Tuple[str, str]],
     out_type: pa.DataType,
+    callable_input: Optional[pa.Table] = None,
 ):
+    if callable(val) and not isinstance(val, type):
+        if callable_input is None:
+            raise TypeError(
+                "Callable SET values are only supported for self-merge."
+            )
+        result = val(callable_input)
+        if not isinstance(result, (pa.Array, pa.ChunkedArray)):
+            raise ValueError(
+                "Callable SET values must return a pyarrow.Array or "
+                "pyarrow.ChunkedArray."
+            )
+        if len(result) != batch.num_rows:
+            raise ValueError(
+                "Callable SET result length must match matched row count: "
+                f"{len(result)} != {batch.num_rows}."
+            )
+        if result.type != out_type:
+            if isinstance(result, pa.ChunkedArray):
+                result = pa.chunked_array(
+                    [chunk.cast(out_type) for chunk in result.chunks],
+                    type=out_type,
+                )
+            else:
+                result = result.cast(out_type)
+        return result
     if isinstance(val, LiteralValue):
         return pa.array([val.value] * batch.num_rows, type=out_type)
     if isinstance(val, SourceColumnRef):

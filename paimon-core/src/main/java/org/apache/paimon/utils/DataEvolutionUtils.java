@@ -24,6 +24,8 @@ import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataField;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -117,6 +119,42 @@ public class DataEvolutionUtils {
                     file.schemaId());
         }
         return ids;
+    }
+
+    /** Table fields physically present in a file, in their physical write order. */
+    public static List<DataField> fileFields(
+            Function<Long, TableSchema> scanTableSchema, DataFileMeta file) {
+        TableSchema schema = scanTableSchema.apply(file.schemaId());
+        List<String> writeCols = file.writeCols();
+        if (writeCols == null) {
+            return schema.fields();
+        }
+
+        Map<String, DataField> fieldsByName = new HashMap<>();
+        for (DataField field : schema.fields()) {
+            fieldsByName.put(field.name(), field);
+        }
+        List<DataField> fields = new ArrayList<>();
+        for (String writeCol : writeCols) {
+            // writeCols may also contain physical row-tracking fields outside the table schema.
+            DataField field = fieldsByName.get(writeCol);
+            if (field != null) {
+                fields.add(field);
+            }
+        }
+        return fields;
+    }
+
+    /** Returns the latest sequence known for a physical field position in the file. */
+    public static long fieldMaxSequenceNumber(
+            DataFileMeta file,
+            @Nullable long[] columnSequences,
+            int fieldPosition,
+            int physicalFieldCount) {
+        if (columnSequences == null || columnSequences.length != physicalFieldCount) {
+            return file.maxSequenceNumber();
+        }
+        return columnSequences[fieldPosition];
     }
 
     /**

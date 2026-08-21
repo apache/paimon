@@ -3734,6 +3734,10 @@ public class CoreOptions implements Serializable {
         return options.get(GLOBAL_INDEX_COLUMN_UPDATE_ACTION);
     }
 
+    public boolean ignoreIndexColumnUpdate() {
+        return globalIndexColumnUpdateAction() == GlobalIndexColumnUpdateAction.IGNORE;
+    }
+
     public LookupStrategy lookupStrategy() {
         return LookupStrategy.from(
                 mergeEngine().equals(MergeEngine.FIRST_ROW),
