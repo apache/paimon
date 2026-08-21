@@ -28,6 +28,7 @@ import org.apache.paimon.table.source.Split
 import org.apache.paimon.utils.{CompressUtils, PartitionPathUtils}
 
 import org.apache.spark.sql.Row
+import org.apache.spark.sql.catalyst.analysis.NoSuchPartitionException
 import org.apache.spark.sql.connector.read.InputPartition
 import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
@@ -141,6 +142,56 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase with AdaptiveSpark
 
         checkAnswer(spark.sql("SHOW PARTITIONS T PARTITION (p1=2, p2='2')"), Seq(Row("p1=2/p2=2")))
       }
+    }
+  }
+
+  test("Format table: truncate table") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, p1 INT, p2 STRING) USING csv PARTITIONED BY (p1, p2)")
+      sql("INSERT INTO t VALUES (1, 1, '1'), (2, 2, '1'), (3, 2, '2')")
+
+      sql("TRUNCATE TABLE t")
+
+      checkAnswer(sql("SELECT * FROM t"), Seq.empty)
+      // Emptying a table does not redefine which partitions it has (SPARK-34418). Here they are
+      // the directories, and those stay.
+      checkAnswer(
+        sql("SHOW PARTITIONS t"),
+        Seq(Row("p1=1/p2=1"), Row("p1=2/p2=1"), Row("p1=2/p2=2")))
+    }
+  }
+
+  test("Format table: truncate partition") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, p1 INT, p2 STRING) USING csv PARTITIONED BY (p1, p2)")
+      sql("INSERT INTO t VALUES (1, 1, '1'), (2, 2, '1'), (3, 2, '2')")
+
+      sql("TRUNCATE TABLE t PARTITION (p1 = 2, p2 = '2')")
+      checkAnswer(sql("SELECT * FROM t"), Seq(Row(1, 1, "1"), Row(2, 2, "1")))
+
+      // A partial spec truncates the partitions it covers.
+      sql("TRUNCATE TABLE t PARTITION (p1 = 2)")
+      checkAnswer(sql("SELECT * FROM t"), Seq(Row(1, 1, "1")))
+
+      checkAnswer(
+        sql("SHOW PARTITIONS t"),
+        Seq(Row("p1=1/p2=1"), Row("p1=2/p2=1"), Row("p1=2/p2=2")))
+    }
+  }
+
+  test("Format table: truncate a partition the table does not have") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, p1 INT, p2 STRING) USING csv PARTITIONED BY (p1, p2)")
+      sql("INSERT INTO t VALUES (1, 1, '1')")
+
+      // A complete spec matching nothing is an error, as for any other Spark table; a partial one
+      // matching nothing does nothing.
+      intercept[NoSuchPartitionException] {
+        sql("TRUNCATE TABLE t PARTITION (p1 = 9, p2 = '9')")
+      }
+      sql("TRUNCATE TABLE t PARTITION (p1 = 9)")
+
+      checkAnswer(sql("SELECT * FROM t"), Seq(Row(1, 1, "1")))
     }
   }
 

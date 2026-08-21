@@ -129,7 +129,17 @@ The `TRUNCATE TABLE` statement removes all the rows from a table or partition(s)
 
 ```sql
 TRUNCATE TABLE my_table;
+TRUNCATE TABLE my_table PARTITION (dt = '2025-01-01');
 ```
+
+On a Format Table read through Paimon (`format-table.implementation = paimon`, the default),
+`TRUNCATE TABLE` deletes the data files of the table or of the named partitions and keeps the
+partitions: their directories remain, and with `metastore.partitioned-table = true` so do their
+catalog registrations, so `SHOW PARTITIONS` returns what it returned before. That setting also
+makes the catalog the answer to which partitions the table has, so truncating empties those, leaves
+a directory still waiting for `MSCK REPAIR TABLE` alone, and replaces their statistics with zero. A
+spec that names only some of the partition keys empties the partitions it covers; a complete spec
+the table does not have is an error.
 
 ## Update Table
 
