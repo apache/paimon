@@ -238,7 +238,8 @@ use `MSCK REPAIR TABLE` for that.
 the row count is read from each file's footer, so it is exact for the formats that carry one
 (Parquet, ORC) and a partition holding no files counts as zero, while a format that carries none
 (CSV, TEXT, JSON) leaves the row count the catalog already held rather than guessing one. Reading
-footers costs one open per file, so `NOSCAN` is the cheaper of the two.
+footers costs one open per file, so it runs on the executors and `NOSCAN` is the cheaper of the
+two.
 
 A `PARTITION (...)` clause must give values for a leading run of the partition columns, because
 that is the shape the catalog can select on. On a table partitioned by `(dt, hh)`,

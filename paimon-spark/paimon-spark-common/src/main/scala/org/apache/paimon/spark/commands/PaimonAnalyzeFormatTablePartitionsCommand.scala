@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.partition.PartitionStatistics
 import org.apache.paimon.spark.catalyst.analysis.PaimonResolvePartitionSpec
 import org.apache.paimon.spark.format.PaimonFormatTable
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
@@ -31,7 +32,7 @@ import org.apache.spark.sql.catalyst.expressions.GenericInternalRow
 import org.apache.spark.sql.types.{StringType, StructField, StructType}
 import org.apache.spark.unsafe.types.UTF8String
 
-import java.util.{Map => JMap}
+import java.util.{List => JList, Map => JMap}
 
 import scala.collection.JavaConverters._
 import scala.collection.immutable.ListMap
@@ -43,8 +44,9 @@ import scala.collection.immutable.ListMap
  * The partitions are measured from storage and each measured field replaces what the catalog holds,
  * so this is how a table catches up with writers the catalog never saw. `NOSCAN` stops at what a
  * directory listing gives — file count, byte size, last file creation time — while a full ANALYZE
- * also reads each file footer for its row count. A format that carries no footer (CSV, TEXT, JSON)
- * leaves the row count as it was rather than guessing one.
+ * also reads each file footer for its row count, on the executors, since that is one open per file.
+ * A format that carries no footer (CSV, TEXT, JSON) leaves the row count as it was rather than
+ * guessing one.
  *
  * Analyzing is not a way to add or remove partitions: it measures the ones registered at the time
  * of the listing and re-registers exactly those. There is no lock between the listing and the
@@ -75,15 +77,56 @@ case class PaimonAnalyzeFormatTablePartitionsCommand(
     }
 
     if (partitions.nonEmpty) {
-      val collector = new FormatTablePartitionStatsCollector(
-        v2Table.table,
-        !noScan,
-        OptionUtils.formatTableStatisticsParallelism())
-      val statistics = collector.collect(partitions.asJava)
+      val parallelism = OptionUtils.formatTableStatisticsParallelism()
+      val statistics =
+        if (noScan) {
+          // One listing request per partition is all NOSCAN reports, cheap enough to take here.
+          new FormatTablePartitionStatsCollector(v2Table.table, false, parallelism)
+            .collect(partitions.asJava)
+        } else {
+          measureOnExecutors(sparkSession, partitions, parallelism)
+        }
       v2Table.partitionManager
         .createPartitions(partitions.asJava, true, statistics, true)
     }
     Seq.empty[Row]
+  }
+
+  /**
+   * Measures the partitions on the executors. A full ANALYZE opens the footer of every file, so
+   * reading them here would make the statement driver-bound on a table with many files and leave
+   * the cluster idle. Each task builds one footer reader and returns what its partitions add up to,
+   * so the driver only ever holds one measurement per partition.
+   *
+   * `format-table.statistics.parallelism` bounds how many requests are in flight: it caps the
+   * tasks, and what is left of it caps the files each task reads at once.
+   */
+  private def measureOnExecutors(
+      sparkSession: SparkSession,
+      partitions: List[JMap[String, String]],
+      parallelism: Int): JList[PartitionStatistics] = {
+    val tasks = math.min(parallelism, partitions.size)
+    val perTask = math.max(1, parallelism / tasks)
+    // The table, not this command: a Spark table cannot be shipped to an executor.
+    val table = v2Table.table
+    val measured = sparkSession.sparkContext
+      .parallelize(partitions.zipWithIndex, tasks)
+      .mapPartitions {
+        batch =>
+          val work = batch.toSeq
+          if (work.isEmpty) {
+            Iterator.empty
+          } else {
+            val collector = new FormatTablePartitionStatsCollector(table, true, perTask)
+            work
+              .map(_._2)
+              .iterator
+              .zip(collector.collect(work.map(_._1).asJava).asScala.iterator)
+          }
+      }
+      .collect()
+      .toMap
+    partitions.indices.map(measured).asJava
   }
 
   /**
