@@ -183,9 +183,8 @@ participates in aggregation or retraction, even when its sequence value is older
 the field for both newer and older retract records.
 
 Managed BLOB partial updates externalize each non-null scalar BLOB, array element, or map value into a
-`.managed.blob` pack. Empty collections and collections containing only null values write no payload. BLOB garbage
-collection for orphaned packs is not implemented yet; repeated updates can leave unreachable storage until a future
-collector is available.
+`.managed.blob` pack. Empty collections and collections containing only null values write no payload. Unreachable packs
+from repeated updates are reclaimed by `remove_orphan_blobs` after they are older than `older_than`.
 
 `blob-view-field` columns store serialized view structs inline. Reads resolve upstream blob bytes through the catalog
 when `blob-view.resolve.enabled` is true (default). Append upstream tables used by `sys.blob_view(...)` must enable
@@ -240,16 +239,33 @@ extra files because more than one retained data file can reference the same pack
 
 ## Garbage Collection
 
-Garbage collection of unreferenced `.managed.blob` packs is not implemented yet. Updates, deletes, compaction, or an
-ambiguous writer failure can therefore leave payload packs that are no longer reachable from current rows.
+Unreferenced `.managed.blob` packs are removed by [`remove_orphan_blobs`](../flink/procedures)
+(local, Flink, or Spark). The procedure reads every retained data file's `.blobref` sidecar across snapshots, tags, and
+branches, then deletes packs that are not referenced and whose modification time is earlier than the absolute
+`older_than` cutoff (1 day before the procedure starts by default).
+`remove_orphan_files` never deletes `.managed.blob` packs.
 
-The ordinary orphan-file cleaner intentionally preserves all `.managed.blob` files. This fail-safe behavior prevents it
-from deleting a payload that is still reachable from a snapshot, tag, branch, or another retained root, but it also
-means unused BLOB storage can grow until a root-aware BLOB garbage collector is available.
+This cleanup is best-effort. It lists snapshots, collects used packs twice, and aborts the run (deletes
+nothing) if the snapshot topology or used-pack set changed between those collections. That shrinks the
+window in which a concurrent commit can change reachability. Standard Paimon compaction does not make a pack
+that was unreachable at the final collection reachable afterward: it only reuses packs referenced by its
+input data files, and deletion-conflict detection rejects a stale compact whose inputs have already been
+removed. Under these standard compaction invariants, no separate commit lease is required for that
+compaction path.
 
-A future collector must compute reachability across all retained roots and treat a missing, corrupt, or unsupported
-`.blobref` sidecar as unsafe to delete. An empty, valid sidecar is different from a missing sidecar: it explicitly states
-that the data file references no managed payload pack.
+`older_than` provides a grace period for packs created by a writer but not yet referenced by a committed
+snapshot. Standard writers create new UUID-named packs; choose a cutoff far enough behind the current time
+for writes, commits, and retries to finish. The one-day default assumes those operations complete within one
+day. Writers that publish references to pre-existing old packs, or commit implementations that bypass normal
+deletion-conflict detection, are outside this safety model.
+
+A missing, corrupt, or unsupported `.blobref` sidecar on a data file that still exists is unsafe: that run skips
+deleting every `.managed.blob` file. ADD entries left in unmerged manifests after snapshot expire, whose data files
+are already gone, are ignored. An empty, valid sidecar is different from a missing sidecar: it explicitly states that
+the data file references no managed payload pack.
+
+Snapshot expiration still deletes only the data file and its `.blobref` extra file. Pack bytes are reclaimed on the
+next `remove_orphan_blobs` run after they become unreachable.
 
 ## Reference Metadata
 
