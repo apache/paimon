@@ -16,6 +16,7 @@
 # limitations under the License.
 ################################################################################
 
+import datetime
 import os
 import shutil
 import tempfile
@@ -2036,6 +2037,489 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(out['age'], [99, 99, 99])
         self.assertEqual(out['name'], ['a', 'b', 'c'])
 
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_condition_pushes_down_predicate(self):
+        from pypaimon.common.options.core_options import (
+            CoreOptions, GlobalIndexSearchMode,
+        )
+        from pypaimon.ray.ray_paimon import read_paimon as real_read_paimon
+
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2, 3], type=pa.int32()),
+                    'name': ['a', 'b', 'c'],
+                    'age': pa.array([10, 20, 30], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+        with patch(
+                'pypaimon.ray.ray_paimon.read_paimon',
+                wraps=real_read_paimon,
+        ) as mock_read:
+            result = merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                when_matched=[WhenMatched.update(
+                    {'age': lit(99)}, condition='t.id IN (1, 3)',
+                )],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        self.assertEqual(result['num_matched'], 2)
+        self.assertEqual(
+            self._read_sorted(target),
+            {
+                'id': [1, 2, 3],
+                'name': ['a', 'b', 'c'],
+                'age': [99, 20, 99],
+            },
+        )
+        read_kwargs = mock_read.call_args[1]
+        predicate = read_kwargs['filter']
+        self.assertEqual(predicate.method, 'in')
+        self.assertEqual(predicate.field, 'id')
+        self.assertEqual(predicate.literals, [1, 3])
+        self.assertEqual(
+            read_kwargs['dynamic_options'][
+                CoreOptions.SCALAR_INDEX_SEARCH_MODE.key()
+            ],
+            GlobalIndexSearchMode.FULL.value,
+        )
+        self.assertTrue(read_kwargs['_preserve_current_schema'])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_pushdown_handles_evolved_file_groups(self):
+        from pypaimon.schema.data_types import AtomicType
+        from pypaimon.schema.schema_change import SchemaChange
+
+        options = dict(self.de_options)
+        options.update({
+            'global-index.enabled': 'true',
+            'bucket': '-1',
+        })
+        target = self._create_table(options=options)
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2], type=pa.int32()),
+                    'name': ['a', 'b'],
+                    'age': pa.array([10, 20], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        table = self.catalog.get_table(target)
+        self.assertGreater(table.create_global_index('id'), 0)
+
+        # This append is intentionally not covered by the existing index.
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([3, 4], type=pa.int32()),
+                    'name': ['c', 'd'],
+                    'age': pa.array([30, 40], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        from pypaimon.index.index_file_handler import IndexFileHandler
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        indexed_ranges = {
+            (
+                entry.index_file.global_index_meta.row_range_start,
+                entry.index_file.global_index_meta.row_range_end,
+            )
+            for entry in IndexFileHandler(table).scan(snapshot)
+        }
+        self.assertEqual({(0, 1)}, indexed_ranges)
+
+        first_result = merge_into(
+            target=target,
+            source=target,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            when_matched=[WhenMatched.update(
+                {'age': lit(99)}, condition='t.id IN (2, 3)',
+            )],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+        self.assertEqual(first_result['num_matched'], 2)
+
+        self.catalog.alter_table(
+            target,
+            [SchemaChange.add_column('note', AtomicType('STRING'))],
+            False,
+        )
+
+        result = merge_into(
+            target=target,
+            source=target,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            when_matched=[WhenMatched.update(
+                {'name': lit('updated')},
+                condition='t.id IN (1, 4) AND t.note IS NULL',
+            )],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        self.assertEqual(result['num_matched'], 2)
+        self.assertEqual(
+            self._read_sorted(target),
+            {
+                'id': [1, 2, 3, 4],
+                'name': ['updated', 'b', 'c', 'updated'],
+                'age': [10, 99, 99, 40],
+                'note': [None, None, None, None],
+            },
+        )
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_delete_condition_pushes_down_predicate(self):
+        from pypaimon.ray.ray_paimon import read_paimon as real_read_paimon
+
+        options = dict(self.de_options)
+        options['deletion-vectors.enabled'] = 'true'
+        target = self._create_table(options=options)
+        self._write(target, self._source(ids=(1, 2, 3)))
+
+        with patch(
+                'pypaimon.ray.ray_paimon.read_paimon',
+                wraps=real_read_paimon,
+        ) as mock_read:
+            result = merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                when_matched=[WhenMatched.delete(condition='s.id = 2')],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        self.assertEqual(result['num_matched'], 1)
+        self.assertEqual(self._read_sorted(target)['id'], [1, 3])
+        predicate = mock_read.call_args[1]['filter']
+        self.assertEqual((predicate.method, predicate.field, predicate.literals),
+                         ('equal', 'id', [2]))
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_multiple_conditions_push_down_or(self):
+        from pypaimon.ray.ray_paimon import read_paimon as real_read_paimon
+
+        target = self._create_table()
+        self._write(target, self._source(ids=(1, 2, 3)))
+
+        with patch(
+                'pypaimon.ray.ray_paimon.read_paimon',
+                wraps=real_read_paimon,
+        ) as mock_read:
+            result = merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                when_matched=[
+                    WhenMatched.update(
+                        {'age': lit(11)}, condition='t.id = 1',
+                    ),
+                    WhenMatched.update(
+                        {'age': lit(33)}, condition='s.id = 3',
+                    ),
+                ],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        self.assertEqual(result['num_matched'], 2)
+        predicate = mock_read.call_args[1]['filter']
+        self.assertEqual(predicate.method, 'or')
+        self.assertEqual(
+            [(p.field, p.literals) for p in predicate.literals],
+            [('id', [1]), ('id', [3])],
+        )
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_unconditional_clause_disables_pushdown(self):
+        from pypaimon.ray.ray_paimon import read_paimon as real_read_paimon
+
+        target = self._create_table()
+        self._write(target, self._source(ids=(1, 2, 3)))
+
+        with patch(
+                'pypaimon.ray.ray_paimon.read_paimon',
+                wraps=real_read_paimon,
+        ) as mock_read:
+            result = merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                when_matched=[
+                    WhenMatched.update(
+                        {'age': lit(11)}, condition='t.id = 1',
+                    ),
+                    WhenMatched.update({'age': lit(99)}),
+                ],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        self.assertEqual(result['num_matched'], 3)
+        self.assertNotIn('filter', mock_read.call_args[1])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_column_comparison_fails_open(self):
+        from pypaimon.ray.ray_paimon import read_paimon as real_read_paimon
+
+        target = self._create_table()
+        self._write(target, self._source(ids=(1, 2, 3)))
+
+        with patch(
+                'pypaimon.ray.ray_paimon.read_paimon',
+                wraps=real_read_paimon,
+        ) as mock_read:
+            result = merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                when_matched=[WhenMatched.update(
+                    {'name': lit('same')}, condition='t.age = s.age',
+                )],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        self.assertEqual(result['num_matched'], 3)
+        self.assertNotIn('filter', mock_read.call_args[1])
+        self.assertEqual(self._read_sorted(target)['name'],
+                         ['same', 'same', 'same'])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_pushdown_preserves_field_case(self):
+        from pypaimon.ray.ray_paimon import read_paimon as real_read_paimon
+
+        case_schema = pa.schema([
+            ('UserID', pa.int32()),
+            ('Value', pa.int32()),
+        ])
+        target = f'default.tbl_{uuid.uuid4().hex[:8]}'
+        schema = Schema.from_pyarrow_schema(
+            case_schema, options=self.de_options,
+        )
+        self.catalog.create_table(target, schema, False)
+        self._write(target, pa.Table.from_pydict(
+            {'UserID': [1, 2, 3], 'Value': [10, 20, 30]},
+            schema=case_schema,
+        ))
+
+        with patch(
+                'pypaimon.ray.ray_paimon.read_paimon',
+                wraps=real_read_paimon,
+        ) as mock_read:
+            result = merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                when_matched=[WhenMatched.update(
+                    {'Value': lit(99)},
+                    condition='t.UserID IN (1, 3)',
+                )],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        self.assertEqual(result['num_matched'], 2)
+        predicate = mock_read.call_args[1]['filter']
+        self.assertEqual(predicate.field, 'UserID')
+        table = self.catalog.get_table(target)
+        read_builder = table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        out = read_builder.new_read().to_arrow(splits).sort_by('UserID')
+        self.assertEqual(out['Value'].to_pylist(), [99, 20, 99])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_date_condition_fails_open(self):
+        from pypaimon.ray.ray_paimon import read_paimon as real_read_paimon
+
+        date_schema = pa.schema([
+            ('id', pa.int32()),
+            ('event_date', pa.date32()),
+            ('value', pa.int32()),
+        ])
+        target = f'default.tbl_{uuid.uuid4().hex[:8]}'
+        schema = Schema.from_pyarrow_schema(
+            date_schema, options=self.de_options,
+        )
+        self.catalog.create_table(target, schema, False)
+        self._write(target, pa.Table.from_pydict({
+            'id': [1, 2],
+            'event_date': [
+                datetime.date(2026, 1, 1),
+                datetime.date(2026, 1, 2),
+            ],
+            'value': [10, 20],
+        }, schema=date_schema))
+
+        with patch(
+                'pypaimon.ray.ray_paimon.read_paimon',
+                wraps=real_read_paimon,
+        ) as mock_read:
+            result = merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                when_matched=[WhenMatched.update(
+                    {'value': lit(99)},
+                    condition="t.event_date = '2026-01-01'",
+                )],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        self.assertEqual(result['num_matched'], 1)
+        self.assertNotIn('filter', mock_read.call_args[1])
+        table = self.catalog.get_table(target)
+        read_builder = table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        out = read_builder.new_read().to_arrow(splits).sort_by('id')
+        self.assertEqual(out['value'].to_pylist(), [99, 20])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_double_condition_fails_open(self):
+        from pypaimon.ray.ray_paimon import read_paimon as real_read_paimon
+
+        double_schema = pa.schema([
+            ('id', pa.int32()),
+            ('metric', pa.float64()),
+            ('value', pa.int32()),
+        ])
+        target = f'default.tbl_{uuid.uuid4().hex[:8]}'
+        schema = Schema.from_pyarrow_schema(
+            double_schema, options=self.de_options,
+        )
+        self.catalog.create_table(target, schema, False)
+        self._write(target, pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'metric': [float('nan'), -1.0, 1.0],
+            'value': [10, 20, 30],
+        }, schema=double_schema))
+
+        with patch(
+                'pypaimon.ray.ray_paimon.read_paimon',
+                wraps=real_read_paimon,
+        ) as mock_read:
+            result = merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                when_matched=[WhenMatched.update(
+                    {'value': lit(99)}, condition='t.metric > 0',
+                )],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        self.assertEqual(result['num_matched'], 2)
+        self.assertNotIn('filter', mock_read.call_args[1])
+        table = self.catalog.get_table(target)
+        read_builder = table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        out = read_builder.new_read().to_arrow(splits).sort_by('id')
+        self.assertEqual(out['value'].to_pylist(), [99, 20, 99])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_like_condition_fails_open(self):
+        from pypaimon.ray.ray_paimon import read_paimon as real_read_paimon
+
+        string_schema = pa.schema([
+            ('id', pa.int32()),
+            ('text', pa.string()),
+            ('value', pa.int32()),
+        ])
+        target = f'default.tbl_{uuid.uuid4().hex[:8]}'
+        schema = Schema.from_pyarrow_schema(
+            string_schema, options=self.de_options,
+        )
+        self.catalog.create_table(target, schema, False)
+        self._write(target, pa.Table.from_pydict({
+            'id': [0, 1, 2, 3, 4],
+            'text': ['n', '\\n', '\n', 'line\nbreak', 'linebreak'],
+            'value': [10, 20, 30, 40, 50],
+        }, schema=string_schema))
+
+        with patch(
+                'pypaimon.ray.ray_paimon.read_paimon',
+                wraps=real_read_paimon,
+        ) as mock_read:
+            result = merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                when_matched=[WhenMatched.update(
+                    {'value': lit(99)}, condition=r"t.text LIKE '%\n%'",
+                )],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        self.assertEqual(result['num_matched'], 4)
+        self.assertNotIn('filter', mock_read.call_args[1])
+        table = self.catalog.get_table(target)
+        read_builder = table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        out = read_builder.new_read().to_arrow(splits).sort_by('id')
+        self.assertEqual(out['value'].to_pylist(), [99, 99, 30, 99, 99])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_out_of_range_integer_fails_open(self):
+        from pypaimon.ray.ray_paimon import read_paimon as real_read_paimon
+
+        int_schema = pa.schema([
+            ('id', pa.int64()),
+            ('value', pa.int32()),
+        ])
+        target = f'default.tbl_{uuid.uuid4().hex[:8]}'
+        schema = Schema.from_pyarrow_schema(
+            int_schema, options=self.de_options,
+        )
+        self.catalog.create_table(target, schema, False)
+        self._write(target, pa.Table.from_pydict({
+            'id': [-1, 0, 1],
+            'value': [10, 20, 30],
+        }, schema=int_schema))
+
+        with patch(
+                'pypaimon.ray.ray_paimon.read_paimon',
+                wraps=real_read_paimon,
+        ) as mock_read:
+            result = merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                when_matched=[WhenMatched.update(
+                    {'value': lit(99)},
+                    condition='t.id < 9223372036854775808',
+                )],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        self.assertEqual(result['num_matched'], 3)
+        self.assertNotIn('filter', mock_read.call_args[1])
+        table = self.catalog.get_table(target)
+        read_builder = table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        out = read_builder.new_read().to_arrow(splits).sort_by('id')
+        self.assertEqual(out['value'].to_pylist(), [99, 99, 99])
+
     def test_self_merge_update_star(self):
         target = self._create_table()
         self._write(
@@ -2530,6 +3014,20 @@ class TargetProjectionTest(unittest.TestCase):
 
 class MergeConditionUnitTest(unittest.TestCase):
 
+    @staticmethod
+    def _predicate_fields():
+        return Schema.from_pyarrow_schema(pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('MixedCase', pa.int32()),
+            ('flag', pa.bool_()),
+            ('event_date', pa.date32()),
+            ('event_time', pa.timestamp('us')),
+            ('amount', pa.decimal128(30, 2)),
+            ('float_value', pa.float32()),
+            ('double_value', pa.float64()),
+        ])).fields
+
     def test_rewrite_condition(self):
         from pypaimon.ray.merge_condition import rewrite_condition
         self.assertEqual(
@@ -2591,6 +3089,155 @@ class MergeConditionUnitTest(unittest.TestCase):
             extract_columns('s.id = t.id AND s.age > t.age'),
             {'s.id', 't.id', 's.age', 't.age'},
         )
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_parse_simple_self_merge_predicate(self):
+        from pypaimon.ray.merge_condition import (
+            try_parse_self_merge_predicate,
+        )
+        predicate = try_parse_self_merge_predicate(
+            't.id IN (1, 3) AND s.name = \'s.literal\'',
+            self._predicate_fields(),
+        )
+        self.assertEqual(predicate.method, 'and')
+        self.assertEqual(
+            [(p.field, p.literals) for p in predicate.literals],
+            [('id', [1, 3]), ('name', ['s.literal'])],
+        )
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_parse_self_merge_predicate_ast_subset(self):
+        from pypaimon.ray.merge_condition import (
+            try_parse_self_merge_predicate,
+        )
+        cases = [
+            ('t.id != 1', 'notEqual', 'id', [1]),
+            ('t.id NOT IN (1, 2)', 'notIn', 'id', [1, 2]),
+            ('t.id BETWEEN 1 AND 2', 'between', 'id', [1, 2]),
+            ('t.id NOT BETWEEN 1 AND 2', 'notBetween', 'id', [1, 2]),
+            ('t.event_date IS NULL', 'isNull', 'event_date', None),
+            ('t.event_date IS NOT NULL', 'isNotNull', 'event_date', None),
+        ]
+        for condition, method, field, literals in cases:
+            with self.subTest(condition=condition):
+                predicate = try_parse_self_merge_predicate(
+                    condition, self._predicate_fields(),
+                )
+                self.assertEqual(
+                    (predicate.method, predicate.field, predicate.literals),
+                    (method, field, literals),
+                )
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_predicate_preserves_field_case(self):
+        from pypaimon.ray.merge_condition import (
+            try_parse_self_merge_predicate,
+        )
+        predicate = try_parse_self_merge_predicate(
+            't.MixedCase = 1', self._predicate_fields(),
+        )
+        self.assertEqual(predicate.field, 'MixedCase')
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_column_comparison_is_not_pushed_down(self):
+        from pypaimon.ray.merge_condition import (
+            try_parse_self_merge_predicate,
+        )
+        self.assertIsNone(try_parse_self_merge_predicate(
+            't.id = s.id', self._predicate_fields(),
+        ))
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_function_is_not_pushed_down(self):
+        from pypaimon.ray.merge_condition import (
+            try_parse_self_merge_predicate,
+        )
+        self.assertIsNone(try_parse_self_merge_predicate(
+            'abs(t.id) > 1', self._predicate_fields(),
+        ))
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_predicate_parse_failure_is_logged(self):
+        from pypaimon.ray.merge_condition import (
+            try_parse_self_merge_predicate,
+        )
+        with self.assertLogs(
+                'pypaimon.ray.merge_condition', level='DEBUG') as logs:
+            self.assertIsNone(try_parse_self_merge_predicate(
+                't.id =', self._predicate_fields(),
+            ))
+        self.assertIn('Unable to push down', '\n'.join(logs.output))
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_unsafe_literal_types_fail_open(self):
+        from pypaimon.ray.merge_condition import (
+            try_parse_self_merge_predicate,
+        )
+        conditions = [
+            "t.event_date = '2026-01-01'",
+            "t.event_time = '2026-01-01 01:02:03'",
+            't.amount = 12345678901234567890.12',
+            't.float_value > 0',
+            't.double_value > 0',
+        ]
+        for condition in conditions:
+            with self.subTest(condition=condition):
+                self.assertIsNone(try_parse_self_merge_predicate(
+                    condition, self._predicate_fields(),
+                ))
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_invalid_literals_fail_open(self):
+        from pypaimon.ray.merge_condition import (
+            try_parse_self_merge_predicate,
+        )
+        conditions = [
+            "t.flag = 'true'",
+            't.name = bare_value',
+            't.name IN (NULL)',
+        ]
+        for condition in conditions:
+            with self.subTest(condition=condition):
+                self.assertIsNone(try_parse_self_merge_predicate(
+                    condition, self._predicate_fields(),
+                ))
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_boolean_literal_is_pushed_down(self):
+        from pypaimon.ray.merge_condition import (
+            try_parse_self_merge_predicate,
+        )
+        predicate = try_parse_self_merge_predicate(
+            't.flag = TRUE', self._predicate_fields(),
+        )
+        self.assertEqual((predicate.field, predicate.literals),
+                         ('flag', [True]))
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_like_condition_is_not_pushed_down(self):
+        from pypaimon.ray.merge_condition import (
+            try_parse_self_merge_predicate,
+        )
+        self.assertIsNone(try_parse_self_merge_predicate(
+            r"t.name LIKE '%\n%'", self._predicate_fields(),
+        ))
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_out_of_range_integers_fail_open(self):
+        from pypaimon.ray.merge_condition import (
+            try_parse_self_merge_predicate,
+        )
+        conditions = [
+            't.id < 9223372036854775808',
+            't.id > -9223372036854775809',
+            't.id IN (1, 9223372036854775808)',
+            't.id BETWEEN -9223372036854775809 AND 1',
+        ]
+        for condition in conditions:
+            with self.subTest(condition=condition):
+                self.assertIsNone(try_parse_self_merge_predicate(
+                    condition, self._predicate_fields(),
+                ))
 
     @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
     def test_filter_batch(self):
