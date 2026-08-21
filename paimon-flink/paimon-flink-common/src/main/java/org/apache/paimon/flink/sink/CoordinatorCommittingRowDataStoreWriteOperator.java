@@ -92,6 +92,7 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
 
     private transient CheckpointCommittablesSerializer stateSerializer;
     private transient TypeSerializer<CheckpointCommittables> eventSerializer;
+    private boolean endOfInput;
 
     public CoordinatorCommittingRowDataStoreWriteOperator(
             StreamOperatorParameters<Committable> parameters,
@@ -135,12 +136,14 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
 
             List<CheckpointCommittables> restored = new ArrayList<>();
             for (CheckpointCommittables entry : pendingCommittableState.get()) {
-                // End input is newer than every ordinary restored checkpoint and must survive
-                // subsequent snapshots even if Flink does not call endInput again after restore.
-                if (entry.checkpointId() == END_INPUT_CHECKPOINT_ID) {
-                    pendingCommittables.put(entry.checkpointId(), entry);
-                }
                 restored.add(entry);
+                if (entry.checkpointId() == END_INPUT_CHECKPOINT_ID) {
+                    // The terminal committable can only be replayed from state after a task or
+                    // region failover. Ordinary restored checkpoint entries keep their existing
+                    // one-shot replay behavior.
+                    pendingCommittables.put(entry.checkpointId(), entry);
+                    endOfInput = true;
+                }
             }
             pendingCommittableState.clear();
 
@@ -173,23 +176,28 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
     }
 
     @Override
+    public void prepareSnapshotPreBarrier(long checkpointId) throws Exception {
+        if (endOfInput) {
+            // The marker proves this real checkpoint was snapshotted after the terminal
+            // committable. It deliberately contains no newly prepared data.
+            emitCheckpointMarker(checkpointId);
+        } else {
+            emitCommittables(false, checkpointId);
+        }
+    }
+
+    @Override
+    public void endInput() throws Exception {
+        endOfInput = true;
+        emitCommittables(true, END_INPUT_CHECKPOINT_ID);
+    }
+
+    @Override
     protected void emitCommittables(boolean waitCompaction, long checkpointId) throws IOException {
         List<Committable> committables = prepareCommit(waitCompaction, checkpointId);
         CheckpointCommittables entry =
                 new CheckpointCommittables(
                         checkpointId, committables, currentWatermark, currentIdle);
-        if (checkpointId == END_INPUT_CHECKPOINT_ID) {
-            CheckpointCommittables previous = pendingCommittables.get(checkpointId);
-            if (previous != null) {
-                // A restored writer may receive endInput again. Preserve the previously persisted
-                // final committables and send one authoritative entry to the coordinator.
-                List<Committable> merged = new ArrayList<>(previous.committables());
-                merged.addAll(entry.committables());
-                entry =
-                        new CheckpointCommittables(
-                                checkpointId, merged, currentWatermark, currentIdle);
-            }
-        }
         // Emit an event per (subtask, checkpoint) regardless of whether committables is empty.
         operatorEventGateway.sendEventToCoordinator(
                 CommittableEvent.create(checkpointId, entry, eventSerializer));
@@ -201,6 +209,15 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
         // The downstream is a DiscardingSink, but emitting keeps numRecordsOut observable and
         // preserves the operator's IO metrics.
         committables.forEach(committable -> output.collect(new StreamRecord<>(committable)));
+    }
+
+    private void emitCheckpointMarker(long checkpointId) throws IOException {
+        CheckpointCommittables marker =
+                new CheckpointCommittables(
+                        checkpointId, new ArrayList<>(), currentWatermark, currentIdle);
+        operatorEventGateway.sendEventToCoordinator(
+                CommittableEvent.create(checkpointId, marker, eventSerializer));
+        pendingCommittables.put(checkpointId, marker);
     }
 
     @Override
