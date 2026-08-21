@@ -1067,24 +1067,12 @@ public class IcebergRestMetadataCommitterTest {
         assertThat(getIcebergResult())
                 .containsExactlyInAnyOrder("Record(1, 10)", "Record(3, 30)", "Record(4, 40)");
 
-        org.apache.paimon.iceberg.metadata.IcebergMetadata localMetadata =
-                org.apache.paimon.iceberg.metadata.IcebergMetadata.fromPath(
-                        table.fileIO(),
-                        new org.apache.paimon.fs.Path(
-                                IcebergCommitCallback.catalogTableMetadataPath(table),
-                                "v3.metadata.json"));
-        String localIdentity =
-                localMetadata.snapshots().stream()
-                        .filter(snap -> snap.snapshotId() == 2)
-                        .findFirst()
-                        .get()
-                        .summary()
-                        .get("paimon-commit-identity");
+        String liveIdentity = table.snapshotManager().snapshot(2).uuid();
         Table icebergTable = restCatalog.loadTable(TableIdentifier.of("mydb", "t"));
         org.apache.iceberg.Snapshot catalogSnapshot2 = icebergTable.snapshot(2);
         if (catalogSnapshot2 != null) {
             assertThat(catalogSnapshot2.summary().get("paimon-commit-identity"))
-                    .isEqualTo(localIdentity);
+                    .isEqualTo(liveIdentity);
         }
     }
 

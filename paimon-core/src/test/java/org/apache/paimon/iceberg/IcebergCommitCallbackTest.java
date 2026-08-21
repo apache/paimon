@@ -20,9 +20,15 @@ package org.apache.paimon.iceberg;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.iceberg.metadata.IcebergDataField;
+import org.apache.paimon.iceberg.metadata.IcebergMetadata;
+import org.apache.paimon.iceberg.metadata.IcebergSchema;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.tag.Tag;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.TagManager;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -33,6 +39,8 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Answers;
 
 import java.lang.reflect.Field;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Optional;
 import java.util.stream.Stream;
 
@@ -101,6 +109,131 @@ public class IcebergCommitCallbackTest {
         Field field = IcebergCommitCallback.class.getDeclaredField(fieldName);
         field.setAccessible(true);
         field.set(target, value);
+    }
+
+    @Test
+    void testFormatVersion2RejectsVariantType() {
+        RowType rowType =
+                RowType.of(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "payload", DataTypes.VARIANT()));
+
+        assertThatThrownBy(
+                        () ->
+                                IcebergCommitCallback.checkFormatVersionSupportsSchema(
+                                        IcebergMetadata.FORMAT_VERSION_V2, rowType))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("VARIANT")
+                .hasMessageContaining("not supported by Iceberg compatibility");
+    }
+
+    @Test
+    void testFormatVersion2RejectsNestedVariantType() {
+        RowType rowType =
+                RowType.of(
+                        new DataField(
+                                0,
+                                "nested",
+                                DataTypes.ARRAY(
+                                        DataTypes.ROW(
+                                                new DataField(
+                                                        1, "payload", DataTypes.VARIANT())))));
+
+        assertThatThrownBy(
+                        () ->
+                                IcebergCommitCallback.checkFormatVersionSupportsSchema(
+                                        IcebergMetadata.FORMAT_VERSION_V2, rowType))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("nested.element.payload: VARIANT");
+    }
+
+    @Test
+    void testVariantPartitionKeyRejected() {
+        IcebergSchema schema =
+                new IcebergSchema(
+                        0,
+                        Arrays.asList(
+                                new IcebergDataField(1, "k", true, "int", null),
+                                new IcebergDataField(2, "payload", false, "variant", null)));
+
+        assertThatThrownBy(
+                        () ->
+                                IcebergCommitCallback.checkNoVariantPartitionKeys(
+                                        Collections.singletonList("payload"), schema))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("payload")
+                .hasMessageContaining("VARIANT");
+    }
+
+    @Test
+    void testNonVariantPartitionKeyAllowed() {
+        IcebergSchema schema =
+                new IcebergSchema(
+                        0,
+                        Arrays.asList(
+                                new IcebergDataField(1, "k", true, "int", null),
+                                new IcebergDataField(2, "payload", false, "variant", null)));
+
+        assertThatCode(
+                        () ->
+                                IcebergCommitCallback.checkNoVariantPartitionKeys(
+                                        Collections.singletonList("k"), schema))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void testNanosecondTimestampsRejectedOnAllVersions() {
+        for (int formatVersion :
+                new int[] {IcebergMetadata.FORMAT_VERSION_V2, IcebergMetadata.FORMAT_VERSION_V3}) {
+            RowType timestampNs = RowType.of(new DataField(0, "ts", DataTypes.TIMESTAMP(9)));
+            assertThatThrownBy(
+                            () ->
+                                    IcebergCommitCallback.checkFormatVersionSupportsSchema(
+                                            formatVersion, timestampNs))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("Nanosecond-precision");
+
+            RowType timestampLtzNs =
+                    RowType.of(new DataField(0, "ts", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(7)));
+            assertThatThrownBy(
+                            () ->
+                                    IcebergCommitCallback.checkFormatVersionSupportsSchema(
+                                            formatVersion, timestampLtzNs))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("Nanosecond-precision");
+        }
+    }
+
+    @Test
+    void testFormatVersion3AlsoRejectsVariantType() {
+        RowType rowType = RowType.of(new DataField(0, "payload", DataTypes.VARIANT()));
+
+        assertThatThrownBy(
+                        () ->
+                                IcebergCommitCallback.checkFormatVersionSupportsSchema(
+                                        IcebergMetadata.FORMAT_VERSION_V3, rowType))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("payload: VARIANT");
+    }
+
+    @Test
+    void testFormatVersion2AllowsNonV3Types() {
+        RowType rowType =
+                RowType.of(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "name", DataTypes.STRING()),
+                        new DataField(2, "ts", DataTypes.TIMESTAMP(6)),
+                        new DataField(
+                                3,
+                                "nested",
+                                DataTypes.MAP(
+                                        DataTypes.STRING(), DataTypes.ARRAY(DataTypes.INT()))));
+
+        assertThatCode(
+                        () ->
+                                IcebergCommitCallback.checkFormatVersionSupportsSchema(
+                                        IcebergMetadata.FORMAT_VERSION_V2, rowType))
+                .doesNotThrowAnyException();
     }
 
     @ParameterizedTest(name = "StorageType: {0}")

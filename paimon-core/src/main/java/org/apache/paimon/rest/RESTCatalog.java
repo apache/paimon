@@ -99,6 +99,8 @@ import static org.apache.paimon.catalog.CatalogUtils.listPartitionsFromFileSyste
 import static org.apache.paimon.catalog.CatalogUtils.validateCatalogManagedFormatTablePartitions;
 import static org.apache.paimon.catalog.CatalogUtils.validateCatalogManagedPartitionOptions;
 import static org.apache.paimon.catalog.CatalogUtils.validateCreateTable;
+import static org.apache.paimon.catalog.CatalogUtils.validateIcebergMirrorable;
+import static org.apache.paimon.catalog.CatalogUtils.validateIcebergMirrorableReplacement;
 import static org.apache.paimon.options.CatalogOptions.CASE_SENSITIVE;
 
 /** A catalog implementation for REST. */
@@ -581,6 +583,31 @@ public class RESTCatalog implements Catalog {
                     identifier, schema.options(), schema.options().containsKey(PATH.key()));
             createExternalTablePathIfNotExist(schema);
             Schema newSchema = inferSchemaIfExternalPaimonTable(schema);
+            // registration adopts a persisted schema and stores nothing new, so only a request
+            // that would really create a table is judged — and creating one that already exists
+            // is a documented no-op, so the outcome below is decided by whether it exists
+            if (newSchema == schema) {
+                try {
+                    validateIcebergMirrorable(schema);
+                } catch (RuntimeException invalidSchema) {
+                    // an existing table decides the outcome either way: a no-op when ignored,
+                    // the documented already-exists failure otherwise
+                    boolean exists;
+                    try {
+                        getTable(identifier);
+                        exists = true;
+                    } catch (TableNotExistException absent) {
+                        exists = false;
+                    }
+                    if (!exists) {
+                        throw invalidSchema;
+                    }
+                    if (ignoreIfExists) {
+                        return;
+                    }
+                    throw new TableAlreadyExistException(identifier);
+                }
+            }
             api.createTable(identifier, newSchema);
         } catch (AlreadyExistsException e) {
             if (!ignoreIfExists) {
@@ -592,7 +619,7 @@ public class RESTCatalog implements Catalog {
             throw new DatabaseNotExistException(identifier.getDatabaseName());
         } catch (BadRequestException e) {
             throw new RuntimeException(new IllegalArgumentException(e.getMessage()));
-        } catch (IllegalArgumentException e) {
+        } catch (IllegalArgumentException | TableAlreadyExistException e) {
             throw e;
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -663,6 +690,35 @@ public class RESTCatalog implements Catalog {
         // client-side here: a round-tripped schema of an internal table may carry the synthetic
         // path option, and the server remains the authority for replace semantics.
         validateCatalogManagedPartitionOptions(newSchema.options());
+        // the server truncates before installing the replacement, so a schema the Iceberg
+        // mirror cannot represent has to be refused before the request is dispatched. Replacing
+        // a table that does not exist is a documented no-op, so only report the invalid schema
+        // once there is a table that would actually be truncated.
+        try {
+            Table existing = null;
+            try {
+                existing = getTable(identifier);
+            } catch (TableNotExistException absent) {
+                // the request itself reports the missing table below
+            }
+            validateIcebergMirrorableReplacement(existing, newSchema);
+        } catch (RuntimeException invalidSchema) {
+            boolean exists;
+            try {
+                getTable(identifier);
+                exists = true;
+            } catch (TableNotExistException absent) {
+                exists = false;
+            }
+            if (exists) {
+                throw invalidSchema;
+            }
+            // no table to replace: the documented outcome is a no-op or a missing-table failure
+            if (ignoreIfNotExists) {
+                return;
+            }
+            throw new TableNotExistException(identifier);
+        }
         try {
             api.replaceTable(identifier, newSchema);
         } catch (NoSuchResourceException e) {

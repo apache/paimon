@@ -25,11 +25,13 @@ import org.apache.paimon.format.json.JsonOptions;
 import org.apache.paimon.format.text.TextOptions;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.iceberg.IcebergCommitCallback;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.exceptions.NotImplementedException;
+import org.apache.paimon.schema.ColumnDirectiveUtils;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -51,6 +53,7 @@ import org.apache.paimon.table.system.AllTablesTable;
 import org.apache.paimon.table.system.CatalogOptionsTable;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
@@ -85,6 +88,59 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Utils for {@link Catalog}. */
 public class CatalogUtils {
+
+    /**
+     * Rejects a schema the Iceberg mirror could not represent. Runs on the effective options, so
+     * catalog defaults are already merged.
+     */
+    public static void validateIcebergMirrorable(Schema schema) {
+        Options options = Options.fromMap(schema.options());
+        TableType tableType = options.get(CoreOptions.TYPE);
+        if (tableType.equals(TableType.TABLE) || tableType.equals(TableType.MATERIALIZED_TABLE)) {
+            // directives (a BYTES field marked __BLOB_FIELD) change the stored types
+            Schema expanded = ColumnDirectiveUtils.applyDirectives(schema);
+            IcebergCommitCallback.checkSchemaMirrorable(options, new RowType(expanded.fields()));
+        }
+    }
+
+    /**
+     * Judges a replacement before {@code replaceTable} truncates: a rule that only exists between
+     * two schemas, such as a format-version downgrade, would otherwise reject it after the data is
+     * gone. Only an in-place replacement is judged against the existing table.
+     */
+    public static void validateIcebergMirrorableReplacement(
+            @Nullable Table existing, Schema newSchema) {
+        Options options = Options.fromMap(newSchema.options());
+        TableType tableType = options.get(CoreOptions.TYPE);
+        if (!tableType.equals(TableType.TABLE) && !tableType.equals(TableType.MATERIALIZED_TABLE)) {
+            return;
+        }
+        // an in-place replacement is staged as written; any other target goes through the create
+        // path, which expands directives first
+        boolean inPlace = existing instanceof FileStoreTable && tableType.equals(TableType.TABLE);
+        List<DataField> fields =
+                inPlace
+                        ? newSchema.fields()
+                        : ColumnDirectiveUtils.applyDirectives(newSchema).fields();
+        IcebergCommitCallback.checkSchemaMirrorable(options, new RowType(fields));
+        if (!inPlace) {
+            return;
+        }
+        FileStoreTable existingTable = (FileStoreTable) existing;
+        TableSchema existingSchema = existingTable.schema();
+        IcebergCommitCallback.checkSchemaChangeMirrorable(
+                Options.fromMap(existingSchema.options()),
+                existingSchema.fields(),
+                options,
+                fields);
+        IcebergCommitCallback.checkNoFormatVersionRegression(
+                options,
+                new SchemaManager(
+                                existingTable.fileIO(),
+                                existingTable.location(),
+                                existingTable.coreOptions().branch())
+                        .listAll());
+    }
 
     public static Path path(String warehouse, String database, String table) {
         return new Path(String.format("%s/%s.db/%s", warehouse, database, table));

@@ -1259,9 +1259,21 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         boolean success;
         final List<SimpleFileEntry> finalBaseFiles = baseDataFiles;
         final List<ManifestEntry> finalDeltaFiles = deltaFiles;
-        commitPreCallbacks.forEach(
-                callback ->
-                        callback.call(finalBaseFiles, finalDeltaFiles, indexFiles, newSnapshot));
+        try {
+            commitPreCallbacks.forEach(
+                    callback ->
+                            callback.call(
+                                    finalBaseFiles, finalDeltaFiles, indexFiles, newSnapshot));
+        } catch (RuntimeException e) {
+            // a pre-commit callback vetoed the commit: the manifests prepared above were
+            // never referenced by a published snapshot and must be cleaned up, exactly
+            // like a preparation failure
+            commitCleaner.cleanUpReuseTmpManifests(
+                    deltaManifestList, changelogManifestList, oldIndexManifest, indexManifest);
+            commitCleaner.cleanUpNoReuseTmpManifests(
+                    baseManifestList, mergeBeforeManifests, mergeAfterManifests);
+            throw e;
+        }
         try {
             success = commitSnapshotImpl(latestSnapshot, newSnapshot, deltaStatistics);
         } catch (Exception e) {
@@ -1496,8 +1508,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         // They may veto the rollback by throwing (e.g. a chain-table snapshot branch rejects a
         // pure-DELETE overwrite that would drop a snapshot partition still anchoring delta
         // partitions), in which case the rollback snapshot is never created.
-        commitPreCallbacks.forEach(
-                callback -> callback.call(baseFiles, deltaFiles, indexChanges, newSnapshot));
+        try {
+            commitPreCallbacks.forEach(
+                    callback -> callback.call(baseFiles, deltaFiles, indexChanges, newSnapshot));
+        } catch (RuntimeException e) {
+            // the base and delta manifests written above were never referenced by a
+            // published snapshot and must be cleaned up, exactly like a regular commit
+            commitCleaner.cleanUpManifestList(baseManifestList);
+            commitCleaner.cleanUpManifestList(deltaManifestList);
+            throw e;
+        }
 
         boolean success =
                 commitSnapshotImpl(

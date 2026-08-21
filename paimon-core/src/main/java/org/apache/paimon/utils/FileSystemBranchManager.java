@@ -22,9 +22,11 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.iceberg.IcebergCommitCallback;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.tag.Tag;
@@ -37,6 +39,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -183,6 +186,21 @@ public class FileSystemBranchManager implements BranchManager {
         Snapshot earliestSnapshot =
                 snapshotManager.copyWithBranch(branchName).snapshot(earliestSnapshotId);
         long earliestSchemaId = earliestSnapshot.schemaId();
+
+        // the branch's schemas are installed verbatim, without passing through
+        // SchemaManager.commit, so the same rules apply here — judged against the versions this
+        // branch already published, which are about to be deleted. Only the mirrored branch.
+        Optional<TableSchema> branchSchema =
+                BranchManager.isMainBranch(BranchManager.normalizeBranch(snapshotManager.branch()))
+                        ? schemaManager.copyWithBranch(branchName).latest()
+                        : Optional.empty();
+        if (branchSchema.isPresent()) {
+            Options branchOptions = Options.fromMap(branchSchema.get().options());
+            IcebergCommitCallback.checkSchemaMirrorable(
+                    branchOptions, branchSchema.get().logicalRowType());
+            IcebergCommitCallback.checkNoFormatVersionRegressionOnRestore(
+                    branchOptions, schemaManager.listAll());
+        }
 
         try {
             // Delete snapshot, schema, and tag from the main branch which occurs after
