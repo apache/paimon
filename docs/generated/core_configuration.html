@@ -663,6 +663,12 @@ under the License.
             <td>Optional endInput check partition expire used in case of batch mode or bounded stream.</td>
         </tr>
         <tr>
+            <td><h5>field-id.one-based</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to assign field ids starting from 1 instead of 0 when creating a table (ids of all columns, including nested ones, are shifted by one). Paimon historically starts field ids at 0, but some external Iceberg readers (e.g. Snowflake) reject field id 0 in Iceberg metadata. Enable when creating tables with Iceberg compatibility for such readers. Only affects table creation; existing tables (and their data files, which embed field ids) keep their original ids.</td>
+        </tr>
+        <tr>
             <td><h5>fields.default-aggregate-function</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
