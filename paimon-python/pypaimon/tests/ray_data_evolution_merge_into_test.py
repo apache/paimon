@@ -2251,6 +2251,72 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertTrue(stale_paths)
         self.assertTrue(all(not os.path.exists(path) for path in stale_paths))
 
+    def test_self_merge_compaction_retry_is_not_nested(self):
+        from pypaimon.ray import data_evolution_merge_into as merge_module
+        from pypaimon.ray import row_id_conflict_rewriter as rewriter_module
+        from pypaimon.write.file_store_commit import FileStoreCommit
+
+        target = self._create_table()
+        self._write(target, self._source(ids=(1, 2)))
+        self._write(target, self._source(ids=(3, 4)))
+        table = self.catalog.get_table(target)
+        real_apply = merge_module.distributed_self_merge_update_apply
+        real_rewrite = rewriter_module._rewrite_updates
+        real_commit_init = FileStoreCommit.__init__
+
+        def stage_then_compact(*args, **kwargs):
+            result = real_apply(*args, **kwargs)
+            self._compact_all_data_files(table)
+            return result
+
+        rewrite_calls = [0]
+
+        def miss_precommit_race(*args, **kwargs):
+            rewrite_calls[0] += 1
+            if rewrite_calls[0] == 1:
+                return None
+            return real_rewrite(*args, **kwargs)
+
+        def init_with_rollback(commit, *args, **kwargs):
+            real_commit_init(commit, *args, **kwargs)
+            commit.rollback = Mock()
+            commit.rollback.try_to_rollback.return_value = True
+
+        with patch.object(
+                merge_module,
+                'distributed_self_merge_update_apply',
+                side_effect=stage_then_compact,
+        ), patch.object(
+                rewriter_module,
+                '_rewrite_updates',
+                side_effect=miss_precommit_race,
+        ), patch.object(
+                FileStoreCommit,
+                '__init__',
+                new=init_with_rollback,
+        ), patch.object(
+                FileStoreCommit,
+                '_commit_retry_wait',
+        ) as commit_retry_wait, patch.object(
+                rewriter_module,
+                '_retry_wait',
+        ) as ray_retry_wait:
+            result = merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                when_matched=[WhenMatched.update({'age': lit(99)})],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        self.assertEqual(result['num_matched'], 4)
+        self.assertEqual(self._read_sorted(target)['age'], [99, 99, 99, 99])
+        commit_retry_wait.assert_not_called()
+        ray_retry_wait.assert_called_once()
+        self.assertEqual(ray_retry_wait.call_args[0][1], 0)
+        self.assertEqual(rewrite_calls[0], 2)
+
     def test_self_merge_compaction_rebase_keeps_logical_conflicts(self):
         from pypaimon.ray import data_evolution_merge_into as merge_module
 

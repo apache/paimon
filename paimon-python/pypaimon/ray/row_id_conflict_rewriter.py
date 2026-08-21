@@ -72,11 +72,40 @@ def commit_self_merge_with_compaction_retry(
             "0 B",
     })
 
+    base_snapshot_ids = _base_snapshot_ids(current_updates)
+    latest_snapshot = table.snapshot_manager().get_latest_snapshot()
+    if (
+            len(base_snapshot_ids) == 1
+            and latest_snapshot is not None
+            and latest_snapshot.id != next(iter(base_snapshot_ids))
+    ):
+        result = _rewrite_updates(
+            table,
+            current_updates,
+            latest_snapshot,
+            num_partitions=num_partitions,
+            ray_remote_args=ray_remote_args,
+        )
+        if result is not None:
+            current_updates = result.update_messages
+            superseded_messages.extend(result.superseded_messages)
+            logger.info(
+                "Rewrote %d stale self-merge file(s) against snapshot %d "
+                "before committing to table %s.",
+                result.rewritten_file_count,
+                latest_snapshot.id,
+                table.identifier,
+            )
+
     while True:
         commit = None
         conflict = None
         try:
             commit = commit_table.new_batch_write_builder().new_commit()
+            # This layer owns stale row-id layout recovery. Do not enter the
+            # legacy compaction-rollback loop before the distributed rebase;
+            # ordinary FileStoreCommit retries remain enabled.
+            commit.file_store_commit.rollback = None
             commit.commit(current_updates + other_messages)
         except Exception as error:
             conflict = _find_row_id_conflict(error)
@@ -104,7 +133,7 @@ def commit_self_merge_with_compaction_retry(
         elapsed = int(time.time() * 1000) - start_millis
         if (
                 elapsed > table.options.commit_timeout()
-                or retry_count > table.options.commit_max_retries()
+                or retry_count >= table.options.commit_max_retries()
         ):
             raise conflict
 
@@ -162,12 +191,7 @@ def _rewrite_updates(
     ):
         return None
 
-    base_snapshot_ids = {
-        message.check_from_snapshot
-        for message in update_messages
-        if message.check_from_snapshot is not None
-        and message.check_from_snapshot >= 0
-    }
+    base_snapshot_ids = _base_snapshot_ids(update_messages)
     if len(base_snapshot_ids) != 1:
         return None
     base_snapshot = table.snapshot_manager().get_snapshot_by_id(
@@ -305,6 +329,15 @@ def _rewrite_updates(
         superseded_messages=superseded_messages,
         rewritten_file_count=len(candidates),
     )
+
+
+def _base_snapshot_ids(update_messages: Sequence[CommitMessage]):
+    return {
+        message.check_from_snapshot
+        for message in update_messages
+        if message.check_from_snapshot is not None
+        and message.check_from_snapshot >= 0
+    }
 
 
 def _rewrite_group(
