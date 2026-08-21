@@ -82,6 +82,9 @@ public interface MongoVersionStrategy {
             List<ComputedColumn> computedColumns,
             Configuration mongodbConfig)
             throws JsonProcessingException {
+        if (jsonNode == null || jsonNode.isNull()) {
+            return null;
+        }
         SchemaAcquisitionMode mode =
                 SchemaAcquisitionMode.valueOf(mongodbConfig.get(START_MODE).toUpperCase());
         ObjectNode objectNode =
