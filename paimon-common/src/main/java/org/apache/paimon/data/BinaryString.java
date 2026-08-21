@@ -28,6 +28,7 @@ import javax.annotation.Nullable;
 import java.io.UnsupportedEncodingException;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.Locale;
 
 import static org.apache.paimon.memory.MemorySegmentUtils.allocateReuseBytes;
 import static org.apache.paimon.memory.MemorySegmentUtils.allocateReuseChars;
@@ -535,7 +536,7 @@ public final class BinaryString extends BinarySection implements Comparable<Bina
     }
 
     private BinaryString javaToUpperCase() {
-        return fromString(toString().toUpperCase());
+        return fromString(toString().toUpperCase(Locale.ROOT));
     }
 
     /**
@@ -569,7 +570,7 @@ public final class BinaryString extends BinarySection implements Comparable<Bina
     }
 
     private BinaryString javaToLowerCase() {
-        return fromString(toString().toLowerCase());
+        return fromString(toString().toLowerCase(Locale.ROOT));
     }
 
     // ------------------------------------------------------------------------------------------

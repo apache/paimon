@@ -30,6 +30,7 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Random;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
@@ -344,6 +345,18 @@ public class BinaryStringTest {
         assertThat(row.getString(3).toLowerCase()).isEqualTo(fromString("abcdefg"));
         assertThat(row.getString(5).toUpperCase()).isEqualTo(fromString("!@#$%^*"));
         assertThat(row.getString(5).toLowerCase()).isEqualTo(fromString("!@#$%^*"));
+    }
+
+    @TestTemplate
+    public void testLocaleIndependentUpperLowerCase() {
+        Locale originalLocale = Locale.getDefault();
+        try {
+            Locale.setDefault(new Locale("tr", "TR"));
+            assertThat(fromString("äi").toUpperCase()).isEqualTo(fromString("ÄI"));
+            assertThat(fromString("ÄI").toLowerCase()).isEqualTo(fromString("äi"));
+        } finally {
+            Locale.setDefault(originalLocale);
+        }
     }
 
     @TestTemplate
