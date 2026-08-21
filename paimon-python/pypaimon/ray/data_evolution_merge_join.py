@@ -329,11 +329,6 @@ def _apply_self_merge_update_group(context, file_group, collect_row_ids):
         context.predicate,
         context.read_type,
     )
-    matched = table_read.to_arrow([file_group], parallelism=1)
-    if matched.num_rows == 0:
-        return [], 0, []
-
-    aliased = _self_merge_aliases(matched, context.row_id_name)
     transform = _build_matched_transform(
         context.clauses,
         on_map={context.row_id_name: context.row_id_name},
@@ -343,9 +338,24 @@ def _apply_self_merge_update_group(context, file_group, collect_row_ids):
         update_schema=context.update_schema,
         callable_input_columns=context.callable_input_columns,
     )
-    updates = transform(aliased)
-    if updates.num_rows == 0:
+    update_parts = []
+    batch_reader = table_read.to_arrow_batch_reader([file_group])
+    for batch in iter(batch_reader.read_next_batch, None):
+        if batch.num_rows == 0:
+            continue
+        matched = pa.Table.from_batches([batch])
+        updates = transform(_self_merge_aliases(
+            matched, context.row_id_name,
+        ))
+        if updates.num_rows > 0:
+            update_parts.append(updates)
+
+    if not update_parts:
         return [], 0, []
+    updates = (
+        update_parts[0]
+        if len(update_parts) == 1 else pa.concat_tables(update_parts)
+    )
 
     row_ids = (
         updates.column(context.row_id_name).to_pylist()

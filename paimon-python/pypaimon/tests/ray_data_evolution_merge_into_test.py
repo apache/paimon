@@ -2089,6 +2089,96 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(result['num_matched'], 4)
         self.assertEqual(self._read_sorted(target)['age'], [99, 99, 99, 99])
 
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_filters_file_group_in_batches(self):
+        from pypaimon.ray import data_evolution_merge_into as merge_module
+        from pypaimon.ray import data_evolution_merge_join as join_module
+        from pypaimon.write.file_store_commit import _abort_commit_messages
+
+        options = dict(self.de_options)
+        options['read.batch-size'] = '2'
+        target = self._create_table(options=options)
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([1, 2, 3, 4, 5, 6], type=pa.int32()),
+                    'name': ['a', 'b', 'c', 'd', 'e', 'f'],
+                    'age': pa.array([0, 2, 0, 4, 0, 6], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+
+        clauses = [WhenMatched.update(
+            {'age': lit(99)}, condition='t.age = t.id',
+        )]
+        table, source_ds, matched, not_matched, ctx = merge_module._prepare(
+            target,
+            target,
+            self.catalog_options,
+            clauses,
+            [],
+            ['_ROW_ID'],
+        )
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        plan, _, _, _ = merge_module._build_datasets(
+            table,
+            target,
+            source_ds,
+            matched,
+            not_matched,
+            ctx,
+            snapshot,
+            _TEST_NUM_PARTITIONS,
+            None,
+        )
+        self.assertIsNone(plan.predicate)
+        self.assertEqual(len(plan.file_groups), 1)
+
+        context = join_module._SelfMergeUpdateContext(
+            table=plan.table,
+            scan_table=plan.scan_table,
+            predicate=plan.predicate,
+            read_type=plan.read_type,
+            clauses=plan.clauses,
+            update_cols=plan.update_cols,
+            update_schema=plan.update_schema,
+            row_id_name=plan.row_id_name,
+            snapshot_id=plan.snapshot_id,
+            callable_input_columns=plan.callable_input_columns,
+        )
+        batch_sizes = []
+        real_build_transform = join_module._build_matched_transform
+
+        def tracked_build_transform(*args, **kwargs):
+            real_transform = real_build_transform(*args, **kwargs)
+
+            def tracked_transform(batch):
+                batch_sizes.append(batch.num_rows)
+                return real_transform(batch)
+
+            return tracked_transform
+
+        messages = []
+        try:
+            with patch.object(
+                    join_module,
+                    '_build_matched_transform',
+                    side_effect=tracked_build_transform,
+            ):
+                messages, count, row_ids = (
+                    join_module._apply_self_merge_update_group(
+                        context, plan.file_groups[0], True,
+                    )
+                )
+
+            self.assertEqual(batch_sizes, [2, 2, 2])
+            self.assertEqual(count, 3)
+            self.assertEqual(row_ids, [1, 3, 5])
+        finally:
+            _abort_commit_messages(table, messages)
+
     def test_self_merge_update_aborts_other_groups_after_failure(self):
         from pypaimon.ray import data_evolution_merge_into as merge_module
         from pypaimon.ray.data_evolution_merge_join import (
