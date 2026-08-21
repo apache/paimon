@@ -32,8 +32,10 @@ from pypaimon.ray.data_evolution_merge_join import (
     build_matched_update_ds,
     build_not_matched_insert_ds,
     build_self_merge_delete_ds,
-    build_self_merge_update_ds,
+    _SelfMergeUpdatePlan,
+    build_self_merge_update_plan,
     distributed_delete_apply,
+    distributed_self_merge_update_apply,
     distributed_update_apply,
     distributed_write_collect_msgs,
 )
@@ -92,7 +94,7 @@ def merge_into(
     base_snapshot = table.snapshot_manager().get_latest_snapshot()
 
     update_ds, delete_ds, insert_ds, update_cols_union = _build_datasets(
-        target, source_ds, matched_specs, not_matched_specs,
+        table, target, source_ds, matched_specs, not_matched_specs,
         ctx, base_snapshot, num_partitions, ray_remote_args,
     )
 
@@ -323,7 +325,7 @@ def _is_self_merge(target, source, target_on_cols, source_on_cols) -> bool:
 
 
 def _build_datasets(
-    target, source_ds, matched_specs, not_matched_specs,
+    table, target, source_ds, matched_specs, not_matched_specs,
     ctx: "_PrepareCtx", base_snapshot, num_partitions, ray_remote_args,
 ):
     # Pin every target read to base_snapshot so all branches see the same
@@ -340,18 +342,16 @@ def _build_datasets(
         if matched_specs and base_snapshot is not None:
             update_cols_union = _union_update_cols(matched_specs)
             if update_cols_union:
-                update_ds = build_self_merge_update_ds(
-                    target_identifier=target,
+                update_ds = build_self_merge_update_plan(
+                    table=table,
                     clauses=matched_specs,
                     target_field_names=ctx.full_target_field_names,
                     target_pa_schema=ctx.update_pa_schema,
                     update_cols=update_cols_union,
-                    catalog_options=ctx.catalog_options,
                     resolve_target_projection=_resolve_target_projection,
                     snapshot_id=base_snapshot_id,
                     scan_predicate=ctx.self_merge_scan_predicate,
                     read_columns=ctx.read_columns,
-                    ray_remote_args=ray_remote_args,
                 )
             if any(c.delete for c in matched_specs):
                 delete_ds = build_self_merge_delete_ds(
@@ -439,16 +439,28 @@ def _execute_and_commit(
 
     try:
         if update_ds is not None:
-            update_msgs, num_updated, update_row_ids = distributed_update_apply(
-                update_ds, table, update_cols_union,
-                num_partitions=num_partitions,
-                ray_remote_args=ray_remote_args,
-                base_snapshot_id=(
-                    base_snapshot.id
-                    if base_snapshot is not None else None
-                ),
-                collect_row_ids=collect_action_row_ids,
-            )
+            if isinstance(update_ds, _SelfMergeUpdatePlan):
+                update_msgs, num_updated, update_row_ids = (
+                    distributed_self_merge_update_apply(
+                        update_ds,
+                        num_partitions=num_partitions,
+                        ray_remote_args=ray_remote_args,
+                        collect_row_ids=collect_action_row_ids,
+                    )
+                )
+            else:
+                update_msgs, num_updated, update_row_ids = (
+                    distributed_update_apply(
+                        update_ds, table, update_cols_union,
+                        num_partitions=num_partitions,
+                        ray_remote_args=ray_remote_args,
+                        base_snapshot_id=(
+                            base_snapshot.id
+                            if base_snapshot is not None else None
+                        ),
+                        collect_row_ids=collect_action_row_ids,
+                    )
+                )
             commit_messages.extend(update_msgs)
 
         if delete_ds is not None:
