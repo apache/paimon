@@ -51,6 +51,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.SnapshotTest.newSnapshotManager;
@@ -122,6 +123,35 @@ public class SnapshotsTableTest extends TableTestBase {
     }
 
     @Test
+    public void testReadSnapshotsWithInAndRangeFilter() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(snapshotsTable.rowType());
+        List<Predicate> predicates =
+                Arrays.asList(
+                        PredicateBuilder.and(
+                                builder.in(0, Arrays.asList(1L, 2L)),
+                                builder.greaterOrEqual(0, 2L)),
+                        PredicateBuilder.and(
+                                builder.in(0, Collections.singletonList(1L)),
+                                builder.greaterOrEqual(0, 2L)));
+        for (int i = 0; i < predicates.size(); i++) {
+            Predicate predicate = predicates.get(i);
+            ReadBuilder readBuilder = snapshotsTable.newReadBuilder().withFilter(predicate);
+            List<InternalRow> result = new ArrayList<>();
+            InternalRowSerializer serializer = new InternalRowSerializer(snapshotsTable.rowType());
+            readBuilder
+                    .newRead()
+                    .createReader(readBuilder.newScan().plan())
+                    .forEachRemaining(row -> result.add(serializer.copy(row)));
+
+            if (i == 0) {
+                assertThat(result).extracting(row -> row.getLong(0)).containsExactly(2L);
+            } else {
+                assertThat(result).isEmpty();
+            }
+        }
+    }
+
+    @Test
     public void testReadSnapshotsWithEqualFilterOnUnknownId() throws Exception {
         PredicateBuilder builder = new PredicateBuilder(snapshotsTable.rowType());
         Predicate predicate =
@@ -135,6 +165,43 @@ public class SnapshotsTableTest extends TableTestBase {
                 .forEachRemaining(result::add);
 
         assertThat(result).isEmpty();
+    }
+
+    @Test
+    public void testReadSnapshotsWithNestedAndFilter() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(snapshotsTable.rowType());
+        Predicate predicate =
+                PredicateBuilder.and(
+                        builder.greaterOrEqual(0, 0L),
+                        builder.equal(0, 99L),
+                        builder.lessThan(0, 3L));
+
+        ReadBuilder readBuilder = snapshotsTable.newReadBuilder().withFilter(predicate);
+        List<InternalRow> result = new ArrayList<>();
+        readBuilder
+                .newRead()
+                .createReader(readBuilder.newScan().plan())
+                .forEachRemaining(result::add);
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    public void testReadSnapshotsWithExclusiveBoundOverflow() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(snapshotsTable.rowType());
+        for (Predicate predicate :
+                Arrays.asList(
+                        builder.greaterThan(0, Long.MAX_VALUE),
+                        builder.lessThan(0, Long.MIN_VALUE))) {
+            ReadBuilder readBuilder = snapshotsTable.newReadBuilder().withFilter(predicate);
+            List<InternalRow> result = new ArrayList<>();
+            readBuilder
+                    .newRead()
+                    .createReader(readBuilder.newScan().plan())
+                    .forEachRemaining(result::add);
+
+            assertThat(result).isEmpty();
+        }
     }
 
     @Test

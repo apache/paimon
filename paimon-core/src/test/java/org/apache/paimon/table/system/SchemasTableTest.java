@@ -106,6 +106,35 @@ public class SchemasTableTest extends TableTestBase {
     }
 
     @Test
+    public void testReadSchemasWithInAndRangeFilter() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(schemasTable.rowType());
+        List<Predicate> predicates =
+                Arrays.asList(
+                        PredicateBuilder.and(
+                                builder.in(0, Arrays.asList(0L, 99L)),
+                                builder.greaterOrEqual(0, 0L)),
+                        PredicateBuilder.and(
+                                builder.in(0, Collections.singletonList(0L)),
+                                builder.greaterOrEqual(0, 1L)));
+        for (int i = 0; i < predicates.size(); i++) {
+            Predicate predicate = predicates.get(i);
+            ReadBuilder readBuilder = schemasTable.newReadBuilder().withFilter(predicate);
+            List<InternalRow> result = new ArrayList<>();
+            InternalRowSerializer serializer = new InternalRowSerializer(schemasTable.rowType());
+            readBuilder
+                    .newRead()
+                    .createReader(readBuilder.newScan().plan())
+                    .forEachRemaining(row -> result.add(serializer.copy(row)));
+
+            if (i == 0) {
+                assertThat(result).extracting(row -> row.getLong(0)).containsExactly(0L);
+            } else {
+                assertThat(result).isEmpty();
+            }
+        }
+    }
+
+    @Test
     public void testReadSchemasWithEqualFilterOnUnknownId() throws Exception {
         PredicateBuilder builder = new PredicateBuilder(schemasTable.rowType());
         Predicate predicate =
@@ -119,6 +148,43 @@ public class SchemasTableTest extends TableTestBase {
                 .forEachRemaining(result::add);
 
         assertThat(result).isEmpty();
+    }
+
+    @Test
+    public void testReadSchemasWithNestedAndFilter() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(schemasTable.rowType());
+        Predicate predicate =
+                PredicateBuilder.and(
+                        builder.greaterOrEqual(0, 0L),
+                        builder.equal(0, 99L),
+                        builder.lessThan(0, 3L));
+
+        ReadBuilder readBuilder = schemasTable.newReadBuilder().withFilter(predicate);
+        List<InternalRow> result = new ArrayList<>();
+        readBuilder
+                .newRead()
+                .createReader(readBuilder.newScan().plan())
+                .forEachRemaining(result::add);
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    public void testReadSchemasWithExclusiveBoundOverflow() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(schemasTable.rowType());
+        for (Predicate predicate :
+                Arrays.asList(
+                        builder.greaterThan(0, Long.MAX_VALUE),
+                        builder.lessThan(0, Long.MIN_VALUE))) {
+            ReadBuilder readBuilder = schemasTable.newReadBuilder().withFilter(predicate);
+            List<InternalRow> result = new ArrayList<>();
+            readBuilder
+                    .newRead()
+                    .createReader(readBuilder.newScan().plan())
+                    .forEachRemaining(result::add);
+
+            assertThat(result).isEmpty();
+        }
     }
 
     @Test

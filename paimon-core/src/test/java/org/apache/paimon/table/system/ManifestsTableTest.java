@@ -224,6 +224,31 @@ public class ManifestsTableTest extends TableTestBase {
     }
 
     @Test
+    public void testFilterBySchemaIdNestedAnd() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(ManifestsTable.TABLE_TYPE);
+        Predicate predicate =
+                PredicateBuilder.and(
+                        builder.greaterOrEqual(4, 0L),
+                        builder.equal(4, 999L),
+                        builder.lessThan(4, 3L));
+
+        List<InternalRow> result = readWithFilter(manifestsTable, predicate);
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    public void testFilterBySchemaIdExclusiveBoundOverflow() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(ManifestsTable.TABLE_TYPE);
+        for (Predicate predicate :
+                Arrays.asList(
+                        builder.greaterThan(4, Long.MAX_VALUE),
+                        builder.lessThan(4, Long.MIN_VALUE))) {
+            List<InternalRow> result = readWithFilter(manifestsTable, predicate);
+            assertThat(result).isEmpty();
+        }
+    }
+
+    @Test
     public void testFilterBySchemaIdRange() throws Exception {
         PredicateBuilder builder = new PredicateBuilder(ManifestsTable.TABLE_TYPE);
         Predicate predicate =
@@ -247,6 +272,30 @@ public class ManifestsTableTest extends TableTestBase {
         List<InternalRow> expectedRow = getExpectedResult(2L);
         List<InternalRow> result = readWithFilter(manifestsTable, predicate);
         assertThat(result).containsExactlyElementsOf(expectedRow);
+    }
+
+    @Test
+    public void testFilterBySchemaIdInAndRange() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(ManifestsTable.TABLE_TYPE);
+        List<Predicate> predicates =
+                Arrays.asList(
+                        PredicateBuilder.and(
+                                builder.in(4, Arrays.asList(0L, 99L)),
+                                builder.greaterOrEqual(4, 0L)),
+                        PredicateBuilder.and(
+                                builder.in(4, Collections.singletonList(0L)),
+                                builder.greaterOrEqual(4, 1L)));
+        for (int i = 0; i < predicates.size(); i++) {
+            Predicate predicate = predicates.get(i);
+            List<InternalRow> result = readWithFilter(manifestsTable, predicate);
+
+            if (i == 0) {
+                assertThat(result).isNotEmpty();
+                assertThat(result).allMatch(row -> row.getLong(4) == 0L);
+            } else {
+                assertThat(result).isEmpty();
+            }
+        }
     }
 
     @Test
