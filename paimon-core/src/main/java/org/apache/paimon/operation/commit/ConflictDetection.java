@@ -292,6 +292,7 @@ public abstract class ConflictDetection {
             List<ManifestEntry> deltaFiles,
             List<IndexManifestEntry> indexFiles,
             CommitKind commitKind,
+            boolean discardDuplicate,
             @Nullable CommitFailRetryResult previousAttempt,
             boolean hasOverwriteSincePreviousAttempt) {
         return scanChangedPartitions(

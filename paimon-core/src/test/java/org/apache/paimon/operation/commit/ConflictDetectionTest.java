@@ -123,6 +123,7 @@ class ConflictDetectionTest {
                                 Collections.singletonList(delta),
                                 Collections.emptyList(),
                                 Snapshot.CommitKind.COMPACT,
+                                false,
                                 null,
                                 false))
                 .isEmpty();
@@ -163,6 +164,7 @@ class ConflictDetectionTest {
                                         createDvIndexEntry(
                                                 "dv", ADD, Collections.singletonList("dv-base"))),
                                 Snapshot.CommitKind.COMPACT,
+                                false,
                                 null,
                                 false))
                 .containsExactly(rangeBase, legacyBase, dvBase);
@@ -188,6 +190,7 @@ class ConflictDetectionTest {
                                 Collections.emptyList(),
                                 Collections.emptyList(),
                                 Snapshot.CommitKind.COMPACT,
+                                false,
                                 previousAttempt,
                                 false))
                 .isEmpty();
@@ -214,6 +217,7 @@ class ConflictDetectionTest {
                                 Collections.emptyList(),
                                 Collections.emptyList(),
                                 Snapshot.CommitKind.APPEND,
+                                false,
                                 commitFailRetryResult(null, cachedBase),
                                 false))
                 .isSameAs(expected);
@@ -224,6 +228,7 @@ class ConflictDetectionTest {
                                 Collections.emptyList(),
                                 Collections.emptyList(),
                                 Snapshot.CommitKind.APPEND,
+                                false,
                                 commitFailRetryResult(previousSnapshot, null),
                                 false))
                 .isSameAs(expected);
@@ -234,6 +239,7 @@ class ConflictDetectionTest {
                                 Collections.emptyList(),
                                 Collections.emptyList(),
                                 Snapshot.CommitKind.APPEND,
+                                false,
                                 commitFailRetryResult(previousSnapshot, cachedBase),
                                 true))
                 .isSameAs(expected);
@@ -266,6 +272,7 @@ class ConflictDetectionTest {
                                 Collections.singletonList(deleted),
                                 Collections.emptyList(),
                                 Snapshot.CommitKind.OVERWRITE,
+                                false,
                                 null,
                                 false))
                 .containsExactly(base);
@@ -296,6 +303,7 @@ class ConflictDetectionTest {
                                         createDvIndexEntry(
                                                 "dv", ADD, Collections.singletonList("base"))),
                                 Snapshot.CommitKind.OVERWRITE,
+                                false,
                                 null,
                                 false))
                 .containsExactly(base);
@@ -331,6 +339,7 @@ class ConflictDetectionTest {
                                 Arrays.asList(added, deleted),
                                 Collections.emptyList(),
                                 Snapshot.CommitKind.OVERWRITE,
+                                false,
                                 null,
                                 false))
                 .containsExactly(rangeBase, legacyBase);
@@ -352,6 +361,7 @@ class ConflictDetectionTest {
                                 Collections.emptyList(),
                                 Collections.emptyList(),
                                 Snapshot.CommitKind.OVERWRITE,
+                                false,
                                 null,
                                 false))
                 .isEmpty();
@@ -376,9 +386,43 @@ class ConflictDetectionTest {
                                 Collections.singletonList(manifestEntry(ADD, "new", null, null)),
                                 Collections.emptyList(),
                                 Snapshot.CommitKind.APPEND,
+                                false,
                                 null,
                                 false))
                 .isSameAs(expected);
+    }
+
+    @Test
+    void testDataEvolutionDiscardDuplicateUsesDefaultPartitionScan() {
+        CommitScanner scanner = mock(CommitScanner.class);
+        DataEvolutionConflictDetection detection =
+                (DataEvolutionConflictDetection) createConflictDetection(scanner, true, false);
+        Snapshot snapshot = snapshot(1);
+        BinaryRow partition = BinaryRow.singleColumn(1);
+        List<BinaryRow> changedPartitions = Collections.singletonList(partition);
+        Range changedRange = new Range(10, 19);
+        List<SimpleFileEntry> expected =
+                Collections.singletonList(createFileEntry("duplicate", ADD));
+        when(scanner.readAllEntriesFromChangedPartitions(snapshot, changedPartitions))
+                .thenReturn(expected);
+
+        assertThat(
+                        detection.scanBaseDataFiles(
+                                snapshot,
+                                changedPartitions,
+                                Arrays.asList(
+                                        manifestEntry(ADD, "updated", 10L, changedRange),
+                                        manifestEntry(ADD, "duplicate", null, null)),
+                                Collections.emptyList(),
+                                Snapshot.CommitKind.APPEND,
+                                true,
+                                null,
+                                false))
+                .isSameAs(expected);
+        verify(scanner).readAllEntriesFromChangedPartitions(snapshot, changedPartitions);
+        verify(scanner, never())
+                .readAllEntriesFromChangedRowRanges(
+                        snapshot, changedPartitions, Collections.singletonList(changedRange));
     }
 
     @Test
@@ -410,6 +454,7 @@ class ConflictDetectionTest {
                                                 changedRange.from,
                                                 changedRange.to)),
                                 Snapshot.CommitKind.APPEND,
+                                false,
                                 null,
                                 false))
                 .containsExactlyElementsOf(expected);
@@ -436,6 +481,7 @@ class ConflictDetectionTest {
                                 Collections.emptyList(),
                                 Collections.emptyList(),
                                 Snapshot.CommitKind.APPEND,
+                                false,
                                 null,
                                 false))
                 .isSameAs(expected);

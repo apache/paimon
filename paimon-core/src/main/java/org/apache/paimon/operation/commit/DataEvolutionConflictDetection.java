@@ -148,8 +148,21 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
             List<ManifestEntry> deltaFiles,
             List<IndexManifestEntry> indexFiles,
             CommitKind commitKind,
+            boolean discardDuplicate,
             @Nullable CommitFailRetryResult previousAttempt,
             boolean hasOverwriteSincePreviousAttempt) {
+        if (discardDuplicate) {
+            return super.scanBaseDataFiles(
+                    latestSnapshot,
+                    changedPartitions,
+                    deltaFiles,
+                    indexFiles,
+                    commitKind,
+                    discardDuplicate,
+                    previousAttempt,
+                    hasOverwriteSincePreviousAttempt);
+        }
+
         List<Range> changedRowRanges = changedRowRanges(deltaFiles, indexFiles);
         Set<String> referencedDataFiles = referencedDataFiles(deltaFiles, indexFiles);
         if (!changedRowRanges.isEmpty()) {
@@ -170,6 +183,7 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
                 deltaFiles,
                 indexFiles,
                 commitKind,
+                discardDuplicate,
                 previousAttempt,
                 hasOverwriteSincePreviousAttempt);
     }
