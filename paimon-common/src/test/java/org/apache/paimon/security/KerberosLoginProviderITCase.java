@@ -37,6 +37,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 /**
@@ -108,7 +109,7 @@ public class KerberosLoginProviderITCase {
     }
 
     @Test
-    public void isLoginPossibleMustThrowExceptionWithProxyUser() {
+    public void isLoginPossibleMustReturnTrueWithProxyUser() {
         Options options = new Options();
         KerberosLoginProvider kerberosLoginProvider = new KerberosLoginProvider(options);
 
@@ -119,8 +120,7 @@ public class KerberosLoginProviderITCase {
             ugi.when(UserGroupInformation::isSecurityEnabled).thenReturn(true);
             ugi.when(UserGroupInformation::getCurrentUser).thenReturn(userGroupInformation);
 
-            assertThatThrownBy(kerberosLoginProvider::isLoginPossible)
-                    .isInstanceOf(UnsupportedOperationException.class);
+            assertThat(kerberosLoginProvider.isLoginPossible()).isTrue();
         }
     }
 
@@ -158,7 +158,7 @@ public class KerberosLoginProviderITCase {
     }
 
     @Test
-    public void doLoginMustThrowExceptionWithProxyUser() {
+    public void doLoginMustDoNothingWithProxyUser() {
         Options options = new Options();
         KerberosLoginProvider kerberosLoginProvider = new KerberosLoginProvider(options);
 
@@ -168,8 +168,12 @@ public class KerberosLoginProviderITCase {
                     .thenReturn(UserGroupInformation.AuthenticationMethod.PROXY);
             ugi.when(UserGroupInformation::getCurrentUser).thenReturn(userGroupInformation);
 
-            assertThatThrownBy(kerberosLoginProvider::doLogin)
-                    .isInstanceOf(UnsupportedOperationException.class);
+            // proxy user should not trigger any Kerberos login
+            kerberosLoginProvider.doLogin();
+            ugi.verify(() -> UserGroupInformation.loginUserFromSubject(null), never());
+            ugi.verify(
+                    () -> UserGroupInformation.loginUserFromKeytab(anyString(), anyString()),
+                    never());
         }
     }
 }
