@@ -1,0 +1,121 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.schema;
+
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.RowType;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.util.List;
+import java.util.UUID;
+import java.util.stream.Collectors;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/** Tests for {@link CoreOptions#FIELD_ID_ONE_BASED} at table creation and evolution. */
+public class FieldIdOneBasedTest {
+
+    @TempDir java.nio.file.Path tempDir;
+
+    private Schema.Builder schemaBuilder() {
+        return Schema.newBuilder()
+                .column("a", DataTypes.INT())
+                .column(
+                        "s",
+                        DataTypes.ROW(
+                                DataTypes.FIELD(0, "x", DataTypes.INT()),
+                                DataTypes.FIELD(0, "y", DataTypes.STRING())))
+                .column("m", DataTypes.MAP(DataTypes.STRING(), DataTypes.ARRAY(DataTypes.INT())));
+    }
+
+    private SchemaManager newSchemaManager(String name) {
+        return new SchemaManager(
+                LocalFileIO.create(),
+                new Path(tempDir.toString() + "/" + name + UUID.randomUUID()));
+    }
+
+    @Test
+    public void testDefaultRemainsZeroBased() throws Exception {
+        TableSchema schema = newSchemaManager("t").createTable(schemaBuilder().build());
+        assertThat(topLevelIds(schema)).containsExactly(0, 1, 4);
+        RowType nested = (RowType) schema.fields().get(1).type();
+        assertThat(nested.getFields().get(0).id()).isEqualTo(2);
+        assertThat(nested.getFields().get(1).id()).isEqualTo(3);
+        assertThat(schema.highestFieldId()).isEqualTo(4);
+    }
+
+    @Test
+    public void testOneBasedShiftsAllIds() throws Exception {
+        TableSchema schema =
+                newSchemaManager("t")
+                        .createTable(
+                                schemaBuilder()
+                                        .option(CoreOptions.FIELD_ID_ONE_BASED.key(), "true")
+                                        .build());
+        assertThat(topLevelIds(schema)).containsExactly(1, 2, 5);
+        RowType nested = (RowType) schema.fields().get(1).type();
+        assertThat(nested.getFields().get(0).id()).isEqualTo(3);
+        assertThat(nested.getFields().get(1).id()).isEqualTo(4);
+        // map/array types carry no ids of their own; ensure the structure survived the shift
+        MapType map = (MapType) schema.fields().get(2).type();
+        assertThat(map.getValueType()).isInstanceOf(ArrayType.class);
+        assertThat(schema.highestFieldId()).isEqualTo(5);
+    }
+
+    @Test
+    public void testEvolutionContinuesFromShiftedIds() throws Exception {
+        SchemaManager manager = newSchemaManager("t");
+        manager.createTable(
+                schemaBuilder().option(CoreOptions.FIELD_ID_ONE_BASED.key(), "true").build());
+        TableSchema evolved = manager.commitChanges(SchemaChange.addColumn("z", DataTypes.INT()));
+        DataField added =
+                evolved.fields().stream()
+                        .filter(f -> f.name().equals("z"))
+                        .findFirst()
+                        .orElseThrow(IllegalStateException::new);
+        assertThat(added.id()).isEqualTo(6);
+        assertThat(evolved.highestFieldId()).isEqualTo(6);
+    }
+
+    @Test
+    public void testOneBasedImmutableAndCreateTimeOnly() throws Exception {
+        // registered as immutable, so ALTER is rejected once the table has snapshots
+        assertThat(CoreOptions.IMMUTABLE_OPTIONS).contains(CoreOptions.FIELD_ID_ONE_BASED.key());
+        // a pre-snapshot option change must not re-base ids: assignment happens at creation only
+        SchemaManager manager = newSchemaManager("t");
+        manager.createTable(schemaBuilder().build());
+        TableSchema altered =
+                manager.commitChanges(
+                        SchemaChange.setOption(CoreOptions.FIELD_ID_ONE_BASED.key(), "true"));
+        assertThat(topLevelIds(altered)).containsExactly(0, 1, 4);
+        assertThat(altered.highestFieldId()).isEqualTo(4);
+    }
+
+    private static List<Integer> topLevelIds(TableSchema schema) {
+        return schema.fields().stream().map(DataField::id).collect(Collectors.toList());
+    }
+}
