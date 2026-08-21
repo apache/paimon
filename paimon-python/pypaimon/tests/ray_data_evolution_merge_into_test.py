@@ -114,6 +114,45 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         snap = table.snapshot_manager().get_latest_snapshot()
         return snap.id if snap is not None else None
 
+    def _compact_all_data_files(self, table):
+        """Replace all current data files with one COMPACT output file."""
+        from pypaimon.table.special_fields import SpecialFields
+
+        read_builder = table.new_read_builder().with_projection(
+            list(table.field_names) + [SpecialFields.ROW_ID.name]
+        )
+        plan = read_builder.new_scan().plan_for_write()
+        old_files = [
+            file for split in plan.splits() for file in split.files
+        ]
+        current = read_builder.new_read().to_arrow(plan.splits()).sort_by(
+            [(SpecialFields.ROW_ID.name, 'ascending')]
+        ).select(list(table.field_names))
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(current)
+        messages = writer.prepare_commit()
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(len(messages[0].new_files), 1)
+        messages[0].new_files = [
+            messages[0].new_files[0].assign_first_row_id(0)
+        ]
+        messages[0].deleted_files.extend(old_files)
+
+        commit = write_builder.new_commit()
+        file_store_commit = commit.file_store_commit
+        original_try_commit = file_store_commit._try_commit
+        file_store_commit._try_commit = (
+            lambda commit_kind, *args, **kwargs:
+            original_try_commit('COMPACT', *args, **kwargs)
+        )
+        try:
+            commit.commit(messages)
+        finally:
+            writer.close()
+            commit.close()
+
     def _merge_and_capture_self_merge_plan(self, **kwargs):
         from pypaimon.ray.data_evolution_merge_join import (
             build_self_merge_update_plan as real_build_plan,
@@ -2088,6 +2127,227 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(len(plan.file_groups), 2)
         self.assertEqual(result['num_matched'], 4)
         self.assertEqual(self._read_sorted(target)['age'], [99, 99, 99, 99])
+
+    def test_self_merge_rebases_staged_updates_after_compaction(self):
+        from pypaimon.data.generic_variant import GenericVariant
+        from pypaimon.data.variant_path import variant_get, variant_replace
+        from pypaimon.ray import data_evolution_merge_into as merge_module
+
+        options = dict(self.de_options)
+        options.update({
+            'commit.max-retries': '0',
+            'data-evolution.row-id-conflict-rewrite.max-size': '1 B',
+        })
+        variant_type = pa.struct([
+            pa.field('value', pa.binary(), nullable=False),
+            pa.field('metadata', pa.binary(), nullable=False),
+        ])
+        schema = pa.schema([
+            ('id', pa.int32()),
+            ('payload', variant_type),
+            ('topic_schema', pa.string()),
+        ])
+        target = 'default.tbl_{}'.format(uuid.uuid4().hex[:8])
+        self.catalog.create_table(
+            target,
+            Schema.from_pyarrow_schema(schema, options=options),
+            False,
+        )
+
+        def payload(values):
+            return GenericVariant.to_arrow_array([
+                GenericVariant.from_python({
+                    'angular_velocity': {'y': value, 'z': value + 1.0},
+                    'linear_acceleration': {
+                        'y': value + 2.0,
+                        'z': value + 3.0,
+                    },
+                })
+                for value in values
+            ])
+
+        self._write(
+            target,
+            pa.table({
+                'id': pa.array([1, 2], type=pa.int32()),
+                'payload': payload([1.0, 10.0]),
+                'topic_schema': ['old', 'old'],
+            }, schema=schema),
+        )
+        self._write(
+            target,
+            pa.table({
+                'id': pa.array([3, 4], type=pa.int32()),
+                'payload': payload([20.0, 30.0]),
+                'topic_schema': ['old', 'old'],
+            }, schema=schema),
+        )
+        table = self.catalog.get_table(target)
+        real_apply = merge_module.distributed_self_merge_update_apply
+        stale_paths = []
+
+        def stage_then_compact(*args, **kwargs):
+            result = real_apply(*args, **kwargs)
+            stale_paths.extend(
+                file.file_path
+                for message in result[0]
+                for file in message.new_files
+            )
+            self._compact_all_data_files(table)
+            return result
+
+        path_types = {
+            '$.angular_velocity.y': pa.float64(),
+            '$.angular_velocity.z': pa.float64(),
+            '$.linear_acceleration.y': pa.float64(),
+            '$.linear_acceleration.z': pa.float64(),
+        }
+
+        def negate_imu_yz(rows):
+            values = variant_get(rows['payload'], path_types)
+            return variant_replace(
+                rows['payload'],
+                {
+                    path: pc.negate(value)
+                    for path, value in values.items()
+                },
+                strict=True,
+            )
+
+        with patch.object(
+                merge_module,
+                'distributed_self_merge_update_apply',
+                side_effect=stage_then_compact,
+        ), patch(
+                'pypaimon.ray.row_id_conflict_rewriter._retry_wait',
+        ):
+            result = merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                read_columns=['payload'],
+                when_matched=[WhenMatched.update({
+                    'payload': negate_imu_yz,
+                    'topic_schema': lit('imu-yz-negated-v1'),
+                })],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        self.assertEqual(result['num_matched'], 4)
+        output = self._read_sorted(target)
+        decoded = [
+            GenericVariant.from_arrow_struct(value).to_python()
+            for value in output['payload']
+        ]
+        self.assertEqual(
+            [row['angular_velocity']['y'] for row in decoded],
+            [-1.0, -10.0, -20.0, -30.0],
+        )
+        self.assertEqual(
+            output['topic_schema'],
+            ['imu-yz-negated-v1'] * 4,
+        )
+        self.assertTrue(stale_paths)
+        self.assertTrue(all(not os.path.exists(path) for path in stale_paths))
+
+    def test_self_merge_compaction_rebase_keeps_logical_conflicts(self):
+        from pypaimon.ray import data_evolution_merge_into as merge_module
+
+        target = self._create_table()
+        self._write(target, self._source(ids=(1, 2)))
+        self._write(target, self._source(ids=(3, 4)))
+        table = self.catalog.get_table(target)
+        real_apply = merge_module.distributed_self_merge_update_apply
+
+        def stage_then_update_and_compact(*args, **kwargs):
+            result = real_apply(*args, **kwargs)
+            write_builder = table.new_batch_write_builder()
+            update = write_builder.new_update()
+            predicate = update.new_predicate_builder().equal('id', 2)
+            messages = update.update_by_predicate(
+                predicate,
+                {'age': 100},
+            )
+            write_builder.new_commit().commit(messages)
+            self._compact_all_data_files(table)
+            return result
+
+        def increment_age(rows):
+            return pc.add(rows['age'], 1)
+
+        with patch.object(
+                merge_module,
+                'distributed_self_merge_update_apply',
+                side_effect=stage_then_update_and_compact,
+        ), self.assertRaises(Exception) as ctx:
+            merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                read_columns=['age'],
+                when_matched=[WhenMatched.update({
+                    'age': increment_age,
+                })],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        self.assertIn("multiple 'MERGE INTO'", str(ctx.exception))
+        self.assertEqual(self._read_sorted(target)['age'][1], 100)
+
+    def test_self_merge_compaction_rebase_preserves_other_column_update(self):
+        from pypaimon.ray import data_evolution_merge_into as merge_module
+
+        target = self._create_table()
+        self._write(target, self._source(ids=(1, 2)))
+        self._write(target, self._source(ids=(3, 4)))
+        table = self.catalog.get_table(target)
+        real_apply = merge_module.distributed_self_merge_update_apply
+
+        def stage_then_update_and_compact(*args, **kwargs):
+            result = real_apply(*args, **kwargs)
+            self._write(target, self._source(ids=(5,)))
+            write_builder = table.new_batch_write_builder()
+            update = write_builder.new_update()
+            predicate = update.new_predicate_builder().equal('id', 2)
+            messages = update.update_by_predicate(
+                predicate,
+                {'name': 'concurrent'},
+            )
+            write_builder.new_commit().commit(messages)
+            self._compact_all_data_files(table)
+            return result
+
+        def increment_age(rows):
+            return pc.add(rows['age'], 1)
+
+        with patch.object(
+                merge_module,
+                'distributed_self_merge_update_apply',
+                side_effect=stage_then_update_and_compact,
+        ), patch(
+                'pypaimon.ray.row_id_conflict_rewriter._retry_wait',
+        ):
+            result = merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                read_columns=['age'],
+                when_matched=[WhenMatched.update({
+                    'age': increment_age,
+                })],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        self.assertEqual(result['num_matched'], 4)
+        output = self._read_sorted(target)
+        self.assertEqual(output['age'], [11, 11, 11, 11, 10])
+        self.assertEqual(
+            output['name'],
+            ['x', 'concurrent', 'x', 'x', 'x'],
+        )
 
     @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
     def test_self_merge_filters_file_group_in_batches(self):

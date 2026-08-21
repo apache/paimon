@@ -436,6 +436,8 @@ def _execute_and_commit(
     num_deleted = 0
     delete_row_ids = []
     num_inserted = 0
+    insert_msgs: list = []
+    self_merge_update = isinstance(update_ds, _SelfMergeUpdatePlan)
 
     try:
         if update_ds is not None:
@@ -494,20 +496,32 @@ def _execute_and_commit(
 
         all_msgs: list = list(commit_messages)
         if all_msgs:
-            table_commit = None
-            try:
-                table_commit = table.new_batch_write_builder().new_commit()
-                table_commit.commit(all_msgs)
-            finally:
-                if table_commit is not None:
-                    try:
-                        table_commit.close()
-                    except Exception as close_error:
-                        logger.warning(
-                            "Failed to close merge_into commit: %s",
-                            close_error,
-                            exc_info=close_error,
-                        )
+            if self_merge_update and update_msgs:
+                from pypaimon.ray.row_id_conflict_rewriter import (
+                    commit_self_merge_with_compaction_retry,
+                )
+                commit_self_merge_with_compaction_retry(
+                    table,
+                    update_msgs,
+                    delete_msgs + insert_msgs,
+                    num_partitions=num_partitions,
+                    ray_remote_args=ray_remote_args,
+                )
+            else:
+                table_commit = None
+                try:
+                    table_commit = table.new_batch_write_builder().new_commit()
+                    table_commit.commit(all_msgs)
+                finally:
+                    if table_commit is not None:
+                        try:
+                            table_commit.close()
+                        except Exception as close_error:
+                            logger.warning(
+                                "Failed to close merge_into commit: %s",
+                                close_error,
+                                exc_info=close_error,
+                            )
     except Exception as e:
         _reraise_inner(e)
 
