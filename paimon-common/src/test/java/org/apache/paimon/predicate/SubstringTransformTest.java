@@ -25,6 +25,7 @@ import org.apache.paimon.types.DataTypes;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -80,6 +81,14 @@ class SubstringTransformTest {
         transform = new SubstringTransform(inputs);
         result = transform.transform(GenericRow.of());
         assertThat(result).isEqualTo(BinaryString.fromString(""));
+    }
+
+    @Test
+    public void testSubstringWithSupplementaryCharacter() {
+        SubstringTransform transform =
+                new SubstringTransform(Arrays.asList(BinaryString.fromString("A😀B"), 2, 1));
+
+        assertThat(transform.transform(GenericRow.of())).isEqualTo(BinaryString.fromString("😀"));
     }
 
     @Test
