@@ -25,13 +25,7 @@ def _resolve_num_partitions(
     num_partitions: Optional[int],
     estimated_size_bytes: Optional[int] = None,
 ) -> int:
-    """Resolve Ray shuffle parallelism without consuming the input Dataset.
-
-    An explicit value is preserved. For the default, the previous ``2 * CPU``
-    value remains the upper bound and the fallback when input metadata is not
-    available. A known input size can reduce small jobs to roughly one
-    partition per Ray target-sized block.
-    """
+    """Resolve default shuffle partitions from input size and CPU count."""
     if num_partitions is not None:
         return num_partitions
 
@@ -66,13 +60,7 @@ def _resolve_num_partitions(
 
 
 def _estimate_dataset_size_bytes(dataset) -> Optional[int]:
-    """Return logical-plan size metadata, never executing ``dataset``.
-
-    Ray's public ``Dataset.size_bytes()`` executes a Dataset when its logical
-    metadata is unknown. Partition selection must not add such an action, so
-    use the guarded logical metadata hook and fall back when Ray cannot infer
-    the size (for example after a row-count-changing ``map_batches``).
-    """
+    """Read logical-plan size metadata without executing the Dataset."""
     try:
         logical_plan = getattr(dataset, "_logical_plan", None)
         dag = getattr(logical_plan, "dag", None)

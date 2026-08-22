@@ -552,8 +552,7 @@ def _estimate_merge_input_size_bytes(
     ctx: "_PrepareCtx",
     base_snapshot,
 ) -> Optional[int]:
-    # Self-merge already caps work by logical file-group count. Its filtered
-    # scan plan is built later, so avoid an extra manifest/index plan here.
+    # Avoid replanning self-merge scans; work is already file-group bounded.
     if ctx.is_self_merge:
         return None
 
