@@ -70,8 +70,10 @@ import static org.apache.flink.api.common.typeinfo.BasicTypeInfo.STRING_TYPE_INF
 import static org.apache.flink.util.Preconditions.checkState;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Flink {@link OrphanFilesClean}, it will submit a job for a table. */
+/** Flink {@link OrphanFilesClean}, it will submit jobs in table batches. */
 public class FlinkOrphanFilesClean extends OrphanFilesClean {
+
+    public static final int DEFAULT_TABLE_BATCH_SIZE = 10;
 
     protected static final Logger LOG = LoggerFactory.getLogger(FlinkOrphanFilesClean.class);
 
@@ -436,49 +438,98 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
             String databaseName,
             @Nullable String tableName)
             throws Catalog.DatabaseNotExistException, Catalog.TableNotExistException {
+        return executeDatabaseOrphanFiles(
+                env,
+                catalog,
+                olderThanMillis,
+                dryRun,
+                parallelism,
+                databaseName,
+                tableName,
+                DEFAULT_TABLE_BATCH_SIZE);
+    }
+
+    public static CleanOrphanFilesResult executeDatabaseOrphanFiles(
+            StreamExecutionEnvironment env,
+            Catalog catalog,
+            long olderThanMillis,
+            boolean dryRun,
+            @Nullable Integer parallelism,
+            String databaseName,
+            @Nullable String tableName,
+            @Nullable Integer tableBatchSize)
+            throws Catalog.DatabaseNotExistException, Catalog.TableNotExistException {
         List<String> tableNames = Collections.singletonList(tableName);
         if (tableName == null || "*".equals(tableName)) {
             tableNames = catalog.listTables(databaseName);
         }
 
-        List<DataStream<CleanOrphanFilesResult>> orphanFilesCleans =
-                new ArrayList<>(tableNames.size());
-        for (String t : tableNames) {
-            Identifier identifier = new Identifier(databaseName, t);
-            Table table = catalog.getTable(identifier);
-            checkArgument(
-                    table instanceof FileStoreTable,
-                    "Only FileStoreTable supports remove-orphan-files action. The table type is '%s'.",
-                    table.getClass().getName());
+        int batchSize = tableBatchSize == null ? DEFAULT_TABLE_BATCH_SIZE : tableBatchSize;
+        checkArgument(batchSize > 0, "Table batch size must be greater than 0.");
 
-            DataStream<CleanOrphanFilesResult> clean =
-                    new FlinkOrphanFilesClean(
-                                    (FileStoreTable) table, olderThanMillis, dryRun, parallelism)
-                            .doOrphanClean(env);
-            if (clean != null) {
-                orphanFilesCleans.add(clean);
-            }
-        }
-
-        DataStream<CleanOrphanFilesResult> result = null;
-        for (DataStream<CleanOrphanFilesResult> clean : orphanFilesCleans) {
-            if (result == null) {
-                result = clean;
-            } else {
-                result = result.union(clean);
-            }
-        }
-
-        return sum(result);
-    }
-
-    private static CleanOrphanFilesResult sum(DataStream<CleanOrphanFilesResult> deleted) {
         long deletedFilesCount = 0;
         long deletedFilesLenInBytes = 0;
-        if (deleted != null) {
+        for (int start = 0; start < tableNames.size(); start += batchSize) {
+            int end = Math.min(start + batchSize, tableNames.size());
+            int batchNumber = start / batchSize + 1;
+            int tableCount = end - start;
+            long batchStart = System.currentTimeMillis();
+            LOG.info(
+                    "Starting orphan files clean batch #{} with {} tables.",
+                    batchNumber,
+                    tableCount);
+
+            List<DataStream<CleanOrphanFilesResult>> orphanFilesCleans =
+                    new ArrayList<>(tableCount);
+            for (String t : tableNames.subList(start, end)) {
+                Identifier identifier = new Identifier(databaseName, t);
+                Table table = catalog.getTable(identifier);
+                checkArgument(
+                        table instanceof FileStoreTable,
+                        "Only FileStoreTable supports remove-orphan-files action. The table type is '%s'.",
+                        table.getClass().getName());
+
+                DataStream<CleanOrphanFilesResult> clean =
+                        new FlinkOrphanFilesClean(
+                                        (FileStoreTable) table,
+                                        olderThanMillis,
+                                        dryRun,
+                                        parallelism)
+                                .doOrphanClean(env);
+                if (clean != null) {
+                    orphanFilesCleans.add(clean);
+                }
+            }
+
+            DataStream<CleanOrphanFilesResult> result = null;
+            for (DataStream<CleanOrphanFilesResult> clean : orphanFilesCleans) {
+                result = result == null ? clean : result.union(clean);
+            }
+
+            CleanOrphanFilesResult batchResult = executeAndAggregateResults(result, batchNumber);
+            deletedFilesCount += batchResult.getDeletedFileCount();
+            deletedFilesLenInBytes += batchResult.getDeletedFileTotalLenInBytes();
+            LOG.info(
+                    "Finished orphan files clean batch #{} with {} tables in {} ms.",
+                    batchNumber,
+                    tableCount,
+                    System.currentTimeMillis() - batchStart);
+        }
+
+        return new CleanOrphanFilesResult(deletedFilesCount, deletedFilesLenInBytes);
+    }
+
+    private static CleanOrphanFilesResult executeAndAggregateResults(
+            DataStream<CleanOrphanFilesResult> cleanResults, int batchNumber) {
+        long deletedFilesCount = 0;
+        long deletedFilesLenInBytes = 0;
+        if (cleanResults != null) {
             try {
                 CloseableIterator<CleanOrphanFilesResult> iterator =
-                        deleted.global().executeAndCollect("OrphanFilesClean");
+                        cleanResults
+                                .global()
+                                .executeAndCollect(
+                                        String.format("OrphanFilesClean-Batch-%d", batchNumber));
                 while (iterator.hasNext()) {
                     CleanOrphanFilesResult cleanOrphanFilesResult = iterator.next();
                     deletedFilesCount += cleanOrphanFilesResult.getDeletedFileCount();
