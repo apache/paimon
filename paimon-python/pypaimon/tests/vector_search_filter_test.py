@@ -2910,13 +2910,14 @@ class VectorSearchManySplitsTest(unittest.TestCase):
             reader = BatchVectorSearchReadImpl(
                 table, limit=5, vector_column=embedding_field,
                 query_vectors=[[1.0], [2.0]], filter_=None)
+            raw_result = DictBasedScoredIndexResult({8: 0.9})
             with mock.patch.object(
-                    reader, "_read_raw_search",
-                    return_value=DictBasedScoredIndexResult({8: 0.9})) as raw_read:
+                    reader, "_read_batch_raw_search",
+                    return_value=[raw_result, raw_result]) as raw_read:
                 results = reader.read_batch([split, raw])
 
         # The raw fallback must be merged into EACH query, not dropped.
-        self.assertEqual(2, raw_read.call_count)
+        self.assertEqual(1, raw_read.call_count)
         self.assertEqual([1, 8], sorted(list(results[0].results())))
         self.assertEqual([2, 8], sorted(list(results[1].results())))
 
@@ -3564,6 +3565,111 @@ class BatchVectorSearchTest(unittest.TestCase):
 
     def tearDown(self):
         mock.patch.stopall()
+
+
+class RawBatchSearchFromArrowTest(unittest.TestCase):
+    """Unit tests for _raw_batch_search_from_arrow SGEMM path."""
+
+    def test_batch_cosine_matches_single_query_results(self):
+        import numpy as np
+        import pyarrow as pa
+        from pypaimon.table.source.vector_search_read import (
+            _raw_batch_search_from_arrow,
+            _raw_search_from_arrow,
+        )
+
+        np.random.seed(42)
+        n_rows, dim = 100, 16
+        row_ids = list(range(n_rows))
+        flat = np.random.randn(n_rows * dim).astype(np.float32)
+        table = pa.table({
+            "_ROW_ID": pa.array(row_ids, type=pa.int64()),
+            "vector": pa.FixedSizeListArray.from_arrays(pa.array(flat), dim),
+        })
+
+        query_vectors = [np.random.randn(dim).astype(np.float32) for _ in range(5)]
+        limit = 10
+
+        batch_results = _raw_batch_search_from_arrow(
+            table, "vector", query_vectors, "cosine", limit)
+
+        for i, qv in enumerate(query_vectors):
+            single_result = _raw_search_from_arrow(
+                table, "vector", qv, "cosine", limit)
+            self.assertEqual(
+                sorted(batch_results[i].results()),
+                sorted(single_result.results()),
+                f"Query {i}: batch and single results differ")
+
+    def test_batch_l2_matches_single_query_results(self):
+        import numpy as np
+        import pyarrow as pa
+        from pypaimon.table.source.vector_search_read import (
+            _raw_batch_search_from_arrow,
+            _raw_search_from_arrow,
+        )
+
+        np.random.seed(123)
+        n_rows, dim = 50, 8
+        row_ids = list(range(n_rows))
+        flat = np.random.randn(n_rows * dim).astype(np.float32)
+        table = pa.table({
+            "_ROW_ID": pa.array(row_ids, type=pa.int64()),
+            "vector": pa.FixedSizeListArray.from_arrays(pa.array(flat), dim),
+        })
+
+        query_vectors = [np.random.randn(dim).astype(np.float32) for _ in range(3)]
+        limit = 5
+
+        batch_results = _raw_batch_search_from_arrow(
+            table, "vector", query_vectors, "l2", limit)
+
+        for i, qv in enumerate(query_vectors):
+            single_result = _raw_search_from_arrow(
+                table, "vector", qv, "l2", limit)
+            self.assertEqual(
+                sorted(batch_results[i].results()),
+                sorted(single_result.results()))
+
+    def test_batch_empty_table_returns_empty_results(self):
+        import numpy as np
+        import pyarrow as pa
+        from pypaimon.table.source.vector_search_read import (
+            _raw_batch_search_from_arrow,
+        )
+
+        table = pa.table({
+            "_ROW_ID": pa.array([], type=pa.int64()),
+            "vector": pa.FixedSizeListArray.from_arrays(
+                pa.array([], type=pa.float32()), 4),
+        })
+
+        results = _raw_batch_search_from_arrow(
+            table, "vector", [np.zeros(4), np.ones(4)], "cosine", 10)
+        self.assertEqual(len(results), 2)
+        for r in results:
+            self.assertEqual(r.results().cardinality(), 0)
+
+    def test_batch_with_null_vectors_filters_correctly(self):
+        import numpy as np
+        import pyarrow as pa
+        from pypaimon.table.source.vector_search_read import (
+            _raw_batch_search_from_arrow,
+        )
+
+        vectors = [[1.0, 0.0], [0.0, 1.0], None, [0.5, 0.5]]
+        table = pa.table({
+            "_ROW_ID": pa.array([0, 1, 2, 3], type=pa.int64()),
+            "vector": pa.array(vectors, type=pa.list_(pa.float32())),
+        })
+
+        results = _raw_batch_search_from_arrow(
+            table, "vector", [np.array([1.0, 0.0])], "cosine", 10)
+        self.assertEqual(len(results), 1)
+        # Row 2 (null vector) should be excluded
+        self.assertNotIn(2, list(results[0].results()))
+        # Row 0 should be top result (exact match)
+        self.assertIn(0, list(results[0].results()))
 
 
 if __name__ == "__main__":
