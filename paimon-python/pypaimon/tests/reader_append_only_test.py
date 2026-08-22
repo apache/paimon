@@ -32,7 +32,7 @@ from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.write.file_store_commit import RetryResult
+from pypaimon.write.file_store_commit import CommitFailRetryResult
 
 
 class AoReaderTest(unittest.TestCase):
@@ -669,7 +669,7 @@ class AoReaderTest(unittest.TestCase):
                 ))
         # mock retry
         success = table_commit.file_store_commit._try_commit_once(
-            RetryResult(None),
+            CommitFailRetryResult(None),
             "APPEND",
             commit_entries,
             [],
