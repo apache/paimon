@@ -285,11 +285,13 @@ class RayReadByRowIdTest(unittest.TestCase):
         def fake_read(rid_ds, table, projection, *, num_partitions,
                       ray_remote_args=None, base_snapshot_id=None):
             captured["base_snapshot_id"] = base_snapshot_id
+            captured["num_partitions"] = num_partitions
             return ray.data.from_arrow(pa.table({"_ROW_ID": pa.array([], pa.int64())}))
 
         with mock.patch.object(m, "distributed_read_by_row_id", fake_read):
             read_by_row_id(target, src, self.catalog_options, projection=["age"])
         self.assertEqual(captured["base_snapshot_id"], expected_sid)
+        self.assertEqual(captured["num_partitions"], 1)
 
     def test_accepts_pyarrow_and_pandas_source(self):
         target = self._create()

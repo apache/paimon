@@ -49,6 +49,11 @@ from pypaimon.ray.data_evolution_merge_transform import (
     WhenNotMatched,
     _NormalizedClause,
 )
+from pypaimon.ray.partitioning import (
+    _estimate_dataset_size_bytes,
+    _estimate_table_scan_size_bytes,
+    _resolve_num_partitions,
+)
 
 __all__ = ["merge_into", "WhenMatched", "WhenNotMatched"]
 
@@ -84,7 +89,6 @@ def merge_into(
     read_columns: Optional[Sequence[str]] = None,
 ) -> Dict[str, int]:
     _require_ray_join()
-    num_partitions = _resolve_num_partitions(num_partitions)
 
     table, source_ds, matched_specs, not_matched_specs, ctx = _prepare(
         target, source, catalog_options,
@@ -92,6 +96,15 @@ def merge_into(
         read_columns,
     )
     base_snapshot = table.snapshot_manager().get_latest_snapshot()
+    estimated_size_bytes = None
+    if num_partitions is None:
+        estimated_size_bytes = _estimate_merge_input_size_bytes(
+            table, source_ds, matched_specs, not_matched_specs, ctx,
+            base_snapshot,
+        )
+    num_partitions = _resolve_num_partitions(
+        num_partitions, estimated_size_bytes,
+    )
 
     update_ds, delete_ds, insert_ds, update_cols_union = _build_datasets(
         table, target, source_ds, matched_specs, not_matched_specs,
@@ -531,16 +544,57 @@ def _normalize_on(on: OnSpec) -> Tuple[List[str], List[str]]:
     return target_cols, source_cols
 
 
-def _resolve_num_partitions(num_partitions: Optional[int]) -> int:
-    if num_partitions is not None:
-        return num_partitions
-    try:
-        import ray
+def _estimate_merge_input_size_bytes(
+    table,
+    source_ds,
+    matched_specs,
+    not_matched_specs,
+    ctx: "_PrepareCtx",
+    base_snapshot,
+) -> Optional[int]:
+    # Self-merge already caps work by logical file-group count. Its filtered
+    # scan plan is built later, so avoid an extra manifest/index plan here.
+    if ctx.is_self_merge:
+        return None
 
-        cpus = int(ray.cluster_resources().get("CPU", 4))
-        return max(1, cpus * 2)
-    except Exception:
-        return 4
+    source_size = _estimate_dataset_size_bytes(source_ds)
+    if source_size is None:
+        return None
+    if base_snapshot is None:
+        return source_size
+
+    target_projections = []
+    if matched_specs:
+        update_cols = _union_update_cols(matched_specs)
+        if update_cols:
+            target_projections.append(_resolve_target_projection(
+                matched_specs,
+                ctx.target_on_cols,
+                update_cols,
+                ctx.settable_field_names,
+            ))
+        if any(clause.delete for clause in matched_specs):
+            target_projections.append(_resolve_target_projection(
+                matched_specs,
+                ctx.target_on_cols,
+                [],
+                ctx.settable_field_names,
+            ))
+    if not_matched_specs:
+        target_projections.append(list(ctx.target_on_cols))
+
+    target_sizes = []
+    unique_projections = list(dict.fromkeys(
+        tuple(projection) for projection in target_projections
+    ))
+    for projection in unique_projections:
+        size = _estimate_table_scan_size_bytes(
+            table, base_snapshot.id, projection,
+        )
+        if size is None:
+            return None
+        target_sizes.append(size)
+    return source_size + max(target_sizes or [0])
 
 
 def _require_ray_join() -> None:

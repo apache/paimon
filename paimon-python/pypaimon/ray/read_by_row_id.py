@@ -30,11 +30,14 @@ from pypaimon.ray.data_evolution_merge_into import (
     _normalize_source,
     _reraise_inner,
     _require_ray_join,
-    _resolve_num_partitions,
 )
 from pypaimon.ray.data_evolution_merge_join import (
     _read_output_schema,
     distributed_read_by_row_id,
+)
+from pypaimon.ray.partitioning import (
+    _estimate_dataset_size_bytes,
+    _resolve_num_partitions,
 )
 
 __all__ = ["read_by_row_id"]
@@ -104,8 +107,6 @@ def read_by_row_id(
     if not projection:
         raise ValueError("projection must be non-empty.")
     projection = list(dict.fromkeys(projection))
-    num_partitions = _resolve_num_partitions(num_partitions)
-
     table = CatalogFactory.create(catalog_options).get_table(target)
     if not table.options.data_evolution_enabled():
         raise ValueError(
@@ -141,6 +142,11 @@ def read_by_row_id(
             "read_by_row_id does not accept a table-name source; pass a ray.data."
             "Dataset / pyarrow.Table / pandas.DataFrame carrying the target row ids.")
     source_ds = _normalize_source(row_ids, catalog_options)
+    num_partitions = _resolve_num_partitions(
+        num_partitions,
+        _estimate_dataset_size_bytes(source_ds)
+        if num_partitions is None else None,
+    )
     # Only check now if the schema is free; fetching it would execute a lazy source.
     known_schema = source_ds.schema(fetch_if_missing=False)
     if known_schema is not None and src_rid_col not in set(known_schema.names):
