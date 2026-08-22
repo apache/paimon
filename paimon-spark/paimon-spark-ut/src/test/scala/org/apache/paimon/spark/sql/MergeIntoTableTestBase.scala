@@ -18,10 +18,12 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.Snapshot
+import org.apache.paimon.{CoreOptions, Snapshot}
 import org.apache.paimon.spark.{PaimonAppendTable, PaimonPrimaryKeyTable, PaimonSparkTestBase, PaimonTableTest}
+import org.apache.paimon.spark.catalyst.analysis.MergeInto
 
 import org.apache.spark.sql.{AnalysisException, Row}
+import org.assertj.core.api.Assertions.{assertThat, assertThatThrownBy}
 
 import java.util.UUID
 import java.util.concurrent.Executors
@@ -1741,6 +1743,49 @@ trait MergeIntoAppendTableTest extends PaimonSparkTestBase with PaimonAppendTabl
         spark.catalog.dropTempView("source")
       }
     }
+  }
+
+  CoreOptions.MergeEngine.values().foreach {
+    mergeEngine =>
+      {
+        test(s"test merge into with merge engine $mergeEngine") {
+          val options = if ("first-row".equals(mergeEngine.toString)) {
+            s"'primary-key' = 'id', 'merge-engine' = '$mergeEngine', 'changelog-producer' = 'lookup'"
+          } else {
+            s"'primary-key' = 'id', 'merge-engine' = '$mergeEngine'"
+          }
+          withTable("source", "target") {
+            Seq((1, "a_new", "11")).toDF("id", "name", "dt").createOrReplaceTempView("source")
+            spark.sql(s"""
+                         |CREATE TABLE target (id INT, name STRING, dt STRING)
+                         |TBLPROPERTIES ($options)
+                         |""".stripMargin)
+            spark.sql("INSERT INTO target VALUES (1, 'a', '11'), (2, 'b', '22')")
+
+            if (MergeInto.supportedMergeEngine.contains(mergeEngine)) {
+              spark.sql("""
+                          |MERGE INTO target
+                          |USING source
+                          |ON target.id = source.id
+                          |WHEN MATCHED THEN
+                          |UPDATE SET target.name = source.name
+                          |""".stripMargin)
+              val rows = spark.sql("SELECT * FROM target ORDER BY id").collectAsList()
+              assertThat(rows.toString).isEqualTo("[[1,a_new,11], [2,b,22]]")
+            } else {
+              assertThatThrownBy(() => spark.sql("""
+                                                   |MERGE INTO target
+                                                   |USING source
+                                                   |ON target.id = source.id
+                                                   |WHEN MATCHED THEN
+                                                   |UPDATE SET target.name = source.name
+                                                   |""".stripMargin))
+                .isInstanceOf(classOf[UnsupportedOperationException])
+                .hasMessageContaining(s"merge engine $mergeEngine can not support MergeInto")
+            }
+          }
+        }
+      }
   }
 
   def createPositiveRandomInt(): Int = {
