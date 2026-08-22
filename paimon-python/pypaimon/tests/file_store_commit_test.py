@@ -32,9 +32,10 @@ from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer
 from pypaimon.write.commit.row_id_conflict_rewriter import RowIdRewriteResult
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_commit import (
+    CommitFailRetryResult,
     FileStoreCommit,
     ManifestMergeResult,
-    RetryResult,
+    RollbackRetryResult,
     RewriteResult,
     _abort_commit_messages,
     _try_replace_manifest_files,
@@ -355,6 +356,77 @@ class TestFileStoreCommit(unittest.TestCase):
              for manifest in result.merge_after_manifests],
         )
 
+    def test_conflict_rollback_retry_skips_history_and_rescans_base(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        file_store_commit = self._create_file_store_commit()
+        conflict = RuntimeError("conflicting compaction")
+        read_all = Mock(return_value=[])
+        file_store_commit.commit_scanner.read_all_entries_from_changed_partitions = read_all
+        file_store_commit.conflict_detection.check_conflicts = Mock(
+            return_value=conflict
+        )
+        file_store_commit.rollback = Mock()
+        file_store_commit.rollback.try_to_rollback.return_value = True
+
+        result = file_store_commit._try_commit_once(
+            retry_result=None,
+            commit_kind="APPEND",
+            commit_entries=[Mock()],
+            changelog_entries=[],
+            commit_identifier=11,
+            latest_snapshot=Mock(id=3),
+            detect_conflicts=True,
+            allow_rollback=True,
+        )
+
+        self.assertIsInstance(result, RollbackRetryResult)
+        self.assertIs(result.exception, conflict)
+
+        file_store_commit.snapshot_manager.get_snapshot_by_id.side_effect = (
+            AssertionError("rollback retry must not scan snapshot history")
+        )
+        file_store_commit.commit_scanner.read_incremental_changes = Mock(
+            side_effect=AssertionError(
+                "rollback retry must not reuse the previous conflict base"
+            )
+        )
+        read_all.reset_mock()
+        file_store_commit.conflict_detection.check_conflicts.return_value = (
+            RuntimeError("conflict after rollback retry")
+        )
+
+        with self.assertRaisesRegex(
+                RuntimeError, "conflict after rollback retry"):
+            file_store_commit._try_commit_once(
+                retry_result=result,
+                commit_kind="APPEND",
+                commit_entries=[Mock()],
+                changelog_entries=[],
+                commit_identifier=11,
+                latest_snapshot=Mock(id=2),
+                detect_conflicts=True,
+            )
+
+        file_store_commit.snapshot_manager.get_snapshot_by_id.assert_not_called()
+        file_store_commit.commit_scanner.read_incremental_changes.assert_not_called()
+        read_all.assert_called_once()
+
+    def test_commit_fail_retry_missing_snapshot_still_fails_closed(
+            self, mock_manifest_list_manager, mock_manifest_file_manager):
+        file_store_commit = self._create_file_store_commit()
+        file_store_commit.snapshot_manager.get_snapshot_by_id.return_value = None
+
+        with self.assertRaisesRegex(
+                RuntimeError, "snapshot 1 cannot be found"):
+            file_store_commit._is_duplicate_commit(
+                CommitFailRetryResult(None),
+                Mock(id=3),
+                11,
+                "APPEND",
+            )
+
+        file_store_commit.snapshot_manager.get_snapshot_by_id.assert_called_once_with(1)
+
     def _run_manifest_commit_attempt(self, commit_side_effect=None,
                                      commit_result=None, retry_result=None,
                                      existing_manifests=None,
@@ -429,7 +501,7 @@ class TestFileStoreCommit(unittest.TestCase):
         file_store_commit, result = self._run_manifest_commit_attempt(
             commit_result=False)
 
-        self.assertIsInstance(result, RetryResult)
+        self.assertIsInstance(result, CommitFailRetryResult)
         self.assertIsNone(result.exception)
         self.assertEqual(
             ['before'],
@@ -449,7 +521,7 @@ class TestFileStoreCommit(unittest.TestCase):
         file_store_commit, result = self._run_manifest_commit_attempt(
             commit_side_effect=failure)
 
-        self.assertIsInstance(result, RetryResult)
+        self.assertIsInstance(result, CommitFailRetryResult)
         self.assertIs(failure, result.exception)
         self.assertTrue(result.commit_result_may_be_uncertain)
         self.assertIsNone(result.manifest_merge_result)
@@ -463,7 +535,7 @@ class TestFileStoreCommit(unittest.TestCase):
             self._manifest_meta('before-b'),
         ]
         previous_after = [self._manifest_meta('merged')]
-        retry_result = RetryResult(
+        retry_result = CommitFailRetryResult(
             Mock(id=3),
             manifest_merge_result=ManifestMergeResult(
                 previous_before, previous_after),
@@ -481,7 +553,7 @@ class TestFileStoreCommit(unittest.TestCase):
             existing_manifests=current,
         )
 
-        self.assertIsInstance(result, RetryResult)
+        self.assertIsInstance(result, CommitFailRetryResult)
         self.assertEqual(
             ['prefix', 'before-a', 'before-b', 'suffix'],
             [manifest.file_name for manifest
@@ -507,7 +579,7 @@ class TestFileStoreCommit(unittest.TestCase):
             self._manifest_meta('before-a'),
             self._manifest_meta('before-b'),
         ]
-        retry_result = RetryResult(
+        retry_result = CommitFailRetryResult(
             Mock(id=3),
             manifest_merge_result=ManifestMergeResult(
                 previous_before, [self._manifest_meta('merged')]),
@@ -524,7 +596,7 @@ class TestFileStoreCommit(unittest.TestCase):
             existing_manifests=current,
         )
 
-        self.assertIsInstance(result, RetryResult)
+        self.assertIsInstance(result, CommitFailRetryResult)
         self.assertIsNone(result.manifest_merge_result)
         file_store_commit.manifest_file_merger.merge.assert_not_called()
         base_manifests = (
