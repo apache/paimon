@@ -247,6 +247,14 @@ public class PredicateBuilderTest {
                         builder.arrayContains(0, null)
                                 .test(GenericRow.of(new GenericArray(new Integer[] {1, null}))))
                 .isFalse();
+        DataType arrayType = DataTypes.ARRAY(DataTypes.INT());
+        assertThat(ArrayContains.INSTANCE.test(arrayType, null, 2)).isFalse();
+        assertThat(
+                        ArrayContains.INSTANCE.test(
+                                arrayType,
+                                new GenericArray(new Integer[] {1, null}),
+                                (Object) null))
+                .isFalse();
         assertThat(containsTwo.negate()).isEmpty();
     }
 
