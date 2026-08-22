@@ -26,6 +26,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.source.Split;
@@ -49,6 +50,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.SynchronousQueue;
@@ -88,8 +90,25 @@ final class CatalogSplitEnumerator extends SplitEnumerator {
     @Override
     List<Split> enumeratePartitions(@Nullable PartitionPredicate partitionFilter)
             throws IOException {
+        return enumeratePartitions(findCatalogPartitions(partitionFilter), partitionFilter);
+    }
+
+    @Override
+    ScanPlan plan(@Nullable PartitionPredicate partitionFilter) throws IOException {
+        if (table.partitionKeys().isEmpty()) {
+            return super.plan(partitionFilter);
+        }
+        List<Partition> partitions = findCatalogPartitions(partitionFilter);
+        List<PartitionEntry> entries = toPartitionEntries(partitions, partitionFilter);
+        return new ScanPlan(enumeratePartitions(partitions, partitionFilter), rowCount(entries));
+    }
+
+    private List<Split> enumeratePartitions(
+            List<Partition> catalogPartitions, @Nullable PartitionPredicate partitionFilter)
+            throws IOException {
         List<Pair<LinkedHashMap<String, String>, Path>> partitions =
-                findPartitions(partitionFilter);
+                toSpecsAndPaths(
+                        catalogPartitions, coreOptions.formatTablePartitionOnlyValueInPath());
         List<Split> splits = new ArrayList<>();
         if (partitions.isEmpty()) {
             return splits;
@@ -128,6 +147,12 @@ final class CatalogSplitEnumerator extends SplitEnumerator {
     @Override
     List<Pair<LinkedHashMap<String, String>, Path>> findPartitions(
             @Nullable PartitionPredicate partitionFilter) {
+        return toSpecsAndPaths(
+                findCatalogPartitions(partitionFilter),
+                coreOptions.formatTablePartitionOnlyValueInPath());
+    }
+
+    private List<Partition> findCatalogPartitions(@Nullable PartitionPredicate partitionFilter) {
         Optional<Predicate> extracted = FormatTableScan.extractPartitionPredicate(partitionFilter);
         Map<String, String> prefix = leadingEqualityPrefix(extracted);
         Predicate catalogFilter = extracted.orElse(null);
@@ -135,15 +160,21 @@ final class CatalogSplitEnumerator extends SplitEnumerator {
         if (partitions.isEmpty() && prefix.isEmpty() && catalogFilter == null) {
             warnIfFilesystemPartitionsExist();
         }
-        return toSpecsAndPaths(partitions, coreOptions.formatTablePartitionOnlyValueInPath());
+        return partitions;
     }
 
     @Override
     List<PartitionEntry> listPartitionEntries() {
-        List<Partition> partitions = partitionManager.listPartitions(Collections.emptyMap(), null);
-        if (partitions.isEmpty()) {
-            warnIfFilesystemPartitionsExist();
-        }
+        return listPartitionEntries(null);
+    }
+
+    @Override
+    List<PartitionEntry> listPartitionEntries(@Nullable PartitionPredicate partitionFilter) {
+        return toPartitionEntries(findCatalogPartitions(partitionFilter), partitionFilter);
+    }
+
+    private List<PartitionEntry> toPartitionEntries(
+            List<Partition> partitions, @Nullable PartitionPredicate partitionFilter) {
         boolean onlyValueInPath = coreOptions.formatTablePartitionOnlyValueInPath();
         List<PartitionEntry> entries = new ArrayList<>(partitions.size());
         Set<Map<String, String>> seen = new HashSet<>(partitions.size());
@@ -151,9 +182,14 @@ final class CatalogSplitEnumerator extends SplitEnumerator {
             if (!seen.add(partition.spec())) {
                 continue;
             }
+            BinaryRow partitionRow =
+                    toPartitionRow(normalizeSpec(partition.spec(), onlyValueInPath));
+            if (partitionFilter != null && !partitionFilter.test(partitionRow)) {
+                continue;
+            }
             entries.add(
                     new PartitionEntry(
-                            toPartitionRow(normalizeSpec(partition.spec(), onlyValueInPath)),
+                            partitionRow,
                             partition.recordCount(),
                             partition.fileSizeInBytes(),
                             partition.fileCount(),
@@ -161,6 +197,21 @@ final class CatalogSplitEnumerator extends SplitEnumerator {
                             partition.totalBuckets()));
         }
         return entries;
+    }
+
+    private OptionalLong rowCount(List<PartitionEntry> entries) {
+        long rowCount = 0L;
+        for (PartitionEntry entry : entries) {
+            if (!PartitionStatistics.isKnown(entry.recordCount())) {
+                return OptionalLong.empty();
+            }
+            try {
+                rowCount = Math.addExact(rowCount, entry.recordCount());
+            } catch (ArithmeticException e) {
+                return OptionalLong.empty();
+            }
+        }
+        return OptionalLong.of(rowCount);
     }
 
     private List<Pair<LinkedHashMap<String, String>, Path>> toSpecsAndPaths(
