@@ -409,6 +409,17 @@ class CoreOptions:
         )
     )
 
+    BLOB_STORED_DESCRIPTOR_FIELDS: ConfigOption[str] = (
+        ConfigOptions.key("blob.stored-descriptor-fields")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "Legacy Java option name for blob-descriptor-field. Kept for "
+            "column-directive migration onto the canonical key; it does not "
+            "change Python read/write layout by itself."
+        )
+    )
+
     BLOB_VIEW_FIELD: ConfigOption[str] = (
         ConfigOptions.key("blob-view-field")
         .string_type()
@@ -1224,7 +1235,14 @@ class CoreOptions:
         return val
 
     def blob_descriptor_fields(self, default=None):
-        value = self.options.get(CoreOptions.BLOB_DESCRIPTOR_FIELD, default)
+        # Do not treat blob.stored-descriptor-fields as a layout switch.
+        # Python master ignored that key and wrote dedicated .blob payloads;
+        # a global fallback would mis-parse those files during a rolling
+        # upgrade. Migrate explicitly to blob-descriptor-field (column
+        # directives already copy the legacy key onto the canonical option).
+        value = self.options.get(CoreOptions.BLOB_DESCRIPTOR_FIELD, None)
+        if value is None:
+            value = default
         return CoreOptions._parse_field_set(value)
 
     def blob_view_fields(self, default=None):

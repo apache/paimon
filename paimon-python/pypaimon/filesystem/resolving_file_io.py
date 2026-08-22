@@ -37,6 +37,7 @@ class ResolvingFileIO(FileIO):
         opts_map.pop(CatalogOptions.RESOLVING_FILE_IO_ENABLED.key(), None)
         self._options = Options(opts_map)
         self._fileio_cache: Dict[tuple, FileIO] = {}
+        self._uri_reader_factory = None
 
     def _cache_key(self, path: str) -> tuple:
         uri = urlparse(path)
@@ -137,7 +138,18 @@ class ResolvingFileIO(FileIO):
         return self._get_fileio(path).write_row(path, data, fields,
                                                 zstd_level, **kwargs)
 
+    @property
+    def uri_reader_factory(self):
+        if self._uri_reader_factory is None:
+            from pypaimon.common.uri_reader import UriReaderFactory
+            self._uri_reader_factory = UriReaderFactory.from_file_io(self)
+        return self._uri_reader_factory
+
     def close(self):
+        factory = self._uri_reader_factory
+        self._uri_reader_factory = None
+        if factory is not None:
+            factory.close()
         for fileio in self._fileio_cache.values():
             fileio.close()
         self._fileio_cache.clear()

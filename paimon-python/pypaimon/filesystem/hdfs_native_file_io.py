@@ -696,4 +696,7 @@ class HdfsNativeFileIO(FileIO):
             raise RuntimeError(f"Failed to write Vortex file {path}: {e}") from e
 
     def close(self):
+        uri_reader_factory = getattr(self, 'uri_reader_factory', None)
+        if uri_reader_factory is not None:
+            uri_reader_factory.close()
         self._client = None

@@ -31,7 +31,7 @@ from pypaimon.schema.data_types import (
     is_blob_file_type,
     is_map_blob_type,
 )
-from pypaimon.table.row.blob import Blob, BlobData, BlobDescriptor, BlobConsumer
+from pypaimon.table.row.blob import Blob, BlobData, BlobDescriptor, BlobConsumer, BlobRef
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 
 
@@ -294,16 +294,43 @@ class BlobFormatWriter:
             data = blob_value.to_data()
             crc32 = self._write_with_crc(data, crc32)
         else:
+            expected_length = None
+            if type(blob_value) is BlobRef:
+                descriptor_length = blob_value.to_descriptor().length
+                if descriptor_length >= 0:
+                    expected_length = descriptor_length
             stream = blob_value.new_input_stream()
+            copy_ok = False
             try:
-                chunk = stream.read(self.copy_buffer_size)
-                while chunk:
-                    crc32 = self._write_with_crc(chunk, crc32)
+                if expected_length is not None:
+                    crc32 = self._copy_exactly(stream, expected_length, crc32)
+                else:
                     chunk = stream.read(self.copy_buffer_size)
+                    while chunk:
+                        crc32 = self._write_with_crc(chunk, crc32)
+                        chunk = stream.read(self.copy_buffer_size)
+                copy_ok = True
             finally:
-                stream.close()
+                try:
+                    stream.close()
+                except Exception:
+                    if copy_ok:
+                        raise
 
         return blob_pos, self.position - blob_pos, crc32
+
+    def _copy_exactly(self, stream: BinaryIO, length: int, crc32: int) -> int:
+        remaining = length
+        while remaining > 0:
+            to_read = min(self.copy_buffer_size, remaining)
+            chunk = stream.read(to_read)
+            if not chunk:
+                raise EOFError(
+                    "Unexpected EOF while copying BLOB payload: expected %d bytes "
+                    "but source ended %d bytes early." % (length, remaining))
+            crc32 = self._write_with_crc(chunk, crc32)
+            remaining -= len(chunk)
+        return crc32
 
     def _write_with_crc(self, data: bytes, crc32: int) -> int:
         crc32 = crc_backend.crc32(data, crc32)

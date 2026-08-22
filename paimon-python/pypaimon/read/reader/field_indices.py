@@ -29,6 +29,28 @@ def blob_field_indices(fields: List[DataField]) -> Set[int]:
     }
 
 
+def descriptor_field_indices(
+        fields: List[DataField], descriptor_field_names: Iterable[str]) -> Set[int]:
+    names = set(descriptor_field_names)
+    if not names:
+        return set()
+    return {i for i, f in enumerate(fields) if f.name in names}
+
+
+def descriptor_field_names_for_table(table) -> Set[str]:
+    from pypaimon.common.options.core_options import CoreOptions
+
+    names = set(CoreOptions.blob_descriptor_fields(table.options))
+    if CoreOptions.blob_as_descriptor(table.options):
+        names |= CoreOptions.blob_view_fields(table.options)
+    return names
+
+
+def descriptor_field_indices_for_table(table, fields: List[DataField]) -> Set[int]:
+    return descriptor_field_indices(
+        fields, descriptor_field_names_for_table(table))
+
+
 def vector_field_indices(fields: List[DataField]) -> Set[int]:
     return {i for i, f in enumerate(fields) if isinstance(f.type, VectorType)}
 

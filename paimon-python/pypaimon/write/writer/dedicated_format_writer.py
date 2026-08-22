@@ -417,14 +417,16 @@ class DedicatedFormatWriter(DataWriter):
                     )
                 try:
                     descriptor_bytes = bytes(value)
-                    descriptor = BlobDescriptor.deserialize(descriptor_bytes)
-                    if descriptor.serialize() != descriptor_bytes:
-                        raise ValueError("Descriptor payload contains trailing bytes.")
+                    BlobDescriptor.deserialize(descriptor_bytes)
                 except Exception as e:
                     raise ValueError(
                         "blob-descriptor-field requires blob field value to be a serialized "
                         "BlobDescriptor."
                     ) from e
+                # serialize() always writes CURRENT_VERSION, so v1 bytes must
+                # be checked by exact wire length, not round-trip serialize().
+                if BlobDescriptor.parse_if_serialized(descriptor_bytes) is None:
+                    raise ValueError("Descriptor payload contains trailing bytes.")
 
         for field_name in self.blob_view_fields:
             if field_name not in data.schema.names:
