@@ -75,12 +75,24 @@ def _estimate_dataset_metadata(dataset, field: str) -> Optional[int]:
         operator = getattr(getattr(dataset, "_logical_plan", None), "dag", None)
         while operator is not None:
             infer_metadata = getattr(operator, "infer_metadata", None)
+            can_modify_num_rows = getattr(
+                operator, "can_modify_num_rows", None
+            )
             if callable(infer_metadata):
                 value = getattr(infer_metadata(), field, None)
-                if value is not None and int(value) >= 0:
+                if (
+                    value is not None
+                    and int(value) >= 0
+                    and not (
+                        field == "size_bytes"
+                        and can_modify_num_rows is not None
+                    )
+                ):
                     return int(value)
-            # Only inherit through transforms Ray marks row-count preserving.
-            if getattr(operator, "can_modify_num_rows", True):
+            if field == "size_bytes":
+                return None
+            # Only inherit row count through transforms Ray marks preserving.
+            if can_modify_num_rows is not False:
                 return None
             dependencies = getattr(operator, "input_dependencies", ())
             operator = dependencies[0] if len(dependencies) == 1 else None

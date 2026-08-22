@@ -137,8 +137,19 @@ class RayPartitioningTest(unittest.TestCase):
                 lambda batch: batch,
                 udf_modifying_row_count=False,
             )
-            self.assertEqual(_estimate_dataset_size_bytes(one_to_one), 16)
+            self.assertIsNone(_estimate_dataset_size_bytes(one_to_one))
             self.assertEqual(_estimate_dataset_num_rows(one_to_one), 2)
+
+            widened = dataset.map_batches(
+                lambda batch: pa.table({
+                    "payload": ["x" * 1_000_000] * batch.num_rows,
+                }),
+                batch_format="pyarrow",
+                udf_modifying_row_count=False,
+            )
+            self.assertIsNone(_estimate_dataset_size_bytes(widened))
+            self.assertEqual(_estimate_dataset_num_rows(widened), 2)
+            self.assertGreater(widened.materialize().size_bytes(), 1_000_000)
 
     def test_sparse_row_ids_keep_shuffle_parallelism(self):
         with mock.patch(
