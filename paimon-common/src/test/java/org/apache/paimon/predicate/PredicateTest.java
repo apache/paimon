@@ -604,6 +604,24 @@ public class PredicateTest {
         assertThat(getLikeFunc("a_c")).isEqualTo(Like.INSTANCE);
     }
 
+    @Test
+    public void testLikeSingleCharacterWildcardMatchesLineTerminators() {
+        String[] lineTerminators = {"\n", "\r", "\u0085", "\u2028", "\u2029"};
+        for (String lineTerminator : lineTerminators) {
+            assertThat(
+                            Like.INSTANCE.test(
+                                    DataTypes.STRING(),
+                                    fromString("a" + lineTerminator + "b"),
+                                    fromString("a_b")))
+                    .isTrue();
+        }
+
+        assertThat(Like.INSTANCE.test(DataTypes.STRING(), fromString("a\r\nb"), fromString("a_b")))
+                .isFalse();
+        assertThat(Like.INSTANCE.test(DataTypes.STRING(), fromString("a\r\nb"), fromString("a__b")))
+                .isTrue();
+    }
+
     private boolean executeLike(String s, String pattern) {
         ThreadLocalRandom rnd = ThreadLocalRandom.current();
         if (rnd.nextBoolean()) {
