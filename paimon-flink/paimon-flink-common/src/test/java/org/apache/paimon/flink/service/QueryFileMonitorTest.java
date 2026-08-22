@@ -38,12 +38,14 @@ import org.apache.flink.api.connector.source.ReaderOutput;
 import org.apache.flink.api.connector.source.SourceOutput;
 import org.apache.flink.api.connector.source.SourceReader;
 import org.apache.flink.core.io.InputStatus;
+import org.apache.flink.core.testutils.ManuallyTriggeredScheduledExecutorService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -113,6 +115,57 @@ public class QueryFileMonitorTest {
         } finally {
             reader.close();
         }
+    }
+
+    @Test
+    public void testConcurrentWaitsDoNotBlockEachOther() throws Exception {
+        ManuallyTriggeredScheduledExecutorService timer =
+                new ManuallyTriggeredScheduledExecutorService();
+        QueryFileMonitor monitor = new QueryFileMonitor(table);
+        SourceReader<InternalRow, SimpleSourceSplit> first = monitor.createReaderWithTimer(timer);
+        SourceReader<InternalRow, SimpleSourceSplit> second = monitor.createReaderWithTimer(timer);
+        try {
+            first.start();
+            second.start();
+            TestingReaderOutput<InternalRow> output = new TestingReaderOutput<>();
+
+            assertThat(first.pollNext(output)).isEqualTo(InputStatus.NOTHING_AVAILABLE);
+            assertThat(second.pollNext(output)).isEqualTo(InputStatus.NOTHING_AVAILABLE);
+
+            // each wait is a queued timer task instead of a thread sleeping for the interval, so
+            // the second reader's delay is already pending while the first one has not elapsed
+            assertThat(timer.getAllNonPeriodicScheduledTask()).hasSize(2);
+            assertThat(first.isAvailable().isDone()).isFalse();
+            assertThat(second.isAvailable().isDone()).isFalse();
+
+            timer.triggerNonPeriodicScheduledTasks();
+
+            assertThat(first.isAvailable().isDone()).isTrue();
+            assertThat(second.isAvailable().isDone()).isTrue();
+        } finally {
+            first.close();
+            second.close();
+        }
+    }
+
+    @Test
+    public void testCloseCancelsThePendingWait() throws Exception {
+        ManuallyTriggeredScheduledExecutorService timer =
+                new ManuallyTriggeredScheduledExecutorService();
+        SourceReader<InternalRow, SimpleSourceSplit> reader =
+                new QueryFileMonitor(table).createReaderWithTimer(timer);
+        reader.start();
+
+        assertThat(reader.pollNext(new TestingReaderOutput<>()))
+                .isEqualTo(InputStatus.NOTHING_AVAILABLE);
+        ScheduledFuture<?> wakeUp = timer.getAllNonPeriodicScheduledTask().get(0);
+        assertThat(wakeUp.isCancelled()).isFalse();
+
+        reader.close();
+
+        // the delay does not outlive the reader
+        assertThat(wakeUp.isCancelled()).isTrue();
+        assertThat(reader.isAvailable().isDone()).isTrue();
     }
 
     private void writeToTable(int a, int b, int c) throws Exception {

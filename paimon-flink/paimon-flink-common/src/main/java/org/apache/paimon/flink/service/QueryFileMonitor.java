@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.service;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.source.AbstractNonCoordinatedSource;
@@ -33,6 +34,7 @@ import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.system.FileMonitorTable;
+import org.apache.paimon.utils.ExecutorThreadFactory;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.connector.source.Boundedness;
@@ -46,6 +48,10 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 
@@ -80,13 +86,35 @@ public class QueryFileMonitor extends AbstractNonCoordinatedSource<InternalRow> 
     @Override
     public SourceReader<InternalRow, SimpleSourceSplit> createReader(
             SourceReaderContext sourceReaderContext) throws Exception {
-        return new Reader();
+        return new Reader(
+                Executors.newSingleThreadScheduledExecutor(
+                        new ExecutorThreadFactory("query-file-monitor-timer")),
+                true);
+    }
+
+    @VisibleForTesting
+    SourceReader<InternalRow, SimpleSourceSplit> createReaderWithTimer(
+            ScheduledExecutorService timer) {
+        return new Reader(timer, false);
     }
 
     private class Reader extends AbstractNonCoordinatedSourceReader<InternalRow> {
+
+        /** Fires the delayed wake-up without occupying a thread while the delay elapses. */
+        private final ScheduledExecutorService timer;
+
+        /** Whether this reader created {@link #timer} and therefore has to shut it down. */
+        private final boolean ownsTimer;
+
         private transient StreamTableScan scan;
         private transient TableRead read;
         private CompletableFuture<Void> availableFuture = CompletableFuture.completedFuture(null);
+        private ScheduledFuture<?> pendingWakeUp;
+
+        private Reader(ScheduledExecutorService timer, boolean ownsTimer) {
+            this.timer = timer;
+            this.ownsTimer = ownsTimer;
+        }
 
         @Override
         public void start() {
@@ -106,17 +134,31 @@ public class QueryFileMonitor extends AbstractNonCoordinatedSource<InternalRow> 
             boolean isEmpty = doScan(readerOutput);
 
             if (isEmpty) {
-                availableFuture =
-                        CompletableFuture.runAsync(
+                CompletableFuture<Void> future = new CompletableFuture<>();
+                availableFuture = future;
+                pendingWakeUp =
+                        timer.schedule(
                                 () -> {
-                                    try {
-                                        Thread.sleep(monitorInterval);
-                                    } catch (InterruptedException ignored) {
-                                    }
-                                });
+                                    future.complete(null);
+                                },
+                                monitorInterval,
+                                TimeUnit.MILLISECONDS);
                 return InputStatus.NOTHING_AVAILABLE;
             }
             return InputStatus.MORE_AVAILABLE;
+        }
+
+        @Override
+        public void close() throws Exception {
+            if (pendingWakeUp != null) {
+                pendingWakeUp.cancel(false);
+                pendingWakeUp = null;
+            }
+            // unblock anyone still waiting on availability instead of leaving them hanging
+            availableFuture.complete(null);
+            if (ownsTimer) {
+                timer.shutdownNow();
+            }
         }
 
         private boolean doScan(ReaderOutput<InternalRow> readerOutput) throws Exception {
