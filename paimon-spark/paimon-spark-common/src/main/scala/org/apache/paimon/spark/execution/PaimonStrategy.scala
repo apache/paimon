@@ -56,7 +56,7 @@ import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Implicits, Dat
 import org.apache.spark.sql.execution.exchange.ShuffleExchangeLike
 import org.apache.spark.sql.execution.joins.{BroadcastHashJoinExec, BroadcastNestedLoopJoinExec}
 import org.apache.spark.sql.execution.shim.{PaimonCreateTableAsSelectStrategy, PaimonReplaceTableAsSelectStrategy, PaimonReplaceTableStrategy}
-import org.apache.spark.sql.paimon.shims.SparkShimLoader
+import org.apache.spark.sql.paimon.shims.{SparkShimLoader, SparkVersionCompat}
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable.ArrayBuffer
@@ -197,19 +197,51 @@ case class PaimonStrategy(spark: SparkSession)
     case ShowCreateTable(ResolvedPaimonView(viewCatalog, ident), _, output) =>
       ShowCreatePaimonViewExec(output, viewCatalog, ident) :: Nil
 
-    case DescribeRelation(ResolvedPaimonView(viewCatalog, ident), _, isExtended, output) =>
-      DescribePaimonViewExec(output, viewCatalog, ident, isExtended) :: Nil
+    // Spark 4.2 (SPARK-39660) routes `DESCRIBE ... PARTITION` through its own
+    // `DescribeTablePartition` plan. Intercept it so Paimon tables keep emitting the same rows they
+    // do on 3.x/4.0/4.1; the upstream exec has a different row shape. The shim returns `None` on
+    // every version that lacks the node, where the spec arrives inside `DescribeRelation` below.
+    case DescribeTablePartitionPlan(relation, partitionSpec, isExtended, output) =>
+      relation match {
+        case r: ResolvedTable =>
+          (r.table, r.catalog) match {
+            case (sparkTable: SparkTable, sparkCatalog: SparkBaseCatalog) =>
+              PaimonDescribeTableExec(
+                output,
+                sparkCatalog,
+                r.identifier,
+                sparkTable,
+                partitionSpec,
+                isExtended) :: Nil
+            case _ => Nil
+          }
+        case _ => Nil
+      }
 
-    case DescribeRelation(r: ResolvedTable, partitionSpec, isExtended, output) =>
-      (r.table, r.catalog) match {
-        case (sparkTable: SparkTable, sparkCatalog: SparkBaseCatalog) =>
-          PaimonDescribeTableExec(
-            output,
-            sparkCatalog,
-            r.identifier,
-            sparkTable,
-            partitionSpec,
-            isExtended) :: Nil
+    // `DescribeRelation` has 3 leading fields on Spark <= 4.1 but only 2 on 4.2 (SPARK-39660 moved
+    // `partitionSpec` out into a separate `DescribeTablePartition` plan), so match by type and read
+    // the members through named accessors instead of a positional pattern.
+    case d: DescribeRelation if d.relation.isInstanceOf[ResolvedPaimonView] =>
+      val v = d.relation.asInstanceOf[ResolvedPaimonView]
+      DescribePaimonViewExec(d.output, v.catalog, v.identifier, d.isExtended) :: Nil
+
+    case d: DescribeRelation =>
+      d.relation match {
+        case r: ResolvedTable =>
+          (r.table, r.catalog) match {
+            case (sparkTable: SparkTable, sparkCatalog: SparkBaseCatalog) =>
+              PaimonDescribeTableExec(
+                d.output,
+                sparkCatalog,
+                r.identifier,
+                sparkTable,
+                // Spark 4.2 moved DESCRIBE ... PARTITION out of DescribeRelation; the shim
+                // returns an empty spec there.
+                SparkShimLoader.shim.describeRelationPartitionSpec(d),
+                d.isExtended
+              ) :: Nil
+            case _ => Nil
+          }
         case _ => Nil
       }
 
@@ -321,10 +353,24 @@ case class PaimonStrategy(spark: SparkSession)
     new GenericInternalRow(values)
   }
 
+  /**
+   * Matches Spark 4.2's `DescribeTablePartition` through the shim, which returns `None` on every
+   * version that lacks the node. An extractor rather than a `case p if shim...isDefined` guard so a
+   * matching node runs the shim once instead of twice; non-matching nodes cost the same as before.
+   */
+  private object DescribeTablePartitionPlan {
+    def unapply(
+        plan: LogicalPlan): Option[(LogicalPlan, Map[String, String], Boolean, Seq[Attribute])] =
+      SparkShimLoader.shim.describeTablePartition(plan)
+  }
+
   private object PaimonCatalogAndIdentifier {
     def unapply(identifier: Seq[String]): Option[(TableCatalog, Identifier)] = {
       val catalogAndIdentifier =
-        SparkUtils.catalogAndIdentifier(spark, identifier.asJava, catalogManager.currentCatalog)
+        SparkUtils.catalogAndIdentifier(
+          spark,
+          identifier.asJava,
+          SparkVersionCompat.currentCatalog(catalogManager))
       catalogAndIdentifier.catalog match {
         case paimonCatalog: SparkCatalog =>
           Some((paimonCatalog, catalogAndIdentifier.identifier()))

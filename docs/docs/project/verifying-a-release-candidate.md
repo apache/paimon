@@ -241,7 +241,7 @@ the packaging-equivalent build without reproducing the full JDK 17 test lane:
 (
   cd "paimon-${PAIMON_VERSION}"
   mvn -ntp clean install -DskipTests -Pdocs-and-source,spark4 \
-    -pl paimon-spark/paimon-spark-4.0,paimon-spark/paimon-spark-4.1 \
+    -pl paimon-spark/paimon-spark-4.0,paimon-spark/paimon-spark-4.1,paimon-spark/paimon-spark-4.2 \
     -am
 )
 ```

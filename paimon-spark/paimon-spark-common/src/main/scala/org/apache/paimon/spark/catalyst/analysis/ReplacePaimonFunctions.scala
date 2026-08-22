@@ -37,6 +37,7 @@ import org.apache.spark.sql.catalyst.plans.logical.{AnalysisHelper, LogicalPlan}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.connector.catalog.{CatalogPlugin, Identifier}
 import org.apache.spark.sql.connector.catalog.PaimonCatalogImplicits._
+import org.apache.spark.sql.paimon.shims.SparkVersionCompat
 import org.apache.spark.sql.types.{BinaryType, DataType, DayTimeIntervalType, NullType, StringType}
 import org.apache.spark.unsafe.types.UTF8String
 
@@ -96,7 +97,10 @@ object ReplacePaimonFunctions {
       Literal(null, BinaryType)
     } else {
       val catalogAndIdentifier = SparkUtils
-        .catalogAndIdentifier(spark, tableName, spark.sessionState.catalogManager.currentCatalog)
+        .catalogAndIdentifier(
+          spark,
+          tableName,
+          SparkVersionCompat.currentCatalog(spark.sessionState.catalogManager))
       if (!catalogAndIdentifier.catalog().isInstanceOf[SparkBaseCatalog]) {
         throw new UnsupportedOperationException(
           s"${catalogAndIdentifier.catalog()} is not a Paimon catalog")
@@ -146,7 +150,7 @@ case class ReplacePaimonFunctions(spark: SparkSession) extends Rule[LogicalPlan]
       .catalogAndIdentifier(
         spark,
         tableName.toString,
-        spark.sessionState.catalogManager.currentCatalog)
+        SparkVersionCompat.currentCatalog(spark.sessionState.catalogManager))
     if (!catalogAndIdentifier.catalog().isInstanceOf[SparkBaseCatalog]) {
       throw new UnsupportedOperationException(
         s"${catalogAndIdentifier.catalog()} is not a Paimon catalog")
@@ -248,8 +252,8 @@ case class ReplacePaimonFunctions(spark: SparkSession) extends Rule[LogicalPlan]
           s"validity must be INTERVAL DAY TO SECOND type, but found ${other.simpleString}")
     }
     val functionCatalog = Option(function.catalogName())
-      .map(catalogManager.catalog)
-      .getOrElse(catalogManager.currentCatalog)
+      .map(SparkVersionCompat.catalog(catalogManager, _))
+      .getOrElse(SparkVersionCompat.currentCatalog(catalogManager))
 
     ReplacePaimonFunctions.resolveDescriptorToPresignedUrl(
       spark,

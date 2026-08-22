@@ -28,7 +28,7 @@ import org.apache.spark.sql.catalyst.analysis.ResolvedIdentifier
 import org.apache.spark.sql.catalyst.plans.logical.{CreateTableAsSelect, LogicalPlan, TableSpec}
 import org.apache.spark.sql.execution.{PaimonTableAsSelectHelper, SparkPlan, SparkStrategy}
 import org.apache.spark.sql.execution.PaimonTableAsSelectHelper._
-import org.apache.spark.sql.execution.datasources.v2.CreateTableAsSelectExec
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 
 case class PaimonCreateTableAsSelectStrategy(spark: SparkSession)
   extends SparkStrategy
@@ -62,7 +62,7 @@ case class PaimonCreateTableAsSelectStrategy(spark: SparkSession)
           "Using CTAS with partitioned format table is not supported yet.")
       }
 
-      CreateTableAsSelectExec(
+      SparkShimLoader.shim.createCreateTableAsSelectExec(
         catalog.asTableCatalog,
         ident,
         parts,

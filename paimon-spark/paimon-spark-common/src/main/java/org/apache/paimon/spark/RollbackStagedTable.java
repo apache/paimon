@@ -25,6 +25,7 @@ import org.apache.spark.sql.connector.catalog.SupportsWrite;
 import org.apache.spark.sql.connector.catalog.Table;
 import org.apache.spark.sql.connector.catalog.TableCapability;
 import org.apache.spark.sql.connector.expressions.Transform;
+import org.apache.spark.sql.connector.metric.CustomTaskMetric;
 import org.apache.spark.sql.connector.read.ScanBuilder;
 import org.apache.spark.sql.connector.write.LogicalWriteInfo;
 import org.apache.spark.sql.connector.write.WriteBuilder;
@@ -96,6 +97,14 @@ class RollbackStagedTable implements StagedTable, SupportsRead, SupportsWrite, S
     @Override
     public Set<TableCapability> capabilities() {
         return table.capabilities();
+    }
+
+    // Spark 4.2 (SPARK-56598) added a default reportDriverMetrics() to TruncatableTable, which
+    // collides with the one StagedTable has carried since 4.0 (SPARK-50285). Java requires an
+    // explicit override to disambiguate. No @Override annotation: neither interface declares this
+    // method on Spark 3.5, where the annotation would fail to compile.
+    public CustomTaskMetric[] reportDriverMetrics() {
+        return new CustomTaskMetric[] {};
     }
 
     @Override
