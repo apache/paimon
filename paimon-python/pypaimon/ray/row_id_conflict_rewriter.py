@@ -33,7 +33,6 @@ from pypaimon.table.special_fields import SpecialFields
 from pypaimon.utils.range import Range
 from pypaimon.write.commit.conflict_detection import RowIdExistenceConflict
 from pypaimon.write.commit_message import CommitMessage
-from pypaimon.write.file_store_commit import CommitResultUncertainError
 
 logger = logging.getLogger(__name__)
 
@@ -100,8 +99,6 @@ def commit_self_merge_with_compaction_retry(
         try:
             commit = commit_table.new_batch_write_builder().new_commit()
             commit.commit(current_updates + other_messages)
-        except CommitResultUncertainError:
-            raise
         except Exception as error:
             conflict = _find_row_id_conflict(error)
             if conflict is None:

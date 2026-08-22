@@ -24,7 +24,6 @@ from pypaimon.ray.row_id_conflict_rewriter import (
     commit_self_merge_with_compaction_retry,
 )
 from pypaimon.write.commit.conflict_detection import RowIdExistenceConflict
-from pypaimon.write.file_store_commit import CommitResultUncertainError
 
 
 class RayRowIdConflictRewriterTest(unittest.TestCase):
@@ -58,7 +57,7 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
         table.options.commit_max_retries.return_value = max_retries
         return table
 
-    def test_uncertain_commit_is_not_rebased_as_row_id_conflict(self):
+    def test_nested_row_id_conflict_is_rebased(self):
         entry = Mock(bucket=0)
         entry.file = Mock(
             file_name='data-file.parquet',
@@ -66,45 +65,36 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
             row_count=1,
         )
         conflict = RowIdExistenceConflict(entry)
-        uncertain = CommitResultUncertainError(
-            'The snapshot commit result is uncertain.')
-        uncertain.__cause__ = conflict
+        commit_error = RuntimeError('commit failed')
+        commit_error.__cause__ = conflict
 
         commit = Mock()
-        commit.commit.side_effect = [uncertain, None]
-        commit_table = Mock()
-        commit_table.new_batch_write_builder.return_value.new_commit.return_value = (
-            commit)
-        table = Mock()
-        table.copy_without_time_travel.return_value = commit_table
-        table.snapshot_manager.return_value.get_latest_snapshot.return_value = (
-            Mock(id=2))
+        commit.commit.side_effect = [commit_error, None]
+        table = self._table(
+            [commit, commit],
+            [Mock(id=1), Mock(id=2)],
+        )
+        rewrite_result = Mock(
+            update_messages=[],
+            rewritten_file_count=1,
+        )
 
         with patch(
-            'pypaimon.ray.row_id_conflict_rewriter._find_row_id_conflict',
-            return_value=conflict,
-        ) as find_conflict, patch(
             'pypaimon.ray.row_id_conflict_rewriter._rewrite_updates',
-            return_value=Mock(
-                update_messages=[],
-                rewritten_file_count=1,
-            ),
+            return_value=rewrite_result,
         ) as rewrite_updates, patch(
-            'pypaimon.write.file_store_commit._abort_commit_messages',
-        ) as abort_messages:
-            with self.assertRaises(CommitResultUncertainError) as context:
-                commit_self_merge_with_compaction_retry(
-                    table,
-                    [],
-                    [],
-                    num_partitions=1,
-                )
+            'pypaimon.ray.row_id_conflict_rewriter._retry_wait',
+        ):
+            commit_self_merge_with_compaction_retry(
+                table,
+                [],
+                [],
+                num_partitions=1,
+            )
 
-        self.assertIs(uncertain, context.exception)
-        find_conflict.assert_not_called()
-        rewrite_updates.assert_not_called()
-        abort_messages.assert_not_called()
-        commit.close.assert_called_once_with()
+        rewrite_updates.assert_called_once()
+        self.assertEqual(2, commit.commit.call_count)
+        self.assertEqual(2, commit.close.call_count)
 
     def test_commit_preserves_file_store_rollback(self):
         rollback = Mock()
@@ -145,16 +135,6 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
 
         self.assertIs(conflict, context.exception.__cause__)
 
-    def test_public_error_preserves_uncertain_commit(self):
-        conflict = RuntimeError('inner conflict')
-        uncertain = CommitResultUncertainError('uncertain commit')
-        uncertain.__cause__ = conflict
-
-        with self.assertRaises(CommitResultUncertainError) as context:
-            _reraise_inner(uncertain)
-
-        self.assertIs(uncertain, context.exception)
-
     def test_public_error_does_not_unwrap_regular_cause(self):
         timeout = TimeoutError('commit timeout')
         outer = RuntimeError('commit result is uncertain')
@@ -187,33 +167,7 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
 
         self.assertIs(cause, context.exception)
 
-    @unittest.skipUnless(
-        importlib.util.find_spec('ray') is not None,
-        'Ray is not installed.',
-    )
-    def test_ray_task_error_stops_at_uncertain_commit(self):
-        from ray.exceptions import RayTaskError
-
-        timeout = TimeoutError('commit timeout')
-        uncertain = CommitResultUncertainError('uncertain commit')
-        uncertain.__cause__ = timeout
-        ray_error = RayTaskError(
-            'worker',
-            'Traceback (most recent call last):\n'
-            'CommitResultUncertainError: uncertain commit',
-            uncertain,
-            proctitle='ray::worker',
-            pid=1,
-            ip='127.0.0.1',
-        ).as_instanceof_cause()
-
-        with self.assertRaises(CommitResultUncertainError) as context:
-            _reraise_inner(ray_error)
-
-        self.assertIs(uncertain, context.exception)
-        self.assertIs(timeout, context.exception.__cause__)
-
-    def test_uncertain_final_generation_does_not_abort_messages(self):
+    def test_final_error_after_multiple_rebases_does_not_abort_messages(self):
         generation_0 = self._message(1, 'generation-0')
         generation_1 = self._message(2, 'generation-1')
         generation_2 = self._message(3, 'generation-2')
@@ -224,8 +178,8 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
         commits = [Mock(), Mock(), Mock()]
         commits[0].commit.side_effect = self._conflict('compact-1')
         commits[1].commit.side_effect = self._conflict('compact-2')
-        uncertain = CommitResultUncertainError('uncertain final attempt')
-        commits[2].commit.side_effect = uncertain
+        terminal = RuntimeError('final attempt failed')
+        commits[2].commit.side_effect = terminal
         table = self._table(
             commits,
             [snapshot_1, snapshot_2, snapshot_3],
@@ -247,9 +201,7 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
             'pypaimon.ray.row_id_conflict_rewriter._retry_wait',
         ), patch(
             'pypaimon.write.file_store_commit._abort_commit_messages',
-        ) as abort_messages, self.assertRaises(
-            CommitResultUncertainError,
-        ) as context:
+        ) as abort_messages, self.assertRaises(RuntimeError) as context:
             commit_self_merge_with_compaction_retry(
                 table,
                 [generation_0],
@@ -257,7 +209,7 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
                 num_partitions=1,
             )
 
-        self.assertIs(uncertain, context.exception)
+        self.assertIs(terminal, context.exception)
         abort_messages.assert_not_called()
 
     def test_exhausted_deterministic_conflict_does_not_abort_messages(self):

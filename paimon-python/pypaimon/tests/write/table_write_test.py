@@ -32,7 +32,6 @@ from pypaimon.build_info import full_version as build_full_version
 from pypaimon.common.json_util import JSON
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
-from pypaimon.write.file_store_commit import CommitResultUncertainError
 from pypaimon.write.table_write import TableWrite
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 
@@ -1541,86 +1540,6 @@ class TableWriteTest(unittest.TestCase):
             write_three.close()
             commit_two.close()
             commit_three.close()
-
-    def test_uncertain_commit_with_unavailable_snapshot_fails_closed(self):
-        table = self._create_postpone_table(
-            'default.test_uncertain_commit_with_unavailable_snapshot',
-            pa_schema=self.postpone_pa_schema,
-            partition_keys=['dt'],
-            primary_keys=['id', 'dt'],
-        )
-        builder = table.new_postpone_fixed_bucket_write_builder()
-        write = builder.new_write()
-        commit = builder.new_commit()
-        try:
-            write.write_arrow(pa.Table.from_pydict({
-                'id': [1], 'dt': ['p'], 'value': ['v'],
-            }, schema=self.postpone_pa_schema))
-            messages = write.prepare_commit()
-            data_paths = [
-                file.external_path or file.file_path
-                for message in messages
-                for file in message.new_files
-            ]
-            uncertain_error = TimeoutError('lost commit response')
-            file_store_commit = commit.file_store_commit
-            file_store_commit.commit_max_retries = 1
-            snapshot_commit = file_store_commit.snapshot_commit
-            real_commit = snapshot_commit.commit
-            attempts = 0
-
-            def uncertain_then_cas_failure(base_uuid, snapshot, statistics):
-                nonlocal attempts
-                attempts += 1
-                if attempts == 1:
-                    self.assertTrue(real_commit(base_uuid, snapshot, statistics))
-                    self._commit_arrow(
-                        table,
-                        pa.Table.from_pydict({
-                            'id': [2], 'dt': ['p'], 'value': ['v2'],
-                        }, schema=self.postpone_pa_schema),
-                        fixed_bucket=True,
-                    )
-                    raise uncertain_error
-                return False
-
-            real_get_snapshot = file_store_commit.snapshot_manager.get_snapshot_by_id
-
-            def hide_first_snapshot(snapshot_id):
-                return None if snapshot_id == 1 else real_get_snapshot(snapshot_id)
-
-            # An unavailable committed snapshot must stop conflict handling.
-            with patch.object(
-                snapshot_commit,
-                'commit',
-                side_effect=uncertain_then_cas_failure,
-            ), patch.object(
-                file_store_commit.snapshot_manager,
-                'get_snapshot_by_id',
-                side_effect=hide_first_snapshot,
-            ), patch.object(
-                file_store_commit.conflict_detection,
-                'check_conflicts',
-                return_value=None,
-            ) as check_conflicts, patch.object(
-                file_store_commit,
-                '_commit_retry_wait',
-            ):
-                with self.assertRaises(CommitResultUncertainError) as context:
-                    commit.commit(messages)
-
-            self.assertIs(uncertain_error, context.exception.__cause__)
-            self.assertEqual(1, attempts)
-            # Only the original attempt reaches conflict detection.
-            check_conflicts.assert_called_once()
-            self.assertTrue(all(table.file_io.exists(path) for path in data_paths))
-            read_builder = table.new_read_builder()
-            rows = read_builder.new_read().to_arrow(
-                read_builder.new_scan().plan().splits())
-            self.assertEqual([1, 2], sorted(rows.column('id').to_pylist()))
-        finally:
-            write.close()
-            commit.close()
 
     def test_data_file_prefix_postpone(self):
         """Test that generated data file names follow the expected prefix format."""

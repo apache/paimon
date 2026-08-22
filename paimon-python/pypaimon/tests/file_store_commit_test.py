@@ -32,7 +32,6 @@ from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer
 from pypaimon.write.commit.row_id_conflict_rewriter import RowIdRewriteResult
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_commit import (
-    CommitResultUncertainError,
     FileStoreCommit,
     ManifestMergeResult,
     RetryResult,
@@ -1089,67 +1088,6 @@ class TestFileStoreCommit(unittest.TestCase):
         self.assertIn("with 1 retries", str(ctx.exception))
         self.assertEqual(2, file_store_commit._try_commit_once.call_count)
         file_store_commit._commit_retry_wait.assert_called_once_with(0)
-
-    def test_uncertain_retry_preserves_error_on_prepare_failure(
-            self, mock_manifest_list_manager, mock_manifest_file_manager):
-        file_store_commit = self._create_file_store_commit()
-        file_store_commit.commit_max_retries = 3
-        file_store_commit.commit_timeout = 10 ** 9
-        file_store_commit._commit_retry_wait = Mock()
-        latest_snapshot = Mock(id=7)
-        file_store_commit.snapshot_manager.get_latest_snapshot.return_value = (
-            latest_snapshot
-        )
-        commit_entry = Mock()
-        commit_timeout = TimeoutError('snapshot response was lost')
-        prepare_failure = RuntimeError('manifest preparation failed')
-        file_store_commit._try_commit_once = Mock(side_effect=[
-            RetryResult(
-                latest_snapshot,
-                commit_timeout,
-                commit_result_may_be_uncertain=True,
-            ),
-            prepare_failure,
-        ])
-
-        with self.assertRaises(CommitResultUncertainError) as context:
-            file_store_commit._try_commit(
-                commit_kind='APPEND',
-                commit_identifier=11,
-                commit_entries_plan=lambda snapshot: [commit_entry],
-            )
-
-        self.assertIs(commit_timeout, context.exception.__cause__)
-        self.assertEqual(2, file_store_commit._try_commit_once.call_count)
-
-    def test_uncertain_retry_does_not_exit_on_empty_plan(
-            self, mock_manifest_list_manager, mock_manifest_file_manager):
-        file_store_commit = self._create_file_store_commit()
-        file_store_commit.commit_max_retries = 3
-        file_store_commit.commit_timeout = 10 ** 9
-        file_store_commit._commit_retry_wait = Mock()
-        latest_snapshot = Mock(id=7)
-        file_store_commit.snapshot_manager.get_latest_snapshot.return_value = (
-            latest_snapshot
-        )
-        commit_entry = Mock()
-        plans = iter([[commit_entry], []])
-        commit_timeout = TimeoutError('snapshot response was lost')
-        file_store_commit._try_commit_once = Mock(return_value=RetryResult(
-            latest_snapshot,
-            commit_timeout,
-            commit_result_may_be_uncertain=True,
-        ))
-
-        with self.assertRaises(CommitResultUncertainError) as context:
-            file_store_commit._try_commit(
-                commit_kind='APPEND',
-                commit_identifier=11,
-                commit_entries_plan=lambda snapshot: next(plans),
-            )
-
-        self.assertIs(commit_timeout, context.exception.__cause__)
-        file_store_commit._try_commit_once.assert_called_once()
 
     @staticmethod
     def _to_entries(commit_messages):

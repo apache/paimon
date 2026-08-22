@@ -180,30 +180,6 @@ class RetryResult(CommitResult):
         return False
 
 
-class CommitResultUncertainError(RuntimeError):
-    """A previous snapshot commit may have succeeded but is not observable."""
-
-
-class _UncertainCommitState:
-    """Retain the first unresolved snapshot-commit attempt across retries."""
-
-    def __init__(self):
-        self.pending = False
-        self.latest_snapshot = None
-        self.exception = None
-
-    def record(self, retry_result: RetryResult) -> None:
-        if not self.pending:
-            self.latest_snapshot = retry_result.latest_snapshot
-            self.exception = retry_result.exception
-        self.pending = True
-
-    def resolve(self) -> None:
-        self.pending = False
-        self.latest_snapshot = None
-        self.exception = None
-
-
 class RewriteResult(CommitResult):
 
     def __init__(self, rewrite: RowIdRewriteResult):
@@ -501,51 +477,37 @@ class FileStoreCommit:
 
         retry_count = 0
         retry_result = None
-        uncertain_commit_state = _UncertainCommitState()
+        commit_result_may_be_uncertain = False
+        uncertain_commit_exception = None
         rewritten_commit_entries = None
         start_time_ms = int(time.time() * 1000)
         while True:
-            try:
-                latest_snapshot = self.snapshot_manager.get_latest_snapshot()
-                commit_entries = (
-                    rewritten_commit_entries
-                    if rewritten_commit_entries is not None
-                    else commit_entries_plan(latest_snapshot)
-                )
+            latest_snapshot = self.snapshot_manager.get_latest_snapshot()
+            commit_entries = (
+                rewritten_commit_entries
+                if rewritten_commit_entries is not None
+                else commit_entries_plan(latest_snapshot)
+            )
 
-                # No entries to commit (e.g. drop_partitions with no matching
-                # data): skip an empty snapshot.
-                if not commit_entries and not index_deletes and not index_adds:
-                    if uncertain_commit_state.pending:
-                        raise CommitResultUncertainError(
-                            "Cannot skip an empty retry while a previous "
-                            "snapshot commit is still uncertain."
-                        ) from uncertain_commit_state.exception
-                    break
+            # No entries to commit (e.g. drop_partitions with no matching
+            # data): skip an empty snapshot.
+            if not commit_entries and not index_deletes and not index_adds:
+                break
 
-                result = self._try_commit_once(
-                    retry_result=retry_result,
-                    commit_kind=commit_kind,
-                    commit_entries=commit_entries,
-                    changelog_entries=changelog_entries or [],
-                    commit_identifier=commit_identifier,
-                    latest_snapshot=latest_snapshot,
-                    detect_conflicts=detect_conflicts,
-                    allow_rollback=allow_rollback,
-                    index_deletes=index_deletes,
-                    index_adds=index_adds,
-                    hash_index_base_snapshot=hash_index_base_snapshot,
-                    uncertain_commit_state=uncertain_commit_state,
-                )
-            except CommitResultUncertainError:
-                raise
-            except Exception:
-                if uncertain_commit_state.pending:
-                    raise CommitResultUncertainError(
-                        "Cannot safely continue after a retry failure while "
-                        "a previous snapshot commit is still uncertain."
-                    ) from uncertain_commit_state.exception
-                raise
+            result = self._try_commit_once(
+                retry_result=retry_result,
+                commit_kind=commit_kind,
+                commit_entries=commit_entries,
+                changelog_entries=changelog_entries or [],
+                commit_identifier=commit_identifier,
+                latest_snapshot=latest_snapshot,
+                detect_conflicts=detect_conflicts,
+                allow_rollback=allow_rollback,
+                index_deletes=index_deletes,
+                index_adds=index_adds,
+                hash_index_base_snapshot=hash_index_base_snapshot,
+                commit_result_may_be_uncertain=commit_result_may_be_uncertain,
+            )
 
             if isinstance(result, RewriteResult):
                 rewritten_commit_entries = result.rewrite.commit_entries
@@ -580,7 +542,9 @@ class FileStoreCommit:
             else:
                 retry_result = result
                 if result.commit_result_may_be_uncertain:
-                    uncertain_commit_state.record(result)
+                    commit_result_may_be_uncertain = True
+                    if uncertain_commit_exception is None:
+                        uncertain_commit_exception = result.exception
 
             elapsed_ms = int(time.time() * 1000) - start_time_ms
             if elapsed_ms > self.commit_timeout or retry_count >= self.commit_max_retries:
@@ -601,24 +565,14 @@ class FileStoreCommit:
                     f"after {elapsed_ms} millis with {retry_count} retries, "
                     f"there maybe exist commit conflicts between multiple jobs."
                 )
-                if uncertain_commit_state.pending:
-                    raise CommitResultUncertainError(
-                        error_msg
-                    ) from uncertain_commit_state.exception
+                if commit_result_may_be_uncertain:
+                    raise RuntimeError(error_msg) from uncertain_commit_exception
                 if retry_result is not None and retry_result.exception:
                     raise RuntimeError(error_msg) from retry_result.exception
                 else:
                     raise RuntimeError(error_msg)
 
-            try:
-                self._commit_retry_wait(retry_count)
-            except Exception:
-                if uncertain_commit_state.pending:
-                    raise CommitResultUncertainError(
-                        "Commit retry was interrupted while a previous "
-                        "snapshot commit is still uncertain."
-                    ) from uncertain_commit_state.exception
-                raise
+            self._commit_retry_wait(retry_count)
             retry_count += 1
 
     def _try_commit_once(self, retry_result: Optional[RetryResult], commit_kind: str,
@@ -631,16 +585,10 @@ class FileStoreCommit:
                          index_deletes=None,
                          index_adds=None,
                          hash_index_base_snapshot=None,
-                         uncertain_commit_state=None) -> CommitResult:
-        if uncertain_commit_state is None:
-            uncertain_commit_state = _UncertainCommitState()
+                         commit_result_may_be_uncertain: bool = False) -> CommitResult:
         start_millis = int(time.time() * 1000)
         if self._is_duplicate_commit(
-                retry_result,
-                latest_snapshot,
-                commit_identifier,
-                commit_kind,
-                uncertain_commit_state):
+                retry_result, latest_snapshot, commit_identifier, commit_kind):
             return SuccessResult()
 
         latest_snapshot_id = latest_snapshot.id if latest_snapshot else 0
@@ -702,13 +650,8 @@ class FileStoreCommit:
             )
 
             if conflict_exception is not None:
-                if uncertain_commit_state.pending:
-                    raise CommitResultUncertainError(
-                        "Cannot safely handle a commit conflict while a "
-                        "previous snapshot commit is still uncertain."
-                    ) from uncertain_commit_state.exception
                 rewrite_result = self._try_rewrite_row_id_conflict(
-                    uncertain_commit_state.pending,
+                    commit_result_may_be_uncertain,
                     conflict_exception,
                     latest_snapshot,
                     base_data_files,
@@ -968,38 +911,15 @@ class FileStoreCommit:
             retry_result,
             latest_snapshot,
             commit_identifier,
-            commit_kind,
-            uncertain_commit_state) -> bool:
-        if (
-                (retry_result is not None or uncertain_commit_state.pending)
-                and latest_snapshot is not None
-        ):
+            commit_kind) -> bool:
+        if retry_result is not None and latest_snapshot is not None:
             start_check_snapshot_id = 1  # Snapshot.FIRST_SNAPSHOT_ID
-            check_from_snapshot = (
-                uncertain_commit_state.latest_snapshot
-                if uncertain_commit_state.pending
-                else retry_result.latest_snapshot
-            )
-            if check_from_snapshot is not None:
-                start_check_snapshot_id = check_from_snapshot.id + 1
+            if retry_result.latest_snapshot is not None:
+                start_check_snapshot_id = retry_result.latest_snapshot.id + 1
 
             for snapshot_id in range(start_check_snapshot_id, latest_snapshot.id + 1):
                 snapshot = self.snapshot_manager.get_snapshot_by_id(snapshot_id)
                 if snapshot is None:
-                    if uncertain_commit_state.pending:
-                        message = (
-                            "Cannot determine whether commit {} by user {} "
-                            "succeeded because snapshot {} is unavailable."
-                        ).format(
-                            commit_identifier,
-                            self.commit_user,
-                            snapshot_id,
-                        )
-                        raise CommitResultUncertainError(
-                            message
-                        ) from uncertain_commit_state.exception
-                    # A deterministic retry has no unresolved snapshot commit.
-                    # Conflict detection handles any history it must read.
                     continue
                 if (snapshot.commit_user == self.commit_user and
                         snapshot.commit_identifier == commit_identifier and
@@ -1009,12 +929,6 @@ class FileStoreCommit:
                         f"user: {self.commit_user}, identifier: {commit_identifier}"
                     )
                     return True
-            if (
-                    uncertain_commit_state.pending
-                    and start_check_snapshot_id <= latest_snapshot.id
-            ):
-                # All later snapshots are visible and exclude this commit.
-                uncertain_commit_state.resolve()
         return False
 
     def _create_dynamic_partition_filter(self, commit_messages: List[CommitMessage]):
