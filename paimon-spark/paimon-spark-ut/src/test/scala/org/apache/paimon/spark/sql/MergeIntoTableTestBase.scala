@@ -1565,6 +1565,95 @@ trait MergeIntoPrimaryKeyTableTest extends PaimonSparkTestBase with PaimonPrimar
         Row(1, 10, "c111") :: Row(2, 20, "c2") :: Row(103, 30, "c333") :: Nil)
     }
   }
+
+  /**
+   * A DELETE clause emits real `RowKind.DELETE` records, so the target's merge engine must be able
+   * to consume them. `partial-update` without `partial-update.remove-record-on-delete` cannot:
+   * before the check in `PaimonMergeInto`, the merge committed happily and the table only blew up
+   * later at read time in `PartialUpdateMergeFunction#add`.
+   */
+  test("Paimon MergeInto: reject DELETE clause when the merge engine can not accept deletes") {
+    val deleteClauses =
+      Seq("WHEN MATCHED THEN DELETE", "WHEN MATCHED AND target.b > 0 THEN DELETE") ++
+        // `WHEN NOT MATCHED BY SOURCE` was only added to Spark's parser in 3.4; on 3.2/3.3 the
+        // statement fails to parse before it ever reaches the analysis rule under test.
+        (if (gteqSpark3_4) Seq("WHEN NOT MATCHED BY SOURCE THEN DELETE") else Nil)
+
+    deleteClauses.foreach {
+      deleteClause =>
+        withTable("source", "target") {
+          Seq((1, 100, "c11")).toDF("a", "b", "c").createOrReplaceTempView("source")
+          createTable(
+            "target",
+            "a INT, b INT, c STRING",
+            Seq("a"),
+            extraProps = Map("merge-engine" -> "partial-update"))
+          spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
+
+          val error = intercept[UnsupportedOperationException] {
+            spark.sql(s"""
+                         |MERGE INTO target
+                         |USING source
+                         |ON target.a = source.a
+                         |$deleteClause
+                         |""".stripMargin)
+          }.getMessage
+          assert(error.contains("partial-update.remove-record-on-delete"), error)
+
+          // The statement was rejected before anything was committed.
+          checkAnswer(
+            spark.sql("SELECT * FROM target ORDER BY a"),
+            Row(1, 10, "c1") :: Row(2, 20, "c2") :: Nil)
+        }
+    }
+  }
+
+  test("Paimon MergeInto: allow DELETE clause once the merge engine can accept deletes") {
+    withTable("source", "target") {
+      Seq((1, 100, "c11")).toDF("a", "b", "c").createOrReplaceTempView("source")
+      createTable(
+        "target",
+        "a INT, b INT, c STRING",
+        Seq("a"),
+        extraProps = Map(
+          "merge-engine" -> "partial-update",
+          "partial-update.remove-record-on-delete" -> "true"))
+      spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
+
+      spark.sql(s"""
+                   |MERGE INTO target
+                   |USING source
+                   |ON target.a = source.a
+                   |WHEN MATCHED THEN DELETE
+                   |""".stripMargin)
+
+      checkAnswer(spark.sql("SELECT * FROM target ORDER BY a"), Row(2, 20, "c2") :: Nil)
+    }
+  }
+
+  test("Paimon MergeInto: a delete-free merge on partial-update is unaffected") {
+    withTable("source", "target") {
+      Seq((1, 100, "c11"), (3, 300, "c33")).toDF("a", "b", "c").createOrReplaceTempView("source")
+      createTable(
+        "target",
+        "a INT, b INT, c STRING",
+        Seq("a"),
+        extraProps = Map("merge-engine" -> "partial-update"))
+      spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
+
+      spark.sql(s"""
+                   |MERGE INTO target
+                   |USING source
+                   |ON target.a = source.a
+                   |WHEN MATCHED THEN UPDATE SET b = source.b
+                   |WHEN NOT MATCHED THEN INSERT *
+                   |""".stripMargin)
+
+      checkAnswer(
+        spark.sql("SELECT * FROM target ORDER BY a"),
+        Row(1, 100, "c1") :: Row(2, 20, "c2") :: Row(3, 300, "c33") :: Nil)
+    }
+  }
 }
 
 trait MergeIntoAppendTableTest extends PaimonSparkTestBase with PaimonAppendTable {
