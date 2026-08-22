@@ -126,6 +126,11 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
     }
 
     @Override
+    protected boolean requiresFullManifestEntryForPartitionScan() {
+        return super.requiresFullManifestEntryForPartitionScan() || rowRangeIndex != null;
+    }
+
+    @Override
     public FileStoreScan withReadType(RowType readType) {
         if (readType != null) {
             List<DataField> nonSystemFields =
