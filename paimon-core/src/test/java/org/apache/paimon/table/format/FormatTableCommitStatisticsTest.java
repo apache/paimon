@@ -224,6 +224,66 @@ class FormatTableCommitStatisticsTest {
     }
 
     @Test
+    void testOverwritingTheWholeTableZeroesAPartitionItDidNotRewrite() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
+        registered(partitionManager, spec("2025", "10"), spec("2025", "11"));
+        writeDataFile(fileIO, tablePath, "year=2025/month=10", "old-data.csv", 4096);
+        writeDataFile(fileIO, tablePath, "year=2025/month=11", "old-data.csv", 2048);
+        // The statement names no partition, and its query wrote only one of the two.
+        CommitMessage message = writtenFile(fileIO, tablePath, "year=2025/month=10", 3, 128);
+
+        overwritingTheWholeTable(tablePath, fileIO, partitionManager)
+                .commit(Collections.singletonList(message));
+
+        Reported reported = capture(partitionManager);
+        assertThat(reported.replaceStatistics).isTrue();
+        assertThat(reported.specs)
+                .containsExactlyInAnyOrder(spec("2025", "10"), spec("2025", "11"));
+        assertThat(reported.statistics)
+                .anySatisfy(
+                        statistics -> {
+                            assertThat(statistics.spec()).isEqualTo(spec("2025", "10"));
+                            assertThat(statistics.recordCount()).isEqualTo(3);
+                            assertThat(statistics.fileSizeInBytes()).isEqualTo(128);
+                            assertThat(statistics.fileCount()).isEqualTo(1);
+                        })
+                // Emptied and not written to: the whole table was replaced, so an exact zero
+                // rather than the numbers of the files this commit deleted.
+                .anySatisfy(
+                        statistics -> {
+                            assertThat(statistics.spec()).isEqualTo(spec("2025", "11"));
+                            assertThat(statistics.recordCount()).isZero();
+                            assertThat(statistics.fileSizeInBytes()).isZero();
+                            assertThat(statistics.fileCount()).isZero();
+                        });
+    }
+
+    @Test
+    void testOverwritingTheWholeTableLeavesADirectoryTheCatalogHasNotRegistered() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
+        registered(partitionManager, spec("2025", "10"));
+        writeDataFile(fileIO, tablePath, "year=2025/month=10", "data.csv", 4096);
+        // A directory MSCK REPAIR TABLE has not registered yet: no scan of this table reads it,
+        // so replacing what the table holds is not this directory's business either.
+        writeDataFile(fileIO, tablePath, "year=2025/month=11", "unregistered.csv", 2048);
+
+        overwritingTheWholeTable(tablePath, fileIO, partitionManager)
+                .commit(Collections.emptyList());
+
+        assertThat(fileIO.exists(new Path(tablePath, "year=2025/month=10/data.csv"))).isFalse();
+        assertThat(fileIO.exists(new Path(tablePath, "year=2025/month=11/unregistered.csv")))
+                .isTrue();
+        // Nor does the overwrite register it: reporting a zero for it would make a partition the
+        // catalog never had, out of a directory that still holds rows.
+        Reported reported = capture(partitionManager);
+        assertThat(reported.specs).containsExactly(spec("2025", "10"));
+    }
+
+    @Test
     void testTruncatingPartitionsReportsAnExactZeroAsTheTotal() throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         Path tablePath = new Path(tempDir.toUri());
@@ -584,6 +644,24 @@ class FormatTableCommitStatisticsTest {
             boolean overwrite,
             Map<String, String> staticPartitions,
             boolean onlyValueInPath) {
+        return commit(
+                tablePath,
+                fileIO,
+                partitionManager,
+                overwrite,
+                staticPartitions,
+                onlyValueInPath,
+                /* dynamicPartitionOverwrite */ true);
+    }
+
+    private FormatTableCommit commit(
+            Path tablePath,
+            FileIO fileIO,
+            FormatTablePartitionManager partitionManager,
+            boolean overwrite,
+            Map<String, String> staticPartitions,
+            boolean onlyValueInPath,
+            boolean dynamicPartitionOverwrite) {
         return new FormatTableCommit(
                 tablePath.toString(),
                 PARTITION_KEYS,
@@ -595,7 +673,14 @@ class FormatTableCommitStatisticsTest {
                 staticPartitions,
                 null,
                 null,
-                partitionManager);
+                partitionManager,
+                dynamicPartitionOverwrite);
+    }
+
+    /** An overwrite that names no partition: INSERT OVERWRITE without a PARTITION clause. */
+    private FormatTableCommit overwritingTheWholeTable(
+            Path tablePath, FileIO fileIO, FormatTablePartitionManager partitionManager) {
+        return commit(tablePath, fileIO, partitionManager, true, null, false, false);
     }
 
     /** A file this commit wrote, with the counts its writer took. */

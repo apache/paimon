@@ -232,10 +232,9 @@ class Spark4Shim extends SparkShim {
 
   override def createFormatTableBatchWrite(
       table: FormatTable,
-      overwriteDynamic: Option[Boolean],
       overwritePartitions: Option[Map[String, String]],
       writeSchema: StructType): BatchWrite =
-    new FormatTableBatchWrite(table, overwriteDynamic, overwritePartitions, writeSchema)
+    new FormatTableBatchWrite(table, overwritePartitions, writeSchema)
 
   override def createCTERelationRef(
       cteId: Long,

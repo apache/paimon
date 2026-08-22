@@ -576,6 +576,54 @@ abstract class FormatTableTestBase extends PaimonHiveTestBase with AdaptiveSpark
     }
   }
 
+  test(
+    "Format table: INSERT OVERWRITE empties an unpartitioned table when the query returns nothing") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, payload STRING) USING CSV")
+      sql("INSERT INTO t VALUES (1, 'a'), (2, 'b')")
+
+      sql("INSERT OVERWRITE t SELECT * FROM t WHERE false")
+
+      // An unpartitioned overwrite replaces the table, and it replaces it with nothing here. Left
+      // to the files this commit wrote, an empty query would leave the old rows readable.
+      checkAnswer(sql("SELECT * FROM t"), Seq.empty)
+    }
+  }
+
+  test("Format table: static INSERT OVERWRITE replaces every partition of the table") {
+    withTable("t") {
+      withSQLConf("spark.sql.sources.partitionOverwriteMode" -> "STATIC") {
+        sql("CREATE TABLE t (id INT, dt STRING) USING CSV PARTITIONED BY (dt)")
+        sql("INSERT INTO t VALUES (1, '20260101'), (2, '20260102')")
+
+        sql("INSERT OVERWRITE t VALUES (9, '20260101')")
+
+        // The statement names no partition and the mode is STATIC, so it is about the whole
+        // table: the partition it does not write is replaced too, not left as it was.
+        checkAnswer(sql("SELECT * FROM t"), Seq(Row(9, "20260101")))
+
+        sql("INSERT OVERWRITE t SELECT * FROM t WHERE false")
+        checkAnswer(sql("SELECT * FROM t"), Seq.empty)
+      }
+    }
+  }
+
+  test("Format table: dynamic INSERT OVERWRITE replaces only the partitions it writes") {
+    withTable("t") {
+      withSQLConf("spark.sql.sources.partitionOverwriteMode" -> "DYNAMIC") {
+        sql("CREATE TABLE t (id INT, dt STRING) USING CSV PARTITIONED BY (dt)")
+        sql("INSERT INTO t VALUES (1, '20260101'), (2, '20260102')")
+
+        sql("INSERT OVERWRITE t VALUES (9, '20260101')")
+        checkAnswer(sql("SELECT * FROM t ORDER BY id"), Seq(Row(2, "20260102"), Row(9, "20260101")))
+
+        // Nothing written means no partition selected, which is not the same as selecting all.
+        sql("INSERT OVERWRITE t SELECT * FROM t WHERE false")
+        checkAnswer(sql("SELECT * FROM t ORDER BY id"), Seq(Row(2, "20260102"), Row(9, "20260101")))
+      }
+    }
+  }
+
   def collectFilteredInputSplits(plan: SparkPlan, tableName: String): Seq[Split] = {
     flatMap(plan) {
       case s: BatchScanExec =>

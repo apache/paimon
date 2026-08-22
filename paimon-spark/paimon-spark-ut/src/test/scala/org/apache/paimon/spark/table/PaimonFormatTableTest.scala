@@ -203,11 +203,21 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
         Row(1, 5, "Jerry") :: Row(1, 7, "Tom") :: Nil
       )
       spark.sql(s"INSERT INTO $tableName PARTITION (id = 3) VALUES (5, 'Alice')")
+      // No PARTITION clause under Spark's default STATIC mode: the statement is about the whole
+      // table, so the partition it does not write is replaced too.
       spark.sql(s"INSERT OVERWRITE $tableName VALUES (5, 'Jerry', 1), (7, 'Tom', 2)")
       checkAnswer(
         spark.sql(s"SELECT id, age, name FROM $tableName ORDER BY id, age"),
-        Row(1, 5, "Jerry") :: Row(2, 7, "Tom") :: Row(3, 5, "Alice") :: Nil
+        Row(1, 5, "Jerry") :: Row(2, 7, "Tom") :: Nil
       )
+      withSparkSQLConf("spark.sql.sources.partitionOverwriteMode" -> "dynamic") {
+        spark.sql(s"INSERT INTO $tableName PARTITION (id = 3) VALUES (5, 'Alice')")
+        spark.sql(s"INSERT OVERWRITE $tableName VALUES (9, 'Jerry', 1)")
+        checkAnswer(
+          spark.sql(s"SELECT id, age, name FROM $tableName ORDER BY id, age"),
+          Row(1, 9, "Jerry") :: Row(2, 7, "Tom") :: Row(3, 5, "Alice") :: Nil
+        )
+      }
     }
   }
 
