@@ -55,6 +55,7 @@ import org.apache.paimon.utils.StatsCollectorFactories;
 
 import javax.annotation.Nullable;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -386,6 +387,13 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                 blobContext != null
                         || !fieldsInVectorFile(writeSchema, vectorFileFormat != null).isEmpty();
         if (hasDedicatedFields) {
+            @Nullable
+            File blobStagingTempDirectory =
+                    blobContext != null
+                                    && blobContext.writeNullOnFetchFailure()
+                                    && ioManager != null
+                            ? new File(ioManager.pickTempDir())
+                            : null;
             return new DedicatedFormatRollingFileWriter(
                     fileIO,
                     schemaId,
@@ -403,7 +411,8 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                     fileIndexOptions,
                     fileSource,
                     statsDenseStore,
-                    blobContext);
+                    blobContext,
+                    blobStagingTempDirectory);
         }
         return new RowDataRollingFileWriter(
                 fileIO,

@@ -59,6 +59,26 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
             boolean writeNullOnFetchFailure,
             BlobFetchMetricReporter blobFetchMetricReporter,
             int copyBufferSize) {
+        this(
+                out,
+                writeConsumer,
+                type,
+                writeNullOnMissingFile,
+                writeNullOnFetchFailure,
+                blobFetchMetricReporter,
+                copyBufferSize,
+                BlobStagingFactory.defaultFactory());
+    }
+
+    BlobFormatWriter(
+            PositionOutputStream out,
+            @Nullable BlobConsumer writeConsumer,
+            RowType type,
+            boolean writeNullOnMissingFile,
+            boolean writeNullOnFetchFailure,
+            BlobFetchMetricReporter blobFetchMetricReporter,
+            int copyBufferSize,
+            BlobStagingFactory stagingFactory) {
         this.out = out;
         this.deleteFileUponAbort = writeConsumer == null;
         this.elementWriter =
@@ -69,7 +89,8 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
                         writeNullOnMissingFile,
                         writeNullOnFetchFailure,
                         blobFetchMetricReporter,
-                        copyBufferSize);
+                        copyBufferSize,
+                        stagingFactory);
         this.lengths = new LongArrayList(16);
     }
 
@@ -128,7 +149,8 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
             boolean writeNullOnMissingFile,
             boolean writeNullOnFetchFailure,
             BlobFetchMetricReporter blobFetchMetricReporter,
-            int copyBufferSize) {
+            int copyBufferSize,
+            BlobStagingFactory stagingFactory) {
         checkArgument(type.getFieldCount() == 1, "BlobFormatWriter only support one field.");
         return BlobElementSerializerFactory.create(type.getTypeAt(0))
                 .createWriter(
@@ -138,6 +160,7 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
                         writeNullOnMissingFile,
                         writeNullOnFetchFailure,
                         blobFetchMetricReporter,
-                        copyBufferSize);
+                        copyBufferSize,
+                        stagingFactory);
     }
 }

@@ -2730,9 +2730,15 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription(
                             "Whether to write NULL for a descriptor BLOB value when the "
-                                    + "referenced resource cannot be fetched during Flink writes "
-                                    + "(e.g. invalid URI or HTTP errors other than 404). "
+                                    + "referenced resource cannot be opened or fully read during "
+                                    + "Flink writes (e.g. invalid URI, HTTP errors other than 404, "
+                                    + "or a response body which fails before it is complete). When "
+                                    + "enabled, the fetched value is staged before it is appended to "
+                                    + "the managed BLOB file so that a body read failure cannot leave "
+                                    + "partial bytes in that file. "
                                     + "HTTP 404 is handled by 'blob-write-null-on-missing-file'. "
+                                    + "Task cancellation and staging or final-output failures still "
+                                    + "fail the write. "
                                     + "When false, the write fails when the descriptor is read.");
 
     public static final ConfigOption<Boolean> COMMIT_DISCARD_DUPLICATE_FILES =

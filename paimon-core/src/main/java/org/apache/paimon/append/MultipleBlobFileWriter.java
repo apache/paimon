@@ -40,6 +40,7 @@ import org.apache.paimon.utils.LongCounter;
 import javax.annotation.Nullable;
 
 import java.io.Closeable;
+import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -70,6 +71,42 @@ public class MultipleBlobFileWriter implements Closeable {
             boolean writeNullOnFetchFailure,
             BlobFetchMetricReporter blobFetchMetricReporter,
             int copyBufferSize) {
+        this(
+                fileIO,
+                schemaId,
+                writeSchema,
+                pathFactory,
+                seqNumCounterSupplier,
+                fileSource,
+                asyncFileWrite,
+                statsDenseStore,
+                targetFileSize,
+                blobConsumer,
+                blobInlineFields,
+                writeNullOnMissingFile,
+                writeNullOnFetchFailure,
+                blobFetchMetricReporter,
+                copyBufferSize,
+                null);
+    }
+
+    MultipleBlobFileWriter(
+            FileIO fileIO,
+            long schemaId,
+            RowType writeSchema,
+            DataFilePathFactory pathFactory,
+            Supplier<LongCounter> seqNumCounterSupplier,
+            FileSource fileSource,
+            boolean asyncFileWrite,
+            boolean statsDenseStore,
+            long targetFileSize,
+            @Nullable BlobConsumer blobConsumer,
+            Set<String> blobInlineFields,
+            boolean writeNullOnMissingFile,
+            boolean writeNullOnFetchFailure,
+            BlobFetchMetricReporter blobFetchMetricReporter,
+            int copyBufferSize,
+            @Nullable File blobStagingTempDirectory) {
         RowType blobRowType = new RowType(fieldsInBlobFile(writeSchema, blobInlineFields));
         this.blobWriters = new ArrayList<>();
         for (String blobFieldName : blobRowType.getFieldNames()) {
@@ -77,6 +114,7 @@ public class MultipleBlobFileWriter implements Closeable {
             blobFileFormat.setWriteConsumer(blobConsumer);
             blobFileFormat.setWriteNullOnMissingFile(writeNullOnMissingFile);
             blobFileFormat.setWriteNullOnFetchFailure(writeNullOnFetchFailure);
+            blobFileFormat.setBlobStagingTempDirectory(blobStagingTempDirectory);
             blobFileFormat.setBlobFetchMetricReporter(blobFetchMetricReporter);
             blobWriters.add(
                     new BlobProjectedFileWriter(
