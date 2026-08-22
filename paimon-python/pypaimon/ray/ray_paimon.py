@@ -26,7 +26,9 @@ Usage::
     write_paimon(ds, "db.table", catalog_options={"warehouse": "/path"})
 """
 
+import hashlib
 import importlib
+import uuid
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 from pypaimon.common.predicate import Predicate
@@ -148,6 +150,8 @@ def map_with_blobs(
     all_blob_columns=None,
     parallelism: int = 64,
     batch_size: Optional[int] = 1024,
+    blob_uri_affinity: bool = False,
+    prefetch_bytes: int = 64 * 1024 * 1024,
     fn_kwargs: Optional[Dict[str, Any]] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
     **map_args,
@@ -159,7 +163,10 @@ def map_with_blobs(
     Ray-compatible batch; for side-effect-only work, return an empty
     ``pyarrow.Table`` instead of ``None``. Call this directly on
     ``scan().to_ray()`` output, or pass ``file_io`` and ``all_blob_columns``.
-    Tune ``batch_size`` for BLOB size and worker memory.
+    Tune ``batch_size`` for BLOB size and worker memory. Set
+    ``blob_uri_affinity=True`` to shuffle descriptors by URI and offset before
+    reading. This lets each worker coalesce adjacent ranges across multiple
+    ``fn`` batches, bounded by ``prefetch_bytes``.
     """
     _require_ray_data()
 
@@ -175,6 +182,14 @@ def map_with_blobs(
         raise ValueError("parallelism must be at least 1, got {}".format(parallelism))
     if batch_size is not None and batch_size < 1:
         raise ValueError("batch_size must be at least 1, got {}".format(batch_size))
+    if not isinstance(blob_uri_affinity, bool):
+        raise ValueError("blob_uri_affinity must be a boolean")
+    if blob_uri_affinity and batch_size is None:
+        raise ValueError("blob_uri_affinity requires batch_size")
+    if (isinstance(prefetch_bytes, bool)
+            or not isinstance(prefetch_bytes, int)
+            or prefetch_bytes < 1):
+        raise ValueError("prefetch_bytes must be a positive integer")
 
     resolved_file_io = file_io
     if resolved_file_io is None:
@@ -190,7 +205,7 @@ def map_with_blobs(
 
     kwargs = dict(map_args)
     kwargs["batch_format"] = "pyarrow"
-    if batch_size is not None:
+    if batch_size is not None and not blob_uri_affinity:
         kwargs.setdefault("batch_size", batch_size)
     if ray_remote_args is not None:
         _set_map_batches_remote_args(dataset, kwargs, ray_remote_args)
@@ -208,17 +223,81 @@ def map_with_blobs(
     if invalid:
         raise ValueError("Column {!r} is not a BLOB column.".format(invalid[0]))
 
+    mapper = _map_blob_batch
+    affinity_cols = []
+    if blob_uri_affinity:
+        dataset, affinity_cols = _cluster_by_blob_uri(dataset, blob_cols)
+        mapper = _map_blob_affinity_block
+        kwargs["batch_size"] = None
+
+    mapper_kwargs = {
+        "file_io": resolved_file_io,
+        "blob_cols": blob_cols,
+        "all_blob_cols": list(all_blob_cols),
+        "parallelism": parallelism,
+        "fn": fn,
+        "fn_kwargs": dict(fn_kwargs or {}),
+    }
+    if blob_uri_affinity:
+        mapper_kwargs.update({
+            "fn_batch_size": batch_size,
+            "prefetch_bytes": prefetch_bytes,
+            "affinity_cols": affinity_cols,
+        })
     return dataset.map_batches(
-        _map_blob_batch,
+        mapper, fn_kwargs=mapper_kwargs, **kwargs)
+
+
+def _cluster_by_blob_uri(dataset, blob_cols):
+    token = uuid.uuid4().hex
+    key_col = "__paimon_blob_key_{}".format(token)
+    offset_col = "__paimon_blob_offset_{}".format(token)
+    with_keys = dataset.map_batches(
+        _append_blob_affinity_keys,
         fn_kwargs={
-            "file_io": resolved_file_io,
             "blob_cols": blob_cols,
-            "all_blob_cols": list(all_blob_cols),
-            "parallelism": parallelism,
-            "fn": fn,
-            "fn_kwargs": dict(fn_kwargs or {}),
+            "key_col": key_col,
+            "offset_col": offset_col,
         },
-        **kwargs)
+        batch_format="pyarrow",
+        zero_copy_batch=True,
+    )
+    return with_keys.sort([key_col, offset_col]), [key_col, offset_col]
+
+
+def _append_blob_affinity_keys(batch, blob_cols, key_col, offset_col):
+    import pyarrow as pa
+    from pypaimon.table.row.blob import BlobDescriptor
+
+    empty_key = b"\0" * 16
+    uri_keys = {}
+    keys = []
+    offsets = []
+    columns = [batch.column(name) for name in blob_cols]
+    for row in range(batch.num_rows):
+        descriptor = None
+        for column in columns:
+            value = column[row]
+            raw = value.as_py() if value.is_valid else None
+            if raw is not None and BlobDescriptor.is_blob_descriptor(raw):
+                descriptor = BlobDescriptor.deserialize(raw)
+                break
+        if descriptor is not None:
+            key = uri_keys.get(descriptor.uri)
+            if key is None:
+                key = hashlib.blake2b(
+                    descriptor.uri.encode("utf-8"), digest_size=16).digest()
+                uri_keys[descriptor.uri] = key
+            keys.append(key)
+            offsets.append(descriptor.offset)
+        else:
+            keys.append(empty_key)
+            offsets.append(-1)
+    return batch.append_column(
+        key_col, pa.array(keys, type=pa.binary(16))
+    ).append_column(
+        offset_col, pa.array(offsets, type=pa.int64())
+    )
 
 
 def _set_map_batches_remote_args(dataset, kwargs, ray_remote_args):
@@ -235,13 +314,52 @@ def _map_blob_batch(
         batch, file_io, blob_cols, all_blob_cols, parallelism, fn, fn_kwargs):
     from pypaimon.multimodal.blob_read import fetch_blob_bodies
 
+    scalar_cols = _blob_scalar_columns(batch, blob_cols, all_blob_cols)
+    bodies = fetch_blob_bodies(
+        file_io, batch.select(blob_cols).to_pydict(), blob_cols, parallelism)
+    return _call_blob_fn(fn, batch.select(scalar_cols), bodies, fn_kwargs)
+
+
+def _map_blob_affinity_block(
+        batch, file_io, blob_cols, all_blob_cols, parallelism, fn, fn_kwargs,
+        fn_batch_size, prefetch_bytes, affinity_cols):
+    from pypaimon.multimodal.blob_read import fetch_blob_bodies
+
+    if batch.num_rows == 0:
+        return
+
+    scalar_cols = _blob_scalar_columns(
+        batch, blob_cols, all_blob_cols, affinity_cols)
+
+    for start, end in _blob_prefetch_windows(
+            batch, blob_cols, fn_batch_size, prefetch_bytes):
+        window = batch.slice(start, end - start)
+        bodies = fetch_blob_bodies(
+            file_io,
+            window.select(blob_cols).to_pydict(),
+            blob_cols,
+            parallelism,
+        )
+        scalar = window.select(scalar_cols)
+        for batch_start in range(0, window.num_rows, fn_batch_size):
+            size = min(fn_batch_size, window.num_rows - batch_start)
+            fn_bodies = {
+                name: values[batch_start:batch_start + size]
+                for name, values in bodies.items()
+            }
+            yield _call_blob_fn(
+                fn, scalar.slice(batch_start, size), fn_bodies, fn_kwargs)
+
+
+def _blob_scalar_columns(batch, blob_cols, all_blob_cols, internal_cols=()):
     missing = [name for name in blob_cols if name not in batch.schema.names]
     if missing:
         raise ValueError("BLOB column(s) not found in Ray Dataset: {}".format(
             ", ".join(missing)))
 
     all_blob = set(all_blob_cols)
-    scalar_cols = [name for name in batch.schema.names if name not in all_blob]
+    excluded = all_blob | set(internal_cols)
+    scalar_cols = [name for name in batch.schema.names if name not in excluded]
     unknown = _unknown_blob_descriptor_columns(batch, scalar_cols)
     if unknown:
         raise ValueError(
@@ -249,16 +367,52 @@ def _map_blob_batch(
             "(likely from a joined BLOB table). Fetch it with its own "
             "table.map_with_blobs() in a separate pass, or drop it before "
             "mapping.".format(unknown[0]))
+    return scalar_cols
 
-    bodies = fetch_blob_bodies(
-        file_io, batch.select(blob_cols).to_pydict(), blob_cols, parallelism)
-    result = fn(batch.select(scalar_cols), bodies, **fn_kwargs)
+
+def _call_blob_fn(fn, scalar, bodies, fn_kwargs):
+    result = fn(scalar, bodies, **fn_kwargs)
     if result is None:
         raise ValueError(
             "map_with_blobs UDF must return a Ray-compatible batch, such as a "
             "pyarrow.Table. For side-effect-only processing, return an empty "
             "pyarrow.Table instead of None.")
     return result
+
+
+def _blob_prefetch_windows(batch, blob_cols, fn_batch_size, max_bytes):
+    start = 0
+    end = 0
+    size = 0
+    while end < batch.num_rows:
+        next_end = min(end + fn_batch_size, batch.num_rows)
+        next_size = _blob_payload_size(
+            batch.slice(end, next_end - end), blob_cols, max_bytes)
+        if end > start and size + next_size > max_bytes:
+            yield start, end
+            start = end
+            size = 0
+        size += next_size
+        end = next_end
+    if end > start:
+        yield start, end
+
+
+def _blob_payload_size(batch, blob_cols, unknown_size):
+    from pypaimon.table.row.blob import BlobDescriptor
+
+    total = 0
+    for name in blob_cols:
+        for value in batch.column(name):
+            if not value.is_valid:
+                continue
+            raw = value.as_py()
+            if BlobDescriptor.is_blob_descriptor(raw):
+                length = BlobDescriptor.deserialize(raw).length
+                total += length if length >= 0 else unknown_size
+            else:
+                total += len(raw)
+    return total
 
 
 def _unknown_blob_descriptor_columns(batch, scalar_cols):

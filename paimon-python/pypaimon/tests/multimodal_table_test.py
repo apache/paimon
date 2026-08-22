@@ -1062,10 +1062,12 @@ class MultimodalTableTest(unittest.TestCase):
                 collect_batch,
                 parallelism=2,
                 batch_size=1,
+                blob_uri_affinity=True,
+                prefetch_bytes=32,
                 fn_kwargs={"prefix": b"got-"},
                 ray_remote_args={"num_cpus": 1},
             )
-            rows = sorted(result.to_pandas().to_dict("records"), key=lambda row: row["idx"])
+            rows = sorted(result.take_all(), key=lambda row: row["idx"])
 
             self.assertEqual(
                 [
@@ -1115,6 +1117,23 @@ class MultimodalTableTest(unittest.TestCase):
                     ["image"],
                     lambda scalar, blobs: pa.table({"rows": [scalar.num_rows]}),
                     file_io=obs.raw_table.file_io,
+                )
+
+            with self.assertRaisesRegex(ValueError, "requires batch_size"):
+                obs.map_with_blobs(
+                    ds,
+                    ["image"],
+                    return_none,
+                    batch_size=None,
+                    blob_uri_affinity=True,
+                )
+
+            with self.assertRaisesRegex(ValueError, "prefetch_bytes"):
+                obs.map_with_blobs(
+                    ds,
+                    ["image"],
+                    return_none,
+                    prefetch_bytes=0,
                 )
 
             with self.assertRaisesRegex(Exception, "must return"):
