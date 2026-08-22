@@ -106,6 +106,45 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
         abort_messages.assert_not_called()
         commit.close.assert_called_once_with()
 
+    def test_commit_preserves_file_store_rollback(self):
+        rollback = Mock()
+        commit = Mock()
+        commit.file_store_commit.rollback = rollback
+        table = self._table([commit], [Mock(id=1)])
+
+        commit_self_merge_with_compaction_retry(
+            table,
+            [],
+            [],
+            num_partitions=1,
+        )
+
+        self.assertIs(commit.file_store_commit.rollback, rollback)
+
+    def test_rewrite_error_keeps_row_id_conflict_as_cause(self):
+        conflict = self._conflict('compact')
+        rewrite_error = ValueError('rewrite failed')
+        update = self._message(1, 'update')
+        commit = Mock()
+        commit.commit.side_effect = conflict
+        table = self._table(
+            [commit],
+            [Mock(id=1), Mock(id=2)],
+        )
+
+        with patch(
+            'pypaimon.ray.row_id_conflict_rewriter._rewrite_updates',
+            side_effect=rewrite_error,
+        ), self.assertRaises(RuntimeError) as context:
+            commit_self_merge_with_compaction_retry(
+                table,
+                [update],
+                [],
+                num_partitions=1,
+            )
+
+        self.assertIs(conflict, context.exception.__cause__)
+
     def test_public_error_preserves_uncertain_commit(self):
         conflict = RuntimeError('inner conflict')
         uncertain = CommitResultUncertainError('uncertain commit')

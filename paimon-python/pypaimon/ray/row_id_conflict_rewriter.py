@@ -99,10 +99,6 @@ def commit_self_merge_with_compaction_retry(
         conflict = None
         try:
             commit = commit_table.new_batch_write_builder().new_commit()
-            # This layer owns stale row-id layout recovery. Do not enter the
-            # legacy compaction-rollback loop before the distributed rebase;
-            # ordinary FileStoreCommit retries remain enabled.
-            commit.file_store_commit.rollback = None
             commit.commit(current_updates + other_messages)
         except CommitResultUncertainError:
             raise
@@ -146,7 +142,7 @@ def commit_self_merge_with_compaction_retry(
         except Exception as rewrite_error:
             raise RuntimeError(
                 "{} {}".format(conflict, rewrite_error)
-            )
+            ) from conflict
         if result is None:
             raise conflict
 
@@ -272,35 +268,25 @@ def _rewrite_updates(
         groups.setdefault(tuple(candidate.file.write_cols), []).append(
             candidate
         )
-    try:
-        for columns, files in groups.items():
-            messages, rewritten_rows, _ = _rewrite_group(
-                table,
-                list(columns),
-                files,
-                latest_snapshot.id,
-                num_partitions=num_partitions,
-                ray_remote_args=ray_remote_args,
+    for columns, files in groups.items():
+        messages, rewritten_rows, _ = _rewrite_group(
+            table,
+            list(columns),
+            files,
+            latest_snapshot.id,
+            num_partitions=num_partitions,
+            ray_remote_args=ray_remote_args,
+        )
+        expected_rows = sum(item.file.row_count for item in files)
+        if rewritten_rows != expected_rows:
+            raise RuntimeError(
+                "Distributed row-id conflict rewrite read {} rows from "
+                "staged files, expected {}.".format(
+                    rewritten_rows,
+                    expected_rows,
+                )
             )
-            expected_rows = sum(item.file.row_count for item in files)
-            if rewritten_rows != expected_rows:
-                from pypaimon.write.file_store_commit import (
-                    _abort_commit_messages,
-                )
-                _abort_commit_messages(table, messages)
-                raise RuntimeError(
-                    "Distributed row-id conflict rewrite read {} rows from "
-                    "staged files, expected {}.".format(
-                        rewritten_rows,
-                        expected_rows,
-                    )
-                )
-            rewritten_messages.extend(messages)
-    except Exception:
-        if rewritten_messages:
-            from pypaimon.write.file_store_commit import _abort_commit_messages
-            _abort_commit_messages(table, rewritten_messages)
-        raise
+        rewritten_messages.extend(messages)
 
     return _RewriteResult(
         update_messages=remaining_messages + rewritten_messages,

@@ -2252,7 +2252,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         # Match Spark: replaced staging files are left for orphan cleanup.
         self.assertTrue(all(os.path.exists(path) for path in stale_paths))
 
-    def test_self_merge_compaction_retry_is_not_nested(self):
+    def test_self_merge_compaction_retry_checks_core_rollback(self):
         from pypaimon.ray import data_evolution_merge_into as merge_module
         from pypaimon.ray import row_id_conflict_rewriter as rewriter_module
         from pypaimon.write.file_store_commit import FileStoreCommit
@@ -2264,6 +2264,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         real_apply = merge_module.distributed_self_merge_update_apply
         real_rewrite = rewriter_module._rewrite_updates
         real_commit_init = FileStoreCommit.__init__
+        rollbacks = []
 
         def stage_then_compact(*args, **kwargs):
             result = real_apply(*args, **kwargs)
@@ -2281,7 +2282,8 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         def init_with_rollback(commit, *args, **kwargs):
             real_commit_init(commit, *args, **kwargs)
             commit.rollback = Mock()
-            commit.rollback.try_to_rollback.return_value = True
+            commit.rollback.try_to_rollback.return_value = False
+            rollbacks.append(commit.rollback)
 
         with patch.object(
                 merge_module,
@@ -2314,6 +2316,9 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(result['num_matched'], 4)
         self.assertEqual(self._read_sorted(target)['age'], [99, 99, 99, 99])
         commit_retry_wait.assert_not_called()
+        self.assertTrue(any(
+            rollback.try_to_rollback.called for rollback in rollbacks
+        ))
         ray_retry_wait.assert_called_once()
         self.assertEqual(ray_retry_wait.call_args[0][1], 0)
         self.assertEqual(rewrite_calls[0], 2)
