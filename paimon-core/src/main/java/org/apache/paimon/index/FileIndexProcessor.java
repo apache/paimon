@@ -31,6 +31,7 @@ import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
@@ -75,7 +76,8 @@ public class FileIndexProcessor {
         this.pathFactory = table.store().pathFactory();
         this.pathFactories = new DataFilePathFactories(pathFactory);
         this.schemaInfoCache =
-                new SchemaCache(fileIndexOptions, new SchemaManager(fileIO, table.location()));
+                new SchemaCache(
+                        fileIndexOptions, new FileSystemSchemaManager(fileIO, table.location()));
         this.sizeInMeta = table.coreOptions().fileIndexInManifestThreshold();
     }
 

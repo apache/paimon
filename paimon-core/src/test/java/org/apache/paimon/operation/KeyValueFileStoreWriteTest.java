@@ -32,6 +32,7 @@ import org.apache.paimon.mergetree.compact.CompactStrategy;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.mergetree.compact.ForceUpLevel0Compaction;
 import org.apache.paimon.mergetree.compact.MergeTreeCompactManager;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -143,7 +144,7 @@ public class KeyValueFileStoreWriteTest {
                 .isEmpty();
 
         SchemaManager schemaManager =
-                new SchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
+                new FileSystemSchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
         TableSchema snapshotSchema =
                 schemaManager.commitChanges(
                         SchemaChange.setOption(
@@ -184,7 +185,7 @@ public class KeyValueFileStoreWriteTest {
                 .containsEntry(SequenceSnapshotProperties.MAX_SEQUENCE_NUMBER, "0");
 
         SchemaManager schemaManager =
-                new SchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
+                new FileSystemSchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
         TableSchema scanSchema =
                 schemaManager.commitChanges(
                         SchemaChange.setOption(
@@ -227,7 +228,7 @@ public class KeyValueFileStoreWriteTest {
 
     private TestFileStore createStoreWithOptions(Map<String, String> options) throws Exception {
         SchemaManager schemaManager =
-                new SchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
+                new FileSystemSchemaManager(LocalFileIO.create(), new Path(tempDir.toUri()));
 
         TableSchema schema =
                 schemaManager.createTable(

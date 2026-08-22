@@ -34,6 +34,7 @@ import org.apache.paimon.hive.mapred.PaimonRecordReader;
 import org.apache.paimon.hive.objectinspector.PaimonObjectInspectorFactory;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -976,7 +977,7 @@ public abstract class HiveReadITCaseBase extends HiveTestBase {
                         "");
         Identifier identifier = Identifier.create(DATABASE_TEST, tableName);
         Path tablePath = AbstractCatalog.newTableLocation(path, identifier);
-        new SchemaManager(LocalFileIO.create(), tablePath).createTable(schema);
+        new FileSystemSchemaManager(LocalFileIO.create(), tablePath).createTable(schema);
 
         // Create hive external table
         String hiveSql =
@@ -1058,7 +1059,7 @@ public abstract class HiveReadITCaseBase extends HiveTestBase {
 
         // add column, do some ddl which will generate a new version schema-n file.
         Path tablePath = AbstractCatalog.newTableLocation(path, identifier);
-        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
+        SchemaManager schemaManager = new FileSystemSchemaManager(LocalFileIO.create(), tablePath);
         schemaManager.commitChanges(SchemaChange.addColumn("N1", DataTypes.STRING()));
 
         // Create hive external table

@@ -39,6 +39,7 @@ import org.apache.paimon.mergetree.compact.FullChangelogMergeFunctionWrapper;
 import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -88,7 +89,7 @@ public class ChangelogMergeTreeRewriterTest {
     public void beforeEach() throws Exception {
         path = new Path(tempDir.toString());
         comparator = Comparator.comparingInt(o -> o.getInt(0));
-        schemaManager = new SchemaManager(LocalFileIO.create(), path);
+        schemaManager = new FileSystemSchemaManager(LocalFileIO.create(), path);
         RowType recordType =
                 DataTypes.ROW(
                         DataTypes.FIELD(0, "key", DataTypes.INT()),

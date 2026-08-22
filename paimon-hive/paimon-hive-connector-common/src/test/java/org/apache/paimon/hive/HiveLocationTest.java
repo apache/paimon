@@ -26,6 +26,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -273,7 +274,7 @@ public class HiveLocationTest {
         hiveShell.execute(insertStr);
 
         FileIO fIO = getFileIO(catalogContext, new Path(location));
-        SchemaManager schemaManager = new SchemaManager(fIO, new Path(location));
+        SchemaManager schemaManager = new FileSystemSchemaManager(fIO, new Path(location));
         Optional<TableSchema> tableSchema = schemaManager.latest();
         assertThat(tableSchema).isPresent();
 

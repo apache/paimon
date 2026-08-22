@@ -32,6 +32,7 @@ import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.schema.TableSchema;
@@ -411,7 +412,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public SchemaManager schemaManager() {
-        return new SchemaManager(fileIO(), path, currentBranch());
+        return new FileSystemSchemaManager(fileIO(), path, currentBranch());
     }
 
     @Override
@@ -770,7 +771,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         }
 
         Optional<TableSchema> optionalSchema =
-                new SchemaManager(fileIO(), location(), targetBranch).latest();
+                new FileSystemSchemaManager(fileIO(), location(), targetBranch).latest();
         Preconditions.checkArgument(
                 optionalSchema.isPresent(), "Branch " + targetBranch + " does not exist");
 

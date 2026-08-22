@@ -40,6 +40,7 @@ import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.options.OptionsUtils;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -1337,7 +1338,7 @@ public class HiveCatalog extends AbstractCatalog {
             FileIO fileIO = fileIO(fromPath);
             if (!isExternalTable(table)
                     && !fromPath.equals(toPath)
-                    && !new SchemaManager(fileIO, fromPath).listAllIds().isEmpty()) {
+                    && !new FileSystemSchemaManager(fileIO, fromPath).listAllIds().isEmpty()) {
                 // Rename the file system's table directory. Maintain consistency between tables in
                 // the file system and tables in the Hive Metastore.
                 try {
@@ -1909,7 +1910,8 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     private SchemaManager schemaManager(Identifier identifier, Path location) {
-        return new SchemaManager(fileIO(location), location, identifier.getBranchNameOrDefault());
+        return new FileSystemSchemaManager(
+                fileIO(location), location, identifier.getBranchNameOrDefault());
     }
 
     public <T> T runWithLock(Identifier identifier, Callable<T> callable) throws Exception {

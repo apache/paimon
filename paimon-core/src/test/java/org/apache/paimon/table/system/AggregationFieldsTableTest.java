@@ -25,6 +25,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
@@ -76,7 +77,7 @@ public class AggregationFieldsTableTest extends TableTestBase {
 
         FileIO fileIO = LocalFileIO.create();
         Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, tableName));
-        schemaManager = new SchemaManager(fileIO, tablePath);
+        schemaManager = new FileSystemSchemaManager(fileIO, tablePath);
     }
 
     @Test

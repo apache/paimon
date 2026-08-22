@@ -33,6 +33,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -285,7 +286,7 @@ class DataEvolutionSplitReadTest {
                         .column("f0", DataTypes.INT())
                         .column("f1", DataTypes.STRING())
                         .build();
-        SchemaManager schemaManager = new SchemaManager(fileIO, tableRoot);
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, tableRoot);
         TableSchema tableSchema = schemaManager.createTable(schema);
         RowType rowType = tableSchema.logicalRowType();
 
@@ -353,7 +354,7 @@ class DataEvolutionSplitReadTest {
                         .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
                         .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
                         .build();
-        SchemaManager schemaManager = new SchemaManager(fileIO, tableRoot);
+        SchemaManager schemaManager = new FileSystemSchemaManager(fileIO, tableRoot);
         TableSchema tableSchema = schemaManager.createTable(schema);
         RowType rowType = tableSchema.logicalRowType();
 

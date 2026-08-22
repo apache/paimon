@@ -107,7 +107,7 @@ public class SchemaManagerTest {
         FailingFileIO.reset(failingName, 100, 100);
         String root = FailingFileIO.getFailingPath(failingName, tempDir.toString());
         path = new Path(root);
-        manager = new SchemaManager(FileIOFinder.find(path), path);
+        manager = new FileSystemSchemaManager(FileIOFinder.find(path), path);
     }
 
     @AfterEach
@@ -360,7 +360,7 @@ public class SchemaManagerTest {
                         Collections.singletonList("id"),
                         options,
                         "");
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), path);
         manager.createTable(schema);
 
         assertThatThrownBy(
@@ -387,7 +387,7 @@ public class SchemaManagerTest {
                         Collections.singletonList("id"),
                         options,
                         "");
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), path);
         manager.createTable(schema);
 
         assertThatThrownBy(
@@ -414,7 +414,7 @@ public class SchemaManagerTest {
                         Collections.singletonList("id"),
                         options,
                         "");
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), path);
         manager.createTable(schema);
 
         assertThatThrownBy(
@@ -450,7 +450,7 @@ public class SchemaManagerTest {
                         Collections.singletonList("id"),
                         options,
                         "");
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), path);
         manager.createTable(schema);
 
         assertThatThrownBy(() -> manager.commitChanges(SchemaChange.dropColumn("status")))
@@ -473,7 +473,7 @@ public class SchemaManagerTest {
                         Collections.singletonList("id"),
                         options,
                         "");
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), path);
         manager.createTable(schema);
 
         assertThatThrownBy(
@@ -500,7 +500,7 @@ public class SchemaManagerTest {
                         Collections.singletonList("id"),
                         options,
                         "");
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), path);
         manager.createTable(schema);
 
         assertThatThrownBy(() -> manager.commitChanges(SchemaChange.dropColumn("tags")))
@@ -739,7 +739,7 @@ public class SchemaManagerTest {
                         options,
                         "append-only table with primary key");
         // use non-failing manager
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), path);
         manager.createTable(schema);
         String schemaContent = manager.latest().get().toString();
 
@@ -759,7 +759,7 @@ public class SchemaManagerTest {
             List<String> expectedOrder) {
         List<DataField> fields = new LinkedList<>(initialFields);
 
-        manager.applyMove(fields, moveOperation);
+        SchemaManager.applyMove(fields, moveOperation);
 
         for (int i = 0; i < expectedOrder.size(); i++) {
             assertEquals(
@@ -821,7 +821,7 @@ public class SchemaManagerTest {
                         options,
                         "");
         Path tableRoot = new Path(tempDir.toString(), "table");
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), tableRoot);
         manager.createTable(schema);
 
         // 'type' is rejected even without snapshots (format tables hold data but create none)
@@ -924,7 +924,7 @@ public class SchemaManagerTest {
                         tableOptions,
                         "");
         Path tableRoot = new Path(tempDir.toString(), "table");
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), tableRoot);
         manager.createTable(schema);
 
         FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tableRoot);
@@ -1004,7 +1004,7 @@ public class SchemaManagerTest {
                         tableOptions,
                         "");
         Path tableRoot = new Path(tempDir.toString(), "table");
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), tableRoot);
         manager.createTable(schema);
 
         FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tableRoot);
@@ -1030,7 +1030,7 @@ public class SchemaManagerTest {
     @Test
     public void testDropPrimaryKeyOnEmptyTable() throws Exception {
         Path tableRoot = new Path(tempDir.toString(), "table");
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), tableRoot);
         manager.createTable(schema);
 
         // drop primary keys on empty table should succeed
@@ -1052,7 +1052,7 @@ public class SchemaManagerTest {
                         tableOptions,
                         "");
         Path tableRoot = new Path(tempDir.toString(), "table");
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), tableRoot);
         manager.createTable(pkSchema);
 
         // write data to create a snapshot
@@ -1093,7 +1093,7 @@ public class SchemaManagerTest {
                         Collections.emptyList(),
                         new HashMap<>(),
                         "");
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), path);
         manager.createTable(schema);
 
         SchemaChange addColumn =
@@ -1234,7 +1234,7 @@ public class SchemaManagerTest {
                         Collections.emptyList(),
                         new HashMap<>(),
                         "");
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), path);
         manager.createTable(schema);
 
         SchemaChange renameColumn =
@@ -1291,7 +1291,7 @@ public class SchemaManagerTest {
                         Collections.emptyList(),
                         new HashMap<>(),
                         "");
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), path);
         manager.createTable(schema);
 
         SchemaChange updateColumnType =
@@ -1338,7 +1338,7 @@ public class SchemaManagerTest {
                         Collections.emptyList(),
                         new HashMap<>(),
                         "");
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), path);
         manager.createTable(schema);
 
         SchemaChange addColumn =
@@ -1377,7 +1377,7 @@ public class SchemaManagerTest {
                         options,
                         "");
         Path tableRoot = new Path(tempDir.toString(), "table");
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), tableRoot);
         manager.createTable(schema);
 
         // write table
@@ -1409,7 +1409,7 @@ public class SchemaManagerTest {
 
     @Test
     public void testRollbackSchemaSuccess() throws Exception {
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), path);
         manager.createTable(schema);
         long firstSchemaId = manager.latest().get().id();
 
@@ -1443,7 +1443,7 @@ public class SchemaManagerTest {
                         options,
                         "");
         Path tableRoot = new Path(tempDir.toString(), "table");
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), tableRoot);
         manager.createTable(appendOnlySchema);
         long firstSchemaId = manager.latest().get().id();
 
@@ -1493,7 +1493,7 @@ public class SchemaManagerTest {
 
     @Test
     public void testRollbackSchemaNotExist() throws Exception {
-        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
+        SchemaManager manager = new FileSystemSchemaManager(LocalFileIO.create(), path);
         manager.createTable(schema);
 
         assertThatThrownBy(
