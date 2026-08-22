@@ -283,15 +283,20 @@ class RayReadByRowIdTest(unittest.TestCase):
         captured = {}
 
         def fake_read(rid_ds, table, projection, *, num_partitions,
-                      ray_remote_args=None, base_snapshot_id=None):
+                      ray_remote_args=None, base_snapshot_id=None,
+                      estimated_size_bytes=None, estimated_num_rows=None):
             captured["base_snapshot_id"] = base_snapshot_id
             captured["num_partitions"] = num_partitions
+            captured["estimated_size_bytes"] = estimated_size_bytes
+            captured["estimated_num_rows"] = estimated_num_rows
             return ray.data.from_arrow(pa.table({"_ROW_ID": pa.array([], pa.int64())}))
 
         with mock.patch.object(m, "distributed_read_by_row_id", fake_read):
             read_by_row_id(target, src, self.catalog_options, projection=["age"])
         self.assertEqual(captured["base_snapshot_id"], expected_sid)
-        self.assertEqual(captured["num_partitions"], 1)
+        self.assertIsNone(captured["num_partitions"])
+        self.assertGreater(captured["estimated_size_bytes"], 0)
+        self.assertEqual(captured["estimated_num_rows"], 1)
 
     def test_accepts_pyarrow_and_pandas_source(self):
         target = self._create()

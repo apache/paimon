@@ -36,8 +36,8 @@ from pypaimon.ray.data_evolution_merge_join import (
     distributed_read_by_row_id,
 )
 from pypaimon.ray.partitioning import (
+    _estimate_dataset_num_rows,
     _estimate_dataset_size_bytes,
-    _resolve_num_partitions,
 )
 
 __all__ = ["read_by_row_id"]
@@ -142,11 +142,11 @@ def read_by_row_id(
             "read_by_row_id does not accept a table-name source; pass a ray.data."
             "Dataset / pyarrow.Table / pandas.DataFrame carrying the target row ids.")
     source_ds = _normalize_source(row_ids, catalog_options)
-    num_partitions = _resolve_num_partitions(
-        num_partitions,
-        _estimate_dataset_size_bytes(source_ds)
-        if num_partitions is None else None,
-    )
+    estimated_size_bytes = None
+    estimated_num_rows = None
+    if num_partitions is None:
+        estimated_size_bytes = _estimate_dataset_size_bytes(source_ds)
+        estimated_num_rows = _estimate_dataset_num_rows(source_ds)
     # Only check now if the schema is free; fetching it would execute a lazy source.
     known_schema = source_ds.schema(fetch_if_missing=False)
     if known_schema is not None and src_rid_col not in set(known_schema.names):
@@ -191,6 +191,8 @@ def read_by_row_id(
             num_partitions=num_partitions,
             ray_remote_args=ray_remote_args,
             base_snapshot_id=base.id,
+            estimated_size_bytes=estimated_size_bytes,
+            estimated_num_rows=estimated_num_rows,
         )
     except Exception as e:
         _reraise_inner(e)

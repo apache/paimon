@@ -598,9 +598,8 @@ print(metrics)   # {"num_updated": 50}
   table's system `_ROW_ID` is its own and cannot address the target's rows.
 - `update_cols`: the non-blob columns to overwrite. Must be non-empty.
 - `num_partitions`: parallelism for grouping the update rows by target file.
-  When source byte-size metadata is available, the default targets Ray's
-  maximum block size and is capped at `max(1, cluster_cpus * 2)`; otherwise it
-  falls back to that CPU-based value. Set it explicitly to override the default.
+  The default uses source size and target file-group count when available,
+  capped at `max(1, cluster_cpus * 2)`; otherwise it uses that cap.
 - `ray_remote_args`: Ray remote options applied to the update tasks.
 
 **Returns:** `{"num_updated": <rows>}`.
@@ -650,10 +649,9 @@ ds = read_by_row_id(
   (resolved later with `map_with_blobs`), or `scan.snapshot-id` / `scan.tag-name` to read a
   specific snapshot. Options that flip table invariants (`data-evolution.enabled`,
   `row-tracking.enabled`, `deletion-vectors.enabled`) are rejected.
-- `num_partitions`: parallelism for grouping the row ids by target file. When
-  source byte-size metadata is available, the default targets Ray's maximum
-  block size and is capped at `max(1, cluster_cpus * 2)`; otherwise it falls
-  back to that CPU-based value. Set it explicitly to override the default.
+- `num_partitions`: parallelism for grouping the row ids by target file. The
+  default uses source size and target file-group count when available, capped
+  at `max(1, cluster_cpus * 2)`; otherwise it uses that cap.
 - `ray_remote_args`: Ray remote options applied to the read tasks.
 
 **Returns:** a `ray.data.Dataset` of `(*projection, _ROW_ID)`.

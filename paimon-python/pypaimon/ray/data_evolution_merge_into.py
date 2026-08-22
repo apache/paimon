@@ -562,38 +562,10 @@ def _estimate_merge_input_size_bytes(
     if base_snapshot is None:
         return source_size
 
-    target_projections = []
-    if matched_specs:
-        update_cols = _union_update_cols(matched_specs)
-        if update_cols:
-            target_projections.append(_resolve_target_projection(
-                matched_specs,
-                ctx.target_on_cols,
-                update_cols,
-                ctx.settable_field_names,
-            ))
-        if any(clause.delete for clause in matched_specs):
-            target_projections.append(_resolve_target_projection(
-                matched_specs,
-                ctx.target_on_cols,
-                [],
-                ctx.settable_field_names,
-            ))
-    if not_matched_specs:
-        target_projections.append(list(ctx.target_on_cols))
-
-    target_sizes = []
-    unique_projections = list(dict.fromkeys(
-        tuple(projection) for projection in target_projections
-    ))
-    for projection in unique_projections:
-        size = _estimate_table_scan_size_bytes(
-            table, base_snapshot.id, projection,
-        )
-        if size is None:
-            return None
-        target_sizes.append(size)
-    return source_size + max(target_sizes or [0])
+    if not matched_specs and not not_matched_specs:
+        return source_size
+    target_size = _estimate_table_scan_size_bytes(table, base_snapshot.id)
+    return None if target_size is None else source_size + target_size
 
 
 def _require_ray_join() -> None:

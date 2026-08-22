@@ -30,9 +30,11 @@ from pypaimon.ray.data_evolution_merge_into import (
     _estimate_merge_input_size_bytes,
 )
 from pypaimon.ray.partitioning import (
+    _estimate_dataset_num_rows,
     _estimate_dataset_size_bytes,
     _estimate_table_scan_size_bytes,
     _resolve_num_partitions,
+    _resolve_row_id_num_partitions,
 )
 
 
@@ -74,6 +76,10 @@ class RayPartitioningTest(unittest.TestCase):
                     _resolve_num_partitions(None, 50_000_000 * 1024),
                     382,
                 )
+                self.assertEqual(
+                    _resolve_num_partitions(None, 1, min_partitions=25),
+                    25,
+                )
         finally:
             context.target_max_block_size = previous_target
 
@@ -111,16 +117,35 @@ class RayPartitioningTest(unittest.TestCase):
 
         self.assertIsNone(_estimate_dataset_size_bytes(dataset))
 
-    def test_ray_metadata_is_known_without_transform_and_unknown_after_map(self):
+    def test_ray_metadata_falls_back_to_unary_input(self):
         import ray
 
         dataset = ray.data.from_arrow(pa.table({"id": [1, 2]}))
         self.assertEqual(_estimate_dataset_size_bytes(dataset), 16)
+        self.assertEqual(_estimate_dataset_num_rows(dataset), 2)
 
         mapped = dataset.map_batches(lambda batch: batch)
-        self.assertIsNone(_estimate_dataset_size_bytes(mapped))
+        self.assertEqual(_estimate_dataset_size_bytes(mapped), 16)
+        self.assertEqual(_estimate_dataset_num_rows(mapped), 2)
 
-    def test_table_estimate_uses_pinned_projected_scan(self):
+    def test_sparse_row_ids_keep_shuffle_parallelism(self):
+        with mock.patch(
+            "ray.cluster_resources", return_value={"CPU": 320}
+        ):
+            self.assertEqual(
+                _resolve_row_id_num_partitions(None, 4096, 500, 500),
+                200,
+            )
+            self.assertEqual(
+                _resolve_row_id_num_partitions(None, 32, 1, 500),
+                1,
+            )
+            self.assertEqual(
+                _resolve_row_id_num_partitions(37, 1, 500, 500),
+                37,
+            )
+
+    def test_table_estimate_uses_pinned_scan(self):
         captured = {}
 
         class _Plan:
@@ -137,10 +162,6 @@ class RayPartitioningTest(unittest.TestCase):
                 return _Plan()
 
         class _ReadBuilder:
-            def with_projection(self, projection):
-                captured["projection"] = projection
-                return self
-
             @staticmethod
             def new_scan():
                 return _Scan()
@@ -155,15 +176,14 @@ class RayPartitioningTest(unittest.TestCase):
                 return _ReadBuilder()
 
         self.assertEqual(
-            _estimate_table_scan_size_bytes(_Table(), 7, ["id", "age"]),
+            _estimate_table_scan_size_bytes(_Table(), 7),
             30,
         )
-        self.assertEqual(captured["projection"], ["id", "age"])
         self.assertEqual(
             captured["options"][CoreOptions.SCAN_SNAPSHOT_ID.key()], "7"
         )
 
-    def test_merge_estimate_uses_largest_join_input(self):
+    def test_merge_estimate_uses_source_and_target_scan(self):
         update_clause = types.SimpleNamespace(
             spec={"age": object()}, delete=False, condition=None,
         )
@@ -184,18 +204,15 @@ class RayPartitioningTest(unittest.TestCase):
         ), mock.patch(
             "pypaimon.ray.data_evolution_merge_into."
             "_estimate_table_scan_size_bytes",
-            side_effect=[20, 30],
+            return_value=20,
         ) as target_estimate:
             result = _estimate_merge_input_size_bytes(
                 object(), object(),
                 [update_clause, delete_clause], [object()], ctx, snapshot,
             )
 
-        self.assertEqual(result, 130)
-        self.assertEqual(
-            [call.args[2] for call in target_estimate.call_args_list],
-            [("id", "age"), ("id",)],
-        )
+        self.assertEqual(result, 120)
+        target_estimate.assert_called_once_with(mock.ANY, 9)
 
     def test_merge_estimate_falls_back_when_source_size_is_unknown(self):
         ctx = types.SimpleNamespace(is_self_merge=False)

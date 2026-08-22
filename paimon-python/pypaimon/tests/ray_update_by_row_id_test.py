@@ -30,7 +30,7 @@ pypaimon = pytest.importorskip("pypaimon")
 ray = pytest.importorskip("ray")
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.ray import update_by_row_id
+from pypaimon.ray import read_paimon, update_by_row_id
 
 
 class RayUpdateByRowIdTest(unittest.TestCase):
@@ -167,15 +167,69 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         captured = {}
 
         def fake_apply(update_ds, table, cols, *, num_partitions,
-                       ray_remote_args=None, base_snapshot_id=None):
+                       ray_remote_args=None, base_snapshot_id=None,
+                       estimated_size_bytes=None, estimated_num_rows=None):
             captured["base_snapshot_id"] = base_snapshot_id
             captured["num_partitions"] = num_partitions
+            captured["estimated_size_bytes"] = estimated_size_bytes
+            captured["estimated_num_rows"] = estimated_num_rows
             return [], 0, []
 
         with mock.patch.object(m, "distributed_update_apply", fake_apply):
             update_by_row_id(target, src, self.catalog_options, update_cols=["age"])
         self.assertEqual(captured["base_snapshot_id"], expected_sid)
-        self.assertEqual(captured["num_partitions"], 1)
+        self.assertIsNone(captured["num_partitions"])
+        self.assertGreater(captured["estimated_size_bytes"], 0)
+        self.assertEqual(captured["estimated_num_rows"], 1)
+
+    def test_transformed_paimon_source_adapts_partitions(self):
+        import pypaimon.ray.data_evolution_merge_join as merge_join
+
+        target = self._create()
+        for value in range(3):
+            self._write(target, pa.Table.from_pydict(
+                {"id": [value], "name": ["n{}".format(value)], "age": [0]},
+                schema=self.pa_schema,
+            ))
+
+        source = read_paimon(
+            target,
+            self.catalog_options,
+            projection=["_ROW_ID", "age"],
+        ).map_batches(
+            lambda batch: pa.table({
+                "_ROW_ID": batch.column("_ROW_ID"),
+                "age": pa.array([99] * batch.num_rows, type=pa.int32()),
+            }),
+            batch_format="pyarrow",
+        )
+        real_resolve = merge_join._resolve_row_id_num_partitions
+        resolved = []
+
+        def track_resolve(*args, **kwargs):
+            result = real_resolve(*args, **kwargs)
+            resolved.append((args, result))
+            return result
+
+        with mock.patch(
+            "ray.cluster_resources", return_value={"CPU": 320}
+        ), mock.patch.object(
+            merge_join,
+            "_resolve_row_id_num_partitions",
+            side_effect=track_resolve,
+        ):
+            stats = update_by_row_id(
+                target,
+                source,
+                self.catalog_options,
+                update_cols=["age"],
+            )
+
+        self.assertEqual(stats, {"num_updated": 3})
+        self.assertEqual([result for _, result in resolved], [3])
+        self.assertGreater(resolved[0][0][1], 0)
+        self.assertEqual(resolved[0][0][2:], (3, 3))
+        self.assertEqual(self._read(target).column("age").to_pylist(), [99] * 3)
 
     def test_new_commit_failure_preserves_pending_messages(self):
         err = RuntimeError("new_commit failed")
