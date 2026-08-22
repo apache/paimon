@@ -37,4 +37,12 @@ public interface StateStore {
      * (subtask or coordinator) and is checkpointed together with that component.
      */
     <T> ListState<T> getListState(ListStateDescriptor<T> descriptor) throws Exception;
+
+    /**
+     * Returns union list state. Coordinator-side implementations do not rescale and may use regular
+     * list-state semantics.
+     */
+    default <T> ListState<T> getUnionListState(ListStateDescriptor<T> descriptor) throws Exception {
+        return getListState(descriptor);
+    }
 }

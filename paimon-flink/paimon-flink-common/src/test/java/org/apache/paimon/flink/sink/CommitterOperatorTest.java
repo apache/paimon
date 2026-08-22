@@ -134,6 +134,59 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
     }
 
     @Test
+    public void testPartialEndInputMergedBeforeOldCheckpointNotification() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        long timestamp = 1;
+
+        // Only one writer has reached endInput. Its END_INPUT committable must remain pending
+        // until the commit operator itself receives endInput.
+        OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
+                createRecoverableTestHarness(table);
+        testHarness.open();
+        StreamTableWrite writer1 =
+                table.newStreamWriteBuilder().withCommitUser(initialCommitUser).newWrite();
+        writer1.write(GenericRow.of(1, 10L));
+        for (CommitMessage message : writer1.prepareCommit(true, Long.MAX_VALUE)) {
+            testHarness.processElement(new Committable(Long.MAX_VALUE, message), timestamp++);
+        }
+
+        OperatorSubtaskState checkpoint = testHarness.snapshot(2, timestamp++);
+        testHarness.notifyOfCompletedCheckpoint(2);
+        assertResults(table);
+        testHarness.close();
+
+        // Recovery must keep the partial END_INPUT committable pending. There is nothing to commit,
+        // so RestoreAndFailCommittableStateManager must not trigger an intentional failure.
+        testHarness = createRecoverableTestHarness(table);
+        testHarness.initializeState(checkpoint);
+        testHarness.open();
+        assertResults(table);
+
+        // A second writer emits a different committable with the same identifier. It must be
+        // merged with the restored END_INPUT committable before the final commit.
+        StreamTableWrite writer2 =
+                table.newStreamWriteBuilder().withCommitUser(initialCommitUser).newWrite();
+        writer2.write(GenericRow.of(2, 20L));
+        for (CommitMessage message : writer2.prepareCommit(true, Long.MAX_VALUE)) {
+            testHarness.processElement(new Committable(Long.MAX_VALUE, message), timestamp++);
+        }
+
+        testHarness.endInput();
+
+        // A completion notification for the restored checkpoint may arrive before another
+        // snapshot. endInput must have drained inputs first, otherwise this notification commits
+        // only the restored partial MAX_VALUE committable and permanently filters writer2's data.
+        testHarness.notifyOfCompletedCheckpoint(2);
+        assertResults(table, "1, 10", "2, 20");
+
+        testHarness.snapshot(3, timestamp++);
+        testHarness.notifyOfCompletedCheckpoint(3);
+        testHarness.close();
+
+        assertResults(table, "1, 10", "2, 20");
+    }
+
+    @Test
     public void testCheckpointAbort() throws Exception {
         FileStoreTable table = createFileStoreTable();
         OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
@@ -467,6 +520,23 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         return snapshot;
     }
 
+    private static OperatorSubtaskState writeEndInputAndSnapshot(
+            FileStoreTable table,
+            String commitUser,
+            long timestamp,
+            long checkpoint,
+            OneInputStreamOperatorTestHarness<Committable, Committable> testHarness)
+            throws Exception {
+        StreamTableWrite write =
+                table.newStreamWriteBuilder().withCommitUser(commitUser).newWrite();
+        write.write(GenericRow.of(1, 10L));
+        for (CommitMessage committable : write.prepareCommit(true, checkpoint)) {
+            testHarness.processElement(new Committable(checkpoint, committable), ++timestamp);
+        }
+        testHarness.endInput();
+        return testHarness.snapshot(checkpoint, ++timestamp);
+    }
+
     @Test
     public void testWatermarkCommit() throws Exception {
         FileStoreTable table = createFileStoreTable();
@@ -549,7 +619,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                 createRecoverableTestHarness(table, false);
         testHarness.open();
         OperatorSubtaskState snapshotState =
-                writeAndSnapshot(table, "commitUser", 1, Long.MAX_VALUE, testHarness);
+                writeEndInputAndSnapshot(table, "commitUser", 1, Long.MAX_VALUE, testHarness);
         testHarness.close();
 
         testHarness = createRecoverableTestHarness(table, false);
@@ -567,12 +637,46 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                                     + "writers can start writing based on these new commits.");
         }
 
-        testHarness.notifyOfCompletedCheckpoint(Long.MAX_VALUE);
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
         assertThat(snapshot).isNotNull();
 
         Path successFile = new Path(table.location(), "b=10/_SUCCESS");
         assertThat(table.fileIO().exists(successFile)).isEqualTo(false);
+    }
+
+    @Test
+    public void testTriggerPartitionMarkDownWhenRecoverFromCompleteEndInputState()
+            throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set(CoreOptions.COMMIT_FORCE_CREATE_SNAPSHOT.key(), "true");
+                            options.set(
+                                    CoreOptions.PARTITION_MARK_DONE_WHEN_END_INPUT.key(), "true");
+                            options.set(
+                                    FlinkConnectorOptions.PARTITION_IDLE_TIME_TO_DONE.key(), "1h");
+                        },
+                        Collections.singletonList("b"));
+
+        OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
+                createRecoverableTestHarness(table, true);
+        testHarness.open();
+        OperatorSubtaskState snapshotState =
+                writeEndInputAndSnapshot(table, "commitUser", 1, Long.MAX_VALUE, testHarness);
+        testHarness.close();
+
+        testHarness = createRecoverableTestHarness(table, true);
+        try {
+            testHarness.initializeState(snapshotState);
+            testHarness.open();
+            fail("Expecting intentional exception");
+        } catch (Exception e) {
+            assertThat(e).hasMessageContaining("This exception is intentionally thrown");
+        }
+
+        assertThat(table.snapshotManager().latestSnapshot()).isNotNull();
+        Path successFile = new Path(table.location(), "b=10/_SUCCESS");
+        assertThat(table.fileIO().exists(successFile)).isTrue();
     }
 
     @Test
@@ -678,7 +782,9 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                         table,
                         null,
                         new RestoreAndFailCommittableStateManager<>(
-                                ManifestCommittableSerializer::new, true));
+                                ManifestCommittableSerializer::new,
+                                true,
+                                StoreCommitter.END_INPUT_HANDLER));
         OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
                 createTestHarness(operatorFactory);
         testHarness.open();
@@ -781,7 +887,8 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                         null,
                         new RestoreAndFailCommittableStateManager<>(
                                 ManifestCommittableSerializer::new,
-                                partitionMarkDownRecoverFromState));
+                                partitionMarkDownRecoverFromState,
+                                StoreCommitter.END_INPUT_HANDLER));
         return createTestHarness(operatorFactory);
     }
 
