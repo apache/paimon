@@ -149,15 +149,7 @@ class _WriteRange:
         self.field_ids = field_ids
 
 
-class RowIdRebaseConflict(RuntimeError):
-    """A structural row-id conflict eligible for a guarded rebase attempt."""
-
-
-class RowIdLineageConflict(RuntimeError):
-    """A staged row-id update belongs to a different snapshot lineage."""
-
-
-class RowIdExistenceConflict(RowIdRebaseConflict):
+class RowIdExistenceConflict(RuntimeError):
     """A staged row-id file no longer matches the current base-file layout."""
 
     def __init__(self, entry):
@@ -184,7 +176,6 @@ class ConflictDetection:
         self.manifest_list_manager = manifest_list_manager
         self.table = table
         self._row_id_check_from_snapshot = None
-        self._row_id_check_from_snapshot_uuid = None
         self.commit_scanner = commit_scanner
 
     def should_be_overwrite_commit(self, append_file_entries=None, append_index_files=None):
@@ -198,9 +189,6 @@ class ConflictDetection:
 
     def has_row_id_check_from_snapshot(self):
         return self._row_id_check_from_snapshot is not None
-
-    def set_row_id_check_from_snapshot_uuid(self, snapshot_uuid):
-        self._row_id_check_from_snapshot_uuid = snapshot_uuid
 
     @staticmethod
     def has_global_index_additions(index_entries=None):
@@ -220,10 +208,6 @@ class ConflictDetection:
             delta_entries,
             commit_kind,
             delta_index_entries=None):
-        conflict = self.check_row_id_snapshot_lineage(latest_snapshot)
-        if conflict is not None:
-            return conflict
-
         try:
             FileEntry.merge_entries(delta_entries)
         except Exception as e:
@@ -280,37 +264,6 @@ class ConflictDetection:
             return conflict
 
         return self.check_row_id_from_snapshot(latest_snapshot, delta_entries)
-
-    def check_row_id_snapshot_lineage(self, latest_snapshot):
-        expected_uuid = self._row_id_check_from_snapshot_uuid
-        base_snapshot_id = self._row_id_check_from_snapshot
-        if expected_uuid is None or base_snapshot_id is None:
-            return None
-
-        if latest_snapshot is None or latest_snapshot.id < base_snapshot_id:
-            return RowIdLineageConflict(
-                "Row-id snapshot lineage conflict: staged from snapshot {} "
-                "with UUID {}, but the latest snapshot is {}.".format(
-                    base_snapshot_id,
-                    expected_uuid,
-                    latest_snapshot.id if latest_snapshot is not None else None,
-                )
-            )
-
-        base_snapshot = self.snapshot_manager.get_snapshot_by_id(
-            base_snapshot_id
-        )
-        actual_uuid = base_snapshot.uuid if base_snapshot is not None else None
-        if actual_uuid != expected_uuid:
-            return RowIdLineageConflict(
-                "Row-id snapshot lineage conflict: snapshot {} changed "
-                "from UUID {} to {}.".format(
-                    base_snapshot_id,
-                    expected_uuid,
-                    actual_uuid,
-                )
-            )
-        return None
 
     @staticmethod
     def check_bucket_num_conflicts(entries):
@@ -723,11 +676,7 @@ class ConflictDetection:
 
         check_snapshot = self.snapshot_manager.get_snapshot_by_id(
             self._row_id_check_from_snapshot)
-        if check_snapshot is None:
-            raise RuntimeError(
-                "Row-id conflict check base snapshot {} cannot be found."
-                .format(self._row_id_check_from_snapshot))
-        if check_snapshot.next_row_id is None:
+        if check_snapshot is None or check_snapshot.next_row_id is None:
             raise RuntimeError(
                 "Next row id cannot be null for snapshot "
                 "{snapshot}.".format(snapshot=self._row_id_check_from_snapshot))
@@ -805,7 +754,7 @@ class ConflictDetection:
                     continue
                 if not column_checker.conflicts_with(entry.file):
                     continue
-                return RowIdRebaseConflict(
+                return RuntimeError(
                     "Blob/row-id update conflicts with concurrent COMPACT "
                     "(snapshot {sid}): anchor file {name} [{ff}, {ft}] "
                     "was compacted away, overlaps staged delta "

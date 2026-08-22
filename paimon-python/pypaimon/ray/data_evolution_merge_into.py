@@ -506,10 +506,6 @@ def _execute_and_commit(
                     delete_msgs + insert_msgs,
                     num_partitions=num_partitions,
                     ray_remote_args=ray_remote_args,
-                    base_snapshot_uuid=(
-                        base_snapshot.uuid
-                        if base_snapshot is not None else None
-                    ),
                 )
             else:
                 table_commit = None

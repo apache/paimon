@@ -423,19 +423,6 @@ class TestCheckRowIdFromSnapshot(unittest.TestCase):
         self.assertIsInstance(result, RuntimeError)
         self.assertIn("snapshot 2 cannot be found", str(result))
 
-    def test_missing_base_snapshot_has_specific_error(self):
-        latest_snap = _FakeSnapshot(2, "APPEND", next_row_id=200)
-        detection = self._make_detection([latest_snap], {})
-
-        with self.assertRaisesRegex(
-                RuntimeError,
-                "base snapshot 1 cannot be found",
-        ):
-            detection.check_row_id_from_snapshot(
-                latest_snap,
-                self._blob_delta(),
-            )
-
     def test_compact_no_conflict_when_no_matching_delete(self):
         check_snap = _FakeSnapshot(1, "APPEND", next_row_id=400)
         compact_snap = _FakeSnapshot(2, "COMPACT", next_row_id=400)
