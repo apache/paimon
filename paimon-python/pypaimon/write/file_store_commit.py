@@ -920,7 +920,15 @@ class FileStoreCommit:
             for snapshot_id in range(start_check_snapshot_id, latest_snapshot.id + 1):
                 snapshot = self.snapshot_manager.get_snapshot_by_id(snapshot_id)
                 if snapshot is None:
-                    continue
+                    raise RuntimeError(
+                        "Cannot determine whether commit {} by user {} "
+                        "succeeded because snapshot {} cannot be found."
+                        .format(
+                            commit_identifier,
+                            self.commit_user,
+                            snapshot_id,
+                        )
+                    )
                 if (snapshot.commit_user == self.commit_user and
                         snapshot.commit_identifier == commit_identifier and
                         snapshot.commit_kind == commit_kind):
