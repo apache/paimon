@@ -17,7 +17,6 @@
 
 import importlib.util
 import unittest
-import uuid
 from unittest.mock import Mock, patch
 
 from pypaimon.ray.data_evolution_merge_into import _reraise_inner
@@ -96,59 +95,6 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
         rewrite_updates.assert_called_once()
         self.assertEqual(2, commit.commit.call_count)
         self.assertEqual(2, commit.close.call_count)
-
-    def test_outer_rebase_reuses_commit_user_after_uncertain_conflict(self):
-        conflict = self._conflict('compact')
-        uncertain_conflict = RuntimeError(
-            'commit retry after uncertain snapshot commit'
-        )
-        uncertain_conflict.__cause__ = conflict
-        builders = []
-        commit_users = []
-
-        class _Builder:
-
-            def __init__(self):
-                self.commit_user = str(uuid.uuid4())
-                builders.append(self)
-
-            def new_commit(self):
-                commit = Mock(commit_user=self.commit_user)
-                commit.commit.side_effect = (
-                    uncertain_conflict if not commit_users else None
-                )
-                commit_users.append(self.commit_user)
-                return commit
-
-        commit_table = Mock()
-        commit_table.new_batch_write_builder.side_effect = _Builder
-        table = Mock()
-        table.copy_without_time_travel.return_value = commit_table
-        table.snapshot_manager.return_value.get_latest_snapshot.side_effect = [
-            Mock(id=1), Mock(id=2),
-        ]
-        table.options.commit_timeout.return_value = 60_000
-        table.options.commit_max_retries.return_value = 3
-
-        with patch(
-            'pypaimon.ray.row_id_conflict_rewriter._rewrite_updates',
-            return_value=Mock(
-                update_messages=[],
-                rewritten_file_count=1,
-            ),
-        ), patch(
-            'pypaimon.ray.row_id_conflict_rewriter._retry_wait',
-        ):
-            commit_self_merge_with_compaction_retry(
-                table,
-                [],
-                [],
-                num_partitions=1,
-            )
-
-        self.assertEqual(1, len(builders))
-        self.assertEqual(2, len(commit_users))
-        self.assertEqual(1, len(set(commit_users)))
 
     def test_commit_preserves_file_store_rollback(self):
         rollback = Mock()

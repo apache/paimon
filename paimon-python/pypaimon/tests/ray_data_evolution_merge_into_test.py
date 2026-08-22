@@ -2326,6 +2326,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
     def test_self_merge_rebases_again_after_second_compaction(self):
         from pypaimon.ray import data_evolution_merge_into as merge_module
         from pypaimon.ray import row_id_conflict_rewriter as rewriter_module
+        from pypaimon.write.write_builder import BatchWriteBuilder
 
         target = self._create_table()
         self._write(target, self._source(ids=(1, 2)))
@@ -2333,6 +2334,17 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         table = self.catalog.get_table(target)
         real_apply = merge_module.distributed_self_merge_update_apply
         real_rewrite = rewriter_module._rewrite_updates
+        real_new_commit = BatchWriteBuilder.new_commit
+        coordinator_commit_users = []
+
+        def capture_new_commit(write_builder):
+            commit = real_new_commit(write_builder)
+            if (
+                    write_builder.table.options
+                    .data_evolution_row_id_conflict_rewrite_max_size() == 0
+            ):
+                coordinator_commit_users.append(write_builder.commit_user)
+            return commit
 
         def stage_then_compact(*args, **kwargs):
             result = real_apply(*args, **kwargs)
@@ -2373,9 +2385,13 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
                 '_rewrite_updates',
                 side_effect=miss_precommit_race,
         ), patch.object(
-                rewriter_module,
-                '_retry_wait',
-                side_effect=compact_before_first_retry,
+            rewriter_module,
+            '_retry_wait',
+            side_effect=compact_before_first_retry,
+        ), patch.object(
+            BatchWriteBuilder,
+            'new_commit',
+            new=capture_new_commit,
         ):
             result = merge_into(
                 target=target,
@@ -2394,6 +2410,98 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(len(rewrite_snapshot_ids), 3)
         self.assertEqual(rewrite_snapshot_ids[0], rewrite_snapshot_ids[1])
         self.assertGreater(rewrite_snapshot_ids[2], rewrite_snapshot_ids[1])
+        self.assertEqual(len(coordinator_commit_users), 3)
+        self.assertEqual(len(set(coordinator_commit_users)), 1)
+
+    def test_self_merge_uncertain_commit_then_compaction_is_duplicate(self):
+        from pypaimon.ray import row_id_conflict_rewriter as rewriter_module
+        from pypaimon.write.write_builder import BatchWriteBuilder
+
+        target = self._create_table()
+        self._write(target, self._source(ids=(1, 2)))
+        self._write(target, self._source(ids=(3, 4)))
+        table = self.catalog.get_table(target)
+        base_snapshot_id = self._snapshot_id(target)
+        real_new_commit = BatchWriteBuilder.new_commit
+        coordinator_commit_users = []
+        duplicate_results = []
+        atomic_attempts = []
+        injected = [False]
+
+        def inject_uncertain_commit(write_builder):
+            commit = real_new_commit(write_builder)
+            if (
+                    injected[0]
+                    or write_builder.table.options
+                    .data_evolution_row_id_conflict_rewrite_max_size() != 0
+            ):
+                return commit
+
+            injected[0] = True
+            coordinator_commit_users.append(write_builder.commit_user)
+            file_store_commit = commit.file_store_commit
+            real_atomic_commit = file_store_commit.snapshot_commit.commit
+            real_duplicate_check = file_store_commit._is_duplicate_commit
+
+            def track_duplicate(*args, **kwargs):
+                result = real_duplicate_check(*args, **kwargs)
+                duplicate_results.append(result)
+                return result
+
+            def commit_then_compact_and_timeout(
+                    base_uuid, snapshot, statistics):
+                atomic_attempts.append(snapshot.id)
+                self.assertTrue(real_atomic_commit(
+                    base_uuid, snapshot, statistics,
+                ))
+                self._compact_all_data_files(table)
+                raise TimeoutError('lost snapshot commit response')
+
+            file_store_commit._is_duplicate_commit = track_duplicate
+            file_store_commit.snapshot_commit.commit = (
+                commit_then_compact_and_timeout
+            )
+            file_store_commit._commit_retry_wait = Mock()
+            return commit
+
+        with patch.object(
+            BatchWriteBuilder,
+            'new_commit',
+            new=inject_uncertain_commit,
+        ), patch.object(
+            rewriter_module,
+            '_rewrite_updates',
+            wraps=rewriter_module._rewrite_updates,
+        ) as rewrite_updates:
+            result = merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                when_matched=[WhenMatched.update({'age': lit(99)})],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        self.assertTrue(injected[0])
+        self.assertEqual(result['num_matched'], 4)
+        self.assertEqual(self._read_sorted(target)['age'], [99, 99, 99, 99])
+        self.assertEqual(atomic_attempts, [base_snapshot_id + 1])
+        self.assertEqual(duplicate_results, [False, True])
+        self.assertEqual(len(coordinator_commit_users), 1)
+        self.assertEqual(
+            table.snapshot_manager().get_snapshot_by_id(
+                base_snapshot_id + 1
+            ).commit_user,
+            coordinator_commit_users[0],
+        )
+        self.assertEqual(
+            table.snapshot_manager().get_snapshot_by_id(
+                base_snapshot_id + 2
+            ).commit_kind,
+            'COMPACT',
+        )
+        self.assertEqual(self._snapshot_id(target), base_snapshot_id + 2)
+        rewrite_updates.assert_not_called()
 
     def test_self_merge_rejects_concurrent_overwrite(self):
         from pypaimon.ray import data_evolution_merge_into as merge_module
