@@ -50,8 +50,8 @@ from pypaimon.ray.data_evolution_merge_transform import (
     _NormalizedClause,
 )
 from pypaimon.ray.partitioning import (
+    _default_hash_shuffle_parallelism,
     _estimate_dataset_size_bytes,
-    _estimate_table_scan_size_bytes,
     _resolve_num_partitions,
 )
 
@@ -99,11 +99,19 @@ def merge_into(
     estimated_size_bytes = None
     if num_partitions is None:
         estimated_size_bytes = _estimate_merge_input_size_bytes(
-            table, source_ds, matched_specs, not_matched_specs, ctx,
-            base_snapshot,
+            source_ds, ctx,
         )
+    min_partitions = 1
+    unknown_num_partitions = None
+    if num_partitions is None and not ctx.is_self_merge:
+        unknown_num_partitions = _default_hash_shuffle_parallelism()
+        if base_snapshot is not None:
+            min_partitions = unknown_num_partitions
     num_partitions = _resolve_num_partitions(
-        num_partitions, estimated_size_bytes,
+        num_partitions,
+        estimated_size_bytes,
+        min_partitions=min_partitions,
+        unknown_num_partitions=unknown_num_partitions,
     )
 
     update_ds, delete_ds, insert_ds, update_cols_union = _build_datasets(
@@ -545,27 +553,12 @@ def _normalize_on(on: OnSpec) -> Tuple[List[str], List[str]]:
 
 
 def _estimate_merge_input_size_bytes(
-    table,
     source_ds,
-    matched_specs,
-    not_matched_specs,
     ctx: "_PrepareCtx",
-    base_snapshot,
 ) -> Optional[int]:
-    # Avoid replanning self-merge scans; work is already file-group bounded.
     if ctx.is_self_merge:
         return None
-
-    source_size = _estimate_dataset_size_bytes(source_ds)
-    if source_size is None:
-        return None
-    if base_snapshot is None:
-        return source_size
-
-    if not matched_specs and not not_matched_specs:
-        return source_size
-    target_size = _estimate_table_scan_size_bytes(table, base_snapshot.id)
-    return None if target_size is None else source_size + target_size
+    return _estimate_dataset_size_bytes(source_ds)
 
 
 def _require_ray_join() -> None:

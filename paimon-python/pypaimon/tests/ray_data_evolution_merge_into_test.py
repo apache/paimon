@@ -165,6 +165,61 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             projection=['id', 'name', 'age'],
         )
 
+    def test_paimon_source_does_not_use_compressed_size(self):
+        from pypaimon.ray import data_evolution_merge_into as m
+
+        target = self._create_table()
+        source = self._create_table()
+        self._write(target, self._source(ids=(0,)))
+        value = 'x' * 1_000_000
+        source_data = pa.Table.from_pydict(
+            {
+                'id': pa.array(list(range(16)), type=pa.int32()),
+                'name': [value] * 16,
+                'age': [10] * 16,
+            },
+            schema=self.pa_schema,
+        )
+        self._write(source, source_data)
+        source_table = self.catalog.get_table(source)
+        splits = source_table.new_read_builder().new_scan().plan().splits()
+        compressed_size = sum(split.file_size for split in splits)
+        self.assertLess(compressed_size * 10, source_data.nbytes)
+
+        real_resolve = m._resolve_num_partitions
+        resolved = []
+
+        def capture(*args, **kwargs):
+            result = real_resolve(*args, **kwargs)
+            resolved.append((args, kwargs, result))
+            return result
+
+        with patch(
+                'ray.cluster_resources', return_value={'CPU': 320},
+        ), patch.object(
+                m, '_resolve_num_partitions', side_effect=capture,
+        ), patch.object(
+                m, '_build_datasets', return_value=(None, None, None, set()),
+        ), patch.object(
+                m, '_execute_and_commit', return_value={},
+        ):
+            merge_into(
+                target=target,
+                source=source,
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[WhenMatched.update('*')],
+            )
+
+        self.assertEqual(len(resolved), 1)
+        args, kwargs, result = resolved[0]
+        self.assertEqual(args, (None, None))
+        self.assertEqual(kwargs, {
+            'min_partitions': 200,
+            'unknown_num_partitions': 200,
+        })
+        self.assertEqual(result, 200)
+
     def test_no_clause_raises(self):
         target = self._create_table()
         with self.assertRaises(ValueError):

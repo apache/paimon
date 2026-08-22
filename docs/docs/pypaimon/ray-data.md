@@ -545,9 +545,10 @@ source-target merges.
 - `read_columns`: columns passed to callable self-merge assignments. Required
   when an update mapping contains a callable; otherwise it must be omitted.
 - `num_partitions`: shuffle parallelism for the join and the write. When input
-  byte-size metadata is available, the default targets Ray's maximum block size
-  and is capped at `max(1, cluster_cpus * 2)`. If any input size is unknown, it
-  falls back to that CPU-based value. Set it explicitly to override the default.
+  in-memory byte-size metadata is reliable, the default targets Ray's maximum
+  block size. Otherwise it uses Ray's hash-shuffle default. A nonempty target
+  keeps that default as a lower bound, and cluster CPUs cap the result. Self-merge
+  keeps its CPU-based default. Set it explicitly to override the default.
 - `ray_remote_args`: Ray remote options applied to the merge's map/group
   tasks (update/delete transform, group write, insert transform).
 - `concurrency`: scheduling for the insert sink.

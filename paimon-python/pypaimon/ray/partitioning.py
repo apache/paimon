@@ -25,6 +25,7 @@ def _resolve_num_partitions(
     num_partitions: Optional[int],
     estimated_size_bytes: Optional[int] = None,
     min_partitions: int = 1,
+    unknown_num_partitions: Optional[int] = None,
 ) -> int:
     """Resolve default shuffle partitions from input size and CPU count."""
     if num_partitions is not None:
@@ -39,6 +40,11 @@ def _resolve_num_partitions(
         max_partitions = 4
 
     if estimated_size_bytes is None:
+        if unknown_num_partitions is not None:
+            return min(
+                max_partitions,
+                max(min_partitions, int(unknown_num_partitions)),
+            )
         return max_partitions
 
     try:
@@ -101,6 +107,18 @@ def _estimate_dataset_metadata(dataset, field: str) -> Optional[int]:
     return None
 
 
+def _default_hash_shuffle_parallelism() -> int:
+    try:
+        from ray.data.context import DataContext
+
+        return max(
+            1,
+            int(DataContext.get_current().default_hash_shuffle_parallelism),
+        )
+    except Exception:
+        return 200
+
+
 def _resolve_row_id_num_partitions(
     num_partitions: Optional[int],
     estimated_size_bytes: Optional[int],
@@ -111,14 +129,7 @@ def _resolve_row_id_num_partitions(
     if num_partitions is not None:
         return num_partitions
 
-    try:
-        from ray.data.context import DataContext
-
-        default_shuffle = int(
-            DataContext.get_current().default_hash_shuffle_parallelism
-        )
-    except Exception:
-        default_shuffle = 200
+    default_shuffle = _default_hash_shuffle_parallelism()
 
     possible_groups = max(1, target_file_count)
     if estimated_num_rows is not None:
@@ -131,30 +142,3 @@ def _resolve_row_id_num_partitions(
         estimated_size_bytes,
         min_partitions=min_partitions,
     )
-
-
-def _estimate_table_scan_size_bytes(
-    table,
-    snapshot_id: Optional[int],
-) -> Optional[int]:
-    """Estimate a pinned Paimon scan from manifest file-size metadata."""
-    try:
-        from pypaimon.common.options.core_options import CoreOptions
-
-        scan_table = (
-            table.copy({
-                CoreOptions.SCAN_SNAPSHOT_ID.key(): str(snapshot_id),
-            })
-            if snapshot_id is not None else table
-        )
-        read_builder = scan_table.new_read_builder()
-        splits = read_builder.new_scan().plan().splits()
-        if not splits:
-            return 0
-        sizes = [int(getattr(split, "file_size", 0) or 0)
-                 for split in splits]
-        if any(size <= 0 for size in sizes):
-            return None
-        return sum(sizes)
-    except Exception:
-        return None

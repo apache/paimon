@@ -25,14 +25,12 @@ import pytest
 
 pytest.importorskip("ray")
 
-from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.ray.data_evolution_merge_into import (
     _estimate_merge_input_size_bytes,
 )
 from pypaimon.ray.partitioning import (
     _estimate_dataset_num_rows,
     _estimate_dataset_size_bytes,
-    _estimate_table_scan_size_bytes,
     _resolve_num_partitions,
     _resolve_row_id_num_partitions,
 )
@@ -80,6 +78,10 @@ class RayPartitioningTest(unittest.TestCase):
                     _resolve_num_partitions(None, 1, min_partitions=25),
                     25,
                 )
+                self.assertEqual(
+                    _resolve_num_partitions(None, 1, min_partitions=200),
+                    200,
+                )
         finally:
             context.target_max_block_size = previous_target
 
@@ -88,6 +90,14 @@ class RayPartitioningTest(unittest.TestCase):
             "ray.cluster_resources", return_value={"CPU": 320}
         ):
             self.assertEqual(_resolve_num_partitions(None, None), 640)
+            self.assertEqual(
+                _resolve_num_partitions(
+                    None,
+                    None,
+                    unknown_num_partitions=200,
+                ),
+                200,
+            )
 
     def test_dataset_estimate_does_not_call_size_bytes(self):
         metadata = types.SimpleNamespace(size_bytes=1234)
@@ -172,74 +182,21 @@ class RayPartitioningTest(unittest.TestCase):
                 37,
             )
 
-    def test_table_estimate_uses_pinned_scan(self):
-        captured = {}
-
-        class _Plan:
-            @staticmethod
-            def splits():
-                return [
-                    types.SimpleNamespace(file_size=10),
-                    types.SimpleNamespace(file_size=20),
-                ]
-
-        class _Scan:
-            @staticmethod
-            def plan():
-                return _Plan()
-
-        class _ReadBuilder:
-            @staticmethod
-            def new_scan():
-                return _Scan()
-
-        class _Table:
-            def copy(self, options):
-                captured["options"] = options
-                return self
-
-            @staticmethod
-            def new_read_builder():
-                return _ReadBuilder()
-
-        self.assertEqual(
-            _estimate_table_scan_size_bytes(_Table(), 7),
-            30,
-        )
-        self.assertEqual(
-            captured["options"][CoreOptions.SCAN_SNAPSHOT_ID.key()], "7"
-        )
-
-    def test_merge_estimate_uses_source_and_target_scan(self):
-        update_clause = types.SimpleNamespace(
-            spec={"age": object()}, delete=False, condition=None,
-        )
-        delete_clause = types.SimpleNamespace(
-            spec={}, delete=True, condition=None,
-        )
+    def test_merge_estimate_uses_only_reliable_source_size(self):
         ctx = types.SimpleNamespace(
             is_self_merge=False,
-            target_on_cols=["id"],
-            settable_field_names=["id", "name", "age"],
         )
-        snapshot = types.SimpleNamespace(id=9)
 
         with mock.patch(
             "pypaimon.ray.data_evolution_merge_into."
             "_estimate_dataset_size_bytes",
             return_value=100,
-        ), mock.patch(
-            "pypaimon.ray.data_evolution_merge_into."
-            "_estimate_table_scan_size_bytes",
-            return_value=20,
-        ) as target_estimate:
+        ):
             result = _estimate_merge_input_size_bytes(
-                object(), object(),
-                [update_clause, delete_clause], [object()], ctx, snapshot,
+                object(), ctx,
             )
 
-        self.assertEqual(result, 120)
-        target_estimate.assert_called_once_with(mock.ANY, 9)
+        self.assertEqual(result, 100)
 
     def test_merge_estimate_falls_back_when_source_size_is_unknown(self):
         ctx = types.SimpleNamespace(is_self_merge=False)
@@ -247,16 +204,12 @@ class RayPartitioningTest(unittest.TestCase):
             "pypaimon.ray.data_evolution_merge_into."
             "_estimate_dataset_size_bytes",
             return_value=None,
-        ), mock.patch(
-            "pypaimon.ray.data_evolution_merge_into."
-            "_estimate_table_scan_size_bytes",
-        ) as target_estimate:
+        ):
             result = _estimate_merge_input_size_bytes(
-                object(), object(), [], [], ctx, None,
+                object(), ctx,
             )
 
         self.assertIsNone(result)
-        target_estimate.assert_not_called()
 
 
 if __name__ == "__main__":
