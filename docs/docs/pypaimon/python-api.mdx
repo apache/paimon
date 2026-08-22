@@ -476,6 +476,11 @@ for batch in table_read.to_arrow_batch_reader(splits):
 # f1: ["a","b","c"]
 ```
 
+Batch reads adapt parallelism to input size and storage; explicit `parallelism`
+or `read.parallelism` overrides it. Results preserve split order and prefetch
+at most one batch per active split, without a hard memory bound. PyArrow
+runtimes without `RecordBatchReader.close` or `from_stream` read serially.
+
 ### Read Python Iterator
 
 You can read the data row by row into a native Python iterator.
