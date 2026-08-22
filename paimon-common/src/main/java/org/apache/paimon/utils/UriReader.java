@@ -23,7 +23,10 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.rest.HttpClientUtils;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
+import java.time.Duration;
 
 /** An interface to read uri as a stream. */
 public interface UriReader {
@@ -36,6 +39,10 @@ public interface UriReader {
 
     static UriReader fromHttp() {
         return new HttpUriReader();
+    }
+
+    static UriReader fromHttp(Duration keepAliveTimeout) {
+        return new HttpUriReader(keepAliveTimeout);
     }
 
     /** A {@link UriReader} uses {@link FileIO} to read file. */
@@ -60,13 +67,33 @@ public interface UriReader {
     /** A {@link UriReader} reads http uri. */
     class HttpUriReader implements UriReader {
 
+        @Nullable private final Duration keepAliveTimeout;
+
+        public HttpUriReader() {
+            this.keepAliveTimeout = null;
+        }
+
+        public HttpUriReader(Duration keepAliveTimeout) {
+            this.keepAliveTimeout = keepAliveTimeout;
+        }
+
         @Override
         public SeekableInputStream newInputStream(String uri) throws IOException {
-            return SeekableInputStream.wrap(HttpClientUtils.getAsInputStream(uri));
+            return SeekableInputStream.wrap(
+                    keepAliveTimeout == null
+                            ? HttpClientUtils.getAsInputStream(uri)
+                            : HttpClientUtils.getAsInputStream(uri, keepAliveTimeout));
         }
 
         public boolean exists(String uri) throws IOException {
-            return HttpClientUtils.exists(uri);
+            return keepAliveTimeout == null
+                    ? HttpClientUtils.exists(uri)
+                    : HttpClientUtils.exists(uri, keepAliveTimeout);
+        }
+
+        @Nullable
+        Duration keepAliveTimeout() {
+            return keepAliveTimeout;
         }
     }
 }

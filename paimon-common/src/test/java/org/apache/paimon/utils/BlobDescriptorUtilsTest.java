@@ -18,18 +18,49 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
 
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link BlobDescriptorUtils}. */
 class BlobDescriptorUtilsTest {
+
+    @Test
+    void testHttpKeepAliveTimeoutPreservesCurrentContext() {
+        Options currentOptions = new Options();
+        currentOptions.setString("warehouse", "oss://bucket/warehouse");
+        CatalogContext currentContext = CatalogContext.create(currentOptions);
+        Options tableOptions = new Options();
+        tableOptions.setString("blob-descriptor.http.keep-alive-timeout", "60s");
+
+        CatalogContext context =
+                BlobDescriptorUtils.getCatalogContext(currentContext, tableOptions);
+
+        assertThat(context).isSameAs(currentContext);
+    }
+
+    @Test
+    void testHttpKeepAliveTimeoutIsNotPassedToExternalFileIO() {
+        Options tableOptions = new Options();
+        tableOptions.setString("blob-descriptor.http.keep-alive-timeout", "60s");
+        tableOptions.setString("blob-descriptor.fs.oss.endpoint", "oss-cn-test.aliyuncs.com");
+
+        CatalogContext context = BlobDescriptorUtils.getCatalogContext(null, tableOptions);
+
+        assertThat(context.options().toMap())
+                .containsEntry("fs.oss.endpoint", "oss-cn-test.aliyuncs.com")
+                .doesNotContainKey("http.keep-alive-timeout")
+                .doesNotContainKey("blob-descriptor.http.keep-alive-timeout");
+    }
 
     @Test
     void testValidateTableRoot() {

@@ -31,6 +31,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 
+import static org.apache.paimon.CoreOptions.BLOB_DESCRIPTOR_HTTP_KEEP_ALIVE_TIMEOUT;
 import static org.apache.paimon.CoreOptions.BLOB_DESCRIPTOR_PREFIX;
 
 /** Utils for {@link BlobDescriptor}. */
@@ -73,7 +74,9 @@ public class BlobDescriptorUtils {
         Map<String, String> descriptorSpecified = new HashMap<>();
         for (Map.Entry<String, String> entry : tableOptions.toMap().entrySet()) {
             String key = entry.getKey();
-            if (key != null && key.startsWith(BLOB_DESCRIPTOR_PREFIX)) {
+            if (key != null
+                    && key.startsWith(BLOB_DESCRIPTOR_PREFIX)
+                    && !key.equals(BLOB_DESCRIPTOR_HTTP_KEEP_ALIVE_TIMEOUT.key())) {
                 descriptorSpecified.put(
                         key.substring(BLOB_DESCRIPTOR_PREFIX.length()), entry.getValue());
             }

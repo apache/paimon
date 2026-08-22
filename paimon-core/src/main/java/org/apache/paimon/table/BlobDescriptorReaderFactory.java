@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
@@ -28,6 +29,10 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.BlobDescriptorUtils;
 import org.apache.paimon.utils.UriReaderFactory;
 
+import javax.annotation.Nullable;
+
+import java.time.Duration;
+
 import static org.apache.paimon.CoreOptions.BLOB_DESCRIPTOR_SOURCE_TABLE;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
@@ -37,19 +42,23 @@ public final class BlobDescriptorReaderFactory {
     private BlobDescriptorReaderFactory() {}
 
     public static UriReaderFactory create(FileStoreTable table) {
-        Options tableOptions = table.coreOptions().toConfiguration();
+        CoreOptions coreOptions = table.coreOptions();
+        Options tableOptions = coreOptions.toConfiguration();
+        Duration httpKeepAliveTimeout =
+                coreOptions.blobDescriptorHttpKeepAliveTimeout().orElse(null);
         String sourceTable = tableOptions.get(BLOB_DESCRIPTOR_SOURCE_TABLE);
         if (sourceTable != null) {
-            return fromSourceTable(table, sourceTable);
+            return fromSourceTable(table, sourceTable, httpKeepAliveTimeout);
         }
 
         CatalogContext descriptorContext =
                 BlobDescriptorUtils.getCatalogContext(
                         table.catalogEnvironment().catalogContext(), tableOptions);
-        return new UriReaderFactory(descriptorContext);
+        return new UriReaderFactory(descriptorContext, httpKeepAliveTimeout);
     }
 
-    private static UriReaderFactory fromSourceTable(FileStoreTable table, String sourceTable) {
+    private static UriReaderFactory fromSourceTable(
+            FileStoreTable table, String sourceTable, @Nullable Duration httpKeepAliveTimeout) {
         CatalogEnvironment catalogEnvironment = table.catalogEnvironment();
         CatalogLoader catalogLoader =
                 checkNotNull(
@@ -66,7 +75,9 @@ public final class BlobDescriptorReaderFactory {
             FileIO sourceFileIO = catalog.getTable(sourceIdentifier).fileIO();
             // Initialize lazy credentials before serializing FileIO to distributed workers.
             sourceFileIO.isObjectStore();
-            return UriReaderFactory.fromFileIO(sourceFileIO);
+            return httpKeepAliveTimeout == null
+                    ? UriReaderFactory.fromFileIO(sourceFileIO)
+                    : UriReaderFactory.fromFileIO(sourceFileIO, httpKeepAliveTimeout);
         } catch (Exception e) {
             throw new RuntimeException(
                     String.format("Failed to load BLOB descriptor source table '%s'.", sourceTable),

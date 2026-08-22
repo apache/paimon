@@ -174,6 +174,29 @@ CREATE TABLE image_table (
 );
 ```
 
+### HTTP descriptor connection keep-alive
+
+For descriptor URLs using HTTP or HTTPS, `blob-descriptor.http.keep-alive-timeout` controls the
+maximum idle age at which a pooled connection may still be reused after a response. Connections
+that have remained idle beyond this cap are removed before the next configured request leases a
+connection. The value must be greater than zero. If a server returns a shorter
+`Keep-Alive: timeout` value, Paimon uses the server value; otherwise this option is also the
+fallback keep-alive duration. Leaving the option unset preserves the HTTP client's existing
+behavior.
+
+This option is not a response timeout and does not limit how long an active response body may take
+to download. It can be set on the target table or supplied as a Flink SQL dynamic option:
+
+```sql
+ALTER TABLE image_table SET (
+    'blob-descriptor.http.keep-alive-timeout' = '60s'
+);
+
+INSERT INTO image_table
+/*+ OPTIONS('blob-descriptor.http.keep-alive-timeout' = '55s') */
+SELECT * FROM source_images;
+```
+
 ## Creating a Table
 
 The recommended way to create a blob table in SQL is to use the **comment directive** `__BLOB_FIELD`, `__BLOB_DESCRIPTOR_FIELD`, or `__BLOB_VIEW_FIELD` on the column. Paimon automatically converts the column to the corresponding BLOB type and registers it in the corresponding option.

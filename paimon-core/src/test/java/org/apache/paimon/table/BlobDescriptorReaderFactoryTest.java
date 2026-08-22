@@ -32,13 +32,17 @@ import org.apache.paimon.rest.RESTApi;
 import org.apache.paimon.rest.RESTTokenFileIO;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
 import org.apache.paimon.utils.InstantiationUtil;
+import org.apache.paimon.utils.UriReader.HttpUriReader;
 import org.apache.paimon.utils.UriReaderFactory;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
+import java.time.Duration;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -51,6 +55,27 @@ import static org.mockito.Mockito.when;
 public class BlobDescriptorReaderFactoryTest {
 
     @TempDir java.nio.file.Path tempPath;
+
+    @Test
+    public void testPassConfiguredHttpKeepAliveTimeout() {
+        CatalogEnvironment catalogEnvironment = mock(CatalogEnvironment.class);
+        when(catalogEnvironment.catalogContext()).thenReturn(CatalogContext.create(new Options()));
+        FileStoreTable targetTable = mock(FileStoreTable.class);
+        when(targetTable.catalogEnvironment()).thenReturn(catalogEnvironment);
+        when(targetTable.coreOptions())
+                .thenReturn(
+                        CoreOptions.fromMap(
+                                Collections.singletonMap(
+                                        CoreOptions.BLOB_DESCRIPTOR_HTTP_KEEP_ALIVE_TIMEOUT.key(),
+                                        "60s")));
+
+        HttpUriReader reader =
+                (HttpUriReader)
+                        BlobDescriptorReaderFactory.create(targetTable)
+                                .create("http://example.com/blob");
+
+        assertThat(reader).extracting("keepAliveTimeout").isEqualTo(Duration.ofSeconds(60));
+    }
 
     @Test
     public void testUseCatalogContextByDefault() throws Exception {
@@ -110,11 +135,10 @@ public class BlobDescriptorReaderFactoryTest {
 
         FileStoreTable targetTable = mock(FileStoreTable.class);
         when(targetTable.catalogEnvironment()).thenReturn(catalogEnvironment);
-        when(targetTable.coreOptions())
-                .thenReturn(
-                        CoreOptions.fromMap(
-                                Collections.singletonMap(
-                                        "blob-descriptor.source-table", "db.source$branch_rt")));
+        Map<String, String> targetOptions = new HashMap<>();
+        targetOptions.put("blob-descriptor.source-table", "db.source$branch_rt");
+        targetOptions.put(CoreOptions.BLOB_DESCRIPTOR_HTTP_KEEP_ALIVE_TIMEOUT.key(), "60s");
+        when(targetTable.coreOptions()).thenReturn(CoreOptions.fromMap(targetOptions));
 
         UriReaderFactory readerFactory = BlobDescriptorReaderFactory.create(targetTable);
         verify(catalogLoader).load();
@@ -122,6 +146,9 @@ public class BlobDescriptorReaderFactoryTest {
         // Creating the factory calls isObjectStore(), which initializes the dynamic token before
         // the REST client is lost during serialization.
         verify(restApi).loadTableToken(sourceIdentifier);
+
+        HttpUriReader httpReader = (HttpUriReader) readerFactory.create("https://example.com/blob");
+        assertThat(httpReader).extracting("keepAliveTimeout").isEqualTo(Duration.ofSeconds(60));
 
         readerFactory = InstantiationUtil.clone(readerFactory);
         String blobUri = "isolated://" + blobFile;

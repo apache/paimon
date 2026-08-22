@@ -37,6 +37,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.file.Files;
+import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -70,6 +71,33 @@ public class UriReaderFactoryTest {
     public void testCreateHttpUriReader() {
         UriReader reader = factory.create("http://example.com/file.txt");
         assertThat(reader).isInstanceOf(HttpUriReader.class);
+        assertThat(((HttpUriReader) reader).keepAliveTimeout()).isNull();
+    }
+
+    @Test
+    public void testCreateHttpUriReaderWithKeepAliveTimeout() throws Exception {
+        Options options = new Options();
+        options.setString("http.keep-alive-timeout", "60s");
+        UriReaderFactory configured = new UriReaderFactory(CatalogContext.create(options));
+
+        HttpUriReader original = (HttpUriReader) configured.create("http://example.com/file.txt");
+        assertThat(original.keepAliveTimeout()).isEqualTo(Duration.ofSeconds(60));
+
+        UriReaderFactory deserialized = InstantiationUtil.clone(configured);
+        HttpUriReader restored = (HttpUriReader) deserialized.create("http://example.com/file.txt");
+        assertThat(restored.keepAliveTimeout()).isEqualTo(Duration.ofSeconds(60));
+        assertThat(restored).isNotSameAs(original);
+    }
+
+    @Test
+    public void testRejectNonPositiveKeepAliveTimeout() {
+        Options options = new Options();
+        options.setString("http.keep-alive-timeout", "0s");
+
+        assertThatThrownBy(() -> new UriReaderFactory(CatalogContext.create(options)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("http.keep-alive-timeout")
+                .hasMessageContaining("greater than 0");
     }
 
     @Test

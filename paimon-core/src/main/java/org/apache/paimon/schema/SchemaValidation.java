@@ -233,6 +233,7 @@ public class SchemaValidation {
                 FileFormat.fromIdentifier(options.formatType(), new Options(schema.options()));
         RowType tableRowType = new RowType(schema.fields());
         validateGeospatialTypes(schema, options, tableRowType);
+        options.blobDescriptorHttpKeepAliveTimeout();
         validateBlobFields(tableRowType, options);
         Set<String> blobDescriptorFields = validateBlobDescriptorFields(tableRowType, options);
         Set<String> blobViewFields =
