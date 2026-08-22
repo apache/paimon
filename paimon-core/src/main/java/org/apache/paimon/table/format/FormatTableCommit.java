@@ -74,6 +74,7 @@ public class FormatTableCommit implements BatchTableCommit {
     private Catalog hiveCatalog;
     private Identifier tableIdentifier;
     @Nullable private final FormatTablePartitionManager partitionManager;
+    private final boolean dynamicPartitionOverwrite;
 
     public FormatTableCommit(
             String location,
@@ -86,7 +87,8 @@ public class FormatTableCommit implements BatchTableCommit {
             @Nullable Map<String, String> staticPartitions,
             @Nullable String syncHiveUri,
             CatalogContext catalogContext,
-            @Nullable FormatTablePartitionManager partitionManager) {
+            @Nullable FormatTablePartitionManager partitionManager,
+            boolean dynamicPartitionOverwrite) {
         this.location = location;
         this.fileIO = fileIO;
         this.formatTablePartitionOnlyValueInPath = formatTablePartitionOnlyValueInPath;
@@ -97,6 +99,7 @@ public class FormatTableCommit implements BatchTableCommit {
         this.partitionKeys = partitionKeys;
         this.tableIdentifier = tableIdentifier;
         this.partitionManager = partitionManager;
+        this.dynamicPartitionOverwrite = dynamicPartitionOverwrite;
         if (syncHiveUri != null) {
             try {
                 Options options = new Options();
@@ -155,15 +158,25 @@ public class FormatTableCommit implements BatchTableCommit {
                     fileIO.mkdirs(partitionPath);
                 }
             } else if (overwrite) {
-                Set<Path> partitionPaths = new HashSet<>();
-                for (TwoPhaseCommitMessage message : messages) {
-                    partitionPaths.add(message.getCommitter().targetPath().getParent());
-                }
-                for (Path p : partitionPaths) {
-                    // The parent of a written file is a complete partition directory - the table
-                    // directory itself when the table is unpartitioned - so there is no partition
-                    // level below it to descend, and it is a partition this commit writes anyway.
-                    deletePreviousDataFile(p, 0);
+                if (replacesOnlyWrittenPartitions()) {
+                    Set<Path> partitionPaths = new HashSet<>();
+                    for (TwoPhaseCommitMessage message : messages) {
+                        partitionPaths.add(message.getCommitter().targetPath().getParent());
+                    }
+                    for (Path p : partitionPaths) {
+                        // The parent of a written file is a complete partition directory - the
+                        // table directory itself when the table is unpartitioned - so there is no
+                        // partition level below it to descend, and it is a partition this commit
+                        // writes anyway.
+                        deletePreviousDataFile(p, 0);
+                    }
+                } else {
+                    // Overwriting without naming a partition replaces the table, so what has to go
+                    // is everything the table holds rather than the files this commit happens to
+                    // write: a statement whose query returns nothing still empties the table.
+                    for (Path dataDirectory : tableDataDirectories()) {
+                        clearedPartitionPaths.addAll(deletePreviousDataFile(dataDirectory, 0));
+                    }
                 }
             }
 
@@ -238,11 +251,12 @@ public class FormatTableCommit implements BatchTableCommit {
     }
 
     /**
-     * Registers the partitions this commit touched, carrying the statistics of what it wrote. A
-     * static prefix overwrite also empties partitions it writes nothing to; those report an exact
-     * zero and are registered with the rest, since a statistic can only be reported for a partition
-     * its own request registers. A truncation writes nothing and reports every partition it
-     * emptied.
+     * Registers the partitions this commit touched, carrying the statistics of what it wrote. An
+     * overwrite also empties partitions it writes nothing to - those below a static prefix, and
+     * every partition the table has when the statement names none and dynamic partition overwrite
+     * is off; those report an exact zero and are registered with the rest, since a statistic can
+     * only be reported for a partition its own request registers. A truncation writes nothing and
+     * reports every partition it emptied.
      */
     private void reportPartitions(
             Set<Map<String, String>> writtenPartitionSpecs,
@@ -433,8 +447,62 @@ public class FormatTableCommit implements BatchTableCommit {
     public void close() throws Exception {}
 
     /**
-     * Deletes the data files below a path and returns the directories they sat in, which for a
-     * static prefix overwrite can be partitions this commit never writes.
+     * Whether an overwrite that names no partition replaces only the partitions this commit wrote
+     * rather than everything the table holds. Same condition a data table commit applies: the
+     * option is about which partitions to replace, so an unpartitioned table has nothing for it to
+     * select.
+     */
+    private boolean replacesOnlyWrittenPartitions() {
+        return partitionKeys != null && !partitionKeys.isEmpty() && dynamicPartitionOverwrite;
+    }
+
+    /**
+     * The directories this table's data sits in: the table directory itself when the table is
+     * unpartitioned, and one per partition otherwise, taken from wherever the table reads its
+     * partitions. A directory no scan of the table reads holds none of its data - one the catalog
+     * has not registered, or one whose name does not parse into the partition keys - and replacing
+     * what the table holds leaves it alone, the way {@link #truncateTable()} does.
+     */
+    private List<Path> tableDataDirectories() {
+        if (partitionKeys == null || partitionKeys.isEmpty()) {
+            return Collections.singletonList(new Path(location));
+        }
+        List<Path> directories = new ArrayList<>();
+        if (partitionManager != null) {
+            for (Map<String, String> spec : registeredPartitions(Collections.emptyMap())) {
+                directories.add(
+                        buildPartitionPath(
+                                location,
+                                spec,
+                                formatTablePartitionOnlyValueInPath,
+                                partitionKeys));
+            }
+            return directories;
+        }
+        for (Pair<LinkedHashMap<String, String>, Path> partition : partitionsInTheFileSystem()) {
+            directories.add(partition.getRight());
+        }
+        return directories;
+    }
+
+    /** The partition directories a table that discovers its partitions from the files has. */
+    private List<Pair<LinkedHashMap<String, String>, Path>> partitionsInTheFileSystem() {
+        return PartitionPathUtils.searchPartSpecAndPaths(
+                fileIO,
+                new Path(location),
+                partitionKeys.size(),
+                partitionKeys,
+                formatTablePartitionOnlyValueInPath,
+                null,
+                null,
+                defaultPartName);
+    }
+
+    /**
+     * Deletes the data files below a path and returns the directories they sat in. Those can be
+     * partitions this commit never writes: a static prefix overwrite clears the partitions sitting
+     * below the prefix, and an overwrite that names no partition clears every partition the table
+     * has.
      */
     private Set<Path> deletePreviousDataFile(Path partitionPath, int partitionLevels)
             throws IOException {
@@ -498,16 +566,7 @@ public class FormatTableCommit implements BatchTableCommit {
         // Filesystem partition discovery: the partition directories the scan reads are the table.
         // A directory that does not parse into the partition keys is not one of them, so
         // truncating leaves it alone.
-        for (Pair<LinkedHashMap<String, String>, Path> partition :
-                PartitionPathUtils.searchPartSpecAndPaths(
-                        fileIO,
-                        new Path(location),
-                        partitionKeys.size(),
-                        partitionKeys,
-                        formatTablePartitionOnlyValueInPath,
-                        null,
-                        null,
-                        defaultPartName)) {
+        for (Pair<LinkedHashMap<String, String>, Path> partition : partitionsInTheFileSystem()) {
             try {
                 deletePreviousDataFile(partition.getRight(), 0);
             } catch (IOException e) {

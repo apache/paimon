@@ -85,7 +85,8 @@ class FormatTableCommitTest {
                         null,
                         null,
                         null,
-                        partitionManager);
+                        partitionManager,
+                        /* dynamicPartitionOverwrite */ true);
         CommitMessage message = new TwoPhaseCommitMessage(committer);
 
         assertThatThrownBy(() -> commit.commit(Collections.singletonList(message)))
@@ -117,7 +118,8 @@ class FormatTableCommitTest {
                         null,
                         null,
                         null,
-                        partitionManager);
+                        partitionManager,
+                        /* dynamicPartitionOverwrite */ true);
         CommitMessage message = new TwoPhaseCommitMessage(committer);
 
         assertThatThrownBy(() -> commit.commit(Collections.singletonList(message)))
@@ -212,7 +214,8 @@ class FormatTableCommitTest {
                         staticPartition,
                         null,
                         null,
-                        null);
+                        null,
+                        /* dynamicPartitionOverwrite */ true);
 
         commit.commit(Collections.singletonList(new TwoPhaseCommitMessage(committer)));
 
@@ -260,7 +263,8 @@ class FormatTableCommitTest {
                         Collections.singletonMap("year", "2025"),
                         null,
                         null,
-                        null);
+                        null,
+                        /* dynamicPartitionOverwrite */ true);
 
         commit.commit(Collections.emptyList());
 
@@ -303,7 +307,8 @@ class FormatTableCommitTest {
                         Collections.singletonMap("year", "2025"),
                         null,
                         null,
-                        null);
+                        null,
+                        /* dynamicPartitionOverwrite */ true);
 
         commit.commit(Collections.emptyList());
 
@@ -350,7 +355,8 @@ class FormatTableCommitTest {
                         staticPartition,
                         null,
                         null,
-                        null);
+                        null,
+                        /* dynamicPartitionOverwrite */ true);
 
         assertThatThrownBy(() -> commit.commit(Collections.emptyList()))
                 .isInstanceOf(RuntimeException.class)
@@ -542,6 +548,113 @@ class FormatTableCommitTest {
         assertThat(fileIO.exists(defaultPartition)).isTrue();
     }
 
+    @Test
+    void testOverwritingWithoutAStaticPartitionEmptiesAnUnpartitionedTable() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        Path previousData = new Path(tablePath, "data-1.csv");
+        fileIO.writeFile(previousData, "1", false);
+        // Another writer is mid-write; its staging tree is not table data.
+        Path stagingFile = new Path(tablePath, "_temporary/attempt/part-00000.csv");
+        fileIO.writeFile(stagingFile, "2", false);
+        FormatTableCommit commit = overwritingCommit(tablePath, fileIO, true);
+
+        // Nothing to write: the query behind the statement returned no rows.
+        commit.commit(Collections.emptyList());
+
+        // An unpartitioned overwrite is about the table, so the files it replaces are the table's,
+        // not the ones this commit happens to write.
+        assertThat(fileIO.exists(previousData)).isFalse();
+        assertThat(fileIO.exists(stagingFile)).isTrue();
+    }
+
+    @Test
+    void testOverwritingAPartitionedTableFollowsDynamicPartitionOverwrite() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path dynamicTable = new Path(new Path(tempDir.toUri()), "dynamic");
+        Path staticTable = new Path(new Path(tempDir.toUri()), "static");
+        for (Path table : Arrays.asList(dynamicTable, staticTable)) {
+            fileIO.writeFile(new Path(table, "year=2025/month=10/data-1.csv"), "1", false);
+            fileIO.writeFile(new Path(table, "year=2025/month=11/data-2.csv"), "2", false);
+        }
+
+        overwritingCommit(dynamicTable, fileIO, true, "year", "month")
+                .commit(Collections.emptyList());
+        overwritingCommit(staticTable, fileIO, false, "year", "month")
+                .commit(Collections.emptyList());
+
+        // Dynamic overwrite selects the partitions written, and this commit wrote none.
+        assertThat(fileIO.exists(new Path(dynamicTable, "year=2025/month=10/data-1.csv"))).isTrue();
+        assertThat(fileIO.exists(new Path(dynamicTable, "year=2025/month=11/data-2.csv"))).isTrue();
+        // With it off, the statement is about the whole table, whatever the query returned.
+        assertThat(fileIO.exists(new Path(staticTable, "year=2025/month=10/data-1.csv"))).isFalse();
+        assertThat(fileIO.exists(new Path(staticTable, "year=2025/month=11/data-2.csv"))).isFalse();
+    }
+
+    @Test
+    void testDynamicOverwriteReplacesOnlyThePartitionsItWrites() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        Path rewritten = new Path(tablePath, "year=2025/month=10/data-1.csv");
+        Path untouched = new Path(tablePath, "year=2025/month=11/data-2.csv");
+        fileIO.writeFile(rewritten, "1", false);
+        fileIO.writeFile(untouched, "2", false);
+        RenamingTwoPhaseOutputStream outputStream =
+                new RenamingTwoPhaseOutputStream(
+                        fileIO, new Path(tablePath, "year=2025/month=10/data-new.csv"), false);
+        outputStream.write(1);
+        TwoPhaseOutputStream.Committer committer = outputStream.closeForCommit();
+
+        overwritingCommit(tablePath, fileIO, true, "year", "month")
+                .commit(Collections.singletonList(new TwoPhaseCommitMessage(committer)));
+
+        // The partitions a dynamic overwrite replaces are the ones it writes, and only those.
+        assertThat(fileIO.exists(rewritten)).isFalse();
+        assertThat(fileIO.exists(new Path(tablePath, "year=2025/month=10/data-new.csv"))).isTrue();
+        assertThat(fileIO.exists(untouched)).isTrue();
+    }
+
+    @Test
+    void testOverwritingTheWholeTableLeavesADirectoryThatIsNoPartitionOfIt() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        fileIO.writeFile(new Path(tablePath, "year=2025/month=10/data-1.csv"), "1", false);
+        // Neither of these parses into the partition keys, so no scan of the table reads them:
+        // replacing what the table holds is none of their business.
+        fileIO.writeFile(new Path(tablePath, "year=2025/nomonth/data-2.csv"), "2", false);
+        fileIO.writeFile(new Path(tablePath, "loose.csv"), "3", false);
+
+        overwritingCommit(tablePath, fileIO, false, "year", "month")
+                .commit(Collections.emptyList());
+
+        assertThat(fileIO.exists(new Path(tablePath, "year=2025/month=10/data-1.csv"))).isFalse();
+        assertThat(fileIO.exists(new Path(tablePath, "year=2025/nomonth/data-2.csv"))).isTrue();
+        assertThat(fileIO.exists(new Path(tablePath, "loose.csv"))).isTrue();
+    }
+
+    /**
+     * An overwrite that names no partition: what INSERT OVERWRITE without a PARTITION clause is.
+     */
+    private FormatTableCommit overwritingCommit(
+            Path tableLocation,
+            LocalFileIO fileIO,
+            boolean dynamicPartitionOverwrite,
+            String... partitionKeys) {
+        return new FormatTableCommit(
+                tableLocation.toString(),
+                Arrays.asList(partitionKeys),
+                fileIO,
+                false,
+                PARTITION_DEFAULT_NAME.defaultValue(),
+                true,
+                Identifier.create("overwrite_db", "overwrite_table"),
+                null,
+                null,
+                null,
+                null,
+                dynamicPartitionOverwrite);
+    }
+
     private static Map<String, String> partitionSpec(String year, String month) {
         LinkedHashMap<String, String> spec = new LinkedHashMap<>();
         spec.put("year", year);
@@ -567,7 +680,8 @@ class FormatTableCommitTest {
                 null,
                 null,
                 null,
-                partitionManager);
+                partitionManager,
+                /* dynamicPartitionOverwrite */ true);
     }
 
     private FormatTablePartitionManager commitPartitionedFile(
@@ -591,7 +705,8 @@ class FormatTableCommitTest {
                         null,
                         null,
                         null,
-                        partitionManager);
+                        partitionManager,
+                        /* dynamicPartitionOverwrite */ true);
         commit.commit(Collections.singletonList(new TwoPhaseCommitMessage(committer)));
         return partitionManager;
     }
