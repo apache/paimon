@@ -374,6 +374,35 @@ public class WriterCommittablesTest {
                                                 Long.MIN_VALUE))));
     }
 
+    @Test
+    public void testEndInputRequiresLaterCheckpointForCoverage() {
+        CheckpointCommittables endInput =
+                new CheckpointCommittables(Long.MAX_VALUE, Collections.emptyList(), 100L);
+        WriterCommittables committables = new WriterCommittables(endInput);
+
+        assertThat(committables.hasEndInput()).isTrue();
+        assertThat(committables.isEndInputCoveredBy(1L)).isFalse();
+
+        committables.mergeWith(
+                new WriterCommittables(
+                        new CheckpointCommittables(2L, Collections.emptyList(), 100L)));
+
+        assertThat(committables.isEndInputCoveredBy(1L)).isFalse();
+        assertThat(committables.isEndInputCoveredBy(2L)).isTrue();
+        assertThat(committables.getCommittablesPerCheckpoint()).doesNotContainKey(Long.MAX_VALUE);
+    }
+
+    @Test
+    public void testRestoredEndInputUsesRestoredCheckpointAsCoverage() {
+        CheckpointCommittables endInput =
+                new CheckpointCommittables(Long.MAX_VALUE, Collections.emptyList(), 100L);
+        WriterCommittables committables =
+                new WriterCommittables(10L, Collections.singletonList(endInput));
+
+        assertThat(committables.isEndInputCoveredBy(9L)).isFalse();
+        assertThat(committables.isEndInputCoveredBy(10L)).isTrue();
+    }
+
     private static CommitMessage createEmptyCommitMessage() {
         return new CommitMessageImpl(
                 BinaryRow.EMPTY_ROW,

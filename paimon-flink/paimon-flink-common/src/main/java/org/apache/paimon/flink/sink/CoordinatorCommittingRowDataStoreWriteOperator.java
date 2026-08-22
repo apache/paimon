@@ -65,6 +65,7 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
 
     private static final Logger LOG =
             LoggerFactory.getLogger(CoordinatorCommittingRowDataStoreWriteOperator.class);
+    private static final long END_INPUT_CHECKPOINT_ID = Long.MAX_VALUE;
 
     @VisibleForTesting
     static final String PENDING_COMMITTABLE_STATE_NAME = "pending_committable_state";
@@ -91,6 +92,7 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
 
     private transient CheckpointCommittablesSerializer stateSerializer;
     private transient TypeSerializer<CheckpointCommittables> eventSerializer;
+    private boolean endOfInput;
 
     public CoordinatorCommittingRowDataStoreWriteOperator(
             StreamOperatorParameters<Committable> parameters,
@@ -135,6 +137,13 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
             List<CheckpointCommittables> restored = new ArrayList<>();
             for (CheckpointCommittables entry : pendingCommittableState.get()) {
                 restored.add(entry);
+                if (entry.checkpointId() == END_INPUT_CHECKPOINT_ID) {
+                    // The terminal committable can only be replayed from state after a task or
+                    // region failover. Ordinary restored checkpoint entries keep their existing
+                    // one-shot replay behavior.
+                    pendingCommittables.put(entry.checkpointId(), entry);
+                    endOfInput = true;
+                }
             }
             pendingCommittableState.clear();
 
@@ -167,6 +176,23 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
     }
 
     @Override
+    public void prepareSnapshotPreBarrier(long checkpointId) throws Exception {
+        if (endOfInput) {
+            // The marker proves this real checkpoint was snapshotted after the terminal
+            // committable. It deliberately contains no newly prepared data.
+            emitCheckpointMarker(checkpointId);
+        } else {
+            emitCommittables(false, checkpointId);
+        }
+    }
+
+    @Override
+    public void endInput() throws Exception {
+        endOfInput = true;
+        emitCommittables(true, END_INPUT_CHECKPOINT_ID);
+    }
+
+    @Override
     protected void emitCommittables(boolean waitCompaction, long checkpointId) throws IOException {
         List<Committable> committables = prepareCommit(waitCompaction, checkpointId);
         CheckpointCommittables entry =
@@ -183,6 +209,15 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
         // The downstream is a DiscardingSink, but emitting keeps numRecordsOut observable and
         // preserves the operator's IO metrics.
         committables.forEach(committable -> output.collect(new StreamRecord<>(committable)));
+    }
+
+    private void emitCheckpointMarker(long checkpointId) throws IOException {
+        CheckpointCommittables marker =
+                new CheckpointCommittables(
+                        checkpointId, new ArrayList<>(), currentWatermark, currentIdle);
+        operatorEventGateway.sendEventToCoordinator(
+                CommittableEvent.create(checkpointId, marker, eventSerializer));
+        pendingCommittables.put(checkpointId, marker);
     }
 
     @Override
