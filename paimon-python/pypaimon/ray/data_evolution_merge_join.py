@@ -31,6 +31,7 @@ from pypaimon.ray.data_evolution_merge_transform import (
     vectorized_insert_transform,
     vectorized_matched_transform,
 )
+from pypaimon.ray.partitioning import _resolve_row_id_num_partitions
 
 
 def _map_kwargs(
@@ -655,10 +656,12 @@ def distributed_update_apply(
     table,
     write_update_cols: Sequence[str],
     *,
-    num_partitions: int,
+    num_partitions: Optional[int],
     ray_remote_args: Optional[Dict[str, Any]] = None,
     base_snapshot_id: Optional[int] = None,
     collect_row_ids: bool = False,
+    estimated_size_bytes: Optional[int] = None,
+    estimated_num_rows: Optional[int] = None,
 ) -> Tuple[list, int, list]:
     import numpy as np
     import pickle
@@ -696,6 +699,13 @@ def distributed_update_apply(
     sorted_first_row_ids = list(planner.first_row_ids)
     if not sorted_first_row_ids:
         return [], 0, []
+
+    num_partitions = _resolve_row_id_num_partitions(
+        num_partitions,
+        estimated_size_bytes,
+        estimated_num_rows,
+        len(sorted_first_row_ids),
+    )
 
     # Pin commit-time conflict check to the snapshot the join was built on,
     # so concurrent commits between read and planner are detected.
@@ -858,9 +868,11 @@ def distributed_read_by_row_id(
     table,
     projection: Sequence[str],
     *,
-    num_partitions: int,
+    num_partitions: Optional[int],
     ray_remote_args: Optional[Dict[str, Any]] = None,
     base_snapshot_id: Optional[int] = None,
+    estimated_size_bytes: Optional[int] = None,
+    estimated_num_rows: Optional[int] = None,
 ):
     """Read ``projection`` for the ``_ROW_ID``s in ``row_ids_ds``, routing each to its
     owning file and reading only the matched rows via ``IndexedSplit`` slicing (blob
@@ -901,6 +913,13 @@ def distributed_read_by_row_id(
     sorted_first_row_ids = list(planner.first_row_ids)
     if not sorted_first_row_ids:
         return None
+
+    num_partitions = _resolve_row_id_num_partitions(
+        num_partitions,
+        estimated_size_bytes,
+        estimated_num_rows,
+        len(sorted_first_row_ids),
+    )
 
     precomputed_info_ref = ray.put(planner._snapshot_files_info())
     frid_col = "_FIRST_ROW_ID"

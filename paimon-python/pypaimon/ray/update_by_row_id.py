@@ -32,10 +32,13 @@ from pypaimon.ray.data_evolution_merge_into import (
     _normalize_source,
     _reraise_inner,
     _require_ray_join,
-    _resolve_num_partitions,
 )
 from pypaimon.ray.data_evolution_merge_join import distributed_update_apply
 from pypaimon.ray.data_evolution_merge_transform import build_update_schema
+from pypaimon.ray.partitioning import (
+    _estimate_dataset_num_rows,
+    _estimate_dataset_size_bytes,
+)
 from pypaimon.schema.data_types import is_blob_file_field
 
 __all__ = ["update_by_row_id"]
@@ -75,8 +78,6 @@ def update_by_row_id(
     if not update_cols:
         raise ValueError("update_cols must be non-empty.")
     update_cols = list(dict.fromkeys(update_cols))  # de-dup, keep order
-    num_partitions = _resolve_num_partitions(num_partitions)
-
     table = CatalogFactory.create(catalog_options).get_table(target)
     if not table.options.data_evolution_enabled():
         raise ValueError(
@@ -114,6 +115,11 @@ def update_by_row_id(
             "update_by_row_id does not accept a table-name source; pass a ray.data."
             f"Dataset / pyarrow.Table / pandas.DataFrame carrying the target {rid}.")
     source_ds = _normalize_source(source, catalog_options)
+    estimated_size_bytes = None
+    estimated_num_rows = None
+    if num_partitions is None:
+        estimated_size_bytes = _estimate_dataset_size_bytes(source_ds)
+        estimated_num_rows = _estimate_dataset_num_rows(source_ds)
     src_cols = set(source_ds.schema().names)
     missing = [c for c in [rid] + update_cols if c not in src_cols]
     if missing:
@@ -145,6 +151,8 @@ def update_by_row_id(
             num_partitions=num_partitions,
             ray_remote_args=ray_remote_args,
             base_snapshot_id=base.id,
+            estimated_size_bytes=estimated_size_bytes,
+            estimated_num_rows=estimated_num_rows,
         )
     except Exception as e:
         _reraise_inner(e)

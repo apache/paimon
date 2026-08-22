@@ -165,6 +165,61 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             projection=['id', 'name', 'age'],
         )
 
+    def test_paimon_source_does_not_use_compressed_size(self):
+        from pypaimon.ray import data_evolution_merge_into as m
+
+        target = self._create_table()
+        source = self._create_table()
+        self._write(target, self._source(ids=(0,)))
+        value = 'x' * 1_000_000
+        source_data = pa.Table.from_pydict(
+            {
+                'id': pa.array(list(range(16)), type=pa.int32()),
+                'name': [value] * 16,
+                'age': [10] * 16,
+            },
+            schema=self.pa_schema,
+        )
+        self._write(source, source_data)
+        source_table = self.catalog.get_table(source)
+        splits = source_table.new_read_builder().new_scan().plan().splits()
+        compressed_size = sum(split.file_size for split in splits)
+        self.assertLess(compressed_size * 10, source_data.nbytes)
+
+        real_resolve = m._resolve_num_partitions
+        resolved = []
+
+        def capture(*args, **kwargs):
+            result = real_resolve(*args, **kwargs)
+            resolved.append((args, kwargs, result))
+            return result
+
+        with patch(
+                'ray.cluster_resources', return_value={'CPU': 320},
+        ), patch.object(
+                m, '_resolve_num_partitions', side_effect=capture,
+        ), patch.object(
+                m, '_build_datasets', return_value=(None, None, None, set()),
+        ), patch.object(
+                m, '_execute_and_commit', return_value={},
+        ):
+            merge_into(
+                target=target,
+                source=source,
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[WhenMatched.update('*')],
+            )
+
+        self.assertEqual(len(resolved), 1)
+        args, kwargs, result = resolved[0]
+        self.assertEqual(args, (None, None))
+        self.assertEqual(kwargs, {
+            'min_partitions': 200,
+            'unknown_num_partitions': 200,
+        })
+        self.assertEqual(result, 200)
+
     def test_no_clause_raises(self):
         target = self._create_table()
         with self.assertRaises(ValueError):
@@ -526,6 +581,57 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(out['id'], [1, 2, 3])
         self.assertEqual(out['name'], ['a', 'b', 'c'])
         self.assertEqual(out['age'], [10, 20, 30])
+
+    def test_insert_into_truncated_target_uses_empty_fast_path(self):
+        from pypaimon.ray import data_evolution_merge_into as m
+
+        target = self._create_table()
+        self._write(target, self._source(ids=(0,)))
+        table = self.catalog.get_table(target)
+        commit = table.new_batch_write_builder().new_commit()
+        commit.truncate_table()
+        commit.close()
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        self.assertIsNotNone(snapshot)
+        self.assertEqual(snapshot.total_record_count, 0)
+
+        real_resolve = m._resolve_num_partitions
+        resolved = []
+
+        def capture(*args, **kwargs):
+            result = real_resolve(*args, **kwargs)
+            resolved.append((args, kwargs, result))
+            return result
+
+        with patch(
+                'ray.cluster_resources', return_value={'CPU': 320},
+        ), patch.object(
+                m, '_resolve_num_partitions', side_effect=capture,
+        ), patch.object(
+                ray.data.Dataset,
+                'join',
+                side_effect=AssertionError('empty target must not be joined'),
+        ):
+            metrics = merge_into(
+                target=target,
+                source=self._source(ids=(1,)),
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[WhenMatched.update('*')],
+                when_not_matched=[WhenNotMatched(insert='*')],
+            )
+
+        self.assertEqual(metrics['num_inserted'], 1)
+        self.assertEqual(self._read_sorted(target)['id'], [1])
+        self.assertEqual(len(resolved), 1)
+        args, kwargs, result = resolved[0]
+        self.assertIsNone(args[0])
+        self.assertGreater(args[1], 0)
+        self.assertEqual(kwargs, {
+            'min_partitions': 1,
+            'unknown_num_partitions': 200,
+        })
+        self.assertEqual(result, 1)
 
     def test_multi_source_match_raises_by_default(self):
         # One target row matched by several source rows: the winning value is
