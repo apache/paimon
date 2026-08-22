@@ -93,11 +93,14 @@ def commit_self_merge_with_compaction_retry(
                 table.identifier,
             )
 
+    # Match Spark's PaimonSparkWriter: every outer rebase attempt creates a
+    # fresh commit from one write builder, preserving the commit user.
+    write_builder = commit_table.new_batch_write_builder()
     while True:
         commit = None
         conflict = None
         try:
-            commit = commit_table.new_batch_write_builder().new_commit()
+            commit = write_builder.new_commit()
             commit.commit(current_updates + other_messages)
         except Exception as error:
             conflict = _find_row_id_conflict(error)
