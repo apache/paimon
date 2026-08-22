@@ -39,11 +39,14 @@ case class PaimonStatistics(
     splits: Array[Split],
     readRowType: RowType,
     tableRowType: RowType,
-    paimonStats: Optional[stats.Statistics]
+    paimonStats: Optional[stats.Statistics],
+    scanRowCount: OptionalLong = OptionalLong.empty()
 ) extends Statistics {
 
   lazy val numRows: OptionalLong = {
-    if (splits.exists(_.rowCount() == -1)) {
+    if (scanRowCount.isPresent) {
+      scanRowCount
+    } else if (splits.exists(_.rowCount() == -1)) {
       OptionalLong.empty()
     } else {
       OptionalLong.of(splits.map(_.rowCount()).sum)

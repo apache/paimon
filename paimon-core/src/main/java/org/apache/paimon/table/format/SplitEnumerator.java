@@ -44,6 +44,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.OptionalLong;
 
 import static org.apache.paimon.format.text.HadoopCompressionUtils.isCompressed;
 import static org.apache.paimon.format.text.TextLineReader.isDefaultDelimiter;
@@ -89,6 +90,10 @@ abstract class SplitEnumerator {
         return enumeratePartitions(partitionFilter);
     }
 
+    ScanPlan plan(@Nullable PartitionPredicate partitionFilter) throws IOException {
+        return new ScanPlan(enumerate(partitionFilter), OptionalLong.empty());
+    }
+
     /** Enumerate splits for a partitioned table; partitions come from the concrete source. */
     abstract List<Split> enumeratePartitions(@Nullable PartitionPredicate partitionFilter)
             throws IOException;
@@ -97,6 +102,39 @@ abstract class SplitEnumerator {
             @Nullable PartitionPredicate partitionFilter);
 
     abstract List<PartitionEntry> listPartitionEntries();
+
+    List<PartitionEntry> listPartitionEntries(@Nullable PartitionPredicate partitionFilter) {
+        List<PartitionEntry> entries = listPartitionEntries();
+        if (partitionFilter == null) {
+            return entries;
+        }
+        List<PartitionEntry> filtered = new ArrayList<>();
+        for (PartitionEntry entry : entries) {
+            if (partitionFilter.test(entry.partition())) {
+                filtered.add(entry);
+            }
+        }
+        return filtered;
+    }
+
+    static final class ScanPlan {
+
+        private final List<Split> splits;
+        private final OptionalLong rowCount;
+
+        ScanPlan(List<Split> splits, OptionalLong rowCount) {
+            this.splits = splits;
+            this.rowCount = rowCount;
+        }
+
+        List<Split> splits() {
+            return splits;
+        }
+
+        OptionalLong rowCount() {
+            return rowCount;
+        }
+    }
 
     BinaryRow toPartitionRow(LinkedHashMap<String, String> partitionSpec) {
         RowType partitionType = table.partitionType();
