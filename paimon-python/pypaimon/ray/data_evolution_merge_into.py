@@ -96,6 +96,7 @@ def merge_into(
         read_columns,
     )
     base_snapshot = table.snapshot_manager().get_latest_snapshot()
+    target_empty = _is_target_empty(base_snapshot)
     estimated_size_bytes = None
     if num_partitions is None:
         estimated_size_bytes = _estimate_merge_input_size_bytes(
@@ -105,7 +106,7 @@ def merge_into(
     unknown_num_partitions = None
     if num_partitions is None and not ctx.is_self_merge:
         unknown_num_partitions = _default_hash_shuffle_parallelism()
-        if base_snapshot is not None:
+        if not target_empty:
             min_partitions = unknown_num_partitions
     num_partitions = _resolve_num_partitions(
         num_partitions,
@@ -358,9 +359,10 @@ def _build_datasets(
     delete_ds = None
     insert_ds = None
     update_cols_union: List[str] = []
+    target_empty = _is_target_empty(base_snapshot)
 
     if ctx.is_self_merge:
-        if matched_specs and base_snapshot is not None:
+        if matched_specs and not target_empty:
             update_cols_union = _union_update_cols(matched_specs)
             if update_cols_union:
                 update_ds = build_self_merge_update_plan(
@@ -390,7 +392,7 @@ def _build_datasets(
     # Mirror Spark: matched/not-matched run as two independent joins
     # (inner / left_anti). One unified left_outer join would force
     # joined.materialize() to feed both branches, which can OOM on large merges.
-    if matched_specs and base_snapshot is not None:
+    if matched_specs and not target_empty:
         update_cols_union = _union_update_cols(matched_specs)
         if update_cols_union:
             update_ds = build_matched_update_ds(
@@ -435,7 +437,7 @@ def _build_datasets(
             catalog_options=ctx.catalog_options,
             num_partitions=num_partitions,
             snapshot_id=base_snapshot_id,
-            target_empty=base_snapshot is None,
+            target_empty=target_empty,
             ray_remote_args=ray_remote_args,
         )
 
@@ -559,6 +561,10 @@ def _estimate_merge_input_size_bytes(
     if ctx.is_self_merge:
         return None
     return _estimate_dataset_size_bytes(source_ds)
+
+
+def _is_target_empty(snapshot) -> bool:
+    return snapshot is None or snapshot.total_record_count == 0
 
 
 def _require_ray_join() -> None:
