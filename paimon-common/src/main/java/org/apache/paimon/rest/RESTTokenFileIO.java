@@ -18,16 +18,21 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileRange;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.PositionOutputStreamWrapper;
 import org.apache.paimon.fs.RemoteIterator;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.fs.SeekableInputStreamWrapper;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
+import org.apache.paimon.fs.VectoredReadable;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
@@ -44,12 +49,18 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
+import java.io.Closeable;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.paimon.options.CatalogOptions.FILE_IO_ALLOW_CACHE;
 import static org.apache.paimon.rest.RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
@@ -67,12 +78,13 @@ public class RESTTokenFileIO implements FileIO {
                     .defaultValue(false)
                     .withDescription("Whether to support data token provided by the REST server.");
 
-    private static final Cache<RESTToken, FileIO> FILE_IO_CACHE =
+    private static final Cache<RESTToken, CachedFileIO> FILE_IO_CACHE =
             Caffeine.newBuilder()
                     .maximumSize(1000)
                     .expireAfterAccess(10, TimeUnit.HOURS)
-                    .removalListener(
-                            (ignored, value, cause) -> IOUtils.closeQuietly((FileIO) value))
+                    // hands back the cache's own reference only, the file system stays alive as
+                    // long as somebody is still reading or writing through it
+                    .removalListener((ignored, value, cause) -> ((CachedFileIO) value).release())
                     .scheduler(
                             Scheduler.forScheduledExecutorService(
                                     Executors.newSingleThreadScheduledExecutor(
@@ -109,62 +121,128 @@ public class RESTTokenFileIO implements FileIO {
 
     @Override
     public SeekableInputStream newInputStream(Path path) throws IOException {
-        return fileIO().newInputStream(path);
+        Lease lease = acquire();
+        boolean opened = false;
+        try {
+            SeekableInputStream delegate = lease.fileIO().newInputStream(path);
+            // readers pick their strategy with instanceof VectoredReadable, so a wrapper that does
+            // not carry the capability silently downgrades them to sequential reads
+            SeekableInputStream in =
+                    delegate instanceof VectoredReadable
+                            ? new LeasedVectoredInputStream(delegate, lease)
+                            : new LeasedSeekableInputStream(delegate, lease);
+            opened = true;
+            return in;
+        } finally {
+            if (!opened) {
+                lease.close();
+            }
+        }
     }
 
     @Override
     public PositionOutputStream newOutputStream(Path path, boolean overwrite) throws IOException {
-        return fileIO().newOutputStream(path, overwrite);
+        Lease lease = acquire();
+        boolean opened = false;
+        try {
+            PositionOutputStream out =
+                    new LeasedPositionOutputStream(
+                            lease.fileIO().newOutputStream(path, overwrite), lease);
+            opened = true;
+            return out;
+        } finally {
+            if (!opened) {
+                lease.close();
+            }
+        }
     }
 
     @Override
     public TwoPhaseOutputStream newTwoPhaseOutputStream(Path path, boolean overwrite)
             throws IOException {
-        return fileIO().newTwoPhaseOutputStream(path, overwrite);
+        Lease lease = acquire();
+        boolean opened = false;
+        try {
+            TwoPhaseOutputStream out =
+                    new LeasedTwoPhaseOutputStream(
+                            lease.fileIO().newTwoPhaseOutputStream(path, overwrite), lease);
+            opened = true;
+            return out;
+        } finally {
+            if (!opened) {
+                lease.close();
+            }
+        }
     }
 
     @Override
     public FileStatus getFileStatus(Path path) throws IOException {
-        return fileIO().getFileStatus(path);
+        try (Lease lease = acquire()) {
+            return lease.fileIO().getFileStatus(path);
+        }
     }
 
     @Override
     public FileStatus[] listStatus(Path path) throws IOException {
-        return fileIO().listStatus(path);
+        try (Lease lease = acquire()) {
+            return lease.fileIO().listStatus(path);
+        }
     }
 
     @Override
     public RemoteIterator<FileStatus> listFilesIterative(Path path, boolean recursive)
             throws IOException {
         // the interface default would hide the inner FileIO's iterative listing override
-        return fileIO().listFilesIterative(path, recursive);
+        Lease lease = acquire();
+        boolean listing = false;
+        try {
+            RemoteIterator<FileStatus> iterator =
+                    new LeasedRemoteIterator(
+                            lease.fileIO().listFilesIterative(path, recursive), lease);
+            listing = true;
+            return iterator;
+        } finally {
+            if (!listing) {
+                lease.close();
+            }
+        }
     }
 
     @Override
     public boolean exists(Path path) throws IOException {
-        return fileIO().exists(path);
+        try (Lease lease = acquire()) {
+            return lease.fileIO().exists(path);
+        }
     }
 
     @Override
     public boolean delete(Path path, boolean recursive) throws IOException {
-        return fileIO().delete(path, recursive);
+        try (Lease lease = acquire()) {
+            return lease.fileIO().delete(path, recursive);
+        }
     }
 
     @Override
     public boolean mkdirs(Path path) throws IOException {
-        return fileIO().mkdirs(path);
+        try (Lease lease = acquire()) {
+            return lease.fileIO().mkdirs(path);
+        }
     }
 
     @Override
     public boolean rename(Path src, Path dst) throws IOException {
-        return fileIO().rename(src, dst);
+        try (Lease lease = acquire()) {
+            return lease.fileIO().rename(src, dst);
+        }
     }
 
     @Override
     public boolean tryToWriteAtomic(Path path, String content) throws IOException {
         // the interface default (temp file + rename) would bypass the inner FileIO's atomic
         // override
-        return fileIO().tryToWriteAtomic(path, content);
+        try (Lease lease = acquire()) {
+            return lease.fileIO().tryToWriteAtomic(path, content);
+        }
     }
 
     @Override
@@ -173,49 +251,109 @@ public class RESTTokenFileIO implements FileIO {
         if (!path.equals(tableRoot)) {
             throw new IOException("Table root does not match RESTTokenFileIO bound table root.");
         }
-        return fileIO().createBlobPresignedUrl(tableRoot, descriptor, validity);
+        try (Lease lease = acquire()) {
+            return lease.fileIO().createBlobPresignedUrl(tableRoot, descriptor, validity);
+        }
     }
 
     @Override
     public boolean isObjectStore() {
-        try {
-            return fileIO().isObjectStore();
+        try (Lease lease = acquire()) {
+            return lease.fileIO().isObjectStore();
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
     }
 
-    public FileIO fileIO() throws IOException {
+    /**
+     * The {@link FileIO} for the current token, valid only for as long as the returned {@link
+     * Lease} is held. Nothing keeps it alive afterwards: the cache is shared by the whole JVM and
+     * evicting an entry closes the file system behind it.
+     */
+    public Lease acquire() throws IOException {
         tryToRefreshToken();
 
-        FileIO fileIO = FILE_IO_CACHE.getIfPresent(token);
-        if (fileIO != null) {
-            return fileIO;
-        }
-
-        synchronized (FILE_IO_CACHE) {
-            fileIO = FILE_IO_CACHE.getIfPresent(token);
-            if (fileIO != null) {
-                return fileIO;
+        while (true) {
+            RESTToken currentToken = token;
+            CachedFileIO cached = FILE_IO_CACHE.getIfPresent(currentToken);
+            if (cached != null) {
+                Lease lease = cached.acquire();
+                if (lease != null) {
+                    return lease;
+                }
+                // spent, so it must not be handed out. Caffeine drops the mapping before it
+                // notifies, which is what keeps this from being reachable today; the branch stays
+                // because the alternative to it is handing out a closed file system
+                FILE_IO_CACHE.asMap().remove(currentToken, cached);
             }
 
-            Options options = catalogContext.options();
-            options = new Options(RESTUtil.merge(options.toMap(), token.token()));
-            options.set(FILE_IO_ALLOW_CACHE, false);
-            CatalogContext context =
-                    CatalogContext.create(
-                            options,
-                            catalogContext.hadoopConf(),
-                            catalogContext.preferIO(),
-                            catalogContext.fallbackIO());
-            try {
-                fileIO = FileIO.get(path, context);
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
+            synchronized (FILE_IO_CACHE) {
+                cached = FILE_IO_CACHE.getIfPresent(currentToken);
+                if (cached != null) {
+                    Lease lease = cached.acquire();
+                    if (lease != null) {
+                        return lease;
+                    }
+                    FILE_IO_CACHE.asMap().remove(currentToken, cached);
+                    continue;
+                }
+
+                Options options = catalogContext.options();
+                options = new Options(RESTUtil.merge(options.toMap(), currentToken.token()));
+                options.set(FILE_IO_ALLOW_CACHE, false);
+                CatalogContext context =
+                        CatalogContext.create(
+                                options,
+                                catalogContext.hadoopConf(),
+                                catalogContext.preferIO(),
+                                catalogContext.fallbackIO());
+                FileIO fileIO;
+                try {
+                    fileIO = FileIO.get(path, context);
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+                cached = new CachedFileIO(fileIO);
+                // take the caller's reference before publishing: an admission policy may evict a
+                // freshly inserted entry straight away, and that must only drop the cache's own
+                // reference, never close what we are about to hand out
+                Lease lease = cached.acquire();
+                FILE_IO_CACHE.put(currentToken, cached);
+                return lease;
             }
-            FILE_IO_CACHE.put(token, fileIO);
-            return fileIO;
         }
+    }
+
+    /**
+     * A {@link Lease} on whatever {@code fileIO} resolves to. Anything other than a {@link
+     * RESTTokenFileIO} owns its own lifetime, so the lease is a no-op there.
+     */
+    public static Lease lease(FileIO fileIO) throws IOException {
+        if (fileIO instanceof RESTTokenFileIO) {
+            return ((RESTTokenFileIO) fileIO).acquire();
+        }
+        return new Lease(fileIO, null);
+    }
+
+    /**
+     * The {@link FileIO} for the current token. Its lease is never handed back, because a raw
+     * reference says nothing about when the caller is done with it, and closing the lease here
+     * would let an eviction in the same window close the instance on its way out of this method.
+     *
+     * @deprecated pins the entry for the life of the process; use {@link #acquire()} and work
+     *     inside the lease. Kept because engines and plugins cast the result to their own concrete
+     *     implementation, which a wrapper would break.
+     */
+    @Deprecated
+    public FileIO fileIO() throws IOException {
+        return acquire().fileIO();
+    }
+
+    /** Drops every entry. The releases it triggers are dispatched asynchronously by the cache. */
+    @VisibleForTesting
+    static void invalidateFileIOCache() {
+        FILE_IO_CACHE.invalidateAll();
+        FILE_IO_CACHE.cleanUp();
     }
 
     private void tryToRefreshToken() {
@@ -281,5 +419,257 @@ public class RESTTokenFileIO implements FileIO {
     public RESTToken validToken() {
         tryToRefreshToken();
         return token;
+    }
+
+    /**
+     * A cached {@link FileIO} and the number of references still outstanding on it. One of them
+     * belongs to the cache itself and is handed back when the entry is evicted; the rest are leases
+     * held by callers. The delegate is closed once the last one is gone, so an eviction can never
+     * shut down a file system that is still serving somebody.
+     *
+     * <p>The flip side is that a lease which is never handed back keeps the file system alive for
+     * good, and once the entry is out of the cache nothing can reach it to close it. A stream that
+     * is opened and then abandoned used to cost a stream handle until the next eviction released
+     * the delegate anyway; now it strands the delegate too.
+     */
+    @VisibleForTesting
+    static class CachedFileIO {
+
+        private final FileIO fileIO;
+        private final AtomicInteger references = new AtomicInteger(1);
+
+        CachedFileIO(FileIO fileIO) {
+            this.fileIO = fileIO;
+        }
+
+        /** A new lease, or null once the delegate is gone and this instance is unusable. */
+        @Nullable
+        Lease acquire() {
+            while (true) {
+                int current = references.get();
+                // not just zero: never resurrect on a count that somehow went negative, that would
+                // hand out a delegate whose close() has already run
+                if (current <= 0) {
+                    return null;
+                }
+                if (references.compareAndSet(current, current + 1)) {
+                    return new Lease(fileIO, this);
+                }
+            }
+        }
+
+        void release() {
+            if (references.decrementAndGet() == 0) {
+                IOUtils.closeQuietly(fileIO);
+            }
+        }
+    }
+
+    /**
+     * The right to use a {@link FileIO} until this lease is closed. Closing it twice releases once.
+     */
+    public static class Lease implements Closeable {
+
+        private final FileIO fileIO;
+        @Nullable private final CachedFileIO cached;
+        private final AtomicBoolean released = new AtomicBoolean();
+
+        private Lease(FileIO fileIO, @Nullable CachedFileIO cached) {
+            this.fileIO = fileIO;
+            this.cached = cached;
+        }
+
+        public FileIO fileIO() {
+            return fileIO;
+        }
+
+        @Override
+        public void close() {
+            if (cached != null && released.compareAndSet(false, true)) {
+                cached.release();
+            }
+        }
+    }
+
+    private static class LeasedSeekableInputStream extends SeekableInputStreamWrapper {
+
+        private final Lease lease;
+
+        private LeasedSeekableInputStream(SeekableInputStream in, Lease lease) {
+            super(in);
+            this.lease = lease;
+        }
+
+        @Override
+        public void close() throws IOException {
+            try {
+                super.close();
+            } finally {
+                lease.close();
+            }
+        }
+    }
+
+    /** Keeps the vectored read capability of the wrapped stream reachable through the wrapper. */
+    private static class LeasedVectoredInputStream extends LeasedSeekableInputStream
+            implements VectoredReadable {
+
+        private LeasedVectoredInputStream(SeekableInputStream in, Lease lease) {
+            super(in, lease);
+        }
+
+        private VectoredReadable vectored() {
+            return (VectoredReadable) in;
+        }
+
+        @Override
+        public int pread(long position, byte[] buffer, int offset, int length) throws IOException {
+            return vectored().pread(position, buffer, offset, length);
+        }
+
+        @Override
+        public void preadFully(long position, byte[] buffer, int offset, int length)
+                throws IOException {
+            vectored().preadFully(position, buffer, offset, length);
+        }
+
+        @Override
+        public int minSeekForVectorReads() {
+            return vectored().minSeekForVectorReads();
+        }
+
+        @Override
+        public int batchSizeForVectorReads() {
+            return vectored().batchSizeForVectorReads();
+        }
+
+        @Override
+        public int parallelismForVectorReads() {
+            return vectored().parallelismForVectorReads();
+        }
+
+        @Override
+        public void readVectored(List<? extends FileRange> ranges) throws IOException {
+            vectored().readVectored(ranges);
+        }
+    }
+
+    private static class LeasedPositionOutputStream extends PositionOutputStreamWrapper {
+
+        private final Lease lease;
+
+        private LeasedPositionOutputStream(PositionOutputStream out, Lease lease) {
+            super(out);
+            this.lease = lease;
+        }
+
+        @Override
+        public void close() throws IOException {
+            try {
+                super.close();
+            } finally {
+                lease.close();
+            }
+        }
+    }
+
+    /**
+     * Both {@link #close()} and {@link #closeForCommit()} end the stream, and implementations call
+     * one from the other, so both release the lease and rely on it releasing only once. The {@link
+     * Committer} takes a lease of its own when it runs.
+     */
+    private static class LeasedTwoPhaseOutputStream extends TwoPhaseOutputStream {
+
+        private final TwoPhaseOutputStream out;
+        private final Lease lease;
+
+        private LeasedTwoPhaseOutputStream(TwoPhaseOutputStream out, Lease lease) {
+            this.out = out;
+            this.lease = lease;
+        }
+
+        @Override
+        public long getPos() throws IOException {
+            return out.getPos();
+        }
+
+        @Override
+        public void write(int b) throws IOException {
+            out.write(b);
+        }
+
+        @Override
+        public void write(byte[] b) throws IOException {
+            out.write(b);
+        }
+
+        @Override
+        public void write(byte[] b, int off, int len) throws IOException {
+            out.write(b, off, len);
+        }
+
+        @Override
+        public void flush() throws IOException {
+            out.flush();
+        }
+
+        @Override
+        public Committer closeForCommit() throws IOException {
+            try {
+                return out.closeForCommit();
+            } finally {
+                lease.close();
+            }
+        }
+
+        @Override
+        public void close() throws IOException {
+            try {
+                out.close();
+            } finally {
+                lease.close();
+            }
+        }
+    }
+
+    /**
+     * A listing is consumed lazily, so the lease has to outlive the call that started it. {@link
+     * RemoteIterator} has nothing to close, so the lease goes back once the listing runs dry or
+     * fails; a caller that walks away mid-listing keeps the entry pinned until the process ends.
+     */
+    private static class LeasedRemoteIterator implements RemoteIterator<FileStatus> {
+
+        private final RemoteIterator<FileStatus> iterator;
+        private final Lease lease;
+
+        private LeasedRemoteIterator(RemoteIterator<FileStatus> iterator, Lease lease) {
+            this.iterator = iterator;
+            this.lease = lease;
+        }
+
+        @Override
+        public boolean hasNext() throws IOException {
+            boolean hasNext;
+            try {
+                hasNext = iterator.hasNext();
+            } catch (Throwable t) {
+                lease.close();
+                throw t;
+            }
+            if (!hasNext) {
+                lease.close();
+            }
+            return hasNext;
+        }
+
+        @Override
+        public FileStatus next() throws IOException {
+            try {
+                return iterator.next();
+            } catch (Throwable t) {
+                lease.close();
+                throw t;
+            }
+        }
     }
 }

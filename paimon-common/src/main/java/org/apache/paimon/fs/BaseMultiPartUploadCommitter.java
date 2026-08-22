@@ -59,8 +59,12 @@ public abstract class BaseMultiPartUploadCommitter<T, C> implements TwoPhaseOutp
 
     @Override
     public void commit(FileIO fileIO) throws IOException {
-        try {
-            MultiPartUploadStore<T, C> multiPartUploadStore = multiPartUploadStore(fileIO);
+        // a REST token FileIO comes out of a cache shared by the whole JVM, and an eviction closes
+        // the file system underneath an unleased caller, so hold a lease for the whole call. Only
+        // a RESTTokenFileIO handed in directly is covered; anything wrapping one is not
+        try (RESTTokenFileIO.Lease lease = RESTTokenFileIO.lease(fileIO)) {
+            MultiPartUploadStore<T, C> multiPartUploadStore =
+                    multiPartUploadStore(lease.fileIO(), targetPath());
             multiPartUploadStore.completeMultipartUpload(
                     objectName, uploadId, uploadedParts, byteLength);
         } catch (Exception e) {
@@ -70,8 +74,9 @@ public abstract class BaseMultiPartUploadCommitter<T, C> implements TwoPhaseOutp
 
     @Override
     public void discard(FileIO fileIO) throws IOException {
-        try {
-            MultiPartUploadStore<T, C> multiPartUploadStore = multiPartUploadStore(fileIO);
+        try (RESTTokenFileIO.Lease lease = RESTTokenFileIO.lease(fileIO)) {
+            MultiPartUploadStore<T, C> multiPartUploadStore =
+                    multiPartUploadStore(lease.fileIO(), targetPath());
             multiPartUploadStore.abortMultipartUpload(objectName, uploadId);
         } catch (Exception e) {
             LOG.warn("Failed to discard multipart upload with ID: {}", uploadId, e);
@@ -90,12 +95,4 @@ public abstract class BaseMultiPartUploadCommitter<T, C> implements TwoPhaseOutp
 
     @Override
     public void clean(FileIO fileIO) throws IOException {}
-
-    private MultiPartUploadStore<T, C> multiPartUploadStore(FileIO fileIO) throws IOException {
-        if (fileIO instanceof RESTTokenFileIO) {
-            RESTTokenFileIO restTokenFileIO = (RESTTokenFileIO) fileIO;
-            fileIO = restTokenFileIO.fileIO();
-        }
-        return multiPartUploadStore(fileIO, targetPath());
-    }
 }
