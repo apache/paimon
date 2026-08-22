@@ -696,7 +696,7 @@ class ConflictDetection:
                 latest_snapshot.id + 1):
             snapshot = self.snapshot_manager.get_snapshot_by_id(snapshot_id)
             if snapshot is None:
-                return RuntimeError(
+                raise RuntimeError(
                     "Row-id conflict check cannot continue because snapshot "
                     "{} cannot be found.".format(snapshot_id))
 

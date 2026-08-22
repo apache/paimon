@@ -414,14 +414,13 @@ class TestCheckRowIdFromSnapshot(unittest.TestCase):
         detection = self._make_detection(
             [check_snap, latest_snap], {3: []})
 
-        result = detection.check_row_id_from_snapshot(
-            latest_snap,
-            self._blob_delta(),
-            check_compaction=False,
-        )
-
-        self.assertIsInstance(result, RuntimeError)
-        self.assertIn("snapshot 2 cannot be found", str(result))
+        with self.assertRaisesRegex(
+                RuntimeError, "snapshot 2 cannot be found"):
+            detection.check_row_id_from_snapshot(
+                latest_snap,
+                self._blob_delta(),
+                check_compaction=False,
+            )
 
     def test_compact_no_conflict_when_no_matching_delete(self):
         check_snap = _FakeSnapshot(1, "APPEND", next_row_id=400)
