@@ -2317,6 +2317,285 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(ray_retry_wait.call_args[0][1], 0)
         self.assertEqual(rewrite_calls[0], 2)
 
+    def test_self_merge_rebases_again_after_second_compaction(self):
+        from pypaimon.ray import data_evolution_merge_into as merge_module
+        from pypaimon.ray import row_id_conflict_rewriter as rewriter_module
+
+        target = self._create_table()
+        self._write(target, self._source(ids=(1, 2)))
+        self._write(target, self._source(ids=(3, 4)))
+        table = self.catalog.get_table(target)
+        real_apply = merge_module.distributed_self_merge_update_apply
+        real_rewrite = rewriter_module._rewrite_updates
+
+        def stage_then_compact(*args, **kwargs):
+            result = real_apply(*args, **kwargs)
+            self._compact_all_data_files(table)
+            return result
+
+        rewrite_snapshot_ids = []
+
+        def miss_precommit_race(
+                rewrite_table, messages, latest_snapshot, **kwargs):
+            rewrite_snapshot_ids.append(latest_snapshot.id)
+            if len(rewrite_snapshot_ids) == 1:
+                return None
+            return real_rewrite(
+                rewrite_table,
+                messages,
+                latest_snapshot,
+                **kwargs,
+            )
+
+        retry_counts = []
+
+        def compact_before_first_retry(_table, retry_count):
+            retry_counts.append(retry_count)
+            if retry_count == 0:
+                self._compact_all_data_files(table)
+
+        with patch.object(
+                merge_module,
+                'distributed_self_merge_update_apply',
+                side_effect=stage_then_compact,
+        ), patch.object(
+                rewriter_module,
+                '_rewrite_updates',
+                side_effect=miss_precommit_race,
+        ), patch.object(
+                rewriter_module,
+                '_retry_wait',
+                side_effect=compact_before_first_retry,
+        ):
+            result = merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                when_matched=[WhenMatched.update({'age': lit(99)})],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        self.assertEqual(result['num_matched'], 4)
+        self.assertEqual(self._read_sorted(target)['age'], [99, 99, 99, 99])
+        self.assertEqual(retry_counts, [0, 1])
+        self.assertEqual(len(rewrite_snapshot_ids), 3)
+        self.assertEqual(rewrite_snapshot_ids[0], rewrite_snapshot_ids[1])
+        self.assertGreater(rewrite_snapshot_ids[2], rewrite_snapshot_ids[1])
+
+    def test_self_merge_rejects_reused_snapshot_id_after_rollback(self):
+        from pypaimon.ray import data_evolution_merge_into as merge_module
+        from pypaimon.ray import row_id_conflict_rewriter as rewriter_module
+
+        target = self._create_table()
+        self._write(target, self._source(ids=(1, 2)))
+        self._write(target, self._source(ids=(3, 4)))
+        table = self.catalog.get_table(target)
+        real_apply = merge_module.distributed_self_merge_update_apply
+        real_rewrite = rewriter_module._rewrite_updates
+        replaced_lineage = [False]
+        staging_paths = set()
+
+        def remember_paths(messages):
+            for message in messages:
+                for file in message.new_files:
+                    staging_paths.add(file.external_path or file.file_path)
+
+        def stage_then_compact(*args, **kwargs):
+            result = real_apply(*args, **kwargs)
+            remember_paths(result[0])
+            self._compact_all_data_files(table)
+            return result
+
+        def rewrite_then_replace_lineage(*args, **kwargs):
+            latest_snapshot = args[2]
+            result = real_rewrite(*args, **kwargs)
+            if result is not None:
+                remember_paths(result.update_messages)
+            if not replaced_lineage[0]:
+                replaced_lineage[0] = True
+                old_uuid = latest_snapshot.uuid
+                table.rollback_to(1)
+                replacement = pa.Table.from_pydict(
+                    {
+                        'id': pa.array([30, 40], type=pa.int32()),
+                        'name': ['replacement', 'replacement'],
+                        'age': pa.array([30, 40], type=pa.int32()),
+                    },
+                    schema=self.pa_schema,
+                )
+                self._write(target, replacement)
+                self._compact_all_data_files(table)
+                replacement_snapshot = (
+                    table.snapshot_manager().get_latest_snapshot()
+                )
+                self.assertEqual(replacement_snapshot.id, latest_snapshot.id)
+                self.assertNotEqual(replacement_snapshot.uuid, old_uuid)
+            return result
+
+        with patch.object(
+                merge_module,
+                'distributed_self_merge_update_apply',
+                side_effect=stage_then_compact,
+        ), patch.object(
+                rewriter_module,
+                '_rewrite_updates',
+                side_effect=rewrite_then_replace_lineage,
+        ), self.assertRaisesRegex(RuntimeError, 'snapshot lineage'):
+            merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                when_matched=[WhenMatched.update({'age': lit(99)})],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        self.assertTrue(replaced_lineage[0])
+        output = self._read_sorted(target)
+        self.assertEqual(output['id'], [1, 2, 30, 40])
+        self.assertEqual(output['age'], [10, 10, 30, 40])
+        self.assertTrue(staging_paths)
+        self.assertTrue(
+            all(not os.path.exists(path) for path in staging_paths)
+        )
+
+    def test_self_merge_rejects_concurrent_overwrite(self):
+        from pypaimon.ray import data_evolution_merge_into as merge_module
+
+        target = self._create_table()
+        self._write(target, self._source(ids=(1, 2)))
+        table = self.catalog.get_table(target)
+        real_apply = merge_module.distributed_self_merge_update_apply
+        staging_paths = []
+
+        def stage_then_overwrite(*args, **kwargs):
+            result = real_apply(*args, **kwargs)
+            staging_paths.extend(
+                file.external_path or file.file_path
+                for message in result[0]
+                for file in message.new_files
+            )
+            replacement = pa.Table.from_pydict(
+                {
+                    'id': pa.array([30, 40], type=pa.int32()),
+                    'name': ['replacement', 'replacement'],
+                    'age': pa.array([30, 40], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            )
+            write_builder = table.new_batch_write_builder().overwrite({})
+            writer = write_builder.new_write()
+            commit = write_builder.new_commit()
+            try:
+                writer.write_arrow(replacement)
+                commit.commit(writer.prepare_commit())
+            finally:
+                writer.close()
+                commit.close()
+            return result
+
+        with patch.object(
+                merge_module,
+                'distributed_self_merge_update_apply',
+                side_effect=stage_then_overwrite,
+        ), self.assertRaises(Exception):
+            merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                when_matched=[WhenMatched.update({'age': lit(99)})],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        output = self._read_sorted(target)
+        self.assertEqual(output['id'], [30, 40])
+        self.assertEqual(output['age'], [30, 40])
+        self.assertTrue(staging_paths)
+        self.assertTrue(
+            all(not os.path.exists(path) for path in staging_paths)
+        )
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_update_and_delete(self):
+        options = dict(self.de_options)
+        options['deletion-vectors.enabled'] = 'true'
+        target = self._create_table(options=options)
+        self._write(target, self._source(ids=(1, 2, 3, 4)))
+
+        result = merge_into(
+            target=target,
+            source=target,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            when_matched=[
+                WhenMatched.update(
+                    {'age': lit(99)}, condition='t.id <= 2',
+                ),
+                WhenMatched.delete(condition='t.id = 3'),
+            ],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        self.assertEqual(result['num_matched'], 3)
+        output = self._read_sorted(target)
+        self.assertEqual(output['id'], [1, 2, 4])
+        self.assertEqual(output['age'], [99, 99, 10])
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_update_delete_does_not_rebase_after_compaction(self):
+        from pypaimon.ray import row_id_conflict_rewriter as rewriter_module
+
+        options = dict(self.de_options)
+        options['deletion-vectors.enabled'] = 'true'
+        target = self._create_table(options=options)
+        self._write(target, self._source(ids=(1, 2, 3, 4)))
+        table = self.catalog.get_table(target)
+        real_commit = (
+            rewriter_module.commit_self_merge_with_compaction_retry
+        )
+        real_rewrite = rewriter_module._rewrite_updates
+        rewrite_results = []
+
+        def compact_then_commit(*args, **kwargs):
+            self._compact_all_data_files(table)
+            return real_commit(*args, **kwargs)
+
+        def assert_rewrite_disabled(*args, **kwargs):
+            result = real_rewrite(*args, **kwargs)
+            rewrite_results.append(result)
+            return result
+
+        with patch.object(
+                rewriter_module,
+                'commit_self_merge_with_compaction_retry',
+                side_effect=compact_then_commit,
+        ), patch.object(
+                rewriter_module,
+                '_rewrite_updates',
+                side_effect=assert_rewrite_disabled,
+        ), self.assertRaises(Exception):
+            merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                when_matched=[
+                    WhenMatched.update(
+                        {'age': lit(99)}, condition='t.id <= 2',
+                    ),
+                    WhenMatched.delete(condition='t.id = 3'),
+                ],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        self.assertTrue(rewrite_results)
+        self.assertTrue(all(result is None for result in rewrite_results))
+        output = self._read_sorted(target)
+        self.assertEqual(output['id'], [1, 2, 3, 4])
+        self.assertEqual(output['age'], [10, 10, 10, 10])
+
     def test_self_merge_compaction_rebase_keeps_logical_conflicts(self):
         from pypaimon.ray import data_evolution_merge_into as merge_module
 

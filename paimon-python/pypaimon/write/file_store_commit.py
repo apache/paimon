@@ -505,32 +505,47 @@ class FileStoreCommit:
         rewritten_commit_entries = None
         start_time_ms = int(time.time() * 1000)
         while True:
-            latest_snapshot = self.snapshot_manager.get_latest_snapshot()
-            commit_entries = (
-                rewritten_commit_entries
-                if rewritten_commit_entries is not None
-                else commit_entries_plan(latest_snapshot)
-            )
+            try:
+                latest_snapshot = self.snapshot_manager.get_latest_snapshot()
+                commit_entries = (
+                    rewritten_commit_entries
+                    if rewritten_commit_entries is not None
+                    else commit_entries_plan(latest_snapshot)
+                )
 
-            # No entries to commit (e.g. drop_partitions with no matching data): skip commit
-            # to avoid creating manifest/snapshot with empty partition_stats (causes read errors).
-            if not commit_entries and not index_deletes and not index_adds:
-                break
+                # No entries to commit (e.g. drop_partitions with no matching
+                # data): skip an empty snapshot.
+                if not commit_entries and not index_deletes and not index_adds:
+                    if uncertain_commit_state.pending:
+                        raise CommitResultUncertainError(
+                            "Cannot skip an empty retry while a previous "
+                            "snapshot commit is still uncertain."
+                        ) from uncertain_commit_state.exception
+                    break
 
-            result = self._try_commit_once(
-                retry_result=retry_result,
-                commit_kind=commit_kind,
-                commit_entries=commit_entries,
-                changelog_entries=changelog_entries or [],
-                commit_identifier=commit_identifier,
-                latest_snapshot=latest_snapshot,
-                detect_conflicts=detect_conflicts,
-                allow_rollback=allow_rollback,
-                index_deletes=index_deletes,
-                index_adds=index_adds,
-                hash_index_base_snapshot=hash_index_base_snapshot,
-                uncertain_commit_state=uncertain_commit_state,
-            )
+                result = self._try_commit_once(
+                    retry_result=retry_result,
+                    commit_kind=commit_kind,
+                    commit_entries=commit_entries,
+                    changelog_entries=changelog_entries or [],
+                    commit_identifier=commit_identifier,
+                    latest_snapshot=latest_snapshot,
+                    detect_conflicts=detect_conflicts,
+                    allow_rollback=allow_rollback,
+                    index_deletes=index_deletes,
+                    index_adds=index_adds,
+                    hash_index_base_snapshot=hash_index_base_snapshot,
+                    uncertain_commit_state=uncertain_commit_state,
+                )
+            except CommitResultUncertainError:
+                raise
+            except Exception:
+                if uncertain_commit_state.pending:
+                    raise CommitResultUncertainError(
+                        "Cannot safely continue after a retry failure while "
+                        "a previous snapshot commit is still uncertain."
+                    ) from uncertain_commit_state.exception
+                raise
 
             if isinstance(result, RewriteResult):
                 rewritten_commit_entries = result.rewrite.commit_entries
@@ -595,7 +610,15 @@ class FileStoreCommit:
                 else:
                     raise RuntimeError(error_msg)
 
-            self._commit_retry_wait(retry_count)
+            try:
+                self._commit_retry_wait(retry_count)
+            except Exception:
+                if uncertain_commit_state.pending:
+                    raise CommitResultUncertainError(
+                        "Commit retry was interrupted while a previous "
+                        "snapshot commit is still uncertain."
+                    ) from uncertain_commit_state.exception
+                raise
             retry_count += 1
 
     def _try_commit_once(self, retry_result: Optional[RetryResult], commit_kind: str,

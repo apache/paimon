@@ -31,7 +31,10 @@ from pypaimon.read.split import DataSplit
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.utils.range import Range
-from pypaimon.write.commit.conflict_detection import RowIdExistenceConflict
+from pypaimon.write.commit.conflict_detection import (
+    RowIdLineageConflict,
+    RowIdRebaseConflict,
+)
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_commit import CommitResultUncertainError
 
@@ -59,47 +62,71 @@ def commit_self_merge_with_compaction_retry(
         *,
         num_partitions: int,
         ray_remote_args=None,
+        base_snapshot_uuid=None,
 ) -> None:
     """Commit self-merge messages, rebasing stale updates when compaction wins."""
     current_updates = list(update_messages)
     other_messages = list(other_messages)
     superseded_messages = []
+    current_base_snapshot_uuid = base_snapshot_uuid
     retry_count = 0
     start_millis = int(time.time() * 1000)
 
-    # Ray performs the rebase below without the local driver's size limit.
-    commit_table = table.copy_without_time_travel({
-        CoreOptions.DATA_EVOLUTION_ROW_ID_CONFLICT_REWRITE_MAX_SIZE.key():
-            "0 B",
-    })
+    def abort_known_uncommitted(include_current):
+        messages = list(superseded_messages)
+        superseded_messages[:] = []
+        if include_current:
+            messages.extend(current_updates)
+            messages.extend(other_messages)
+        if messages:
+            from pypaimon.write.file_store_commit import (
+                _abort_commit_messages,
+            )
+            _abort_commit_messages(table, messages)
 
-    base_snapshot_ids = _base_snapshot_ids(current_updates)
-    latest_snapshot = table.snapshot_manager().get_latest_snapshot()
+    try:
+        # Ray performs the rebase below without the local driver's size limit.
+        commit_table = table.copy_without_time_travel({
+            CoreOptions.DATA_EVOLUTION_ROW_ID_CONFLICT_REWRITE_MAX_SIZE.key():
+                "0 B",
+        })
+        base_snapshot_ids = _base_snapshot_ids(current_updates)
+        latest_snapshot = table.snapshot_manager().get_latest_snapshot()
+    except Exception:
+        abort_known_uncommitted(True)
+        raise
     if (
             len(base_snapshot_ids) == 1
             and latest_snapshot is not None
             and latest_snapshot.id != next(iter(base_snapshot_ids))
     ):
-        result = _rewrite_updates(
-            table,
-            current_updates,
-            latest_snapshot,
-            num_partitions=num_partitions,
-            ray_remote_args=ray_remote_args,
-        )
-        if result is not None:
-            current_updates = result.update_messages
-            superseded_messages.extend(result.superseded_messages)
-            logger.info(
-                "Rewrote %d stale self-merge file(s) against snapshot %d "
-                "before committing to table %s.",
-                result.rewritten_file_count,
-                latest_snapshot.id,
-                table.identifier,
+        try:
+            result = _rewrite_updates(
+                table,
+                current_updates,
+                latest_snapshot,
+                num_partitions=num_partitions,
+                ray_remote_args=ray_remote_args,
+                expected_base_snapshot_uuid=current_base_snapshot_uuid,
             )
+            if result is not None:
+                current_updates = result.update_messages
+                superseded_messages.extend(result.superseded_messages)
+                current_base_snapshot_uuid = latest_snapshot.uuid
+                logger.info(
+                    "Rewrote %d stale self-merge file(s) against snapshot %d "
+                    "before committing to table %s.",
+                    result.rewritten_file_count,
+                    latest_snapshot.id,
+                    table.identifier,
+                )
+        except Exception:
+            abort_known_uncommitted(True)
+            raise
 
     while True:
         commit = None
+        commit_attempted = False
         conflict = None
         try:
             commit = commit_table.new_batch_write_builder().new_commit()
@@ -107,13 +134,26 @@ def commit_self_merge_with_compaction_retry(
             # legacy compaction-rollback loop before the distributed rebase;
             # ordinary FileStoreCommit retries remain enabled.
             commit.file_store_commit.rollback = None
+            conflict_detection = commit.file_store_commit.conflict_detection
+            conflict_detection.set_row_id_check_from_snapshot_uuid(
+                current_base_snapshot_uuid
+            )
+            commit_attempted = True
             commit.commit(current_updates + other_messages)
         except CommitResultUncertainError:
             # An unobservable snapshot may reference these files.
+            abort_known_uncommitted(False)
             raise
         except Exception as error:
+            lineage_conflict = _find_error(error, RowIdLineageConflict)
+            if lineage_conflict is not None:
+                abort_known_uncommitted(True)
+                if lineage_conflict is error:
+                    raise
+                raise lineage_conflict from error
             conflict = _find_row_id_conflict(error)
             if conflict is None:
+                abort_known_uncommitted(not commit_attempted)
                 raise
         finally:
             if commit is not None:
@@ -127,11 +167,7 @@ def commit_self_merge_with_compaction_retry(
                     )
 
         if conflict is None:
-            if superseded_messages:
-                from pypaimon.write.file_store_commit import (
-                    _abort_commit_messages,
-                )
-                _abort_commit_messages(table, superseded_messages)
+            abort_known_uncommitted(False)
             return
 
         elapsed = int(time.time() * 1000) - start_millis
@@ -139,10 +175,12 @@ def commit_self_merge_with_compaction_retry(
                 elapsed > table.options.commit_timeout()
                 or retry_count >= table.options.commit_max_retries()
         ):
+            abort_known_uncommitted(True)
             raise conflict
 
         latest_snapshot = table.snapshot_manager().get_latest_snapshot()
         if latest_snapshot is None:
+            abort_known_uncommitted(True)
             raise conflict
 
         try:
@@ -152,20 +190,25 @@ def commit_self_merge_with_compaction_retry(
                 latest_snapshot,
                 num_partitions=num_partitions,
                 ray_remote_args=ray_remote_args,
+                expected_base_snapshot_uuid=current_base_snapshot_uuid,
             )
         except Exception as rewrite_error:
+            abort_known_uncommitted(True)
             raise RuntimeError(
                 "{} {}".format(conflict, rewrite_error)
             )
         if result is None:
-            raise conflict
-
-        elapsed = int(time.time() * 1000) - start_millis
-        if elapsed > table.options.commit_timeout():
+            abort_known_uncommitted(True)
             raise conflict
 
         current_updates = result.update_messages
         superseded_messages.extend(result.superseded_messages)
+        current_base_snapshot_uuid = latest_snapshot.uuid
+        elapsed = int(time.time() * 1000) - start_millis
+        if elapsed > table.options.commit_timeout():
+            abort_known_uncommitted(True)
+            raise conflict
+
         logger.info(
             "Rewrote %d stale self-merge file(s) against snapshot %d "
             "before retrying commit to table %s.",
@@ -173,7 +216,11 @@ def commit_self_merge_with_compaction_retry(
             latest_snapshot.id,
             table.identifier,
         )
-        _retry_wait(table, retry_count)
+        try:
+            _retry_wait(table, retry_count)
+        except Exception:
+            abort_known_uncommitted(True)
+            raise
         retry_count += 1
 
 
@@ -184,6 +231,7 @@ def _rewrite_updates(
         *,
         num_partitions: int,
         ray_remote_args=None,
+        expected_base_snapshot_uuid=None,
 ) -> Optional[_RewriteResult]:
     if table.options.deletion_vectors_enabled(False):
         return None
@@ -201,6 +249,25 @@ def _rewrite_updates(
     base_snapshot = table.snapshot_manager().get_snapshot_by_id(
         next(iter(base_snapshot_ids))
     )
+    if (
+            expected_base_snapshot_uuid is not None
+            and (
+                base_snapshot is None
+                or base_snapshot.uuid != expected_base_snapshot_uuid
+            )
+    ):
+        raise RowIdLineageConflict(
+            "Row-id snapshot lineage conflict: snapshot {} no longer has "
+            "the staged UUID {}.".format(
+                next(iter(base_snapshot_ids)),
+                expected_base_snapshot_uuid,
+            )
+        )
+    if base_snapshot is not None and latest_snapshot.id < base_snapshot.id:
+        raise RowIdLineageConflict(
+            "Latest snapshot {} is older than self-merge base snapshot {}."
+            .format(latest_snapshot.id, base_snapshot.id)
+        )
     if (
             base_snapshot is None
             or base_snapshot.schema_id != latest_snapshot.schema_id
@@ -257,7 +324,20 @@ def _rewrite_updates(
         )
     ]
     if not candidates:
-        return None
+        # The physical files changed but their row-id boundaries did not.
+        # Logical history was validated above, so advancing the baseline is
+        # sufficient and avoids rejecting another same-boundary compaction.
+        return _RewriteResult(
+            update_messages=[
+                replace(
+                    message,
+                    check_from_snapshot=latest_snapshot.id,
+                )
+                for message in update_messages
+            ],
+            superseded_messages=[],
+            rewritten_file_count=0,
+        )
     if not _ranges_are_still_covered(current_files, candidates):
         return None
 
@@ -424,12 +504,16 @@ def _validate_no_logical_conflict(
         commit.close()
 
 
-def _find_row_id_conflict(error) -> Optional[RowIdExistenceConflict]:
+def _find_row_id_conflict(error) -> Optional[RowIdRebaseConflict]:
+    return _find_error(error, RowIdRebaseConflict)
+
+
+def _find_error(error, error_type):
     seen = set()
     current = error
     while current is not None and id(current) not in seen:
         seen.add(id(current))
-        if isinstance(current, RowIdExistenceConflict):
+        if isinstance(current, error_type):
             return current
         current = (
             getattr(current, "cause", None)
