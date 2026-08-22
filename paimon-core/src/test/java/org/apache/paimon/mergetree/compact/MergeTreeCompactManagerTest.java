@@ -584,6 +584,11 @@ public class MergeTreeCompactManagerTest {
                     extractFilesFromSections(sections),
                     Collections.singletonList(newFile(outputLevel, minKey, maxKey, maxSequence)));
         }
+
+        @Override
+        public void deleteProduced(List<DataFileMeta> files) {
+            // the output of this rewriter is not backed by real files
+        }
     }
 
     private static class LevelMinMax {

@@ -59,12 +59,17 @@ public class FileRewriteCompactTask extends CompactTask {
 
     @Override
     protected CompactResult doCompact() throws Exception {
-        CompactResult result = new CompactResult();
+        CompactResult result = produced();
         for (DataFileMeta file : files) {
             rewriteFile(file, result);
         }
         result.setDeletionFile(compactDfSupplier.get());
         return result;
+    }
+
+    @Override
+    protected void deleteProduced(List<DataFileMeta> producedFiles) {
+        rewriter.deleteProduced(producedFiles);
     }
 
     private void rewriteFile(DataFileMeta file, CompactResult toUpdate) throws Exception {

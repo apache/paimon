@@ -363,8 +363,11 @@ public class TestFileStore extends KeyValueFileStore {
                 .forEach(
                         w -> {
                             try {
-                                // wait for compaction to end, otherwise orphan files may occur
-                                // see CompactManager#cancelCompaction for more info
+                                // Wait for compaction to end before closing. Closing cancels an
+                                // in-flight compaction and returns as soon as its future is
+                                // cancelled, while the compaction thread is still unwinding and
+                                // holding its readers open, which makes the assertions on open
+                                // streams of the tests racy.
                                 w.sync();
                                 w.close();
                             } catch (Exception e) {

@@ -23,6 +23,7 @@ import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.SortEngine;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.compact.CompactResult;
+import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
@@ -43,8 +44,10 @@ import org.apache.paimon.mergetree.compact.AbstractCompactRewriter;
 import org.apache.paimon.mergetree.compact.CompactRewriter;
 import org.apache.paimon.mergetree.compact.CompactStrategy;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.paimon.mergetree.compact.FileRewriteCompactTask;
 import org.apache.paimon.mergetree.compact.IntervalPartition;
 import org.apache.paimon.mergetree.compact.MergeTreeCompactManager;
+import org.apache.paimon.mergetree.compact.MergeTreeCompactRewriter;
 import org.apache.paimon.mergetree.compact.ReducerMergeFunctionWrapper;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -85,6 +88,7 @@ import java.util.TreeMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -92,6 +96,7 @@ import static java.util.Collections.singletonList;
 import static org.apache.paimon.mergetree.compact.UniversalCompactionTest.ofTesting;
 import static org.apache.paimon.utils.FileStorePathFactoryTest.createNonPartFactory;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link MergeTreeReaders} and {@link MergeTreeWriter}. */
 public abstract class MergeTreeTestBase {
@@ -323,6 +328,63 @@ public abstract class MergeTreeTestBase {
 
     interface RunnableWithException {
         void run() throws Exception;
+    }
+
+    @Test
+    public void testDiscardedCompactionDeletesTheFilesItProduced() throws Exception {
+        List<DataFileMeta> inputs = generateDataFileToCommit();
+        assertThat(inputs.size()).isGreaterThan(1);
+
+        // Rewrite the first input file successfully and fail on the second one, so that the files
+        // written by the finished step are only reachable through the accumulated result of the
+        // task.
+        AtomicInteger rewrites = new AtomicInteger();
+        List<DataFileMeta> produced = new ArrayList<>();
+        // the production rewriter, so that the deletion really goes through its writer factory
+        CompactRewriter rewriter =
+                new MergeTreeCompactRewriter(
+                        compactReaderFactory,
+                        compactWriterFactory,
+                        comparator,
+                        null,
+                        DeduplicateMergeFunction.factory(),
+                        new MergeSorter(options, null, null, null)) {
+                    @Override
+                    public CompactResult rewrite(
+                            int outputLevel, boolean dropDelete, List<List<SortedRun>> sections)
+                            throws Exception {
+                        if (rewrites.getAndIncrement() > 0) {
+                            throw new IOException("mock a failure in a later step");
+                        }
+                        CompactResult result = super.rewrite(outputLevel, dropDelete, sections);
+                        produced.addAll(result.after());
+                        return result;
+                    }
+                };
+
+        FileRewriteCompactTask task =
+                new FileRewriteCompactTask(
+                        rewriter,
+                        CompactUnit.fromFiles(options.numLevels() - 1, inputs, true),
+                        false,
+                        null,
+                        () -> null,
+                        "");
+        assertThatThrownBy(task::call).hasMessageContaining("mock a failure in a later step");
+
+        LocalFileIO fileIO = LocalFileIO.create();
+        assertThat(produced).isNotEmpty();
+        for (DataFileMeta file : produced) {
+            assertThat(fileIO.exists(pathOf(file))).isFalse();
+        }
+        // the inputs are still required by the previous snapshots
+        for (DataFileMeta file : inputs) {
+            assertThat(fileIO.exists(pathOf(file))).isTrue();
+        }
+    }
+
+    private Path pathOf(DataFileMeta file) {
+        return writerFactory.pathFactory(file.level()).toPath(file);
     }
 
     @ParameterizedTest
@@ -630,6 +692,11 @@ public abstract class MergeTreeTestBase {
             writer.write(new RecordReaderIterator<>(reader));
             writer.close();
             return new CompactResult(extractFilesFromSections(sections), writer.result());
+        }
+
+        @Override
+        public void deleteProduced(List<DataFileMeta> files) {
+            files.forEach(writerFactory::deleteFile);
         }
     }
 

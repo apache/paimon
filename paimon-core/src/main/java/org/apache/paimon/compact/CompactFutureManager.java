@@ -20,9 +20,12 @@ package org.apache.paimon.compact;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 
+import javax.annotation.Nullable;
+
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 
 /** Base implementation of {@link CompactManager} which runs compaction in a separate thread. */
@@ -30,10 +33,22 @@ public abstract class CompactFutureManager implements CompactManager {
 
     protected Future<CompactResult> taskFuture;
 
+    @Nullable private CompactTask task;
+
+    protected void submitTask(ExecutorService executor, CompactTask task) {
+        this.task = task;
+        this.taskFuture = executor.submit(task);
+    }
+
     @Override
     public void cancelCompaction() {
-        // TODO this method may leave behind orphan files if compaction is actually finished
-        //  but some CPU work still needs to be done
+        if (task != null) {
+            // Tell the task that its output is not needed anymore before interrupting it, so that
+            // it deletes the files it produced no matter whether it observes the interruption.
+            // See CompactTask#cancel for the invariant that this must not be followed by
+            // prepareCommit on the same writer/maintainer.
+            task.cancel();
+        }
         if (taskFuture != null && !taskFuture.isCancelled()) {
             taskFuture.cancel(true);
         }
@@ -48,15 +63,21 @@ public abstract class CompactFutureManager implements CompactManager {
             throws ExecutionException, InterruptedException {
         if (taskFuture != null) {
             if (blocking || taskFuture.isDone()) {
-                CompactResult result;
+                CompactTask currentTask = task;
                 try {
-                    result = obtainCompactResult();
+                    return Optional.of(obtainCompactResult());
                 } catch (CancellationException e) {
-                    return Optional.empty();
+                    // Cancellation may have won the race against the completion of the task, in
+                    // which case the future has dropped a result whose files are already on disk.
+                    // Report it so that the caller can account for them. If the task instead
+                    // observed the cancellation, it has deleted its own output and there is
+                    // nothing to report here.
+                    return Optional.ofNullable(
+                            currentTask == null ? null : currentTask.completedResult());
                 } finally {
                     taskFuture = null;
+                    task = null;
                 }
-                return Optional.of(result);
             }
         }
         return Optional.empty();

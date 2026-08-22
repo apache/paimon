@@ -109,7 +109,18 @@ public class BucketedAppendFileStoreWrite extends BaseAppendFileStoreWrite {
                     options.sortedRunSizeRatio(),
                     options.numSortedRunCompactionTrigger(),
                     options.numLevels(),
-                    files -> clusterRewrite(partition, bucket, files));
+                    new BucketedAppendClusterManager.CompactRewriter() {
+                        @Override
+                        public List<DataFileMeta> rewrite(List<DataFileMeta> toCluster)
+                                throws Exception {
+                            return clusterRewrite(partition, bucket, toCluster);
+                        }
+
+                        @Override
+                        public void delete(List<DataFileMeta> files) {
+                            deleteFiles(partition, bucket, files);
+                        }
+                    });
         } else {
             Function<String, DeletionVector> dvFactory =
                     dvMaintainer != null
@@ -123,7 +134,18 @@ public class BucketedAppendFileStoreWrite extends BaseAppendFileStoreWrite {
                     options.targetFileSize(false),
                     options.compactionFileSize(false),
                     options.forceRewriteAllFiles(),
-                    files -> compactRewrite(partition, bucket, dvFactory, files),
+                    new BucketedAppendCompactManager.CompactRewriter() {
+                        @Override
+                        public List<DataFileMeta> rewrite(List<DataFileMeta> toCompact)
+                                throws Exception {
+                            return compactRewrite(partition, bucket, dvFactory, toCompact);
+                        }
+
+                        @Override
+                        public void delete(List<DataFileMeta> files) {
+                            deleteFiles(partition, bucket, files);
+                        }
+                    },
                     compactionMetrics == null
                             ? null
                             : compactionMetrics.createReporter(partition, bucket));

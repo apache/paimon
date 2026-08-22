@@ -53,4 +53,10 @@ public interface CompactRewriter extends Closeable {
      * @throws Exception exception
      */
     CompactResult upgrade(int outputLevel, DataFileMeta file) throws Exception;
+
+    /**
+     * Delete files produced by this rewriter, used when a compaction result is discarded and its
+     * files can never be committed.
+     */
+    void deleteProduced(List<DataFileMeta> files);
 }

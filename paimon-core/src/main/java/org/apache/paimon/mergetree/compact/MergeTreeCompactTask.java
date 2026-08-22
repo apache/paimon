@@ -82,7 +82,7 @@ public class MergeTreeCompactTask extends CompactTask {
     @Override
     protected CompactResult doCompact() throws Exception {
         List<List<SortedRun>> candidate = new ArrayList<>();
-        CompactResult result = new CompactResult();
+        CompactResult result = produced();
 
         // Checking the order and compacting adjacent and contiguous files
         // Note: can't skip an intermediate file to compact, this will destroy the overall
@@ -111,6 +111,11 @@ public class MergeTreeCompactTask extends CompactTask {
         rewrite(candidate, result);
         result.setDeletionFile(compactDfSupplier.get());
         return result;
+    }
+
+    @Override
+    protected void deleteProduced(List<DataFileMeta> files) {
+        rewriter.deleteProduced(files);
     }
 
     @Override

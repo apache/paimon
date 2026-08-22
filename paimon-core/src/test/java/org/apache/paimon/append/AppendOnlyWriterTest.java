@@ -192,7 +192,7 @@ public class AppendOnlyWriterTest {
                                 true,
                                 true,
                                 Collections.emptyList(),
-                                compactBefore -> Collections.emptyList(),
+                                rewriter(compactBefore -> Collections.emptyList()),
                                 options)
                         .getKey();
 
@@ -1221,12 +1221,14 @@ public class AppendOnlyWriterTest {
                 spillable,
                 hasIoManager,
                 scannedFiles,
-                compactBefore -> {
-                    latch.await();
-                    return compactBefore.isEmpty()
-                            ? Collections.emptyList()
-                            : Collections.singletonList(generateCompactAfter(compactBefore));
-                },
+                rewriter(
+                        compactBefore -> {
+                            latch.await();
+                            return compactBefore.isEmpty()
+                                    ? Collections.emptyList()
+                                    : Collections.singletonList(
+                                            generateCompactAfter(compactBefore));
+                        }),
                 options);
     }
 
@@ -1244,9 +1246,29 @@ public class AppendOnlyWriterTest {
                         false,
                         true,
                         Collections.emptyList(),
-                        compactBefore -> Collections.emptyList(),
+                        rewriter(compactBefore -> Collections.emptyList()),
                         options)
                 .getKey();
+    }
+
+    /**
+     * A rewrite function whose output is not backed by real files, so nothing has to be deleted.
+     */
+    @FunctionalInterface
+    private interface Rewrite {
+        List<DataFileMeta> rewrite(List<DataFileMeta> compactBefore) throws Exception;
+    }
+
+    private static BucketedAppendCompactManager.CompactRewriter rewriter(Rewrite rewrite) {
+        return new BucketedAppendCompactManager.CompactRewriter() {
+            @Override
+            public List<DataFileMeta> rewrite(List<DataFileMeta> compactBefore) throws Exception {
+                return rewrite.rewrite(compactBefore);
+            }
+
+            @Override
+            public void delete(List<DataFileMeta> files) {}
+        };
     }
 
     private Pair<AppendOnlyWriter, List<DataFileMeta>> createWriterBase(
