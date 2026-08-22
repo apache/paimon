@@ -1573,11 +1573,13 @@ trait MergeIntoPrimaryKeyTableTest extends PaimonSparkTestBase with PaimonPrimar
    * later at read time in `PartialUpdateMergeFunction#add`.
    */
   test("Paimon MergeInto: reject DELETE clause when the merge engine can not accept deletes") {
-    Seq(
-      "WHEN MATCHED THEN DELETE",
-      "WHEN MATCHED AND target.b > 0 THEN DELETE",
-      "WHEN NOT MATCHED BY SOURCE THEN DELETE"
-    ).foreach {
+    val deleteClauses =
+      Seq("WHEN MATCHED THEN DELETE", "WHEN MATCHED AND target.b > 0 THEN DELETE") ++
+        // `WHEN NOT MATCHED BY SOURCE` was only added to Spark's parser in 3.4; on 3.2/3.3 the
+        // statement fails to parse before it ever reaches the analysis rule under test.
+        (if (gteqSpark3_4) Seq("WHEN NOT MATCHED BY SOURCE THEN DELETE") else Nil)
+
+    deleteClauses.foreach {
       deleteClause =>
         withTable("source", "target") {
           Seq((1, 100, "c11")).toDF("a", "b", "c").createOrReplaceTempView("source")
