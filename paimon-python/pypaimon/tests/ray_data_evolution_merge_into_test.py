@@ -2249,7 +2249,8 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             ['imu-yz-negated-v1'] * 4,
         )
         self.assertTrue(stale_paths)
-        self.assertTrue(all(not os.path.exists(path) for path in stale_paths))
+        # Match Spark: replaced staging files are left for orphan cleanup.
+        self.assertTrue(all(os.path.exists(path) for path in stale_paths))
 
     def test_self_merge_compaction_retry_is_not_nested(self):
         from pypaimon.ray import data_evolution_merge_into as merge_module
@@ -2442,8 +2443,9 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(output['id'], [30, 40])
         self.assertEqual(output['age'], [30, 40])
         self.assertTrue(staging_paths)
+        # Match Spark: failed staging files are left for orphan cleanup.
         self.assertTrue(
-            all(not os.path.exists(path) for path in staging_paths)
+            all(os.path.exists(path) for path in staging_paths)
         )
 
     @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)

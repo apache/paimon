@@ -86,7 +86,6 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
             'pypaimon.ray.row_id_conflict_rewriter._rewrite_updates',
             return_value=Mock(
                 update_messages=[],
-                superseded_messages=[object()],
                 rewritten_file_count=1,
             ),
         ) as rewrite_updates, patch(
@@ -116,7 +115,7 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
 
         self.assertIs(uncertain, context.exception)
 
-    def test_uncertain_final_generation_only_aborts_superseded_messages(self):
+    def test_uncertain_final_generation_does_not_abort_messages(self):
         generation_0 = self._message(1, 'generation-0')
         generation_1 = self._message(2, 'generation-1')
         generation_2 = self._message(3, 'generation-2')
@@ -139,12 +138,10 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
             side_effect=[
                 Mock(
                     update_messages=[generation_1],
-                    superseded_messages=[generation_0],
                     rewritten_file_count=1,
                 ),
                 Mock(
                     update_messages=[generation_2],
-                    superseded_messages=[generation_1],
                     rewritten_file_count=1,
                 ),
             ],
@@ -163,12 +160,9 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
             )
 
         self.assertIs(uncertain, context.exception)
-        abort_messages.assert_called_once_with(
-            table,
-            [generation_0, generation_1],
-        )
+        abort_messages.assert_not_called()
 
-    def test_exhausted_deterministic_conflict_aborts_every_generation(self):
+    def test_exhausted_deterministic_conflict_does_not_abort_messages(self):
         generation_0 = self._message(1, 'generation-0')
         generation_1 = self._message(2, 'generation-1')
         other = self._message(-1, 'insert')
@@ -188,7 +182,6 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
             'pypaimon.ray.row_id_conflict_rewriter._rewrite_updates',
             return_value=Mock(
                 update_messages=[generation_1],
-                superseded_messages=[generation_0],
                 rewritten_file_count=1,
             ),
         ), patch(
@@ -206,12 +199,9 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
             )
 
         self.assertIs(terminal, context.exception)
-        abort_messages.assert_called_once_with(
-            table,
-            [generation_0, generation_1, other],
-        )
+        abort_messages.assert_not_called()
 
-    def test_unknown_final_error_only_aborts_superseded_messages(self):
+    def test_unknown_final_error_does_not_abort_messages(self):
         generation_0 = self._message(1, 'generation-0')
         generation_1 = self._message(2, 'generation-1')
         other = self._message(-1, 'insert')
@@ -227,7 +217,6 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
             'pypaimon.ray.row_id_conflict_rewriter._rewrite_updates',
             return_value=Mock(
                 update_messages=[generation_1],
-                superseded_messages=[generation_0],
                 rewritten_file_count=1,
             ),
         ), patch(
@@ -243,7 +232,7 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
             )
 
         self.assertIs(unknown, context.exception)
-        abort_messages.assert_called_once_with(table, [generation_0])
+        abort_messages.assert_not_called()
 
 
 if __name__ == '__main__':
