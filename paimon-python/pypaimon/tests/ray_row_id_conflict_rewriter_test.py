@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import importlib.util
 import unittest
 from unittest.mock import Mock, patch
 
@@ -114,6 +115,64 @@ class RayRowIdConflictRewriterTest(unittest.TestCase):
             _reraise_inner(uncertain)
 
         self.assertIs(uncertain, context.exception)
+
+    def test_public_error_does_not_unwrap_regular_cause(self):
+        timeout = TimeoutError('commit timeout')
+        outer = RuntimeError('commit result is uncertain')
+        outer.__cause__ = timeout
+
+        with self.assertRaises(RuntimeError) as context:
+            _reraise_inner(outer)
+
+        self.assertIs(outer, context.exception)
+
+    @unittest.skipUnless(
+        importlib.util.find_spec('ray') is not None,
+        'Ray is not installed.',
+    )
+    def test_public_error_unwraps_ray_task_error(self):
+        from ray.exceptions import RayTaskError
+
+        cause = ValueError('worker failure')
+        ray_error = RayTaskError(
+            'worker',
+            'Traceback (most recent call last):\nValueError: worker failure',
+            cause,
+            proctitle='ray::worker',
+            pid=1,
+            ip='127.0.0.1',
+        ).as_instanceof_cause()
+
+        with self.assertRaises(ValueError) as context:
+            _reraise_inner(ray_error)
+
+        self.assertIs(cause, context.exception)
+
+    @unittest.skipUnless(
+        importlib.util.find_spec('ray') is not None,
+        'Ray is not installed.',
+    )
+    def test_ray_task_error_stops_at_uncertain_commit(self):
+        from ray.exceptions import RayTaskError
+
+        timeout = TimeoutError('commit timeout')
+        uncertain = CommitResultUncertainError('uncertain commit')
+        uncertain.__cause__ = timeout
+        ray_error = RayTaskError(
+            'worker',
+            'Traceback (most recent call last):\n'
+            'CommitResultUncertainError: uncertain commit',
+            uncertain,
+            proctitle='ray::worker',
+            pid=1,
+            ip='127.0.0.1',
+        ).as_instanceof_cause()
+
+        with self.assertRaises(CommitResultUncertainError) as context:
+            _reraise_inner(ray_error)
+
+        self.assertIs(uncertain, context.exception)
+        self.assertIs(timeout, context.exception.__cause__)
 
     def test_uncertain_final_generation_does_not_abort_messages(self):
         generation_0 = self._message(1, 'generation-0')
