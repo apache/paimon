@@ -227,9 +227,57 @@ class RayUpdateByRowIdTest(unittest.TestCase):
 
         self.assertEqual(stats, {"num_updated": 3})
         self.assertEqual([result for _, result in resolved], [3])
-        self.assertGreater(resolved[0][0][1], 0)
-        self.assertEqual(resolved[0][0][2:], (3, 3))
+        self.assertEqual(resolved[0][0][1:], (None, None, 3))
         self.assertEqual(self._read(target).column("age").to_pylist(), [99] * 3)
+
+    def test_expanding_transform_keeps_target_parallelism(self):
+        import pypaimon.ray.data_evolution_merge_join as merge_join
+
+        target = self._create()
+        for value in range(3):
+            self._write(target, pa.Table.from_pydict(
+                {"id": [value], "name": ["n{}".format(value)], "age": [0]},
+                schema=self.pa_schema,
+            ))
+
+        rows = read_paimon(
+            target,
+            self.catalog_options,
+            projection=["_ROW_ID"],
+        ).take_all()
+        row_ids = [row["_ROW_ID"] for row in rows]
+        source = ray.data.from_arrow(pa.table({"seed": [0]})).map_batches(
+            lambda batch: pa.table({
+                "_ROW_ID": pa.array(row_ids, type=pa.int64()),
+                "age": pa.array([77] * len(row_ids), type=pa.int32()),
+            }),
+            batch_format="pyarrow",
+        )
+        real_resolve = merge_join._resolve_row_id_num_partitions
+        resolved = []
+
+        def track_resolve(*args, **kwargs):
+            result = real_resolve(*args, **kwargs)
+            resolved.append((args, result))
+            return result
+
+        with mock.patch(
+            "ray.cluster_resources", return_value={"CPU": 320}
+        ), mock.patch.object(
+            merge_join,
+            "_resolve_row_id_num_partitions",
+            side_effect=track_resolve,
+        ):
+            stats = update_by_row_id(
+                target,
+                source,
+                self.catalog_options,
+                update_cols=["age"],
+            )
+
+        self.assertEqual(stats, {"num_updated": 3})
+        self.assertEqual(resolved, [((None, None, None, 3), 3)])
+        self.assertEqual(self._read(target).column("age").to_pylist(), [77] * 3)
 
     def test_new_commit_failure_preserves_pending_messages(self):
         err = RuntimeError("new_commit failed")

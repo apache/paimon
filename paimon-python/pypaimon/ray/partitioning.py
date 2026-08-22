@@ -79,6 +79,9 @@ def _estimate_dataset_metadata(dataset, field: str) -> Optional[int]:
                 value = getattr(infer_metadata(), field, None)
                 if value is not None and int(value) >= 0:
                     return int(value)
+            # Only inherit through transforms Ray marks row-count preserving.
+            if getattr(operator, "can_modify_num_rows", True):
+                return None
             dependencies = getattr(operator, "input_dependencies", ())
             operator = dependencies[0] if len(dependencies) == 1 else None
     except Exception:
@@ -109,6 +112,8 @@ def _resolve_row_id_num_partitions(
     if estimated_num_rows is not None:
         possible_groups = min(possible_groups, max(1, estimated_num_rows))
     min_partitions = min(max(1, default_shuffle), possible_groups)
+    if estimated_size_bytes is None:
+        return min(_resolve_num_partitions(None), min_partitions)
     return _resolve_num_partitions(
         None,
         estimated_size_bytes,

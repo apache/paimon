@@ -117,7 +117,9 @@ class RayPartitioningTest(unittest.TestCase):
 
         self.assertIsNone(_estimate_dataset_size_bytes(dataset))
 
-    def test_ray_metadata_falls_back_to_unary_input(self):
+    def test_ray_metadata_respects_transform_cardinality(self):
+        import inspect
+
         import ray
 
         dataset = ray.data.from_arrow(pa.table({"id": [1, 2]}))
@@ -125,8 +127,18 @@ class RayPartitioningTest(unittest.TestCase):
         self.assertEqual(_estimate_dataset_num_rows(dataset), 2)
 
         mapped = dataset.map_batches(lambda batch: batch)
-        self.assertEqual(_estimate_dataset_size_bytes(mapped), 16)
-        self.assertEqual(_estimate_dataset_num_rows(mapped), 2)
+        self.assertIsNone(_estimate_dataset_size_bytes(mapped))
+        self.assertIsNone(_estimate_dataset_num_rows(mapped))
+
+        if "udf_modifying_row_count" in inspect.signature(
+            ray.data.Dataset.map_batches
+        ).parameters:
+            one_to_one = dataset.map_batches(
+                lambda batch: batch,
+                udf_modifying_row_count=False,
+            )
+            self.assertEqual(_estimate_dataset_size_bytes(one_to_one), 16)
+            self.assertEqual(_estimate_dataset_num_rows(one_to_one), 2)
 
     def test_sparse_row_ids_keep_shuffle_parallelism(self):
         with mock.patch(
@@ -134,6 +146,10 @@ class RayPartitioningTest(unittest.TestCase):
         ):
             self.assertEqual(
                 _resolve_row_id_num_partitions(None, 4096, 500, 500),
+                200,
+            )
+            self.assertEqual(
+                _resolve_row_id_num_partitions(None, None, None, 500),
                 200,
             )
             self.assertEqual(
