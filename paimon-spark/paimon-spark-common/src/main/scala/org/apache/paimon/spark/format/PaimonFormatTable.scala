@@ -367,20 +367,30 @@ case class PaimonFormatTableWriterBuilder(table: FormatTable, writeSchema: Struc
 
   override def partitionRowType(): RowType = table.partitionType
 
-  override def build: Write = new Write with RequiresDistributionAndOrdering {
-    private val writeRequirement = PaimonWriteRequirement(table)
-
-    override def requiredDistribution(): Distribution = writeRequirement.distribution
-
-    override def requiredOrdering(): Array[SortOrder] = writeRequirement.ordering
-
-    override def toBatch: BatchWrite = {
-      SparkShimLoader.shim
-        .createFormatTableBatchWrite(table, overwriteDynamic, overwritePartitions, writeSchema)
+  override def build: Write = {
+    // Which partitions an overwrite replaces is the table option's call, the same as for a data
+    // table. Carrying the mode Spark resolved into that option is what keeps a `STATIC` overwrite
+    // from being served as if it were `DYNAMIC`.
+    val writeTable = overwriteDynamic match {
+      case Some(dynamic) =>
+        table.copy(Map(CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key -> dynamic.toString).asJava)
+      case None => table
     }
+    new Write with RequiresDistributionAndOrdering {
+      private val writeRequirement = PaimonWriteRequirement(writeTable)
 
-    override def toStreaming: StreamingWrite = {
-      throw new UnsupportedOperationException("FormatTable doesn't support streaming write")
+      override def requiredDistribution(): Distribution = writeRequirement.distribution
+
+      override def requiredOrdering(): Array[SortOrder] = writeRequirement.ordering
+
+      override def toBatch: BatchWrite = {
+        SparkShimLoader.shim
+          .createFormatTableBatchWrite(writeTable, overwritePartitions, writeSchema)
+      }
+
+      override def toStreaming: StreamingWrite = {
+        throw new UnsupportedOperationException("FormatTable doesn't support streaming write")
+      }
     }
   }
 }

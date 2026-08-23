@@ -1541,9 +1541,9 @@ class TableWriteTest(unittest.TestCase):
             commit_two.close()
             commit_three.close()
 
-    def test_uncertain_commit_then_cas_failure_keeps_files(self):
+    def test_uncertain_commit_with_unavailable_snapshot_fails_closed(self):
         table = self._create_postpone_table(
-            'default.test_uncertain_commit_then_cas_failure',
+            'default.test_uncertain_commit_with_unavailable_snapshot',
             pa_schema=self.postpone_pa_schema,
             partition_keys=['dt'],
             primary_keys=['id', 'dt'],
@@ -1588,7 +1588,6 @@ class TableWriteTest(unittest.TestCase):
             def hide_first_snapshot(snapshot_id):
                 return None if snapshot_id == 1 else real_get_snapshot(snapshot_id)
 
-            # Keep the retry on the CAS path after snapshot 1 becomes unavailable.
             with patch.object(
                 snapshot_commit,
                 'commit',
@@ -1601,15 +1600,20 @@ class TableWriteTest(unittest.TestCase):
                 file_store_commit.conflict_detection,
                 'check_conflicts',
                 return_value=None,
-            ), patch.object(file_store_commit, '_commit_retry_wait'):
-                with self.assertRaises(RuntimeError) as context:
+            ) as check_conflicts, patch.object(
+                file_store_commit,
+                '_commit_retry_wait',
+            ):
+                with self.assertRaisesRegex(
+                        RuntimeError, 'snapshot 1 cannot be found'):
                     commit.commit(messages)
 
-            self.assertIs(uncertain_error, context.exception.__cause__)
-            self.assertEqual(2, attempts)
+            self.assertEqual(1, attempts)
+            check_conflicts.assert_called_once()
             self.assertTrue(all(table.file_io.exists(path) for path in data_paths))
             self.assertEqual(
-                [1, 2], self._read_sorted(table, 'id').column('id').to_pylist()
+                [1, 2], self._read_sorted(
+                    table, 'id').column('id').to_pylist()
             )
         finally:
             write.close()

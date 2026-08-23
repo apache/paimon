@@ -494,6 +494,8 @@ def _execute_and_commit(
     num_deleted = 0
     delete_row_ids = []
     num_inserted = 0
+    insert_msgs: list = []
+    self_merge_update = isinstance(update_ds, _SelfMergeUpdatePlan)
     update_num_partitions = (
         num_partitions
         if update_num_partitions is None
@@ -562,20 +564,32 @@ def _execute_and_commit(
 
         all_msgs: list = list(commit_messages)
         if all_msgs:
-            table_commit = None
-            try:
-                table_commit = table.new_batch_write_builder().new_commit()
-                table_commit.commit(all_msgs)
-            finally:
-                if table_commit is not None:
-                    try:
-                        table_commit.close()
-                    except Exception as close_error:
-                        logger.warning(
-                            "Failed to close merge_into commit: %s",
-                            close_error,
-                            exc_info=close_error,
-                        )
+            if self_merge_update and update_msgs:
+                from pypaimon.ray.row_id_conflict_rewriter import (
+                    commit_self_merge_with_compaction_retry,
+                )
+                commit_self_merge_with_compaction_retry(
+                    table,
+                    update_msgs,
+                    delete_msgs + insert_msgs,
+                    num_partitions=num_partitions,
+                    ray_remote_args=ray_remote_args,
+                )
+            else:
+                table_commit = None
+                try:
+                    table_commit = table.new_batch_write_builder().new_commit()
+                    table_commit.commit(all_msgs)
+                finally:
+                    if table_commit is not None:
+                        try:
+                            table_commit.close()
+                        except Exception as close_error:
+                            logger.warning(
+                                "Failed to close merge_into commit: %s",
+                                close_error,
+                                exc_info=close_error,
+                            )
     except Exception as e:
         _reraise_inner(e)
 
@@ -624,14 +638,22 @@ def _require_ray_join() -> None:
 
 
 def _reraise_inner(err: BaseException) -> None:
-    """Unwrap Ray's RayTaskError so callers see the worker-side exception."""
+    """Unwrap only RayTaskError layers and preserve ordinary exception chains."""
+    try:
+        from ray.exceptions import RayTaskError
+    except ImportError:
+        raise err
+
     inner = err
-    cause = getattr(err, "cause", None) or getattr(err, "__cause__", None)
-    while cause is not None:
+    while isinstance(inner, RayTaskError):
+        cause = getattr(inner, "cause", None)
+        if cause is None or cause is inner:
+            break
         inner = cause
-        cause = getattr(inner, "cause", None) or getattr(inner, "__cause__", None)
     if inner is err:
         raise err
+    if getattr(inner, "__cause__", None) is not None:
+        raise inner
     raise inner from err
 
 

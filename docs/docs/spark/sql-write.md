@@ -123,6 +123,14 @@ SELECT * FROM my_table;
 */
 ```
 
+A Format Table read through Paimon (`format-table.implementation = paimon`, the default) follows
+the same rule. An `INSERT OVERWRITE` that names no partition replaces the whole table, so a
+partition the query does not write is replaced too, and a query that returns no rows leaves the
+table empty; `dynamic` mode replaces only the partitions written, and writing nothing then replaces
+nothing. With `metastore.partitioned-table = true` the catalog is the answer to which partitions
+the table has, so overwriting the whole table empties those and leaves a directory still waiting
+for `MSCK REPAIR TABLE` alone.
+
 ## Truncate Table
 
 The `TRUNCATE TABLE` statement removes all the rows from a table or partition(s).

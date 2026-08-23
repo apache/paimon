@@ -151,7 +151,6 @@ trait SparkShim {
   /** Same `BatchWrite` mixin problem as [[createPaimonBatchWrite]], but for `FormatTable` writes. */
   def createFormatTableBatchWrite(
       table: FormatTable,
-      overwriteDynamic: Option[Boolean],
       overwritePartitions: Option[Map[String, String]],
       writeSchema: StructType): BatchWrite
 

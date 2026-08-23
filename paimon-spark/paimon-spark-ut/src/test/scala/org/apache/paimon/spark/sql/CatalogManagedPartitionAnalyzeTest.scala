@@ -25,6 +25,8 @@ import org.apache.paimon.spark.PaimonSparkTestWithRestCatalogBase
 import org.apache.paimon.table.FormatTable
 
 import org.apache.spark.sql.catalyst.analysis.NoSuchPartitionException
+import org.apache.spark.sql.catalyst.optimizer.BuildRight
+import org.apache.spark.sql.execution.joins.{BroadcastHashJoinExec, SortMergeJoinExec}
 
 import java.util.Locale
 
@@ -333,6 +335,136 @@ class CatalogManagedPartitionAnalyzeTest extends PaimonSparkTestWithRestCatalogB
       assert(listed.fileCount() >= 1L, listed.toString)
       assert(listed.fileSizeInBytes() > 0L, listed.toString)
       assert(!PartitionStatistics.isKnown(listed.recordCount()), listed.toString)
+    }
+  }
+
+  test("catalog partition row counts feed scan statistics after partition pruning") {
+    val tableName = "analyze_scan_statistics"
+    withTable(tableName) {
+      createTable(tableName)
+      sql(s"""INSERT INTO ${qualified(tableName)} VALUES
+             |(1, 'a', '20260101', '00'),
+             |(2, 'b', '20260101', '00'),
+             |(3, 'c', '20260102', '00')
+             |""".stripMargin)
+
+      val all = getFormatTableScan(s"SELECT * FROM ${qualified(tableName)}")
+      assert(all.estimateStatistics.numRows().getAsLong == 3L)
+
+      val pruned =
+        getFormatTableScan(s"SELECT * FROM ${qualified(tableName)} WHERE dt = '20260101'")
+      assert(pruned.estimateStatistics.numRows().getAsLong == 2L)
+    }
+  }
+
+  test("one unknown selected partition makes scan row count unknown") {
+    val tableName = "analyze_partial_scan_statistics"
+    withTable(tableName) {
+      createTable(tableName)
+      sql(
+        s"INSERT INTO ${qualified(tableName)} VALUES " +
+          s"(1, 'known', '20260101', '00')")
+      writeCsvPartition(tableName, "20260102", "00", 2)
+      repair(tableName)
+
+      val known = getFormatTableScan(s"SELECT * FROM ${qualified(tableName)} WHERE dt = '20260101'")
+      assert(known.estimateStatistics.numRows().getAsLong == 1L)
+
+      val partiallyUnknown =
+        getFormatTableScan(s"SELECT * FROM ${qualified(tableName)}").estimateStatistics
+      assert(!partiallyUnknown.numRows().isPresent)
+    }
+  }
+
+  test("partition row count is not duplicated across format data splits") {
+    val tableName = "analyze_multi_split_statistics"
+    withTable(tableName) {
+      sql(s"""CREATE TABLE $tableName (id INT, payload STRING, dt STRING, hour STRING)
+             |USING CSV
+             |PARTITIONED BY (dt, hour)
+             |TBLPROPERTIES (
+             |  'format-table.implementation' = 'paimon',
+             |  'metastore.partitioned-table' = 'true',
+             |  'source.split.target-size' = '1 B')
+             |""".stripMargin)
+      sql(s"""INSERT INTO ${qualified(tableName)} VALUES
+             |(1, 'one', '20260101', '00'),
+             |(2, 'two', '20260101', '00'),
+             |(3, 'three', '20260101', '00')
+             |""".stripMargin)
+
+      val scan = getFormatTableScan(s"SELECT * FROM ${qualified(tableName)}")
+      assert(scan.inputSplits.length > 1)
+      assert(scan.inputSplits.forall(_.rowCount() == -1L))
+      assert(scan.estimateStatistics.numRows().getAsLong == 3L)
+    }
+  }
+
+  test("TPC-DS-style dimension join uses partition row count to avoid fact-side shuffle") {
+    val tableName = "date_dim_format"
+    withSparkSQLConf(
+      "spark.sql.adaptive.enabled" -> "false",
+      "spark.sql.cbo.enabled" -> "true",
+      "spark.sql.autoBroadcastJoinThreshold" -> "128",
+      "spark.sql.join.preferSortMergeJoin" -> "true"
+    ) {
+      withTable(tableName) {
+        sql(s"""CREATE TABLE $tableName (id INT, payload STRING, dt STRING, hour STRING)
+               |USING PARQUET
+               |PARTITIONED BY (dt, hour)
+               |TBLPROPERTIES (
+               |  'format-table.implementation' = 'paimon',
+               |  'metastore.partitioned-table' = 'true')
+               |""".stripMargin)
+
+        // Keep the physical file above the broadcast threshold while the projected dimension row
+        // is tiny. The first partition is written normally, then copied as if an external writer
+        // had added a new date partition without reporting its row count.
+        val sparkSession = spark
+        import sparkSession.implicits._
+        val payload = new scala.util.Random(42L).alphanumeric.take(256 * 1024).mkString
+        withTempView("date_dim_rows") {
+          Seq((1, payload, "20260101", "00"))
+            .toDF("id", "payload", "dt", "hour")
+            .createOrReplaceTempView("date_dim_rows")
+          sql(s"INSERT INTO ${qualified(tableName)} SELECT * FROM date_dim_rows")
+        }
+        copyPartitionFiles(tableName, "20260101", "20260102")
+        repair(tableName)
+
+        val query =
+          s"""SELECT store_sales.id
+             |FROM range(0, 1000000) store_sales
+             |JOIN ${qualified(tableName)} date_dim
+             |  ON store_sales.id = date_dim.id
+             |WHERE date_dim.dt = '20260102' AND date_dim.hour = '00'
+             |""".stripMargin
+
+        val beforeStats = getFormatTableScan(query).estimateStatistics
+        assert(!beforeStats.numRows().isPresent)
+        val beforePlan = sql(query).queryExecution.executedPlan
+        assert(
+          beforePlan.collectFirst { case join: SortMergeJoinExec => join }.isDefined,
+          beforePlan)
+        assert(
+          beforePlan.collectFirst { case join: BroadcastHashJoinExec => join }.isEmpty,
+          beforePlan)
+
+        sql(
+          s"ANALYZE TABLE ${qualified(tableName)} " +
+            s"PARTITION (dt = '20260102', hour = '00') COMPUTE STATISTICS").collect()
+
+        val afterStats = getFormatTableScan(query).estimateStatistics
+        assert(afterStats.numRows().getAsLong == 1L)
+        val afterQuery = sql(query)
+        val afterPlan = afterQuery.queryExecution.executedPlan
+        val broadcastJoin = afterPlan
+          .collectFirst { case join: BroadcastHashJoinExec => join }
+          .getOrElse(fail(afterPlan.toString))
+          .asInstanceOf[BroadcastHashJoinExec]
+        assert(broadcastJoin.buildSide == BuildRight, afterPlan)
+        checkAnswer(afterQuery, Seq(org.apache.spark.sql.Row(1L)))
+      }
     }
   }
 

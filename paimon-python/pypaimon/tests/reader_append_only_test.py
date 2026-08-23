@@ -32,7 +32,7 @@ from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.row.generic_row import GenericRow
-from pypaimon.write.file_store_commit import RetryResult
+from pypaimon.write.file_store_commit import CommitFailRetryResult
 
 
 class AoReaderTest(unittest.TestCase):
@@ -669,7 +669,7 @@ class AoReaderTest(unittest.TestCase):
                 ))
         # mock retry
         success = table_commit.file_store_commit._try_commit_once(
-            RetryResult(None),
+            CommitFailRetryResult(None),
             "APPEND",
             commit_entries,
             [],
@@ -808,6 +808,26 @@ class AoReaderTest(unittest.TestCase):
             self.expected.slice(7, 1),  # 8/h
         ])
         self.assertEqual(actual.sort_by('user_id'), expected)
+
+    def test_ao_reader_with_large_filter(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
+        self.catalog.create_table('default.test_append_only_large_filter', schema, False)
+        table = self.catalog.get_table('default.test_append_only_large_filter')
+        self._write_test_table(table)
+
+        predicate_builder = table.new_read_builder().new_predicate_builder()
+        predicate = predicate_builder.or_predicates([
+            predicate_builder.equal('user_id', value)
+            for value in list(range(100, 355)) + [2, 6]
+        ])
+        read_builder = table.new_read_builder().with_filter(predicate)
+
+        actual = self._read_test_table(read_builder).sort_by('user_id')
+        expected = pa.concat_tables([
+            self.expected.slice(1, 1),
+            self.expected.slice(5, 1),
+        ])
+        self.assertEqual(actual, expected)
 
     def test_ao_reader_with_projection(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
