@@ -47,6 +47,9 @@ public class ArrayContains extends LeafBinaryFunction {
 
     @Override
     public boolean test(DataType type, Object field, Object literal) {
+        if (field == null || literal == null) {
+            return false;
+        }
         DataType elementType = elementType(type);
         InternalArray array = (InternalArray) field;
         InternalArray.ElementGetter getter = InternalArray.createElementGetter(elementType);
