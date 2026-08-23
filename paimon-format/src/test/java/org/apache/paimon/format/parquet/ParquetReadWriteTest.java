@@ -901,6 +901,78 @@ public class ParquetReadWriteTest {
     }
 
     @Test
+    public void testReadByteStreamSplitWrittenByParquet() throws Exception {
+        Path path = new Path(folder.getPath(), UUID.randomUUID().toString());
+        Configuration conf = new Configuration();
+        MessageType schema =
+                new MessageType(
+                        "origin-parquet",
+                        Types.required(PrimitiveType.PrimitiveTypeName.FLOAT).named("f0").withId(0),
+                        Types.required(PrimitiveType.PrimitiveTypeName.DOUBLE)
+                                .named("f1")
+                                .withId(1),
+                        Types.optional(PrimitiveType.PrimitiveTypeName.FLOAT).named("f2").withId(2),
+                        Types.optional(PrimitiveType.PrimitiveTypeName.DOUBLE)
+                                .named("f3")
+                                .withId(3));
+
+        int size = 8193;
+        try (ParquetWriter<Group> writer =
+                ExampleParquetWriter.builder(
+                                HadoopOutputFile.fromPath(
+                                        new org.apache.hadoop.fs.Path(path.toString()), conf))
+                        .withWriteMode(ParquetFileWriter.Mode.OVERWRITE)
+                        .withConf(conf)
+                        .withType(schema)
+                        .withDictionaryEncoding(false)
+                        .withByteStreamSplitEncoding(true)
+                        .build()) {
+            SimpleGroupFactory groups = new SimpleGroupFactory(schema);
+            for (int i = 1; i <= size; i++) {
+                Group row = groups.newGroup().append("f0", i * 0.1f).append("f1", i * 0.01d);
+                if (i % 3 != 0) {
+                    row.append("f2", i * 0.5f);
+                }
+                if (i % 5 != 0) {
+                    row.append("f3", i * 0.25d);
+                }
+                writer.write(row);
+            }
+        }
+
+        RowType rowType =
+                RowType.of(new FloatType(), new DoubleType(), new FloatType(), new DoubleType());
+        ParquetReaderFactory format = new ParquetReaderFactory(new Options(), rowType, 500, null);
+        AtomicInteger count = new AtomicInteger();
+        try (RecordReader<InternalRow> reader =
+                format.createReader(
+                        new FormatReaderContext(
+                                new LocalFileIO(),
+                                path,
+                                new LocalFileIO().getFileSize(path),
+                                null,
+                                null))) {
+            reader.forEachRemaining(
+                    row -> {
+                        int i = count.incrementAndGet();
+                        assertThat(row.getFloat(0)).isEqualTo(i * 0.1f);
+                        assertThat(row.getDouble(1)).isEqualTo(i * 0.01d);
+                        if (i % 3 == 0) {
+                            assertThat(row.isNullAt(2)).isTrue();
+                        } else {
+                            assertThat(row.getFloat(2)).isEqualTo(i * 0.5f);
+                        }
+                        if (i % 5 == 0) {
+                            assertThat(row.isNullAt(3)).isTrue();
+                        } else {
+                            assertThat(row.getDouble(3)).isEqualTo(i * 0.25d);
+                        }
+                    });
+        }
+        assertThat(count.get()).isEqualTo(size);
+    }
+
+    @Test
     public void testReadTimestampNanosWrittenByParquet() throws Exception {
         Path path = new Path(folder.getPath(), UUID.randomUUID().toString());
         Configuration conf = new Configuration();
