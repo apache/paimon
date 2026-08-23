@@ -221,6 +221,84 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         })
         self.assertEqual(result, 200)
 
+    def test_matched_execution_uses_target_context(self):
+        from pypaimon.ray import data_evolution_merge_into as m
+
+        source_context = Mock(
+            target_max_block_size=512,
+            default_hash_shuffle_parallelism=7,
+        )
+        target_context = Mock(
+            target_max_block_size=128,
+            default_hash_shuffle_parallelism=3,
+        )
+        source_ds = Mock(context=source_context)
+        update_ds = Mock(context=target_context)
+        delete_ds = Mock(context=target_context)
+        ctx = Mock(is_self_merge=False)
+        snapshot = Mock(total_record_count=1)
+        table = Mock()
+        table.snapshot_manager().get_latest_snapshot.return_value = snapshot
+
+        with patch.object(
+                m, '_prepare',
+                return_value=(table, source_ds, [], [], ctx),
+        ), patch.object(
+                m, '_estimate_merge_input_size_bytes', return_value=512,
+        ), patch.object(
+                m, '_build_datasets',
+                return_value=(update_ds, delete_ds, None, ['age']),
+        ) as build_datasets, patch.object(
+                m, 'distributed_update_apply', return_value=([], 0, []),
+        ) as update_apply, patch.object(
+                m, 'distributed_delete_apply', return_value=([], 0, []),
+        ) as delete_apply, patch(
+                'ray.cluster_resources', return_value={'CPU': 320},
+        ):
+            merge_into(
+                target='default.target',
+                source=source_ds,
+                catalog_options={'warehouse': '/tmp/warehouse'},
+                on=['id'],
+                when_matched=[WhenMatched.update('*')],
+            )
+            default_source_partitions = build_datasets.call_args.args[7]
+            default_update_partitions = (
+                update_apply.call_args.kwargs['num_partitions']
+            )
+            default_delete_partitions = (
+                delete_apply.call_args.kwargs['num_partitions']
+            )
+
+            build_datasets.reset_mock()
+            update_apply.reset_mock()
+            delete_apply.reset_mock()
+            merge_into(
+                target='default.target',
+                source=source_ds,
+                catalog_options={'warehouse': '/tmp/warehouse'},
+                on=['id'],
+                when_matched=[WhenMatched.update('*')],
+                num_partitions=11,
+            )
+
+        # The source-left branch would use 7 partitions.
+        self.assertEqual(default_source_partitions, 7)
+        # Both matched results inherit the target-left context: 512 / 128 = 4.
+        self.assertEqual(default_update_partitions, 4)
+        self.assertEqual(default_delete_partitions, 4)
+        # An explicit value still applies to every branch and execution stage.
+        self.assertEqual(build_datasets.call_args.args[7], 11)
+        self.assertEqual(
+            build_datasets.call_args.kwargs['requested_num_partitions'], 11
+        )
+        self.assertEqual(
+            update_apply.call_args.kwargs['num_partitions'], 11
+        )
+        self.assertEqual(
+            delete_apply.call_args.kwargs['num_partitions'], 11
+        )
+
     def test_no_clause_raises(self):
         target = self._create_table()
         with self.assertRaises(ValueError):

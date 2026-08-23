@@ -27,6 +27,7 @@ import pyarrow as pa
 from pypaimon.common.predicate import Predicate
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.ray.data_evolution_merge_join import (
+    _resolve_matched_num_partitions,
     _resolve_source_projection,
     build_matched_delete_ds,
     build_matched_update_ds,
@@ -130,11 +131,28 @@ def merge_into(
         requested_num_partitions=requested_num_partitions,
         estimated_size_bytes=estimated_size_bytes,
     )
+    update_num_partitions = None
+    delete_num_partitions = None
+    if not ctx.is_self_merge:
+        if update_ds is not None:
+            update_num_partitions = _resolve_matched_num_partitions(
+                requested_num_partitions,
+                estimated_size_bytes,
+                update_ds,
+            )
+        if delete_ds is not None:
+            delete_num_partitions = _resolve_matched_num_partitions(
+                requested_num_partitions,
+                estimated_size_bytes,
+                delete_ds,
+            )
 
     return _execute_and_commit(
         table, update_ds, delete_ds, insert_ds, update_cols_union,
         base_snapshot, source_num_partitions,
         ray_remote_args, concurrency,
+        update_num_partitions=update_num_partitions,
+        delete_num_partitions=delete_num_partitions,
     )
 
 
@@ -463,6 +481,8 @@ def _execute_and_commit(
     table, update_ds, delete_ds, insert_ds, update_cols_union,
     base_snapshot, num_partitions,
     ray_remote_args, concurrency,
+    update_num_partitions=None,
+    delete_num_partitions=None,
 ):
     collect_action_row_ids = update_ds is not None and delete_ds is not None
     commit_messages: list = []
@@ -474,6 +494,16 @@ def _execute_and_commit(
     num_deleted = 0
     delete_row_ids = []
     num_inserted = 0
+    update_num_partitions = (
+        num_partitions
+        if update_num_partitions is None
+        else update_num_partitions
+    )
+    delete_num_partitions = (
+        num_partitions
+        if delete_num_partitions is None
+        else delete_num_partitions
+    )
 
     try:
         if update_ds is not None:
@@ -481,7 +511,7 @@ def _execute_and_commit(
                 update_msgs, num_updated, update_row_ids = (
                     distributed_self_merge_update_apply(
                         update_ds,
-                        num_partitions=num_partitions,
+                        num_partitions=update_num_partitions,
                         ray_remote_args=ray_remote_args,
                         collect_row_ids=collect_action_row_ids,
                     )
@@ -490,7 +520,7 @@ def _execute_and_commit(
                 update_msgs, num_updated, update_row_ids = (
                     distributed_update_apply(
                         update_ds, table, update_cols_union,
-                        num_partitions=num_partitions,
+                        num_partitions=update_num_partitions,
                         ray_remote_args=ray_remote_args,
                         base_snapshot_id=(
                             base_snapshot.id
@@ -504,7 +534,7 @@ def _execute_and_commit(
         if delete_ds is not None:
             delete_msgs, num_deleted, delete_row_ids = distributed_delete_apply(
                 delete_ds, table,
-                num_partitions=num_partitions,
+                num_partitions=delete_num_partitions,
                 ray_remote_args=ray_remote_args,
                 base_snapshot_id=(
                     base_snapshot.id
