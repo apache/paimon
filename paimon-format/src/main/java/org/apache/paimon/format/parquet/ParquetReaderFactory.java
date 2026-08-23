@@ -54,8 +54,10 @@ import org.apache.parquet.io.ColumnIOFactory;
 import org.apache.parquet.io.MessageColumnIO;
 import org.apache.parquet.schema.ConversionPatterns;
 import org.apache.parquet.schema.GroupType;
+import org.apache.parquet.schema.LogicalTypeAnnotation;
 import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.OriginalType;
+import org.apache.parquet.schema.PrimitiveType;
 import org.apache.parquet.schema.Type;
 import org.apache.parquet.schema.Types;
 import org.slf4j.Logger;
@@ -291,15 +293,19 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 RowType rowType = (RowType) readType;
                 GroupType rowGroup = (GroupType) parquetType;
                 List<Type> rowGroupFields = new ArrayList<>();
+                boolean allFieldsMissing = true;
                 for (DataField field : rowType.getFields()) {
                     String fieldName = field.name();
                     Type type = matchParquetField(rowGroup, fieldName);
                     if (type != null) {
+                        allFieldsMissing = false;
                         rowGroupFields.add(clipParquetType(field.type(), type));
                     } else {
-                        // todo: support nested field missing
-                        throw new RuntimeException("field " + fieldName + " is missing");
+                        rowGroupFields.add(ParquetSchemaConverter.convertToParquetType(field));
                     }
+                }
+                if (allFieldsMissing && rowGroup.getFieldCount() > 0) {
+                    rowGroupFields.add(findCheapestGroupField(rowGroup));
                 }
                 return rowGroup.withNewFields(rowGroupFields);
             case MAP:
@@ -355,6 +361,94 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 }
             default:
                 return parquetType;
+        }
+    }
+
+    private Type findCheapestGroupField(GroupType groupType) {
+        return findCheapestField(groupType, 0).type.asGroupType().getType(0);
+    }
+
+    private CheapestField findCheapestField(Type type, int repetitionLevel) {
+        if (type.isPrimitive()) {
+            PrimitiveType.PrimitiveTypeName typeName =
+                    type.asPrimitiveType().getPrimitiveTypeName();
+            int cost;
+            switch (typeName) {
+                case BOOLEAN:
+                    cost = 1;
+                    break;
+                case INT32:
+                case FLOAT:
+                    cost = 4;
+                    break;
+                case INT64:
+                case DOUBLE:
+                    cost = 8;
+                    break;
+                case INT96:
+                    cost = 12;
+                    break;
+                default:
+                    cost = 32;
+            }
+            return new CheapestField(type, repetitionLevel, cost);
+        }
+
+        GroupType groupType = type.asGroupType();
+        LogicalTypeAnnotation annotation = groupType.getLogicalTypeAnnotation();
+        if (annotation instanceof LogicalTypeAnnotation.MapLogicalTypeAnnotation
+                || annotation instanceof LogicalTypeAnnotation.MapKeyValueTypeAnnotation) {
+            Preconditions.checkArgument(
+                    groupType.getFieldCount() == 1 && !groupType.getType(0).isPrimitive(),
+                    "Invalid map type: %s",
+                    groupType);
+            GroupType keyValueType = groupType.getType(0).asGroupType();
+            Preconditions.checkArgument(
+                    keyValueType.getRepetition() == Type.Repetition.REPEATED
+                            && keyValueType.getFieldCount() == 2,
+                    "Invalid map type: %s",
+                    groupType);
+            CheapestField key = findCheapestField(keyValueType.getType(0), repetitionLevel + 1);
+            CheapestField value = findCheapestField(keyValueType.getType(1), repetitionLevel + 1);
+            GroupType clippedKeyValue =
+                    keyValueType.withNewFields(Arrays.asList(key.type, value.type));
+            return new CheapestField(
+                    groupType.withNewFields(Collections.singletonList(clippedKeyValue)),
+                    Math.max(key.repetitionLevel, value.repetitionLevel),
+                    key.cost + value.cost);
+        }
+
+        CheapestField cheapest = null;
+        for (Type child : groupType.getFields()) {
+            int childRepetitionLevel =
+                    repetitionLevel + (child.getRepetition() == Type.Repetition.REPEATED ? 1 : 0);
+            if (cheapest == null || childRepetitionLevel <= cheapest.repetitionLevel) {
+                CheapestField candidate = findCheapestField(child, childRepetitionLevel);
+                if (cheapest == null
+                        || candidate.repetitionLevel < cheapest.repetitionLevel
+                        || (candidate.repetitionLevel == cheapest.repetitionLevel
+                                && candidate.cost < cheapest.cost)) {
+                    cheapest = candidate;
+                }
+            }
+        }
+        Preconditions.checkNotNull(cheapest, "Parquet group must contain at least one field.");
+        return new CheapestField(
+                groupType.withNewFields(Collections.singletonList(cheapest.type)),
+                cheapest.repetitionLevel,
+                cheapest.cost);
+    }
+
+    private static class CheapestField {
+
+        private final Type type;
+        private final int repetitionLevel;
+        private final int cost;
+
+        private CheapestField(Type type, int repetitionLevel, int cost) {
+            this.type = type;
+            this.repetitionLevel = repetitionLevel;
+            this.cost = cost;
         }
     }
 
