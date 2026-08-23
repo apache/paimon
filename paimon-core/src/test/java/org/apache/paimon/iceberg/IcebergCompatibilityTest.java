@@ -464,6 +464,54 @@ public class IcebergCompatibilityTest {
     }
 
     @Test
+    public void testExpireAllBeforeSkipsAlreadyDeletedManifestList() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(rowType, Collections.emptyList(), Collections.emptyList(), -1);
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 10));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(2, write.prepareCommit(false, 2));
+
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(new Path(table.location(), "metadata"));
+        long latest = table.latestSnapshot().get().id();
+
+        // v(latest - 1) is retained by previous-versions-max = 1, but an earlier from-scratch
+        // rebuild deletes the manifest lists of every version below the one it rebuilds at.
+        // Reproduce that state: the metadata JSON survives, the list it points at does not.
+        Path retainedMetadataPath = pathFactory.toMetadataPath(latest - 1);
+        IcebergMetadata retained = IcebergMetadata.fromPath(table.fileIO(), retainedMetadataPath);
+        Path danglingListPath = new Path(retained.currentSnapshot().manifestList());
+        table.fileIO().deleteQuietly(danglingListPath);
+        assertThat(table.fileIO().exists(retainedMetadataPath)).isTrue();
+        assertThat(table.fileIO().exists(danglingListPath)).isFalse();
+
+        // Dropping the base metadata sends the next commit down the from-scratch path, which
+        // calls expireAllBefore and so walks the retained JSON above.
+        table.fileIO().deleteQuietly(pathFactory.toMetadataPath(latest));
+
+        write.write(GenericRow.of(3, 30));
+        commit.commit(3, write.prepareCommit(false, 3));
+
+        // The rebuild completed and published a usable Iceberg head.
+        Path rebuiltMetadataPath = pathFactory.toMetadataPath(table.latestSnapshot().get().id());
+        assertThat(table.fileIO().exists(rebuiltMetadataPath)).isTrue();
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)", "Record(3, 30)");
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
     public void testCommitAfterRollbackDoesNotDuplicateSchemas() throws Exception {
         RowType rowType =
                 RowType.of(

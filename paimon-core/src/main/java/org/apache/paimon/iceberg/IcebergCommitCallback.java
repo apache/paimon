@@ -1608,6 +1608,13 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 }
                 expiredManifestLists.add(listName);
 
+                // A retained metadata JSON can reference a list an earlier rebuild already
+                // deleted. Reading it must not fail: we only open it to delete what it
+                // points at, and that earlier pass already did so.
+                if (!table.fileIO().exists(listPath)) {
+                    continue;
+                }
+
                 for (IcebergManifestFileMeta meta : manifestList.read(listName)) {
                     String metaName = new Path(meta.manifestPath()).getName();
                     if (expiredManifestFileMetas.contains(metaName)) {
