@@ -76,9 +76,15 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
 
     private static final FieldReader INT_READER = new IntReader();
 
+    private static final FieldReader INT_TO_BIGINT_READER = new IntToBigIntReader();
+
+    private static final FieldReader INT_TO_DOUBLE_READER = new IntToDoubleReader();
+
     private static final FieldReader BIGINT_READER = new BigIntReader();
 
     private static final FieldReader FLOAT_READER = new FloatReader();
+
+    private static final FieldReader FLOAT_TO_DOUBLE_READER = new FloatToDoubleReader();
 
     private static final FieldReader DOUBLE_READER = new DoubleReader();
 
@@ -92,6 +98,20 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
                 && type != null
                 && type.getTypeRoot() == DataTypeRoot.BLOB) {
             return new BlobBytesReader(uriReader);
+        }
+        if (type != null && primitive.getLogicalType() == null) {
+            if (primitive.getType() == Schema.Type.INT) {
+                if (type.getTypeRoot() == DataTypeRoot.BIGINT) {
+                    return INT_TO_BIGINT_READER;
+                }
+                if (type.getTypeRoot() == DataTypeRoot.DOUBLE) {
+                    return INT_TO_DOUBLE_READER;
+                }
+            }
+            if (primitive.getType() == Schema.Type.FLOAT
+                    && type.getTypeRoot() == DataTypeRoot.DOUBLE) {
+                return FLOAT_TO_DOUBLE_READER;
+            }
         }
         return AvroSchemaVisitor.super.primitive(primitive, type);
     }
@@ -335,6 +355,22 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
         }
     }
 
+    private static class IntToBigIntReader extends IntReader {
+
+        @Override
+        public Object read(Decoder decoder, Object reuse) throws IOException {
+            return (long) decoder.readInt();
+        }
+    }
+
+    private static class IntToDoubleReader extends IntReader {
+
+        @Override
+        public Object read(Decoder decoder, Object reuse) throws IOException {
+            return (double) decoder.readInt();
+        }
+    }
+
     private static class BigIntReader implements FieldReader {
 
         @Override
@@ -358,6 +394,14 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
         @Override
         public void skip(Decoder decoder) throws IOException {
             decoder.readFloat();
+        }
+    }
+
+    private static class FloatToDoubleReader extends FloatReader {
+
+        @Override
+        public Object read(Decoder decoder, Object reuse) throws IOException {
+            return (double) decoder.readFloat();
         }
     }
 
