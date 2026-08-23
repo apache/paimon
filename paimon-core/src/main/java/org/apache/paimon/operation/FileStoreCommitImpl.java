@@ -1633,6 +1633,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             null,
                             latestSnapshot.indexManifest(),
                             commitUser,
+                            CoreFullVersion.get(),
                             Long.MAX_VALUE,
                             CommitKind.COMPACT,
                             System.currentTimeMillis(),

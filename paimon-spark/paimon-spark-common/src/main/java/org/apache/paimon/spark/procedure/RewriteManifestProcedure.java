@@ -374,8 +374,12 @@ public class RewriteManifestProcedure extends BaseProcedure {
                                                         writer.write(survived);
                                                     }
                                                 }
-                                            } finally {
                                                 writer.close();
+                                            } catch (Exception e) {
+                                                // task failed — abort the manifest file so it
+                                                // doesn't leak as an orphan
+                                                writer.abort();
+                                                throw e;
                                             }
 
                                             List<ManifestFileMeta> results = writer.result();
