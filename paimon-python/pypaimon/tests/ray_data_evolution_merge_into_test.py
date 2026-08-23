@@ -214,6 +214,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(len(resolved), 1)
         args, kwargs, result = resolved[0]
         self.assertEqual(args, (None, None))
+        self.assertIsNotNone(kwargs.pop('data_context'))
         self.assertEqual(kwargs, {
             'min_partitions': 200,
             'unknown_num_partitions': 200,
@@ -627,11 +628,48 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         args, kwargs, result = resolved[0]
         self.assertIsNone(args[0])
         self.assertGreater(args[1], 0)
+        self.assertIsNotNone(kwargs.pop('data_context'))
         self.assertEqual(kwargs, {
             'min_partitions': 1,
             'unknown_num_partitions': 200,
         })
         self.assertEqual(result, 1)
+
+    def test_insert_into_truncated_target_preserves_write_parallelism(self):
+        from pypaimon.ray import data_evolution_merge_into as m
+
+        target = self._create_table()
+        self._write(target, self._source(ids=(0,)))
+        table = self.catalog.get_table(target)
+        commit = table.new_batch_write_builder().new_commit()
+        commit.truncate_table()
+        commit.close()
+
+        real_write = m.distributed_write_collect_msgs
+        write_blocks = []
+
+        def capture(insert_ds, *args, **kwargs):
+            insert_ds = insert_ds.materialize()
+            write_blocks.append(insert_ds.num_blocks())
+            return real_write(insert_ds, *args, **kwargs)
+
+        with patch.object(
+                m, 'distributed_write_collect_msgs', side_effect=capture,
+        ):
+            metrics = merge_into(
+                target=target,
+                source=self._source(ids=range(1, 31)),
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_not_matched=[WhenNotMatched(insert='*')],
+                num_partitions=3,
+            )
+
+        self.assertEqual(metrics['num_inserted'], 30)
+        self.assertEqual(write_blocks, [3])
+        self.assertEqual(
+            self._read_sorted(target)['id'], list(range(1, 31))
+        )
 
     def test_multi_source_match_raises_by_default(self):
         # One target row matched by several source rows: the winning value is
@@ -3486,10 +3524,12 @@ class TargetProjectionTest(unittest.TestCase):
         ])
         selected_ds = Mock()
         source_renamed = Mock()
+        repartitioned = Mock()
         result = object()
         source_ds.select_columns.return_value = selected_ds
         selected_ds.rename_columns.return_value = source_renamed
-        source_renamed.map_batches.return_value = result
+        source_renamed.repartition.return_value = repartitioned
+        repartitioned.map_batches.return_value = result
 
         out = build_not_matched_insert_ds(
             target_identifier='default.target',
@@ -3513,6 +3553,7 @@ class TargetProjectionTest(unittest.TestCase):
             'id': 's.id',
             'name': 's.name',
         })
+        source_renamed.repartition.assert_called_once_with(1)
 
 
 class MergeConditionUnitTest(unittest.TestCase):

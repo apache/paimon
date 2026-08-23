@@ -168,11 +168,13 @@ class RayUpdateByRowIdTest(unittest.TestCase):
 
         def fake_apply(update_ds, table, cols, *, num_partitions,
                        ray_remote_args=None, base_snapshot_id=None,
-                       estimated_size_bytes=None, estimated_num_rows=None):
+                       estimated_size_bytes=None, estimated_num_rows=None,
+                       data_context=None):
             captured["base_snapshot_id"] = base_snapshot_id
             captured["num_partitions"] = num_partitions
             captured["estimated_size_bytes"] = estimated_size_bytes
             captured["estimated_num_rows"] = estimated_num_rows
+            captured["data_context"] = data_context
             return [], 0, []
 
         with mock.patch.object(m, "distributed_update_apply", fake_apply):
@@ -181,6 +183,7 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         self.assertIsNone(captured["num_partitions"])
         self.assertGreater(captured["estimated_size_bytes"], 0)
         self.assertEqual(captured["estimated_num_rows"], 1)
+        self.assertIsNotNone(captured["data_context"])
 
     def test_transformed_paimon_source_adapts_partitions(self):
         import pypaimon.ray.data_evolution_merge_join as merge_join

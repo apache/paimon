@@ -104,8 +104,15 @@ def merge_into(
         )
     min_partitions = 1
     unknown_num_partitions = None
+    data_context = (
+        None
+        if ctx.is_self_merge
+        else getattr(source_ds, "context", None)
+    )
     if num_partitions is None and not ctx.is_self_merge:
-        unknown_num_partitions = _default_hash_shuffle_parallelism()
+        unknown_num_partitions = _default_hash_shuffle_parallelism(
+            data_context
+        )
         if not target_empty:
             min_partitions = unknown_num_partitions
     num_partitions = _resolve_num_partitions(
@@ -113,6 +120,7 @@ def merge_into(
         estimated_size_bytes,
         min_partitions=min_partitions,
         unknown_num_partitions=unknown_num_partitions,
+        data_context=data_context,
     )
 
     update_ds, delete_ds, insert_ds, update_cols_union = _build_datasets(

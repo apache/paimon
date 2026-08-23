@@ -144,9 +144,11 @@ def read_by_row_id(
     source_ds = _normalize_source(row_ids, catalog_options)
     estimated_size_bytes = None
     estimated_num_rows = None
+    data_context = None
     if num_partitions is None:
         estimated_size_bytes = _estimate_dataset_size_bytes(source_ds)
         estimated_num_rows = _estimate_dataset_num_rows(source_ds)
+        data_context = getattr(source_ds, "context", None)
     # Only check now if the schema is free; fetching it would execute a lazy source.
     known_schema = source_ds.schema(fetch_if_missing=False)
     if known_schema is not None and src_rid_col not in set(known_schema.names):
@@ -193,6 +195,7 @@ def read_by_row_id(
             base_snapshot_id=base.id,
             estimated_size_bytes=estimated_size_bytes,
             estimated_num_rows=estimated_num_rows,
+            data_context=data_context,
         )
     except Exception as e:
         _reraise_inner(e)

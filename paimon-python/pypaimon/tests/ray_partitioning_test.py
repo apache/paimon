@@ -85,6 +85,30 @@ class RayPartitioningTest(unittest.TestCase):
         finally:
             context.target_max_block_size = previous_target
 
+    def test_known_size_uses_dataset_context(self):
+        import ray
+        from ray.data.context import DataContext
+
+        context = DataContext.get_current()
+        previous_target = context.target_max_block_size
+        try:
+            context.target_max_block_size = 128 * 1024 * 1024
+            data_context = ray.data.from_items([1]).context
+            context.target_max_block_size = 1024 * 1024 * 1024
+            with mock.patch(
+                "ray.cluster_resources", return_value={"CPU": 320}
+            ):
+                self.assertEqual(
+                    _resolve_num_partitions(
+                        None,
+                        512 * 1024 * 1024,
+                        data_context=data_context,
+                    ),
+                    4,
+                )
+        finally:
+            context.target_max_block_size = previous_target
+
     def test_unknown_size_keeps_cpu_default(self):
         with mock.patch(
             "ray.cluster_resources", return_value={"CPU": 320}
@@ -138,7 +162,16 @@ class RayPartitioningTest(unittest.TestCase):
 
         mapped = dataset.map_batches(lambda batch: batch)
         self.assertIsNone(_estimate_dataset_size_bytes(mapped))
-        self.assertIsNone(_estimate_dataset_num_rows(mapped))
+        cardinality_parameter = inspect.signature(
+            ray.data.Dataset.map_batches
+        ).parameters.get("udf_modifying_row_count")
+        modifies_by_default = (
+            True
+            if cardinality_parameter is None
+            else cardinality_parameter.default
+        )
+        expected_rows = None if modifies_by_default else 2
+        self.assertEqual(_estimate_dataset_num_rows(mapped), expected_rows)
 
         if "udf_modifying_row_count" in inspect.signature(
             ray.data.Dataset.map_batches
@@ -161,6 +194,30 @@ class RayPartitioningTest(unittest.TestCase):
             self.assertEqual(_estimate_dataset_num_rows(widened), 2)
             self.assertGreater(widened.materialize().size_bytes(), 1_000_000)
 
+    def test_old_map_batches_cardinality_is_unknown(self):
+        dependency = types.SimpleNamespace(
+            infer_metadata=mock.Mock(
+                return_value=types.SimpleNamespace(num_rows=2)
+            ),
+            can_modify_num_rows=None,
+        )
+
+        class MapBatches:
+            input_dependencies = (dependency,)
+
+            @staticmethod
+            def infer_metadata():
+                return types.SimpleNamespace(num_rows=None)
+
+            @staticmethod
+            def can_modify_num_rows():
+                return False
+
+        dataset = types.SimpleNamespace(
+            _logical_plan=types.SimpleNamespace(dag=MapBatches())
+        )
+        self.assertIsNone(_estimate_dataset_num_rows(dataset))
+
     def test_sparse_row_ids_keep_shuffle_parallelism(self):
         with mock.patch(
             "ray.cluster_resources", return_value={"CPU": 320}
@@ -180,6 +237,28 @@ class RayPartitioningTest(unittest.TestCase):
             self.assertEqual(
                 _resolve_row_id_num_partitions(37, 1, 500, 500),
                 37,
+            )
+
+    def test_row_id_sizing_uses_dataset_context(self):
+        data_context = types.SimpleNamespace(
+            target_max_block_size=128 * 1024 * 1024,
+            default_hash_shuffle_parallelism=25,
+        )
+        with mock.patch(
+            "ray.cluster_resources", return_value={"CPU": 320}
+        ), mock.patch(
+            "ray.data.context.DataContext.get_current",
+            side_effect=AssertionError("must use the Dataset context"),
+        ):
+            self.assertEqual(
+                _resolve_row_id_num_partitions(
+                    None,
+                    512 * 1024 * 1024,
+                    None,
+                    500,
+                    data_context=data_context,
+                ),
+                25,
             )
 
     def test_merge_estimate_uses_only_reliable_source_size(self):

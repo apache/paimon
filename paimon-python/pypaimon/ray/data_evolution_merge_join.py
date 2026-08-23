@@ -662,6 +662,7 @@ def distributed_update_apply(
     collect_row_ids: bool = False,
     estimated_size_bytes: Optional[int] = None,
     estimated_num_rows: Optional[int] = None,
+    data_context=None,
 ) -> Tuple[list, int, list]:
     import numpy as np
     import pickle
@@ -705,6 +706,7 @@ def distributed_update_apply(
         estimated_size_bytes,
         estimated_num_rows,
         len(sorted_first_row_ids),
+        data_context=data_context,
     )
 
     # Pin commit-time conflict check to the snapshot the join was built on,
@@ -873,6 +875,7 @@ def distributed_read_by_row_id(
     base_snapshot_id: Optional[int] = None,
     estimated_size_bytes: Optional[int] = None,
     estimated_num_rows: Optional[int] = None,
+    data_context=None,
 ):
     """Read ``projection`` for the ``_ROW_ID``s in ``row_ids_ds``, routing each to its
     owning file and reading only the matched rows via ``IndexedSplit`` slicing (blob
@@ -919,6 +922,7 @@ def distributed_read_by_row_id(
         estimated_size_bytes,
         estimated_num_rows,
         len(sorted_first_row_ids),
+        data_context=data_context,
     )
 
     precomputed_info_ref = ray.put(planner._snapshot_files_info())
@@ -1162,7 +1166,7 @@ def build_not_matched_insert_ds(
     )
 
     if target_empty:
-        unmatched = source_renamed
+        unmatched = source_renamed.repartition(num_partitions)
     else:
         target_ds = read_paimon(
             target_identifier, catalog_options,

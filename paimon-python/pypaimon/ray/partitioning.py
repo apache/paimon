@@ -26,6 +26,7 @@ def _resolve_num_partitions(
     estimated_size_bytes: Optional[int] = None,
     min_partitions: int = 1,
     unknown_num_partitions: Optional[int] = None,
+    data_context=None,
 ) -> int:
     """Resolve default shuffle partitions from input size and CPU count."""
     if num_partitions is not None:
@@ -50,9 +51,12 @@ def _resolve_num_partitions(
     try:
         from ray.data.context import DataContext
 
-        target_size_bytes = int(
-            DataContext.get_current().target_max_block_size
+        context = (
+            data_context
+            if data_context is not None
+            else DataContext.get_current()
         )
+        target_size_bytes = int(context.target_max_block_size)
     except Exception:
         return max_partitions
 
@@ -81,9 +85,7 @@ def _estimate_dataset_metadata(dataset, field: str) -> Optional[int]:
         operator = getattr(getattr(dataset, "_logical_plan", None), "dag", None)
         while operator is not None:
             infer_metadata = getattr(operator, "infer_metadata", None)
-            can_modify_num_rows = getattr(
-                operator, "can_modify_num_rows", None
-            )
+            can_modify_num_rows = _can_modify_num_rows(operator)
             if callable(infer_metadata):
                 value = getattr(infer_metadata(), field, None)
                 if (
@@ -107,13 +109,36 @@ def _estimate_dataset_metadata(dataset, field: str) -> Optional[int]:
     return None
 
 
-def _default_hash_shuffle_parallelism() -> int:
+def _can_modify_num_rows(operator) -> Optional[bool]:
+    value = getattr(operator, "can_modify_num_rows", None)
+    if not callable(value):
+        return value if isinstance(value, bool) else None
+
+    # Ray 2.50/2.51 MapBatches reports False without a cardinality flag.
+    if (
+        type(operator).__name__ == "MapBatches"
+        and not hasattr(operator, "_udf_modifying_row_count")
+    ):
+        return None
+    try:
+        value = value()
+    except Exception:
+        return None
+    return value if isinstance(value, bool) else None
+
+
+def _default_hash_shuffle_parallelism(data_context=None) -> int:
     try:
         from ray.data.context import DataContext
 
+        context = (
+            data_context
+            if data_context is not None
+            else DataContext.get_current()
+        )
         return max(
             1,
-            int(DataContext.get_current().default_hash_shuffle_parallelism),
+            int(context.default_hash_shuffle_parallelism),
         )
     except Exception:
         return 200
@@ -124,21 +149,26 @@ def _resolve_row_id_num_partitions(
     estimated_size_bytes: Optional[int],
     estimated_num_rows: Optional[int],
     target_file_count: int,
+    data_context=None,
 ) -> int:
     """Resolve row-ID partitions from input size and target fan-out."""
     if num_partitions is not None:
         return num_partitions
 
-    default_shuffle = _default_hash_shuffle_parallelism()
+    default_shuffle = _default_hash_shuffle_parallelism(data_context)
 
     possible_groups = max(1, target_file_count)
     if estimated_num_rows is not None:
         possible_groups = min(possible_groups, max(1, estimated_num_rows))
     min_partitions = min(max(1, default_shuffle), possible_groups)
     if estimated_size_bytes is None:
-        return min(_resolve_num_partitions(None), min_partitions)
+        return min(
+            _resolve_num_partitions(None, data_context=data_context),
+            min_partitions,
+        )
     return _resolve_num_partitions(
         None,
         estimated_size_bytes,
         min_partitions=min_partitions,
+        data_context=data_context,
     )

@@ -117,9 +117,11 @@ def update_by_row_id(
     source_ds = _normalize_source(source, catalog_options)
     estimated_size_bytes = None
     estimated_num_rows = None
+    data_context = None
     if num_partitions is None:
         estimated_size_bytes = _estimate_dataset_size_bytes(source_ds)
         estimated_num_rows = _estimate_dataset_num_rows(source_ds)
+        data_context = getattr(source_ds, "context", None)
     src_cols = set(source_ds.schema().names)
     missing = [c for c in [rid] + update_cols if c not in src_cols]
     if missing:
@@ -153,6 +155,7 @@ def update_by_row_id(
             base_snapshot_id=base.id,
             estimated_size_bytes=estimated_size_bytes,
             estimated_num_rows=estimated_num_rows,
+            data_context=data_context,
         )
     except Exception as e:
         _reraise_inner(e)
