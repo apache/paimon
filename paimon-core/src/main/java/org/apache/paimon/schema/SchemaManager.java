@@ -19,6 +19,7 @@
 package org.apache.paimon.schema;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.catalog.Catalog;
@@ -26,6 +27,10 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.iceberg.IcebergOptions;
+import org.apache.paimon.index.GlobalIndexMeta;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.ColumnDirectiveUtils.ConvertedColumn;
 import org.apache.paimon.schema.SchemaChange.AddColumn;
 import org.apache.paimon.schema.SchemaChange.DropColumn;
@@ -38,6 +43,8 @@ import org.apache.paimon.schema.SchemaChange.UpdateColumnNullability;
 import org.apache.paimon.schema.SchemaChange.UpdateColumnPosition;
 import org.apache.paimon.schema.SchemaChange.UpdateColumnType;
 import org.apache.paimon.schema.SchemaChange.UpdateComment;
+import org.apache.paimon.table.CatalogEnvironment;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.SchemaModification;
 import org.apache.paimon.types.ArrayType;
@@ -73,6 +80,8 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -275,8 +284,16 @@ public class SchemaManager implements Serializable {
                                                             tableRoot.toString(), true, branch)));
             LazyField<Identifier> lazyIdentifier =
                     new LazyField<>(() -> identifierFromPath(tableRoot.toString(), true, branch));
+            Set<Integer> affectedGlobalIndexFieldIds = new LinkedHashSet<>();
             TableSchema newTableSchema =
-                    generateTableSchema(oldTableSchema, changes, hasSnapshots, lazyIdentifier);
+                    generateTableSchema(
+                            oldTableSchema,
+                            changes,
+                            hasSnapshots,
+                            lazyIdentifier,
+                            affectedGlobalIndexFieldIds);
+            assertNoGlobalIndexReferences(
+                    snapshotManager, oldTableSchema, affectedGlobalIndexFieldIds);
             try {
                 boolean success = commit(newTableSchema);
                 if (success) {
@@ -293,6 +310,17 @@ public class SchemaManager implements Serializable {
             List<SchemaChange> changes,
             LazyField<Boolean> hasSnapshots,
             LazyField<Identifier> lazyIdentifier)
+            throws Catalog.ColumnAlreadyExistException, Catalog.ColumnNotExistException {
+        return generateTableSchema(
+                oldTableSchema, changes, hasSnapshots, lazyIdentifier, new HashSet<>());
+    }
+
+    private static TableSchema generateTableSchema(
+            TableSchema oldTableSchema,
+            List<SchemaChange> changes,
+            LazyField<Boolean> hasSnapshots,
+            LazyField<Identifier> lazyIdentifier,
+            Set<Integer> affectedGlobalIndexFieldIds)
             throws Catalog.ColumnAlreadyExistException, Catalog.ColumnNotExistException {
         Map<String, String> oldOptions = new HashMap<>(oldTableSchema.options());
         Map<String, String> newOptions = new HashMap<>(oldTableSchema.options());
@@ -443,6 +471,8 @@ public class SchemaManager implements Serializable {
                 }.updateIntermediateColumn(newFields, 0);
             } else if (change instanceof RenameColumn) {
                 RenameColumn rename = (RenameColumn) change;
+                collectAffectedGlobalIndexFieldIds(
+                        newFields, rename.fieldNames(), affectedGlobalIndexFieldIds);
                 assertNotUpdatingPartitionKeys(oldTableSchema, rename.fieldNames(), "rename");
                 assertNotUpdatingPrimaryKeyIndexColumn(
                         oldTableSchema, rename.fieldNames(), "rename");
@@ -475,6 +505,8 @@ public class SchemaManager implements Serializable {
                 }.updateIntermediateColumn(newFields, 0);
             } else if (change instanceof DropColumn) {
                 DropColumn drop = (DropColumn) change;
+                collectAffectedGlobalIndexFieldIds(
+                        newFields, drop.fieldNames(), affectedGlobalIndexFieldIds);
                 dropColumnValidation(oldTableSchema, drop);
                 if (drop.fieldNames().length == 1) {
                     String dropName = drop.fieldNames()[0];
@@ -500,6 +532,8 @@ public class SchemaManager implements Serializable {
                 }.updateIntermediateColumn(newFields, 0);
             } else if (change instanceof UpdateColumnType) {
                 UpdateColumnType update = (UpdateColumnType) change;
+                collectAffectedGlobalIndexFieldIds(
+                        newFields, update.fieldNames(), affectedGlobalIndexFieldIds);
                 assertNotUpdatingPartitionKeys(oldTableSchema, update.fieldNames(), "update");
                 assertNotUpdatingPrimaryKeys(oldTableSchema, update.fieldNames(), "update");
                 assertNotUpdatingPrimaryKeyIndexColumn(
@@ -1032,6 +1066,112 @@ public class SchemaManager implements Serializable {
             throw new UnsupportedOperationException(
                     String.format(
                             "Cannot %s primary-key index column: [%s]", operation, fieldName));
+        }
+    }
+
+    private void assertNoGlobalIndexReferences(
+            SnapshotManager snapshotManager, TableSchema schema, Set<Integer> affectedFieldIds) {
+        if (affectedFieldIds.isEmpty()) {
+            return;
+        }
+
+        Snapshot snapshot = snapshotManager.latestSnapshot();
+        if (snapshot == null || snapshot.indexManifest() == null) {
+            return;
+        }
+
+        Options dynamicOptions = new Options();
+        dynamicOptions.set(CoreOptions.BRANCH, branch);
+        FileStoreTable table =
+                FileStoreTableFactory.createWithoutFallbackBranch(
+                        fileIO, tableRoot, schema, dynamicOptions, CatalogEnvironment.empty());
+        List<IndexManifestEntry> references =
+                table.store()
+                        .newIndexFileHandler()
+                        .scan(
+                                snapshot,
+                                entry -> {
+                                    GlobalIndexMeta meta = entry.indexFile().globalIndexMeta();
+                                    return meta != null
+                                            && meta.getIndexedFieldIds().stream()
+                                                    .anyMatch(affectedFieldIds::contains);
+                                });
+        if (references.isEmpty()) {
+            return;
+        }
+
+        Map<String, Integer> referenceSummary = new LinkedHashMap<>();
+        for (IndexManifestEntry reference : references) {
+            IndexFileMeta indexFile = reference.indexFile();
+            String key =
+                    String.format(
+                            "type=%s, indexed-field-ids=%s",
+                            indexFile.indexType(),
+                            indexFile.globalIndexMeta().getIndexedFieldIds());
+            referenceSummary.put(key, referenceSummary.getOrDefault(key, 0) + 1);
+        }
+        List<String> summaries = new ArrayList<>();
+        for (Map.Entry<String, Integer> entry : referenceSummary.entrySet()) {
+            summaries.add(entry.getKey() + ", files=" + entry.getValue());
+        }
+
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Cannot drop, rename, or update the type of columns with field ids %s "
+                                + "because they are referenced by live Global Index files: %s. "
+                                + "Drop the complete Global Index before altering the indexed columns.",
+                        affectedFieldIds, String.join("; ", summaries)));
+    }
+
+    private static void collectAffectedGlobalIndexFieldIds(
+            List<DataField> fields, String[] fieldNames, Set<Integer> affectedFieldIds) {
+        collectAffectedGlobalIndexFieldIds(fields, fieldNames, 0, affectedFieldIds);
+    }
+
+    private static void collectAffectedGlobalIndexFieldIds(
+            List<DataField> fields, String[] fieldNames, int depth, Set<Integer> affectedFieldIds) {
+        DataField field = null;
+        for (DataField candidate : fields) {
+            if (candidate.name().equals(fieldNames[depth])) {
+                field = candidate;
+                break;
+            }
+        }
+        if (field == null) {
+            return;
+        }
+
+        affectedFieldIds.add(field.id());
+        if (depth == fieldNames.length - 1) {
+            field.type().collectFieldIds(affectedFieldIds);
+            return;
+        }
+
+        DataType nestedType = field.type();
+        int nestedDepth = depth;
+        while (true) {
+            switch (nestedType.getTypeRoot()) {
+                case ROW:
+                    nestedDepth++;
+                    if (nestedDepth < fieldNames.length) {
+                        collectAffectedGlobalIndexFieldIds(
+                                ((RowType) nestedType).getFields(),
+                                fieldNames,
+                                nestedDepth,
+                                affectedFieldIds);
+                    }
+                    return;
+                case ARRAY:
+                    nestedDepth++;
+                    nestedType = ((ArrayType) nestedType).getElementType();
+                    break;
+                case MAP:
+                    nestedDepth++;
+                    nestedType = ((MapType) nestedType).getValueType();
+                    break;
+                default:
+                    return;
+            }
         }
     }
 
