@@ -268,6 +268,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @Override
+    public FileStoreCommit rowIdCheckConflict(
+            @Nullable Long rowIdCheckFromSnapshot, @Nullable String baseSnapshotUuid) {
+        this.conflictDetection.setRowIdCheckFromSnapshot(rowIdCheckFromSnapshot, baseSnapshotUuid);
+        return this;
+    }
+
+    @Override
     public FileStoreCommit rowIdCheckConflictForMaterializeDvCompaction(
             @Nullable Long rowIdCheckFromSnapshot) {
         this.conflictDetection.setRowIdCheckFromSnapshotForMaterializeDvCompaction(

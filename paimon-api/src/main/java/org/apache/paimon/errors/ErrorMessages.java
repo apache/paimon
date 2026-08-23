@@ -25,5 +25,9 @@ public class ErrorMessages {
             "For Data Evolution table, multiple 'MERGE INTO' operations have encountered conflicts,"
                     + " updating the same file, which can render some updates ineffective.";
 
+    public static final String DATA_EVOLUTION_SNAPSHOT_LINEAGE_CONFLICT_MESSAGE =
+            "For Data Evolution table, the base snapshot lineage has changed, possibly due to a"
+                    + " rollback. Staged updates from the old snapshot lineage cannot be committed.";
+
     private ErrorMessages() {}
 }

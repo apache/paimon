@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkRowWrapper;
@@ -405,6 +406,8 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
         FileStoreTable storeTable = (FileStoreTable) table;
         // copy to avoid serialization issue
         long baseSnapshotId = this.baseSnapshotId;
+        Snapshot baseSnapshot = ((FileStoreTable) table).snapshotManager().snapshot(baseSnapshotId);
+        String baseSnapshotUuid = baseSnapshot != null ? baseSnapshot.uuid() : null;
 
         // Check if some global-indexed columns are updated
         DataStream<Committable> checked =
@@ -425,7 +428,8 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
                                         storeTable,
                                         storeTable
                                                 .newCommit(context.commitUser())
-                                                .rowIdCheckConflict(baseSnapshotId),
+                                                .rowIdCheckConflict(
+                                                        baseSnapshotId, baseSnapshotUuid),
                                         context),
                         new NoopCommittableStateManager());
 

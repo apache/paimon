@@ -20,6 +20,7 @@ package org.apache.paimon.operation.commit;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.errors.ErrorMessages;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -1636,5 +1637,74 @@ class ConflictDetectionTest {
                 null,
                 null,
                 null);
+    }
+
+    @Test
+    void testRowIdCheckConflictAbaDetectsRollback() {
+        CommitScanner scanner = mock(CommitScanner.class);
+        SnapshotManager snapshotManager = mock(SnapshotManager.class);
+        DataEvolutionConflictDetection detection =
+                (DataEvolutionConflictDetection)
+                        createConflictDetection(scanner, true, false, false, snapshotManager);
+
+        String baseUuid = "uuid-v1";
+        detection.setRowIdCheckFromSnapshot(1L, baseUuid);
+
+        Snapshot baseSnapshot = mock(Snapshot.class);
+        Snapshot latestSnapshot = mock(Snapshot.class);
+        when(baseSnapshot.uuid()).thenReturn("uuid-v2");
+        when(baseSnapshot.nextRowId()).thenReturn(100L);
+        when(latestSnapshot.id()).thenReturn(2L);
+        when(latestSnapshot.commitUser()).thenReturn("test-user");
+        when(snapshotManager.snapshot(1L)).thenReturn(baseSnapshot);
+
+        RowIdConflictChecker checker = mock(RowIdConflictChecker.class);
+        when(checker.isEmpty()).thenReturn(false);
+
+        assertThat(
+                        detection.checkConflicts(
+                                latestSnapshot,
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                checker,
+                                Snapshot.CommitKind.APPEND))
+                .isPresent()
+                .get()
+                .hasMessageContaining(
+                        ErrorMessages.DATA_EVOLUTION_SNAPSHOT_LINEAGE_CONFLICT_MESSAGE);
+    }
+
+    @Test
+    void testRowIdCheckConflictNoAbaWhenUuidMatches() {
+        CommitScanner scanner = mock(CommitScanner.class);
+        SnapshotManager snapshotManager = mock(SnapshotManager.class);
+        DataEvolutionConflictDetection detection =
+                (DataEvolutionConflictDetection)
+                        createConflictDetection(scanner, true, false, false, snapshotManager);
+
+        String baseUuid = "uuid-v1";
+        detection.setRowIdCheckFromSnapshot(1L, baseUuid);
+
+        Snapshot baseSnapshot = mock(Snapshot.class);
+        Snapshot latestSnapshot = mock(Snapshot.class);
+        when(baseSnapshot.uuid()).thenReturn("uuid-v1");
+        when(baseSnapshot.nextRowId()).thenReturn(100L);
+        when(latestSnapshot.id()).thenReturn(2L);
+        when(latestSnapshot.commitUser()).thenReturn("test-user");
+        when(snapshotManager.snapshot(1L)).thenReturn(baseSnapshot);
+
+        RowIdConflictChecker checker = mock(RowIdConflictChecker.class);
+        when(checker.isEmpty()).thenReturn(false);
+
+        assertThat(
+                        detection.checkConflicts(
+                                latestSnapshot,
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                checker,
+                                Snapshot.CommitKind.APPEND))
+                .isEmpty();
     }
 }

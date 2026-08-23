@@ -74,6 +74,7 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
     private final SnapshotManager snapshotManager;
 
     private @Nullable Long rowIdCheckFromSnapshot;
+    private @Nullable String baseSnapshotUuid;
     private @Nullable RowIdConflictCheckStrategy rowIdConflictCheckStrategy;
 
     public DataEvolutionConflictDetection(
@@ -103,19 +104,31 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
     @Override
     public void setRowIdCheckFromSnapshot(@Nullable Long rowIdCheckFromSnapshot) {
         setRowIdCheckFromSnapshot(
-                rowIdCheckFromSnapshot, DataEvolutionDmlRowIdConflictCheck.INSTANCE);
+                rowIdCheckFromSnapshot, null, DataEvolutionDmlRowIdConflictCheck.INSTANCE);
+    }
+
+    @Override
+    public void setRowIdCheckFromSnapshot(
+            @Nullable Long rowIdCheckFromSnapshot, @Nullable String baseSnapshotUuid) {
+        setRowIdCheckFromSnapshot(
+                rowIdCheckFromSnapshot,
+                baseSnapshotUuid,
+                DataEvolutionDmlRowIdConflictCheck.INSTANCE);
     }
 
     @Override
     public void setRowIdCheckFromSnapshotForMaterializeDvCompaction(
             @Nullable Long rowIdCheckFromSnapshot) {
-        setRowIdCheckFromSnapshot(rowIdCheckFromSnapshot, MaterializeDvRowIdConflictCheck.INSTANCE);
+        setRowIdCheckFromSnapshot(
+                rowIdCheckFromSnapshot, null, MaterializeDvRowIdConflictCheck.INSTANCE);
     }
 
     private void setRowIdCheckFromSnapshot(
             @Nullable Long rowIdCheckFromSnapshot,
+            @Nullable String baseSnapshotUuid,
             RowIdConflictCheckStrategy conflictCheckStrategy) {
         this.rowIdCheckFromSnapshot = rowIdCheckFromSnapshot;
+        this.baseSnapshotUuid = baseSnapshotUuid;
         this.rowIdConflictCheckStrategy =
                 rowIdCheckFromSnapshot == null ? null : conflictCheckStrategy;
     }
@@ -356,8 +369,33 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
             return Optional.empty();
         }
 
+        // Fail closed when the latest snapshot ID is less than the base snapshot ID.
+        // This indicates a rollback has deleted newer snapshots, and the staged update
+        // is based on a snapshot lineage that no longer exists.
+        if (latestSnapshot.id() < rowIdCheckFromSnapshot) {
+            return Optional.of(
+                    new RuntimeException(
+                            ErrorMessages.DATA_EVOLUTION_SNAPSHOT_LINEAGE_CONFLICT_MESSAGE));
+        }
+
+        // Detect equal snapshot IDs with different snapshot UUIDs (ABA problem).
+        // A rollback can delete a snapshot and a new commit can reuse the same numeric ID.
+        // If the base snapshot UUID differs from the current snapshot UUID at that ID,
+        // the staged update is based on a different snapshot lineage.
+        Snapshot baseSnapshot = snapshotManager.snapshot(rowIdCheckFromSnapshot);
+        if (baseSnapshot == null) {
+            return Optional.of(
+                    new RuntimeException(
+                            ErrorMessages.DATA_EVOLUTION_SNAPSHOT_LINEAGE_CONFLICT_MESSAGE));
+        }
+        if (baseSnapshotUuid != null && !baseSnapshotUuid.equals(baseSnapshot.uuid())) {
+            return Optional.of(
+                    new RuntimeException(
+                            ErrorMessages.DATA_EVOLUTION_SNAPSHOT_LINEAGE_CONFLICT_MESSAGE));
+        }
+
         List<BinaryRow> changedPartitions = changedPartitions(deltaEntries, deltaIndexEntries);
-        Long checkNextRowId = snapshotManager.snapshot(rowIdCheckFromSnapshot).nextRowId();
+        Long checkNextRowId = baseSnapshot.nextRowId();
         checkState(
                 checkNextRowId != null,
                 "Next row id cannot be null for snapshot %s.",

@@ -162,6 +162,11 @@ public abstract class ConflictDetection {
         // Only Data Evolution tables support Row ID conflict detection.
     }
 
+    public void setRowIdCheckFromSnapshot(
+            @Nullable Long rowIdCheckFromSnapshot, @Nullable String baseSnapshotUuid) {
+        // Only Data Evolution tables support Row ID conflict detection.
+    }
+
     public void setRowIdCheckFromSnapshotForMaterializeDvCompaction(
             @Nullable Long rowIdCheckFromSnapshot) {
         // Only Data Evolution tables support Row ID conflict detection.
