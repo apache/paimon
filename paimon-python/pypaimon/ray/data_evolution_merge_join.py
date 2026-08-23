@@ -31,7 +31,11 @@ from pypaimon.ray.data_evolution_merge_transform import (
     vectorized_insert_transform,
     vectorized_matched_transform,
 )
-from pypaimon.ray.partitioning import _resolve_row_id_num_partitions
+from pypaimon.ray.partitioning import (
+    _default_hash_shuffle_parallelism,
+    _resolve_num_partitions,
+    _resolve_row_id_num_partitions,
+)
 
 
 def _map_kwargs(
@@ -44,6 +48,26 @@ def _map_kwargs(
     if ray_remote_args:
         kwargs.update(ray_remote_args)
     return kwargs
+
+
+def _resolve_matched_num_partitions(
+    num_partitions: Optional[int],
+    estimated_size_bytes: Optional[int],
+    target_ds,
+) -> int:
+    """Resolve a target-left join from the context sealed on its left input."""
+    if num_partitions is not None:
+        return num_partitions
+
+    data_context = getattr(target_ds, "context", None)
+    default_shuffle = _default_hash_shuffle_parallelism(data_context)
+    return _resolve_num_partitions(
+        num_partitions,
+        estimated_size_bytes,
+        min_partitions=default_shuffle,
+        unknown_num_partitions=default_shuffle,
+        data_context=data_context,
+    )
 
 
 @dataclass(frozen=True)
@@ -544,8 +568,9 @@ def build_matched_update_ds(
     target_pa_schema: pa.Schema,
     update_cols: Sequence[str],
     catalog_options: Dict[str, str],
-    num_partitions: int,
+    num_partitions: Optional[int],
     resolve_target_projection,
+    estimated_size_bytes: Optional[int] = None,
     snapshot_id: Optional[int] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
 ) -> Tuple:
@@ -566,6 +591,9 @@ def build_matched_update_ds(
 
     target_renamed = target_ds.rename_columns(
         {c: f"t.{c}" for c in target_ds.schema().names}
+    )
+    num_partitions = _resolve_matched_num_partitions(
+        num_partitions, estimated_size_bytes, target_renamed,
     )
     source_cols = _resolve_source_projection(
         clauses, source_on, source_ds.schema().names,
@@ -603,8 +631,9 @@ def build_matched_delete_ds(
     clauses: List[_NormalizedClause],
     target_field_names: Sequence[str],
     catalog_options: Dict[str, str],
-    num_partitions: int,
+    num_partitions: Optional[int],
     resolve_target_projection,
+    estimated_size_bytes: Optional[int] = None,
     snapshot_id: Optional[int] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
 ) -> Tuple:
@@ -628,6 +657,9 @@ def build_matched_delete_ds(
 
     target_renamed = target_ds.rename_columns(
         {c: f"t.{c}" for c in target_ds.schema().names}
+    )
+    num_partitions = _resolve_matched_num_partitions(
+        num_partitions, estimated_size_bytes, target_renamed,
     )
     source_cols = list(source_ds.schema().names)
     source_renamed = source_ds.rename_columns(

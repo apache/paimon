@@ -3509,6 +3509,74 @@ class TargetProjectionTest(unittest.TestCase):
             'id': 's.id',
             'name': 's.name',
         })
+        self.assertEqual(
+            target_renamed.join.call_args.kwargs['num_partitions'], 1
+        )
+
+    def test_matched_update_uses_target_left_context(self):
+        from pypaimon.ray.data_evolution_merge_join import (
+            build_matched_update_ds,
+        )
+        from pypaimon.ray.data_evolution_merge_transform import SourceColumnRef
+
+        source_ds = Mock()
+        source_ds.schema.return_value = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+        ])
+        selected_ds = Mock()
+        source_renamed = Mock()
+        source_renamed.context = Mock(
+            target_max_block_size=512,
+            default_hash_shuffle_parallelism=7,
+        )
+        source_ds.select_columns.return_value = selected_ds
+        selected_ds.rename_columns.return_value = source_renamed
+
+        target_ds = Mock()
+        target_ds.schema.return_value = pa.schema([
+            ('_ROW_ID', pa.int64()),
+            ('id', pa.int32()),
+        ])
+        target_renamed = Mock()
+        target_renamed.context = Mock(
+            target_max_block_size=128,
+            default_hash_shuffle_parallelism=3,
+        )
+        joined = Mock()
+        target_ds.rename_columns.return_value = target_renamed
+        target_renamed.join.return_value = joined
+
+        with patch(
+                'pypaimon.ray.ray_paimon.read_paimon',
+                return_value=target_ds,
+        ), patch(
+                'ray.cluster_resources', return_value={'CPU': 320},
+        ), patch(
+                'ray.data.context.DataContext.get_current',
+                side_effect=AssertionError('must use target Dataset context'),
+        ):
+            build_matched_update_ds(
+                target_identifier='default.target',
+                source_ds=source_ds,
+                target_on=['id'],
+                source_on=['id'],
+                clauses=[self._clause({'name': SourceColumnRef('name')})],
+                target_field_names=['id', 'name'],
+                target_pa_schema=pa.schema([
+                    ('id', pa.int32()),
+                    ('name', pa.string()),
+                ]),
+                update_cols=['name'],
+                catalog_options={'warehouse': '/tmp/warehouse'},
+                num_partitions=None,
+                estimated_size_bytes=512,
+                resolve_target_projection=lambda *args: ['id'],
+            )
+
+        join_kwargs = target_renamed.join.call_args.kwargs
+        # Target context: ceil(512 / 128) = 4. Source context would resolve 7.
+        self.assertEqual(join_kwargs['num_partitions'], 4)
 
     def test_not_matched_insert_selects_needed_source_cols(self):
         from pypaimon.ray.data_evolution_merge_join import (

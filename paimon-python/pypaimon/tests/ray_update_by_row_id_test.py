@@ -15,6 +15,7 @@
 #  specific language governing permissions and limitations
 #  under the License.
 
+import inspect
 import os
 import shutil
 import tempfile
@@ -230,7 +231,18 @@ class RayUpdateByRowIdTest(unittest.TestCase):
 
         self.assertEqual(stats, {"num_updated": 3})
         self.assertEqual([result for _, result in resolved], [3])
-        self.assertEqual(resolved[0][0][1:], (None, None, 3))
+        cardinality_parameter = inspect.signature(
+            ray.data.Dataset.map_batches
+        ).parameters.get("udf_modifying_row_count")
+        expected_num_rows = (
+            3
+            if cardinality_parameter is not None
+            and cardinality_parameter.default is False
+            else None
+        )
+        self.assertEqual(
+            resolved[0][0][1:], (None, expected_num_rows, 3)
+        )
         self.assertEqual(self._read(target).column("age").to_pylist(), [99] * 3)
 
     def test_expanding_transform_keeps_target_parallelism(self):
@@ -249,12 +261,17 @@ class RayUpdateByRowIdTest(unittest.TestCase):
             projection=["_ROW_ID"],
         ).take_all()
         row_ids = [row["_ROW_ID"] for row in rows]
+        map_kwargs = {"batch_format": "pyarrow"}
+        if "udf_modifying_row_count" in inspect.signature(
+            ray.data.Dataset.map_batches
+        ).parameters:
+            map_kwargs["udf_modifying_row_count"] = True
         source = ray.data.from_arrow(pa.table({"seed": [0]})).map_batches(
             lambda batch: pa.table({
                 "_ROW_ID": pa.array(row_ids, type=pa.int64()),
                 "age": pa.array([77] * len(row_ids), type=pa.int32()),
             }),
-            batch_format="pyarrow",
+            **map_kwargs,
         )
         real_resolve = merge_join._resolve_row_id_num_partitions
         resolved = []

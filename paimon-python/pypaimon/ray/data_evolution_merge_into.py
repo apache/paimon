@@ -89,6 +89,7 @@ def merge_into(
     read_columns: Optional[Sequence[str]] = None,
 ) -> Dict[str, int]:
     _require_ray_join()
+    requested_num_partitions = num_partitions
 
     table, source_ds, matched_specs, not_matched_specs, ctx = _prepare(
         target, source, catalog_options,
@@ -115,7 +116,7 @@ def merge_into(
         )
         if not target_empty:
             min_partitions = unknown_num_partitions
-    num_partitions = _resolve_num_partitions(
+    source_num_partitions = _resolve_num_partitions(
         num_partitions,
         estimated_size_bytes,
         min_partitions=min_partitions,
@@ -125,12 +126,14 @@ def merge_into(
 
     update_ds, delete_ds, insert_ds, update_cols_union = _build_datasets(
         table, target, source_ds, matched_specs, not_matched_specs,
-        ctx, base_snapshot, num_partitions, ray_remote_args,
+        ctx, base_snapshot, source_num_partitions, ray_remote_args,
+        requested_num_partitions=requested_num_partitions,
+        estimated_size_bytes=estimated_size_bytes,
     )
 
     return _execute_and_commit(
         table, update_ds, delete_ds, insert_ds, update_cols_union,
-        base_snapshot, num_partitions,
+        base_snapshot, source_num_partitions,
         ray_remote_args, concurrency,
     )
 
@@ -356,7 +359,9 @@ def _is_self_merge(target, source, target_on_cols, source_on_cols) -> bool:
 
 def _build_datasets(
     table, target, source_ds, matched_specs, not_matched_specs,
-    ctx: "_PrepareCtx", base_snapshot, num_partitions, ray_remote_args,
+    ctx: "_PrepareCtx", base_snapshot, source_num_partitions, ray_remote_args,
+    requested_num_partitions: Optional[int] = None,
+    estimated_size_bytes: Optional[int] = None,
 ):
     # Pin every target read to base_snapshot so all branches see the same
     # snapshot the caller observed; otherwise concurrent commits in between
@@ -413,7 +418,8 @@ def _build_datasets(
                 target_pa_schema=ctx.update_pa_schema,
                 update_cols=update_cols_union,
                 catalog_options=ctx.catalog_options,
-                num_partitions=num_partitions,
+                num_partitions=requested_num_partitions,
+                estimated_size_bytes=estimated_size_bytes,
                 resolve_target_projection=_resolve_target_projection,
                 snapshot_id=base_snapshot_id,
                 ray_remote_args=ray_remote_args,
@@ -427,7 +433,8 @@ def _build_datasets(
                 clauses=matched_specs,
                 target_field_names=ctx.settable_field_names,
                 catalog_options=ctx.catalog_options,
-                num_partitions=num_partitions,
+                num_partitions=requested_num_partitions,
+                estimated_size_bytes=estimated_size_bytes,
                 resolve_target_projection=_resolve_target_projection,
                 snapshot_id=base_snapshot_id,
                 ray_remote_args=ray_remote_args,
@@ -443,7 +450,7 @@ def _build_datasets(
             target_field_names=ctx.full_target_field_names,
             target_pa_schema=ctx.full_pa_schema,
             catalog_options=ctx.catalog_options,
-            num_partitions=num_partitions,
+            num_partitions=source_num_partitions,
             snapshot_id=base_snapshot_id,
             target_empty=target_empty,
             ray_remote_args=ray_remote_args,
