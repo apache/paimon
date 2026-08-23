@@ -34,6 +34,7 @@ from pypaimon.read.interval_partition import IntervalPartition, SortedRun
 from pypaimon.read.partition_info import PartitionInfo
 from pypaimon.read.push_down_utils import (
     predicate_field_names,
+    predicate_supports_arrow_filter,
     rewrite_predicate_indices,
     trim_predicate_by_fields,
 )
@@ -143,6 +144,8 @@ class SplitRead(ABC):
         self.table: FileStoreTable = table
         self.predicate = predicate
         self.push_down_predicate = self._push_down_predicate()
+        self._arrow_filter_pushdown_enabled = predicate_supports_arrow_filter(
+            self.push_down_predicate)
         self.split = split
         self.row_tracking_enabled = row_tracking_enabled
         self.value_arity = len(read_type)
@@ -558,7 +561,11 @@ class SplitRead(ABC):
                 if _is_reachable(read_field)
             ]
             read_predicate = trim_predicate_by_fields(self.push_down_predicate, read_file_fields)
-            read_arrow_predicate = read_predicate.to_arrow() if read_predicate else None
+            read_arrow_predicate = (
+                read_predicate.to_arrow()
+                if read_predicate and self._arrow_filter_pushdown_enabled
+                else None
+            )
             self.schema_id_2_fields[key] = (
                 read_file_fields,
                 read_arrow_predicate,
@@ -855,7 +862,9 @@ class RawFileSplitRead(SplitRead):
             blob_field_indices=blob_field_indices(self.read_fields),
             vector_field_indices=vector_field_indices(self.read_fields))
         reader = concat_reader
-        if self.table.is_primary_key_table and self.predicate_for_reader:
+        if (self.predicate_for_reader
+                and (self.table.is_primary_key_table
+                     or not self._arrow_filter_pushdown_enabled)):
             reader = FilterRecordBatchReader(
                 reader,
                 self.predicate_for_reader,

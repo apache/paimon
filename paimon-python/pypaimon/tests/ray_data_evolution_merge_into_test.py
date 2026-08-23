@@ -3246,6 +3246,55 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         )
 
     @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
+    def test_self_merge_large_or_condition_pushes_down_predicate(self):
+        target = self._create_table()
+        self._write(
+            target,
+            pa.Table.from_pydict(
+                {
+                    'id': pa.array([0, 1, 2], type=pa.int32()),
+                    'name': ['Alice', 'Alice', 'Alice'],
+                    'age': pa.array([10, 11, 12], type=pa.int32()),
+                },
+                schema=self.pa_schema,
+            ),
+        )
+        condition = "t.name = 'Alice' AND ({})".format(
+            ' OR '.join(
+                '(t.id = {} AND t.age = {})'.format(i, i + 10)
+                for i in range(2000)
+            )
+        )
+
+        result, plan = self._merge_and_capture_self_merge_plan(
+            target=target,
+            source=target,
+            catalog_options=self.catalog_options,
+            on=['_ROW_ID'],
+            when_matched=[WhenMatched.update(
+                {'age': lit(99)}, condition=condition,
+            )],
+            num_partitions=_TEST_NUM_PARTITIONS,
+        )
+
+        self.assertEqual(result['num_matched'], 3)
+        self.assertEqual(self._read_sorted(target)['age'], [99, 99, 99])
+        predicate = plan.predicate
+        self.assertEqual(predicate.method, 'and')
+        self.assertEqual(
+            (predicate.literals[0].field,
+             predicate.literals[0].literals),
+            ('name', ['Alice']),
+        )
+        large_or = predicate.literals[1]
+        self.assertEqual(large_or.method, 'or')
+        self.assertEqual(len(large_or.literals), 2000)
+        self.assertTrue(all(
+            child.method == 'and' and len(child.literals) == 2
+            for child in large_or.literals
+        ))
+
+    @unittest.skipIf(_SKIP_CONDITION, _SKIP_REASON)
     def test_self_merge_pushdown_handles_evolved_file_groups(self):
         from pypaimon.schema.data_types import AtomicType
         from pypaimon.schema.schema_change import SchemaChange
