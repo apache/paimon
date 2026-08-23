@@ -499,14 +499,19 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             schema=self.pa_schema,
         )
 
-        merge_into(
-            target=target,
-            source=source,
-            catalog_options=self.catalog_options,
-            on=['id'],
-            when_matched=[WhenMatched.update('*')],
-            num_partitions=_TEST_NUM_PARTITIONS,
-        )
+        with patch.object(
+                ray.data.Dataset,
+                'materialize',
+                side_effect=AssertionError('plain source must stay streaming'),
+        ):
+            merge_into(
+                target=target,
+                source=source,
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[WhenMatched.update('*')],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
 
         out = self._read_sorted(target)
         self.assertEqual(out['id'], [1, 2, 3])
@@ -529,21 +534,26 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             ),
         )
 
-        metrics = merge_into(
-            target=target,
-            source=pa.Table.from_pydict(
-                {
-                    'id': pa.array([2, 3], type=pa.int32()),
-                    'name': ['ignored', 'ignored'],
-                    'age': pa.array([99, 99], type=pa.int32()),
-                },
-                schema=self.pa_schema,
-            ),
-            catalog_options=self.catalog_options,
-            on=['id'],
-            when_matched=[WhenMatched.delete()],
-            num_partitions=_TEST_NUM_PARTITIONS,
-        )
+        with patch.object(
+                ray.data.Dataset,
+                'materialize',
+                side_effect=AssertionError('plain source must stay streaming'),
+        ):
+            metrics = merge_into(
+                target=target,
+                source=pa.Table.from_pydict(
+                    {
+                        'id': pa.array([2, 3], type=pa.int32()),
+                        'name': ['ignored', 'ignored'],
+                        'age': pa.array([99, 99], type=pa.int32()),
+                    },
+                    schema=self.pa_schema,
+                ),
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[WhenMatched.delete()],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
 
         self.assertEqual(metrics, {
             'num_matched': 2, 'num_inserted': 0, 'num_unchanged': 0,
@@ -552,6 +562,57 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(out['id'], [1])
         self.assertEqual(out['name'], ['a'])
         self.assertEqual(out['age'], [10])
+
+    def test_joined_source_delete_materializes_before_routing(self):
+        options = dict(self.de_options)
+        options['deletion-vectors.enabled'] = 'true'
+        target = self._create_table(options=options)
+        self._write(target, self._source(ids=(1, 2, 3)))
+
+        source = ray.data.from_arrow(pa.table({
+            'id': pa.array([2, 3], type=pa.int32()),
+        })).join(
+            ray.data.from_arrow(pa.table({
+                'id': pa.array([2, 3], type=pa.int32()),
+                'selected': [True, True],
+            })),
+            join_type='inner',
+            num_partitions=_TEST_NUM_PARTITIONS,
+            on=['id'],
+        )
+        real_materialize = ray.data.Dataset.materialize
+        materialized = []
+
+        def track_materialize(dataset):
+            materialized.append(dataset)
+            return real_materialize(dataset)
+
+        with patch.object(
+                ray.data.Dataset, 'materialize', new=track_materialize,
+        ):
+            metrics = merge_into(
+                target=target,
+                source=source,
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[WhenMatched.delete()],
+                num_partitions=_TEST_NUM_PARTITIONS,
+            )
+
+        self.assertEqual(metrics['num_matched'], 2)
+        self.assertEqual(self._read_sorted(target)['id'], [1])
+        self.assertEqual(len(materialized), 1)
+
+    def test_source_shuffle_detection(self):
+        from pypaimon.ray import data_evolution_merge_into as merge_module
+
+        source = ray.data.from_arrow(pa.table({'id': [1, 2]}))
+        detect = merge_module._has_upstream_join_or_shuffle
+
+        self.assertFalse(detect(source))
+        self.assertFalse(detect(source.repartition(2, shuffle=False)))
+        self.assertTrue(detect(source.repartition(2, shuffle=True)))
+        self.assertTrue(detect(source.random_shuffle()))
 
     def test_not_matched_insert_appends_unmatched(self):
         target = self._create_table()
@@ -1051,16 +1112,26 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
 
         updates = matched.map_batches(
             resolve_and_compute, batch_format='pyarrow')
-        metrics = merge_into(
-            target=name,
-            source=updates,
-            catalog_options=self.catalog_options,
-            on=['id'],
-            when_matched=[
-                WhenMatched.update({'feature': source_col('new_feature')})
-            ],
-            num_partitions=num_partitions,
-        )
+        real_materialize = ray.data.Dataset.materialize
+        materialized = []
+
+        def track_materialize(dataset):
+            materialized.append(dataset)
+            return real_materialize(dataset)
+
+        with patch.object(
+                ray.data.Dataset, 'materialize', new=track_materialize,
+        ):
+            metrics = merge_into(
+                target=name,
+                source=updates,
+                catalog_options=self.catalog_options,
+                on=['id'],
+                when_matched=[
+                    WhenMatched.update({'feature': source_col('new_feature')})
+                ],
+                num_partitions=num_partitions,
+            )
 
         table = self.catalog.get_table(name)
         rb = table.new_read_builder()
@@ -1070,6 +1141,7 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
         self.assertEqual(out['feature'], [200, 20, 400])
         self.assertEqual(out['payload'], [b'aa', b'bbb', b'cccc'])
         self.assertEqual(metrics['num_matched'], 2)
+        self.assertEqual(len(materialized), 1)
 
     def test_combined_writes_single_snapshot(self):
         target = self._create_table()
@@ -2306,13 +2378,18 @@ class RayDataEvolutionMergeIntoTest(unittest.TestCase):
             ),
         )
 
-        result = merge_into(
-            target=target,
-            source=target,
-            catalog_options=self.catalog_options,
-            on=['_ROW_ID'],
-            when_matched=[WhenMatched.update({'age': lit(99)})],
-        )
+        with patch.object(
+                ray.data.Dataset,
+                'materialize',
+                side_effect=AssertionError('self-merge must stay streaming'),
+        ):
+            result = merge_into(
+                target=target,
+                source=target,
+                catalog_options=self.catalog_options,
+                on=['_ROW_ID'],
+                when_matched=[WhenMatched.update({'age': lit(99)})],
+            )
 
         self.assertEqual(result['num_matched'], 3)
         out = self._read_sorted(target)

@@ -97,6 +97,9 @@ def merge_into(
         list(when_matched), list(when_not_matched), on,
         read_columns,
     )
+    materialize_matched_before_routing = (
+        _has_upstream_join_or_shuffle(source_ds)
+    )
     base_snapshot = table.snapshot_manager().get_latest_snapshot()
     target_empty = _is_target_empty(base_snapshot)
     estimated_size_bytes = None
@@ -153,6 +156,7 @@ def merge_into(
         ray_remote_args, concurrency,
         update_num_partitions=update_num_partitions,
         delete_num_partitions=delete_num_partitions,
+        materialize_matched_before_routing=materialize_matched_before_routing,
     )
 
 
@@ -483,6 +487,7 @@ def _execute_and_commit(
     ray_remote_args, concurrency,
     update_num_partitions=None,
     delete_num_partitions=None,
+    materialize_matched_before_routing=False,
 ):
     collect_action_row_ids = update_ds is not None and delete_ds is not None
     commit_messages: list = []
@@ -529,6 +534,9 @@ def _execute_and_commit(
                             if base_snapshot is not None else None
                         ),
                         collect_row_ids=collect_action_row_ids,
+                        materialize_before_routing=(
+                            materialize_matched_before_routing
+                        ),
                     )
                 )
             commit_messages.extend(update_msgs)
@@ -543,6 +551,9 @@ def _execute_and_commit(
                     if base_snapshot is not None else None
                 ),
                 collect_row_ids=collect_action_row_ids,
+                materialize_before_routing=(
+                    materialize_matched_before_routing
+                ),
             )
             commit_messages.extend(delete_msgs)
 
@@ -821,6 +832,35 @@ def _normalize_source(
         "source must be a ray.data.Dataset, a Paimon table identifier string, "
         f"a pyarrow.Table, or a pandas.DataFrame; got {type(source).__name__}."
     )
+
+
+def _has_upstream_join_or_shuffle(dataset) -> bool:
+    """Best-effort check for a lazy source join or shuffle."""
+    try:
+        logical_plan = getattr(dataset, "_logical_plan", None)
+        operator = getattr(logical_plan, "dag", None)
+        pending = [operator] if operator is not None else []
+        visited = set()
+        while pending:
+            operator = pending.pop()
+            if id(operator) in visited:
+                continue
+            visited.add(id(operator))
+            operator_name = type(operator).__name__
+            if operator_name in {
+                "Aggregate", "Join", "RandomShuffle", "Sort",
+            }:
+                return True
+            if operator_name == "Repartition":
+                shuffle = getattr(
+                    operator, "shuffle", getattr(operator, "_shuffle", False)
+                )
+                if shuffle:
+                    return True
+            pending.extend(getattr(operator, "input_dependencies", ()))
+    except Exception:
+        pass
+    return False
 
 
 def _source_schema_or_raise(source_ds):
