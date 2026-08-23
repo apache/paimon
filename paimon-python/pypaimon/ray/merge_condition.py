@@ -162,15 +162,22 @@ def _to_paimon_predicate(expression, builder, fields_by_name):
     if kind == 'BinaryExpr':
         op = node.op().upper()
         if op in ('AND', 'OR'):
-            left = _to_paimon_predicate(
-                node.left(), builder, fields_by_name,
-            )
-            right = _to_paimon_predicate(
-                node.right(), builder, fields_by_name,
-            )
-            if left is None or right is None:
-                return None
-            predicates = [left, right]
+            predicates = []
+            pending = [expression]
+            while pending:
+                current = pending.pop()
+                if current.variant_name() == 'BinaryExpr':
+                    current_node = current.to_variant()
+                    if current_node.op().upper() == op:
+                        pending.append(current_node.right())
+                        pending.append(current_node.left())
+                        continue
+                predicate = _to_paimon_predicate(
+                    current, builder, fields_by_name,
+                )
+                if predicate is None:
+                    return None
+                predicates.append(predicate)
             if op == 'AND':
                 return PredicateBuilder.and_predicates(predicates)
             return PredicateBuilder.or_predicates(predicates)
