@@ -18,7 +18,7 @@
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional
 
 import pandas
 import pyarrow
@@ -654,12 +654,84 @@ class TableRead:
         streaming: bool = False,
         prefetch_concurrency: int = 1,
         *,
+        batch_format: str = "row",
+        batch_size: Optional[int] = None,
+        to_tensor_fn: Optional[Callable] = None,
         shuffle: bool = False,
         seed: int = 0,
         buffer_size: int = 1000,
         max_buffer_input_splits: int = 10,
     ) -> "torch.utils.data.Dataset":
-        """Wrap Paimon table data to PyTorch Dataset."""
+        """Wrap Paimon table data in a PyTorch Dataset.
+
+        ``batch_format="row"`` preserves the original behavior and yields one
+        Python dictionary per row. Streaming reads can instead yield native
+        PyArrow ``RecordBatch`` objects or dictionaries of Torch tensors,
+        avoiding per-row Python conversion. Use ``DataLoader(batch_size=None)``
+        for either batch-first format so PyTorch does not batch the data again.
+
+        Args:
+            splits: Scan-plan splits to read.
+            streaming: Whether to stream through an ``IterableDataset``.
+            prefetch_concurrency: Split-read threads inside each DataLoader
+                worker.
+            batch_format: ``"row"`` (default), ``"pyarrow"``, or ``"torch"``.
+                Batch formats require ``streaming=True``.
+            batch_size: Optional number of rows per yielded batch. ``None``
+                preserves native Paimon reader batch sizes. A positive value
+                combines or slices RecordBatches, with only the last batch in
+                each DataLoader worker allowed to be smaller.
+            to_tensor_fn: Optional callable receiving a PyArrow RecordBatch in
+                ``batch_format="torch"`` mode. By default, numeric, boolean,
+                and fixed-size-list columns are converted to tensors.
+            shuffle: Whether to apply Paimon's row-level streaming shuffle.
+                This currently supports only ``batch_format="row"``.
+        """
+        valid_batch_formats = {"row", "pyarrow", "torch"}
+        if batch_format not in valid_batch_formats:
+            raise ValueError(
+                "batch_format must be one of %s, got %r"
+                % (sorted(valid_batch_formats), batch_format)
+            )
+        if batch_size is not None and (
+            isinstance(batch_size, bool)
+            or not isinstance(batch_size, int)
+            or batch_size <= 0
+        ):
+            raise ValueError("batch_size must be a positive int or None")
+        if batch_format == "row":
+            if batch_size is not None:
+                raise ValueError(
+                    "batch_size requires batch_format='pyarrow' or 'torch'"
+                )
+            if to_tensor_fn is not None:
+                raise ValueError("to_tensor_fn requires batch_format='torch'")
+        else:
+            if not streaming:
+                raise ValueError(
+                    "batch_format=%r requires streaming=True" % batch_format
+                )
+            if shuffle:
+                raise ValueError(
+                    "shuffle=True only supports batch_format='row'"
+                )
+            if batch_format == "pyarrow" and to_tensor_fn is not None:
+                raise ValueError("to_tensor_fn requires batch_format='torch'")
+            if to_tensor_fn is not None and not callable(to_tensor_fn):
+                raise ValueError("to_tensor_fn must be callable")
+
+            from pypaimon.read.datasource.torch_dataset import (
+                TorchBatchIterDataset,
+            )
+            return TorchBatchIterDataset(
+                self,
+                splits,
+                batch_format=batch_format,
+                batch_size=batch_size,
+                prefetch_concurrency=prefetch_concurrency,
+                to_tensor_fn=to_tensor_fn,
+            )
+
         if shuffle:
             if not streaming:
                 raise ValueError("shuffle=True only supports streaming=True")

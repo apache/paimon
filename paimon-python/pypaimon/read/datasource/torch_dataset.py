@@ -21,8 +21,10 @@ Module to read a Paimon table into PyTorch Dataset.
 import queue
 import random
 import threading
-from typing import Iterator, List
+import warnings
+from typing import Any, Callable, Iterator, List, Optional
 
+import pyarrow as pa
 import torch
 from torch.utils.data import Dataset, IterableDataset
 
@@ -88,6 +90,13 @@ class _BaseTorchIterDataset(IterableDataset):
     Shared helpers for streaming PyTorch datasets backed by Paimon splits.
     """
 
+    _SENTINEL = 0
+    _ITEM = 1
+    _ERR = 2
+    _PREFETCH_PUT_TIMEOUT_SEC = 30.0
+    _PREFETCH_GET_TIMEOUT_SEC = 300.0
+    _PREFETCH_JOIN_TIMEOUT_SEC = 5.0
+
     def __init__(self, table_read: TableRead, splits: List[Split]):
         self.table_read = table_read
         self.splits = splits
@@ -119,6 +128,66 @@ class _BaseTorchIterDataset(IterableDataset):
 
         return self.splits[start_idx:end_idx]
 
+    def _iter_concurrently(
+        self,
+        splits: List[Split],
+        concurrency: int,
+        item_iterator: Callable[[List[Split]], Iterator],
+        queue_maxsize: int,
+    ) -> Iterator:
+        n = min(concurrency, len(splits))
+        if n == 0:
+            return
+        split_groups = [splits[i::n] for i in range(n)]
+
+        q = queue.Queue(maxsize=queue_maxsize)
+        stop = threading.Event()
+
+        def put_item(tag: int, payload):
+            while not stop.is_set():
+                try:
+                    q.put((tag, payload), timeout=self._PREFETCH_PUT_TIMEOUT_SEC)
+                    return True
+                except queue.Full:
+                    continue
+            return False
+
+        def producer(split_group: List[Split]):
+            try:
+                for item in item_iterator(split_group):
+                    if stop.is_set() or not put_item(self._ITEM, item):
+                        break
+                put_item(self._SENTINEL, None)
+            except Exception as e:
+                put_item(self._ERR, e)
+
+        threads = [
+            threading.Thread(target=producer, args=(group,), daemon=True)
+            for group in split_groups
+        ]
+        for thread in threads:
+            thread.start()
+
+        try:
+            done = 0
+            while done < n:
+                try:
+                    tag, payload = q.get(timeout=self._PREFETCH_GET_TIMEOUT_SEC)
+                except queue.Empty:
+                    if stop.is_set():
+                        break
+                    continue
+                if tag == self._SENTINEL:
+                    done += 1
+                elif tag == self._ERR:
+                    raise payload
+                else:
+                    yield payload
+        finally:
+            stop.set()
+            for thread in threads:
+                thread.join(timeout=self._PREFETCH_JOIN_TIMEOUT_SEC)
+
 
 class TorchIterDataset(_BaseTorchIterDataset):
     """
@@ -129,13 +198,7 @@ class TorchIterDataset(_BaseTorchIterDataset):
     rather than loading everything into memory upfront.
     """
 
-    _SENTINEL = 0
-    _ROW = 1
-    _ERR = 2
     _PREFETCH_QUEUE_MAXSIZE = 512
-    _PREFETCH_PUT_TIMEOUT_SEC = 30.0
-    _PREFETCH_GET_TIMEOUT_SEC = 300.0
-    _PREFETCH_JOIN_TIMEOUT_SEC = 5.0
 
     def __init__(self, table_read: TableRead, splits: List[Split], prefetch_concurrency: int = 1):
         """
@@ -165,8 +228,12 @@ class TorchIterDataset(_BaseTorchIterDataset):
         splits_to_process = self._worker_splits(worker_info)
 
         if self.prefetch_concurrency > 1:
-            for row in self._iter_rows(splits_to_process):
-                yield row
+            yield from self._iter_concurrently(
+                splits_to_process,
+                self.prefetch_concurrency,
+                self._rows_for_splits,
+                self._PREFETCH_QUEUE_MAXSIZE,
+            )
             return
 
         worker_iterator = self.table_read.to_iterator(splits_to_process)
@@ -174,60 +241,172 @@ class TorchIterDataset(_BaseTorchIterDataset):
         for offset_row in worker_iterator:
             yield self._row_to_dict(offset_row)
 
-    def _iter_rows(self, splits: List[Split]):
-        n = min(self.prefetch_concurrency, len(splits))
-        if n == 0:
-            return
-        split_groups = [splits[i::n] for i in range(n)]
+    def _rows_for_splits(self, splits: List[Split]) -> Iterator[dict]:
+        for offset_row in self.table_read.to_iterator(splits):
+            yield self._row_to_dict(offset_row)
 
-        q = queue.Queue(maxsize=self._PREFETCH_QUEUE_MAXSIZE)
-        stop = threading.Event()
 
-        def put_item(tag: int, payload):
-            while not stop.is_set():
-                try:
-                    q.put((tag, payload), timeout=self._PREFETCH_PUT_TIMEOUT_SEC)
-                    return True
-                except queue.Full:
-                    continue
-            return False
+def _concat_record_batches(batches: List[pa.RecordBatch]) -> pa.RecordBatch:
+    if len(batches) == 1:
+        return batches[0]
+    return pa.RecordBatch.from_arrays(
+        [
+            pa.concat_arrays([batch.column(i) for batch in batches])
+            for i in range(batches[0].num_columns)
+        ],
+        schema=batches[0].schema,
+    )
 
-        def producer(split_group: List):
-            try:
-                for offset_row in self.table_read.to_iterator(split_group):
-                    if stop.is_set():
-                        break
-                    row_dict = self._row_to_dict(offset_row)
-                    if not put_item(self._ROW, row_dict):
-                        break
-                put_item(self._SENTINEL, None)
-            except Exception as e:
-                put_item(self._ERR, e)
 
-        threads = [threading.Thread(target=producer, args=(split_groups[i],), daemon=True)
-                   for i in range(n)]
-        for t in threads:
-            t.start()
+def _sized_record_batches(
+    batches: Iterator[pa.RecordBatch],
+    batch_size: Optional[int],
+) -> Iterator[pa.RecordBatch]:
+    if batch_size is None:
+        yield from batches
+        return
 
+    pending: List[pa.RecordBatch] = []
+    pending_rows = 0
+    for batch in batches:
+        offset = 0
+        while offset < batch.num_rows:
+            take = min(batch_size - pending_rows, batch.num_rows - offset)
+            pending.append(batch.slice(offset, take))
+            pending_rows += take
+            offset += take
+            if pending_rows == batch_size:
+                yield _concat_record_batches(pending)
+                pending = []
+                pending_rows = 0
+
+    if pending:
+        yield _concat_record_batches(pending)
+
+
+def _default_to_tensor(batch: pa.RecordBatch) -> dict:
+    tensors = {}
+    for name, array in zip(batch.schema.names, batch.columns):
+        if array.null_count:
+            raise ValueError(
+                "Torch tensor conversion does not support null values in "
+                "column %r; provide to_tensor_fn to handle them." % name
+            )
+
+        if pa.types.is_fixed_size_list(array.type):
+            value_type = array.type.value_type
+            if not (
+                pa.types.is_integer(value_type)
+                or pa.types.is_floating(value_type)
+                or pa.types.is_boolean(value_type)
+            ):
+                raise ValueError(
+                    "Torch tensor conversion does not support column %r with "
+                    "type %s; provide to_tensor_fn." % (name, array.type)
+                )
+            values = array.values.slice(
+                array.offset * array.type.list_size,
+                len(array) * array.type.list_size,
+            )
+            if values.null_count:
+                raise ValueError(
+                    "Torch tensor conversion does not support null list values "
+                    "in column %r; provide to_tensor_fn to handle them." % name
+                )
+            numpy_array = values.to_numpy(zero_copy_only=False).reshape(
+                len(array), array.type.list_size
+            )
+        elif (
+            pa.types.is_integer(array.type)
+            or pa.types.is_floating(array.type)
+            or pa.types.is_boolean(array.type)
+        ):
+            numpy_array = array.to_numpy(zero_copy_only=False)
+        else:
+            raise ValueError(
+                "Torch tensor conversion only supports numeric, boolean, and "
+                "fixed-size-list columns; column %r has type %s. Select "
+                "batch_format='pyarrow' or provide to_tensor_fn."
+                % (name, array.type)
+            )
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message="The given NumPy array is not writable",
+                category=UserWarning,
+            )
+            tensors[name] = torch.from_numpy(numpy_array)
+    return tensors
+
+
+class TorchBatchIterDataset(_BaseTorchIterDataset):
+    """Streaming IterableDataset which yields Arrow or Tensor batches."""
+
+    _PREFETCH_BATCH_QUEUE_MAXSIZE = 16
+
+    def __init__(
+        self,
+        table_read: TableRead,
+        splits: List[Split],
+        batch_format: str,
+        batch_size: Optional[int],
+        prefetch_concurrency: int = 1,
+        to_tensor_fn: Optional[Callable[[pa.RecordBatch], Any]] = None,
+    ):
+        super().__init__(table_read, splits)
+        self.batch_format = batch_format
+        self.batch_size = batch_size
+        self.prefetch_concurrency = max(1, int(prefetch_concurrency))
+        self.to_tensor_fn = to_tensor_fn
+
+    def __iter__(self):
+        worker_info = torch.utils.data.get_worker_info()
+        splits_to_process = self._worker_splits(worker_info)
+        if self.prefetch_concurrency > 1:
+            raw_batches = self._iter_concurrently(
+                splits_to_process,
+                self.prefetch_concurrency,
+                self._arrow_batches_for_splits,
+                self._PREFETCH_BATCH_QUEUE_MAXSIZE,
+            )
+        else:
+            raw_batches = self._arrow_batches_for_splits(splits_to_process)
+
+        batches = _sized_record_batches(
+            self._limit_batches(raw_batches), self.batch_size
+        )
+        for batch in batches:
+            if self.batch_format == "torch":
+                converter = self.to_tensor_fn or _default_to_tensor
+                yield converter(batch)
+            else:
+                yield batch
+
+    def _arrow_batches_for_splits(
+        self, splits: List[Split]
+    ) -> Iterator[pa.RecordBatch]:
+        reader = self.table_read.to_arrow_batch_reader(splits)
         try:
-            done = 0
-            while done < n:
-                try:
-                    tag, payload = q.get(timeout=self._PREFETCH_GET_TIMEOUT_SEC)
-                except queue.Empty:
-                    if stop.is_set():
-                        break
-                    continue
-                if tag == self._SENTINEL:
-                    done += 1
-                elif tag == self._ERR:
-                    raise payload
-                else:
-                    yield payload
+            for batch in iter(reader.read_next_batch, None):
+                if batch.num_rows:
+                    yield batch
         finally:
-            stop.set()
-            for t in threads:
-                t.join(timeout=self._PREFETCH_JOIN_TIMEOUT_SEC)
+            close = getattr(reader, "close", None)
+            if close is not None:
+                close()
+
+    def _limit_batches(
+        self, batches: Iterator[pa.RecordBatch]
+    ) -> Iterator[pa.RecordBatch]:
+        remaining = self.table_read.limit
+        for batch in batches:
+            if remaining is not None:
+                if remaining <= 0:
+                    return
+                if batch.num_rows > remaining:
+                    batch = batch.slice(0, remaining)
+                remaining -= batch.num_rows
+            yield batch
 
 
 class TorchShuffledIterDataset(_BaseTorchIterDataset):

@@ -59,6 +59,80 @@ when it is false, it will read the full amount of data into memory.
 
 **`prefetch_concurrency`** (default: 1): When streaming is true, number of threads used for parallel prefetch within each DataLoader worker. Set to a value greater than 1 to partition splits across threads and increase read throughput. Has no effect when streaming is false.
 
+### Batch-first Streaming
+
+For training pipelines where Python row conversion is the bottleneck, set
+`batch_format` to make the `IterableDataset` yield whole batches. Disable
+DataLoader auto-batching with `batch_size=None`.
+
+To consume PyArrow `RecordBatch` objects directly:
+
+```python
+dataset = table_read.to_torch(
+    splits,
+    streaming=True,
+    batch_format="pyarrow",
+    batch_size=1024,
+    prefetch_concurrency=4,
+)
+dataloader = DataLoader(dataset, batch_size=None, num_workers=2)
+
+for record_batch in dataloader:
+    train_on_arrow(record_batch)
+```
+
+To convert numeric columns to Tensor batches inside each DataLoader worker:
+
+```python
+dataset = table_read.to_torch(
+    splits,
+    streaming=True,
+    batch_format="torch",
+    batch_size=1024,
+)
+dataloader = DataLoader(dataset, batch_size=None, num_workers=2)
+
+for batch in dataloader:
+    # batch is a dict[str, torch.Tensor]
+    train(batch["features"], batch["label"])
+```
+
+The default Tensor converter supports non-null numeric, boolean, and numeric
+fixed-size-list columns. Use `to_tensor_fn` for strings, variable-length
+features, BLOB decoding, null handling, or application-specific device and
+dtype conversion:
+
+```python
+import torch
+
+def convert(batch):
+    return {
+        "label": torch.from_numpy(
+            batch.column("label").to_numpy(zero_copy_only=False)
+        ),
+        "text": batch.column("text").to_pylist(),
+    }
+
+dataset = table_read.to_torch(
+    splits,
+    streaming=True,
+    batch_format="torch",
+    batch_size=1024,
+    to_tensor_fn=convert,
+)
+```
+
+The default converter can share numeric Arrow buffers with CPU tensors. Treat
+those tensors as read-only, or clone them before an in-place mutation.
+
+If `batch_size` is omitted, PyPaimon preserves native reader batch sizes and
+avoids batch resizing. When it is set, batches are combined or sliced to that
+size; only the final batch produced by each DataLoader worker may be smaller.
+Batch-first streaming partitions splits across DataLoader workers in the same
+way as row streaming. Row-level `shuffle=True` is not supported in batch-first
+mode; shuffle split order during planning or shuffle batches in the training
+pipeline instead.
+
 ## File Format Metadata Cache
 
 Reusable PyArrow Dataset metadata is cached across reads. Configure its estimated
