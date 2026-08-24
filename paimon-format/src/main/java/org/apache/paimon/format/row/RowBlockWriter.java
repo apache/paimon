@@ -302,8 +302,8 @@ class RowBlockWriter {
         @Override
         public void write(DataGetters data, int i) {
             Variant v = data.getVariant(i);
-            buf.writeBytes(v.value());
-            buf.writeBytes(v.metadata());
+            buf.writeBytes(v.valueBuffer());
+            buf.writeBytes(v.metadataBuffer());
         }
     }
 

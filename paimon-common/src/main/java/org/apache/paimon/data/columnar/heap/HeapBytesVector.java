@@ -20,6 +20,7 @@ package org.apache.paimon.data.columnar.heap;
 
 import org.apache.paimon.data.columnar.writable.WritableBytesVector;
 
+import java.nio.ByteBuffer;
 import java.util.Arrays;
 
 /**
@@ -89,9 +90,27 @@ public class HeapBytesVector extends AbstractHeapVector implements WritableBytes
     }
 
     @Override
+    public void putByteBuffer(int elementNum, ByteBuffer value) {
+        int length = value.remaining();
+        long requiredCapacity = (long) bytesAppended + length;
+        reserveBytes(requiredCapacity);
+        value.duplicate().get(buffer, bytesAppended, length);
+        this.start[elementNum] = bytesAppended;
+        this.length[elementNum] = length;
+        bytesAppended += length;
+    }
+
+    @Override
     public void appendByteArray(byte[] value, int offset, int length) {
         reserve(elementsAppended + 1);
         putByteArray(elementsAppended, value, offset, length);
+        elementsAppended++;
+    }
+
+    @Override
+    public void appendByteBuffer(ByteBuffer value) {
+        reserve(elementsAppended + 1);
+        putByteBuffer(elementsAppended, value);
         elementsAppended++;
     }
 

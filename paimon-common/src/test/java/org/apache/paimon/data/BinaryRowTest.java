@@ -25,6 +25,7 @@ import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.data.serializer.InternalVectorSerializer;
 import org.apache.paimon.data.serializer.Serializer;
+import org.apache.paimon.data.variant.BufferOnlyVariant;
 import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.types.DataType;
@@ -963,7 +964,10 @@ public class BinaryRowTest {
         BinaryRow row = new BinaryRow(2);
         BinaryRowWriter writer = new BinaryRowWriter(row);
 
-        writer.writeVariant(0, GenericVariant.fromJson("{\"age\":27,\"city\":\"Beijing\"}"));
+        writer.writeVariant(
+                0,
+                new BufferOnlyVariant(
+                        GenericVariant.fromJson("{\"age\":27,\"city\":\"Beijing\"}")));
         writer.setNullAt(1);
         writer.complete();
 

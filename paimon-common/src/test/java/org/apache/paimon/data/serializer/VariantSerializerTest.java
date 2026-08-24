@@ -18,11 +18,33 @@
 
 package org.apache.paimon.data.serializer;
 
+import org.apache.paimon.data.variant.BufferOnlyVariant;
 import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.data.variant.Variant;
+import org.apache.paimon.io.DataInputDeserializer;
+import org.apache.paimon.io.DataOutputSerializer;
+
+import org.junit.jupiter.api.Test;
+
+import java.io.IOException;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link VariantSerializer}. */
 public class VariantSerializerTest extends SerializerTestBase<Variant> {
+
+    @Test
+    public void testSerializeFromBuffers() throws IOException {
+        GenericVariant expected = GenericVariant.fromJson("{\"age\":27,\"city\":\"Beijing\"}");
+        DataOutputSerializer output = new DataOutputSerializer(32);
+
+        VariantSerializer.INSTANCE.serialize(new BufferOnlyVariant(expected), output);
+        Variant actual =
+                VariantSerializer.INSTANCE.deserialize(
+                        new DataInputDeserializer(output.getSharedBuffer(), 0, output.length()));
+
+        assertThat(actual.toJson()).isEqualTo(expected.toJson());
+    }
 
     @Override
     protected Serializer<Variant> createSerializer() {

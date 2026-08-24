@@ -164,6 +164,11 @@ public class GenericVariantBuilder {
         return Arrays.copyOfRange(writeBuffer, 0, writePos);
     }
 
+    /** Returns a view of the value written so far without copying the builder buffer. */
+    public ByteBuffer valueWithoutMetadataBuffer() {
+        return ByteBuffer.wrap(writeBuffer, 0, writePos).slice().order(ByteOrder.LITTLE_ENDIAN);
+    }
+
     public void appendString(String str) {
         byte[] text = str.getBytes(StandardCharsets.UTF_8);
         boolean longStr = text.length > MAX_SHORT_STR_SIZE;
@@ -281,12 +286,18 @@ public class GenericVariantBuilder {
     }
 
     public void appendBinary(byte[] binary) {
-        checkCapacity(1 + U32_SIZE + binary.length);
+        appendBinary(ByteBuffer.wrap(binary));
+    }
+
+    public void appendBinary(ByteBuffer binary) {
+        ByteBuffer source = binary.duplicate();
+        int length = source.remaining();
+        checkCapacity(1 + U32_SIZE + length);
         writeBuffer[writePos++] = primitiveHeader(BINARY);
-        writeLong(writeBuffer, writePos, binary.length, U32_SIZE);
+        writeLong(writeBuffer, writePos, length, U32_SIZE);
         writePos += U32_SIZE;
-        System.arraycopy(binary, 0, writeBuffer, writePos, binary.length);
-        writePos += binary.length;
+        source.get(writeBuffer, writePos, length);
+        writePos += length;
     }
 
     public void appendUuid(UUID uuid) {
@@ -368,7 +379,9 @@ public class GenericVariantBuilder {
                 int currentOffset = 0;
                 for (int i = 0; i < size; ++i) {
                     int oldOffset = fields.get(i).offset;
-                    int fieldSize = GenericVariantUtil.valueSize(writeBuffer, start + oldOffset);
+                    int fieldSize =
+                            GenericVariantUtil.valueSize(
+                                    ByteBuffer.wrap(writeBuffer), start + oldOffset);
                     System.arraycopy(
                             writeBuffer,
                             start + oldOffset,
@@ -440,12 +453,12 @@ public class GenericVariantBuilder {
     // variant into the current variant dictionary and rebuild it with new field ids. For scalar
     // values in the input variant, we can directly copy the binary slice.
     public void appendVariant(GenericVariant v) {
-        appendVariantImpl(v.rawValue(), v.metadata(), v.pos());
+        appendVariantImpl(v.rawValueBuffer(), v.metadataBuffer(), v.pos());
     }
 
-    private void appendVariantImpl(byte[] value, byte[] metadata, int pos) {
-        checkIndex(pos, value.length);
-        int basicType = value[pos] & BASIC_TYPE_MASK;
+    private void appendVariantImpl(ByteBuffer value, ByteBuffer metadata, int pos) {
+        checkIndex(pos, value.remaining());
+        int basicType = GenericVariantUtil.getByte(value, pos) & BASIC_TYPE_MASK;
         switch (basicType) {
             case OBJECT:
                 handleObject(
@@ -498,14 +511,14 @@ public class GenericVariantBuilder {
     // building an object during shredding, where there is a fixed pre-existing metadata that
     // all shredded values will refer to.
     public void shallowAppendVariant(GenericVariant v) {
-        shallowAppendVariantImpl(v.rawValue(), v.pos());
+        shallowAppendVariantImpl(v.rawValueBuffer(), v.pos());
     }
 
-    private void shallowAppendVariantImpl(byte[] value, int pos) {
+    private void shallowAppendVariantImpl(ByteBuffer value, int pos) {
         int size = valueSize(value, pos);
-        checkIndex(pos + size - 1, value.length);
+        checkIndex(pos + size - 1, value.remaining());
         checkCapacity(size);
-        System.arraycopy(value, pos, writeBuffer, writePos, size);
+        GenericVariantUtil.slice(value, pos, size).get(writeBuffer, writePos, size);
         writePos += size;
     }
 

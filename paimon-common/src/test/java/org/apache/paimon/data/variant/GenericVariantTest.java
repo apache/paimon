@@ -26,10 +26,13 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.InstantiationUtil;
 
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.time.ZoneOffset;
 
 import static org.apache.paimon.data.variant.PaimonShreddingUtils.assembleVariant;
@@ -40,6 +43,89 @@ import static org.apache.paimon.types.DataTypesTest.assertThat;
 
 /** Test of {@link GenericVariant}. */
 public class GenericVariantTest {
+
+    @Test
+    public void testByteBufferBackedVariantSupportsHeapAndDirectSlices() {
+        GenericVariant expected =
+                GenericVariant.fromJson("{\"array\":[1,true,null],\"nested\":{\"key\":\"value\"}}");
+
+        GenericVariant heap =
+                new GenericVariant(
+                        paddedBuffer(expected.value(), false),
+                        paddedBuffer(expected.metadata(), false));
+        assertThat(heap.toJson()).isEqualTo(expected.toJson());
+        assertThat(heap.valueBuffer().arrayOffset()).isEqualTo(3);
+        assertThat(heap.metadataBuffer().arrayOffset()).isEqualTo(3);
+
+        ByteBuffer directValue = paddedBuffer(expected.value(), true);
+        ByteBuffer directMetadata = paddedBuffer(expected.metadata(), true);
+        GenericVariant direct = new GenericVariant(directValue, directMetadata);
+        assertThat(direct.toJson()).isEqualTo(expected.toJson());
+        assertThat(direct.getFieldByKey("nested").getFieldByKey("key").getString())
+                .isEqualTo("value");
+        assertThat(direct.valueBuffer().isDirect()).isEqualTo(true);
+        assertThat(direct.metadataBuffer().isDirect()).isEqualTo(true);
+        assertThat(directValue.position()).isEqualTo(0);
+        assertThat(directMetadata.position()).isEqualTo(0);
+        assertThat(direct.value()).isEqualTo(expected.value());
+        assertThat(direct.metadata()).isEqualTo(expected.metadata());
+    }
+
+    @Test
+    public void testShreddingByteBufferBackedVariant() {
+        GenericVariant expected =
+                GenericVariant.fromJson("{\"a\":1,\"leftover\":{\"payload\":\"large-value\"}}");
+        GenericVariant direct =
+                new GenericVariant(
+                        paddedBuffer(expected.value(), true),
+                        paddedBuffer(expected.metadata(), true));
+        VariantSchema schema =
+                buildVariantSchema(variantShreddingSchema(RowType.of(DataTypes.BIGINT())));
+
+        Variant rebuilt = assembleVariant(castShredded(direct, schema), schema);
+
+        assertThat(rebuilt.toJson()).isEqualTo(expected.toJson());
+    }
+
+    @Test
+    public void testSerializeByteBufferBackedVariant() throws Exception {
+        GenericVariant expected = GenericVariant.fromJson("{\"nested\":{\"key\":\"value\"}}");
+        GenericVariant direct =
+                new GenericVariant(
+                        paddedBuffer(expected.value(), true),
+                        paddedBuffer(expected.metadata(), true));
+
+        GenericVariant restored = InstantiationUtil.clone(direct.getFieldByKey("nested"));
+
+        assertThat(restored.toJson()).isEqualTo("{\"key\":\"value\"}");
+        assertThat(restored.pos()).isEqualTo(direct.getFieldByKey("nested").pos());
+    }
+
+    private static ByteBuffer paddedBuffer(byte[] bytes, boolean direct) {
+        ByteBuffer padded =
+                direct
+                        ? ByteBuffer.allocateDirect(bytes.length + 4)
+                        : ByteBuffer.allocate(bytes.length + 4);
+        padded.position(3);
+        padded.put(bytes);
+        padded.limit(3 + bytes.length);
+        padded.position(3);
+        return padded.slice().order(ByteOrder.LITTLE_ENDIAN);
+    }
+
+    @Test
+    public void testNestedValueBufferUsesRawValueSlice() {
+        GenericVariant root = GenericVariant.fromJson("{\"nested\":{\"key\":\"value\"}}");
+        GenericVariant nested = root.getFieldByKey("nested");
+
+        ByteBuffer buffer = nested.valueBuffer();
+        byte[] serialized = new byte[buffer.remaining()];
+        buffer.duplicate().get(serialized);
+
+        assertThat(buffer.array()).isSameAs(root.rawValue());
+        assertThat(buffer.arrayOffset() + buffer.position()).isEqualTo(nested.pos());
+        assertThat(serialized).isEqualTo(nested.value());
+    }
 
     @Test
     public void testToJson() {

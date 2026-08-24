@@ -18,10 +18,8 @@
 
 package org.apache.paimon.data.variant;
 
-import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.variant.VariantPathSegment.ArrayExtraction;
 import org.apache.paimon.data.variant.VariantPathSegment.ObjectExtraction;
-import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.types.DataType;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonFactory;
@@ -31,6 +29,8 @@ import java.io.CharArrayWriter;
 import java.io.IOException;
 import java.io.Serializable;
 import java.math.BigDecimal;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -38,7 +38,6 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
 import java.time.temporal.ChronoUnit;
-import java.util.Arrays;
 import java.util.Base64;
 import java.util.Locale;
 import java.util.Objects;
@@ -54,8 +53,8 @@ import static org.apache.paimon.data.variant.GenericVariantUtil.getMetadataKey;
 import static org.apache.paimon.data.variant.GenericVariantUtil.handleArray;
 import static org.apache.paimon.data.variant.GenericVariantUtil.handleObject;
 import static org.apache.paimon.data.variant.GenericVariantUtil.malformedVariant;
-import static org.apache.paimon.data.variant.GenericVariantUtil.pointToMetadataKey;
 import static org.apache.paimon.data.variant.GenericVariantUtil.readUnsigned;
+import static org.apache.paimon.data.variant.GenericVariantUtil.slice;
 import static org.apache.paimon.data.variant.GenericVariantUtil.valueSize;
 import static org.apache.paimon.data.variant.GenericVariantUtil.variantConstructorSizeLimit;
 
@@ -68,49 +67,107 @@ public final class GenericVariant implements Variant, Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    private final byte[] value;
-    private final byte[] metadata;
+    private final ByteBuffer value;
+    private final ByteBuffer metadata;
     // The variant value doesn't use the whole `value` binary, but starts from its `pos` index and
     // spans a size of `valueSize(value, pos)`. This design avoids frequent copies of the value
     // binary when reading a sub-variant in the array/object element.
     private final int pos;
 
     public GenericVariant(byte[] value, byte[] metadata) {
-        this(value, metadata, 0);
+        this(ByteBuffer.wrap(value), ByteBuffer.wrap(metadata));
     }
 
-    private GenericVariant(byte[] value, byte[] metadata, int pos) {
+    /** Creates a Variant backed by the bytes between each buffer's position and limit. */
+    public GenericVariant(ByteBuffer value, ByteBuffer metadata) {
+        this(normalize(value), normalize(metadata), 0);
+    }
+
+    private GenericVariant(ByteBuffer value, ByteBuffer metadata, int pos) {
         this.value = value;
         this.metadata = metadata;
         this.pos = pos;
         // There is currently only one allowed version.
-        if (metadata.length < 1 || (metadata[0] & VERSION_MASK) != VERSION) {
+        if (metadata.remaining() < 1
+                || (GenericVariantUtil.getByte(metadata, 0) & VERSION_MASK) != VERSION) {
             throw malformedVariant();
         }
-        // Don't attempt to use a Variant larger than 16 MiB. We'll never produce one, and it risks
+        // Don't attempt to use a Variant larger than 128 MiB. We'll never produce one, and it risks
         // memory instability.
-        if (metadata.length > SIZE_LIMIT || value.length > SIZE_LIMIT) {
+        if (metadata.remaining() > SIZE_LIMIT || value.remaining() > SIZE_LIMIT) {
             throw variantConstructorSizeLimit();
         }
     }
 
+    private static ByteBuffer normalize(ByteBuffer buffer) {
+        return buffer.slice().order(ByteOrder.LITTLE_ENDIAN);
+    }
+
     @Override
     public byte[] value() {
-        if (pos == 0) {
-            return value;
-        }
         int size = valueSize(value, pos);
-        checkIndex(pos + size - 1, value.length);
-        return Arrays.copyOfRange(value, pos, pos + size);
+        checkIndex(pos + size - 1, value.remaining());
+        return toByteArray(value, pos, size);
+    }
+
+    @Override
+    public ByteBuffer valueBuffer() {
+        int size = valueSize(value, pos);
+        checkIndex(pos + size - 1, value.remaining());
+        return slice(value, pos, size);
     }
 
     public byte[] rawValue() {
-        return value;
+        return toByteArray(value, 0, value.remaining());
+    }
+
+    ByteBuffer rawValueBuffer() {
+        return value.duplicate().order(ByteOrder.LITTLE_ENDIAN);
     }
 
     @Override
     public byte[] metadata() {
-        return metadata;
+        return toByteArray(metadata, 0, metadata.remaining());
+    }
+
+    @Override
+    public ByteBuffer metadataBuffer() {
+        return metadata.duplicate().order(ByteOrder.LITTLE_ENDIAN);
+    }
+
+    private static byte[] toByteArray(ByteBuffer buffer, int offset, int length) {
+        if (offset == 0
+                && buffer.hasArray()
+                && buffer.position() == 0
+                && buffer.arrayOffset() == 0
+                && length == buffer.array().length) {
+            return buffer.array();
+        }
+        return GenericVariantUtil.copyBytes(buffer, offset, length);
+    }
+
+    private Object writeReplace() {
+        return new SerializationProxy(this);
+    }
+
+    private static final class SerializationProxy implements Serializable {
+
+        private static final long serialVersionUID = 1L;
+
+        private final byte[] value;
+        private final byte[] metadata;
+        private final int pos;
+
+        private SerializationProxy(GenericVariant variant) {
+            this.value = GenericVariantUtil.copyBytes(variant.value, 0, variant.value.remaining());
+            this.metadata =
+                    GenericVariantUtil.copyBytes(variant.metadata, 0, variant.metadata.remaining());
+            this.pos = variant.pos;
+        }
+
+        private Object readResolve() {
+            return new GenericVariant(ByteBuffer.wrap(value), ByteBuffer.wrap(metadata), pos);
+        }
     }
 
     public int pos() {
@@ -123,14 +180,12 @@ public final class GenericVariant implements Variant, Serializable {
             return false;
         }
         GenericVariant that = (GenericVariant) o;
-        return pos == that.pos
-                && Objects.deepEquals(value, that.value)
-                && Objects.deepEquals(metadata, that.metadata);
+        return pos == that.pos && value.equals(that.value) && metadata.equals(that.metadata);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(Arrays.hashCode(value), Arrays.hashCode(metadata), pos);
+        return Objects.hash(value, metadata, pos);
     }
 
     public static GenericVariant fromJson(String json) {
@@ -172,13 +227,15 @@ public final class GenericVariant implements Variant, Serializable {
 
     @Override
     public long sizeInBytes() {
-        return metadata.length + value.length;
+        return metadata.remaining() + value.remaining();
     }
 
     @Override
     public Variant copy() {
         return new GenericVariant(
-                Arrays.copyOf(value, value.length), Arrays.copyOf(metadata, metadata.length), pos);
+                ByteBuffer.wrap(GenericVariantUtil.copyBytes(value, 0, value.remaining())),
+                ByteBuffer.wrap(GenericVariantUtil.copyBytes(metadata, 0, metadata.remaining())),
+                pos);
     }
 
     // Get a boolean value from the variant.
@@ -316,23 +373,18 @@ public final class GenericVariant implements Variant, Serializable {
     }
 
     private static final class MetadataKeyLookup {
-        private final byte[] metadata;
+        private final ByteBuffer metadata;
         private final String key;
-        private final MemorySegment[] metadataSegments;
-        private final BinaryString binaryKey;
-        private final BinaryString candidate;
+        private final byte[] utf8Key;
 
-        private MetadataKeyLookup(byte[] metadata, String key) {
+        private MetadataKeyLookup(ByteBuffer metadata, String key) {
             this.metadata = metadata;
             this.key = key;
-            this.metadataSegments = new MemorySegment[] {MemorySegment.wrap(metadata)};
-            this.binaryKey = BinaryString.fromString(key);
-            this.candidate = BinaryString.fromAddress(metadataSegments, 0, 0);
+            this.utf8Key = key.getBytes(java.nio.charset.StandardCharsets.UTF_8);
         }
 
         private int compareUtf8(int id) {
-            pointToMetadataKey(metadata, metadataSegments, id, candidate);
-            return candidate.compareTo(binaryKey);
+            return GenericVariantUtil.compareMetadataKey(metadata, id, utf8Key);
         }
     }
 
@@ -443,7 +495,7 @@ public final class GenericVariant implements Variant, Serializable {
     }
 
     private static void toJsonImpl(
-            byte[] value, byte[] metadata, int pos, StringBuilder sb, ZoneId zoneId) {
+            ByteBuffer value, ByteBuffer metadata, int pos, StringBuilder sb, ZoneId zoneId) {
         switch (GenericVariantUtil.getType(value, pos)) {
             case OBJECT:
                 handleObject(

@@ -21,7 +21,6 @@ package org.apache.paimon.arrow.writer;
 import org.apache.paimon.arrow.ArrowUtils;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.DataGetters;
-import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
@@ -75,6 +74,7 @@ import org.apache.arrow.vector.complex.StructVector;
 import javax.annotation.Nullable;
 
 import java.math.BigDecimal;
+import java.nio.ByteBuffer;
 import java.time.ZoneId;
 import java.util.Arrays;
 import java.util.List;
@@ -534,10 +534,11 @@ public class ArrowFieldWriters {
     public static class VariantWriter extends ArrowFieldWriter {
 
         @Nullable private final VariantSchema variantSchema;
-        @Nullable private final GenericRow reusableRow;
         private final ArrowFieldWriter[] fieldWriters;
         private final StructVector structVector;
         private final int fieldCount;
+        @Nullable private final VarBinaryVector valueVector;
+        @Nullable private final VarBinaryVector metadataVector;
 
         public VariantWriter(
                 FieldVector fieldVector, boolean isNullable, @Nullable RowType shreddingSchema) {
@@ -547,17 +548,22 @@ public class ArrowFieldWriters {
             RowType outputRowType;
             if (shreddingSchema != null) {
                 this.variantSchema = PaimonShreddingUtils.buildVariantSchema(shreddingSchema);
-                this.reusableRow = null;
                 outputRowType = shreddingSchema;
             } else {
                 this.variantSchema = null;
-                this.reusableRow = new GenericRow(DEFAULT_VARIANT_ROW_TYPE.getFieldCount());
                 outputRowType = DEFAULT_VARIANT_ROW_TYPE;
             }
 
             this.fieldCount = outputRowType.getFieldCount();
             this.fieldWriters = new ArrowFieldWriter[fieldCount];
             List<FieldVector> children = structVector.getChildrenFromFields();
+            if (variantSchema == null) {
+                this.valueVector = (VarBinaryVector) children.get(0);
+                this.metadataVector = (VarBinaryVector) children.get(1);
+            } else {
+                this.valueVector = null;
+                this.metadataVector = null;
+            }
             for (int i = 0; i < fieldCount; i++) {
                 fieldWriters[i] =
                         outputRowType
@@ -591,11 +597,14 @@ public class ArrowFieldWriters {
 
                 InternalRow rowData = rowColumnVector.getRow(row);
                 if (variantSchema != null && rowData.getFieldCount() != fieldCount) {
-                    GenericVariant variant =
-                            new GenericVariant(rowData.getBinary(0), rowData.getBinary(1));
+                    Variant variant = Variant.fromRow(rowData);
+                    GenericVariant genericVariant =
+                            new GenericVariant(variant.valueBuffer(), variant.metadataBuffer());
                     InternalRow shreddedRow =
-                            PaimonShreddingUtils.castShredded(variant, variantSchema);
+                            PaimonShreddingUtils.castShredded(genericVariant, variantSchema);
                     writeRow(i, shreddedRow);
+                } else if (variantSchema == null) {
+                    writeVariant(i, Variant.fromRow(rowData));
                 } else {
                     writeRow(i, rowData);
                 }
@@ -609,17 +618,32 @@ public class ArrowFieldWriters {
                 GenericVariant genericVariant =
                         variant instanceof GenericVariant
                                 ? (GenericVariant) variant
-                                : new GenericVariant(variant.value(), variant.metadata());
+                                : new GenericVariant(
+                                        variant.valueBuffer(), variant.metadataBuffer());
                 InternalRow shreddedRow =
                         PaimonShreddingUtils.castShredded(genericVariant, variantSchema);
                 writeRow(rowIndex, shreddedRow);
             } else {
-                if (reusableRow == null) {
-                    throw new IllegalStateException("Reusable row is not initialized.");
-                }
-                reusableRow.setField(0, variant.value());
-                reusableRow.setField(1, variant.metadata());
-                writeRow(rowIndex, reusableRow);
+                writeVariant(rowIndex, variant);
+            }
+        }
+
+        private void writeVariant(int rowIndex, Variant variant) {
+            if (valueVector == null || metadataVector == null) {
+                throw new IllegalStateException("Variant binary vectors are not initialized.");
+            }
+            writeBuffer(valueVector, rowIndex, variant.valueBuffer());
+            writeBuffer(metadataVector, rowIndex, variant.metadataBuffer());
+            structVector.setIndexDefined(rowIndex);
+        }
+
+        private static void writeBuffer(VarBinaryVector vector, int rowIndex, ByteBuffer buffer) {
+            int offset = buffer.position();
+            int length = buffer.remaining();
+            if (buffer.hasArray()) {
+                vector.setSafe(rowIndex, buffer.array(), buffer.arrayOffset() + offset, length);
+            } else {
+                vector.setSafe(rowIndex, buffer, offset, length);
             }
         }
 
