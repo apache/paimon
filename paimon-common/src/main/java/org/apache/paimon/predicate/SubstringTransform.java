@@ -23,6 +23,15 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.DeserializationContext;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+
+import java.io.IOException;
 import java.util.List;
 import java.util.Objects;
 
@@ -39,9 +48,40 @@ public class SubstringTransform implements Transform {
 
     private final List<Object> inputs;
 
-    public SubstringTransform(List<Object> inputs) {
+    @JsonCreator
+    public SubstringTransform(
+            @JsonProperty(StringTransform.FIELD_INPUTS)
+                    @JsonDeserialize(contentUsing = InputDeserializer.class)
+                    List<Object> inputs) {
         checkArgument(inputs.size() == 2 || inputs.size() == 3);
+        Object source = inputs.get(0);
+        // transform() casts this slot to BinaryString
+        checkArgument(
+                source == null || source instanceof FieldRef || source instanceof BinaryString,
+                "SUBSTRING source must be a string or a field reference");
         this.inputs = inputs;
+    }
+
+    /** Deserializer for {@link SubstringTransform} inputs, which may also be integers. */
+    public static class InputDeserializer extends StringTransform.InputDeserializer {
+
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        protected Object otherInput(JsonNode node, DeserializationContext context)
+                throws IOException {
+            if (node.isNumber()) {
+                // canConvertToInt checks the range, not integrality
+                if (!node.isIntegralNumber()) {
+                    context.reportInputMismatch(
+                            Object.class,
+                            "SubstringTransform position must be an integer: %s",
+                            node.toString());
+                }
+                return node.canConvertToInt() ? node.intValue() : node.numberValue();
+            }
+            return super.otherInput(node, context);
+        }
     }
 
     @Override
@@ -119,8 +159,14 @@ public class SubstringTransform implements Transform {
     }
 
     @Override
+    @JsonIgnore
     public final List<Object> inputs() {
         return inputs;
+    }
+
+    @JsonGetter(StringTransform.FIELD_INPUTS)
+    public final List<Object> inputsForJson() {
+        return StringTransform.inputsForJson(inputs);
     }
 
     @Override
@@ -140,5 +186,10 @@ public class SubstringTransform implements Transform {
     @Override
     public int hashCode() {
         return Objects.hashCode(inputs);
+    }
+
+    @Override
+    public String toString() {
+        return StringTransform.formatCall(name(), inputs);
     }
 }

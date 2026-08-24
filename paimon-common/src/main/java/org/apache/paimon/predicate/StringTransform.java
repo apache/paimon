@@ -94,6 +94,12 @@ public abstract class StringTransform implements Transform {
                 }
             }
 
+            return otherInput(node, context);
+        }
+
+        /** Inputs a subclass accepts beyond strings and {@link FieldRef}s. */
+        protected Object otherInput(JsonNode node, DeserializationContext context)
+                throws java.io.IOException {
             context.reportInputMismatch(
                     Object.class, "Unsupported StringTransform input JSON: %s", node.toString());
             return null;
@@ -108,15 +114,7 @@ public abstract class StringTransform implements Transform {
 
     @JsonGetter(FIELD_INPUTS)
     public final List<Object> inputsForJson() {
-        List<Object> serialized = new ArrayList<>(inputs.size());
-        for (Object input : inputs) {
-            if (input instanceof BinaryString) {
-                serialized.add(input.toString());
-            } else {
-                serialized.add(input);
-            }
-        }
-        return serialized;
+        return inputsForJson(inputs);
     }
 
     @Override
@@ -157,8 +155,27 @@ public abstract class StringTransform implements Transform {
 
     @Override
     public String toString() {
-        List<String> inputs =
-                this.inputs.stream().map(String::valueOf).collect(Collectors.toList());
-        return name() + "(" + String.join(", ", inputs) + ')';
+        return formatCall(name(), inputs);
+    }
+
+    /** Inputs as written to JSON: {@link BinaryString} literals become JSON strings. */
+    static List<Object> inputsForJson(List<Object> inputs) {
+        List<Object> serialized = new ArrayList<>(inputs.size());
+        for (Object input : inputs) {
+            if (input instanceof BinaryString) {
+                serialized.add(input.toString());
+            } else {
+                serialized.add(input);
+            }
+        }
+        return serialized;
+    }
+
+    /** Renders a transform as {@code NAME(input, input)}. */
+    static String formatCall(String name, List<Object> inputs) {
+        return name
+                + "("
+                + inputs.stream().map(String::valueOf).collect(Collectors.joining(", "))
+                + ')';
     }
 }
