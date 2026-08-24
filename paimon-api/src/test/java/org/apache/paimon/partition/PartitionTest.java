@@ -62,6 +62,65 @@ class PartitionTest {
     }
 
     @Test
+    void testAbsentStatisticsAreUnknownNotZero() {
+        // What listPartitions returns from a catalog that stores no statistics. Every consumer of
+        // this response reads the numbers through PartitionStatistics.isKnown, so absence has to
+        // arrive as unknown and not as an exact zero.
+        String statisticsFreeJson = "{\"spec\":{\"pt\":\"1\"},\"done\":true}";
+
+        Partition partition = JsonSerdeUtil.fromJson(statisticsFreeJson, Partition.class);
+
+        assertThat(partition.spec()).containsEntry("pt", "1");
+        assertThat(partition.done()).isTrue();
+        assertThat(partition.recordCount()).isEqualTo(PartitionStatistics.UNKNOWN);
+        assertThat(partition.fileSizeInBytes()).isEqualTo(PartitionStatistics.UNKNOWN);
+        assertThat(partition.fileCount()).isEqualTo(PartitionStatistics.UNKNOWN);
+        assertThat(partition.lastFileCreationTime()).isEqualTo(PartitionStatistics.UNKNOWN);
+        assertThat(partition.createdAt()).isNull();
+        assertThat(partition.options()).isNull();
+    }
+
+    @Test
+    void testReportedZeroStaysAnExactMeasurement() {
+        // The other half of the same boundary: a partition someone measured as empty must not come
+        // back as unknown.
+        String emptyPartitionJson =
+                "{\"spec\":{\"pt\":\"1\"},\"recordCount\":0,\"fileSizeInBytes\":0,"
+                        + "\"fileCount\":0,\"lastFileCreationTime\":0}";
+
+        Partition partition = JsonSerdeUtil.fromJson(emptyPartitionJson, Partition.class);
+
+        assertThat(partition.recordCount()).isEqualTo(0L);
+        assertThat(partition.fileSizeInBytes()).isEqualTo(0L);
+        assertThat(partition.fileCount()).isEqualTo(0L);
+        assertThat(PartitionStatistics.isKnown(partition.recordCount())).isTrue();
+    }
+
+    @Test
+    void testMeasurementsSurviveARoundTrip() {
+        Partition partition =
+                new Partition(
+                        Collections.singletonMap("pt", "1"),
+                        0L, // an empty partition someone did measure
+                        1024L,
+                        2L,
+                        1234567890L,
+                        10,
+                        true,
+                        1234567890L,
+                        "user1",
+                        1234567900L,
+                        "user2",
+                        Collections.singletonMap("key", "value"));
+
+        Partition parsed =
+                JsonSerdeUtil.fromJson(JsonSerdeUtil.toFlatJson(partition), Partition.class);
+
+        assertThat(parsed).isEqualTo(partition);
+        assertThat(parsed.recordCount()).isEqualTo(0L);
+    }
+
+    @Test
     void testJsonSerializationWithNonNullValues() {
         Map<String, String> spec = Collections.singletonMap("pt", "1");
         Partition partition =
