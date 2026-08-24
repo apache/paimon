@@ -102,6 +102,7 @@ import static org.apache.paimon.spark.SparkTypeUtils.CURRENT_DEFAULT_COLUMN_META
 import static org.apache.paimon.spark.SparkTypeUtils.toPaimonType;
 import static org.apache.paimon.spark.util.OptionUtils.checkRequiredConfigurations;
 import static org.apache.paimon.spark.util.OptionUtils.copyWithSQLConf;
+import static org.apache.paimon.spark.util.OptionUtils.usePaimonFormatTableImplementation;
 import static org.apache.paimon.spark.util.OptionUtils.withBranchFromOptions;
 import static org.apache.paimon.spark.utils.CatalogUtils.checkNamespace;
 import static org.apache.paimon.spark.utils.CatalogUtils.checkNoDefaultValue;
@@ -391,6 +392,24 @@ public class SparkCatalog extends SparkBaseCatalog
             return true;
         } catch (Catalog.TableNotExistException e) {
             return false;
+        }
+    }
+
+    public void checkPartitionedFormatTableCtas(
+            Identifier ident,
+            @Nullable String provider,
+            boolean partitioned,
+            Map<String, String> properties) {
+        if (partitioned
+                && isFormatTable(provider)
+                && !usePaimonFormatTableImplementation(
+                        catalogName,
+                        toIdentifier(ident, catalogName),
+                        catalog.options(),
+                        properties)) {
+            throw new UnsupportedOperationException(
+                    "Using CTAS with a partitioned engine format table is not supported. "
+                            + "Set 'format-table.implementation' to 'paimon'.");
         }
     }
 
