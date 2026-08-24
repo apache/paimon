@@ -42,6 +42,7 @@ import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.data.variant.PaimonShreddingUtils;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.data.variant.VariantCastArgs;
+import org.apache.paimon.data.variant.VariantSchema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -465,11 +466,25 @@ public class ArrowFormatWriterTest {
             writer.write(new ColumnVector[] {columnarVariant}, null, 0, 1);
             writer.flush();
 
-            Iterator<InternalRow> rows =
-                    new ArrowBatchReader(rowType, shreddingSchemas, true)
+            RowType physicalVariantType = (RowType) shreddingSchemas.getTypeAt(0);
+            VariantSchema variantSchema =
+                    PaimonShreddingUtils.buildVariantSchema(physicalVariantType);
+            Iterator<InternalRow> physicalRows =
+                    new ArrowBatchReader(shreddingSchemas, true)
                             .readBatch(writer.getVectorSchemaRoot())
                             .iterator();
-            assertThat(rows.next().getVariant(0).toJson()).isEqualTo(expected.toJson());
+            Variant actual =
+                    PaimonShreddingUtils.assembleVariant(
+                            physicalRows.next().getRow(0, physicalVariantType.getFieldCount()),
+                            variantSchema);
+            assertThat(actual.toJson()).isEqualTo(expected.toJson());
+
+            assertThatThrownBy(
+                            () ->
+                                    new ArrowBatchReader(rowType, true)
+                                            .readBatch(writer.getVectorSchemaRoot()))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("raw Variant Arrow layout");
         }
     }
 
@@ -551,10 +566,25 @@ public class ArrowFormatWriterTest {
             assertThat(variantVector.getChild(PaimonShreddingUtils.TYPED_VALUE_FIELD_NAME))
                     .isNotNull();
 
-            ArrowBatchReader reader = new ArrowBatchReader(rowType, shreddingSchemas, true);
+            RowType physicalVariantType = (RowType) shreddingSchemas.getTypeAt(0);
+            VariantSchema variantSchema =
+                    PaimonShreddingUtils.buildVariantSchema(physicalVariantType);
+            ArrowBatchReader reader = new ArrowBatchReader(shreddingSchemas, true);
             Iterator<InternalRow> rows = reader.readBatch(writer.getVectorSchemaRoot()).iterator();
-            assertThat(rows.next().getVariant(0).toJson()).isEqualTo(mixed.toJson());
-            assertThat(rows.next().getVariant(0).toJson()).isEqualTo(fullyTyped.toJson());
+            assertThat(
+                            PaimonShreddingUtils.assembleVariant(
+                                            rows.next()
+                                                    .getRow(0, physicalVariantType.getFieldCount()),
+                                            variantSchema)
+                                    .toJson())
+                    .isEqualTo(mixed.toJson());
+            assertThat(
+                            PaimonShreddingUtils.assembleVariant(
+                                            rows.next()
+                                                    .getRow(0, physicalVariantType.getFieldCount()),
+                                            variantSchema)
+                                    .toJson())
+                    .isEqualTo(fullyTyped.toJson());
 
             ArrowBatchReader readerWithoutShreddingSchema = new ArrowBatchReader(rowType, true);
             assertThatThrownBy(
@@ -565,7 +595,7 @@ public class ArrowFormatWriterTest {
                                             .next()
                                             .getVariant(0))
                     .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("shredded Variant");
+                    .hasMessageContaining("shredding read plan");
         }
     }
 

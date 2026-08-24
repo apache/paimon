@@ -26,13 +26,10 @@ import org.apache.paimon.data.columnar.ColumnarRow;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.types.VariantType;
 
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
-
-import javax.annotation.Nullable;
 
 import java.util.HashMap;
 import java.util.Iterator;
@@ -53,46 +50,21 @@ public class ArrowBatchReader {
         this(
                 rowType,
                 caseSensitive,
-                Arrow2PaimonVectorConverter.Arrow2PaimonVectorConvertorVisitor.INSTANCE,
-                null);
-    }
-
-    public ArrowBatchReader(RowType rowType, RowType shreddingSchemas, boolean caseSensitive) {
-        this(
-                rowType,
-                caseSensitive,
-                Arrow2PaimonVectorConverter.Arrow2PaimonVectorConvertorVisitor.INSTANCE,
-                shreddingSchemas);
+                Arrow2PaimonVectorConverter.Arrow2PaimonVectorConvertorVisitor.INSTANCE);
     }
 
     public ArrowBatchReader(
             RowType rowType,
             boolean caseSensitive,
             Arrow2PaimonVectorConverter.Arrow2PaimonVectorConvertorVisitor visitor) {
-        this(rowType, caseSensitive, visitor, null);
-    }
-
-    private ArrowBatchReader(
-            RowType rowType,
-            boolean caseSensitive,
-            Arrow2PaimonVectorConverter.Arrow2PaimonVectorConvertorVisitor visitor,
-            @Nullable RowType shreddingSchemas) {
         ColumnVector[] columnVectors = new ColumnVector[rowType.getFieldCount()];
         this.convertors = new Arrow2PaimonVectorConverter[rowType.getFieldCount()];
         this.batch = new VectorizedColumnBatch(columnVectors);
         this.projectedRowType = rowType;
 
         for (int i = 0; i < columnVectors.length; i++) {
-            DataField field = rowType.getFields().get(i);
-            if (field.type() instanceof VariantType
-                    && shreddingSchemas != null
-                    && shreddingSchemas.containsField(field.name())) {
-                this.convertors[i] =
-                        Arrow2PaimonVectorConverter.constructShreddedVariant(
-                                (RowType) shreddingSchemas.getField(field.name()).type());
-            } else {
-                this.convertors[i] = Arrow2PaimonVectorConverter.construct(visitor, field.type());
-            }
+            this.convertors[i] =
+                    Arrow2PaimonVectorConverter.construct(visitor, rowType.getTypeAt(i));
         }
         this.caseSensitive = caseSensitive;
     }
