@@ -105,19 +105,21 @@ public class GenericVariantTest {
     }
 
     @Test
-    @SuppressWarnings("deprecation")
     public void testSerializeByteBufferBackedVariant() throws Exception {
         GenericVariant expected = GenericVariant.fromJson("{\"nested\":{\"key\":\"value\"}}");
         GenericVariant direct =
                 new GenericVariant(
                         paddedBuffer(expected.value(), true),
                         paddedBuffer(expected.metadata(), true));
+        GenericVariant nested = direct.getFieldByKey("nested");
 
-        GenericVariant restored = InstantiationUtil.clone(direct.getFieldByKey("nested"));
+        GenericVariant restored = InstantiationUtil.clone(nested);
 
         assertThat(restored.toJson()).isEqualTo("{\"key\":\"value\"}");
-        assertThat(restored.pos()).isEqualTo(0);
-        assertThat(restored.rawValue()).isEqualTo(restored.value());
+        assertThat(
+                        InstantiationUtil.serializeObject(nested).length
+                                < InstantiationUtil.serializeObject(direct).length)
+                .isEqualTo(true);
         assertThat(ObjectStreamClass.lookup(GenericVariant.class).getSerialVersionUID())
                 .isEqualTo(2L);
     }
@@ -164,7 +166,6 @@ public class GenericVariantTest {
     }
 
     @Test
-    @SuppressWarnings("deprecation")
     public void testNestedValueBufferIsBoundedZeroCopyView() {
         GenericVariant root = GenericVariant.fromJson("{\"nested\":{\"key\":\"value\"}}");
         GenericVariant nested = root.getFieldByKey("nested");
@@ -175,8 +176,6 @@ public class GenericVariantTest {
 
         assertThat(buffer.array()).isSameAs(root.valueBuffer().array());
         assertThat(buffer.remaining() < root.valueBuffer().remaining()).isEqualTo(true);
-        assertThat(nested.pos()).isEqualTo(0);
-        assertThat(nested.rawValue()).isEqualTo(nested.value());
         assertThat(serialized).isEqualTo(nested.value());
     }
 

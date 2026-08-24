@@ -125,12 +125,6 @@ public final class GenericVariant implements Variant, Serializable {
         return value.duplicate().order(ByteOrder.LITTLE_ENDIAN);
     }
 
-    /** @deprecated Use {@link #value()} for the current logical value. */
-    @Deprecated
-    public byte[] rawValue() {
-        return value();
-    }
-
     @Override
     public byte[] metadata() {
         return toByteArray(metadata, 0, metadata.remaining());
@@ -176,12 +170,6 @@ public final class GenericVariant implements Variant, Serializable {
         private Object readResolve() {
             return new GenericVariant(value, metadata);
         }
-    }
-
-    /** @deprecated Each GenericVariant now stores a bounded value buffer starting at position 0. */
-    @Deprecated
-    public int pos() {
-        return 0;
     }
 
     @Override
