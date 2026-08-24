@@ -40,6 +40,10 @@ public class CreateDatabaseRequest implements RESTRequest {
     @JsonProperty(FIELD_OPTIONS)
     private final Map<String, String> options;
 
+    public CreateDatabaseRequest() {
+        this(null, null);
+    }
+
     @JsonCreator
     public CreateDatabaseRequest(
             @JsonProperty(FIELD_NAME) String name,

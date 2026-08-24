@@ -41,6 +41,10 @@ public class AlterDatabaseRequest implements RESTRequest {
     @JsonProperty(FIELD_UPDATES)
     private final Map<String, String> updates;
 
+    public AlterDatabaseRequest() {
+        this(null, null);
+    }
+
     @JsonCreator
     public AlterDatabaseRequest(
             @JsonProperty(FIELD_REMOVALS) List<String> removals,
