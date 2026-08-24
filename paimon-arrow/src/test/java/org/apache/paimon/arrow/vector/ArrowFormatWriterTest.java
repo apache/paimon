@@ -36,7 +36,6 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.columnar.AllNullColumnVector;
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.ColumnarRow;
-import org.apache.paimon.data.columnar.ColumnarVariant;
 import org.apache.paimon.data.columnar.heap.HeapBytesVector;
 import org.apache.paimon.data.columnar.heap.HeapRowVector;
 import org.apache.paimon.data.variant.GenericVariant;
@@ -406,7 +405,7 @@ public class ArrowFormatWriterTest {
             rows.next();
             Variant actual = rows.next().getVariant(0);
 
-            assertThat(actual).isInstanceOf(ColumnarVariant.class);
+            assertThat(actual).isInstanceOf(GenericVariant.class);
             assertThat(actual.valueBuffer().isDirect()).isTrue();
             assertThat(actual.metadataBuffer().isDirect()).isTrue();
             assertThat(actual.value()).isEqualTo(expected.value());
@@ -415,7 +414,7 @@ public class ArrowFormatWriterTest {
     }
 
     @Test
-    public void testWriteColumnarVariant() {
+    public void testWriteColumnarInput() {
         RowType rowType = new RowType(Arrays.asList(new DataField(0, "v", DataTypes.VARIANT())));
         GenericVariant variant = GenericVariant.fromJson("{\"a\": 1, \"b\": \"x\"}");
         GenericVariant prefix = GenericVariant.fromJson("null");
@@ -506,17 +505,35 @@ public class ArrowFormatWriterTest {
                                         "v",
                                         PaimonShreddingUtils.variantShreddingSchema(
                                                 expectedSchema))));
-        GenericVariant variant = GenericVariant.fromJson("{\"a\": 1, \"b\": \"x\"}");
+        GenericVariant mixed = GenericVariant.fromJson("{\"a\":1,\"b\":\"x\",\"c\":3}");
+        GenericVariant fullyTyped = GenericVariant.fromJson("{\"a\":2,\"b\":\"y\"}");
 
         try (ArrowFormatWriter writer =
                 new ArrowFormatWriter(rowType, 16, true, null, shreddingSchemas)) {
-            writer.write(GenericRow.of(new BufferOnlyVariant(variant)));
+            writer.write(GenericRow.of(new BufferOnlyVariant(mixed)));
+            writer.write(GenericRow.of(new BufferOnlyVariant(fullyTyped)));
             writer.flush();
 
             StructVector variantVector = (StructVector) writer.getVectorSchemaRoot().getVector("v");
             assertThat(variantVector.isNull(0)).isFalse();
             assertThat(variantVector.getChild(PaimonShreddingUtils.TYPED_VALUE_FIELD_NAME))
                     .isNotNull();
+
+            ArrowBatchReader reader = new ArrowBatchReader(rowType, shreddingSchemas, true);
+            Iterator<InternalRow> rows = reader.readBatch(writer.getVectorSchemaRoot()).iterator();
+            assertThat(rows.next().getVariant(0).toJson()).isEqualTo(mixed.toJson());
+            assertThat(rows.next().getVariant(0).toJson()).isEqualTo(fullyTyped.toJson());
+
+            ArrowBatchReader readerWithoutShreddingSchema = new ArrowBatchReader(rowType, true);
+            assertThatThrownBy(
+                            () ->
+                                    readerWithoutShreddingSchema
+                                            .readBatch(writer.getVectorSchemaRoot())
+                                            .iterator()
+                                            .next()
+                                            .getVariant(0))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("shredded Variant");
         }
     }
 

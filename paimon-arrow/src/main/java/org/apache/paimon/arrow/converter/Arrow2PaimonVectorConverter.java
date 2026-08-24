@@ -19,6 +19,7 @@
 package org.apache.paimon.arrow.converter;
 
 import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
@@ -44,7 +45,9 @@ import org.apache.paimon.data.columnar.ShortColumnVector;
 import org.apache.paimon.data.columnar.TimestampColumnVector;
 import org.apache.paimon.data.columnar.VecColumnVector;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
+import org.apache.paimon.data.variant.PaimonShreddingUtils;
 import org.apache.paimon.data.variant.Variant;
+import org.apache.paimon.data.variant.VariantSchema;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
@@ -113,6 +116,37 @@ public interface Arrow2PaimonVectorConverter {
     static Arrow2PaimonVectorConverter construct(
             Arrow2PaimonVectorConvertorVisitor visitor, DataType type) {
         return type.accept(visitor);
+    }
+
+    /** Creates a converter which reconstructs a Variant from its shredded Arrow struct. */
+    static Arrow2PaimonVectorConverter constructShreddedVariant(RowType shreddingSchema) {
+        final VariantSchema variantSchema =
+                PaimonShreddingUtils.buildVariantSchema(shreddingSchema);
+        final Arrow2PaimonVectorConverter physicalConverter = construct(shreddingSchema);
+        return vector -> {
+            final RowColumnVector physicalRows =
+                    (RowColumnVector) physicalConverter.convertVector(vector);
+            return new RowColumnVector() {
+                @Override
+                public boolean isNullAt(int index) {
+                    return physicalRows.isNullAt(index);
+                }
+
+                @Override
+                public InternalRow getRow(int index) {
+                    Variant variant =
+                            PaimonShreddingUtils.assembleVariant(
+                                    physicalRows.getRow(index), variantSchema);
+                    return GenericRow.of(variant.value(), variant.metadata());
+                }
+
+                @Override
+                public VectorizedColumnBatch getBatch() {
+                    throw new UnsupportedOperationException(
+                            "A reconstructed Variant does not expose a physical row batch.");
+                }
+            };
+        };
     }
 
     ColumnVector convertVector(FieldVector vector);
@@ -484,11 +518,20 @@ public interface Arrow2PaimonVectorConverter {
 
         @Override
         public Arrow2PaimonVectorConverter visit(VariantType variantType) {
-            return visit(
-                    RowType.builder()
-                            .field(Variant.VALUE, DataTypes.BYTES().notNull())
-                            .field(Variant.METADATA, DataTypes.BYTES().notNull())
-                            .build());
+            final Arrow2PaimonVectorConverter rawConverter =
+                    visit(
+                            RowType.builder()
+                                    .field(Variant.VALUE, DataTypes.BYTES().notNull())
+                                    .field(Variant.METADATA, DataTypes.BYTES().notNull())
+                                    .build());
+            return vector -> {
+                if (((StructVector) vector).getChild(PaimonShreddingUtils.TYPED_VALUE_FIELD_NAME)
+                        != null) {
+                    throw new IllegalArgumentException(
+                            "Cannot read a shredded Variant without its shredding schema.");
+                }
+                return rawConverter.convertVector(vector);
+            };
         }
 
         @Override

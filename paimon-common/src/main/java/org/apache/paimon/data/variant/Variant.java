@@ -20,10 +20,10 @@ package org.apache.paimon.data.variant;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.columnar.ColumnarRow;
-import org.apache.paimon.data.columnar.ColumnarVariant;
 import org.apache.paimon.types.DataType;
 
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 
@@ -48,7 +48,9 @@ public interface Variant {
     /** Creates a Variant from the value and metadata fields in a physical Variant row. */
     static Variant fromRow(InternalRow row) {
         if (row instanceof ColumnarRow) {
-            return new ColumnarVariant((ColumnarRow) row);
+            ColumnarRow columnarRow = (ColumnarRow) row;
+            return new GenericVariant(
+                    columnarRow.getBinaryBuffer(0), columnarRow.getBinaryBuffer(1));
         }
         return new GenericVariant(row.getBinary(0), row.getBinary(1));
     }
@@ -63,7 +65,9 @@ public interface Variant {
      * storage may be reused by the reader, so callers that retain the bytes must copy them.
      * Implementations should return a new buffer view on each call.
      */
-    ByteBuffer metadataBuffer();
+    default ByteBuffer metadataBuffer() {
+        return ByteBuffer.wrap(metadata()).order(ByteOrder.LITTLE_ENDIAN);
+    }
 
     /** Returns the variant value. */
     byte[] value();
@@ -75,7 +79,9 @@ public interface Variant {
      * storage may be reused by the reader, so callers that retain the bytes must copy them.
      * Implementations should return a new buffer view on each call.
      */
-    ByteBuffer valueBuffer();
+    default ByteBuffer valueBuffer() {
+        return ByteBuffer.wrap(value()).order(ByteOrder.LITTLE_ENDIAN);
+    }
 
     /** Parses the variant to json. */
     default String toJson() {

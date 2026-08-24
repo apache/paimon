@@ -30,6 +30,7 @@ import org.apache.paimon.utils.InstantiationUtil;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.ObjectStreamClass;
 import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -99,6 +100,37 @@ public class GenericVariantTest {
 
         assertThat(restored.toJson()).isEqualTo("{\"key\":\"value\"}");
         assertThat(restored.pos()).isEqualTo(direct.getFieldByKey("nested").pos());
+        assertThat(ObjectStreamClass.lookup(GenericVariant.class).getSerialVersionUID())
+                .isEqualTo(2L);
+    }
+
+    @Test
+    public void testEqualityForByteBufferBackedVariants() {
+        GenericVariant expected = GenericVariant.fromJson("{\"a\":1}");
+        GenericVariant first =
+                new GenericVariant(expected.valueBuffer(), expected.metadataBuffer());
+        GenericVariant second =
+                new GenericVariant(expected.valueBuffer(), expected.metadataBuffer());
+
+        assertThat(first).isEqualTo(second);
+        assertThat(first).isEqualTo(expected);
+        assertThat(expected).isEqualTo(first);
+        assertThat(first.hashCode()).isEqualTo(expected.hashCode());
+    }
+
+    @Test
+    public void testCopyDetachesBackingBuffers() {
+        GenericVariant expected = GenericVariant.fromJson("null");
+        byte[] value = expected.value().clone();
+        byte[] metadata = expected.metadata().clone();
+        GenericVariant variant =
+                new GenericVariant(ByteBuffer.wrap(value), ByteBuffer.wrap(metadata));
+
+        Variant copied = variant.copy();
+        value[0] = GenericVariant.fromJson("true").value()[0];
+
+        assertThat(variant.toJson()).isEqualTo("true");
+        assertThat(copied.toJson()).isEqualTo("null");
     }
 
     private static ByteBuffer paddedBuffer(byte[] bytes, boolean direct) {

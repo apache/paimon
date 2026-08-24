@@ -27,6 +27,8 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonGenerator
 
 import java.io.CharArrayWriter;
 import java.io.IOException;
+import java.io.InvalidObjectException;
+import java.io.ObjectInputStream;
 import java.io.Serializable;
 import java.math.BigDecimal;
 import java.nio.ByteBuffer;
@@ -65,7 +67,7 @@ import static org.apache.paimon.data.variant.GenericVariantUtil.variantConstruct
 /** An internal data structure implementing {@link Variant}. */
 public final class GenericVariant implements Variant, Serializable {
 
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
 
     private final ByteBuffer value;
     private final ByteBuffer metadata;
@@ -83,10 +85,21 @@ public final class GenericVariant implements Variant, Serializable {
         this(normalize(value), normalize(metadata), 0);
     }
 
+    /** Returns this variant as a GenericVariant without copying its serialized buffers. */
+    static GenericVariant fromVariant(Variant variant) {
+        return variant instanceof GenericVariant
+                ? (GenericVariant) variant
+                : new GenericVariant(variant.valueBuffer(), variant.metadataBuffer());
+    }
+
     private GenericVariant(ByteBuffer value, ByteBuffer metadata, int pos) {
         this.value = value;
         this.metadata = metadata;
         this.pos = pos;
+        validate();
+    }
+
+    private void validate() {
         // There is currently only one allowed version.
         if (metadata.remaining() < 1
                 || (GenericVariantUtil.getByte(metadata, 0) & VERSION_MASK) != VERSION) {
@@ -148,6 +161,10 @@ public final class GenericVariant implements Variant, Serializable {
 
     private Object writeReplace() {
         return new SerializationProxy(this);
+    }
+
+    private void readObject(ObjectInputStream in) throws InvalidObjectException {
+        throw new InvalidObjectException("Serialization proxy required.");
     }
 
     private static final class SerializationProxy implements Serializable {

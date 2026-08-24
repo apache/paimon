@@ -339,7 +339,7 @@ public class RowToColumnConverterTest {
                 ((HeapBytesVector) rowVector.getChildren()[0]).getBytes(1);
         BytesColumnVector.Bytes metadataBytes =
                 ((HeapBytesVector) rowVector.getChildren()[1]).getBytes(1);
-        assertThat(columnarVariant).isInstanceOf(ColumnarVariant.class);
+        assertThat(columnarVariant).isInstanceOf(GenericVariant.class);
         assertThat(columnarVariant.valueBuffer().array()).isSameAs(valueBytes.data);
         assertThat(columnarVariant.valueBuffer().arrayOffset()).isEqualTo(valueBytes.offset);
         assertThat(columnarVariant.valueBuffer().remaining()).isEqualTo(valueBytes.len);
