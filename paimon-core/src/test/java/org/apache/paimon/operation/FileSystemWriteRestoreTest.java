@@ -36,6 +36,7 @@ import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.InnerTableWrite;
+import org.apache.paimon.table.sink.PartitionBucketMapping;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.types.DataType;
@@ -52,6 +53,7 @@ import java.util.HashMap;
 import java.util.UUID;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
+import static org.apache.paimon.table.BucketMode.POSTPONE_BUCKET;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
@@ -78,6 +80,14 @@ public class FileSystemWriteRestoreTest {
             RowType.of(
                     new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
                     new String[] {"pt", "k", "v"});
+
+    @Test
+    void testEmptyBucketDoesNotReportPostponeTableDefault() {
+        PartitionBucketMapping mapping = PartitionBucketMapping.defaultBuckets(POSTPONE_BUCKET);
+
+        assertThat(WriteRestore.extractTotalBuckets(Collections.emptyList(), binaryRow(1), mapping))
+                .isNull();
+    }
 
     @Test
     void testRestoreFromPinnedSnapshotForPostponeBucket() {
@@ -181,10 +191,11 @@ public class FileSystemWriteRestoreTest {
     }
 
     @Test
-    public void testEmptyBucketInUnseenPartitionUsesDefault() throws Exception {
-        // For an entirely unseen partition (no files anywhere), no per-partition
-        // mapping exists and PartitionBucketMapping.resolveNumBuckets falls back to
-        // the table's default bucket count.
+    public void testEmptyBucketInUnseenPartitionDoesNotReportTableDefault() throws Exception {
+        // For an entirely unseen partition (no files anywhere), no per-partition override exists.
+        // Return null so the writer falls back to its expected table-level bucket count. In
+        // particular, this preserves postpone-bucket writes whose table default is -2 while the
+        // staged writer assigns real fixed buckets.
         FileStoreTable table = createPartitionedPkTable(8);
         commitOneRow(table, 1, 100); // ensures the snapshot exists
 
@@ -192,7 +203,7 @@ public class FileSystemWriteRestoreTest {
         RestoreFiles restored =
                 restore.restoreFiles(binaryRow(/* unseen */ 999), 0, false, false, false);
 
-        assertThat(restored.totalBuckets()).isEqualTo(8);
+        assertThat(restored.totalBuckets()).isNull();
         assertThat(restored.dataFiles()).isNullOrEmpty();
     }
 

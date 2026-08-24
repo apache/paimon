@@ -37,10 +37,12 @@ public class PartitionBucketMappingTest {
     public void testDefaultBucketCount() {
         PartitionBucketMapping mapping = PartitionBucketMapping.defaultBuckets(16);
 
-        // Any partition should resolve to the default
+        // Any partition should resolve to the default, but no partition has an explicit override.
         assertThat(mapping.resolveNumBuckets(BinaryRow.EMPTY_ROW)).isEqualTo(16);
         assertThat(mapping.resolveNumBuckets(partition(1))).isEqualTo(16);
         assertThat(mapping.resolveNumBuckets(partition(42))).isEqualTo(16);
+        assertThat(mapping.getNumBucketsOverride(BinaryRow.EMPTY_ROW)).isNull();
+        assertThat(mapping.getNumBucketsOverride(partition(1))).isNull();
     }
 
     @Test
@@ -55,12 +57,15 @@ public class PartitionBucketMappingTest {
 
         PartitionBucketMapping mapping = new PartitionBucketMapping(16, partitionMap);
 
-        // Mapped partitions return their specific bucket counts
+        // Mapped partitions return their specific bucket counts and expose explicit overrides.
         assertThat(mapping.resolveNumBuckets(partA)).isEqualTo(32);
         assertThat(mapping.resolveNumBuckets(partB)).isEqualTo(64);
+        assertThat(mapping.getNumBucketsOverride(partA)).isEqualTo(32);
+        assertThat(mapping.getNumBucketsOverride(partB)).isEqualTo(64);
 
-        // Unmapped partition falls back to the default
+        // Unmapped partition falls back to the default without reporting an explicit override.
         assertThat(mapping.resolveNumBuckets(partC)).isEqualTo(16);
+        assertThat(mapping.getNumBucketsOverride(partC)).isNull();
     }
 
     @Test

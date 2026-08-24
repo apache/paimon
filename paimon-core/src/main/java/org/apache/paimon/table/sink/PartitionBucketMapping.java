@@ -23,6 +23,8 @@ import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.table.FileStoreTable;
 
+import javax.annotation.Nullable;
+
 import java.io.Serializable;
 import java.util.Collections;
 import java.util.HashMap;
@@ -125,6 +127,22 @@ public class PartitionBucketMapping implements Serializable {
             }
         }
         return new PartitionBucketMapping(defaultBuckets, partitionBucketMap);
+    }
+
+    /**
+     * Returns the explicit bucket-count override for the given partition, if one exists.
+     *
+     * <p>This method does not fall back to the table-level default. It is used by restore paths to
+     * distinguish an explicitly rescaled partition from an unseen partition which should continue
+     * using the writer's expected bucket count.
+     *
+     * @param partition the partition key as a {@link BinaryRow}
+     * @return the explicit bucket-count override, or {@code null} when the partition uses the
+     *     table-level default
+     */
+    @Nullable
+    public Integer getNumBucketsOverride(BinaryRow partition) {
+        return partitionBucketMap.get(partition);
     }
 
     /**

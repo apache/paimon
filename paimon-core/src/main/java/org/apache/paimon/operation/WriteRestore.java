@@ -61,7 +61,7 @@ public interface WriteRestore {
             return entries.get(0).totalBuckets();
         }
         if (partition.getFieldCount() > 0) {
-            return mapping.resolveNumBuckets(partition);
+            return mapping.getNumBucketsOverride(partition);
         }
         return null;
     }
