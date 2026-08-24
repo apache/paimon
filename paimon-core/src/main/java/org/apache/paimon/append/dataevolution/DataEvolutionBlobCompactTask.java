@@ -128,7 +128,7 @@ public class DataEvolutionBlobCompactTask extends DataEvolutionCompactTask {
             RowType blobWriteType,
             String blobFieldName,
             DataFilePathFactory pathFactory) {
-        BlobFileFormat blobFileFormat = new BlobFileFormat();
+        BlobFileFormat blobFileFormat = new BlobFileFormat(false, options.blobCopyBufferSize());
         return new RowDataFileWriter(
                 table.fileIO(),
                 RollingFileWriter.createFileWriterContext(
@@ -145,7 +145,9 @@ public class DataEvolutionBlobCompactTask extends DataEvolutionCompactTask {
                 false,
                 options.statsDenseStore(),
                 pathFactory.isExternalPath(),
-                Collections.singletonList(blobFieldName));
+                Collections.singletonList(blobFieldName),
+                null,
+                null);
     }
 
     private DataField blobField(

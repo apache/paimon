@@ -26,6 +26,7 @@ import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
@@ -33,9 +34,13 @@ import org.apache.paimon.utils.StringUtils;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /** Utilities for column comment directives (BLOB / VECTOR type conversion via ADD COLUMN). */
 public final class ColumnDirectiveUtils {
@@ -240,10 +245,32 @@ public final class ColumnDirectiveUtils {
                 return new ArrayType(
                         sourceType.isNullable(), new BlobType(elementType.isNullable()));
             }
+            if (root == DataTypeRoot.MAP) {
+                Preconditions.checkArgument(
+                        CoreOptions.BLOB_FIELD.key().equals(directive.optionKey()),
+                        "Column %s declared with '%s' must be of BYTES, BINARY or BLOB type, but was %s. "
+                                + "MAP<X, BLOB> is only supported by '%s'.",
+                        fieldName,
+                        directive.optionKey(),
+                        sourceType,
+                        CoreOptions.BLOB_FIELD.key());
+                MapType mapType = (MapType) sourceType;
+                Preconditions.checkArgument(
+                        isBlobSourceRoot(mapType.getValueType().getTypeRoot()),
+                        "Column %s declared with a BLOB directive must have a BINARY, "
+                                + "VARBINARY or BLOB map value type, but was %s.",
+                        fieldName,
+                        sourceType);
+                return new MapType(
+                        sourceType.isNullable(),
+                        mapType.getKeyType(),
+                        new BlobType(mapType.getValueType().isNullable()));
+            }
             Preconditions.checkArgument(
                     isBlobSourceRoot(root),
                     "Column %s declared with a BLOB directive must be of BYTES, BINARY, "
-                            + "BLOB, ARRAY<BYTES>, ARRAY<BINARY> or ARRAY<BLOB> type, but was %s.",
+                            + "BLOB, ARRAY<BYTES>, ARRAY<BINARY> or ARRAY<BLOB> type, or a "
+                            + "supported MAP<X, BYTES/BINARY/BLOB> type, but was %s.",
                     fieldName,
                     sourceType);
             return new BlobType(sourceType.isNullable());
@@ -287,7 +314,18 @@ public final class ColumnDirectiveUtils {
                 }
             }
         }
-        String newValue = existing == null ? fieldName : existing + "," + fieldName;
+
+        Set<String> values = new LinkedHashSet<>();
+        if (existing != null) {
+            values.addAll(
+                    Arrays.stream(existing.split(","))
+                            .map(String::trim)
+                            .filter(str -> !str.isEmpty())
+                            .collect(Collectors.toList()));
+        }
+        values.add(fieldName);
+
+        String newValue = StringUtils.join(values.iterator(), ",");
         options.put(optionKey, newValue);
     }
 
@@ -303,7 +341,7 @@ public final class ColumnDirectiveUtils {
 
     /**
      * Remove directive-managed options when a BLOB or VECTOR column is dropped. Only acts on BLOB,
-     * {@code ARRAY<BLOB>} or VECTOR type columns; other types are ignored.
+     * {@code ARRAY<BLOB>}, {@code MAP<X, BLOB>} or VECTOR type columns; other types are ignored.
      */
     public static void removeDroppedDirectiveOptions(
             String fieldName, DataType type, Map<String, String> options) {
@@ -322,6 +360,25 @@ public final class ColumnDirectiveUtils {
                 }
             }
             options.remove(String.format("field.%s.vector-dim", fieldName));
+        } else if (type.getTypeRoot() == DataTypeRoot.MAP) {
+            options.remove(
+                    CoreOptions.FIELDS_PREFIX
+                            + "."
+                            + fieldName
+                            + "."
+                            + CoreOptions.MAP_STORAGE_LAYOUT);
+            options.remove(
+                    CoreOptions.FIELDS_PREFIX
+                            + "."
+                            + fieldName
+                            + "."
+                            + CoreOptions.MAP_SHARED_SHREDDING_MAX_COLUMNS);
+            options.remove(
+                    CoreOptions.FIELDS_PREFIX
+                            + "."
+                            + fieldName
+                            + "."
+                            + CoreOptions.MAP_SHARED_SHREDDING_COLUMN_PLACEMENT_POLICY);
         }
     }
 

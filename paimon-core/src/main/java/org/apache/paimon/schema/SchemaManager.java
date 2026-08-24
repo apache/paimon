@@ -25,6 +25,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.schema.ColumnDirectiveUtils.ConvertedColumn;
 import org.apache.paimon.schema.SchemaChange.AddColumn;
 import org.apache.paimon.schema.SchemaChange.DropColumn;
@@ -94,6 +95,9 @@ import static org.apache.paimon.CoreOptions.IGNORE_DELETE;
 import static org.apache.paimon.CoreOptions.IGNORE_RETRACT;
 import static org.apache.paimon.CoreOptions.IGNORE_UPDATE_BEFORE;
 import static org.apache.paimon.CoreOptions.LIST_AGG_DELIMITER;
+import static org.apache.paimon.CoreOptions.MAP_SHARED_SHREDDING_COLUMN_PLACEMENT_POLICY;
+import static org.apache.paimon.CoreOptions.MAP_SHARED_SHREDDING_MAX_COLUMNS;
+import static org.apache.paimon.CoreOptions.MAP_STORAGE_LAYOUT;
 import static org.apache.paimon.CoreOptions.NESTED_KEY;
 import static org.apache.paimon.CoreOptions.PK_CLUSTERING_OVERRIDE;
 import static org.apache.paimon.CoreOptions.SEQUENCE_FIELD;
@@ -103,6 +107,7 @@ import static org.apache.paimon.catalog.Identifier.UNKNOWN_DATABASE;
 import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.SEQUENCE_GROUP;
 import static org.apache.paimon.schema.ColumnDirectiveUtils.applyAddColumnDirective;
 import static org.apache.paimon.schema.ColumnDirectiveUtils.applyDirectives;
+import static org.apache.paimon.schema.ColumnDirectiveUtils.parseAddColumnComment;
 import static org.apache.paimon.types.BlobType.isBlobFileField;
 import static org.apache.paimon.utils.DefaultValueUtils.validateDefaultValue;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
@@ -528,14 +533,20 @@ public class SchemaManager implements Serializable {
                                     String.format(
                                             "Column type %s[%s] cannot be converted to %s without losing information.",
                                             field.name(), sourceRootType, targetRootType));
-                            return new DataField(
-                                    field.id(),
-                                    field.name(),
+                            DataType newFieldType =
                                     getArrayMapTypeWithTargetTypeRoot(
                                             field.type(),
                                             targetRootType,
                                             depth,
-                                            update.fieldNames().length),
+                                            update.fieldNames().length);
+                            // the default value is carried over unchanged, so it has to stay
+                            // readable as the new type -- otherwise the table is left with a
+                            // default that createTable and ALTER .. SET DEFAULT would both reject
+                            validateDefaultValue(newFieldType, field.defaultValue());
+                            return new DataField(
+                                    field.id(),
+                                    field.name(),
+                                    newFieldType,
                                     field.description(),
                                     field.defaultValue());
                         },
@@ -573,6 +584,11 @@ public class SchemaManager implements Serializable {
                         lazyIdentifier);
             } else if (change instanceof UpdateColumnComment) {
                 UpdateColumnComment update = (UpdateColumnComment) change;
+                Preconditions.checkArgument(
+                        parseAddColumnComment(update.newDescription()) == null,
+                        "Should not alter existing field's type through column directives: %s",
+                        update.newDescription());
+
                 updateNestedColumn(
                         newFields,
                         update.fieldNames(),
@@ -854,7 +870,20 @@ public class SchemaManager implements Serializable {
                         fieldName -> FIELDS_PREFIX + "." + fieldName + "." + AGG_FUNCTION,
                         fieldName -> FIELDS_PREFIX + "." + fieldName + "." + IGNORE_RETRACT,
                         fieldName -> FIELDS_PREFIX + "." + fieldName + "." + DISTINCT,
-                        fieldName -> FIELDS_PREFIX + "." + fieldName + "." + LIST_AGG_DELIMITER);
+                        fieldName -> FIELDS_PREFIX + "." + fieldName + "." + LIST_AGG_DELIMITER,
+                        fieldName -> FIELDS_PREFIX + "." + fieldName + "." + MAP_STORAGE_LAYOUT,
+                        fieldName ->
+                                FIELDS_PREFIX
+                                        + "."
+                                        + fieldName
+                                        + "."
+                                        + MAP_SHARED_SHREDDING_MAX_COLUMNS,
+                        fieldName ->
+                                FIELDS_PREFIX
+                                        + "."
+                                        + fieldName
+                                        + "."
+                                        + MAP_SHARED_SHREDDING_COLUMN_PLACEMENT_POLICY);
 
         for (RenameColumn rename : renameColumns) {
             String fieldName = rename.fieldNames()[0];
@@ -998,6 +1027,7 @@ public class SchemaManager implements Serializable {
         if (options.primaryKeyVectorIndexColumns().contains(fieldName)
                 || options.primaryKeyBTreeIndexColumns().contains(fieldName)
                 || options.primaryKeyBitmapIndexColumns().contains(fieldName)
+                || options.primaryKeyMultiValueIndexColumns().contains(fieldName)
                 || options.primaryKeyFullTextIndexColumns().contains(fieldName)) {
             throw new UnsupportedOperationException(
                     String.format(
@@ -1186,14 +1216,32 @@ public class SchemaManager implements Serializable {
     @VisibleForTesting
     public boolean commit(TableSchema newSchema) throws Exception {
         SchemaValidation.validateTableSchema(newSchema);
+        validateHistoricalIcebergGeospatialTypes(newSchema);
         SchemaValidation.validateFallbackBranch(this, newSchema);
         Path schemaPath = toSchemaPath(newSchema.id());
         return fileIO.tryToWriteAtomic(schemaPath, newSchema.toString());
     }
 
+    private void validateHistoricalIcebergGeospatialTypes(TableSchema newSchema) {
+        CoreOptions options = new CoreOptions(newSchema.options());
+        IcebergOptions.StorageType storage =
+                options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE);
+        if (storage == IcebergOptions.StorageType.DISABLED) {
+            return;
+        }
+
+        for (TableSchema schema : listAll()) {
+            SchemaValidation.validateIcebergGeospatialTypes(schema.logicalRowType(), options);
+        }
+    }
+
     /** Read schema for schema id. */
     public TableSchema schema(long id) {
         return fromPath(fileIO, toSchemaPath(id));
+    }
+
+    public TableSchema tryGetSchema(long id) throws FileNotFoundException {
+        return tryFromPath(fileIO, toSchemaPath(id));
     }
 
     /** Check if a schema exists. */
@@ -1428,6 +1476,14 @@ public class SchemaManager implements Serializable {
 
         if (CoreOptions.BUCKET.key().equals(key)) {
             throw new UnsupportedOperationException(String.format("Cannot reset %s.", key));
+        }
+
+        if (DELETION_VECTORS_ENABLED.key().equals(key)) {
+            checkAlterTableOption(
+                    options,
+                    key,
+                    options.get(key),
+                    DELETION_VECTORS_ENABLED.defaultValue().toString());
         }
 
         if (options.containsKey(PK_CLUSTERING_OVERRIDE.key())

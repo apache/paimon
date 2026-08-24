@@ -20,6 +20,8 @@ package org.apache.paimon.fs;
 
 import java.util.concurrent.CompletableFuture;
 
+import static java.util.Objects.requireNonNull;
+
 /* This file is based on source code from the Hadoop Project (http://hadoop.apache.org/), licensed by the Apache
  * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
  * additional information regarding copyright ownership. */
@@ -47,16 +49,35 @@ public interface FileRange {
         return new FileRangeImpl(offset, length);
     }
 
+    /**
+     * Factory method to create a FileRange object backed by a caller-provided buffer.
+     *
+     * @param offset starting offset of the range.
+     * @param buffer buffer to store the data for this range.
+     * @return a new instance of FileRangeImpl.
+     */
+    static FileRange createFileRange(long offset, byte[] buffer) {
+        return new FileRangeImpl(offset, buffer);
+    }
+
     /** An implementation for {@link FileRange}. */
     class FileRangeImpl implements FileRange {
 
         private final long offset;
         private final int length;
         private final CompletableFuture<byte[]> reader;
+        private byte[] buffer;
 
         public FileRangeImpl(long offset, int length) {
             this.offset = offset;
             this.length = length;
+            this.reader = new CompletableFuture<>();
+        }
+
+        public FileRangeImpl(long offset, byte[] buffer) {
+            this.offset = offset;
+            this.buffer = requireNonNull(buffer, "buffer is null");
+            this.length = this.buffer.length;
             this.reader = new CompletableFuture<>();
         }
 
@@ -78,6 +99,13 @@ public interface FileRange {
         @Override
         public CompletableFuture<byte[]> getData() {
             return reader;
+        }
+
+        byte[] getOrCreateBuffer() {
+            if (buffer == null) {
+                buffer = new byte[length];
+            }
+            return buffer;
         }
     }
 }

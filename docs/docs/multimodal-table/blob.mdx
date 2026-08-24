@@ -29,7 +29,7 @@ under the License.
 
 ## Overview
 
-The `BLOB` (Binary Large Object) type is a data type designed for storing multimodal data such as images, videos, audio files, and other large binary objects in Paimon tables. Unlike traditional `BYTES` type which stores binary data inline with other columns, `BLOB` type stores large binary data in separate files and maintains references to them, providing better performance for large objects. A field can also use `ARRAY<BLOB>` to store an ordered collection of blobs, including null arrays and null elements.
+The `BLOB` (Binary Large Object) type is a data type designed for storing multimodal data such as images, videos, audio files, and other large binary objects in Paimon tables. Unlike traditional `BYTES` type which stores binary data inline with other columns, `BLOB` type stores large binary data in separate files and maintains references to them, providing better performance for large objects. A field can also use `ARRAY<BLOB>` for an ordered collection or `MAP<K, BLOB>` for keyed blobs.
 
 The Blob Storage is based on Data Evolution mode.
 
@@ -76,17 +76,20 @@ Paimon supports three storage modes for BLOB fields, selected via **comment dire
 
 1. **Default blob storage** (`__BLOB_FIELD`)
    Blob bytes are written to Paimon-managed `.blob` files under the table path.
-   This mode supports both `BLOB` and `ARRAY<BLOB>` fields.
+   This mode supports `BLOB`, `ARRAY<BLOB>`, and `MAP<K, BLOB>` fields.
 
 2. **Descriptor-only storage** (`__BLOB_DESCRIPTOR_FIELD`)
-   Only serialized `BlobDescriptor` bytes are stored inline in data files. Paimon does not write `.blob` files for these fields, and writes must provide descriptor-based input.
+   Only serialized `BlobDescriptor` bytes are stored inline in data files. Paimon does not write `.blob` files for these fields, and non-null values must provide descriptor-based input.
 
 3. **Blob view storage** (`__BLOB_VIEW_FIELD`)
    Serialized `BlobViewStruct` bytes are stored inline. The struct points to a BLOB value in an upstream table by table identifier, BLOB field, and row id. The actual blob bytes are resolved from the upstream table at read time.
 
 This allows one table to mix different storage modes for different BLOB columns.
-`ARRAY<BLOB>` is supported only by `__BLOB_FIELD`; descriptor-only and blob-view
-comment directives accept scalar BLOB fields only.
+`ARRAY<BLOB>` and `MAP<K, BLOB>` are supported only by `__BLOB_FIELD`;
+descriptor-only and blob-view comment directives accept scalar BLOB fields only.
+Map keys support the integer family, `BOOLEAN`, `DECIMAL`, `DATE`, `TIME`, `BINARY`,
+`VARBINARY` (`BYTES`), `CHAR`, and `VARCHAR`. Use non-null keys for compatibility across
+Flink, Spark, and Python.
 
 ## Table Options
 
@@ -173,7 +176,7 @@ CREATE TABLE image_table (
 
 ## Creating a Table
 
-The recommended way to create a blob table in SQL is to use the **comment directive** `__BLOB_FIELD`, `__BLOB_DESCRIPTOR_FIELD`, or `__BLOB_VIEW_FIELD` on the column. Paimon automatically converts the column type to `BLOB` and registers it in the corresponding option.
+The recommended way to create a blob table in SQL is to use the **comment directive** `__BLOB_FIELD`, `__BLOB_DESCRIPTOR_FIELD`, or `__BLOB_VIEW_FIELD` on the column. Paimon automatically converts the column to the corresponding BLOB type and registers it in the corresponding option.
 
 <Tabs groupId="blob-create-table">
 
@@ -243,7 +246,7 @@ Schema schema = Schema.newBuilder()
 import pyarrow as pa
 from pypaimon import Schema
 
-# pa.large_binary() and list_(large_binary()) are recognized as blob types.
+# Scalar, list, and map types with large_binary() values are recognized as blob types.
 pa_schema = pa.schema([
     ('id', pa.int32()),
     ('name', pa.string()),
@@ -264,13 +267,13 @@ schema = Schema.from_pyarrow_schema(
 
 </Tabs>
 
-The comment directive format is `__DIRECTIVE; optional user comment`. Paimon converts `BYTES`/`BINARY` to `BLOB` and `ARRAY<BYTES>`/`ARRAY<BINARY>` to `ARRAY<BLOB>`, registers the field in the corresponding option, and stores the text after `;` as the column's real comment.
+The comment directive format is `__DIRECTIVE; optional user comment`. Paimon converts `BYTES`/`BINARY` to `BLOB`, `ARRAY<BYTES>`/`ARRAY<BINARY>` to `ARRAY<BLOB>`, and `MAP<K, BYTES>`/`MAP<K, BINARY>` to `MAP<K, BLOB>`. It registers the field in the corresponding option and stores the text after `;` as the column's real comment.
 
 Supported directives:
 
 | Directive | Storage mode | Option |
 |-----------|-------------|--------|
-| `__BLOB_FIELD` | Raw scalar or array elements in `.blob` files | `blob-field` |
+| `__BLOB_FIELD` | Raw scalar, array elements, or map values in `.blob` files | `blob-field` |
 | `__BLOB_DESCRIPTOR_FIELD` | Descriptor bytes inline | `blob-descriptor-field` |
 | `__BLOB_VIEW_FIELD` | View reference inline | `blob-view-field` |
 
@@ -498,7 +501,79 @@ CREATE TABLE descriptor_table (
 );
 ```
 
-Paimon stores only serialized `BlobDescriptor` bytes in normal data files. Reading the blob follows the descriptor URI to access bytes, and writing requires descriptor input for those fields.
+Paimon stores only serialized `BlobDescriptor` bytes in normal data files. Reading the blob follows the descriptor URI to access bytes, and non-null values require descriptor input for those fields.
+
+## Presigned URLs for OSS Blobs
+
+Paimon can create a temporary HTTPS URL for an OSS-backed `BlobDescriptor`. The descriptor may
+refer to a byte range inside a larger `.blob` file. Paimon first materializes exactly that range as
+a separate OSS object without a file extension, sets its content type to
+`application/octet-stream`, and then returns a presigned GET URL.
+
+Configure the catalog with the standard public HTTPS OSS endpoint. Internal endpoints and
+endpoints without the `https` scheme are rejected because external consumers must be able to fetch
+the returned URL:
+
+```properties
+fs.oss.endpoint=https://oss-cn-hangzhou.aliyuncs.com
+```
+
+To obtain descriptors from a regular BLOB column, read the source table with
+`blob-as-descriptor=true`. The SQL functions have strict and error-tolerant forms:
+
+```sql
+-- Flink SQL
+SELECT sys.descriptor_to_presigned_url(
+    'default.image_table',
+    image,
+    INTERVAL '5' MINUTE)
+FROM image_table /*+ OPTIONS('blob-as-descriptor'='true') */;
+
+SELECT sys.try_descriptor_to_presigned_url(
+    'default.image_table',
+    image,
+    INTERVAL '5' MINUTE)
+FROM image_table /*+ OPTIONS('blob-as-descriptor'='true') */;
+```
+
+```sql
+-- Spark SQL
+ALTER TABLE image_table SET TBLPROPERTIES ('blob-as-descriptor' = 'true');
+
+SELECT sys.descriptor_to_presigned_url(
+    'default.image_table',
+    image,
+    INTERVAL '5' MINUTE)
+FROM image_table;
+```
+
+In both Flink and Spark, `source_table` must be a non-null string literal in
+`database.table` form. `catalog.database.table` is also accepted when the catalog matches the
+catalog that owns the function. Dynamic columns and `CASE` expressions are rejected during
+planning. The strict function propagates row errors; `try_descriptor_to_presigned_url` returns
+`NULL` for row-level errors. The validity interval must be positive whole seconds.
+
+The Java API uses the same table-root safety check:
+
+```java
+DataTable table = ...;
+Blob blob = ...;
+String url =
+        blob.toPresignedUrl(
+                table.fileIO(), table.location(), Duration.ofMinutes(5));
+```
+
+The materialized object's bytes are unchanged. Consumers must inspect the content instead of
+relying on a URL suffix or a format-specific content type. For direct model `image_url` inputs, use
+only formats verified with the target model; PDF is not covered by this entry point.
+
+Materialized objects are keyed by the complete descriptor fingerprint. Repeated short-term calls
+for the same descriptor reuse an object whose length, content type, and fingerprint still match,
+while generating a fresh URL. The first version does not resolve races with stale-cache cleanup or
+orphan-file cleaning.
+
+Treat the returned URL as a bearer credential: submit it immediately to the external service, do
+not persist it, and never write the URL or its signature/security-token query parameters to logs.
 
 ## Blob View
 
@@ -600,12 +675,12 @@ For the Python equivalent, see [Blob Storage in pypaimon](../pypaimon/blob).
 
 ## Limitations
 
-1. **Append Table Only**: Blob type is designed for append-only tables. Primary key tables are not supported.
+1. **Primary Key Tables**: Managed BLOB storage in primary-key tables has additional requirements; see [Primary-Key BLOB Storage](../primary-key-table/blob-storage). Primary-key tables support `merge-engine=partial-update` with scalar `blob-descriptor-field`, managed `blob-field` (`changelog-producer=none`), and scalar `blob-view-field`; `ARRAY` / `MAP` descriptor or view fields are not supported.
 2. **No Predicate Pushdown**: Blob columns cannot be used in filter predicates.
 3. **No Statistics**: Statistics collection is not supported for blob columns.
-4. **Required Options**: `row-tracking.enabled` and `data-evolution.enabled` must be set to `true`.
+4. **Append Table Options**: For append tables, `row-tracking.enabled` and `data-evolution.enabled` must be set to `true`.
 5. **Blob View Dependency**: Blob view fields depend on the referenced upstream table and row. If the upstream data is removed or no longer readable, the view cannot be resolved.
-6. **Array Storage Mode**: `ARRAY<BLOB>` is supported only for raw managed blob storage (`__BLOB_FIELD`), not for `__BLOB_DESCRIPTOR_FIELD` or `__BLOB_VIEW_FIELD`.
+6. **Collection Storage Mode**: `ARRAY<BLOB>` and `MAP<K, BLOB>` are supported only for raw managed blob storage (`__BLOB_FIELD`), not for `__BLOB_DESCRIPTOR_FIELD` or `__BLOB_VIEW_FIELD`.
 
 ## Best Practices
 

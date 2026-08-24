@@ -24,6 +24,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.iceberg.IcebergCommitCallback;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -406,6 +407,9 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         if (statsCache != null) {
             copied.setStatsCache(statsCache);
         }
+        if (dvmetaCache != null) {
+            copied.setDVMetaCache(dvmetaCache);
+        }
         return copied;
     }
 
@@ -522,6 +526,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public void rollbackTo(long snapshotId) {
+        IcebergCommitCallback.markRetirePendingForRollback(this);
         SnapshotManager snapshotManager = snapshotManager();
         try {
             snapshotManager.rollback(Instant.snapshot(snapshotId));
@@ -547,6 +552,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public void rollbackTo(String tagName) {
+        IcebergCommitCallback.markRetirePendingForRollback(this);
         SnapshotManager snapshotManager = snapshotManager();
         try {
             snapshotManager.rollback(Instant.tag(tagName));

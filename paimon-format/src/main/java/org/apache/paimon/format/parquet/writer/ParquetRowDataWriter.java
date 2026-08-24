@@ -93,6 +93,8 @@ public class ParquetRowDataWriter {
                     return new BooleanWriter();
                 case BINARY:
                 case VARBINARY:
+                case GEOMETRY:
+                case GEOGRAPHY:
                     return new BinaryWriter();
                 case BLOB:
                     return new BlobDescriptorWriter();

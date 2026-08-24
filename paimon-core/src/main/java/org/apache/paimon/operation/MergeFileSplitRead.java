@@ -33,6 +33,7 @@ import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.mergetree.DropDeleteReader;
 import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.MergeTreeReaders;
+import org.apache.paimon.mergetree.SortBufferWriteBuffer;
 import org.apache.paimon.mergetree.SortedRun;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.mergetree.compact.IntervalPartition;
@@ -41,6 +42,8 @@ import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
 import org.apache.paimon.mergetree.compact.ReducerMergeFunctionWrapper;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.reader.EmptyRecordReader;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.ReaderSupplier;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
@@ -58,6 +61,8 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
@@ -74,7 +79,9 @@ import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
  */
 public class MergeFileSplitRead implements SplitRead<KeyValue> {
 
+    private final CoreOptions options;
     private final TableSchema tableSchema;
+    private final RowType keyType;
     private final FileIO fileIO;
     private final KeyValueFileReaderFactory.Builder readerFactoryBuilder;
     private final Comparator<InternalRow> keyComparator;
@@ -85,6 +92,7 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
 
     @Nullable private RowType readKeyType;
     @Nullable private RowType outerReadType;
+    @Nullable private IOManager ioManager;
 
     @Nullable private List<Predicate> filtersForKeys;
     @Nullable private List<Predicate> filtersForAll;
@@ -99,7 +107,9 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
             Comparator<InternalRow> keyComparator,
             MergeFunctionFactory<KeyValue> mfFactory,
             KeyValueFileReaderFactory.Builder readerFactoryBuilder) {
+        this.options = options;
         this.tableSchema = schema;
+        this.keyType = keyType;
         this.readerFactoryBuilder = readerFactoryBuilder;
         this.fileIO = readerFactoryBuilder.fileIO();
         this.keyComparator = keyComparator;
@@ -131,6 +141,21 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
 
     @Override
     public MergeFileSplitRead withReadType(RowType readType) {
+        RowType adjustedReadType = adjustReadType(readType);
+
+        readerFactoryBuilder.withReadValueType(adjustedReadType);
+        mergeSorter.setProjectedValueType(adjustedReadType);
+
+        // Project away fields added for merging.
+        if (adjustedReadType != readType) {
+            outerReadType = readType;
+        }
+
+        return this;
+    }
+
+    /** Returns the value type required internally by the configured merge function. */
+    public RowType adjustReadType(RowType readType) {
         RowType tableRowType = tableSchema.logicalRowType();
         RowType adjustedReadType = readType;
 
@@ -150,24 +175,22 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
             }
         }
         adjustedReadType = mfFactory.adjustReadType(adjustedReadType);
-
-        readerFactoryBuilder.withReadValueType(adjustedReadType);
-        mergeSorter.setProjectedValueType(adjustedReadType);
-
-        // When finalReadType != readType, need to project the outer read type
-        if (adjustedReadType != readType) {
-            outerReadType = readType;
-        }
-
-        return this;
+        return adjustedReadType;
     }
 
     @Override
     public MergeFileSplitRead withIOManager(IOManager ioManager) {
+        this.ioManager = ioManager;
         this.mergeSorter.setIOManager(ioManager);
         if (mfFactory instanceof LookupMergeFunction.Factory) {
             ((LookupMergeFunction.Factory) mfFactory).withIOManager(ioManager);
         }
+        return this;
+    }
+
+    @Override
+    public MergeFileSplitRead withReadBatchSizer(ReadBatchSizer sizer) {
+        readerFactoryBuilder.withReadBatchSizer(sizer);
         return this;
     }
 
@@ -246,6 +269,20 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         }
     }
 
+    /** Reads a writer-grouped postpone split with key predicates only. */
+    public RecordReader<KeyValue> createPostponeReader(DataSplit split) throws IOException {
+        if (split.isStreaming() || split.bucket() != BucketMode.POSTPONE_BUCKET) {
+            throw new IllegalArgumentException(
+                    "Postpone reader requires a batch split from the postpone bucket.");
+        }
+        return createNoMergeReader(
+                split.partition(),
+                split.bucket(),
+                split.dataFiles(),
+                split.deletionFiles().orElse(null),
+                true);
+    }
+
     public RecordReader<KeyValue> createChainReader(ChainSplit chainSplit) throws IOException {
         List<DataFileMeta> files = chainSplit.dataFiles();
         ChainReadContext chainReadContext =
@@ -263,7 +300,11 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         ChainKeyValueFileReaderFactory nonOverlappedSectionFactory =
                 builder.build(null, dvFactory, false, filtersForAll, chainReadContext);
         return createMergeReader(
-                files, overlappedSectionFactory, nonOverlappedSectionFactory, forceKeepDelete);
+                files,
+                overlappedSectionFactory,
+                nonOverlappedSectionFactory,
+                forceKeepDelete,
+                new ReducerMergeFunctionWrapper(unwrapLookup(mfFactory).create(actualReadType())));
     }
 
     public RecordReader<KeyValue> createMergeReader(
@@ -281,18 +322,21 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         KeyValueFileReaderFactory nonOverlappedSectionFactory =
                 readerFactoryBuilder.build(partition, bucket, dvFactory, false, filtersForAll);
         return createMergeReader(
-                files, overlappedSectionFactory, nonOverlappedSectionFactory, keepDelete);
+                files,
+                overlappedSectionFactory,
+                nonOverlappedSectionFactory,
+                keepDelete,
+                new ReducerMergeFunctionWrapper(mfFactory.create(actualReadType())));
     }
 
     public RecordReader<KeyValue> createMergeReader(
             List<DataFileMeta> files,
             KeyValueFileReaderFactory overlappedSectionFactory,
             KeyValueFileReaderFactory nonOverlappedSectionFactory,
-            boolean keepDelete)
+            boolean keepDelete,
+            MergeFunctionWrapper<KeyValue> mergeFuncWrapper)
             throws IOException {
         List<ReaderSupplier<KeyValue>> sectionReaders = new ArrayList<>();
-        MergeFunctionWrapper<KeyValue> mergeFuncWrapper =
-                new ReducerMergeFunctionWrapper(mfFactory.create(actualReadType()));
         for (List<SortedRun> section : new IntervalPartition(files, keyComparator).partition()) {
             sectionReaders.add(
                     () ->
@@ -306,7 +350,140 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
                                     mergeFuncWrapper,
                                     mergeSorter));
         }
-        RecordReader<KeyValue> reader = ConcatRecordReader.create(sectionReaders);
+        return finishMergeReader(ConcatRecordReader.create(sectionReaders), keepDelete);
+    }
+
+    /**
+     * Merges one real-bucket split with routed postpone records.
+     *
+     * <p>The postpone reader is consumed and closed eagerly. Its input order defines sequence
+     * numbers after the real files, while user-defined sequence fields take precedence. A null
+     * split represents a postpone-only bucket.
+     */
+    public RecordReader<KeyValue> createPostponeMergeReader(
+            @Nullable DataSplit realSplit, RecordReader<KeyValue> postponeRecords)
+            throws IOException {
+        List<DataFileMeta> realFiles =
+                realSplit == null ? Collections.emptyList() : realSplit.dataFiles();
+
+        RowType valueType = actualReadType();
+        UserDefinedSeqComparator udsComparator = null;
+        SortBufferWriteBuffer postponeBuffer = null;
+        long nextSequenceNumber = -1L;
+        try (RecordReader<KeyValue> records = postponeRecords) {
+            RecordReader.RecordIterator<KeyValue> batch;
+            while ((batch = records.readBatch()) != null) {
+                try {
+                    KeyValue record;
+                    while ((record = batch.next()) != null) {
+                        if (postponeBuffer == null) {
+                            for (DataFileMeta file : realFiles) {
+                                nextSequenceNumber =
+                                        Math.max(nextSequenceNumber, file.maxSequenceNumber());
+                            }
+                            udsComparator = createUdsComparator();
+                            postponeBuffer =
+                                    new SortBufferWriteBuffer(
+                                            keyType,
+                                            valueType,
+                                            udsComparator,
+                                            mergeSorter.memoryPool(),
+                                            options.writeBufferSpillable(),
+                                            options.writeBufferSpillDiskSize(),
+                                            options.localSortMaxNumFileHandles(),
+                                            options.spillCompressOptions(),
+                                            ioManager);
+                        }
+                        nextSequenceNumber = Math.addExact(nextSequenceNumber, 1L);
+                        if (!postponeBuffer.put(
+                                nextSequenceNumber,
+                                record.valueKind(),
+                                record.key(),
+                                record.value())) {
+                            throw new IOException(
+                                    "Postpone merge read buffer is full. Enable write-buffer-spillable or increase sort-spill-buffer-size.");
+                        }
+                    }
+                } finally {
+                    batch.releaseBatch();
+                }
+            }
+        } catch (IOException | RuntimeException e) {
+            if (postponeBuffer != null) {
+                postponeBuffer.clear();
+            }
+            throw e;
+        }
+
+        if (postponeBuffer == null) {
+            return realSplit == null ? new EmptyRecordReader<>() : createReader(realSplit);
+        }
+
+        final RecordReader<KeyValue> postponeReader;
+        try {
+            postponeReader =
+                    postponeBuffer.createReader(keyComparator, mfFactory.create(valueType));
+        } catch (IOException | RuntimeException e) {
+            postponeBuffer.clear();
+            throw e;
+        }
+
+        if (realFiles.isEmpty()) {
+            return finishMergeReader(postponeReader, forceKeepDelete);
+        }
+
+        // Postpone records make real-file value filters unsafe before the final merge.
+        final RecordReader<KeyValue> realBucketReader;
+        try {
+            DeletionVector.Factory dvFactory =
+                    DeletionVector.factory(
+                            fileIO, realFiles, realSplit.deletionFiles().orElse(null));
+            KeyValueFileReaderFactory realFileReaderFactory =
+                    readerFactoryBuilder.build(
+                            realSplit.partition(),
+                            realSplit.bucket(),
+                            dvFactory,
+                            false,
+                            filtersForKeys);
+            realBucketReader =
+                    MergeTreeReaders.readerForMergeTree(
+                            new IntervalPartition(realFiles, keyComparator).partition(),
+                            realFileReaderFactory,
+                            keyComparator,
+                            udsComparator,
+                            new ReducerMergeFunctionWrapper(mfFactory.create(valueType)),
+                            mergeSorter);
+        } catch (IOException | RuntimeException e) {
+            closeAndSuppress(postponeReader, e);
+            throw e;
+        }
+
+        RecordReader<KeyValue> reader;
+        try {
+            reader =
+                    mergeSorter.mergeSortNoSpill(
+                            Arrays.asList(() -> realBucketReader, () -> postponeReader),
+                            keyComparator,
+                            udsComparator,
+                            new ReducerMergeFunctionWrapper(mfFactory.create(valueType)));
+        } catch (IOException | RuntimeException e) {
+            closeAndSuppress(realBucketReader, e);
+            closeAndSuppress(postponeReader, e);
+            throw e;
+        }
+        return finishMergeReader(reader, forceKeepDelete);
+    }
+
+    private static void closeAndSuppress(RecordReader<?> reader, Exception exception) {
+        try {
+            reader.close();
+        } catch (IOException closeException) {
+            exception.addSuppressed(closeException);
+        }
+    }
+
+    private RecordReader<KeyValue> finishMergeReader(
+            RecordReader<KeyValue> reader, boolean keepDelete) {
 
         if (!keepDelete) {
             reader = new DropDeleteReader(reader);
@@ -365,5 +542,12 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     @Nullable
     public UserDefinedSeqComparator createUdsComparator() {
         return UserDefinedSeqComparator.create(actualReadType(), sequenceFields, sequenceOrder);
+    }
+
+    private static MergeFunctionFactory<KeyValue> unwrapLookup(
+            MergeFunctionFactory<KeyValue> factory) {
+        return factory instanceof LookupMergeFunction.Factory
+                ? ((LookupMergeFunction.Factory) factory).wrapped()
+                : factory;
     }
 }

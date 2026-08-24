@@ -137,7 +137,8 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
                     filter,
                     pinnedSnapshot);
         }
-        return new DataEvolutionVectorScan(table, partitionFilter, filter, vectorColumn, options);
+        return new DataEvolutionVectorScan(
+                table, partitionFilter, filter, vectorColumn, options, pinnedSnapshot);
     }
 
     @Override
@@ -155,7 +156,7 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
                 && table.coreOptions().primaryKeyVectorIndexColumns().contains(vectorColumn.name());
     }
 
-    VectorSearchBuilderImpl withSnapshot(Snapshot snapshot) {
+    public VectorSearchBuilderImpl withSnapshot(Snapshot snapshot) {
         this.pinnedSnapshot = snapshot;
         return this;
     }

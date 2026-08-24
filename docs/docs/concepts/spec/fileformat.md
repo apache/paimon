@@ -64,6 +64,16 @@ The following table lists the type mapping from Paimon type to Parquet type.
       <td></td>
     </tr>
     <tr>
+      <td>GEOMETRY(crs)</td>
+      <td>BINARY</td>
+      <td>GEOMETRY(crs)</td>
+    </tr>
+    <tr>
+      <td>GEOGRAPHY(crs, algorithm)</td>
+      <td>BINARY</td>
+      <td>GEOGRAPHY(crs, algorithm)</td>
+    </tr>
+    <tr>
       <td>DECIMAL(P, S)</td>
       <td>P <= 9: INT32, P <= 18: INT64, P > 18: FIXED_LEN_BYTE_ARRAY</td>
       <td>DECIMAL(P, S)</td>
@@ -142,8 +152,10 @@ The following table lists the type mapping from Paimon type to Parquet type.
 </table>
 
 Limitations:
+
 1. [Parquet does not support nullable map keys](https://github.com/apache/parquet-format/blob/master/LogicalTypes#maps).
 2. Parquet TIMESTAMP type with precision 9 will use INT96, but this int96 is a time zone converted value and requires additional adjustments.
+3. Tables containing `GEOMETRY` or `GEOGRAPHY` columns must use Parquet for `file.format`, every entry in `file.format.per.level`, and `changelog-file.format` when configured.
 
 ## AVRO
 
@@ -234,16 +246,16 @@ The following table lists the type mapping from Paimon type to Avro type.
       <td></td>
     </tr>
     <tr>
-      <td><code>MAP</code><br>
-      (key must be string/char/varchar type)</td>
-      <td><code>map</code></td>
-      <td></td>
+      <td><code>MAP</code></td>
+      <td>string/char/varchar key: <code>map</code><br>
+      other key: <code>array</code> of key-value <code>record</code></td>
+      <td>other key: <code>map</code></td>
     </tr>
     <tr>
-      <td><code>MULTISET</code><br>
-      (element must be string/char/varchar type)</td>
-      <td><code>map</code></td>
-      <td></td>
+      <td><code>MULTISET</code></td>
+      <td>string/char/varchar element: <code>map</code><br>
+      other element: <code>array</code> of element-count <code>record</code></td>
+      <td>other element: <code>map</code></td>
     </tr>
     <tr>
       <td><code>ROW</code></td>
@@ -849,9 +861,9 @@ BLOB files use the `.blob` extension and have the following structure:
 +------------------+
 ```
 
-Each physical BLOB file stores one logical field. The field can be either `BLOB` or
-`ARRAY<BLOB>`. For `ARRAY<BLOB>`, the variable-length data area in an entry uses the
-following nested payload:
+Each physical BLOB file stores one logical field. The field can be `BLOB`,
+`ARRAY<BLOB>`, or `MAP<K, BLOB>`. For `ARRAY<BLOB>`, the variable-length data area in
+an entry uses the following nested payload:
 
 ```
 +----------------------+-----------------------------------------------+
@@ -864,10 +876,49 @@ following nested payload:
 +----------------------+-----------------------------------------------+
 ```
 
-An element length of `-1` represents a null array element. At the outer file index
-level, `-1` represents a null field and `-2` represents a field placeholder used by
-data evolution. An empty array is encoded with an element count of zero and an empty
-element index; it is distinct from a null array.
+An element length of `-1` represents a null array element. An empty array is encoded
+with an element count of zero and an empty element index; it is distinct from a null
+array.
+
+For `MAP<K, BLOB>`, the variable-length data area uses the following nested payload:
+
+```
++----------------------+-----------------------------------------------+
+| Map Magic Number     | 4 bytes (1296188226, Little Endian)           |
+| Map Version          | 1 byte                                        |
+| Entry Count          | 4 bytes (Little Endian)                       |
+| Key Data             | Concatenated bytes of all non-null keys       |
+| Blob Data            | Concatenated bytes of all non-null values     |
+| Key Length Index     | Delta-Varint compressed key lengths           |
+| Blob Length Index    | Delta-Varint compressed Blob lengths          |
+| Key Index Length     | 4 bytes (Little Endian)                       |
+| Blob Index Length    | 4 bytes (Little Endian)                       |
++----------------------+-----------------------------------------------+
+```
+
+The key and Blob length indexes are aligned by entry position. A length of `-1`
+represents null, while zero represents an empty key or Blob. Supported key types and
+their encodings are:
+
+| Key type | Encoding |
+|----------|----------|
+| `TINYINT`, `SMALLINT`, `INT`, `BIGINT` | Signed integer in little-endian byte order using the type's fixed width |
+| `BOOLEAN` | One byte: `0` for false and `1` for true |
+| `DECIMAL(p, s)`, `p <= 18` | Eight-byte little-endian signed unscaled integer |
+| `DECIMAL(p, s)`, `p > 18` | Minimal-length signed big-endian two's-complement unscaled integer |
+| `DATE` | Four-byte little-endian signed count of days since 1970-01-01 |
+| `TIME(p)` | Four-byte little-endian signed count of milliseconds since midnight |
+| `BINARY`, `VARBINARY` (`BYTES`) | Raw bytes |
+| `CHAR`, `VARCHAR` | UTF-8 bytes |
+
+The DECIMAL scale is defined by the field type and is not stored in each key. `BINARY`
+and `VARBINARY` keys are not padded, truncated, or validated against the declared length.
+An empty map has an entry count of zero and is distinct from a null map. The `TIME(p)`
+encoding uses Paimon's millisecond internal representation and does not add nanosecond
+precision.
+
+At the outer file index level, `-1` represents a null field and `-2` represents a
+field placeholder used by data evolution.
 
 Key features:
 - **CRC32 Checksums**: Each blob entry has a CRC32 checksum for data integrity verification
@@ -875,7 +926,7 @@ Key features:
 - **Delta-Varint Compression**: The index uses delta-varint compression for space efficiency
 
 Limitations:
-1. BLOB format only supports a single `BLOB` or `ARRAY<BLOB>` field per physical file.
+1. BLOB format only supports a single `BLOB`, `ARRAY<BLOB>`, or `MAP<K, BLOB>` field per physical file.
 2. BLOB format does not support predicate pushdown.
 3. Statistics collection is not supported for BLOB columns.
 

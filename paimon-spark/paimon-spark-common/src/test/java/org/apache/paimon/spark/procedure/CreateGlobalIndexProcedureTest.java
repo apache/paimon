@@ -481,6 +481,7 @@ public class CreateGlobalIndexProcedureTest {
                 null,
                 null,
                 firstRowId,
+                null,
                 null);
     }
 

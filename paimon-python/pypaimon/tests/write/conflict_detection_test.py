@@ -311,6 +311,22 @@ class TestOverwriteConflictDetection(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertIn("File deletion conflicts", str(result))
 
+    def test_bucket_num_mismatch_conflicts(self):
+        detection = self._make_detection()
+        old = _make_entry("old")
+        new = _make_entry("new")
+        new.total_buckets = 2
+
+        result = detection.check_conflicts(
+            latest_snapshot=None,
+            base_entries=[old],
+            delta_entries=[new],
+            commit_kind="APPEND",
+        )
+
+        self.assertIsNotNone(result)
+        self.assertIn("Total buckets", str(result))
+
 
 class _FakeSnapshot:
 
@@ -391,6 +407,20 @@ class TestCheckRowIdFromSnapshot(unittest.TestCase):
             [check_snap, compact_snap], {2: compact_entries})
         self.assertIsNone(
             detection.check_row_id_from_snapshot(compact_snap, self._blob_delta()))
+
+    def test_missing_intermediate_snapshot_fails_closed(self):
+        check_snap = _FakeSnapshot(1, "APPEND", next_row_id=200)
+        latest_snap = _FakeSnapshot(3, "COMPACT", next_row_id=200)
+        detection = self._make_detection(
+            [check_snap, latest_snap], {3: []})
+
+        with self.assertRaisesRegex(
+                RuntimeError, "snapshot 2 cannot be found"):
+            detection.check_row_id_from_snapshot(
+                latest_snap,
+                self._blob_delta(),
+                check_compaction=False,
+            )
 
     def test_compact_no_conflict_when_no_matching_delete(self):
         check_snap = _FakeSnapshot(1, "APPEND", next_row_id=400)

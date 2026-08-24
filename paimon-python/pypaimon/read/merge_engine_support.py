@@ -62,29 +62,21 @@ _AGGREGATION_SUPPORTED_AGG_FUNCS = frozenset([
     "first_value", "first_non_null_value",
     "sum", "max", "min",
     "bool_or", "bool_and",
+    "listagg",
+    "nested_update", "nested_partial_update",
+    "collect",
+    "product",
+    "merge_map_with_keytime",
+    "merge_map",
+    "theta_sketch",
+    "hll_sketch",
+    "rbm32",
 ])
 _FIELDS_PREFIX = "fields."
 _FIELD_SEQUENCE_GROUP_SUFFIX = ".sequence-group"
 _FIELD_AGGREGATE_FUNCTION_SUFFIX = ".aggregate-function"
 _FIELD_IGNORE_RETRACT_SUFFIX = ".ignore-retract"
-_FIELD_NESTED_SEQUENCE_SUFFIX = ".nested-sequence-field"
 _DEFAULT_AGGREGATE_FUNCTION_KEY = "fields.default-aggregate-function"
-
-
-def _nested_sequence_field_options(table) -> Set[str]:
-    """Option keys configuring ``nested-sequence-field`` (a per-field
-    nested sequence ordering distinct from the top-level
-    ``sequence.field``). pypaimon implements top-level ``sequence.field``
-    but not nested sequence fields, so reject them on every PK engine
-    rather than silently ignoring them.
-    """
-    flagged: Set[str] = set()
-    raw = table.options.options.to_map()
-    for key in raw:
-        if key.startswith(_FIELDS_PREFIX) and key.endswith(
-                _FIELD_NESTED_SEQUENCE_SUFFIX):
-            flagged.add(key)
-    return flagged
 
 
 def _unsupported_sequence_fields(table) -> Set[str]:
@@ -174,16 +166,6 @@ def check_supported(table) -> None:
     """
     if not table.is_primary_key_table:
         return
-    # ``nested-sequence-field`` is unimplemented on every engine; reject it
-    # before per-engine dispatch so it can't be silently ignored by the
-    # top-level ``sequence.field`` comparator.
-    nested_seq = _nested_sequence_field_options(table)
-    if nested_seq:
-        raise NotImplementedError(
-            "nested-sequence-field is not implemented in pypaimon yet: {}. "
-            "Top-level 'sequence.field' is supported; open an issue to track "
-            "nested sequence field support.".format(", ".join(sorted(nested_seq)))
-        )
     # ``sequence.field`` validity is engine-independent in Java
     # (SchemaValidation.validateSequenceField). pypaimon has no
     # schema-creation validation, so enforce the same invariants here on
@@ -234,9 +216,8 @@ def check_supported(table) -> None:
                 "built-in aggregators ({}); retract opt-ins "
                 "(aggregation.remove-record-on-delete, "
                 "fields.<f>.ignore-retract) "
-                "and other aggregators (product / listagg / collect / "
-                "merge_map* / nested_update* / theta_sketch / "
-                "hll_sketch / roaring_bitmap_*) are not yet supported. "
+                "and other aggregators (rbm64) "
+                "are not yet supported. "
                 "Open an issue to track support.".format(
                     ", ".join(sorted(unsupported)),
                     ", ".join(sorted(_AGGREGATION_SUPPORTED_AGG_FUNCS)),
@@ -286,8 +267,7 @@ def aggregation_unsupported_options(table) -> Set[str]:
        ``builtin_seq_comparator``).
     3. Out-of-scope aggregator selections: ``fields.<f>.aggregate-
        function`` and ``fields.default-aggregate-function`` set to an
-       identifier this engine doesn't support yet (e.g. ``collect``,
-       ``nested_update``).
+       identifier this engine doesn't support yet (e.g. ``rbm64``).
     """
     flagged: Set[str] = set()
     raw = table.options.options.to_map()

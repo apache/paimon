@@ -55,7 +55,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
@@ -67,7 +66,6 @@ import java.util.UUID;
 import static org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors.newDirectExecutorService;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /** Native SPI tests for file-aligned primary-key full-text archives. */
 class NativePrimaryKeyFullTextIndexTest {
@@ -81,7 +79,6 @@ class NativePrimaryKeyFullTextIndexTest {
 
     @BeforeEach
     void before() {
-        assumeTrue(isNativeAvailable(), "Native full-text library not available, skipping tests");
         fileIO = LocalFileIO.create();
         indexPath = new Path(tempDir.toUri());
     }
@@ -134,10 +131,11 @@ class NativePrimaryKeyFullTextIndexTest {
         GlobalIndexer indexer = GlobalIndexer.create("full-text", TEXT_FIELD, options);
         PrimaryKeyFullTextBucketSearch search =
                 new PrimaryKeyFullTextBucketSearch(
-                        payload ->
+                        (payload, totalRowCount) ->
                                 indexer.createReader(
                                         fileReader(),
                                         Collections.singletonList(toIOMeta(payload)),
+                                        totalRowCount,
                                         newDirectExecutorService()));
 
         List<List<PrimaryKeySearchPosition>> rankings =
@@ -192,7 +190,7 @@ class NativePrimaryKeyFullTextIndexTest {
                         null,
                         result.meta(),
                         new PrimaryKeyIndexSourceMeta(
-                                        new PrimaryKeyIndexSourceFile("data-1", texts.size()))
+                                        1, new PrimaryKeyIndexSourceFile("data-1", texts.size()))
                                 .serialize()),
                 null);
     }
@@ -258,10 +256,5 @@ class NativePrimaryKeyFullTextIndexTest {
 
     private static String matchQuery(String terms) {
         return "{\"match\":{\"query\":\"" + terms + "\"}}";
-    }
-
-    private static boolean isNativeAvailable() {
-        String path = System.getenv("PAIMON_FTINDEX_JNI_LIB_PATH");
-        return path != null && !path.isEmpty() && new File(path).isFile();
     }
 }

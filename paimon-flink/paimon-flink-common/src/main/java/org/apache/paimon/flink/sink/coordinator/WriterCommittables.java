@@ -135,6 +135,16 @@ public class WriterCommittables {
         return entry == null ? Long.MIN_VALUE : entry.watermark();
     }
 
+    /**
+     * Returns whether this subtask was idle at {@code checkpointId}. Falls back to {@code false}
+     * (ACTIVE) when the subtask has no entry — equivalent to "channel exists but has never reported
+     * a watermark yet", which Flink's {@code StatusWatermarkValve} also treats as ACTIVE.
+     */
+    public boolean isIdleAt(long checkpointId) {
+        CheckpointCommittables entry = committablesPerCheckpoint.get(checkpointId);
+        return entry != null && entry.idle();
+    }
+
     @Override
     public String toString() {
         return String.format(

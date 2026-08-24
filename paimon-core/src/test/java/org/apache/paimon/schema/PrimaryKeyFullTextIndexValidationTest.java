@@ -111,10 +111,11 @@ class PrimaryKeyFullTextIndexValidationTest {
     }
 
     @Test
-    void testSupportsFirstRowWithoutDeletionVectors() {
+    void testIgnoresMergeOnReadForFirstRowWithoutDeletionVectors() {
         Map<String, String> options = enabledOptions();
         options.put(CoreOptions.MERGE_ENGINE.key(), "first-row");
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "false");
+        options.put(CoreOptions.DELETION_VECTORS_MERGE_ON_READ.key(), "true");
 
         assertThatCode(() -> validateTableSchema(schema(options))).doesNotThrowAnyException();
     }
@@ -163,16 +164,6 @@ class PrimaryKeyFullTextIndexValidationTest {
         assertThatThrownBy(() -> validateTableSchema(schema(options)))
                 .hasMessageContaining("content")
                 .hasMessageContaining("at most one primary-key index");
-    }
-
-    @Test
-    void testRejectsInvalidLsmCompactionOptions() {
-        Map<String, String> options = enabledOptions();
-        options.put("fields.content.pk-index.compaction.level-fanout", "1");
-
-        assertThatThrownBy(() -> validateTableSchema(schema(options)))
-                .hasMessageContaining("fields.content.pk-index.compaction.level-fanout")
-                .hasMessageContaining("greater than 1");
     }
 
     @Test

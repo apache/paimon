@@ -48,11 +48,7 @@ public class ResetConsumerAction extends TableActionBase implements LocalAction 
     @Override
     public void executeLocally() throws Exception {
         FileStoreTable dataTable = (FileStoreTable) table;
-        ConsumerManager consumerManager =
-                new ConsumerManager(
-                        dataTable.fileIO(),
-                        dataTable.location(),
-                        dataTable.snapshotManager().branch());
+        ConsumerManager consumerManager = dataTable.consumerManager();
         if (Objects.isNull(nextSnapshotId)) {
             consumerManager.deleteConsumer(consumerId);
         } else {

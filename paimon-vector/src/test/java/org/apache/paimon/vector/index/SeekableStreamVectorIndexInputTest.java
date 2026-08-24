@@ -24,6 +24,7 @@ import org.apache.paimon.fs.VectoredReadable;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -48,6 +49,10 @@ public class SeekableStreamVectorIndexInputTest {
         assertThat(input.positionReads).hasValue(2);
         assertThat(input.sequentialReads).hasValue(0);
         assertThat(input.maxActiveReads).hasValue(2);
+        assertThat(input.positionReadBuffers.stream().anyMatch(buffer -> buffer == buffers[0]))
+                .isTrue();
+        assertThat(input.positionReadBuffers.stream().anyMatch(buffer -> buffer == buffers[1]))
+                .isTrue();
     }
 
     @Test
@@ -90,6 +95,8 @@ public class SeekableStreamVectorIndexInputTest {
         private final AtomicInteger positionReads = new AtomicInteger();
         private final AtomicInteger sequentialReads = new AtomicInteger();
         private final AtomicInteger maxActiveReads = new AtomicInteger();
+        private final CopyOnWriteArrayList<byte[]> positionReadBuffers =
+                new CopyOnWriteArrayList<>();
 
         private int position;
 
@@ -129,6 +136,7 @@ public class SeekableStreamVectorIndexInputTest {
 
         @Override
         public int pread(long position, byte[] buffer, int offset, int length) throws IOException {
+            positionReadBuffers.add(buffer);
             int active = activeReads.incrementAndGet();
             maxActiveReads.accumulateAndGet(active, Math::max);
             readsStarted.countDown();

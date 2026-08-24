@@ -29,6 +29,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.PostponeFixedBucketWriteBuilder;
 import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
@@ -131,14 +132,26 @@ public interface FileStoreTable extends DataTable {
     @Override
     TableWriteImpl<?> newWrite(String commitUser);
 
+    /** Returns a builder for fixed-bucket batch writes to a postpone-bucket table. */
+    default PostponeFixedBucketWriteBuilder newPostponeFixedBucketWriteBuilder() {
+        return new PostponeFixedBucketWriteBuilder(this);
+    }
+
     TableWriteImpl<?> newWrite(String commitUser, @Nullable Integer writeId);
 
     /**
-     * Create a new write with a custom {@link RowKeyExtractor}. This is useful for scenarios like
-     * rescaling where the bucket assignment logic needs to be overridden.
+     * Creates a new write with a custom {@link RowKeyExtractor}. This is useful for scenarios such
+     * as rescaling where the bucket assignment logic needs to be overridden.
      */
     TableWriteImpl<?> newWrite(
             String commitUser, @Nullable Integer writeId, RowKeyExtractor rowKeyExtractor);
+
+    /** Creates a fixed-bucket merge-tree write for a postpone-bucket batch write. */
+    default TableWriteImpl<?> newPostponeFixedBucketWrite(
+            String commitUser, @Nullable Integer writeId) {
+        throw new UnsupportedOperationException(
+                "Postpone fixed-bucket writes are only supported by primary-key tables.");
+    }
 
     @Override
     TableCommitImpl newCommit(String commitUser);

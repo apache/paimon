@@ -294,6 +294,65 @@ class DaftRestReadTest(RESTBaseTest):
         self.assertEqual(captured["opts"].get("warehouse"), "oss://my-bucket", captured["opts"])
         fake_file_io.try_to_refresh_token.assert_called()
 
+    def test_source_deserialization_refreshes_rest_io_config(self):
+        from daft.pickle import dumps, loads
+
+        from pypaimon.daft.daft_paimon import _source_for_table
+
+        initial_token = {
+            "fs.oss.accessKeyId": "initial-key",
+            "fs.oss.accessKeySecret": "initial-secret",
+            "fs.oss.securityToken": "initial-token",
+        }
+        refreshed_token = {
+            "fs.oss.accessKeyId": "refreshed-key",
+            "fs.oss.accessKeySecret": "refreshed-secret",
+            "fs.oss.securityToken": "refreshed-token",
+        }
+        fake_token = MagicMock()
+        fake_token.token = initial_token
+        fake_file_io = MagicMock()
+        fake_file_io.token = fake_token
+
+        catalog_options = {**self.options, "warehouse": "morax_test"}
+        fake_file_io.properties = catalog_options
+        table_path = "oss://my-bucket/db.db/tbl-abc"
+
+        with patch.object(self.table, "file_io", fake_file_io), patch.object(
+            self.table, "table_path", table_path
+        ):
+            source = _source_for_table(self.table, catalog_options=catalog_options)
+            serialized = dumps(source)
+
+            fake_token.token = refreshed_token
+            with patch(
+                "pypaimon.daft.daft_datasource._load_table",
+                return_value=self.table,
+            ):
+                restored = loads(serialized)
+
+        initial_oss = source._storage_config.io_config.opendal_backends["oss"]
+        restored_oss = (restored._storage_config.io_config.opendal_backends or {}).get(
+            "oss", {}
+        )
+        self.assertEqual(
+            (
+                initial_oss.get("access_key_id"),
+                initial_oss.get("access_key_secret"),
+                initial_oss.get("security_token"),
+            ),
+            ("initial-key", "initial-secret", "initial-token"),
+        )
+        self.assertEqual(
+            (
+                restored_oss.get("access_key_id"),
+                restored_oss.get("access_key_secret"),
+                restored_oss.get("security_token"),
+            ),
+            ("refreshed-key", "refreshed-secret", "refreshed-token"),
+        )
+        self.assertEqual(fake_file_io.try_to_refresh_token.call_count, 2)
+
     def test_enrich_is_noop_when_not_rest_metastore(self):
         from pypaimon.daft.daft_paimon import _enrich_options_with_rest_token
         opts = {"warehouse": "/tmp/x", "metastore": "filesystem"}

@@ -23,15 +23,10 @@ import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.serializer.InternalRowSerializer;
-import org.apache.paimon.format.csv.CsvOptions;
-import org.apache.paimon.format.json.JsonOptions;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.partition.PartitionPredicate.AndPartitionPredicate;
 import org.apache.paimon.partition.PartitionPredicate.DefaultPartitionPredicate;
@@ -49,45 +44,38 @@ import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
-import org.apache.paimon.utils.BinPacking;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PartitionPathUtils;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import javax.annotation.Nullable;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
-
-import static org.apache.paimon.format.text.HadoopCompressionUtils.isCompressed;
-import static org.apache.paimon.format.text.TextLineReader.isDefaultDelimiter;
-import static org.apache.paimon.utils.InternalRowPartitionComputer.convertSpecToInternalRow;
-import static org.apache.paimon.utils.PartitionPathUtils.searchPartSpecAndPaths;
 
 /** {@link TableScan} for {@link FormatTable}. */
 public class FormatTableScan implements InnerTableScan {
 
-    private static final Logger LOG = LoggerFactory.getLogger(FormatTableScan.class);
+    /** A format-table scan plan with statistics collected during split planning. */
+    public interface Plan extends TableScan.Plan {
 
-    private final FormatTable table;
-    private final CoreOptions coreOptions;
+        /** Returns the row count of the planned partitions, or empty if any count is unknown. */
+        OptionalLong rowCount();
+    }
+
+    final FormatTable table;
+    final CoreOptions coreOptions;
     @Nullable private PartitionPredicate partitionFilter;
+    private final SplitEnumerator splitEnumerator;
     @Nullable private final Integer limit;
-    private final long targetSplitSize;
-    private final long openFileCost;
-    private final FormatTable.Format format;
 
     public FormatTableScan(
             FormatTable table,
@@ -97,9 +85,7 @@ public class FormatTableScan implements InnerTableScan {
         this.coreOptions = new CoreOptions(table.options());
         this.partitionFilter = partitionFilter;
         this.limit = limit;
-        this.targetSplitSize = coreOptions.splitTargetSize();
-        this.openFileCost = coreOptions.splitOpenFileCost();
-        this.format = table.format();
+        this.splitEnumerator = SplitEnumerator.create(table, coreOptions, table.partitionManager());
     }
 
     @Override
@@ -115,22 +101,7 @@ public class FormatTableScan implements InnerTableScan {
 
     @Override
     public List<PartitionEntry> listPartitionEntries() {
-        List<Pair<LinkedHashMap<String, String>, Path>> partition2Paths =
-                searchPartSpecAndPaths(
-                        table.fileIO(),
-                        new Path(table.location()),
-                        table.partitionKeys().size(),
-                        table.partitionKeys(),
-                        coreOptions.formatTablePartitionOnlyValueInPath(),
-                        null,
-                        table.partitionType(),
-                        table.defaultPartName());
-        List<PartitionEntry> partitionEntries = new ArrayList<>();
-        for (Pair<LinkedHashMap<String, String>, Path> partition2Path : partition2Paths) {
-            BinaryRow row = toPartitionRow(partition2Path.getKey());
-            partitionEntries.add(new PartitionEntry(row, -1L, -1L, -1L, -1L, -1));
-        }
-        return partitionEntries;
+        return splitEnumerator.listPartitionEntries(partitionFilter);
     }
 
     @Override
@@ -138,92 +109,142 @@ public class FormatTableScan implements InnerTableScan {
         throw new UnsupportedOperationException("Filter is not supported for FormatTable.");
     }
 
-    public static boolean isDataFileName(String fileName) {
-        return fileName != null && !fileName.startsWith(".") && !fileName.startsWith("_");
+    /**
+     * Lists the data files under {@code listedRoot}, skipping committer staging trees ({@code
+     * _temporary/}, {@code __magic_job-<id>/}, {@code .hive-staging_*}) without descending into
+     * them. Files staged there carry ordinary data file names, so a name alone cannot tell them
+     * apart from committed data; the directory above them can.
+     *
+     * <p>Only entries below {@code listedRoot} are judged, never the root itself, which may
+     * legitimately sit under a warehouse path such as {@code oss://bucket/_warehouse/db/t}, and
+     * which is the default partition directory of the value-only layout when a null partition value
+     * is read.
+     *
+     * @throws FileNotFoundException if {@code listedRoot} does not exist; a directory that
+     *     disappears further down is skipped instead, leaving the rest of the listing complete
+     */
+    static List<FileStatus> listDataFiles(FileIO fileIO, Path listedRoot) throws IOException {
+        return listDataFiles(fileIO, listedRoot, 0, false, null);
     }
 
-    private BinaryRow toPartitionRow(LinkedHashMap<String, String> partitionSpec) {
-        RowType partitionType = table.partitionType();
-        GenericRow row =
-                convertSpecToInternalRow(partitionSpec, partitionType, table.defaultPartName());
-        return new InternalRowSerializer(partitionType).toBinaryRow(row);
+    /**
+     * As {@link #listDataFiles(FileIO, Path)}, for a root that still has partition directories
+     * below it: an {@code INSERT OVERWRITE} naming only the leading partition keys clears such a
+     * prefix.
+     *
+     * <p>Being at a partition level does not exempt a directory from the {@code '_'} / {@code '.'}
+     * rule. A job writing the same prefix with the trailing keys dynamic stages exactly there, so
+     * {@code year=2025/_temporary} holds that job's own month directories, not this table's. One
+     * hidden name is table content: the default partition name in the value-only layout, where a
+     * partition directory is the bare value. That is the exemption {@link
+     * PartitionPathUtils#searchPartSpecAndPaths} already makes on the scan side.
+     *
+     * @param partitionLevels how many directory levels below {@code listedRoot} hold partition
+     *     directories rather than table content
+     * @param onlyValueInPath whether a partition directory is named by its value alone ({@code
+     *     2025/}) instead of {@code key=value} ({@code year=2025/})
+     * @param defaultPartName the directory name standing for a null partition value
+     */
+    static List<FileStatus> listDataFiles(
+            FileIO fileIO,
+            Path listedRoot,
+            int partitionLevels,
+            boolean onlyValueInPath,
+            @Nullable String defaultPartName)
+            throws IOException {
+        String partitionDirExemptFromHiding = onlyValueInPath ? defaultPartName : null;
+        List<FileStatus> dataFiles = new ArrayList<>();
+        List<Path> level = new ArrayList<>();
+        // A missing root is the caller's signal, e.g. a partition that the catalog knows but whose
+        // directory is gone, so let it surface.
+        collectDataFiles(
+                fileIO.listStatus(listedRoot),
+                partitionLevels >= 1 ? partitionDirExemptFromHiding : null,
+                dataFiles,
+                level);
+        for (int depth = 1; !level.isEmpty(); depth++) {
+            boolean childrenArePartitions = partitionLevels >= depth + 1;
+            List<Path> next = new ArrayList<>();
+            for (Path directory : level) {
+                try {
+                    collectDataFiles(
+                            fileIO.listStatus(directory),
+                            childrenArePartitions ? partitionDirExemptFromHiding : null,
+                            dataFiles,
+                            next);
+                } catch (FileNotFoundException e) {
+                    // The directory vanished after its parent listed it; the rest of the listing
+                    // is still complete.
+                }
+            }
+            level = next;
+        }
+        return dataFiles;
+    }
+
+    /**
+     * @param exemptFromHiding the one hidden directory name that holds table content here, or null
+     *     when every hidden directory is a staging tree
+     */
+    private static void collectDataFiles(
+            @Nullable FileStatus[] children,
+            @Nullable String exemptFromHiding,
+            List<FileStatus> dataFiles,
+            List<Path> directories) {
+        if (children == null) {
+            return;
+        }
+        for (FileStatus child : children) {
+            String name = child.getPath().getName();
+            boolean hidden = PartitionPathUtils.isHiddenName(name);
+            if (child.isDir()) {
+                if (!hidden || name.equals(exemptFromHiding)) {
+                    directories.add(child.getPath());
+                }
+            } else if (!hidden) {
+                dataFiles.add(child);
+            }
+        }
+    }
+
+    BinaryRow toPartitionRow(LinkedHashMap<String, String> partitionSpec) {
+        return splitEnumerator.toPartitionRow(partitionSpec);
     }
 
     private class FormatTableScanPlan implements Plan {
+
+        @Nullable private SplitEnumerator.ScanPlan scanPlan;
+
         @Override
         public List<Split> splits() {
-            List<Split> splits = new ArrayList<>();
+            List<Split> splits = new ArrayList<>(scanPlan().splits());
+            // Keep all splits for a positive limit because FormatDataSplit has no row count.
+            if (limit != null && limit <= 0) {
+                return new ArrayList<>();
+            }
+            return splits;
+        }
+
+        @Override
+        public OptionalLong rowCount() {
+            return scanPlan().rowCount();
+        }
+
+        private synchronized SplitEnumerator.ScanPlan scanPlan() {
+            if (scanPlan != null) {
+                return scanPlan;
+            }
             try {
-                FileIO fileIO = table.fileIO();
-                if (!table.partitionKeys().isEmpty()) {
-                    for (Pair<LinkedHashMap<String, String>, Path> pair : findPartitions()) {
-                        LinkedHashMap<String, String> partitionSpec = pair.getKey();
-                        BinaryRow partitionRow = toPartitionRow(partitionSpec);
-                        if (partitionFilter == null || partitionFilter.test(partitionRow)) {
-                            splits.addAll(createSplits(fileIO, pair.getValue(), partitionRow));
-                        }
-                    }
-                } else {
-                    splits.addAll(createSplits(fileIO, new Path(table.location()), null));
-                }
-                if (limit != null) {
-                    if (limit <= 0) {
-                        return new ArrayList<>();
-                    }
-                    if (splits.size() > limit) {
-                        return splits.subList(0, limit);
-                    }
-                }
+                scanPlan = splitEnumerator.plan(partitionFilter);
             } catch (IOException e) {
                 throw new RuntimeException("Failed to scan files", e);
             }
-            return splits;
+            return scanPlan;
         }
     }
 
     List<Pair<LinkedHashMap<String, String>, Path>> findPartitions() {
-        LOG.debug(
-                "Find partitions for format table {}, partition filter: {}",
-                table.name(),
-                partitionFilter);
-        boolean onlyValueInPath = coreOptions.formatTablePartitionOnlyValueInPath();
-        if (partitionFilter instanceof MultiplePartitionPredicate) {
-            // generate partitions directly
-            Set<BinaryRow> partitions = ((MultiplePartitionPredicate) partitionFilter).partitions();
-            return generatePartitions(
-                    table.partitionKeys(),
-                    table.partitionType(),
-                    table.defaultPartName(),
-                    new Path(table.location()),
-                    partitions,
-                    onlyValueInPath);
-        } else {
-            // search paths with partition filter optimization
-            // This will prune partition directories early during traversal,
-            // which is especially important for cloud storage like OSS/S3
-            Optional<Predicate> predicate = extractPartitionPredicate(partitionFilter);
-            LOG.debug(
-                    "Extracted predicate for format table {} partition pruning: {}",
-                    table.name(),
-                    predicate.orElse(null));
-
-            Pair<Path, Integer> scanPathAndLevel =
-                    computeScanPathAndLevel(
-                            new Path(table.location()),
-                            table.partitionKeys(),
-                            predicate,
-                            table.partitionType(),
-                            onlyValueInPath);
-            return searchPartSpecAndPaths(
-                    table.fileIO(),
-                    scanPathAndLevel.getLeft(),
-                    scanPathAndLevel.getRight(),
-                    table.partitionKeys(),
-                    onlyValueInPath,
-                    predicate.orElse(null),
-                    table.partitionType(),
-                    table.defaultPartName());
-        }
+        return splitEnumerator.findPartitions(partitionFilter);
     }
 
     protected static List<Pair<LinkedHashMap<String, String>, Path>> generatePartitions(
@@ -272,7 +293,7 @@ public class FormatTableScan implements InnerTableScan {
                 Optional<Predicate> childPredicate = extractPartitionPredicate(child);
                 childPredicate.ifPresent(predicates::add);
                 // Skip children that can't be expressed as Predicate (e.g. Multiple);
-                // they are still applied by partitionFilter.test() in plan().
+                // they are still applied before listing the partition files.
             }
             return predicates.isEmpty()
                     ? Optional.empty()
@@ -305,66 +326,6 @@ public class FormatTableScan implements InnerTableScan {
             }
         }
         return Pair.of(scanPath, level);
-    }
-
-    private List<Split> createSplits(FileIO fileIO, Path path, BinaryRow partition)
-            throws IOException {
-        List<FormatDataSplit.FileMeta> segments = new ArrayList<>();
-        FileStatus[] files = fileIO.listFiles(path, true);
-        Arrays.sort(files, Comparator.comparing(file -> file.getPath().toString()));
-        for (FileStatus file : files) {
-            if (isDataFileName(file.getPath().getName())) {
-                segments.addAll(toSegments(file));
-            }
-        }
-
-        List<Split> splits = new ArrayList<>();
-        for (List<FormatDataSplit.FileMeta> bin :
-                BinPacking.packForOrdered(
-                        segments,
-                        file -> Math.max(file.readSize(), openFileCost),
-                        targetSplitSize)) {
-            splits.add(new FormatDataSplit(bin, partition));
-        }
-        return splits;
-    }
-
-    private List<FormatDataSplit.FileMeta> toSegments(FileStatus file) {
-        if (!preferToSplitFile(file)) {
-            return Collections.singletonList(
-                    new FormatDataSplit.FileMeta(file.getPath(), file.getLen()));
-        }
-        List<FormatDataSplit.FileMeta> segments = new ArrayList<>();
-        long remainingBytes = file.getLen();
-        long currentStart = 0;
-
-        while (remainingBytes > 0) {
-            long splitSize = Math.min(targetSplitSize, remainingBytes);
-            segments.add(
-                    new FormatDataSplit.FileMeta(
-                            file.getPath(), file.getLen(), currentStart, splitSize));
-            currentStart += splitSize;
-            remainingBytes -= splitSize;
-        }
-        return segments;
-    }
-
-    private boolean preferToSplitFile(FileStatus file) {
-        if (file.getLen() <= targetSplitSize) {
-            return false;
-        }
-
-        Options options = coreOptions.toConfiguration();
-        switch (format) {
-            case CSV:
-                return !isCompressed(file.getPath())
-                        && isDefaultDelimiter(options.get(CsvOptions.LINE_DELIMITER));
-            case JSON:
-                return !isCompressed(file.getPath())
-                        && isDefaultDelimiter(options.get(JsonOptions.LINE_DELIMITER));
-            default:
-                return false;
-        }
     }
 
     public static Map<String, String> extractLeadingEqualityPartitionSpecWhenOnlyAnd(

@@ -35,16 +35,19 @@ public class ShreddingFormatWriter implements BundleFormatWriter {
 
     private final FormatWriter delegate;
     private final SupportsShreddingWritePlan writerFactory;
+    private final ShreddingWritePlanFactory writePlanFactory;
     private final ShreddingWritePlan writePlan;
     private final String compression;
 
     public ShreddingFormatWriter(
             FormatWriter delegate,
             SupportsShreddingWritePlan writerFactory,
+            ShreddingWritePlanFactory writePlanFactory,
             ShreddingWritePlan writePlan,
             String compression) {
         this.delegate = delegate;
         this.writerFactory = writerFactory;
+        this.writePlanFactory = writePlanFactory;
         this.writePlan = writePlan;
         this.compression = compression;
     }
@@ -84,6 +87,7 @@ public class ShreddingFormatWriter implements BundleFormatWriter {
         } finally {
             delegate.close();
         }
+        writePlanFactory.onFileCompleted(writePlan);
     }
 
     private class PhysicalBundleRecords implements BundleRecords {

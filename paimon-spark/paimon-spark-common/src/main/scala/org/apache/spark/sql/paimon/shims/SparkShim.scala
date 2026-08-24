@@ -29,17 +29,19 @@ import org.apache.paimon.types.{DataType, RowType}
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.FunctionIdentifier
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
 import org.apache.spark.sql.catalyst.plans.logical.{Assignment, CTERelationRef, InsertAction, LogicalPlan, MergeAction, MergeIntoTable, SubqueryAlias, TableSpec, UnresolvedWith, UpdateAction}
+import org.apache.spark.sql.catalyst.plans.physical.Distribution
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{Column, Identifier, StagingTableCatalog, Table, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
+import org.apache.spark.sql.connector.read.Scan
 import org.apache.spark.sql.connector.write.BatchWrite
 import org.apache.spark.sql.execution.SparkPlan
-import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
+import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, DataSourceV2ScanRelation}
 import org.apache.spark.sql.types.StructType
 
 import java.util.{Map => JMap}
@@ -149,7 +151,6 @@ trait SparkShim {
   /** Same `BatchWrite` mixin problem as [[createPaimonBatchWrite]], but for `FormatTable` writes. */
   def createFormatTableBatchWrite(
       table: FormatTable,
-      overwriteDynamic: Option[Boolean],
       overwritePartitions: Option[Map[String, String]],
       writeSchema: StructType): BatchWrite
 
@@ -158,6 +159,8 @@ trait SparkShim {
       resolved: Boolean,
       output: Seq[Attribute],
       isStreaming: Boolean): CTERelationRef
+
+  def createClusteredDistribution(expressions: Seq[Expression], numPartitions: Int): Distribution
 
   def supportsHashAggregate(
       aggregateBufferAttributes: Seq[Attribute],
@@ -191,8 +194,18 @@ trait SparkShim {
   def copyDataSourceV2Relation(
       relation: DataSourceV2Relation,
       table: Table,
-      output: Seq[org.apache.spark.sql.catalyst.expressions.AttributeReference])
-      : DataSourceV2Relation
+      output: Seq[AttributeReference]): DataSourceV2Relation
+
+  /** Creates an internal scan relation whose constructor changed across Spark minor versions. */
+  def createDataSourceV2ScanRelation(
+      relation: DataSourceV2ScanRelation,
+      scan: Scan,
+      output: Seq[AttributeReference]): DataSourceV2ScanRelation
+
+  /** Creates a clustered distribution whose constructor changed in Spark 3.3. */
+  def createClusteredDistribution(
+      expressions: Seq[Expression],
+      requiredNumPartitions: Option[Int]): Distribution
 
   /**
    * Returns the list of "early" substitution rules Paimon needs to apply on a parsed view plan.
@@ -255,6 +268,37 @@ trait SparkShim {
   def isSparkVariantType(dataType: org.apache.spark.sql.types.DataType): Boolean
 
   def SparkVariantType(): org.apache.spark.sql.types.DataType
+
+  // Geometry and geography are available in Spark 4.1 and later.
+  def toPaimonGeometry(o: Object): Array[Byte]
+
+  def toPaimonGeometry(row: InternalRow, pos: Int): Array[Byte]
+
+  def toPaimonGeometry(array: ArrayData, pos: Int): Array[Byte]
+
+  def toPaimonGeography(o: Object): Array[Byte]
+
+  def toPaimonGeography(row: InternalRow, pos: Int): Array[Byte]
+
+  def toPaimonGeography(array: ArrayData, pos: Int): Array[Byte]
+
+  def toSparkGeometry(wkb: Array[Byte], crs: String): Object
+
+  def toSparkGeography(wkb: Array[Byte], crs: String, algorithm: String): Object
+
+  def isSparkGeometryType(dataType: org.apache.spark.sql.types.DataType): Boolean
+
+  def isSparkGeographyType(dataType: org.apache.spark.sql.types.DataType): Boolean
+
+  def SparkGeometryType(crs: String): org.apache.spark.sql.types.DataType
+
+  def SparkGeographyType(crs: String, algorithm: String): org.apache.spark.sql.types.DataType
+
+  def sparkGeometryCrs(dataType: org.apache.spark.sql.types.DataType): String
+
+  def sparkGeographyCrs(dataType: org.apache.spark.sql.types.DataType): String
+
+  def sparkGeographyAlgorithm(dataType: org.apache.spark.sql.types.DataType): String
 
   // SQL UDFs (`CREATE FUNCTION ... RETURN ...`) are Spark 4.0+; the spark3 shim no-ops these.
 

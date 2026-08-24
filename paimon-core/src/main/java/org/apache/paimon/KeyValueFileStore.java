@@ -33,6 +33,7 @@ import org.apache.paimon.operation.KeyValueFileStoreScan;
 import org.apache.paimon.operation.KeyValueFileStoreWrite;
 import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.RawFileSplitRead;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.postpone.PostponeBucketFileStoreWrite;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
@@ -162,19 +163,32 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                     tableName,
                     writeId);
         }
+        return newFixedBucketWrite(commitUser, options);
+    }
+
+    /** Creates a merge-tree writer for fixed-bucket batch writes to a postpone-bucket table. */
+    public AbstractFileStoreWrite<KeyValue> newPostponeFixedBucketWrite(String commitUser) {
+        Options writeOptions = new Options(options.toMap());
+        writeOptions.set(CoreOptions.WRITE_ONLY, true);
+        return newFixedBucketWrite(commitUser, new CoreOptions(writeOptions));
+    }
+
+    private AbstractFileStoreWrite<KeyValue> newFixedBucketWrite(
+            String commitUser, CoreOptions writeOptions) {
         DynamicBucketIndexMaintainer.Factory indexFactory = null;
         if (bucketMode() == BucketMode.HASH_DYNAMIC) {
             indexFactory = new DynamicBucketIndexMaintainer.Factory(newIndexFileHandler());
         }
         BucketedDvMaintainer.Factory dvMaintainerFactory = null;
-        if (options.deletionVectorsEnabled()) {
+        if (writeOptions.deletionVectorsEnabled()) {
             dvMaintainerFactory = BucketedDvMaintainer.factory(newIndexFileHandler());
         }
         BucketedPrimaryKeyIndexMaintainer.Factory primaryKeyIndexMaintainerFactory = null;
-        if (options.primaryKeyVectorIndexEnabled()
-                || options.primaryKeyFullTextIndexEnabled()
-                || !options.primaryKeyBTreeIndexColumns().isEmpty()
-                || !options.primaryKeyBitmapIndexColumns().isEmpty()) {
+        if (writeOptions.primaryKeyVectorIndexEnabled()
+                || writeOptions.primaryKeyFullTextIndexEnabled()
+                || !writeOptions.primaryKeyBTreeIndexColumns().isEmpty()
+                || !writeOptions.primaryKeyBitmapIndexColumns().isEmpty()
+                || !writeOptions.primaryKeyMultiValueIndexColumns().isEmpty()) {
             primaryKeyIndexMaintainerFactory =
                     BucketedPrimaryKeyIndexMaintainer.Factory.create(
                             newIndexFileHandler(), newReaderFactoryBuilder(), schema);
@@ -188,7 +202,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 keyType,
                 valueType,
                 keyComparatorSupplier,
-                () -> UserDefinedSeqComparator.create(valueType, options),
+                () -> UserDefinedSeqComparator.create(valueType, writeOptions),
                 logDedupEqualSupplier,
                 mfFactory,
                 pathFactory(),
@@ -198,7 +212,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 indexFactory,
                 dvMaintainerFactory,
                 primaryKeyIndexMaintainerFactory,
-                options,
+                writeOptions,
                 keyValueFieldsExtractor,
                 tableName);
     }

@@ -423,8 +423,9 @@ public class RangeBitmapFileIndexTest {
         FieldRef fieldRef = new FieldRef(0, "", intType);
         RangeBitmapFileIndex bitmapFileIndex = new RangeBitmapFileIndex(intType, new Options());
         FileIndexWriter writer = bitmapFileIndex.createWriter();
-        writer.writeRecord(null);
-        writer.writeRecord(null);
+        for (int i = 0; i < 5; i++) {
+            writer.writeRecord(null);
+        }
 
         // build index
         byte[] bytes = writer.serializedBytes();
@@ -433,7 +434,7 @@ public class RangeBitmapFileIndexTest {
 
         // test is null
         assertThat(((BitmapIndexResult) reader.visitIsNull(fieldRef)).get())
-                .isEqualTo(RoaringBitmap32.bitmapOf(0, 1));
+                .isEqualTo(RoaringBitmap32.bitmapOfRange(0, 5));
         // test is not null
         assertThat(((BitmapIndexResult) reader.visitIsNotNull(fieldRef)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf());
@@ -444,6 +445,10 @@ public class RangeBitmapFileIndexTest {
         // test GT
         assertThat(((BitmapIndexResult) reader.visitGreaterThan(fieldRef, 0)).get())
                 .isEqualTo(RoaringBitmap32.bitmapOf());
+
+        TopN topN = new TopN(fieldRef, ASCENDING, NULLS_FIRST, 1);
+        assertThat(((BitmapIndexResult) reader.visitTopN(topN, null)).get())
+                .isEqualTo(RoaringBitmap32.bitmapOfRange(0, 5));
     }
 
     @Test
@@ -504,6 +509,59 @@ public class RangeBitmapFileIndexTest {
         assertThat(result).isInstanceOf(BitmapIndexResult.class);
         RoaringBitmap32 actual = ((BitmapIndexResult) result).get();
         assertThat(actual).isEqualTo(RoaringBitmap32.bitmapOf(3, 0, 4)); // values: 5, 10, 15
+    }
+
+    @Test
+    public void testTopNWithMultipleColumnsKeepsNullTies() {
+        IntType intType = new IntType();
+        FieldRef fieldRef1 = new FieldRef(0, "col1", intType);
+        FieldRef fieldRef2 = new FieldRef(1, "col2", intType);
+
+        RangeBitmapFileIndex bitmapFileIndex = new RangeBitmapFileIndex(intType, new Options());
+        FileIndexWriter writer = bitmapFileIndex.createWriter();
+
+        writer.writeRecord(null);
+        writer.writeRecord(null);
+        writer.writeRecord(null);
+        writer.writeRecord(7);
+        writer.writeRecord(8);
+
+        byte[] bytes = writer.serializedBytes();
+        ByteArraySeekableStream stream = new ByteArraySeekableStream(bytes);
+        FileIndexReader reader = bitmapFileIndex.createReader(stream, 0, bytes.length);
+        RoaringBitmap32 foundSet = RoaringBitmap32.bitmapOf(0, 1, 2, 3, 4);
+
+        // col2 decides among the tied nulls, so all of them must survive the index selection
+        List<SortValue> multiple =
+                Arrays.asList(
+                        new SortValue(fieldRef1, ASCENDING, NULLS_FIRST),
+                        new SortValue(fieldRef2, DESCENDING, NULLS_FIRST));
+        FileIndexResult result =
+                reader.visitTopN(new TopN(multiple, 2), new BitmapIndexResult(() -> foundSet));
+        assertThat(((BitmapIndexResult) result).get()).isEqualTo(RoaringBitmap32.bitmapOf(0, 1, 2));
+
+        // a single order is exact, so the null group is still trimmed to the limit
+        List<SortValue> single = Arrays.asList(new SortValue(fieldRef1, ASCENDING, NULLS_FIRST));
+        result = reader.visitTopN(new TopN(single, 2), new BitmapIndexResult(() -> foundSet));
+        assertThat(((BitmapIndexResult) result).get()).isEqualTo(RoaringBitmap32.bitmapOf(0, 1));
+
+        // nulls sort last, so they tie while filling up the remaining limit
+        List<SortValue> multipleNullsLast =
+                Arrays.asList(
+                        new SortValue(fieldRef1, ASCENDING, NULLS_LAST),
+                        new SortValue(fieldRef2, DESCENDING, NULLS_LAST));
+        result =
+                reader.visitTopN(
+                        new TopN(multipleNullsLast, 3), new BitmapIndexResult(() -> foundSet));
+        assertThat(((BitmapIndexResult) result).get())
+                .isEqualTo(RoaringBitmap32.bitmapOf(0, 1, 2, 3, 4));
+
+        List<SortValue> singleNullsLast =
+                Arrays.asList(new SortValue(fieldRef1, ASCENDING, NULLS_LAST));
+        result =
+                reader.visitTopN(
+                        new TopN(singleNullsLast, 3), new BitmapIndexResult(() -> foundSet));
+        assertThat(((BitmapIndexResult) result).get()).isEqualTo(RoaringBitmap32.bitmapOf(0, 3, 4));
     }
 
     @Test

@@ -110,26 +110,42 @@ class DataVectorWriter(DataWriter):
 
     def write(self, data: pa.RecordBatch):
         try:
-            normal_data, vector_data = self._split_data(data)
-
-            processed_normal = pa.Table.from_batches([normal_data]) if normal_data is not None else None
-            if self.pending_normal_data is None:
-                self.pending_normal_data = processed_normal
-            elif processed_normal is not None:
-                self.pending_normal_data = pa.concat_tables([self.pending_normal_data, processed_normal])
-
-            if self.vector_writer is not None and vector_data is not None and vector_data.num_rows > 0:
-                self.vector_writer.write(vector_data)
-
-            self.record_count += data.num_rows
-
-            if self._should_roll_normal():
-                self._close_current_writers()
+            offset = 0
+            # _write_batch keeps normal and vector pending rows in lockstep
+            # and closes both writers when the shared row limit is reached.
+            while offset < data.num_rows:
+                capacity = self.target_file_row_num - self._current_row_count()
+                if capacity <= 0:
+                    self._close_current_writers()
+                    capacity = self.target_file_row_num
+                length = min(capacity, data.num_rows - offset)
+                self._write_batch(data.slice(offset, length))
+                offset += length
 
         except Exception as e:
             logger.error("Exception occurs when writing data. Cleaning up.", exc_info=e)
             self.abort()
             raise e
+
+    def _write_batch(self, data: pa.RecordBatch):
+        if data.num_rows == 0:
+            return
+
+        normal_data, vector_data = self._split_data(data)
+
+        processed_normal = pa.Table.from_batches([normal_data]) if normal_data is not None else None
+        if self.pending_normal_data is None:
+            self.pending_normal_data = processed_normal
+        elif processed_normal is not None:
+            self.pending_normal_data = pa.concat_tables([self.pending_normal_data, processed_normal])
+
+        if self.vector_writer is not None and vector_data is not None and vector_data.num_rows > 0:
+            self.vector_writer.write(vector_data)
+
+        self.record_count += data.num_rows
+
+        if self._should_roll_normal():
+            self._close_current_writers()
 
     def prepare_commit(self) -> List[DataFileMeta]:
         self._close_current_writers()
@@ -174,9 +190,18 @@ class DataVectorWriter(DataWriter):
     def _should_roll_normal(self) -> bool:
         if self.pending_normal_data is None:
             return False
+        if self.pending_normal_data.num_rows >= self.target_file_row_num:
+            return True
         if self.record_count % self.CHECK_ROLLING_RECORD_CNT != 0:
             return False
         return self.pending_normal_data.nbytes > self.target_file_size
+
+    def _current_row_count(self) -> int:
+        if self.pending_normal_data is not None:
+            return self.pending_normal_data.num_rows
+        if self.vector_writer is not None and self.vector_writer.pending_data is not None:
+            return self.vector_writer.pending_data.num_rows
+        return 0
 
     def _close_current_writers(self):
         has_normal = self.pending_normal_data is not None and self.pending_normal_data.num_rows > 0
@@ -195,6 +220,7 @@ class DataVectorWriter(DataWriter):
             self.vector_writer.committed_files.clear()
 
         self.pending_normal_data = None
+        self.record_count = 0
 
     def _write_normal_data_to_file(self, data: pa.Table) -> Optional[DataFileMeta]:
         if data.num_rows == 0:

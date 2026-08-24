@@ -370,7 +370,7 @@ public interface SchemaChange extends Serializable {
         @Override
         public int hashCode() {
             int result = Objects.hash(dataType, description);
-            result = 31 * result + Objects.hashCode(fieldNames);
+            result = 31 * result + Arrays.hashCode(fieldNames);
             result = 31 * result + Objects.hashCode(move);
             return result;
         }
@@ -425,7 +425,7 @@ public interface SchemaChange extends Serializable {
         @Override
         public int hashCode() {
             int result = Objects.hash(newName);
-            result = 31 * result + Objects.hashCode(fieldNames);
+            result = 31 * result + Arrays.hashCode(fieldNames);
             return result;
         }
     }
@@ -465,7 +465,7 @@ public interface SchemaChange extends Serializable {
 
         @Override
         public int hashCode() {
-            return Objects.hashCode(fieldNames);
+            return Arrays.hashCode(fieldNames);
         }
     }
 
@@ -528,7 +528,7 @@ public interface SchemaChange extends Serializable {
         @Override
         public int hashCode() {
             int result = Objects.hash(newDataType);
-            result = 31 * result + Objects.hashCode(fieldNames);
+            result = 31 * result + Arrays.hashCode(fieldNames);
             return result;
         }
     }
@@ -812,7 +812,7 @@ public interface SchemaChange extends Serializable {
         @Override
         public int hashCode() {
             int result = Objects.hash(newDefaultValue);
-            result = 31 * result + Objects.hashCode(fieldNames);
+            result = 31 * result + Arrays.hashCode(fieldNames);
             return result;
         }
     }

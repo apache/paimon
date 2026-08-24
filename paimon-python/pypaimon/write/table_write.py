@@ -15,7 +15,6 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import pyarrow as pa
@@ -23,7 +22,10 @@ import pyarrow as pa
 from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.table.row.blob import BlobConsumer
-from pypaimon.write.row_utils import require_columns, row_to_named_values
+from pypaimon.write.row_utils import (
+    require_columns,
+    row_to_named_values,
+)
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_write import FileStoreWrite
 
@@ -37,28 +39,140 @@ class TableWrite:
 
         self.table: FileStoreTable = table
         self.table_pyarrow_schema = PyarrowFieldParser.from_paimon_schema(self.table.table_schema.fields)
-        self.file_store_write = FileStoreWrite(self.table, commit_user)
-        self.row_key_extractor = self.table.create_row_key_extractor()
         self.commit_user = commit_user
         self.static_partition = static_partition
+        self.file_store_write = self._create_file_store_write(commit_user)
+        self.row_key_extractor = self._create_row_key_extractor(static_partition)
+
+    def _create_file_store_write(self, commit_user):
+        return FileStoreWrite(self.table, commit_user)
+
+    def _create_row_key_extractor(self, static_partition):
+        return self.table.create_row_key_extractor(
+            ignore_existing=static_partition is not None
+        )
 
     def write_arrow(self, table: pa.Table):
+        self._validate_pyarrow_schema(table.schema)
         batches_iterator = table.to_batches()
         for batch in batches_iterator:
             self.write_arrow_batch(batch)
 
     def write_arrow_batch(self, data: pa.RecordBatch):
         self._validate_pyarrow_schema(data.schema)
-        partitions, buckets = self.row_key_extractor.extract_partition_bucket_batch(data)
 
-        partition_bucket_groups = defaultdict(list)
-        for i in range(data.num_rows):
-            partition_bucket_groups[(tuple(partitions[i]), buckets[i])].append(i)
+        for partition, bucket, row_indices in \
+                self.row_key_extractor.extract_partition_bucket_groups(data):
+            if row_indices is None:
+                # Every input row belongs to the same partition/bucket. Passing the
+                # original batch through avoids copying large BLOB values through
+                # Arrow take before the dedicated BLOB writer consumes them.
+                sub_table = data
+            else:
+                # row_indices is an int64 array of this group's rows in
+                # ascending input order (the extractor sorts grouped indices so
+                # sequence-number assignment stays latest-wins correct), so the
+                # span is just first..last.
+                lo = row_indices[0].as_py()
+                hi = row_indices[-1].as_py()
+                count = len(row_indices)
+                if hi - lo + 1 == count:
+                    # Distinct row indices spanning exactly `count` values are
+                    # contiguous, so share the original Arrow buffers instead of
+                    # gathering their rows into newly allocated buffers with take.
+                    sub_table = data.slice(lo, count)
+                else:
+                    sub_table = pa.compute.take(data, row_indices)
+            self._write_partition_bucket_batch(partition, bucket, sub_table)
 
-        for (partition, bucket), row_indices in partition_bucket_groups.items():
-            indices_array = pa.array(row_indices, type=pa.int64())
-            sub_table = pa.compute.take(data, indices_array)
-            self.file_store_write.write(partition, bucket, sub_table)
+    def _write_partition_bucket_batch(self, partition, bucket, data):
+        self.file_store_write.write(partition, bucket, data)
+
+    def with_dynamic_bucket_index(
+        self,
+        ignore_existing: bool = False,
+        base_snapshot_id: Optional[int] = None,
+    ):
+        """Enable persistent HASH-index maintenance for coordinated writes."""
+        from pypaimon.table.bucket_mode import BucketMode
+        from pypaimon.write.row_key_extractor import DynamicBucketRowKeyExtractor
+
+        if self.table.bucket_mode() != BucketMode.HASH_DYNAMIC:
+            raise ValueError(
+                "Dynamic bucket index maintenance is only valid for "
+                "HASH_DYNAMIC tables"
+            )
+        if self.file_store_write.data_writers:
+            raise RuntimeError(
+                "Dynamic bucket index maintenance must be enabled before writing"
+            )
+        self.row_key_extractor = DynamicBucketRowKeyExtractor(
+            self.table.table_schema,
+            table=self.table,
+            ignore_existing=ignore_existing,
+            base_snapshot_id=base_snapshot_id,
+        )
+        return self
+
+    def write_arrow_batch_to_bucket(
+        self,
+        data: pa.RecordBatch,
+        bucket: int,
+        key_hashes: Optional[List[int]] = None,
+        new_mappings: Optional[List[bool]] = None,
+    ):
+        """Write one complete group whose bucket was computed upstream."""
+        from pypaimon.table.bucket_mode import BucketMode
+        from pypaimon.write.row_key_extractor import DynamicBucketRowKeyExtractor
+
+        bucket_mode = self.table.bucket_mode()
+        if bucket_mode not in (BucketMode.HASH_FIXED, BucketMode.HASH_DYNAMIC):
+            raise ValueError(
+                "Precomputed bucket writes are only valid for HASH_FIXED or "
+                "HASH_DYNAMIC tables"
+            )
+        if not isinstance(self.row_key_extractor, DynamicBucketRowKeyExtractor):
+            if bucket_mode == BucketMode.HASH_DYNAMIC:
+                raise RuntimeError("Dynamic bucket extractor is not configured")
+        self._validate_pyarrow_schema(data.schema)
+        if bucket_mode == BucketMode.HASH_DYNAMIC:
+            if key_hashes is None:
+                partition = self.row_key_extractor.notify_precomputed_bucket_batch(
+                    data, bucket
+                )
+            else:
+                partition = (
+                    self.row_key_extractor
+                    .notify_precomputed_bucket_hashes_batch(
+                        data,
+                        bucket,
+                        key_hashes,
+                        new_mappings=new_mappings,
+                    )
+                )
+        else:
+            if key_hashes is not None:
+                raise ValueError(
+                    "Precomputed key hashes are only valid for HASH_DYNAMIC tables"
+                )
+            if new_mappings is not None:
+                raise ValueError(
+                    "Precomputed new-mapping flags are only valid for "
+                    "HASH_DYNAMIC tables"
+                )
+            partitions = self.row_key_extractor.extract_partitions_batch(data)
+            if not partitions:
+                return
+            partition = tuple(partitions[0])
+            for actual_partition in partitions[1:]:
+                if tuple(actual_partition) != partition:
+                    raise RuntimeError(
+                        "A precomputed fixed-bucket group contained multiple "
+                        f"partitions: expected {partition}, got {actual_partition}"
+                    )
+        if partition is None:
+            return
+        self._write_partition_bucket_batch(partition, bucket, data)
 
     def write_row(self, row):
         values_by_name = row_to_named_values(row, self.table.table_schema.fields)
@@ -72,10 +186,26 @@ class TableWrite:
         partition, bucket = (
             self.row_key_extractor.extract_partition_bucket_row(values_by_name)
         )
-        self.file_store_write.write_row(partition, bucket, row, values_by_name)
+        self._write_partition_bucket_row(
+            partition, bucket, row, values_by_name
+        )
+
+    def _write_partition_bucket_row(
+        self, partition, bucket, row, values_by_name
+    ):
+        self.file_store_write.write_row(
+            partition, bucket, row, values_by_name
+        )
 
     def write_pandas(self, dataframe):
-        pa_schema = PyarrowFieldParser.from_paimon_schema(self.table.table_schema.fields)
+        write_cols = self.file_store_write.write_cols
+        if write_cols is not None:
+            # Column-subset write (append-only ``with_write_type``): build the
+            # RecordBatch against the subset schema so the input only needs the
+            # written columns, mirroring the ``write_arrow`` path.
+            pa_schema = self._write_cols_pyarrow_schema(write_cols)
+        else:
+            pa_schema = self.table_pyarrow_schema
         record_batch = pa.RecordBatch.from_pandas(dataframe, schema=pa_schema)
         return self.write_arrow_batch(record_batch)
 
@@ -117,11 +247,9 @@ class TableWrite:
                 By default, dynamically decided based on available resources.
             ray_remote_args: Optional kwargs passed to :func:`ray.remote` in write tasks.
                 For example, ``{"num_cpus": 2, "max_retries": 3}``.
-            hash_fixed_precluster: HASH_FIXED pre-clustering mode. ``"auto"``
-                and ``"off"`` write append-only HASH_FIXED tables directly
-                and reject HASH_FIXED primary-key tables. ``"map_groups"``
-                writes each HASH_FIXED primary-key group in one task and
-                preserves the legacy single-group memory bound.
+            hash_fixed_precluster: Pre-clustering mode. ``"auto"`` follows
+                table options, ``"off"`` disables it, and ``"map_groups"``
+                explicitly enables HASH_FIXED grouping.
             static_partition: Optional partition spec to overwrite. When set,
                 the Ray write runs in overwrite mode for this partition and
                 overrides any builder-level partition spec.
@@ -140,13 +268,65 @@ class TableWrite:
             concurrency=concurrency,
             ray_remote_args=ray_remote_args,
             hash_fixed_precluster=hash_fixed_precluster,
+            **self._distributed_write_options(),
         )
 
+    def _distributed_write_options(self) -> Dict[str, Any]:
+        """Return options forwarded by ``write_ray`` to the Ray writer."""
+        return {}
+
     def close(self):
-        self.file_store_write.close()
+        try:
+            self.file_store_write.close()
+        finally:
+            self._release_prepared_indexes()
 
     def abort(self):
-        self.file_store_write.abort()
+        try:
+            self.file_store_write.abort()
+        finally:
+            abort = getattr(self.row_key_extractor, "abort", None)
+            if abort is not None:
+                abort()
+
+    def _prepare_commit(self, commit_identifier) -> List[CommitMessage]:
+        commit_messages = self.file_store_write.prepare_commit(commit_identifier)
+        prepare_indexes = getattr(self.row_key_extractor, "prepare_commit", None)
+        if prepare_indexes is None:
+            return commit_messages
+
+        index_changes = prepare_indexes()
+        base_snapshot_id = getattr(
+            self.row_key_extractor, "base_snapshot_id", None
+        )
+        messages_by_bucket = {
+            (tuple(message.partition), message.bucket): message
+            for message in commit_messages
+        }
+        for (partition, bucket), changes in index_changes.items():
+            message = messages_by_bucket.get((partition, bucket))
+            if message is None:
+                message = CommitMessage(
+                    partition=partition,
+                    bucket=bucket,
+                    new_files=[],
+                )
+                commit_messages.append(message)
+                messages_by_bucket[(partition, bucket)] = message
+            message.index_adds.extend(changes.additions)
+            message.index_deletes.extend(changes.deletions)
+        if base_snapshot_id is not None:
+            # Data-only upserts must participate too. A concurrent overwrite
+            # can rebuild the HASH index and move an existing key, making a
+            # stale data file unsafe even when this writer added no mapping.
+            for message in commit_messages:
+                message.hash_index_base_snapshot = base_snapshot_id
+        return commit_messages
+
+    def _release_prepared_indexes(self) -> None:
+        release = getattr(self.row_key_extractor, "release_prepared", None)
+        if release is not None:
+            release()
 
     def _validate_pyarrow_schema(self, data_schema: pa.Schema):
         if self._is_compatible_pyarrow_schema(data_schema, self.table_pyarrow_schema):
@@ -201,10 +381,12 @@ class BatchTableWrite(TableWrite):
         if self.batch_committed:
             raise RuntimeError("BatchTableWrite only supports one-time committing.")
         self.batch_committed = True
-        return self.file_store_write.prepare_commit(BATCH_COMMIT_IDENTIFIER)
+        return self._prepare_commit(BATCH_COMMIT_IDENTIFIER)
 
 
 class StreamTableWrite(TableWrite):
 
     def prepare_commit(self, commit_identifier) -> List[CommitMessage]:
-        return self.file_store_write.prepare_commit(commit_identifier)
+        messages = self._prepare_commit(commit_identifier)
+        self._release_prepared_indexes()
+        return messages

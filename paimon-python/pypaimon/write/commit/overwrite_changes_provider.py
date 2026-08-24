@@ -132,12 +132,17 @@ class OverwriteChangesProvider:
         # New files being written by this overwrite.
         for msg in self.commit_messages:
             partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
+            total_buckets = (
+                msg.total_buckets
+                if msg.total_buckets is not None
+                else self.table.total_buckets
+            )
             for file in msg.new_files:
                 entries.append(ManifestEntry(
                     kind=0,
                     partition=partition,
                     bucket=msg.bucket,
-                    total_buckets=self.table.total_buckets,
+                    total_buckets=total_buckets,
                     file=file,
                 ))
         return entries

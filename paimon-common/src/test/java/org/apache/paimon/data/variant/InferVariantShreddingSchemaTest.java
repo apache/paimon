@@ -27,9 +27,13 @@ import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.apache.paimon.data.variant.PaimonShreddingUtils.variantShreddingSchema;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -196,6 +200,103 @@ public class InferVariantShreddingSchemaTest {
     }
 
     @Test
+    void testAdaptiveInferenceUsesAdmissionAndRetentionThresholds() {
+        RowType schema = RowType.of(new DataType[] {DataTypes.VARIANT()}, new String[] {"v"});
+        VariantShreddingInferenceSession session =
+                new VariantShreddingInferenceSession(
+                        new InferVariantShreddingSchema(schema, 300, 50, 0.4), 10, 0.4, 0.2);
+
+        List<InternalRow> initialRows = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            initialRows.add(
+                    GenericRow.of(
+                            GenericVariant.fromJson(
+                                    i < 5 ? "{\"legacy\":\"v\",\"stable\":1}" : "{\"stable\":1}")));
+        }
+        RowType initialSchema = session.inferSchema(initialRows);
+        assertThat(initialSchema.getField("v").type())
+                .isEqualTo(
+                        variantShreddingSchema(
+                                RowType.of(
+                                        new DataType[] {DataTypes.STRING(), DataTypes.BIGINT()},
+                                        new String[] {"legacy", "stable"})));
+        session.commitPendingInference();
+
+        List<InternalRow> secondRows = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            secondRows.add(
+                    GenericRow.of(
+                            GenericVariant.fromJson(
+                                    i < 9
+                                            ? "{\"emerging\":true,\"stable\":2}"
+                                            : "{\"stable\":2}")));
+        }
+        RowType secondSchema = session.inferSchema(secondRows);
+        assertThat(secondSchema.getField("v").type())
+                .isEqualTo(
+                        variantShreddingSchema(
+                                RowType.of(
+                                        new DataType[] {
+                                            DataTypes.BOOLEAN(),
+                                            DataTypes.STRING(),
+                                            DataTypes.BIGINT()
+                                        },
+                                        new String[] {"emerging", "legacy", "stable"})));
+        session.commitPendingInference();
+
+        List<InternalRow> thirdRows = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            thirdRows.add(GenericRow.of(GenericVariant.fromJson("{\"stable\":3}")));
+        }
+        RowType thirdSchema = session.inferSchema(thirdRows);
+        assertThat(thirdSchema.getField("v").type())
+                .isEqualTo(
+                        variantShreddingSchema(
+                                RowType.of(
+                                        new DataType[] {DataTypes.BOOLEAN(), DataTypes.BIGINT()},
+                                        new String[] {"emerging", "stable"})));
+    }
+
+    @Test
+    void testAdaptiveInferenceWidensScalarSelectedFromPriorEvidence() {
+        RowType schema =
+                RowType.of(
+                        new DataType[] {DataTypes.VARIANT(), DataTypes.VARIANT()},
+                        new String[] {"first", "second"});
+        VariantShreddingInferenceSession session =
+                new VariantShreddingInferenceSession(
+                        new InferVariantShreddingSchema(schema, 6, 50, 0.1), 10, 0.1, 0.05);
+
+        RowType initialSchema =
+                session.inferSchema(
+                        Arrays.asList(
+                                GenericRow.of(
+                                        GenericVariant.fromJson("{\"a\":1,\"b\":2}"),
+                                        GenericVariant.fromJson("{\"historical\":12345}"))));
+        assertThat(initialSchema.getField("first").type())
+                .isEqualTo(
+                        variantShreddingSchema(
+                                RowType.of(
+                                        new DataType[] {DataTypes.BIGINT(), DataTypes.BIGINT()},
+                                        new String[] {"a", "b"})));
+        assertThat(initialSchema.getField("second").type())
+                .isEqualTo(variantShreddingSchema(DataTypes.VARIANT()));
+        session.commitPendingInference();
+
+        RowType adaptiveSchema =
+                session.inferSchema(
+                        Arrays.asList(GenericRow.of(GenericVariant.fromJson("1"), null)));
+        assertThat(adaptiveSchema.getField("first").type())
+                .isEqualTo(variantShreddingSchema(DataTypes.BIGINT()));
+        assertThat(adaptiveSchema.getField("second").type())
+                .isEqualTo(
+                        variantShreddingSchema(
+                                RowType.of(
+                                        new DataType[] {DataTypes.BIGINT()},
+                                        new String[] {"historical"})));
+    }
+
+    @Test
     void testInferSchemaWithDeepNesting() {
         // Schema: row<v: variant>
         RowType schema = RowType.of(new DataType[] {DataTypes.VARIANT()}, new String[] {"v"});
@@ -344,35 +445,39 @@ public class InferVariantShreddingSchemaTest {
         // Schema: row<v: variant>
         RowType schema = RowType.of(new DataType[] {DataTypes.VARIANT()}, new String[] {"v"});
 
-        String json =
-                "{"
-                        + "\"string\": \"test\", "
-                        + "\"long\": 123456789, "
-                        + "\"double\": 3.14159, "
-                        + "\"boolean\": true, "
-                        + "\"null\": null"
-                        + "}";
+        DataField f1 = new DataField(0, "binary", DataTypes.BYTES());
+        DataField f2 = new DataField(1, "boolean", DataTypes.BOOLEAN());
+        DataField f3 = new DataField(2, "date", DataTypes.DATE());
+        DataField f4 = new DataField(3, "decimal", DataTypes.DECIMAL(18, 5));
+        DataField f5 = new DataField(4, "double", DataTypes.DOUBLE());
+        DataField f6 = new DataField(5, "float", DataTypes.FLOAT());
+        DataField f7 = new DataField(6, "long", DataTypes.BIGINT());
+        DataField f8 = new DataField(7, "null", DataTypes.VARIANT());
+        DataField f9 = new DataField(8, "string", DataTypes.STRING());
+        DataField f10 = new DataField(9, "timestamp", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE());
+        DataField f11 = new DataField(10, "timestampntz", DataTypes.TIMESTAMP());
+        RowType objectType = RowType.of(f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11);
 
-        GenericVariant variant = GenericVariant.fromJson(json);
+        Map<String, Object> values = new HashMap<>();
+        values.put("string", "test");
+        values.put("long", 123456789L);
+        values.put("decimal", new BigDecimal("3.14159"));
+        values.put("double", 1.0123456789012345678901234567890123456789D);
+        values.put("boolean", true);
+        values.put("null", null);
+        values.put("date", 20000);
+        values.put("timestamp", 1_234_567_890_123_456L);
+        values.put("timestampntz", 9_876_543_210_123_456L);
+        values.put("float", 3.14f);
+        values.put("binary", "bytes".getBytes(StandardCharsets.UTF_8));
+        GenericVariant variant = GenericVariantBuilderHelper.build(objectType, values);
         List<InternalRow> rows = Arrays.asList(GenericRow.of(variant));
 
         InferVariantShreddingSchema inferrer = defaultInferVariantShreddingSchema(schema);
         RowType inferredSchema = inferrer.inferSchema(rows);
 
-        // All primitive types: boolean, decimal (3.14159 becomes DECIMAL), bigint, variant (null),
-        // string
-        RowType expectedType =
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.BOOLEAN(),
-                            DataTypes.DECIMAL(18, 5),
-                            DataTypes.BIGINT(),
-                            DataTypes.VARIANT(),
-                            DataTypes.STRING()
-                        },
-                        new String[] {"boolean", "double", "long", "null", "string"});
         assertThat(inferredSchema.getField("v").type())
-                .isEqualTo(variantShreddingSchema(expectedType));
+                .isEqualTo(variantShreddingSchema(objectType));
     }
 
     @Test

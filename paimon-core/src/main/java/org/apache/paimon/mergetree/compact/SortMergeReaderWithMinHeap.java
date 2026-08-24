@@ -21,6 +21,7 @@ package org.apache.paimon.mergetree.compact;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.Preconditions;
 
@@ -66,7 +67,11 @@ public class SortMergeReaderWithMinHeap<T> implements SortMergeReader<T> {
                                     return result;
                                 }
                             }
-                            return Long.compare(e1.kv.sequenceNumber(), e2.kv.sequenceNumber());
+                            result = Long.compare(e1.kv.sequenceNumber(), e2.kv.sequenceNumber());
+                            if (result != 0) {
+                                return result;
+                            }
+                            return Boolean.compare(e1.kv.isAdd(), e2.kv.isAdd());
                         });
         this.polled = new ArrayList<>();
     }
@@ -100,17 +105,56 @@ public class SortMergeReaderWithMinHeap<T> implements SortMergeReader<T> {
 
     @Override
     public void close() throws IOException {
+        // Each of these readers holds an open data file, and there are as many of them as there
+        // are sorted runs being merged. One failing close() must not abandon the readers behind
+        // it, or a single bad file leaks every descriptor after it for the rest of the merge.
+        // The first failure is the one that propagates; later ones ride along as suppressed.
+        Throwable collected = null;
         for (RecordReader<KeyValue> reader : nextBatchReaders) {
-            reader.close();
+            collected = closeCollecting(reader, collected);
         }
         for (Element element : minHeap) {
-            element.iterator.releaseBatch();
-            element.reader.close();
+            collected = releaseCollecting(element, collected);
         }
         for (Element element : polled) {
-            element.iterator.releaseBatch();
-            element.reader.close();
+            collected = releaseCollecting(element, collected);
         }
+        if (collected != null) {
+            rethrowCloseFailure(collected);
+        }
+    }
+
+    private static @Nullable Throwable releaseCollecting(
+            Element element, @Nullable Throwable collected) {
+        try {
+            element.iterator.releaseBatch();
+        } catch (Throwable t) {
+            collected = ExceptionUtils.firstOrSuppressed(t, collected);
+        }
+        return closeCollecting(element.reader, collected);
+    }
+
+    private static @Nullable Throwable closeCollecting(
+            RecordReader<KeyValue> reader, @Nullable Throwable collected) {
+        try {
+            reader.close();
+        } catch (Throwable t) {
+            collected = ExceptionUtils.firstOrSuppressed(t, collected);
+        }
+        return collected;
+    }
+
+    private static void rethrowCloseFailure(Throwable failure) throws IOException {
+        if (failure instanceof IOException) {
+            throw (IOException) failure;
+        }
+        if (failure instanceof Error) {
+            throw (Error) failure;
+        }
+        if (failure instanceof RuntimeException) {
+            throw (RuntimeException) failure;
+        }
+        throw new IOException(failure);
     }
 
     /** The iterator iterates on {@link SortMergeReaderWithMinHeap}. */

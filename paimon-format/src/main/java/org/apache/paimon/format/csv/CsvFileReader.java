@@ -61,9 +61,15 @@ public class CsvFileReader extends AbstractTextFileReader {
 
     @Override
     protected void setupReading() throws IOException {
-        // Skip header if needed
+        // Skip header if needed. The header only lives at byte 0, so only the split starting there
+        // has one to skip. A split with a non-zero offset must not drop a line here: the record
+        // straddling its start boundary was already discarded by StandardLineReader#skipFirstLine
+        // and belongs to the previous split, which reads it in full. Dropping another line would
+        // silently lose the first data row of this split.
         if (includeHeader && !headerSkipped) {
-            readLine();
+            if (offset == 0) {
+                readLine();
+            }
             headerSkipped = true;
         }
     }

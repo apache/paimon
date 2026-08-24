@@ -32,6 +32,8 @@ import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
@@ -62,6 +64,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Predicate;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link CdcRecordStoreWriteOperator}. */
 public class CdcRecordStoreWriteOperatorTest {
@@ -251,6 +254,109 @@ public class CdcRecordStoreWriteOperatorTest {
         harness.close();
     }
 
+    private static RowType rowTypeWithComplexColumn(DataType complexType) {
+        return RowType.of(new DataType[] {DataTypes.INT(), complexType}, new String[] {"k", "v"});
+    }
+
+    private CdcRecord recordWithValue(String value) {
+        Map<String, String> data = new HashMap<>();
+        data.put("k", "1");
+        data.put("v", value);
+        return new CdcRecord(RowKind.INSERT, data);
+    }
+
+    /**
+     * A malformed MAP value must reach the corrupt record policy, the same way a malformed value of
+     * any other type does, instead of being silently written as an empty map.
+     */
+    @Test
+    @Timeout(30)
+    public void testCorruptMapRecordFailsLoudly() throws Exception {
+        Options options = new Options();
+        options.set(CdcRecordStoreWriteOperator.MAX_RETRY_NUM_TIMES, 1);
+        FileStoreTable table =
+                createFileStoreTable(
+                        rowTypeWithComplexColumn(
+                                DataTypes.MAP(DataTypes.STRING(), DataTypes.STRING())),
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        options);
+
+        OneInputStreamOperatorTestHarness<CdcRecord, Committable> harness =
+                createTestHarness(table);
+        harness.open();
+
+        assertThatThrownBy(() -> harness.processElement(recordWithValue("{\"a\": "), 1))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Unable to process element. Possibly a corrupt record");
+
+        harness.close();
+    }
+
+    /** Same for ROW, which used to blow up later with an obscure error while writing the row. */
+    @Test
+    @Timeout(30)
+    public void testCorruptRowRecordFailsLoudly() throws Exception {
+        Options options = new Options();
+        options.set(CdcRecordStoreWriteOperator.MAX_RETRY_NUM_TIMES, 1);
+        FileStoreTable table =
+                createFileStoreTable(
+                        rowTypeWithComplexColumn(
+                                DataTypes.ROW(
+                                        new DataField(2, "f0", DataTypes.STRING()),
+                                        new DataField(3, "f1", DataTypes.STRING()))),
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        options);
+
+        OneInputStreamOperatorTestHarness<CdcRecord, Committable> harness =
+                createTestHarness(table);
+        harness.open();
+
+        assertThatThrownBy(() -> harness.processElement(recordWithValue("{\"f0\": "), 1))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Unable to process element. Possibly a corrupt record");
+
+        harness.close();
+    }
+
+    /**
+     * With {@code cdc.skip-corrupt-record} the record must be dropped entirely, rather than written
+     * with an empty map in place of the value that failed to parse.
+     */
+    @Test
+    @Timeout(30)
+    public void testSkipCorruptMapRecord() throws Exception {
+        Options options = new Options();
+        options.set(CdcRecordStoreWriteOperator.MAX_RETRY_NUM_TIMES, 1);
+        options.set(CdcRecordStoreWriteOperator.SKIP_CORRUPT_RECORD, true);
+        FileStoreTable table =
+                createFileStoreTable(
+                        rowTypeWithComplexColumn(
+                                DataTypes.MAP(DataTypes.STRING(), DataTypes.STRING())),
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        options);
+
+        OneInputStreamOperatorTestHarness<CdcRecord, Committable> harness =
+                createTestHarness(table);
+        harness.open();
+
+        harness.processElement(recordWithValue("{\"a\": "), 1);
+        harness.prepareSnapshotPreBarrier(1);
+
+        assertThat(harness.extractOutputValues())
+                .allSatisfy(
+                        committable ->
+                                assertThat(
+                                                ((CommitMessageImpl) committable.commitMessage())
+                                                        .newFilesIncrement()
+                                                        .newFiles())
+                                        .isEmpty());
+
+        harness.close();
+    }
+
     private OneInputStreamOperatorTestHarness<CdcRecord, Committable> createTestHarness(
             FileStoreTable table) throws Exception {
         CdcRecordStoreWriteOperator.Factory operatorFactory =
@@ -279,9 +385,19 @@ public class CdcRecordStoreWriteOperatorTest {
 
     private FileStoreTable createFileStoreTable(
             RowType rowType, List<String> partitions, List<String> primaryKeys) throws Exception {
+        return createFileStoreTable(rowType, partitions, primaryKeys, new Options());
+    }
+
+    private FileStoreTable createFileStoreTable(
+            RowType rowType,
+            List<String> partitions,
+            List<String> primaryKeys,
+            Options extraOptions)
+            throws Exception {
         Options conf = new Options();
         conf.set(CdcRecordStoreWriteOperator.RETRY_SLEEP_TIME, Duration.ofMillis(10));
         conf.set(CoreOptions.BUCKET, 1);
+        extraOptions.toMap().forEach(conf::set);
 
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(

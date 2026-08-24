@@ -321,7 +321,8 @@ class BlobStore:
         projection.extend(columns)
         read_builder = read_builder.with_projection(projection)
         read_builder = read_builder.with_filter(self._keys_predicate(keys))
-        plan = read_builder.new_scan().plan()
+        scan = read_builder.new_scan()
+        plan = scan.plan_for_write()
         table = read_builder.new_read().to_arrow(plan.splits())
 
         targets = {}

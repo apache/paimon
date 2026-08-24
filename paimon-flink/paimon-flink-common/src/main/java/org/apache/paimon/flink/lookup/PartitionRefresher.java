@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.lookup;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.options.Options;
@@ -42,7 +43,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
-import static org.apache.paimon.lookup.rocksdb.RocksDBOptions.LOOKUP_CACHE_ROWS;
+import static org.apache.paimon.CoreOptions.LOOKUP_CACHE_ROWS;
 
 /** Manages partition refresh logic for {@link FullCacheLookupTable}. */
 public class PartitionRefresher implements Closeable {
@@ -54,7 +55,7 @@ public class PartitionRefresher implements Closeable {
     private final String tmpDirectory;
     private volatile File path;
     private ExecutorService partitionRefreshExecutor;
-    private AtomicReference<LookupTable> pendingLookupTable;
+    private AtomicReference<RefreshResult> pendingRefresh;
     private AtomicReference<Exception> partitionRefreshException;
 
     /** Current partitions being used for lookup. Updated when partition refresh completes. */
@@ -72,7 +73,7 @@ public class PartitionRefresher implements Closeable {
         if (!partitionRefreshAsync) {
             return;
         }
-        this.pendingLookupTable = new AtomicReference<>(null);
+        this.pendingRefresh = new AtomicReference<>(null);
         this.partitionRefreshException = new AtomicReference<>(null);
         this.partitionRefreshExecutor =
                 Executors.newSingleThreadExecutor(
@@ -139,14 +140,15 @@ public class PartitionRefresher implements Closeable {
 
         partitionRefreshExecutor.submit(
                 () -> {
+                    File newPath = new File(tmpDirectory, "lookup-" + UUID.randomUUID());
+                    FullCacheLookupTable newTable;
                     try {
-                        this.path = new File(tmpDirectory, "lookup-" + UUID.randomUUID());
-                        if (!path.mkdirs()) {
-                            throw new RuntimeException("Failed to create dir: " + path);
+                        if (!newPath.mkdirs()) {
+                            throw new RuntimeException("Failed to create dir: " + newPath);
                         }
-                        FullCacheLookupTable.Context newContext = context.copy(path);
+                        FullCacheLookupTable.Context newContext = context.copy(newPath);
                         Options options = Options.fromMap(context.table.options());
-                        FullCacheLookupTable newTable =
+                        newTable =
                                 FullCacheLookupTable.create(
                                         newContext, options.get(LOOKUP_CACHE_ROWS));
                         if (cacheRowFilter != null) {
@@ -154,28 +156,43 @@ public class PartitionRefresher implements Closeable {
                         }
                         newTable.specifyPartitions(newPartitions, partitionFilter);
                         newTable.open();
-
-                        pendingLookupTable.set(newTable);
-                        LOG.info("Async partition refresh completed for table {}.", tableName);
                     } catch (Exception e) {
                         LOG.error("Async partition refresh failed for table {}.", tableName, e);
                         partitionRefreshException.set(e);
-                        if (path != null) {
-                            FileIOUtils.deleteDirectoryQuietly(path);
-                        }
+                        FileIOUtils.deleteDirectoryQuietly(newPath);
+                        return;
+                    }
+
+                    try {
+                        publishRefreshResult(newTable, newPartitions, newPath);
+                        LOG.info("Async partition refresh completed for table {}.", tableName);
+                    } catch (IOException e) {
+                        LOG.error(
+                                "Failed to close superseded async partition refresh for table {}.",
+                                tableName,
+                                e);
+                        partitionRefreshException.set(e);
                     }
                 });
+    }
+
+    @VisibleForTesting
+    void publishRefreshResult(LookupTable lookupTable, List<BinaryRow> partitions, File refreshPath)
+            throws IOException {
+        RefreshResult previous =
+                pendingRefresh.getAndSet(new RefreshResult(lookupTable, partitions, refreshPath));
+        if (previous != null) {
+            previous.lookupTable.close();
+        }
     }
 
     /**
      * Check if an async partition refresh has completed.
      *
-     * @param newPartitions the new partitions to update after refresh completes
-     * @return a Pair containing the new lookup table and its temp path if ready, or null if no
-     *     switch is needed
+     * @return the new lookup table if ready, or null if no switch is needed
      */
     @Nullable
-    public LookupTable getNewLookupTable(List<BinaryRow> newPartitions) throws Exception {
+    public LookupTable getNewLookupTable() throws Exception {
         if (!partitionRefreshAsync) {
             return null;
         }
@@ -189,14 +206,15 @@ public class PartitionRefresher implements Closeable {
             throw asyncException;
         }
 
-        LookupTable newTable = pendingLookupTable.getAndSet(null);
-        if (newTable == null) {
+        RefreshResult refreshResult = pendingRefresh.getAndSet(null);
+        if (refreshResult == null) {
             return null;
         }
 
-        this.currentPartitions = newPartitions;
+        this.currentPartitions = refreshResult.partitions;
+        this.path = refreshResult.path;
         LOG.info("Switched to new lookup table for table {} with new partitions.", tableName);
-        return newTable;
+        return refreshResult.lookupTable;
     }
 
     /** Close partition refresh resources. */
@@ -205,10 +223,10 @@ public class PartitionRefresher implements Closeable {
         if (partitionRefreshExecutor != null) {
             ExecutorUtils.gracefulShutdown(1L, TimeUnit.MINUTES, partitionRefreshExecutor);
         }
-        if (pendingLookupTable != null) {
-            LookupTable pending = pendingLookupTable.getAndSet(null);
+        if (pendingRefresh != null) {
+            RefreshResult pending = pendingRefresh.getAndSet(null);
             if (pending != null) {
-                pending.close();
+                pending.lookupTable.close();
             }
         }
     }
@@ -219,5 +237,18 @@ public class PartitionRefresher implements Closeable {
 
     public File path() {
         return path;
+    }
+
+    private static final class RefreshResult {
+
+        private final LookupTable lookupTable;
+        private final List<BinaryRow> partitions;
+        private final File path;
+
+        private RefreshResult(LookupTable lookupTable, List<BinaryRow> partitions, File path) {
+            this.lookupTable = lookupTable;
+            this.partitions = partitions;
+            this.path = path;
+        }
     }
 }

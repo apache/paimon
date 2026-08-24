@@ -19,9 +19,11 @@
 package org.apache.paimon.globalindex;
 
 import org.apache.paimon.predicate.BatchVectorSearch;
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FullTextSearch;
 import org.apache.paimon.predicate.FunctionVisitor;
 import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.predicate.VectorSearch;
 
 import java.io.Closeable;
@@ -33,6 +35,41 @@ import java.util.concurrent.CompletableFuture;
 /** Index reader for global index, return {@link GlobalIndexResult}. */
 public interface GlobalIndexReader
         extends FunctionVisitor<CompletableFuture<Optional<GlobalIndexResult>>>, Closeable {
+
+    @Override
+    default CompletableFuture<Optional<GlobalIndexResult>> visitIsNaN(FieldRef fieldRef) {
+        return CompletableFuture.completedFuture(Optional.empty());
+    }
+
+    @Override
+    default CompletableFuture<Optional<GlobalIndexResult>> visitArrayContains(
+            FieldRef fieldRef, Object literal) {
+        return CompletableFuture.completedFuture(Optional.empty());
+    }
+
+    @Override
+    default CompletableFuture<Optional<GlobalIndexResult>> visitArraysOverlap(
+            FieldRef fieldRef, List<Object> literals) {
+        return CompletableFuture.completedFuture(Optional.empty());
+    }
+
+    @Override
+    default CompletableFuture<Optional<GlobalIndexResult>> visitArrayContainsAll(
+            FieldRef fieldRef, List<Object> literals) {
+        return CompletableFuture.completedFuture(Optional.empty());
+    }
+
+    @Override
+    default CompletableFuture<Optional<GlobalIndexResult>> visitBetween(
+            FieldRef fieldRef, Object from, Object to) {
+        return CompletableFuture.completedFuture(Optional.empty());
+    }
+
+    @Override
+    default CompletableFuture<Optional<GlobalIndexResult>> visitNotBetween(
+            FieldRef fieldRef, Object from, Object to) {
+        return CompletableFuture.completedFuture(Optional.empty());
+    }
 
     @Override
     default CompletableFuture<Optional<GlobalIndexResult>> visitAnd(
@@ -60,6 +97,16 @@ public interface GlobalIndexReader
     default CompletableFuture<Optional<ScoredGlobalIndexResult>> visitFullTextSearch(
             FullTextSearch fullTextSearch) {
         throw new UnsupportedOperationException();
+    }
+
+    /**
+     * Returns row candidates for the given TopN predicate.
+     *
+     * <p>The result may contain more than {@link TopN#limit()} rows when this reader owns multiple
+     * independent index files. Callers must still apply the final TopN operation.
+     */
+    default CompletableFuture<Optional<GlobalIndexResult>> visitTopN(TopN topN) {
+        return CompletableFuture.completedFuture(Optional.empty());
     }
 
     /** Batch search; result {@code i} matches vector {@code i}. */

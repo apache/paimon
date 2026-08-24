@@ -32,7 +32,6 @@ import org.apache.paimon.utils.ObjectsFile;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PathFactory;
 import org.apache.paimon.utils.SegmentsCache;
-import org.apache.paimon.utils.VersionedObjectSerializer;
 
 import javax.annotation.Nullable;
 
@@ -144,7 +143,7 @@ public class ManifestList extends ObjectsFile<ManifestFileMeta> {
         }
 
         public ManifestList create() {
-            RowType metaType = VersionedObjectSerializer.versionType(ManifestFileMeta.SCHEMA);
+            RowType metaType = ManifestSchemaUtils.withFormatIdentifier(ManifestFileMeta.SCHEMA);
             return new ManifestList(
                     fileIO,
                     new ManifestFileMetaSerializer(),

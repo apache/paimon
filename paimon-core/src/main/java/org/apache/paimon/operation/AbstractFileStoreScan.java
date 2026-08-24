@@ -367,7 +367,10 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         List<ManifestFileMeta> manifests = readManifests().filteredManifests;
         Map<BinaryRow, PartitionEntry> partitions = new ConcurrentHashMap<>();
         Consumer<ManifestFileMeta> processor =
-                m -> PartitionEntry.merge(PartitionEntry.merge(readManifest(m)), partitions);
+                m ->
+                        PartitionEntry.merge(
+                                readManifest(m, PartitionEntry::fromManifestEntry, null, null),
+                                partitions);
         randomlyOnlyExecute(getExecutorService(parallelism), processor, manifests);
         return partitions.values().stream()
                 .filter(p -> p.fileCount() > 0)
@@ -379,7 +382,10 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         List<ManifestFileMeta> manifests = readManifests().filteredManifests;
         Map<Pair<BinaryRow, Integer>, BucketEntry> buckets = new ConcurrentHashMap<>();
         Consumer<ManifestFileMeta> processor =
-                m -> BucketEntry.merge(BucketEntry.merge(readManifest(m)), buckets);
+                m ->
+                        BucketEntry.merge(
+                                readManifest(m, BucketEntry::fromManifestEntry, null, null),
+                                buckets);
         randomlyOnlyExecute(getExecutorService(parallelism), processor, manifests);
         return buckets.values().stream()
                 .filter(p -> p.fileCount() > 0)

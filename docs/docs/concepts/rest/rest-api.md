@@ -22,6 +22,9 @@ specific language governing permissions and limitations
 under the License.
 -->
 
+The OpenAPI 3.1 document below defines the language-neutral wire contract for REST Catalog
+servers and clients. It can also be used to generate or validate SDK models in other languages.
+
 <body>
     <iframe src="/docs/master/rest-catalog-open-api.yaml" width="100%" height="800px" />
 </body>

@@ -21,6 +21,7 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.options.Options;
@@ -28,12 +29,14 @@ import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.stats.SimpleStatsEvolutions;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.source.snapshot.ScannerTestBase;
+import org.apache.paimon.tag.BatchReadTagCreator;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
@@ -41,9 +44,12 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.apache.paimon.data.BinaryArray.fromLongArray;
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_FIRST;
@@ -376,6 +382,244 @@ public class TableScanTest extends ScannerTestBase {
 
         write.close();
         commit.close();
+    }
+
+    @Test
+    public void testPostponeMergeReadBuilderAndPushDown() throws Exception {
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+        write.write(rowData(1, 10, 100L));
+        write.write(rowData(2, 20, 200L));
+        write.write(rowData(3, 30, 300L));
+        commit.commit(0, write.prepareCommit(true, 0));
+        write.close();
+        commit.close();
+
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(CoreOptions.BUCKET.key(), "-2");
+        dynamicOptions.put(CoreOptions.POSTPONE_MERGE_ON_READ.key(), "true");
+        FileStoreTable postponeTable = table.copy(dynamicOptions);
+        PredicateBuilder builder = new PredicateBuilder(postponeTable.rowType());
+
+        // The option must not change an ordinary Core scan.
+        assertThat(postponeTable.newScan().plan().splits()).hasSize(3);
+        assertThat(postponeTable.newScan().withLimit(1).plan().splits()).hasSize(1);
+        long realOnlySnapshotId = postponeTable.snapshotManager().latestSnapshotId();
+        PostponeMergeReadBuilder realOnlyBuilder =
+                PostponeMergeReadBuilder.createSnapshotBound(postponeTable, null).get();
+        assertThat(PostponeMergeReadBuilder.create(postponeTable, null)).isEmpty();
+
+        StreamTableWrite postponeWrite = postponeTable.newWrite(commitUser);
+        StreamTableCommit postponeCommit = postponeTable.newCommit(commitUser);
+        postponeWrite.write(rowData(1, 10, 101L));
+        postponeCommit.commit(1, postponeWrite.prepareCommit(true, 1));
+        postponeWrite.close();
+        postponeCommit.close();
+
+        // A snapshot-bound builder must not pick up postpone files committed after its selection.
+        PostponeMergePlan realOnlyPlan = realOnlyBuilder.plan();
+        assertThat(realOnlyPlan.postponeSplits()).isEmpty();
+        assertThatThrownBy(() -> realOnlyPlan.bucketRouter().numBuckets(BinaryRow.singleColumn(1)))
+                .hasMessageContaining("Missing postpone bucket number");
+        assertThat(realOnlyPlan.realSplits())
+                .allSatisfy(split -> assertThat(split.snapshotId()).isEqualTo(realOnlySnapshotId));
+
+        FileStoreTable compactedFullTable =
+                postponeTable.copy(
+                        Collections.singletonMap(CoreOptions.SCAN_MODE.key(), "compacted-full"));
+        assertThat(PostponeMergeReadBuilder.create(compactedFullTable, null)).isEmpty();
+        assertThat(PostponeMergeReadBuilder.createSnapshotBound(compactedFullTable, null))
+                .isEmpty();
+
+        // A postpone record may update any value, so real-file value statistics are unsafe.
+        Predicate valueFilter = builder.equal(2, 100L);
+        PostponeMergePlan mergePlan =
+                PostponeMergeReadBuilder.create(postponeTable, null)
+                        .get()
+                        .withFilter(valueFilter)
+                        .withReadType(postponeTable.rowType().project("b"))
+                        .plan();
+        assertThat(mergePlan.realSplits()).hasSize(3);
+        assertThat(mergePlan.postponeSplits()).hasSize(1);
+        assertThat(mergePlan.resultReadType().getFieldNames()).containsExactly("b");
+
+        // Partition and trimmed-primary-key filters remain safe.
+        Predicate partitionFilter = builder.equal(0, 1);
+        assertThat(
+                        PostponeMergeReadBuilder.create(postponeTable, null)
+                                .get()
+                                .withFilter(partitionFilter)
+                                .plan()
+                                .realSplits())
+                .hasSize(1);
+        Predicate primaryKeyFilter = builder.equal(1, 10);
+        assertThat(
+                        PostponeMergeReadBuilder.create(postponeTable, null)
+                                .get()
+                                .withFilter(primaryKeyFilter)
+                                .plan()
+                                .realSplits())
+                .hasSize(1);
+
+        // A builder remains bound to the snapshot selected during its probe.
+        PostponeMergeReadBuilder pinnedBuilder =
+                PostponeMergeReadBuilder.create(postponeTable, null).get();
+        long pinnedSnapshotId = postponeTable.snapshotManager().latestSnapshotId();
+        postponeWrite = postponeTable.newWrite(commitUser);
+        postponeCommit = postponeTable.newCommit(commitUser);
+        postponeWrite.write(rowData(2, 20, 201L));
+        postponeCommit.commit(2, postponeWrite.prepareCommit(true, 2));
+        postponeWrite.close();
+        postponeCommit.close();
+        PostponeMergePlan pinnedPlan = pinnedBuilder.plan();
+        assertThat(pinnedPlan.postponeSplits()).hasSize(1);
+        assertThat(pinnedPlan.realSplits())
+                .allSatisfy(split -> assertThat(split.snapshotId()).isEqualTo(pinnedSnapshotId));
+        assertThat(pinnedPlan.postponeSplits())
+                .allSatisfy(split -> assertThat(split.snapshotId()).isEqualTo(pinnedSnapshotId));
+
+        FileStoreTable protectedTable =
+                postponeTable.copy(
+                        Collections.singletonMap(
+                                CoreOptions.SCAN_PLAN_AUTO_TAG_FOR_READ_TIME_RETAINED.key(),
+                                "1 h"));
+        PostponeMergeReadBuilder protectedBuilder =
+                PostponeMergeReadBuilder.create(protectedTable, null).get();
+        protectedBuilder.plan();
+        String readProtectionTag = protectedBuilder.readProtectionTagName();
+        assertThat(readProtectionTag).isNotNull();
+        assertThat(protectedTable.tagManager().tagExists(readProtectionTag)).isTrue();
+        new BatchReadTagCreator(
+                        protectedTable.tagManager(),
+                        protectedTable.snapshotManager(),
+                        protectedTable.coreOptions().scanPlanAutoTagTimeRetained())
+                .deleteReadTag(readProtectionTag);
+    }
+
+    @Test
+    public void testPostponeMergeRejectsLatestDelta() {
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(CoreOptions.BUCKET.key(), "-2");
+        dynamicOptions.put(CoreOptions.POSTPONE_MERGE_ON_READ.key(), "true");
+        dynamicOptions.put(CoreOptions.SCAN_MODE.key(), "latest-delta");
+        FileStoreTable latestDeltaTable = table.copy(dynamicOptions);
+
+        assertThatThrownBy(
+                        () -> PostponeMergeReadBuilder.createSnapshotBound(latestDeltaTable, null))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("requires a full snapshot scan")
+                .hasMessageContaining("latest-delta");
+    }
+
+    @Test
+    public void testPostponeMergePlanAndRead() throws Exception {
+        StreamTableWrite realWrite = table.newWrite(commitUser);
+        StreamTableCommit realCommit = table.newCommit(commitUser);
+        realWrite.write(rowData(1, 10, 100L));
+        realWrite.write(rowData(1, 20, 200L));
+        realCommit.commit(0, realWrite.prepareCommit(true, 0));
+        realWrite.close();
+        realCommit.close();
+
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(CoreOptions.BUCKET.key(), "-2");
+        FileStoreTable postponeTable = table.copy(dynamicOptions);
+        StreamTableWrite postponeWrite = postponeTable.newWrite(commitUser);
+        StreamTableCommit postponeCommit = postponeTable.newCommit(commitUser);
+        postponeWrite.write(rowData(1, 10, 101L));
+        postponeWrite.write(rowData(1, 30, 300L));
+        postponeCommit.commit(1, postponeWrite.prepareCommit(true, 1));
+        postponeWrite.write(rowData(1, 10, 102L));
+        postponeCommit.commit(2, postponeWrite.prepareCommit(true, 2));
+        postponeWrite.close();
+        postponeCommit.close();
+
+        Predicate partitionFilter = new PredicateBuilder(postponeTable.rowType()).equal(0, 1);
+        PostponeMergeReadBuilder readBuilder =
+                PostponeMergeReadBuilder.create(postponeTable, null)
+                        .get()
+                        .withFilter(partitionFilter)
+                        .withReadType(postponeTable.rowType().project("b"));
+        PostponeMergePlan plan = readBuilder.plan();
+
+        assertThat(plan.realSplits()).hasSize(1);
+        assertThat(plan.postponeSplits()).hasSize(1);
+        assertThat(plan.postponeSplits().get(0).dataFiles()).hasSize(2);
+        assertThat(plan.mergeReadType().getFieldNames()).containsExactly("b");
+
+        List<Long> values = new ArrayList<>();
+        try (IOManager ioManager = IOManager.create(tempDir.resolve("postpone-merge").toString());
+                RecordReaderIterator<org.apache.paimon.data.InternalRow> rows =
+                        new RecordReaderIterator<>(
+                                readBuilder
+                                        .newRead()
+                                        .withIOManager(ioManager)
+                                        .createBucketMergeReader(
+                                                plan.realSplits().get(0),
+                                                readBuilder
+                                                        .newRead()
+                                                        .withIOManager(ioManager)
+                                                        .createPostponeReader(
+                                                                plan.postponeSplits().get(0))))) {
+            while (rows.hasNext()) {
+                values.add(rows.next().getLong(0));
+            }
+        }
+        assertThat(values).containsExactlyInAnyOrder(102L, 200L, 300L);
+    }
+
+    @Test
+    public void testPostponeMergePlanPotentialBuckets() throws Exception {
+        StreamTableWrite realWrite = table.newWrite(commitUser);
+        StreamTableCommit realCommit = table.newCommit(commitUser);
+        realWrite.write(rowData(1, 10, 100L));
+        realWrite.write(rowData(2, 20, 200L));
+        realCommit.commit(0, realWrite.prepareCommit(true, 0));
+        realWrite.close();
+        realCommit.close();
+
+        FileStoreTable postponeTable =
+                table.copy(Collections.singletonMap(CoreOptions.BUCKET.key(), "-2"));
+        StreamTableWrite postponeWrite = postponeTable.newWrite(commitUser);
+        StreamTableCommit postponeCommit = postponeTable.newCommit(commitUser);
+        postponeWrite.write(rowData(1, 10, 101L));
+        postponeWrite.write(rowData(3, 30, 300L));
+        postponeCommit.commit(1, postponeWrite.prepareCommit(true, 1));
+        postponeWrite.close();
+        postponeCommit.close();
+
+        PostponeMergeReadBuilder readBuilder =
+                PostponeMergeReadBuilder.create(postponeTable, null).get();
+        PostponeMergePlan initialPlan = readBuilder.plan();
+        assertThat(initialPlan.numPotentialBuckets()).isEqualTo(3);
+        assertThat(initialPlan.bucketRouter().numBuckets(BinaryRow.singleColumn(1))).isEqualTo(1);
+        assertThatThrownBy(() -> initialPlan.bucketRouter().numBuckets(BinaryRow.singleColumn(2)))
+                .hasMessageContaining("Missing postpone bucket number");
+
+        BinaryRow newPartition = BinaryRow.singleColumn(3);
+        long postponeFileSize =
+                initialPlan.postponeSplits().stream()
+                        .filter(split -> split.partition().equals(newPartition))
+                        .flatMap(split -> split.dataFiles().stream())
+                        .mapToLong(DataFileMeta::fileSize)
+                        .sum();
+        assertThat(postponeFileSize).isPositive();
+        FileStoreTable sizeEstimatedTable =
+                postponeTable.copy(
+                        Collections.singletonMap(
+                                CoreOptions.POSTPONE_TARGET_SIZE_PER_BUCKET.key(), "1 b"));
+        PostponeMergePlan sizeEstimatedPlan =
+                PostponeMergeReadBuilder.create(sizeEstimatedTable, null).get().plan();
+        assertThat(sizeEstimatedPlan.numPotentialBuckets()).isEqualTo(2L + postponeFileSize);
+
+        Map<String, String> explicitDefaultOptions = new HashMap<>();
+        explicitDefaultOptions.put(CoreOptions.POSTPONE_DEFAULT_BUCKET_NUM.key(), "2");
+        explicitDefaultOptions.put(CoreOptions.POSTPONE_TARGET_ROW_NUM_PER_BUCKET.key(), "100");
+        FileStoreTable explicitDefaultTable = postponeTable.copy(explicitDefaultOptions);
+        PostponeMergeReadBuilder explicitDefaultBuilder =
+                PostponeMergeReadBuilder.create(explicitDefaultTable, null).get();
+        PostponeMergePlan explicitDefaultPlan = explicitDefaultBuilder.plan();
+        assertThat(explicitDefaultPlan.numPotentialBuckets()).isEqualTo(4);
     }
 
     @Test

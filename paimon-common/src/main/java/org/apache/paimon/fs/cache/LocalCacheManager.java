@@ -34,4 +34,7 @@ public interface LocalCacheManager {
     long getFileSize(String filePath);
 
     void putFileSize(String filePath, long size);
+
+    /** Invalidates all entries whose file path starts with the given prefix. */
+    default void invalidate(String filePathPrefix) {}
 }

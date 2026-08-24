@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import dataclasses
 import os
 import shutil
 import tempfile
@@ -22,6 +23,7 @@ import unittest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.changelog import Changelog, ChangelogManager
+from pypaimon.snapshot.snapshot import Snapshot
 
 import pyarrow as pa
 
@@ -119,15 +121,28 @@ class TestChangelogManager(unittest.TestCase):
 
     def test_changelog_from_snapshot(self):
         """Test that Changelog can be created from a Snapshot."""
+        snapshot = Snapshot(
+            version=3,
+            id=1,
+            schema_id=2,
+            base_manifest_list="base",
+            delta_manifest_list="delta",
+            total_record_count=10,
+            delta_record_count=5,
+            commit_user="user",
+            commit_identifier=3,
+            commit_kind="APPEND",
+            time_millis=1000,
+            writer_version="python-2.1.dev-commit-id",
+        )
 
-        snapshot_manager = self.table.snapshot_manager()
-        snapshot = snapshot_manager.get_latest_snapshot()
+        changelog = Changelog.from_snapshot(snapshot)
 
-        if snapshot:
-            changelog = Changelog.from_snapshot(snapshot)
-            self.assertEqual(changelog.id, snapshot.id)
-            self.assertEqual(changelog.schema_id, snapshot.schema_id)
-            self.assertEqual(changelog.time_millis, snapshot.time_millis)
+        for field in dataclasses.fields(Snapshot):
+            self.assertEqual(
+                getattr(snapshot, field.name), getattr(changelog, field.name),
+                "Changelog dropped/changed Snapshot field '{}'".format(field.name),
+            )
 
 
 if __name__ == '__main__':

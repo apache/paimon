@@ -24,11 +24,14 @@ import org.apache.paimon.globalindex.{GlobalIndexResult, IndexedSplit, ScoredGlo
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicatesAndDataPredicates
 import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
-import org.apache.paimon.spark.{PaimonRecordReaderIterator, SparkCatalog, SparkGenericCatalog, SparkTable, SparkUtils}
+import org.apache.paimon.spark.{PaimonRecordReaderIterator, PaimonScan, PostponeMergeInputScan, PostponeMergeOnRead, SparkCatalog, SparkGenericCatalog, SparkTable, SparkUtils}
 import org.apache.paimon.spark.catalog.{SparkBaseCatalog, SupportView}
 import org.apache.paimon.spark.catalyst.analysis.ResolvedPaimonView
+import org.apache.paimon.spark.catalyst.optimizer.PushDownMapSelectedKeys
+import org.apache.paimon.spark.catalyst.optimizer.RepartitionLateralVectorSearchInput
 import org.apache.paimon.spark.catalyst.plans.logical.{CopyIntoLocationCommand, CopyIntoLocationSource, CopyIntoTableCommand, CreateOrReplaceTagCommand, CreatePaimonView, DeleteTagCommand, DropPaimonView, LateralVectorSearch, PaimonCallCommand, PaimonDropPartitions, PaimonTableValuedFunctions, RenameTagCommand, ResolvedIdentifier, ShowPaimonViews, ShowTagsCommand, TruncatePaimonTableWithFilter}
 import org.apache.paimon.spark.data.SparkInternalRow
+import org.apache.paimon.spark.format.PaimonFormatTable
 import org.apache.paimon.spark.read.VectorSearchResultUtils
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.table.{InnerTable, SpecialFields, Table}
@@ -41,12 +44,17 @@ import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.{ResolvedNamespace, ResolvedTable}
-import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeSet, Expression, GenericInternalRow, JoinedRow, PredicateHelper, UnsafeProjection}
-import org.apache.spark.sql.catalyst.plans.logical.{CreateTableAsSelect, DescribeRelation, LogicalPlan, ReplaceTable, ReplaceTableAsSelect, ShowCreateTable}
+import org.apache.spark.sql.catalyst.expressions.{And, Attribute, AttributeSet, Expression, GenericInternalRow, JoinedRow, PredicateHelper, UnsafeProjection}
+import org.apache.spark.sql.catalyst.optimizer.BuildRight
+import org.apache.spark.sql.catalyst.planning.PhysicalOperation
+import org.apache.spark.sql.catalyst.plans.logical.{AddPartitions, CreateTableAsSelect, DescribeRelation, DropPartitions, LogicalPlan, RepairTable, ReplaceTable, ReplaceTableAsSelect, ShowCreateTable}
+import org.apache.spark.sql.catalyst.plans.physical.{Distribution, UnspecifiedDistribution}
 import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{Identifier, PaimonLookupCatalog, TableCatalog}
-import org.apache.spark.sql.execution.{PaimonDescribeTableExec, SparkPlan, SparkStrategy}
-import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Implicits, DataSourceV2Relation}
+import org.apache.spark.sql.execution.{FilterExec, GlobalLimitExec, LeafExecNode, PaimonDescribeTableExec, ProjectExec, SparkPlan, SparkStrategy, UnaryExecNode}
+import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Implicits, DataSourceV2Relation, DataSourceV2ScanRelation}
+import org.apache.spark.sql.execution.exchange.ShuffleExchangeLike
+import org.apache.spark.sql.execution.joins.{BroadcastHashJoinExec, BroadcastNestedLoopJoinExec}
 import org.apache.spark.sql.execution.shim.{PaimonCreateTableAsSelectStrategy, PaimonReplaceTableAsSelectStrategy, PaimonReplaceTableStrategy}
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
 
@@ -61,7 +69,51 @@ case class PaimonStrategy(spark: SparkSession)
   import DataSourceV2Implicits._
   protected lazy val catalogManager = spark.sessionState.catalogManager
 
-  override def apply(plan: LogicalPlan): Seq[SparkPlan] = plan match {
+  override def apply(plan: LogicalPlan): Seq[SparkPlan] = {
+    // Spark creates DataSourceV2ScanRelation after injected optimizer rules have run. Apply this
+    // rewrite during physical planning, when the scan relation is available, and let the regular
+    // Spark strategies plan the rewritten logical subtree.
+    val rewritten = PushDownMapSelectedKeys(plan)
+    if (!rewritten.fastEquals(plan)) {
+      planLater(rewritten) :: Nil
+    } else {
+      applyWithoutMapSelectedKeysPushDown(plan)
+    }
+  }
+
+  private def applyWithoutMapSelectedKeysPushDown(plan: LogicalPlan): Seq[SparkPlan] = plan match {
+
+    case PhysicalOperation(projects, filters, relation: DataSourceV2ScanRelation) =>
+      relation.scan match {
+        case scan: PaimonScan if PostponeMergeOnRead.usesCustomSource(scan.table) =>
+          scan.planPostponeMerge() match {
+            case Some(mergePlan) =>
+              val inputScan = PostponeMergeInputScan(mergePlan)
+              val inputOutput =
+                org.apache.spark.sql.PaimonUtils.toAttributes(inputScan.readSchema())
+              val inputRelation =
+                SparkShimLoader.shim.createDataSourceV2ScanRelation(
+                  relation,
+                  inputScan,
+                  inputOutput)
+              val merge =
+                PostponeMergeOnReadExec(
+                  relation.output,
+                  mergePlan,
+                  PostponeMergeOnReadExec.computeShufflePartitions(
+                    mergePlan.corePlan,
+                    scan.coreOptions,
+                    spark.sessionState.conf),
+                  planLater(inputRelation)
+                )
+              val filtered =
+                filters.reduceLeftOption(And).map(FilterExec(_, merge)).getOrElse(merge)
+              ProjectExec(projects, filtered) :: Nil
+            case None =>
+              ProjectExec(projects, EmptyPostponeMergeExec(relation.output)) :: Nil
+          }
+        case _ => Nil
+      }
 
     case ctas: CreateTableAsSelect =>
       PaimonCreateTableAsSelectStrategy(spark)(ctas)
@@ -161,6 +213,51 @@ case class PaimonStrategy(spark: SparkSession)
         case _ => Nil
       }
 
+    case AddPartitions(r @ ResolvedTable(_, _, table: PaimonFormatTable, _), parts, ifNotExists) =>
+      PaimonAddFormatTablePartitionsExec(
+        table,
+        parts.asResolvedPartitionSpecs,
+        ifNotExists,
+        recacheTable(r)) :: Nil
+
+    // Spark's DataSourceV2Strategy rejects RepairTable for every v2 table; Format Tables with
+    // catalog-managed partitions support it through the sync engine, so intercept here (extension
+    // strategies run first). Tables using filesystem partition discovery fall through and keep
+    // the upstream rejection.
+    case RepairTable(
+          r @ ResolvedTable(_, _, table: PaimonFormatTable, _),
+          enableAddPartitions,
+          enableDropPartitions) if table.hasCatalogManagedPartitions =>
+      PaimonRepairFormatTablePartitionsExec(
+        table,
+        enableAddPartitions,
+        enableDropPartitions,
+        recacheTable(r)) :: Nil
+
+    case DropPartitions(
+          r @ ResolvedTable(_, _, table: PaimonFormatTable, _),
+          parts,
+          ifExists,
+          purge) =>
+      PaimonDropFormatTablePartitionsExec(
+        table,
+        parts.asResolvedPartitionSpecs,
+        ifExists,
+        purge,
+        recacheTable(r)) :: Nil
+
+    case PaimonDropPartitions(
+          r @ ResolvedTable(_, _, table: PaimonFormatTable, _),
+          parts,
+          ifExists,
+          purge) =>
+      PaimonDropFormatTablePartitionsExec(
+        table,
+        parts.asResolvedPartitionSpecs,
+        ifExists,
+        purge,
+        recacheTable(r)) :: Nil
+
     case PaimonDropPartitions(
           r @ ResolvedTable(_, _, table: SparkTable, _),
           parts,
@@ -245,6 +342,11 @@ case class PaimonStrategy(spark: SparkSession)
   }
 }
 
+private case class EmptyPostponeMergeExec(output: Seq[Attribute]) extends LeafExecNode {
+
+  override protected def doExecute(): RDD[InternalRow] = sparkContext.emptyRDD[InternalRow]
+}
+
 case class LateralVectorSearchExec(
     innerTable: InnerTable,
     columnName: String,
@@ -262,6 +364,30 @@ case class LateralVectorSearchExec(
   override def children: Seq[SparkPlan] = Seq(child)
 
   override def output: Seq[Attribute] = child.output ++ projectOutput
+
+  // Statistics-based broadcast selection is only known after physical planning. Request a
+  // distribution here so EnsureRequirements can restore the streamed LIMIT side's parallelism.
+  override def requiredChildDistribution: Seq[Distribution] = {
+    if (hasUnrepartitionedGlobalLimit(child)) {
+      Seq(
+        SparkShimLoader.shim.createClusteredDistribution(
+          child.output,
+          RepartitionLateralVectorSearchInput.parallelism))
+    } else {
+      Seq(UnspecifiedDistribution)
+    }
+  }
+
+  private def hasUnrepartitionedGlobalLimit(plan: SparkPlan): Boolean = plan match {
+    case _: ShuffleExchangeLike => false
+    case _: GlobalLimitExec => true
+    case join: BroadcastHashJoinExec =>
+      hasUnrepartitionedGlobalLimit(if (join.buildSide == BuildRight) join.left else join.right)
+    case join: BroadcastNestedLoopJoinExec =>
+      hasUnrepartitionedGlobalLimit(if (join.buildSide == BuildRight) join.left else join.right)
+    case unary: UnaryExecNode => hasUnrepartitionedGlobalLimit(unary.child)
+    case _ => false
+  }
 
   @transient override lazy val producedAttributes: AttributeSet = {
     AttributeSet(vectorSearchOutput ++ output.filterNot(attr => inputSet.contains(attr)))

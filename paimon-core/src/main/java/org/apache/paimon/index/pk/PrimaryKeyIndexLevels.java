@@ -26,7 +26,9 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.function.Function;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -34,123 +36,108 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Derives logical compaction levels from immutable primary-key index source metadata. */
 public final class PrimaryKeyIndexLevels<T> {
 
-    private final int fanout;
-    private final double staleRatioThreshold;
-    private final Function<T, String> identity;
+    private final Function<T, Integer> dataLevel;
     private final Function<T, List<PrimaryKeyIndexSourceFile>> sources;
 
     public PrimaryKeyIndexLevels(
-            int fanout,
-            double staleRatioThreshold,
-            Function<T, String> identity,
-            Function<T, List<PrimaryKeyIndexSourceFile>> sources) {
-        checkArgument(fanout > 1, "Primary-key index level fanout must be greater than one.");
-        checkArgument(
-                staleRatioThreshold > 0 && staleRatioThreshold <= 1,
-                "Primary-key index stale ratio threshold must be in (0, 1].");
-        this.fanout = fanout;
-        this.staleRatioThreshold = staleRatioThreshold;
-        this.identity = identity;
+            Function<T, Integer> dataLevel, Function<T, List<PrimaryKeyIndexSourceFile>> sources) {
+        this.dataLevel = dataLevel;
         this.sources = sources;
     }
 
     public Optional<Plan<T>> pick(List<T> units, Map<String, DataFileMeta> activeSourceFiles) {
-        T staleCandidate = null;
-        double highestStaleRatio = -1;
-        for (T unit : units) {
-            double staleRatio = staleRatio(unit, activeSourceFiles);
-            if (staleRatio >= staleRatioThreshold
-                    && (staleRatio > highestStaleRatio
-                            || (staleRatio == highestStaleRatio
-                                    && (staleCandidate == null
-                                            || identity.apply(unit)
-                                                            .compareTo(
-                                                                    identity.apply(staleCandidate))
-                                                    < 0)))) {
-                staleCandidate = unit;
-                highestStaleRatio = staleRatio;
+        Map<Integer, List<DataFileMeta>> desiredByLevel = new TreeMap<>();
+        for (DataFileMeta file : activeSourceFiles.values()) {
+            if (file.level() > 0) {
+                desiredByLevel
+                        .computeIfAbsent(file.level(), ignored -> new ArrayList<>())
+                        .add(file);
             }
         }
-        if (staleCandidate != null) {
-            return Optional.of(
-                    createPlan(Collections.singletonList(staleCandidate), activeSourceFiles));
+        for (List<DataFileMeta> files : desiredByLevel.values()) {
+            files.sort(Comparator.comparing(DataFileMeta::fileName));
         }
 
-        List<T> candidates = new ArrayList<>(units);
-        candidates.sort(
-                Comparator.comparingLong(this::buildRowCount).thenComparing(identity::apply));
-        for (int start = 0; start + fanout <= candidates.size(); start++) {
-            long smallest = buildRowCount(candidates.get(start));
-            long largest = buildRowCount(candidates.get(start + fanout - 1));
-            if (largest <= saturatedMultiply(smallest, fanout)) {
-                return Optional.of(
-                        createPlan(
-                                new ArrayList<>(candidates.subList(start, start + fanout)),
-                                activeSourceFiles));
+        Map<Integer, T> unitsByLevel = new TreeMap<>();
+        for (T unit : units) {
+            int level = dataLevel.apply(unit);
+            checkArgument(level > 0, "Primary-key index data level must be positive.");
+            checkArgument(
+                    unitsByLevel.put(level, unit) == null,
+                    "Multiple primary-key index units exist for data level %s.",
+                    level);
+        }
+
+        Set<Integer> levels = new TreeSet<>();
+        levels.addAll(desiredByLevel.keySet());
+        levels.addAll(unitsByLevel.keySet());
+        for (int level : levels) {
+            T unit = unitsByLevel.get(level);
+            List<DataFileMeta> desired =
+                    desiredByLevel.getOrDefault(level, Collections.emptyList());
+            if (unit == null) {
+                return Optional.of(new Plan<>(level, Collections.emptyList(), desired));
+            }
+            if (!matches(sources.apply(unit), desired)) {
+                return Optional.of(new Plan<>(level, Collections.singletonList(unit), desired));
             }
         }
         return Optional.empty();
     }
 
-    private double staleRatio(T unit, Map<String, DataFileMeta> activeSourceFiles) {
-        long totalRows = 0;
-        long staleRows = 0;
-        for (PrimaryKeyIndexSourceFile source : sources.apply(unit)) {
-            totalRows = Math.addExact(totalRows, source.rowCount());
-            DataFileMeta active = activeSourceFiles.get(source.fileName());
-            if (active == null) {
-                staleRows = Math.addExact(staleRows, source.rowCount());
-            } else {
-                checkArgument(
-                        active.rowCount() == source.rowCount(),
-                        "Primary-key index source %s row count does not match active data file.",
-                        source.fileName());
+    public boolean isCurrent(Plan<T> plan, Map<String, DataFileMeta> activeSourceFiles) {
+        List<DataFileMeta> current = new ArrayList<>();
+        for (DataFileMeta file : activeSourceFiles.values()) {
+            if (file.level() == plan.dataLevel()) {
+                current.add(file);
             }
         }
-        return totalRows == 0 ? 0 : ((double) staleRows) / totalRows;
-    }
-
-    private Plan<T> createPlan(List<T> inputUnits, Map<String, DataFileMeta> activeSourceFiles) {
-        Map<String, DataFileMeta> selectedSources = new TreeMap<>();
-        for (T unit : inputUnits) {
-            for (PrimaryKeyIndexSourceFile source : sources.apply(unit)) {
-                DataFileMeta active = activeSourceFiles.get(source.fileName());
-                if (active != null) {
-                    checkArgument(
-                            active.rowCount() == source.rowCount(),
-                            "Primary-key index source %s row count does not match active data file.",
-                            source.fileName());
-                    selectedSources.put(active.fileName(), active);
-                }
+        current.sort(Comparator.comparing(DataFileMeta::fileName));
+        if (plan.sourceFiles().size() != current.size()) {
+            return false;
+        }
+        for (int i = 0; i < current.size(); i++) {
+            DataFileMeta planned = plan.sourceFiles().get(i);
+            DataFileMeta actual = current.get(i);
+            if (!planned.fileName().equals(actual.fileName())
+                    || planned.rowCount() != actual.rowCount()) {
+                return false;
             }
         }
-        return new Plan<>(inputUnits, new ArrayList<>(selectedSources.values()));
+        return true;
     }
 
-    private long buildRowCount(T unit) {
-        long rowCount = 0;
-        for (PrimaryKeyIndexSourceFile source : sources.apply(unit)) {
-            rowCount = Math.addExact(rowCount, source.rowCount());
+    private static boolean matches(
+            List<PrimaryKeyIndexSourceFile> sources, List<DataFileMeta> desired) {
+        if (sources.size() != desired.size()) {
+            return false;
         }
-        return rowCount;
-    }
-
-    private static long saturatedMultiply(long value, int multiplier) {
-        if (value > Long.MAX_VALUE / multiplier) {
-            return Long.MAX_VALUE;
+        for (int i = 0; i < sources.size(); i++) {
+            PrimaryKeyIndexSourceFile source = sources.get(i);
+            DataFileMeta file = desired.get(i);
+            if (!source.fileName().equals(file.fileName())
+                    || source.rowCount() != file.rowCount()) {
+                return false;
+            }
         }
-        return value * multiplier;
+        return true;
     }
 
     /** A deterministic primary-key index rebuild selection. */
     public static final class Plan<T> {
 
+        private final int dataLevel;
         private final List<T> inputUnits;
         private final List<DataFileMeta> sourceFiles;
 
-        private Plan(List<T> inputUnits, List<DataFileMeta> sourceFiles) {
+        private Plan(int dataLevel, List<T> inputUnits, List<DataFileMeta> sourceFiles) {
+            this.dataLevel = dataLevel;
             this.inputUnits = Collections.unmodifiableList(new ArrayList<>(inputUnits));
             this.sourceFiles = Collections.unmodifiableList(new ArrayList<>(sourceFiles));
+        }
+
+        public int dataLevel() {
+            return dataLevel;
         }
 
         public List<T> inputUnits() {

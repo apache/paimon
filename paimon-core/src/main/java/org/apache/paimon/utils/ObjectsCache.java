@@ -28,7 +28,6 @@ import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Function;
 
@@ -77,7 +76,7 @@ public abstract class ObjectsCache<K, V, S extends Segments> {
             if (cacheMetrics != null) {
                 cacheMetrics.increaseHitObject();
             }
-            return convert(readFromSegments(segments, filters), convertor);
+            return readFromSegments(segments, filters, convertor);
         } else {
             if (cacheMetrics != null) {
                 cacheMetrics.increaseMissedObject();
@@ -88,7 +87,7 @@ public abstract class ObjectsCache<K, V, S extends Segments> {
             if (fileSize <= cache.maxElementSize()) {
                 segments = createSegments(key, fileSize);
                 cache.put(key, segments);
-                return convert(readFromSegments(segments, filters), convertor);
+                return readFromSegments(segments, filters, convertor);
             } else {
                 return readFromIterator(
                         reader.apply(key, fileSize),
@@ -100,15 +99,8 @@ public abstract class ObjectsCache<K, V, S extends Segments> {
         }
     }
 
-    private <R> List<R> convert(List<V> values, Function<V, R> convertor) {
-        List<R> result = new ArrayList<>(values.size());
-        for (V v : values) {
-            result.add(convertor.apply(v));
-        }
-        return result;
-    }
-
-    protected abstract List<V> readFromSegments(S segments, Filters<V> filters) throws IOException;
+    protected abstract <R> List<R> readFromSegments(
+            S segments, Filters<V> filters, Function<V, R> convertor) throws IOException;
 
     protected abstract S createSegments(K k, @Nullable Long fileSize);
 

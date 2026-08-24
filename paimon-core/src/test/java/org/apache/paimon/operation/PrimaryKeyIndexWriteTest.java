@@ -52,7 +52,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests BTree and Bitmap primary-key index wiring through the file-store writer. */
+/** Tests source-backed primary-key index wiring through the file-store writer. */
 class PrimaryKeyIndexWriteTest {
 
     @TempDir java.nio.file.Path tempDir;
@@ -75,10 +75,6 @@ class PrimaryKeyIndexWriteTest {
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
         options.put(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "itemId");
         options.put(CoreOptions.PK_BITMAP_INDEX_COLUMNS.key(), "comment");
-        options.put("fields.itemId.pk-index.compaction.level-fanout", "7");
-        options.put("fields.itemId.pk-index.compaction.stale-ratio-threshold", "0.4");
-        options.put("fields.comment.pk-index.compaction.level-fanout", "7");
-        options.put("fields.comment.pk-index.compaction.stale-ratio-threshold", "0.4");
         TestFileStore store = createStore(options);
         KeyValueFileStoreWrite write = (KeyValueFileStoreWrite) store.newWrite();
         write.withIOManager(ioManager);
@@ -90,13 +86,30 @@ class PrimaryKeyIndexWriteTest {
 
         assertThat(container.primaryKeyIndexMaintainer).isNotNull();
         assertThat(container.primaryKeyIndexMaintainer.buildNotCompleted()).isFalse();
-        List<?> sortedMaintainers =
-                (List<?>) readField(container.primaryKeyIndexMaintainer, "sortedMaintainers");
-        for (Object sortedMaintainer : sortedMaintainers) {
-            Object levels = readField(sortedMaintainer, "levels");
-            assertThat(readField(levels, "fanout")).isEqualTo(7);
-            assertThat(readField(levels, "staleRatioThreshold")).isEqualTo(0.4);
-        }
+        write.close();
+    }
+
+    @Test
+    void testCreatesCoordinatorForMultiValueDefinition() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "10");
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        options.put(CoreOptions.PK_MULTIVALUE_INDEX_COLUMNS.key(), "tags");
+        List<DataField> fields =
+                new ArrayList<>(TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields());
+        fields.add(new DataField(7, "tags", DataTypes.ARRAY(DataTypes.STRING())));
+        TestFileStore store = createStore(options, new RowType(fields));
+        KeyValueFileStoreWrite write = (KeyValueFileStoreWrite) store.newWrite();
+        write.withIOManager(ioManager);
+        TestKeyValueGenerator generator = new TestKeyValueGenerator();
+        KeyValue record = generator.next();
+
+        AbstractFileStoreWrite.WriterContainer<KeyValue> container =
+                write.createWriterContainer(generator.getPartition(record), 1);
+
+        assertThat(container.primaryKeyIndexMaintainer).isNotNull();
+        assertThat((List<?>) readField(container.primaryKeyIndexMaintainer, "sortedMaintainers"))
+                .hasSize(1);
         write.close();
     }
 

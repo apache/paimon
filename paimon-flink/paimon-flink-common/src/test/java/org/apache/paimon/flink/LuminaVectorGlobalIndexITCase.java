@@ -19,8 +19,10 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.flink.globalindex.GenericGlobalIndexBuilder;
 import org.apache.paimon.flink.globalindex.GenericIndexTopoBuilder;
+import org.apache.paimon.globalindex.ScanResult;
+import org.apache.paimon.globalindex.generic.GenericGlobalIndexScanner;
+import org.apache.paimon.index.DataEvolutionIndexSourceMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -34,6 +36,7 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -45,6 +48,11 @@ public class LuminaVectorGlobalIndexITCase extends CatalogITCaseBase {
 
     private static final String INDEX_TYPE = "lumina";
     private static final String LEGACY_INDEX_TYPE = "lumina-vector-ann";
+
+    @Override
+    protected Boolean sqlSyncMode() {
+        return true;
+    }
 
     @BeforeAll
     static void checkLuminaAvailable() {
@@ -430,16 +438,20 @@ public class LuminaVectorGlobalIndexITCase extends CatalogITCaseBase {
                 GenericIndexTopoBuilder.buildIndex(
                         env,
                         () ->
-                                new GenericGlobalIndexBuilder(table) {
+                                new GenericGlobalIndexScanner(table) {
                                     @Override
-                                    public List<ManifestEntry> scan() {
-                                        return super.scan().stream()
-                                                .filter(
-                                                        e ->
-                                                                e.file().firstRowId() != null
-                                                                        && e.file().firstRowId()
-                                                                                < 50)
-                                                .collect(Collectors.toList());
+                                    public Optional<ScanResult<ManifestEntry>> scan() {
+                                        return super.scan()
+                                                .map(
+                                                        result ->
+                                                                result.withEntries(
+                                                                        result.entries().stream()
+                                                                                .filter(
+                                                                                        LuminaVectorGlobalIndexITCase
+                                                                                                ::hasFirstRowIdBefore50)
+                                                                                .collect(
+                                                                                        Collectors
+                                                                                                .toList())));
                                     }
                                 },
                         table,
@@ -458,87 +470,89 @@ public class LuminaVectorGlobalIndexITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testDeletedIndexEntriesDefault() throws Catalog.TableNotExistException {
+    public void testDataEvolutionUpdateRefreshesIndexAtomically() throws Exception {
         sql(
-                "CREATE TABLE T_DEL_DEFAULT (id INT, v ARRAY<FLOAT>) WITH ("
+                "CREATE TABLE T_REFRESH (id INT, v ARRAY<FLOAT>) WITH ("
                         + "'bucket' = '-1', "
                         + "'row-tracking.enabled' = 'true', "
                         + "'data-evolution.enabled' = 'true', "
+                        + "'global-index.column-update-action' = 'IGNORE', "
                         + "'lumina.index.dimension' = '3', "
                         + "'lumina.distance.metric' = 'l2'"
                         + ")");
+        String nullValues =
+                IntStream.range(0, 10)
+                        .mapToObj(i -> "(" + i + ", CAST(NULL AS ARRAY<FLOAT>))")
+                        .collect(Collectors.joining(","));
+        sql("INSERT INTO T_REFRESH VALUES " + nullValues + "," + vectorValues(10, 20, 3));
 
-        FileStoreTable table = paimonTable("T_DEL_DEFAULT");
-        GenericGlobalIndexBuilder builder = new GenericGlobalIndexBuilder(table);
-        assertThat(builder.deletedIndexEntries()).isEmpty();
-    }
-
-    @Test
-    public void testDeletedIndexEntriesAtomicCommit() throws Exception {
-        sql(
-                "CREATE TABLE T_DEL_ATOMIC (id INT, v ARRAY<FLOAT>) WITH ("
-                        + "'bucket' = '-1', "
-                        + "'row-tracking.enabled' = 'true', "
-                        + "'data-evolution.enabled' = 'true', "
-                        + "'lumina.index.dimension' = '3', "
-                        + "'lumina.distance.metric' = 'l2'"
-                        + ")");
-
-        sql("INSERT INTO T_DEL_ATOMIC VALUES " + vectorValues(0, 100, 3));
-
-        // First build: create initial index
+        FileStoreTable table = paimonTable("T_REFRESH");
+        long firstDataSnapshotId = table.snapshotManager().latestSnapshot().id();
         sql(
                 "CALL sys.create_global_index("
-                        + "`table` => 'default.T_DEL_ATOMIC', "
+                        + "`table` => 'default.T_REFRESH', "
                         + "index_column => 'v', "
                         + "index_type => '"
                         + INDEX_TYPE
                         + "')");
 
-        FileStoreTable table = paimonTable("T_DEL_ATOMIC");
-        List<IndexManifestEntry> oldEntries =
-                table.store().newIndexFileHandler().scanEntries().stream()
-                        .filter(e -> INDEX_TYPE.equals(e.indexFile().indexType()))
-                        .collect(Collectors.toList());
+        List<IndexManifestEntry> oldEntries = table.store().newIndexFileHandler().scan(INDEX_TYPE);
         assertThat(oldEntries).isNotEmpty();
-
+        assertThat(oldEntries)
+                .allSatisfy(
+                        entry ->
+                                assertThat(
+                                                DataEvolutionIndexSourceMeta.fromIndexFile(
+                                                                entry.indexFile())
+                                                        .scanSnapshotId())
+                                        .isEqualTo(firstDataSnapshotId));
         List<String> oldFileNames =
-                oldEntries.stream().map(e -> e.indexFile().fileName()).collect(Collectors.toList());
-
-        // Second build: use a custom builder that reports old entries as deletedIndexEntries
-        StreamExecutionEnvironment env = streamExecutionEnvironmentBuilder().batchMode().build();
-        boolean hasIndex =
-                GenericIndexTopoBuilder.buildIndex(
-                        env,
-                        () ->
-                                new GenericGlobalIndexBuilder(table) {
-                                    @Override
-                                    public List<IndexManifestEntry> deletedIndexEntries() {
-                                        return oldEntries;
-                                    }
-                                },
-                        table,
-                        "v",
-                        INDEX_TYPE,
-                        null,
-                        new Options(table.options()));
-        assertThat(hasIndex).isTrue();
-        env.execute("test-rebuild-index");
-
-        // After the atomic commit, old index files should be deleted and new ones created
-        List<IndexManifestEntry> newEntries =
-                table.store().newIndexFileHandler().scanEntries().stream()
-                        .filter(e -> INDEX_TYPE.equals(e.indexFile().indexType()))
+                oldEntries.stream()
+                        .map(entry -> entry.indexFile().fileName())
                         .collect(Collectors.toList());
 
-        assertThat(newEntries).isNotEmpty();
-        long totalRowCount = newEntries.stream().mapToLong(e -> e.indexFile().rowCount()).sum();
-        assertThat(totalRowCount).isEqualTo(100L);
+        sql("CREATE TABLE S_REFRESH (id INT, v ARRAY<FLOAT>)");
+        sql(
+                "INSERT INTO S_REFRESH VALUES "
+                        + "(1, ARRAY[CAST(0.0 AS FLOAT), CAST(1.0 AS FLOAT), "
+                        + "CAST(2.0 AS FLOAT)])");
+        sql(
+                "CALL sys.data_evolution_merge_into("
+                        + "'default.T_REFRESH', '', '', 'S_REFRESH', "
+                        + "'T_REFRESH.id=S_REFRESH.id', 'v=S_REFRESH.v', 2)");
+        assertThat(sql("SELECT id FROM T_REFRESH WHERE id = 1 AND v IS NOT NULL")).hasSize(1);
 
-        // New files should be different from old files (old ones were deleted)
-        List<String> newFileNames =
-                newEntries.stream().map(e -> e.indexFile().fileName()).collect(Collectors.toList());
-        assertThat(newFileNames).doesNotContainAnyElementsOf(oldFileNames);
+        long updatedSnapshotId = table.snapshotManager().latestSnapshot().id();
+        assertThat(
+                        table.store().newIndexFileHandler().scan(INDEX_TYPE).stream()
+                                .map(entry -> entry.indexFile().fileName()))
+                .containsExactlyInAnyOrderElementsOf(oldFileNames);
+
+        sql(
+                "CALL sys.create_global_index("
+                        + "`table` => 'default.T_REFRESH', "
+                        + "index_column => 'v', "
+                        + "index_type => '"
+                        + INDEX_TYPE
+                        + "')");
+
+        assertThat(table.snapshotManager().latestSnapshot().id()).isEqualTo(updatedSnapshotId + 1);
+        List<IndexManifestEntry> refreshedEntries =
+                table.store().newIndexFileHandler().scan(INDEX_TYPE);
+        assertThat(refreshedEntries).isNotEmpty();
+        assertThat(
+                        refreshedEntries.stream()
+                                .map(entry -> entry.indexFile().fileName())
+                                .collect(Collectors.toList()))
+                .doesNotContainAnyElementsOf(oldFileNames);
+        assertThat(refreshedEntries)
+                .allSatisfy(
+                        entry ->
+                                assertThat(
+                                                DataEvolutionIndexSourceMeta.fromIndexFile(
+                                                                entry.indexFile())
+                                                        .scanSnapshotId())
+                                        .isEqualTo(updatedSnapshotId));
     }
 
     // -- Helpers --
@@ -548,6 +562,10 @@ public class LuminaVectorGlobalIndexITCase extends CatalogITCaseBase {
                 .map(IndexManifestEntry::indexFile)
                 .filter(f -> INDEX_TYPE.equals(f.indexType()))
                 .collect(Collectors.toList());
+    }
+
+    private static boolean hasFirstRowIdBefore50(ManifestEntry entry) {
+        return entry.file().firstRowId() != null && entry.file().firstRowId() < 50;
     }
 
     private static String vectorValues(int startId, int count, int dim) {

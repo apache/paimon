@@ -248,8 +248,14 @@ append-only partitions should use the default mode or
 `hash_fixed_precluster="off"`.
 
 For non-HASH_FIXED append-only tables, the dataset is written as-is.
-Postpone-bucket primary-key tables (`bucket = -2`) are also written
-as-is to the `bucket-postpone` directory. HASH_DYNAMIC and
+Postpone-bucket tables (`bucket = -2`) follow
+`postpone.batch-write-fixed-bucket` (default: `true`). Existing partitions
+reuse their bucket count; new partitions infer one from the configured target
+row count or size. Ray materializes the input for this global plan, then sorts
+by partition, bucket, and primary-key hash. One primary key stays with one
+writer, while a large bucket can span multiple Ray blocks. Set
+`hash_fixed_precluster="off"` to retain `bucket-postpone` writes. Fixed-bucket
+postpone writes support `bucket-function.type=default` only. HASH_DYNAMIC and
 CROSS_PARTITION primary-key Ray writes are not supported and fail fast,
 including the default dynamic-bucket primary-key table (`bucket = -1`).
 Ray write tasks create independent Paimon writers, which can assign
@@ -261,18 +267,15 @@ overlapping buckets or sequence numbers for those modes.
 - `catalog_options`: kwargs forwarded to `CatalogFactory.create()`.
 - `overwrite`: if `True`, overwrite existing data in the table.
 - `concurrency`: optional max number of Ray write tasks to run concurrently.
-  For HASH_FIXED primary-key `map_groups` writes, this limits the group
-  writer tasks.
+  For HASH_FIXED primary-key and postpone-bucket writes, this limits writer
+  tasks.
 - `ray_remote_args`: optional kwargs passed to `ray.remote()` in write tasks
-  (e.g. `{"num_cpus": 2}`). For HASH_FIXED primary-key `map_groups`
-  writes, these options apply to the group writer tasks.
-- `hash_fixed_precluster`: HASH_FIXED pre-clustering mode. `"auto"` and
-  `"off"` write append-only HASH_FIXED tables directly and reject
-  HASH_FIXED primary-key tables. `"map_groups"` enables the legacy
-  small-file optimization for append-only tables and runs one writer per
-  HASH_FIXED primary-key group. Each `(partition_keys..., bucket)` group
-  must fit in memory on one Ray node. This option does not enable Ray
-  writes for HASH_DYNAMIC or CROSS_PARTITION primary-key tables.
+  (e.g. `{"num_cpus": 2}`). These options also apply to HASH_FIXED
+  primary-key and postpone-bucket writer tasks.
+- `hash_fixed_precluster`: pre-clustering mode. `"auto"` follows table options,
+  `"off"` disables pre-clustering, and `"map_groups"` explicitly enables
+  HASH_FIXED grouping. This option does not enable HASH_DYNAMIC or
+  CROSS_PARTITION primary-key writes.
 
 ### `TableWrite.write_ray()` (lower-level)
 
@@ -313,6 +316,9 @@ table_write.write_ray(
 # 3. Close resources
 table_write.close()
 ```
+
+An explicit `new_postpone_fixed_bucket_write_builder()` also enables the
+real-bucket path without setting `hash_fixed_precluster`.
 
 ### Overwrite
 
@@ -397,6 +403,35 @@ ds = bucket_join(
   that spreads keys evenly to avoid skewed, memory-heavy tasks.
 - Partitioned tables are not supported yet (bucket ids are per-partition).
 
+## Range Join
+
+`range_join` joins tables clustered by the first join key without a global
+shuffle. Each key range runs in one Ray task.
+
+```python
+from pypaimon.ray import range_join
+
+ds = range_join(
+    left="database_name.incoming_keys",
+    right="database_name.key_rowid",
+    catalog_options={"warehouse": "/path/to/warehouse"},
+    left_on="url",
+    right_on="lookup_url",
+    left_projection=["url"],
+    right_projection=["lookup_url", "row_id"],
+    left_partitions={"dt": "2026-07-30"},  # optional
+    num_ranges=64,                          # optional
+)
+```
+
+Use `on="url"` when key names match. Multiple keys are supported; the first
+defines ranges. Only inner join is supported.
+
+Manifest/key stats are preferred; Parquet footers are the fallback. Missing
+stats safely reduce parallelism, possibly to one task. Unclustered files may be
+read repeatedly. Float/double and local-time-zone timestamp range keys are not
+supported.
+
 ## Merge Into
 
 `merge_into` updates or deletes matched rows and optionally inserts unmatched
@@ -478,11 +513,37 @@ extra. Install the extra before using conditions: `pip install pypaimon[sql]`.
   ]
   ```
 
+For self-merge (`source == target` and `on=["_ROW_ID"]`), update values may
+also be callables. A callable receives the matched `read_columns` plus
+`_ROW_ID` as a `pyarrow.Table` and must return one `pyarrow.Array` or
+`pyarrow.ChunkedArray` value per input row:
+
+```python
+import pyarrow.compute as pc
+
+merge_into(
+    target="db.table",
+    source="db.table",
+    catalog_options=catalog_options,
+    on=["_ROW_ID"],
+    read_columns=["age"],
+    when_matched=[WhenMatched.update({
+        "age": lambda rows: pc.add(rows["age"], 1),
+    }, condition="t.id IN (1, 3)")],
+)
+```
+
+Callables may run zero, one, or multiple times and must be deterministic,
+side-effect-free, and row-local. They are not supported for general
+source-target merges.
+
 **Parameters:**
 - `source`: a `ray.data.Dataset`, `pyarrow.Table`, `pandas.DataFrame`, or a
   Paimon table identifier string. When a string is passed, it reads the table
   from the same `catalog_options` at the latest snapshot.
 - `on`: key columns, or `{target_col: source_col}` for renamed keys.
+- `read_columns`: columns passed to callable self-merge assignments. Required
+  when an update mapping contains a callable; otherwise it must be omitted.
 - `num_partitions`: shuffle parallelism for the join and the write; defaults to
   `max(1, cluster_cpus * 2)`. Raise it for large merges on big clusters.
 - `ray_remote_args`: Ray remote options applied to the merge's map/group
@@ -602,3 +663,116 @@ ds = read_by_row_id(
 - For a non-empty target, the `row_ids` source is consumed lazily by the downstream
   action, not read here. A lazy source missing `row_id_col` raises when the read runs
   (a materialized source raises up front).
+
+## Process Row Id Ranges
+
+`process_row_id_ranges` plans the latest snapshot into logical file groups and
+calls a user-supplied processor synchronously for each target-sized batch. The
+processor receives a `List[Range]` and owns the read, distributed computation,
+commit, and retry policy. Base files and overlapping data-evolution, BLOB, or
+VECTOR files remain in one indivisible group.
+
+`rows_per_commit` is therefore a target rather than a hard limit: the function
+never splits a file group, so a batch can contain more rows. The range plan is
+captured once at the start of a run, callbacks execute in row-id order, and an
+exception stops later callbacks.
+
+### Resumable embedding backfill from a BLOB column
+
+The following pattern reads an `image` BLOB, computes a nullable `embedding`
+VECTOR with Ray, and commits about one million row ids at a time. It pushes
+`embedding IS NULL` into each range scan, so a completed row is filtered before
+its image payload is materialized. Rerun the whole function after a failure;
+already committed ranges are skipped automatically.
+
+```python
+import pyarrow as pa
+
+from my_embedding_model import load_model
+from pypaimon import CatalogFactory
+from pypaimon.ray import process_row_id_ranges, update_by_row_id
+
+TARGET = "database_name.images"
+CATALOG_OPTIONS = {"warehouse": "/path/to/warehouse"}
+EMBEDDING_DIM = 768
+
+
+class EmbedImages:
+    def __init__(self):
+        # Constructed once in every Ray actor, not once per Arrow batch.
+        self.model = load_model()
+
+    def __call__(self, batch: pa.Table) -> pa.Table:
+        vectors = self.model.encode(batch["image"].to_pylist())
+        return pa.table({
+            "_ROW_ID": batch["_ROW_ID"],
+            "embedding": pa.array(
+                vectors.tolist(),
+                type=pa.list_(pa.float32(), EMBEDDING_DIM),
+            ),
+        })
+
+
+def process_ranges(ranges):
+    # Resolve a fresh table for every batch so this scan sees embeddings
+    # committed by earlier callbacks. Force BLOB payloads rather than descriptors.
+    table = (
+        CatalogFactory.create(CATALOG_OPTIONS)
+        .get_table(TARGET)
+        .copy({"blob-as-descriptor": "false"})
+    )
+    read_builder = table.new_read_builder().with_projection(
+        ["image", "embedding", "_ROW_ID"]
+    )
+    read_builder.with_filter(
+        read_builder.new_predicate_builder().is_null("embedding")
+    )
+    splits = (
+        read_builder.new_scan()
+        .with_row_ranges(ranges)
+        .plan()
+        .splits()
+    )
+    pending = read_builder.new_read().to_ray(
+        splits,
+        concurrency=64,
+        ray_remote_args={"num_cpus": 1},
+    )
+    if pending.limit(1).count() == 0:
+        return
+
+    updates = pending.map_batches(
+        EmbedImages,
+        batch_format="pyarrow",
+        batch_size=128,
+        concurrency=8,       # required for a callable-class Ray actor pool
+        num_gpus=1,
+    )
+
+    # update_by_row_id executes the Ray pipeline and makes one Paimon commit.
+    # It is valid for VECTOR/ARRAY embedding columns; BLOB columns themselves
+    # cannot be updated through update_by_row_id.
+    update_by_row_id(
+        target=TARGET,
+        source=updates,
+        catalog_options=CATALOG_OPTIONS,
+        update_cols=["embedding"],
+        num_partitions=128,
+    )
+
+
+process_row_id_ranges(
+    TARGET,
+    CATALOG_OPTIONS,
+    rows_per_commit=1_000_000,
+    processor=process_ranges,
+)
+```
+
+The target must enable `row-tracking.enabled` and
+`data-evolution.enabled`; `embedding` must be nullable and the table must not
+enable deletion vectors. If the source BLOB or embedding model can change,
+use an additional source/model-version column instead of treating every
+non-null embedding as permanently complete. `process_row_id_ranges` does not
+retry a failed processor itself—the resumability in this example comes from
+rerunning it and selecting only rows whose embedding is still null.

@@ -29,6 +29,7 @@ import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.LeafTernaryFunction;
 import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
 
@@ -38,6 +39,7 @@ import java.io.Closeable;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
@@ -49,6 +51,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.function.IntFunction;
 import java.util.stream.Collectors;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Predicate for filtering data using global indexes. */
 public class GlobalIndexEvaluator implements Closeable {
@@ -65,11 +69,44 @@ public class GlobalIndexEvaluator implements Closeable {
     }
 
     public Optional<GlobalIndexResult> evaluate(@Nullable Predicate predicate) {
+        return await(evaluateAsync(predicate));
+    }
+
+    /**
+     * Evaluate the predicate asynchronously. Keep this evaluator open until the future completes.
+     */
+    public CompletableFuture<Optional<GlobalIndexResult>> evaluateAsync(
+            @Nullable Predicate predicate) {
+        if (predicate == null) {
+            return CompletableFuture.completedFuture(Optional.empty());
+        }
+        return visitAsync(predicate).thenApply(result -> result.map(Evaluation::result));
+    }
+
+    /** Evaluate the predicate and return the fields whose supported indexes contributed. */
+    public Optional<Evaluation> evaluateWithContributingFields(@Nullable Predicate predicate) {
         if (predicate == null) {
             return Optional.empty();
         }
+        return await(visitAsync(predicate));
+    }
+
+    public Optional<GlobalIndexResult> evaluateTopN(TopN topN) {
+        FieldRef fieldRef = topN.orders().get(0).field();
+        int fieldId = rowType.getField(fieldRef.name()).id();
+        Collection<GlobalIndexReader> readers =
+                indexReadersCache.computeIfAbsent(fieldId, readersFunction::apply);
+
+        if (readers.isEmpty()) {
+            return Optional.empty();
+        }
+        checkArgument(readers.size() == 1, "TopN expects one aggregated global index reader.");
+        return await(readers.iterator().next().visitTopN(topN));
+    }
+
+    private <T> T await(CompletableFuture<T> future) {
         try {
-            return visitAsync(predicate).get();
+            return future.get();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Interrupted during index evaluation", e);
@@ -84,14 +121,14 @@ public class GlobalIndexEvaluator implements Closeable {
         }
     }
 
-    private CompletableFuture<Optional<GlobalIndexResult>> visitAsync(Predicate predicate) {
+    private CompletableFuture<Optional<Evaluation>> visitAsync(Predicate predicate) {
         if (predicate instanceof LeafPredicate) {
             return visitLeafAsync((LeafPredicate) predicate);
         }
         return visitCompoundAsync((CompoundPredicate) predicate);
     }
 
-    private CompletableFuture<Optional<GlobalIndexResult>> visitLeafAsync(LeafPredicate predicate) {
+    private CompletableFuture<Optional<Evaluation>> visitLeafAsync(LeafPredicate predicate) {
         Optional<FieldRef> fieldRefOptional = predicate.fieldRefOptional();
         if (!fieldRefOptional.isPresent()) {
             return CompletableFuture.completedFuture(Optional.empty());
@@ -124,18 +161,20 @@ public class GlobalIndexEvaluator implements Closeable {
                                     compoundResult = childResult;
                                 }
                                 if (compoundResult.get().results().isEmpty()) {
-                                    return compoundResult;
+                                    break;
                                 }
                             }
-                            return compoundResult;
+                            return compoundResult.map(
+                                    result ->
+                                            new Evaluation(result, Collections.singleton(fieldId)));
                         });
     }
 
-    private CompletableFuture<Optional<GlobalIndexResult>> visitCompoundAsync(
+    private CompletableFuture<Optional<Evaluation>> visitCompoundAsync(
             CompoundPredicate predicate) {
         List<Predicate> children =
                 pruneRedundantIsNotNullForAnd(flattenChildren(predicate), predicate);
-        List<CompletableFuture<Optional<GlobalIndexResult>>> childFutures =
+        List<CompletableFuture<Optional<Evaluation>>> childFutures =
                 new ArrayList<>(children.size());
         for (Predicate child : children) {
             childFutures.add(visitAsync(child));
@@ -144,40 +183,67 @@ public class GlobalIndexEvaluator implements Closeable {
         return CompletableFuture.allOf(childFutures.toArray(new CompletableFuture[0]))
                 .thenApply(
                         v -> {
-                            List<Optional<GlobalIndexResult>> results = new ArrayList<>();
-                            for (CompletableFuture<Optional<GlobalIndexResult>> f : childFutures) {
+                            List<Optional<Evaluation>> results = new ArrayList<>();
+                            for (CompletableFuture<Optional<Evaluation>> f : childFutures) {
                                 results.add(f.join());
                             }
                             return combineResults(results, predicate);
                         });
     }
 
-    private Optional<GlobalIndexResult> combineResults(
-            List<Optional<GlobalIndexResult>> results, CompoundPredicate predicate) {
+    private Optional<Evaluation> combineResults(
+            List<Optional<Evaluation>> results, CompoundPredicate predicate) {
+        Set<Integer> contributingFieldIds = new HashSet<>();
         if (predicate.function() instanceof Or) {
             GlobalIndexResult compoundResult = GlobalIndexResult.createEmpty();
-            for (Optional<GlobalIndexResult> childResult : results) {
-                if (!childResult.isPresent()) {
+            for (Optional<Evaluation> child : results) {
+                if (!child.isPresent()) {
                     return Optional.empty();
                 }
-                compoundResult = compoundResult.or(childResult.get());
+                compoundResult = compoundResult.or(child.get().result());
+                contributingFieldIds.addAll(child.get().contributingFieldIds());
             }
-            return Optional.of(compoundResult);
+            return Optional.of(new Evaluation(compoundResult, contributingFieldIds));
         } else {
             Optional<GlobalIndexResult> compoundResult = Optional.empty();
-            for (Optional<GlobalIndexResult> childResult : results) {
-                if (childResult.isPresent()) {
+            for (Optional<Evaluation> child : results) {
+                if (child.isPresent()) {
                     if (compoundResult.isPresent()) {
-                        compoundResult = Optional.of(compoundResult.get().and(childResult.get()));
+                        compoundResult =
+                                Optional.of(compoundResult.get().and(child.get().result()));
                     } else {
-                        compoundResult = childResult;
+                        compoundResult = Optional.of(child.get().result());
                     }
+                    contributingFieldIds.addAll(child.get().contributingFieldIds());
                 }
                 if (compoundResult.isPresent() && compoundResult.get().results().isEmpty()) {
-                    return compoundResult;
+                    break;
                 }
             }
-            return compoundResult;
+            return compoundResult.map(result -> new Evaluation(result, contributingFieldIds));
+        }
+    }
+
+    /**
+     * Matches and fields whose supported index results contributed; discarded branches excluded.
+     */
+    public static final class Evaluation {
+
+        private final GlobalIndexResult result;
+        private final Set<Integer> contributingFieldIds;
+
+        private Evaluation(GlobalIndexResult result, Collection<Integer> contributingFieldIds) {
+            this.result = result;
+            this.contributingFieldIds =
+                    Collections.unmodifiableSet(new HashSet<>(contributingFieldIds));
+        }
+
+        public GlobalIndexResult result() {
+            return result;
+        }
+
+        public Set<Integer> contributingFieldIds() {
+            return contributingFieldIds;
         }
     }
 

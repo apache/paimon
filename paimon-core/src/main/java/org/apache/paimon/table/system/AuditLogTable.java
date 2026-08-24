@@ -41,6 +41,7 @@ import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.PredicateReplaceVisitor;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.DataTable;
@@ -97,7 +98,6 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     protected final List<DataField> specialFields;
 
     public AuditLogTable(FileStoreTable wrapped) {
-        this.wrapped = wrapped;
         this.specialFields = new ArrayList<>();
         specialFields.add(SpecialFields.ROW_KIND);
 
@@ -105,9 +105,13 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
                 CoreOptions.fromMap(wrapped.options()).tableReadSequenceNumberEnabled();
 
         if (includeSequenceNumber) {
-            this.wrapped.options().put(CoreOptions.KEY_VALUE_SEQUENCE_NUMBER_ENABLED.key(), "true");
+            wrapped =
+                    wrapped.copyWithoutTimeTravel(
+                            Collections.singletonMap(
+                                    CoreOptions.KEY_VALUE_SEQUENCE_NUMBER_ENABLED.key(), "true"));
             specialFields.add(SpecialFields.SEQUENCE_NUMBER);
         }
+        this.wrapped = wrapped;
     }
 
     /** Creates a PredicateReplaceVisitor that adjusts field indices by systemFieldCount. */
@@ -779,6 +783,13 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public TableRead withIOManager(IOManager ioManager) {
             this.dataRead.withIOManager(ioManager);
+            return this;
+        }
+
+        @Override
+        public InnerTableRead withReadBatchSizer(ReadBatchSizer sizer) {
+            // System-table wrappers must preserve memory control on the physical data read.
+            dataRead.withReadBatchSizer(sizer);
             return this;
         }
 

@@ -42,6 +42,7 @@ public class StrictModeChecker {
     private final String commitUser;
     private final Supplier<FileStoreScan> scanSupplier;
     private final IndexManifestFile indexManifestFile;
+    private final boolean dataEvolutionEnabled;
 
     private long strictModeLastSafeSnapshot;
 
@@ -50,11 +51,13 @@ public class StrictModeChecker {
             String commitUser,
             Supplier<FileStoreScan> scanSupplier,
             IndexManifestFile indexManifestFile,
+            boolean dataEvolutionEnabled,
             long strictModeLastSafeSnapshot) {
         this.snapshotManager = snapshotManager;
         this.commitUser = commitUser;
         this.scanSupplier = scanSupplier;
         this.indexManifestFile = indexManifestFile;
+        this.dataEvolutionEnabled = dataEvolutionEnabled;
         this.strictModeLastSafeSnapshot = strictModeLastSafeSnapshot;
     }
 
@@ -68,7 +71,15 @@ public class StrictModeChecker {
             }
             if (snapshot.commitKind() == CommitKind.COMPACT
                     || snapshot.commitKind() == CommitKind.OVERWRITE) {
-                if (hasOverlappedPartition(snapshot, newPartitions)) {
+                boolean hasOverlap = hasOverlappedDataPartition(snapshot, newPartitions);
+                // OVERWRITE may contain logical changes represented only by deletion vectors,
+                // while an index-only COMPACT on a data evolution table does not change data.
+                if (!hasOverlap
+                        && (snapshot.commitKind() == CommitKind.OVERWRITE
+                                || !dataEvolutionEnabled)) {
+                    hasOverlap = hasOverlappedIndexPartition(snapshot, newPartitions);
+                }
+                if (hasOverlap) {
                     throw new RuntimeException(
                             String.format(
                                     "When trying to commit snapshot %d, "
@@ -109,7 +120,7 @@ public class StrictModeChecker {
         }
     }
 
-    private boolean hasOverlappedPartition(Snapshot snapshot, Set<BinaryRow> newPartitions) {
+    private boolean hasOverlappedDataPartition(Snapshot snapshot, Set<BinaryRow> newPartitions) {
         if (newPartitions.isEmpty()) {
             return false;
         }
@@ -120,10 +131,13 @@ public class StrictModeChecker {
                         .withKind(ScanMode.DELTA)
                         .dropStats()
                         .readFileIterator();
-        if (hasOverlappedPartition(entries, newPartitions)) {
-            return true;
-        }
+        return hasOverlappedPartition(entries, newPartitions);
+    }
 
+    private boolean hasOverlappedIndexPartition(Snapshot snapshot, Set<BinaryRow> newPartitions) {
+        if (newPartitions.isEmpty()) {
+            return false;
+        }
         String indexManifest = snapshot.indexManifest();
         if (indexManifest == null) {
             return false;

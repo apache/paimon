@@ -16,10 +16,10 @@
 # under the License.
 
 import collections
+import struct
 from typing import Callable, Dict, List, Optional, Tuple
 
 import pyarrow as pa
-import pyarrow.dataset as ds
 from pyarrow import RecordBatch
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
@@ -29,7 +29,65 @@ from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.row.blob import Blob
 from pypaimon.utils.range import Range
 
-_MIN_BATCH_SIZE_TO_REFILL = 1024
+_MAX_ARROW_OFFSET = (1 << 31) - 1
+
+
+def _offset_bounds(array, width=4):
+    offsets = array.buffers()[1]
+    if offsets is None:
+        return 0, 0
+    value_format = "=i" if width == 4 else "=q"
+    start = struct.unpack_from(
+        value_format, offsets, array.offset * width)[0]
+    end = struct.unpack_from(
+        value_format, offsets, (array.offset + len(array)) * width)[0]
+    return start, end
+
+
+def _collect_offset_usage(array, path, usage):
+    data_type = array.type
+    if pa.types.is_string(data_type) or pa.types.is_binary(data_type):
+        start, end = _offset_bounds(array)
+        usage[path] = end - start
+        return
+
+    if pa.types.is_list(data_type) or pa.types.is_map(data_type):
+        start, end = _offset_bounds(array)
+        usage[path] = end - start
+        if pa.types.is_map(data_type):
+            _collect_offset_usage(
+                array.keys.slice(start, end - start), path + ("key",), usage)
+            _collect_offset_usage(
+                array.items.slice(start, end - start), path + ("item",), usage)
+        else:
+            _collect_offset_usage(
+                array.values.slice(start, end - start), path + ("item",), usage)
+        return
+
+    if pa.types.is_large_list(data_type):
+        start, end = _offset_bounds(array, 8)
+        _collect_offset_usage(
+            array.values.slice(start, end - start), path + ("item",), usage)
+        return
+
+    if pa.types.is_fixed_size_list(data_type):
+        size = data_type.list_size
+        start = array.offset * size
+        _collect_offset_usage(
+            array.values.slice(start, len(array) * size), path + ("item",), usage)
+        return
+
+    if pa.types.is_struct(data_type):
+        for index in range(data_type.num_fields):
+            _collect_offset_usage(
+                array.field(index), path + ("field", index), usage)
+
+
+def _batch_offset_usage(batch):
+    usage = {}
+    for index in range(batch.num_columns):
+        _collect_offset_usage(batch.column(index), (index,), usage)
+    return usage
 
 
 class _BlobFileState:
@@ -83,76 +141,65 @@ class ConcatBatchReader(RecordBatchReader):
 
 class MergeAllBatchReader(RecordBatchReader):
     """
-    A reader that accepts multiple reader suppliers and concatenates all their arrow batches
-    into one big batch. This is useful when you want to merge all data from multiple sources
-    into a single batch for processing.
+    Read multiple suppliers as one bounded stream.
+
+    Small input batches are combined up to ``batch_size`` without allowing one
+    output batch to exceed Arrow's 32-bit offset limit.
     """
 
     def __init__(self, reader_suppliers: List[Callable], batch_size: int = 1024):
-        self.reader_suppliers = reader_suppliers
-        self.merged_batch: Optional[RecordBatch] = None
-        self.reader = None
-        self._batch_size = batch_size
+        self._reader = ConcatBatchReader(reader_suppliers)
+        self._remainder: Optional[RecordBatch] = None
+        self._batch_size = max(1, batch_size)
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
-        if self.reader:
-            try:
-                return self.reader.read_next_batch()
-            except StopIteration:
-                return None
-
-        all_batches = []
-
-        # Read all batches from all reader suppliers
-        for supplier in self.reader_suppliers:
-            reader = supplier()
-            if reader is None:
+        batches = []
+        num_rows = 0
+        offset_usage = {}
+        while True:
+            batch = self._remainder
+            self._remainder = None
+            if batch is None:
+                batch = self._reader.read_arrow_batch()
+            if batch is None:
+                break
+            if batch.num_rows == 0:
                 continue
-            try:
-                while True:
-                    batch = reader.read_arrow_batch()
-                    if batch is None:
-                        break
-                    all_batches.append(batch)
-            finally:
-                reader.close()
 
-        # Concatenate all batches into one big batch
-        if all_batches:
-            # For PyArrow < 17.0.0, use Table.concat_tables approach
-            # Convert batches to tables and concatenate
-            tables = [pa.Table.from_batches([batch]) for batch in all_batches]
-            if len(tables) == 1:
-                # Single table, just get the first batch
-                self.merged_batch = tables[0].to_batches()[0]
-            else:
-                # Multiple tables, concatenate them
-                concatenated_table = pa.concat_tables(tables)
-                # Convert back to a single batch by taking all batches and combining
-                all_concatenated_batches = concatenated_table.to_batches()
-                if len(all_concatenated_batches) == 1:
-                    self.merged_batch = all_concatenated_batches[0]
-                else:
-                    # If still multiple batches, we need to manually combine them
-                    # This shouldn't happen with concat_tables, but just in case
-                    combined_arrays = []
-                    for i in range(len(all_concatenated_batches[0].columns)):
-                        column_arrays = [batch.column(i) for batch in all_concatenated_batches]
-                        combined_arrays.append(pa.concat_arrays(column_arrays))
-                    self.merged_batch = pa.RecordBatch.from_arrays(
-                        combined_arrays,
-                        schema=all_concatenated_batches[0].schema
-                    )
-        else:
-            self.merged_batch = None
+            take = min(batch.num_rows, self._batch_size - num_rows)
+            piece = batch.slice(0, take)
+            piece_usage = _batch_offset_usage(piece)
+            if batches and any(
+                    offset_usage.get(path, 0) + value > _MAX_ARROW_OFFSET
+                    for path, value in piece_usage.items()):
+                self._remainder = batch
+                break
+
+            batches.append(piece)
+            num_rows += take
+            for path, value in piece_usage.items():
+                offset_usage[path] = offset_usage.get(path, 0) + value
+            if take < batch.num_rows:
+                self._remainder = batch.slice(take)
+            if num_rows == self._batch_size or any(
+                    value >= _MAX_ARROW_OFFSET
+                    for value in offset_usage.values()):
+                break
+
+        if not batches:
             return None
-        dataset = ds.InMemoryDataset(self.merged_batch)
-        self.reader = dataset.scanner(batch_size=self._batch_size).to_reader()
-        return self.reader.read_next_batch()
+        if len(batches) == 1:
+            return batches[0]
+
+        columns = [
+            pa.concat_arrays([batch.column(i) for batch in batches])
+            for i in range(batches[0].num_columns)
+        ]
+        return pa.RecordBatch.from_arrays(columns, schema=batches[0].schema)
 
     def close(self) -> None:
-        self.merged_batch = None
-        self.reader = None
+        self._remainder = None
+        self._reader.close()
 
 
 class DataEvolutionMergeReader(RecordBatchReader):
@@ -198,22 +245,8 @@ class DataEvolutionMergeReader(RecordBatchReader):
         for i, reader in enumerate(self.readers):
             if reader is not None:
                 if self._buffers[i] is not None:
-                    remainder = self._buffers[i]
+                    batches[i] = self._buffers[i]
                     self._buffers[i] = None
-                    if remainder.num_rows >= _MIN_BATCH_SIZE_TO_REFILL:
-                        batches[i] = remainder
-                    else:
-                        new_batch = reader.read_arrow_batch()
-                        if new_batch is not None and new_batch.num_rows > 0:
-                            combined_arrays = [
-                                pa.concat_arrays([remainder.column(j), new_batch.column(j)])
-                                for j in range(remainder.num_columns)
-                            ]
-                            batches[i] = pa.RecordBatch.from_arrays(
-                                combined_arrays, schema=remainder.schema
-                            )
-                        else:
-                            batches[i] = remainder
                 else:
                     batch = reader.read_arrow_batch()
                     if batch is None:
@@ -260,13 +293,15 @@ class BlobFallbackBatchReader(RecordBatchReader):
 
     def __init__(self, file_reader_suppliers: List[Tuple[DataFileMeta, Callable]],
                  field_name: str, output_type, row_ranges: Optional[List[Range]] = None,
-                 blob_as_descriptor: bool = False, deletion_vector=None, batch_size: int = 1024):
+                 blob_as_descriptor: bool = False, deletion_vector=None, batch_size: int = 1024,
+                 blob_parallelism: int = 1):
         self._file_reader_suppliers = file_reader_suppliers
         self._field_name = field_name
         self._output_type = output_type
         self._row_ranges = Range.sort_and_merge_overlap(row_ranges) if row_ranges else None
         self._blob_as_descriptor = blob_as_descriptor
         self._is_array_blob = pa.types.is_list(output_type) or pa.types.is_large_list(output_type)
+        self._is_map_blob = pa.types.is_map(output_type)
         self._data_field = DataField(
             0,
             field_name,
@@ -279,6 +314,8 @@ class BlobFallbackBatchReader(RecordBatchReader):
             self._deletion_vector_range, self._deletion_vector = deletion_vector
         self._returned = False
         self._batch_size = max(1, batch_size)
+        self._blob_parallelism = max(1, blob_parallelism)
+        self._file_io = None
         self._target_ranges = self._compute_target_ranges()
         self._target_range_index = 0
         self._next_row_id = (
@@ -297,6 +334,9 @@ class BlobFallbackBatchReader(RecordBatchReader):
         if not batch_row_ids:
             return None
 
+        resolve_blobs_concurrently = (
+            self._blob_parallelism > 1 and not self._blob_as_descriptor
+        )
         groups: Dict[int, Dict[int, Tuple[object, bool]]] = {}
 
         batch_first = batch_row_ids[0]
@@ -308,6 +348,8 @@ class BlobFallbackBatchReader(RecordBatchReader):
             if not blob_values:
                 continue
             group = groups.setdefault(state.file.max_sequence_number, {})
+            if resolve_blobs_concurrently and self._file_io is None:
+                self._file_io = state.reader._file_io
             for row_id, blob in blob_values.items():
                 if row_id in group:
                     raise ValueError(
@@ -315,13 +357,30 @@ class BlobFallbackBatchReader(RecordBatchReader):
                     )
                 if blob is None:
                     group[row_id] = (None, False)
-                elif blob is Blob.PLACE_HOLDER or blob is Blob.ARRAY_PLACE_HOLDER:
+                elif (
+                    blob is Blob.PLACE_HOLDER
+                    or blob is Blob.ARRAY_PLACE_HOLDER
+                    or blob is Blob.MAP_PLACE_HOLDER
+                ):
                     group[row_id] = (None, True)
+                elif self._is_map_blob:
+                    if resolve_blobs_concurrently:
+                        group[row_id] = (blob, False)
+                    else:
+                        group[row_id] = (self._map_value_for_arrow(blob), False)
                 elif self._is_array_blob:
-                    group[row_id] = (self._array_value_for_arrow(blob), False)
+                    if resolve_blobs_concurrently:
+                        group[row_id] = (blob, False)
+                    else:
+                        group[row_id] = (self._array_value_for_arrow(blob), False)
                 else:
                     if self._blob_as_descriptor:
                         group[row_id] = (blob.to_descriptor().serialize(), False)
+                    elif resolve_blobs_concurrently:
+                        # Keep values lazy until fallback selects the newest
+                        # non-placeholder version for each row. Otherwise older
+                        # overridden BLOB versions would be read unnecessarily.
+                        group[row_id] = (blob, False)
                     else:
                         group[row_id] = (blob.to_data(), False)
             if state.selected_range_index >= len(state.selected_ranges):
@@ -345,6 +404,9 @@ class BlobFallbackBatchReader(RecordBatchReader):
             if not found:
                 raise ValueError("All blob files at the same row id store a placeholder.")
 
+        if resolve_blobs_concurrently:
+            result = self._resolve_selected_blobs(result)
+
         return pa.RecordBatch.from_arrays(
             [pa.array(result, type=self._output_type)],
             names=[self._field_name],
@@ -360,6 +422,74 @@ class BlobFallbackBatchReader(RecordBatchReader):
             else:
                 result.append(blob.to_data())
         return result
+
+    def _map_value_for_arrow(self, blob_map):
+        if None in blob_map:
+            raise ValueError(
+                "MAP<X, BLOB> with null keys cannot be converted to a PyArrow Map."
+            )
+        result = []
+        for key, blob in blob_map.items():
+            if blob is None:
+                value = None
+            elif self._blob_as_descriptor:
+                value = blob.to_descriptor().serialize()
+            else:
+                value = blob.to_data()
+            result.append((key, value))
+        return result
+
+    def _resolve_selected_blobs(self, values: List[object]) -> List[object]:
+        """Materialize selected scalar, array, or map BLOBs with the shared FileIO."""
+        resolved = []
+        indexed_blobs: List[Tuple[int, object, Blob]] = []
+        for row_index, value in enumerate(values):
+            if self._is_map_blob:
+                if value is None:
+                    resolved.append(None)
+                    continue
+                if None in value:
+                    raise ValueError(
+                        "MAP<X, BLOB> with null keys cannot be converted to a PyArrow Map."
+                    )
+                map_values = []
+                for entry_index, (key, blob) in enumerate(value.items()):
+                    map_values.append((key, None))
+                    if blob is not None:
+                        indexed_blobs.append((row_index, entry_index, blob))
+                resolved.append(map_values)
+            elif self._is_array_blob:
+                if value is None:
+                    resolved.append(None)
+                    continue
+                array_values = []
+                for element_index, blob in enumerate(value):
+                    if blob is None:
+                        array_values.append(None)
+                    else:
+                        array_values.append(None)
+                        indexed_blobs.append((row_index, element_index, blob))
+                resolved.append(array_values)
+            elif isinstance(value, Blob):
+                resolved.append(None)
+                indexed_blobs.append((row_index, None, value))
+            else:
+                resolved.append(value)
+
+        if not indexed_blobs:
+            return resolved
+
+        bodies = self._file_io.read_blobs_concurrent(
+            [blob for _, _, blob in indexed_blobs], self._blob_parallelism)
+        for (row_index, slot, _), body in zip(indexed_blobs, bodies):
+            if self._is_map_blob:
+                key = resolved[row_index][slot][0]
+                resolved[row_index][slot] = (key, body)
+            elif slot is None:
+                resolved[row_index] = body
+            else:
+                resolved[row_index][slot] = body
+        return resolved
 
     def _compute_target_ranges(self) -> List[Range]:
         ranges = Range.sort_and_merge_overlap([
@@ -459,7 +589,9 @@ class BlobFallbackBatchReader(RecordBatchReader):
                 blob_offsets,
                 self._data_field,
                 reader._input_stream,
-                blob_as_descriptor=self._blob_as_descriptor,
+                blob_as_descriptor=(
+                    self._blob_as_descriptor or self._blob_parallelism > 1
+                ),
             )
 
             blobs = []

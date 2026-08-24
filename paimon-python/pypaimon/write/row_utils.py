@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from collections.abc import Mapping
 from typing import Any, Dict, Iterable, List
 
 import pyarrow as pa
@@ -78,6 +79,8 @@ def value_for_arrow(value: Any, field: DataField) -> Any:
 def _contains_blob_value(value: Any) -> bool:
     if isinstance(value, Blob):
         return True
+    if isinstance(value, Mapping):
+        return any(_contains_blob_value(item) for item in value.values())
     if isinstance(value, (list, tuple)):
         return any(_contains_blob_value(item) for item in value)
     return False

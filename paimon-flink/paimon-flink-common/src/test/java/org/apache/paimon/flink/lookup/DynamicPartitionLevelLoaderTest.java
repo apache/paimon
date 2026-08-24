@@ -23,7 +23,6 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.lookup.rocksdb.RocksDBOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -221,7 +220,7 @@ public class DynamicPartitionLevelLoaderTest {
         SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
         Options conf = new Options(customOptions);
         conf.set(CoreOptions.BUCKET, 2);
-        conf.set(RocksDBOptions.LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL, Duration.ofSeconds(1));
+        conf.set(CoreOptions.LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL, Duration.ofSeconds(1));
         if (primaryKeys.isEmpty()) {
             conf.set(CoreOptions.BUCKET_KEY.key(), "k");
         }

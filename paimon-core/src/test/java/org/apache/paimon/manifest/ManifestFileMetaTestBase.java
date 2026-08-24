@@ -98,6 +98,7 @@ public abstract class ManifestFileMetaTestBase {
                         null,
                         null,
                         null,
+                        null,
                         null));
     }
 
@@ -105,9 +106,9 @@ public abstract class ManifestFileMetaTestBase {
         return getManifestFile().write(Arrays.asList(entries)).get(0);
     }
 
-    abstract ManifestFile getManifestFile();
+    protected abstract ManifestFile getManifestFile();
 
-    abstract RowType getPartitionType();
+    protected abstract RowType getPartitionType();
 
     protected void assertEquivalentEntries(
             List<ManifestFileMeta> input, List<ManifestFileMeta> merged) {

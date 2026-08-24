@@ -98,6 +98,8 @@ Paimon Iceberg compatibility currently supports the following data types.
 | `TIMESTAMP_LTZ` (precision 3-6) | `timestamptz`     |
 | `TIMESTAMP` (precision 7-9)  | `timestamp_ns`    |
 | `TIMESTAMP_LTZ` (precision 7-9) | `timestamptz_ns`  |
+| `GEOMETRY(crs)` | `geometry(crs)` |
+| `GEOGRAPHY(crs, algorithm)` | `geography(crs, algorithm)` |
 | `ARRAY`        | `list`            |
 | `MAP`          | `map`             |
 | `ROW`          | `struct`          |
@@ -107,5 +109,12 @@ Paimon Iceberg compatibility currently supports the following data types.
 **Note on Timestamp Types:**
 - `TIMESTAMP` and `TIMESTAMP_LTZ` types with precision from 3 to 6 are mapped to standard Iceberg timestamp types
 - `TIMESTAMP` and `TIMESTAMP_LTZ` types with precision from 7 to 9 use nanosecond precision and require Iceberg v3 format
+
+**Note on Geospatial Types:**
+- `GEOMETRY` and `GEOGRAPHY` values use OGC Well-Known Binary (WKB). The default CRS is `OGC:CRS84`, and the default geography edge algorithm is `spherical`.
+- Geospatial columns require Parquet for data, per-level, and changelog files. When Iceberg metadata is enabled, set `metadata.iceberg.format-version` to `3`.
+- Spark SQL supports geospatial columns in Spark 4.1 when `spark.sql.geospatial.enabled=true`, for CRSs recognized by Spark, with the `spherical` geography edge algorithm. Spark 3.x, Spark 4.0, and Flink SQL reject these columns instead of exposing them as binary and losing the CRS or edge algorithm.
+- When Iceberg metadata is enabled, a `GEOGRAPHY` CRS cannot contain a comma, including in nested columns, because Iceberg's geospatial type grammar uses commas to separate parameters.
+- Iceberg REST catalog publication does not yet support geospatial columns. Use `table-location`, `hadoop-catalog`, or `hive-catalog` metadata storage instead.
 
 :::

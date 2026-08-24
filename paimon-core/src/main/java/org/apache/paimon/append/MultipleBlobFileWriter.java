@@ -26,6 +26,7 @@ import org.apache.paimon.format.blob.BlobFileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.io.FileWriterAbortExecutor;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.io.RollingFileWriterImpl;
 import org.apache.paimon.io.RowDataFileWriter;
@@ -67,11 +68,12 @@ public class MultipleBlobFileWriter implements Closeable {
             Set<String> blobInlineFields,
             boolean writeNullOnMissingFile,
             boolean writeNullOnFetchFailure,
-            BlobFetchMetricReporter blobFetchMetricReporter) {
+            BlobFetchMetricReporter blobFetchMetricReporter,
+            int copyBufferSize) {
         RowType blobRowType = new RowType(fieldsInBlobFile(writeSchema, blobInlineFields));
         this.blobWriters = new ArrayList<>();
         for (String blobFieldName : blobRowType.getFieldNames()) {
-            BlobFileFormat blobFileFormat = new BlobFileFormat();
+            BlobFileFormat blobFileFormat = new BlobFileFormat(false, copyBufferSize);
             blobFileFormat.setWriteConsumer(blobConsumer);
             blobFileFormat.setWriteNullOnMissingFile(writeNullOnMissingFile);
             blobFileFormat.setWriteNullOnFetchFailure(writeNullOnFetchFailure);
@@ -97,7 +99,9 @@ public class MultipleBlobFileWriter implements Closeable {
                                             asyncFileWrite,
                                             statsDenseStore,
                                             pathFactory.isExternalPath(),
-                                            singletonList(blobFieldName)),
+                                            singletonList(blobFieldName),
+                                            null,
+                                            null),
                             targetFileSize,
                             writeSchema.projectIndexes(singletonList(blobFieldName))));
         }
@@ -130,6 +134,14 @@ public class MultipleBlobFileWriter implements Closeable {
         return results;
     }
 
+    List<FileWriterAbortExecutor> drainAbortExecutors() {
+        List<FileWriterAbortExecutor> abortExecutors = new ArrayList<>();
+        for (BlobProjectedFileWriter blobWriter : blobWriters) {
+            abortExecutors.addAll(blobWriter.writer().drainAbortExecutors());
+        }
+        return abortExecutors;
+    }
+
     private static class BlobProjectedFileWriter
             extends ProjectedFileWriter<
                     RollingFileWriterImpl<InternalRow, DataFileMeta>, List<DataFileMeta>> {
@@ -137,7 +149,9 @@ public class MultipleBlobFileWriter implements Closeable {
                 Supplier<? extends SingleFileWriter<InternalRow, DataFileMeta>> writerFactory,
                 long targetFileSize,
                 int[] projection) {
-            super(new RollingFileWriterImpl<>(writerFactory, targetFileSize), projection);
+            super(
+                    new RollingFileWriterImpl<>(writerFactory, targetFileSize, Long.MAX_VALUE),
+                    projection);
         }
     }
 }

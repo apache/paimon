@@ -21,6 +21,7 @@ package org.apache.paimon.cosn;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.utils.SensitiveConfigUtils;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
@@ -83,7 +84,7 @@ public class COSNFileIO extends HadoopCompliantFileIO {
                     LOG.debug(
                             "Adding config entry for {} as {} to Hadoop config",
                             key,
-                            hadoopOptions.get(key));
+                            SensitiveConfigUtils.redactValue(key, hadoopOptions.get(key)));
                 }
             }
         }

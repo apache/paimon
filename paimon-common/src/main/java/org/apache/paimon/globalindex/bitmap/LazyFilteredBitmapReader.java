@@ -42,15 +42,11 @@ public class LazyFilteredBitmapReader extends SortedFileGlobalIndexReader<Bitmap
             List<GlobalIndexIOMeta> files,
             KeySerializer keySerializer,
             long fallbackScanMaxSize,
+            long totalRowCount,
             ExecutorService executor) {
-        super(files, keySerializer, fallbackScanMaxSize, executor);
+        super(files, keySerializer, fallbackScanMaxSize, totalRowCount, executor);
         this.fileReader = fileReader;
         this.keySerializer = keySerializer;
-    }
-
-    @Override
-    protected Optional<GlobalIndexResult> visitIsNotNull(BitmapIndexReader reader) {
-        return reader.visitIsNotNull();
     }
 
     @Override
@@ -86,11 +82,6 @@ public class LazyFilteredBitmapReader extends SortedFileGlobalIndexReader<Bitmap
     }
 
     @Override
-    protected Optional<GlobalIndexResult> visitNotEqual(BitmapIndexReader reader, Object literal) {
-        return reader.visitNotEqual(literal);
-    }
-
-    @Override
     protected Optional<GlobalIndexResult> visitLessOrEqual(
             BitmapIndexReader reader, Object literal) {
         return reader.visitLessOrEqual(literal);
@@ -110,12 +101,6 @@ public class LazyFilteredBitmapReader extends SortedFileGlobalIndexReader<Bitmap
     @Override
     protected Optional<GlobalIndexResult> visitIn(BitmapIndexReader reader, List<Object> literals) {
         return reader.visitIn(literals);
-    }
-
-    @Override
-    protected Optional<GlobalIndexResult> visitNotIn(
-            BitmapIndexReader reader, List<Object> literals) {
-        return reader.visitNotIn(literals);
     }
 
     @Override

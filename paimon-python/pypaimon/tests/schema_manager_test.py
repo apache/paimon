@@ -22,9 +22,12 @@ import unittest
 from pypaimon.branch.branch_manager import BranchManager
 from pypaimon.common.identifier import DEFAULT_MAIN_BRANCH
 from pypaimon.common.file_io import FileIO
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
-from pypaimon.schema.data_types import ArrayType, AtomicType, DataField
+from pypaimon.schema.data_types import (ArrayType, AtomicType, DataField,
+                                        MapType, RowType)
 from pypaimon.schema.schema import Schema
+from pypaimon.schema.schema_change import SetOption
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.schema.table_schema import TableSchema
 
@@ -116,6 +119,11 @@ class TestBlobPartitionValidation(unittest.TestCase):
         blob_types = [
             AtomicType("BLOB"),
             ArrayType(True, AtomicType("BLOB")),
+            MapType(
+                True,
+                AtomicType("STRING", False),
+                AtomicType("BLOB"),
+            ),
         ]
         for index, blob_type in enumerate(blob_types):
             with self.subTest(blob_type=blob_type):
@@ -143,6 +151,148 @@ class TestBlobPartitionValidation(unittest.TestCase):
             "can not be part of partition keys",
         ):
             manager.commit(table_schema)
+
+    def test_create_table_allows_unsupported_map_blob_key(self):
+        manager = SchemaManager(
+            self.file_io,
+            f"{self.temp_dir}/test_db.db/unsupported_map_key",
+        )
+        schema = Schema(
+            fields=[
+                DataField(0, "id", AtomicType("INT")),
+                DataField(
+                    1,
+                    "payload",
+                    MapType(
+                        True,
+                        AtomicType("BOOLEAN", False),
+                        AtomicType("BLOB"),
+                    ),
+                ),
+            ],
+            options={
+                "row-tracking.enabled": "true",
+                "data-evolution.enabled": "true",
+            },
+        )
+
+        table_schema = manager.create_table(schema)
+        self.assertEqual(table_schema.fields[1].type, schema.fields[1].type)
+
+    def test_create_table_rejects_unsupported_nested_blob(self):
+        nested_types = [
+            MapType(True, AtomicType("BLOB", False), AtomicType("INT")),
+            RowType(
+                True,
+                [DataField(2, "nested_blob", AtomicType("BLOB"))],
+            ),
+            ArrayType(True, ArrayType(True, AtomicType("BLOB"))),
+            MapType(
+                True,
+                AtomicType("STRING", False),
+                ArrayType(True, AtomicType("BLOB")),
+            ),
+        ]
+
+        for index, nested_type in enumerate(nested_types):
+            with self.subTest(nested_type=nested_type):
+                manager = SchemaManager(
+                    self.file_io,
+                    f"{self.temp_dir}/test_db.db/nested_blob_{index}",
+                )
+                schema = Schema(
+                    fields=[
+                        DataField(0, "id", AtomicType("INT")),
+                        DataField(1, "payload", nested_type),
+                    ],
+                )
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "unsupported nested BLOB type",
+                ):
+                    manager.create_table(schema)
+
+    def test_create_table_still_rejects_primary_key_map_blob(self):
+        manager = SchemaManager(
+            self.file_io,
+            f"{self.temp_dir}/test_db.db/pk_map_blob",
+        )
+        schema = Schema(
+            fields=[
+                DataField(0, "id", AtomicType("INT", False)),
+                DataField(
+                    1,
+                    "payload",
+                    MapType(
+                        True,
+                        AtomicType("STRING", False),
+                        AtomicType("BLOB"),
+                    ),
+                ),
+            ],
+            primary_keys=["id"],
+            options={
+                "row-tracking.enabled": "true",
+                "data-evolution.enabled": "true",
+            },
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "MAP<X, BLOB> type is not supported with primary key",
+        ):
+            manager.create_table(schema)
+
+
+class TestOptionValidation(unittest.TestCase):
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.file_io = FileIO.get(self.temp_dir, Options({}))
+        self.table_path = f"{self.temp_dir}/test_db.db/test_table"
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    @staticmethod
+    def _schema(options=None):
+        return Schema(
+            fields=[DataField(0, "id", AtomicType("INT"))],
+            options=options or {},
+        )
+
+    def test_create_rejects_invalid_target_file_row_num(self):
+        key = CoreOptions.TARGET_FILE_ROW_NUM.key()
+        max_value = CoreOptions.TARGET_FILE_ROW_NUM.default_value()
+        manager = SchemaManager(self.file_io, self.table_path)
+
+        invalid_values = [
+            ("0", "should be at least 1"),
+            (str(max_value + 1), f"should be at most {max_value}"),
+        ]
+        for value, message in invalid_values:
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, f"{key} {message}"):
+                    manager.create_table(self._schema({key: value}))
+
+    def test_alter_rejects_invalid_target_file_row_num(self):
+        key = CoreOptions.TARGET_FILE_ROW_NUM.key()
+        max_value = CoreOptions.TARGET_FILE_ROW_NUM.default_value()
+        manager = SchemaManager(self.file_io, self.table_path)
+        manager.create_table(self._schema())
+
+        invalid_values = [
+            ("-1", "should be at least 1"),
+            (str(max_value + 1), f"should be at most {max_value}"),
+        ]
+        for value, message in invalid_values:
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(RuntimeError, f"{key} {message}"):
+                    manager.commit_changes([SetOption(key, value)])
+
+        self.assertEqual(manager.latest().id, 0)
+        self.assertNotIn(key, manager.latest().options)
 
 
 if __name__ == '__main__':

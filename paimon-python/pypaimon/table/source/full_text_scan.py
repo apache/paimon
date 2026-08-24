@@ -21,7 +21,7 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from typing import List
 
-from pypaimon.globalindex.global_index_coverage import GlobalIndexCoverage
+from pypaimon.globalindex.data_evolution_global_index_coverage import DataEvolutionGlobalIndexCoverage
 from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (
     FULL_TEXT_IDENTIFIER,
 )
@@ -51,7 +51,7 @@ class FullTextScan(ABC):
         pass
 
 
-class FullTextScanImpl(FullTextScan):
+class DataEvolutionFullTextScan(FullTextScan):
     """Implementation for FullTextScan."""
 
     def __init__(
@@ -117,12 +117,15 @@ class FullTextScanImpl(FullTextScan):
                         column_name, range_key.from_, range_key.to, files))
 
         if all_index_files:
-            raw_row_ranges = GlobalIndexCoverage(
+            raw_row_ranges = DataEvolutionGlobalIndexCoverage(
                 self._table,
                 snapshot,
                 partition_filter,
                 all_index_files,
-            ).unindexed_ranges(list(text_column_ids))
+            ).unindexed_ranges(
+                list(text_column_ids),
+                search_mode=self._table.options.full_text_index_search_mode(),
+            )
             if raw_row_ranges:
                 splits.append(RawFullTextSearchSplit(raw_row_ranges))
 

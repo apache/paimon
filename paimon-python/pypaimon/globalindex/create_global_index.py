@@ -160,7 +160,7 @@ class GlobalIndexBuilder:
             read_builder = read_builder.with_partition_filter(partition_filter)
 
         scan = read_builder.new_scan()
-        plan = scan.plan()
+        plan = scan.plan_for_write()
         splits = plan.splits()
         if not splits:
             return []

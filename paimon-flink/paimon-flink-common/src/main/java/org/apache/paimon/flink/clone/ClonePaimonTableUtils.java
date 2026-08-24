@@ -134,6 +134,7 @@ public class ClonePaimonTableUtils {
             String targetDatabase,
             String targetTableName,
             Map<String, String> targetCatalogConfig,
+            Map<String, String> targetTableConfig,
             int parallelism,
             @Nullable String whereSql,
             @Nullable List<String> includedTables,
@@ -165,6 +166,7 @@ public class ClonePaimonTableUtils {
                                 new ClonePaimonSchemaFunction(
                                         sourceCatalogConfig,
                                         targetCatalogConfig,
+                                        targetTableConfig,
                                         preferFileFormat,
                                         cloneIfExists))
                         .name("Clone Schema")

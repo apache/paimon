@@ -293,7 +293,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         }
         ConflictDetection.Factory conflictDetectFactory =
                 scanner ->
-                        new ConflictDetection(
+                        ConflictDetection.create(
                                 tableName,
                                 commitUser,
                                 partitionType,

@@ -20,6 +20,8 @@ package org.apache.paimon.globalindex;
 
 import javax.annotation.Nullable;
 
+import java.util.List;
+
 /** Index writer for single-column global index with relative row id (from 0 to rowCnt - 1). */
 public interface GlobalIndexSingleColumnWriter extends GlobalIndexWriter {
 
@@ -30,4 +32,14 @@ public interface GlobalIndexSingleColumnWriter extends GlobalIndexWriter {
      * @param relativeRowId local row id calculated by {@code rowId - rangeStart}
      */
     void write(@Nullable Object key, long relativeRowId);
+
+    /**
+     * Finishes a writer whose normalized entries cover {@code sourceRowCount} source rows.
+     *
+     * <p>The default implementation preserves the one-entry-per-source-row contract. Writers for
+     * zero-to-many key extraction should override this method.
+     */
+    default List<ResultEntry> finish(long sourceRowCount) {
+        return finish();
+    }
 }

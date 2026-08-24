@@ -86,7 +86,9 @@ public class BulkFileFormatTest {
                                 new FormatReaderContext(
                                         new LocalFileIO(),
                                         path,
-                                        new LocalFileIO().getFileSize(path)));
+                                        new LocalFileIO().getFileSize(path),
+                                        null,
+                                        null));
         List<InternalRow> result = new ArrayList<>();
         reader.forEachRemaining(
                 rowData -> result.add(GenericRow.of(rowData.getInt(0), rowData.getInt(0))));

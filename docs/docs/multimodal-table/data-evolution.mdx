@@ -211,6 +211,15 @@ Notes:
   `spark.paimon.write.data-evolution.update-conflict-retry.max-attempts` and
   retry wait time with
   `spark.paimon.write.data-evolution.update-conflict-retry.wait-ms`.
+- If concurrent compaction changes row-ID file boundaries after Spark SQL
+  `MERGE INTO` stages regular partial-column files, Spark rebases those staged
+  files onto the latest boundaries before committing instead of rerunning the
+  MERGE source and join. Spark performs this rewrite with distributed DataFrame
+  processing, so the PyPaimon-only
+  `data-evolution.row-id-conflict-rewrite.max-size` limit does not apply.
+  Recovery does not apply when deletion vectors are enabled or when
+  existing-row BLOB or VECTOR files are staged, and it does not hide logical
+  concurrent-update conflicts.
 - In Spark SQL, `MERGE INTO` supports `WHEN NOT MATCHED BY SOURCE` for delete
   actions on Data Evolution tables.
 - The Flink `data_evolution_merge_into` procedure currently supports updating
@@ -225,16 +234,47 @@ together with row tracking and Data Evolution:
 :::warning
 
 Deleting rows with deletion vectors does not physically remove the original
-data immediately. If a table has many deleted rows, run compaction to
-materialize the deletions; otherwise, the deleted data still consumes storage
-space and may reduce read efficiency. Set
-`data-evolution.compaction.rewrite-row-ids=true` for compaction to rewrite all
-column files in the compacted range, physically apply deletion vectors, and
-reassign row IDs. Enable this only when callers do not rely on stable `_ROW_ID`;
-this invalidates row-id based references and drops global indexes for affected
-partitions.
+data immediately. Data Evolution compaction preserves row IDs and logical
+deletions, so it does not materialize deleted rows. The legacy
+`data-evolution.compaction.rewrite-row-ids` option is no longer supported. Use
+the `materialize_deletion_vectors` procedure to apply deletion vectors to the
+latest table state and replace the affected files. Historical snapshots and
+tags may still reference the replaced files; reclaiming their storage requires
+those references to expire and snapshot expiration to remove the files.
 
 :::
+
+Both Flink and Spark expose the same procedure:
+
+```sql
+CALL sys.materialize_deletion_vectors(`table` => 'default.target_table');
+```
+
+The procedure can limit the rewrite to selected partitions. `partitions` and
+`where` cannot be used together:
+
+```sql
+CALL sys.materialize_deletion_vectors(
+    `table` => 'default.target_table',
+    partitions => 'dt=2026-08-12');
+
+CALL sys.materialize_deletion_vectors(
+    `table` => 'default.target_table',
+    `where` => 'dt >= 20260801');
+```
+
+Materialization rewrites the affected data, assigns new row IDs to surviving
+rows, removes the applied deletion vectors, and drops affected global indexes.
+Consumers which persist `_ROW_ID` values must therefore coordinate with this
+operation. Concurrent changes to affected row-ID ranges cause the procedure to
+fail instead of committing stale results. Materialization of vector-store files
+is not currently supported.
+
+Spark processes bounded batches until all matching deletion vectors have been
+materialized. To keep a Flink job bounded, one Flink procedure invocation
+processes one batch with a soft target of 100,000 deletion vectors. An
+overlapping row-ID component is never split and can exceed the target. Invoke
+the Flink procedure repeatedly until an invocation makes no changes.
 
 ```sql
 CREATE TABLE target_table (id INT, b INT, c INT) TBLPROPERTIES (
@@ -248,15 +288,6 @@ Spark SQL supports `DELETE FROM` for Data Evolution tables:
 
 ```sql
 DELETE FROM target_table WHERE id = 1;
-```
-
-To physically remove deleted rows during compaction:
-
-```sql
-CALL sys.compact(
-    table => 'target_table',
-    options => 'data-evolution.compaction.rewrite-row-ids=true'
-);
 ```
 
 Spark SQL also supports delete actions in `MERGE INTO`:
@@ -273,8 +304,18 @@ WHEN MATCHED AND s.op = 'update' THEN UPDATE SET t.b = t.b + 10
 WHEN NOT MATCHED BY SOURCE AND t.id > 10 THEN DELETE;
 ```
 
-The `WHEN NOT MATCHED BY SOURCE` clause requires Spark 3.4 or later. Currently,
-only Spark supports writing deletes for Data Evolution tables.
+The `WHEN NOT MATCHED BY SOURCE` clause requires Spark 3.4 or later.
+
+With Flink 1.17 or later, SQL supports `DELETE FROM` for Data Evolution tables
+in batch mode. For row-level predicates, matching rows are recorded in deletion
+vectors, so data files are not rewritten:
+
+```sql
+DELETE FROM target_table WHERE id = 1;
+```
+
+Flink users can also submit the
+[`delete` action](../flink/action-jars#deleting-from-a-data-evolution-table).
 
 ## Self Updates
 

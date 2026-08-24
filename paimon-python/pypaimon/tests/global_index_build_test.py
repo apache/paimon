@@ -41,9 +41,11 @@ from pypaimon.globalindex.full_text.native_full_text_index_writer import (
 )
 from pypaimon.globalindex.vindex.vindex_vector_index_writer import (
     VindexVectorIndexWriter,
+    _sample_training_vectors,
     native_options,
+    train_sample_ratio,
 )
-from pypaimon.globalindex.global_index_scanner import GlobalIndexScanner
+from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
 from pypaimon.index.index_file_handler import IndexFileHandler
 from pypaimon.schema.data_types import ArrayType, AtomicType, RowType
 from pypaimon.tests.data_evolution_test_helpers import (
@@ -78,19 +80,34 @@ class _FakeSplit:
         self.raw_convertible = False
 
 
+class _FakeVectorIndexTraining:
+
+    def __init__(self, options, data):
+        self.options = dict(options)
+        self.trained = data.tolist()
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+class _FakeVectorIndexTrainer:
+
+    @classmethod
+    def train(cls, options, data):
+        return _FakeVectorIndexTraining(options, data)
+
+
 class _FakeVectorIndexWriter:
     instances = []
 
-    def __init__(self, options):
-        self.options = dict(options)
-        self.trained = None
+    def __init__(self, training):
+        self.options = dict(training.options)
+        self.trained = training.trained
         self.added_ids = None
         self.added_vectors = None
         self.closed = False
         _FakeVectorIndexWriter.instances.append(self)
-
-    def train(self, data):
-        self.trained = data.tolist()
 
     def add_vectors(self, ids, data):
         self.added_ids = ids.tolist()
@@ -211,7 +228,7 @@ class GlobalIndexBuildTest(
 
         read_builder = table.new_read_builder()
         predicate = read_builder.new_predicate_builder().equal('id', 2)
-        with GlobalIndexScanner.create(
+        with DataEvolutionGlobalIndexScanner.create(
                 table,
                 predicate=predicate,
                 snapshot=snapshot) as scanner:
@@ -372,7 +389,7 @@ class GlobalIndexBuildTest(
              [Range(0, 1), Range(3, 3)]),
         ]
         for predicate, expected in cases:
-            with GlobalIndexScanner.create(
+            with DataEvolutionGlobalIndexScanner.create(
                     table,
                     predicate=predicate,
                     snapshot=snapshot) as scanner:
@@ -551,6 +568,7 @@ class GlobalIndexBuildTest(
 
         old_module = sys.modules.get("paimon_vindex")
         sys.modules["paimon_vindex"] = types.SimpleNamespace(
+            VectorIndexTrainer=_FakeVectorIndexTrainer,
             VectorIndexWriter=_FakeVectorIndexWriter)
         _FakeVectorIndexWriter.instances = []
         try:
@@ -609,6 +627,7 @@ class GlobalIndexBuildTest(
 
         old_module = sys.modules.get("paimon_vindex")
         sys.modules["paimon_vindex"] = types.SimpleNamespace(
+            VectorIndexTrainer=_FakeVectorIndexTrainer,
             VectorIndexWriter=_FakeVectorIndexWriter)
         _FakeVectorIndexWriter.instances = []
         try:
@@ -631,6 +650,13 @@ class GlobalIndexBuildTest(
         self.assertEqual(
             [[0, 1], [0, 1], [0]],
             [writer.added_ids for writer in _FakeVectorIndexWriter.instances],
+        )
+        self.assertEqual(
+            ['2', '2', '1'],
+            [
+                writer.options['expected-vector-count']
+                for writer in _FakeVectorIndexWriter.instances
+            ],
         )
 
         snapshot = table.snapshot_manager().get_latest_snapshot()
@@ -669,6 +695,7 @@ class GlobalIndexBuildTest(
 
         old_module = sys.modules.get("paimon_vindex")
         sys.modules["paimon_vindex"] = types.SimpleNamespace(
+            VectorIndexTrainer=_FakeVectorIndexTrainer,
             VectorIndexWriter=_FakeVectorIndexWriter)
         _FakeVectorIndexWriter.instances = []
         options = {
@@ -962,6 +989,50 @@ class GlobalIndexBuildTest(
         self.assertEqual('512', result['nlist'])
         self.assertEqual('16', result['pq.m'])
         self.assertEqual('true', result['use-opq'])
+
+    def test_vindex_native_options_support_030_indexes(self):
+        data_type = ArrayType(True, AtomicType('FLOAT'))
+        options = {
+            'ivf-rq.rq.bits': '5',
+            'ivf-rq.max-bytes-per-vector': '96',
+            'diskann.build-preset': 'balanced',
+            'diskann.pq.code-ratio': '0.0625',
+            'diskann.raw-vector-encoding': 'f16',
+        }
+
+        rq_result = native_options(
+            data_type, options, 'ivf-rq', 'embedding')
+        self.assertEqual('ivf_rq', rq_result['index.type'])
+        self.assertEqual('5', rq_result['rq.bits'])
+        self.assertEqual('96', rq_result['max-bytes-per-vector'])
+        self.assertEqual('inner_product', rq_result['metric'])
+
+        diskann_result = native_options(
+            data_type, options, 'diskann', 'embedding')
+        self.assertEqual('diskann', diskann_result['index.type'])
+        self.assertEqual(
+            'balanced', diskann_result['diskann.build-preset'])
+        self.assertEqual('0.0625', diskann_result['pq.code-ratio'])
+        self.assertEqual(
+            'f16', diskann_result['diskann.raw-vector-encoding'])
+
+    def test_vindex_training_sample_ratio(self):
+        options = {
+            'ivf-rq.train.sample-ratio': '0.5',
+            'fields.embedding.train.sample-ratio': '0.25',
+        }
+        self.assertEqual(
+            0.25, train_sample_ratio(options, 'ivf-rq', 'embedding'))
+        self.assertEqual(
+            0.5, train_sample_ratio(options, 'ivf-rq', 'other'))
+
+        import numpy as np
+        vectors = np.arange(20, dtype=np.float32).reshape(10, 2)
+        sampled = _sample_training_vectors(np, vectors, 0.4)
+        self.assertEqual(
+            [[0.0, 1.0], [4.0, 5.0], [10.0, 11.0], [14.0, 15.0]],
+            sampled.tolist(),
+        )
 
     def test_split_by_contiguous_row_range_matches_java_builder(self):
         split = _FakeSplit([

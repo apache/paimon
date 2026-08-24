@@ -18,6 +18,9 @@
 
 package org.apache.paimon.data.variant;
 
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.memory.MemorySegment;
+
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
@@ -650,5 +653,23 @@ public class GenericVariantUtil {
         }
         checkIndex(stringStart + nextOffset - 1, metadata.length);
         return new String(metadata, stringStart + offset, nextOffset - offset);
+    }
+
+    static void pointToMetadataKey(
+            byte[] metadata, MemorySegment[] metadataSegments, int id, BinaryString result) {
+        checkIndex(0, metadata.length);
+        int offsetSize = ((metadata[0] >> 6) & 0x3) + 1;
+        int dictSize = readUnsigned(metadata, 1, offsetSize);
+        if (id >= dictSize) {
+            throw malformedVariant();
+        }
+        int stringStart = 1 + (dictSize + 2) * offsetSize;
+        int offset = readUnsigned(metadata, 1 + (id + 1) * offsetSize, offsetSize);
+        int nextOffset = readUnsigned(metadata, 1 + (id + 2) * offsetSize, offsetSize);
+        if (offset > nextOffset) {
+            throw malformedVariant();
+        }
+        checkIndex(stringStart + nextOffset - 1, metadata.length);
+        result.pointTo(metadataSegments, stringStart + offset, nextOffset - offset);
     }
 }

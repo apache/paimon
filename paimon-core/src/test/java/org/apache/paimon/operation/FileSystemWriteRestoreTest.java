@@ -255,8 +255,9 @@ public class FileSystemWriteRestoreTest {
     }
 
     @Test
-    public void testWriteRejectsBucketMismatchWhenPerPartitionCountDisabled() throws Exception {
-        FileStoreTable table = createPartitionedPkTable(4, false);
+    public void testWriteRejectsBucketMismatchWhenPerPartitionCountDisabledByDefault()
+            throws Exception {
+        FileStoreTable table = createPartitionedPkTableWithDefaultOptions(4);
         commitOneRow(table, 1, 1);
         commitOneRow(table, 1, 2);
 
@@ -281,11 +282,22 @@ public class FileSystemWriteRestoreTest {
 
     private FileStoreTable createPartitionedPkTable(int bucket, boolean perPartitionCountEnabled)
             throws Exception {
+        return createPartitionedPkTable(bucket, Boolean.valueOf(perPartitionCountEnabled));
+    }
+
+    private FileStoreTable createPartitionedPkTableWithDefaultOptions(int bucket) throws Exception {
+        return createPartitionedPkTable(bucket, null);
+    }
+
+    private FileStoreTable createPartitionedPkTable(int bucket, Boolean perPartitionCountEnabled)
+            throws Exception {
         Path path = new Path(tempDir.toString());
         Options options = new Options();
         options.set(CoreOptions.PATH, path.toString());
         options.set(CoreOptions.BUCKET, bucket);
-        options.set(CoreOptions.BUCKET_PER_PARTITION_COUNT_ENABLED, perPartitionCountEnabled);
+        if (perPartitionCountEnabled != null) {
+            options.set(CoreOptions.BUCKET_PER_PARTITION_COUNT_ENABLED, perPartitionCountEnabled);
+        }
 
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(

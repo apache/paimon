@@ -95,7 +95,7 @@ class PrimaryKeyVectorScanTest {
         when(reader.indexFileHandler()).thenReturn(indexFileHandler);
         configureBatchScan(table, reader, snapshot);
 
-        new PrimaryKeyVectorScan(table, 7, "ivf-pq", null).scan();
+        new PrimaryKeyVectorScan(table, 7, "ivf-pq", null, null).scan();
 
         verify(reader).onlyReadRealBuckets();
     }
@@ -237,6 +237,7 @@ class PrimaryKeyVectorScanTest {
     private static IndexFileMeta payloadFile(String indexType, int fieldId, String fileName) {
         byte[] sourceMeta =
                 new PrimaryKeyIndexSourceMeta(
+                                1,
                                 Collections.singletonList(
                                         new PrimaryKeyIndexSourceFile("data-1", 2)))
                         .serialize();

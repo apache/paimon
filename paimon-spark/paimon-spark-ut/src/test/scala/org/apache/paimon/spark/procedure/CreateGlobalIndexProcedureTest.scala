@@ -19,11 +19,14 @@
 package org.apache.paimon.spark.procedure
 
 import org.apache.paimon.globalindex.{KeySerializer, SortedIndexFileMeta}
+import org.apache.paimon.index.DataEvolutionIndexSourceMeta
+import org.apache.paimon.manifest.IndexManifestEntry
 import org.apache.paimon.memory.MemorySlice
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.types.VarCharType
 import org.apache.paimon.utils.Range
 
+import org.apache.spark.sql.Row
 import org.apache.spark.sql.paimon.Utils
 import org.apache.spark.sql.streaming.StreamTest
 
@@ -33,6 +36,99 @@ import scala.collection.JavaConverters._
 import scala.collection.immutable
 
 class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest {
+
+  test("refresh btree index after data evolution update") {
+    withTable("T", "S", "P") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT, idx INT, payload STRING)
+                  |TBLPROPERTIES (
+                  |  'bucket' = '-1',
+                  |  'global-index.enabled' = 'true',
+                  |  'row-tracking.enabled' = 'true',
+                  |  'data-evolution.enabled' = 'true',
+                  |  'global-index.column-update-action' = 'IGNORE',
+                  |  'btree-index.records-per-range' = '2')
+                  |""".stripMargin)
+
+      spark.sql(
+        s"INSERT INTO T VALUES ${(0 until 10).map(i => s"($i, $i, 'p$i')").mkString(",")}"
+      )
+      createBTreeIndex("T", "idx")
+      spark.sql(
+        s"INSERT INTO T VALUES ${(10 until 20).map(i => s"($i, $i, 'p$i')").mkString(",")}"
+      )
+      createBTreeIndex("T", "idx")
+
+      def entriesByRange: Map[String, Seq[IndexManifestEntry]] = {
+        loadTable("T")
+          .store()
+          .newIndexFileHandler()
+          .scan("btree")
+          .asScala
+          .groupBy(
+            entry =>
+              s"${entry.indexFile().globalIndexMeta().rowRangeStart()}:" +
+                s"${entry.indexFile().globalIndexMeta().rowRangeEnd()}")
+          .map { case (range, entries) => range -> entries.toList }
+      }
+
+      def fileNames(entries: Seq[IndexManifestEntry]): Set[String] =
+        entries.map(_.indexFile().fileName()).toSet
+
+      val initial = entriesByRange
+      assert(initial.keySet == Set("0:9", "10:19"))
+      assert(initial("0:9").size > 1)
+      assert(initial("10:19").size > 1)
+      val initialFirstFiles = fileNames(initial("0:9"))
+      val initialSecondFiles = fileNames(initial("10:19"))
+
+      spark.sql("CREATE TABLE S (id INT, idx INT)")
+      spark.sql("INSERT INTO S VALUES (1, 1001)")
+      spark.sql("""
+                  |MERGE INTO T
+                  |USING S
+                  |ON T.id = S.id
+                  |WHEN MATCHED THEN UPDATE SET T.idx = S.idx
+                  |""".stripMargin)
+      val updateSnapshotId = loadTable("T").snapshotManager().latestSnapshot().id()
+
+      createBTreeIndex("T", "idx")
+      assert(loadTable("T").snapshotManager().latestSnapshot().id() == updateSnapshotId + 1)
+
+      val refreshed = entriesByRange
+      assert(refreshed.keySet == Set("0:9", "10:19"))
+      assert((fileNames(refreshed("0:9")).intersect(initialFirstFiles)).isEmpty)
+      assert(fileNames(refreshed("10:19")) == initialSecondFiles)
+      refreshed("0:9").foreach(
+        entry =>
+          assert(
+            DataEvolutionIndexSourceMeta
+              .fromIndexFile(entry.indexFile())
+              .scanSnapshotId() == updateSnapshotId
+          ))
+      checkAnswer(sql("SELECT id FROM T WHERE idx = 1"), Seq.empty)
+      checkAnswer(sql("SELECT id FROM T WHERE idx = 1001"), Seq(Row(1)))
+
+      val refreshedSnapshotId = loadTable("T").snapshotManager().latestSnapshot().id()
+      val refreshedFiles = refreshed.values.flatten.map(_.indexFile().fileName()).toSet
+      createBTreeIndex("T", "idx")
+      assert(loadTable("T").snapshotManager().latestSnapshot().id() == refreshedSnapshotId)
+      assert(entriesByRange.values.flatten.map(_.indexFile().fileName()).toSet == refreshedFiles)
+
+      spark.sql("CREATE TABLE P (id INT, payload STRING)")
+      spark.sql("INSERT INTO P VALUES (1, 'new-payload')")
+      spark.sql("""
+                  |MERGE INTO T
+                  |USING P
+                  |ON T.id = P.id
+                  |WHEN MATCHED THEN UPDATE SET T.payload = P.payload
+                  |""".stripMargin)
+      val payloadUpdateSnapshotId = loadTable("T").snapshotManager().latestSnapshot().id()
+      createBTreeIndex("T", "idx")
+      assert(loadTable("T").snapshotManager().latestSnapshot().id() == payloadUpdateSnapshotId)
+      assert(entriesByRange.values.flatten.map(_.indexFile().fileName()).toSet == refreshedFiles)
+    }
+  }
 
   test("create btree global index") {
     withTable("T") {
@@ -145,6 +241,50 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
       assert(bitmapEntries.nonEmpty)
       assert(bitmapEntries.map(_.rowCount()).sum == 10000L)
       bitmapEntries.foreach(e => assert(e.globalIndexMeta() != null))
+    }
+  }
+
+  test("create multivalue global index") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT, tags ARRAY<STRING>)
+                  |TBLPROPERTIES (
+                  |  'bucket' = '-1',
+                  |  'global-index.enabled' = 'true',
+                  |  'row-tracking.enabled' = 'true',
+                  |  'data-evolution.enabled' = 'true')
+                  |""".stripMargin)
+
+      spark.sql(
+        "INSERT INTO T VALUES " +
+          "(1, array('red', 'blue')), " +
+          "(2, array('blue')), " +
+          "(3, array('green')), " +
+          "(4, array('red', 'red')), " +
+          "(5, CAST(NULL AS ARRAY<STRING>)), " +
+          "(6, CAST(array() AS ARRAY<STRING>)), " +
+          "(7, array(CAST(NULL AS STRING))), " +
+          "(8, array('red', CAST(NULL AS STRING)))"
+      )
+
+      val output =
+        spark
+          .sql("CALL sys.create_global_index(table => 'test.T', index_column => 'tags', " +
+            "index_type => 'multivalue', options => 'sorted-index.records-per-range=2')")
+          .collect()
+          .head
+
+      assert(output.getBoolean(0))
+      val entries = loadTable("T")
+        .store()
+        .newIndexFileHandler()
+        .scanEntries()
+        .asScala
+        .map(_.indexFile())
+        .filter(_.indexType() == "multivalue")
+      assert(entries.size > 1)
+      assert(entries.map(_.rowCount()).sum == 8L)
+      entries.foreach(entry => assert(entry.globalIndexMeta() != null))
     }
   }
 
@@ -285,5 +425,13 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
         case _ => // ignore
       }
     }
+  }
+
+  private def createBTreeIndex(tableName: String, column: String): Unit = {
+    spark
+      .sql(
+        s"CALL sys.create_global_index(table => 'test.$tableName', " +
+          s"index_column => '$column', index_type => 'btree')")
+      .collect()
   }
 }

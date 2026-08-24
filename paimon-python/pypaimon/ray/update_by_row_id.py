@@ -156,52 +156,20 @@ def update_by_row_id(
 
 
 def _commit_update_messages(table, commit_messages) -> None:
-    pending_msgs: list = list(commit_messages)
-    commit_started = False
-
-    try:
-        table_commit = None
-        try:
-            table_commit = table.new_batch_write_builder().new_commit()
-            commit_started = True
-            table_commit.commit(pending_msgs)
-        finally:
-            if table_commit is not None:
-                try:
-                    table_commit.close()
-                except Exception as close_error:
-                    logger.warning(
-                        "Failed to close update_by_row_id commit: %s",
-                        close_error,
-                        exc_info=close_error,
-                    )
-    except Exception as e:
-        if not commit_started:
-            _abort_pending_update_messages(table, pending_msgs)
-        _reraise_inner(e)
-
-
-def _abort_pending_update_messages(table, commit_messages) -> None:
-    if not commit_messages:
-        return
-
+    messages = list(commit_messages)
     table_commit = None
     try:
         table_commit = table.new_batch_write_builder().new_commit()
-        table_commit.abort(commit_messages)
-    except Exception as abort_error:
-        logger.warning(
-            "Failed to abort pending update_by_row_id commit messages: %s",
-            abort_error,
-            exc_info=abort_error,
-        )
+        table_commit.commit(messages)
+    except Exception as e:
+        _reraise_inner(e)
     finally:
         if table_commit is not None:
             try:
                 table_commit.close()
             except Exception as close_error:
                 logger.warning(
-                    "Failed to close update_by_row_id abort commit: %s",
+                    "Failed to close update_by_row_id commit: %s",
                     close_error,
                     exc_info=close_error,
                 )

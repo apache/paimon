@@ -109,6 +109,7 @@ public class DedicatedFormatRollingFileWriter
                             RollingFileWriterImpl<InternalRow, DataFileMeta>, List<DataFileMeta>>>
             vectorStoreWriterFactory;
     private final long targetFileSize;
+    private final long targetFileRowNum;
 
     // State management
     private final List<FileWriterAbortExecutor> closedWriters;
@@ -121,6 +122,7 @@ public class DedicatedFormatRollingFileWriter
                     RollingFileWriterImpl<InternalRow, DataFileMeta>, List<DataFileMeta>>
             vectorStoreWriter;
     private long recordCount = 0;
+    private long currentFileRecordCount = 0;
     private boolean closed = false;
 
     public DedicatedFormatRollingFileWriter(
@@ -131,6 +133,7 @@ public class DedicatedFormatRollingFileWriter
             long targetFileSize,
             long blobTargetFileSize,
             long vectorTargetFileSize,
+            long targetFileRowNum,
             RowType writeSchema,
             DataFilePathFactory pathFactory,
             Supplier<LongCounter> seqNumCounterSupplier,
@@ -141,7 +144,12 @@ public class DedicatedFormatRollingFileWriter
             boolean statsDenseStore,
             @Nullable BlobFileContext context) {
         // Initialize basic fields
+        Preconditions.checkArgument(
+                targetFileRowNum > 0,
+                "targetFileRowNum must be positive, but is %s",
+                targetFileRowNum);
         this.targetFileSize = targetFileSize;
+        this.targetFileRowNum = targetFileRowNum;
         this.results = new ArrayList<>();
         this.closedWriters = new ArrayList<>();
 
@@ -201,7 +209,8 @@ public class DedicatedFormatRollingFileWriter
                                     context.blobInlineFields(),
                                     context.writeNullOnMissingFile(),
                                     context.writeNullOnFetchFailure(),
-                                    context.blobFetchMetricReporter());
+                                    context.blobFetchMetricReporter(),
+                                    context.copyBufferSize());
         } else {
             this.blobWriterFactory = null;
         }
@@ -272,7 +281,9 @@ public class DedicatedFormatRollingFileWriter
                             asyncFileWrite,
                             statsDenseStore,
                             pathFactory.isExternalPath(),
-                            normalColumnNames);
+                            normalColumnNames,
+                            null,
+                            null);
             return new ProjectedFileWriter<>(rowDataFileWriter, projectionNormalFields);
         };
     }
@@ -317,8 +328,11 @@ public class DedicatedFormatRollingFileWriter
                                         asyncFileWrite,
                                         statsDenseStore,
                                         pathFactory.isExternalPath(),
-                                        vectorStoreColumnNames),
-                        targetFileSize),
+                                        vectorStoreColumnNames,
+                                        null,
+                                        null),
+                        targetFileSize,
+                        Long.MAX_VALUE),
                 vectorStoreProjection);
     }
 
@@ -351,8 +365,9 @@ public class DedicatedFormatRollingFileWriter
                 currentWriter.write(row);
             }
             recordCount++;
+            currentFileRecordCount++;
 
-            if (currentWriter != null && rollingFile()) {
+            if (rollingFile()) {
                 closeCurrentWriter();
             }
         } catch (Throwable e) {
@@ -415,11 +430,19 @@ public class DedicatedFormatRollingFileWriter
         }
     }
 
-    /** Checks if the current file should be rolled based on size and record count. */
+    /**
+     * Checks if the current file should be rolled. The row cap applies even when there is no main
+     * writer (all fields dedicated), so blob/vector writers roll together.
+     */
     private boolean rollingFile() throws IOException {
-        return currentWriter
-                .writer()
-                .reachTargetSize(recordCount % CHECK_ROLLING_RECORD_CNT == 0, targetFileSize);
+        if (currentFileRecordCount >= targetFileRowNum) {
+            return true;
+        }
+        return currentWriter != null
+                && currentWriter
+                        .writer()
+                        .reachTargetSize(
+                                recordCount % CHECK_ROLLING_RECORD_CNT == 0, targetFileSize);
     }
 
     /**
@@ -454,6 +477,7 @@ public class DedicatedFormatRollingFileWriter
 
         // Reset current writer
         currentWriter = null;
+        currentFileRecordCount = 0;
     }
 
     /** Closes the main writer and returns its metadata. */
@@ -470,6 +494,7 @@ public class DedicatedFormatRollingFileWriter
         }
         blobWriter.close();
         List<DataFileMeta> results = blobWriter.result();
+        closedWriters.addAll(blobWriter.drainAbortExecutors());
         blobWriter = null;
         return results;
     }
@@ -481,6 +506,7 @@ public class DedicatedFormatRollingFileWriter
         }
         vectorStoreWriter.close();
         List<DataFileMeta> results = vectorStoreWriter.result();
+        closedWriters.addAll(vectorStoreWriter.writer().drainAbortExecutors());
         vectorStoreWriter = null;
         return results;
     }

@@ -21,6 +21,8 @@ package org.apache.paimon.spark.catalyst.analysis
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.commands.{MergeIntoPaimonDataEvolutionTable, MergeIntoPaimonTable}
+import org.apache.paimon.table.PrimaryKeyTableUtils.validatePKUpsertDeletable
+import org.apache.paimon.table.Table
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeSet, Expression, SubqueryExpression}
@@ -51,6 +53,7 @@ case class PaimonMergeInto(spark: SparkSession)
           var v2Table = relation.table.asInstanceOf[SparkTable]
 
           checkPaimonTable(v2Table.getTable)
+          checkDeleteActionValidity(v2Table.getTable, merge)
           checkCondition(merge.mergeCondition)
           (merge.matchedActions ++ merge.notMatchedActions)
             .flatMap(_.condition)
@@ -120,6 +123,35 @@ case class PaimonMergeInto(spark: SparkSession)
     }
     if (SubqueryExpression.hasSubquery(condition)) {
       throw new RuntimeException(s"Condition $condition with subquery can't be supported.")
+    }
+  }
+
+  /**
+   * A `WHEN MATCHED ... THEN DELETE` or `WHEN NOT MATCHED BY SOURCE ... THEN DELETE` clause emits
+   * real [[org.apache.paimon.types.RowKind.DELETE]] records into the LSM tree (see
+   * `MergeIntoPaimonTable.constructChangedRows`), so the target's merge engine has to be able to
+   * consume them.
+   *
+   * Without this check a merge engine that rejects delete records -- `partial-update` without
+   * `partial-update.remove-record-on-delete` -- accepts the write and commits a snapshot that later
+   * makes the table unreadable: the failure only surfaces much later, in
+   * `PartialUpdateMergeFunction#add`, at *read* time.
+   *
+   * This mirrors the validation Flink runs for SQL `DELETE`
+   * (`SupportsRowLevelOperationFlinkTableSink#applyRowLevelDelete`) and the one
+   * `DeleteFromPaimonTableCommand` already runs, so all three paths reject the same tables with the
+   * same message.
+   */
+  private def checkDeleteActionValidity(table: Table, merge: MergeIntoTable): Unit = {
+    // Tables without primary keys rewrite the touched files (or maintain deletion vectors) instead
+    // of emitting delete records, so no merge engine is involved.
+    if (table.primaryKeys().isEmpty) {
+      return
+    }
+    val deletesRows = (merge.matchedActions ++ resolveNotMatchedBySourceActions(merge))
+      .exists(_.isInstanceOf[DeleteAction])
+    if (deletesRows) {
+      validatePKUpsertDeletable(table)
     }
   }
 

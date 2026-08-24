@@ -580,6 +580,8 @@ public class PredicateTest {
         assertThat(executeLike("abcde", "%c.e")).isEqualTo(false);
         assertThat(executeLike("a-c", "a\\_c")).isEqualTo(false);
         assertThat(executeLike("a_c", "a\\_c")).isEqualTo(true);
+        assertThat(Arrays.asList(executeLike("a%", "a\\%"), executeLike("a\\anything", "a\\%")))
+                .containsExactly(true, false);
         assertThat(executeLike("startX", "start%")).isEqualTo(true);
         assertThat(executeLike("not_startX", "start%")).isEqualTo(false);
         assertThat(executeLike("xxmiddleyy", "%middle%")).isEqualTo(true);
@@ -600,6 +602,24 @@ public class PredicateTest {
         assertThat(getLikeFunc("%end")).isEqualTo(EndsWith.INSTANCE);
         assertThat(getLikeFunc("%middle%")).isEqualTo(Contains.INSTANCE);
         assertThat(getLikeFunc("a_c")).isEqualTo(Like.INSTANCE);
+    }
+
+    @Test
+    public void testLikeSingleCharacterWildcardMatchesLineTerminators() {
+        String[] lineTerminators = {"\n", "\r", "\u0085", "\u2028", "\u2029"};
+        for (String lineTerminator : lineTerminators) {
+            assertThat(
+                            Like.INSTANCE.test(
+                                    DataTypes.STRING(),
+                                    fromString("a" + lineTerminator + "b"),
+                                    fromString("a_b")))
+                    .isTrue();
+        }
+
+        assertThat(Like.INSTANCE.test(DataTypes.STRING(), fromString("a\r\nb"), fromString("a_b")))
+                .isFalse();
+        assertThat(Like.INSTANCE.test(DataTypes.STRING(), fromString("a\r\nb"), fromString("a__b")))
+                .isTrue();
     }
 
     private boolean executeLike(String s, String pattern) {
@@ -736,13 +756,13 @@ public class PredicateTest {
         Predicate p6 = builder6.in(0, Arrays.asList(1, null, 3, 4));
         assertThat(p6.toString())
                 .isEqualTo(
-                        "Or([Or([Or([Equal(f0, 1), Equal(f0, null)]), Equal(f0, 3)]), Equal(f0, 4)])");
+                        "Or([Or([Equal(f0, 1), Equal(f0, null)]), Or([Equal(f0, 3), Equal(f0, 4)])])");
 
         PredicateBuilder builder7 = new PredicateBuilder(RowType.of(new IntType()));
         Predicate p7 = builder7.notIn(0, Arrays.asList(1, null, 3, 4));
         assertThat(p7.toString())
                 .isEqualTo(
-                        "And([And([And([NotEqual(f0, 1), NotEqual(f0, null)]), NotEqual(f0, 3)]), NotEqual(f0, 4)])");
+                        "And([And([NotEqual(f0, 1), NotEqual(f0, null)]), And([NotEqual(f0, 3), NotEqual(f0, 4)])])");
 
         PredicateBuilder builder8 = new PredicateBuilder(RowType.of(new IntType()));
         List<Object> literals = new ArrayList<>();

@@ -16,15 +16,14 @@
 # under the License.
 
 """
-Provides compatibility patches for fastavro on Python 3.6,
-specifically for handling zstd-compressed Avro files.
+Compatibility patch for fastavro on Python 3.6/3.7 (the python-zstandard
+fastavro), for reading zstd-compressed Avro (manifest) files.
 
-The main issue addressed is:
-- On Python 3.6, fastavro's zstd decompression may fail with:
+Those fastavro versions may fail on frames without a content-size header
+(e.g. written by Java or backports.zstd) with:
   "zstd.ZstdError: could not determine content size in frame header"
-  
-This module patches fastavro's zstd handling to use a more compatible
-decompression method that works on Python 3.6.
+This patches fastavro's zstd block reader to stream-decompress instead.
+Python 3.8+ uses backports.zstd and needs no patch.
 """
 
 import sys
@@ -34,7 +33,7 @@ _patch_applied = False
 
 def _apply_zstd_patch():
     global _patch_applied
-    if _patch_applied or sys.version_info[:2] != (3, 6):
+    if _patch_applied or sys.version_info[:2] >= (3, 8):
         return
 
     try:
@@ -69,7 +68,7 @@ def _apply_zstd_patch():
         _patch_applied = True
 
 
-if sys.version_info[:2] == (3, 6):
+if sys.version_info[:2] < (3, 8):
     try:
         _apply_zstd_patch()
     except ImportError:

@@ -27,13 +27,20 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BinaryVector;
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.DataFormatTestUtil;
+import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.variant.GenericVariant;
+import org.apache.paimon.data.variant.GenericVariantBuilder;
+import org.apache.paimon.data.variant.GenericVariantUtil.Type;
 import org.apache.paimon.deletionvectors.BitmapDeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer;
@@ -41,7 +48,10 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.globalindex.sorted.SortedGlobalIndexBuilder;
+import org.apache.paimon.globalindex.ScanResult;
+import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
+import org.apache.paimon.globalindex.sorted.SortedGlobalIndexTestUtils;
+import org.apache.paimon.index.HashBucketAssigner;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
@@ -70,6 +80,7 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
@@ -85,22 +96,30 @@ import org.apache.paimon.utils.TraceableFileIO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
+import org.junit.jupiter.api.io.TempDir;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.DATA_EVOLUTION_ENABLED;
@@ -123,6 +142,7 @@ public class JavaPyE2ETest {
     private static final Logger LOG = LoggerFactory.getLogger(JavaPyE2ETest.class);
 
     java.nio.file.Path tempDir = Paths.get("../paimon-python/pypaimon/tests/e2e").toAbsolutePath();
+    @TempDir java.nio.file.Path ioTempDir;
 
     // Fields from TableTestBase that we need
     protected final String commitUser = UUID.randomUUID().toString();
@@ -337,6 +357,35 @@ public class JavaPyE2ETest {
 
     @Test
     @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testJavaWriteDynamicBucketHashIndex() throws Exception {
+        Identifier identifier = identifier("dynamic_hash_java_to_python");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("key1", DataTypes.STRING())
+                        .column("key2", DataTypes.BIGINT())
+                        .column("value", DataTypes.STRING())
+                        .primaryKey("key1", "key2")
+                        .option("bucket", "-1")
+                        .option("dynamic-bucket.target-row-num", "1")
+                        .option("file.format", "parquet")
+                        .build();
+        catalog.createTable(identifier, schema, true);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                InnerTableCommit commit = table.newCommit(commitUser)) {
+            GenericRow row =
+                    GenericRow.of(
+                            BinaryString.fromString("hello-java"),
+                            42L,
+                            BinaryString.fromString("java-old"));
+            write.write(row, assignDynamicBucket(table, row));
+            commit.commit(0, write.prepareCommit(true, 0));
+        }
+    }
+
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
     public void testPKDeletionVectorWrite() throws Exception {
         Consumer<Options> optionsSetter =
                 options -> {
@@ -347,40 +396,42 @@ public class JavaPyE2ETest {
         String tableName = "test_pk_dv";
         Path tablePath = new Path(warehouse.toString() + "/default.db/" + tableName);
         FileStoreTable table = createFileStoreTable(optionsSetter, tablePath);
-        StreamTableWrite write = table.newWrite(commitUser);
-        IOManager ioManager = IOManager.create(tablePath.toString());
-        write.withIOManager(ioManager);
-        StreamTableCommit commit = table.newCommit(commitUser);
+        try (IOManager ioManager = IOManager.create(ioTempDir.toString());
+                StreamTableWrite write = table.newWrite(commitUser).withIOManager(ioManager);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
 
-        write.write(createRow3Cols(1, 10, 100L));
-        write.write(createRow3Cols(2, 20, 200L));
-        write.write(createRow3Cols(1, 11, 101L));
-        commit.commit(0, write.prepareCommit(true, 0));
+            write.write(createRow3Cols(1, 10, 100L));
+            write.write(createRow3Cols(2, 20, 200L));
+            write.write(createRow3Cols(1, 11, 101L));
+            commit.commit(0, write.prepareCommit(true, 0));
 
-        write.write(createRow3Cols(1, 10, 1000L));
-        write.write(createRow3Cols(2, 21, 201L));
-        write.write(createRow3Cols(2, 21, 2001L));
-        commit.commit(1, write.prepareCommit(true, 1));
+            write.write(createRow3Cols(1, 10, 1000L));
+            write.write(createRow3Cols(2, 21, 201L));
+            write.write(createRow3Cols(2, 21, 2001L));
+            commit.commit(1, write.prepareCommit(true, 1));
 
-        write.write(createRow3Cols(1, 11, 1001L));
-        write.write(createRow3Cols(2, 21, 20001L));
-        write.write(createRow3Cols(2, 22, 202L));
-        write.write(createRow3ColsWithKind(RowKind.DELETE, 1, 11, 1001L));
-        commit.commit(2, write.prepareCommit(true, 2));
-        write.write(createRow3ColsWithKind(RowKind.DELETE, 2, 20, 200L));
-        commit.commit(2, write.prepareCommit(true, 2));
+            write.write(createRow3Cols(1, 11, 1001L));
+            write.write(createRow3Cols(2, 21, 20001L));
+            write.write(createRow3Cols(2, 22, 202L));
+            write.write(createRow3ColsWithKind(RowKind.DELETE, 1, 11, 1001L));
+            commit.commit(2, write.prepareCommit(true, 2));
+            write.write(createRow3ColsWithKind(RowKind.DELETE, 2, 20, 200L));
+            commit.commit(2, write.prepareCommit(true, 2));
 
-        // test result
-        Function<InternalRow, String> rowDataToString =
-                row ->
-                        internalRowToString(
-                                row,
-                                DataTypes.ROW(
-                                        DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()));
-        List<String> result =
-                getResult(table.newRead(), table.newScan().plan().splits(), rowDataToString);
-        assertThat(result)
-                .containsExactlyInAnyOrder("+I[1, 10, 1000]", "+I[2, 21, 20001]", "+I[2, 22, 202]");
+            // test result
+            Function<InternalRow, String> rowDataToString =
+                    row ->
+                            internalRowToString(
+                                    row,
+                                    DataTypes.ROW(
+                                            DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()));
+            List<String> result =
+                    getResult(table.newRead(), table.newScan().plan().splits(), rowDataToString);
+            assertThat(result)
+                    .containsExactlyInAnyOrder(
+                            "+I[1, 10, 1000]", "+I[2, 21, 20001]", "+I[2, 22, 202]");
+        }
+        assertSpillDirectoryEmpty();
     }
 
     @Test
@@ -395,37 +446,38 @@ public class JavaPyE2ETest {
         String tableName = "test_pk_dv_multi_batch";
         Path tablePath = new Path(warehouse.toString() + "/default.db/" + tableName);
         FileStoreTable table = createFileStoreTable(optionsSetter, tablePath);
-        StreamTableWrite write = table.newWrite(commitUser);
-        IOManager ioManager = IOManager.create(tablePath.toString());
-        write.withIOManager(ioManager);
-        StreamTableCommit commit = table.newCommit(commitUser);
+        try (IOManager ioManager = IOManager.create(ioTempDir.toString());
+                StreamTableWrite write = table.newWrite(commitUser).withIOManager(ioManager);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
 
-        // Write 10000 records
-        for (int i = 1; i <= 10000; i++) {
-            write.write(createRow3Cols(1, i * 10, (long) i * 100));
+            // Write 10000 records
+            for (int i = 1; i <= 10000; i++) {
+                write.write(createRow3Cols(1, i * 10, (long) i * 100));
+            }
+            commit.commit(0, write.prepareCommit(false, 0));
+
+            // Delete the 81930th record
+            write.write(createRow3ColsWithKind(RowKind.DELETE, 1, 81930, 819300L));
+            commit.commit(1, write.prepareCommit(true, 1));
+
+            Function<InternalRow, String> rowDataToString =
+                    row ->
+                            internalRowToString(
+                                    row,
+                                    DataTypes.ROW(
+                                            DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()));
+            List<String> result =
+                    getResult(table.newRead(), table.newScan().plan().splits(), rowDataToString);
+
+            // Verify the count is 9999
+            assertThat(result).hasSize(9999);
+
+            assertThat(result).doesNotContain("+I[1, 81930, 819300]");
+
+            assertThat(result).contains("+I[1, 10, 100]");
+            assertThat(result).contains("+I[1, 100000, 1000000]");
         }
-        commit.commit(0, write.prepareCommit(false, 0));
-
-        // Delete the 81930th record
-        write.write(createRow3ColsWithKind(RowKind.DELETE, 1, 81930, 819300L));
-        commit.commit(1, write.prepareCommit(true, 1));
-
-        Function<InternalRow, String> rowDataToString =
-                row ->
-                        internalRowToString(
-                                row,
-                                DataTypes.ROW(
-                                        DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()));
-        List<String> result =
-                getResult(table.newRead(), table.newScan().plan().splits(), rowDataToString);
-
-        // Verify the count is 9999
-        assertThat(result).hasSize(9999);
-
-        assertThat(result).doesNotContain("+I[1, 81930, 819300]");
-
-        assertThat(result).contains("+I[1, 10, 100]");
-        assertThat(result).contains("+I[1, 100000, 1000000]");
+        assertSpillDirectoryEmpty();
     }
 
     @Test
@@ -438,35 +490,36 @@ public class JavaPyE2ETest {
         String tableName = "test_pk_dv_raw_convertable";
         Path tablePath = new Path(warehouse.toString() + "/default.db/" + tableName);
         FileStoreTable table = createFileStoreTable(optionsSetter, tablePath);
-        StreamTableWrite write = table.newWrite(commitUser);
-        IOManager ioManager = IOManager.create(tablePath.toString());
-        write.withIOManager(ioManager);
-        StreamTableCommit commit = table.newCommit(commitUser);
+        try (IOManager ioManager = IOManager.create(ioTempDir.toString());
+                StreamTableWrite write = table.newWrite(commitUser).withIOManager(ioManager);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
 
-        for (int i = 1; i <= 10000; i++) {
-            write.write(createRow3Cols(1, i * 10, (long) i * 100));
+            for (int i = 1; i <= 10000; i++) {
+                write.write(createRow3Cols(1, i * 10, (long) i * 100));
+            }
+            commit.commit(0, write.prepareCommit(false, 0));
+
+            write.write(createRow3ColsWithKind(RowKind.DELETE, 1, 81930, 819300L));
+            commit.commit(1, write.prepareCommit(true, 1));
+
+            Function<InternalRow, String> rowDataToString =
+                    row ->
+                            internalRowToString(
+                                    row,
+                                    DataTypes.ROW(
+                                            DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()));
+            List<String> result =
+                    getResult(table.newRead(), table.newScan().plan().splits(), rowDataToString);
+
+            assertThat(result).hasSize(9999);
+
+            assertThat(result).doesNotContain("+I[1, 81930, 819300]");
+
+            // Verify some sample records exist
+            assertThat(result).contains("+I[1, 10, 100]");
+            assertThat(result).contains("+I[1, 100000, 1000000]");
         }
-        commit.commit(0, write.prepareCommit(false, 0));
-
-        write.write(createRow3ColsWithKind(RowKind.DELETE, 1, 81930, 819300L));
-        commit.commit(1, write.prepareCommit(true, 1));
-
-        Function<InternalRow, String> rowDataToString =
-                row ->
-                        internalRowToString(
-                                row,
-                                DataTypes.ROW(
-                                        DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()));
-        List<String> result =
-                getResult(table.newRead(), table.newScan().plan().splits(), rowDataToString);
-
-        assertThat(result).hasSize(9999);
-
-        assertThat(result).doesNotContain("+I[1, 81930, 819300]");
-
-        // Verify some sample records exist
-        assertThat(result).contains("+I[1, 10, 100]");
-        assertThat(result).contains("+I[1, 100000, 1000000]");
+        assertSpillDirectoryEmpty();
     }
 
     @Test
@@ -527,6 +580,57 @@ public class JavaPyE2ETest {
 
     @Test
     @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testReadPythonDynamicBucketHashIndex() throws Exception {
+        Identifier identifier = identifier("dynamic_hash_python_to_java");
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                InnerTableCommit commit = table.newCommit(commitUser)) {
+            GenericRow row =
+                    GenericRow.of(
+                            BinaryString.fromString("hello-java"),
+                            42L,
+                            BinaryString.fromString("java-new"));
+            write.write(row, assignDynamicBucket(table, row));
+            commit.commit(1, write.prepareCommit(true, 1));
+        }
+
+        List<String> result =
+                getResult(
+                        table.newRead(),
+                        table.newScan().plan().splits(),
+                        row -> DataFormatTestUtil.toStringNoRowKind(row, table.rowType()));
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        "hello-java, 42, java-new", "python-only, 7, python-only");
+    }
+
+    private int assignDynamicBucket(FileStoreTable table, InternalRow row) {
+        InternalRowSerializer serializer =
+                new InternalRowSerializer(DataTypes.STRING(), DataTypes.BIGINT());
+        int keyHash =
+                serializer.toBinaryRow(GenericRow.of(row.getString(0), row.getLong(1))).hashCode();
+        HashBucketAssigner assigner =
+                new HashBucketAssigner(
+                        table.snapshotManager(),
+                        commitUser,
+                        table.store().newIndexFileHandler(),
+                        1,
+                        1,
+                        0,
+                        1,
+                        -1);
+        return assigner.assign(BinaryRow.EMPTY_ROW, keyHash);
+    }
+
+    private void assertSpillDirectoryEmpty() throws Exception {
+        try (Stream<java.nio.file.Path> files = Files.list(ioTempDir)) {
+            assertThat(files).isEmpty();
+        }
+    }
+
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
     public void testBtreeIndexWrite() throws Exception {
         testBtreeIndexWriteString();
         testBtreeIndexWriteInt();
@@ -577,19 +681,8 @@ public class JavaPyE2ETest {
             commit.commit(write.prepareCommit());
         }
 
-        SortedGlobalIndexBuilder builder =
-                new SortedGlobalIndexBuilder(table, "btree").withIndexField("k");
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
-            commit.commit(
-                    builder.build(
-                            builder.scan()
-                                    .map(org.apache.paimon.utils.Pair::getValue)
-                                    .orElseThrow(
-                                            () ->
-                                                    new IllegalStateException(
-                                                            "Expected scan result when building index."))
-                                    .get(0),
-                            IOManager.create(warehouse.toString())));
+            commit.commit(buildSortedIndex(table, "btree", "k"));
         }
 
         try (BatchTableWrite write = writeBuilder.newWrite();
@@ -654,19 +747,8 @@ public class JavaPyE2ETest {
         }
 
         // build index
-        SortedGlobalIndexBuilder builder =
-                new SortedGlobalIndexBuilder(table, "bitmap").withIndexField("k");
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
-            commit.commit(
-                    builder.build(
-                            builder.scan()
-                                    .map(org.apache.paimon.utils.Pair::getValue)
-                                    .orElseThrow(
-                                            () ->
-                                                    new IllegalStateException(
-                                                            "Expected scan result when building index."))
-                                    .get(0),
-                            IOManager.create(warehouse.toString())));
+            commit.commit(buildSortedIndex(table, "bitmap", "k"));
         }
 
         // assert index
@@ -757,19 +839,8 @@ public class JavaPyE2ETest {
         }
 
         // build index
-        SortedGlobalIndexBuilder builder =
-                new SortedGlobalIndexBuilder(table, "btree").withIndexField("k");
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
-            commit.commit(
-                    builder.build(
-                            builder.scan()
-                                    .map(org.apache.paimon.utils.Pair::getValue)
-                                    .orElseThrow(
-                                            () ->
-                                                    new IllegalStateException(
-                                                            "Expected scan result when building index."))
-                                    .get(0),
-                            IOManager.create(warehouse.toString())));
+            commit.commit(buildSortedIndex(table, "btree", "k"));
         }
 
         // assert index
@@ -838,19 +909,8 @@ public class JavaPyE2ETest {
             commit.commit(write.prepareCommit());
         }
 
-        SortedGlobalIndexBuilder builder =
-                new SortedGlobalIndexBuilder(table, indexType).withIndexField("k");
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
-            commit.commit(
-                    builder.build(
-                            builder.scan()
-                                    .map(org.apache.paimon.utils.Pair::getValue)
-                                    .orElseThrow(
-                                            () ->
-                                                    new IllegalStateException(
-                                                            "Expected scan result when building index."))
-                                    .get(0),
-                            IOManager.create(warehouse.toString())));
+            commit.commit(buildSortedIndex(table, indexType, "k"));
         }
 
         List<IndexManifestEntry> indexEntries =
@@ -918,19 +978,8 @@ public class JavaPyE2ETest {
         }
 
         // build index
-        SortedGlobalIndexBuilder builder =
-                new SortedGlobalIndexBuilder(table, "btree").withIndexField("k");
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
-            commit.commit(
-                    builder.build(
-                            builder.scan()
-                                    .map(org.apache.paimon.utils.Pair::getValue)
-                                    .orElseThrow(
-                                            () ->
-                                                    new IllegalStateException(
-                                                            "Expected scan result when building index."))
-                                    .get(0),
-                            IOManager.create(warehouse.toString())));
+            commit.commit(buildSortedIndex(table, "btree", "k"));
         }
 
         // assert index
@@ -997,19 +1046,8 @@ public class JavaPyE2ETest {
         }
 
         // build index
-        SortedGlobalIndexBuilder builder =
-                new SortedGlobalIndexBuilder(table, "btree").withIndexField("k");
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
-            commit.commit(
-                    builder.build(
-                            builder.scan()
-                                    .map(org.apache.paimon.utils.Pair::getValue)
-                                    .orElseThrow(
-                                            () ->
-                                                    new IllegalStateException(
-                                                            "Expected scan result when building index."))
-                                    .get(0),
-                            IOManager.create(warehouse.toString())));
+            commit.commit(buildSortedIndex(table, "btree", "k"));
         }
 
         // assert index
@@ -1421,6 +1459,214 @@ public class JavaPyE2ETest {
         assertThat(rows.get(4).get(0)).isEqualTo(lastValue.getBytes(StandardCharsets.UTF_8));
     }
 
+    /** Java writes MAP&lt;K, BLOB&gt; columns for Python to read. */
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testJavaWriteMapBlobTable() throws Exception {
+        Identifier identifier = identifier("map_blob_java_test");
+        catalog.dropTable(identifier, true);
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("payloads", DataTypes.MAP(DataTypes.INT(), DataTypes.BLOB()))
+                        .column(
+                                "boolean_payloads",
+                                DataTypes.MAP(DataTypes.BOOLEAN(), DataTypes.BLOB()))
+                        .column(
+                                "compact_decimal_payloads",
+                                DataTypes.MAP(DataTypes.DECIMAL(10, 2), DataTypes.BLOB()))
+                        .column(
+                                "high_decimal_payloads",
+                                DataTypes.MAP(DataTypes.DECIMAL(20, 2), DataTypes.BLOB()))
+                        .column("date_payloads", DataTypes.MAP(DataTypes.DATE(), DataTypes.BLOB()))
+                        .column("time_payloads", DataTypes.MAP(DataTypes.TIME(3), DataTypes.BLOB()))
+                        .column(
+                                "binary_payloads",
+                                DataTypes.MAP(DataTypes.BINARY(4), DataTypes.BLOB()))
+                        .column(
+                                "varbinary_payloads",
+                                DataTypes.MAP(DataTypes.VARBINARY(8), DataTypes.BLOB()))
+                        .option(ROW_TRACKING_ENABLED.key(), "true")
+                        .option(DATA_EVOLUTION_ENABLED.key(), "true")
+                        .option(BUCKET.key(), "-1")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+
+        Map<Object, Object> first = new LinkedHashMap<>();
+        first.put(1, new BlobData("java-alpha".getBytes(StandardCharsets.UTF_8)));
+        first.put(2, null);
+        first.put(3, new BlobData(new byte[0]));
+        Map<Object, Object> last = new LinkedHashMap<>();
+        last.put(4, new BlobData("java-omega".getBytes(StandardCharsets.UTF_8)));
+        Map<Object, Object> booleanPayloads = new LinkedHashMap<>();
+        booleanPayloads.put(true, new BlobData("java-boolean".getBytes(StandardCharsets.UTF_8)));
+        Map<Object, Object> compactDecimalPayloads = new LinkedHashMap<>();
+        compactDecimalPayloads.put(
+                Decimal.fromBigDecimal(new BigDecimal("12.34"), 10, 2),
+                new BlobData("java-compact-decimal".getBytes(StandardCharsets.UTF_8)));
+        Map<Object, Object> highDecimalPayloads = new LinkedHashMap<>();
+        highDecimalPayloads.put(
+                Decimal.fromBigDecimal(new BigDecimal("123456789012345678.90"), 20, 2),
+                new BlobData("java-high-decimal".getBytes(StandardCharsets.UTF_8)));
+        Map<Object, Object> datePayloads = new LinkedHashMap<>();
+        datePayloads.put(-1, new BlobData("java-date".getBytes(StandardCharsets.UTF_8)));
+        Map<Object, Object> timePayloads = new LinkedHashMap<>();
+        timePayloads.put(45_296_789, new BlobData("java-time".getBytes(StandardCharsets.UTF_8)));
+        Map<Object, Object> binaryPayloads = new LinkedHashMap<>();
+        binaryPayloads.put(
+                new byte[] {0, (byte) 0xff, 1, 2},
+                new BlobData("java-binary".getBytes(StandardCharsets.UTF_8)));
+        Map<Object, Object> varbinaryPayloads = new LinkedHashMap<>();
+        varbinaryPayloads.put(
+                new byte[0], new BlobData("java-varbinary".getBytes(StandardCharsets.UTF_8)));
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(
+                    GenericRow.of(
+                            1,
+                            new GenericMap(first),
+                            new GenericMap(booleanPayloads),
+                            new GenericMap(compactDecimalPayloads),
+                            new GenericMap(highDecimalPayloads),
+                            new GenericMap(datePayloads),
+                            new GenericMap(timePayloads),
+                            new GenericMap(binaryPayloads),
+                            new GenericMap(varbinaryPayloads)));
+            write.write(
+                    GenericRow.of(
+                            2,
+                            new GenericMap(Collections.emptyMap()),
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null));
+            write.write(GenericRow.of(3, null, null, null, null, null, null, null, null));
+            write.write(
+                    GenericRow.of(
+                            4, new GenericMap(last), null, null, null, null, null, null, null));
+            commit.commit(write.prepareCommit());
+        }
+
+        assertMapBlobRows(readMapBlobRows(table), "java-alpha", "java-omega");
+        assertAdditionalMapBlobKeyTypes(table, "java");
+    }
+
+    /** Java reads MAP&lt;K, BLOB&gt; columns written by Python. */
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testJavaReadMapBlobTable() throws Exception {
+        FileStoreTable table =
+                (FileStoreTable) catalog.getTable(identifier("map_blob_python_test"));
+        assertMapBlobRows(readMapBlobRows(table), "python-alpha", "python-omega");
+        assertAdditionalMapBlobKeyTypes(table, "python");
+    }
+
+    private Map<Integer, Map<Integer, byte[]>> readMapBlobRows(FileStoreTable table)
+            throws Exception {
+        Map<Integer, Map<Integer, byte[]>> rows = new HashMap<>();
+        List<Split> splits = new ArrayList<>(table.newSnapshotReader().read().dataSplits());
+        try (org.apache.paimon.reader.RecordReader<InternalRow> reader =
+                table.newRead().createReader(splits)) {
+            reader.forEachRemaining(
+                    row -> {
+                        int id = row.getInt(0);
+                        if (row.isNullAt(1)) {
+                            rows.put(id, null);
+                            return;
+                        }
+
+                        InternalMap map = row.getMap(1);
+                        InternalArray keys = map.keyArray();
+                        InternalArray values = map.valueArray();
+                        Map<Integer, byte[]> converted = new HashMap<>();
+                        for (int i = 0; i < map.size(); i++) {
+                            converted.put(
+                                    keys.getInt(i),
+                                    values.isNullAt(i) ? null : values.getBlob(i).toData());
+                        }
+                        rows.put(id, converted);
+                    });
+        }
+        return rows;
+    }
+
+    private void assertMapBlobRows(
+            Map<Integer, Map<Integer, byte[]>> rows, String firstValue, String lastValue) {
+        assertThat(rows).containsOnlyKeys(1, 2, 3, 4);
+        assertThat(rows.get(1)).containsOnlyKeys(1, 2, 3);
+        assertThat(rows.get(1).get(1)).isEqualTo(firstValue.getBytes(StandardCharsets.UTF_8));
+        assertThat(rows.get(1).get(2)).isNull();
+        assertThat(rows.get(1).get(3)).isEmpty();
+        assertThat(rows.get(2)).isEmpty();
+        assertThat(rows.get(3)).isNull();
+        assertThat(rows.get(4)).containsOnlyKeys(4);
+        assertThat(rows.get(4).get(4)).isEqualTo(lastValue.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private void assertAdditionalMapBlobKeyTypes(FileStoreTable table, String valuePrefix)
+            throws Exception {
+        boolean[] found = new boolean[1];
+        List<Split> splits = new ArrayList<>(table.newSnapshotReader().read().dataSplits());
+        try (org.apache.paimon.reader.RecordReader<InternalRow> reader =
+                table.newRead().createReader(splits)) {
+            reader.forEachRemaining(
+                    row -> {
+                        if (row.getInt(0) != 1) {
+                            return;
+                        }
+                        found[0] = true;
+
+                        InternalMap booleanMap = row.getMap(2);
+                        assertThat(booleanMap.keyArray().getBoolean(0)).isTrue();
+                        assertSingleBlobValue(booleanMap, valuePrefix + "-boolean");
+
+                        InternalMap compactDecimalMap = row.getMap(3);
+                        assertThat(compactDecimalMap.keyArray().getDecimal(0, 10, 2).toBigDecimal())
+                                .isEqualByComparingTo("12.34");
+                        assertSingleBlobValue(compactDecimalMap, valuePrefix + "-compact-decimal");
+
+                        InternalMap highDecimalMap = row.getMap(4);
+                        assertThat(highDecimalMap.keyArray().getDecimal(0, 20, 2).toBigDecimal())
+                                .isEqualByComparingTo("123456789012345678.90");
+                        assertSingleBlobValue(highDecimalMap, valuePrefix + "-high-decimal");
+
+                        InternalMap dateMap = row.getMap(5);
+                        assertThat(dateMap.keyArray().getInt(0)).isEqualTo(-1);
+                        assertSingleBlobValue(dateMap, valuePrefix + "-date");
+
+                        InternalMap timeMap = row.getMap(6);
+                        assertThat(timeMap.keyArray().getInt(0)).isEqualTo(45_296_789);
+                        assertSingleBlobValue(timeMap, valuePrefix + "-time");
+
+                        GenericMap binaryMap = (GenericMap) row.getMap(7);
+                        byte[] binaryKey = new byte[] {0, (byte) 0xff, 1, 2};
+                        assertThat(binaryMap.keyArray().getBinary(0)).isEqualTo(binaryKey);
+                        assertThat(binaryMap.contains(binaryKey)).isTrue();
+                        assertThat(((Blob) binaryMap.get(binaryKey)).toData())
+                                .isEqualTo(
+                                        (valuePrefix + "-binary").getBytes(StandardCharsets.UTF_8));
+                        assertThat(binaryMap.size()).isOne();
+
+                        InternalMap varbinaryMap = row.getMap(8);
+                        assertThat(varbinaryMap.keyArray().getBinary(0)).isEmpty();
+                        assertSingleBlobValue(varbinaryMap, valuePrefix + "-varbinary");
+                    });
+        }
+        assertThat(found[0]).isTrue();
+    }
+
+    private void assertSingleBlobValue(InternalMap map, String expectedValue) {
+        assertThat(map.size()).isOne();
+        assertThat(map.valueArray().getBlob(0).toData())
+                .isEqualTo(expectedValue.getBytes(StandardCharsets.UTF_8));
+    }
+
     /** Java writes a VARIANT-column table for Python to read (Java→Python E2E). */
     @Test
     @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
@@ -1455,6 +1701,28 @@ public class JavaPyE2ETest {
                             3,
                             BinaryString.fromString("Carol"),
                             GenericVariant.fromJson("[1,2,3]")));
+
+            // Scalar DATE/TIMESTAMP/TIMESTAMP_NTZ/UUID values for cross-language compatibility.
+            GenericVariantBuilder b = new GenericVariantBuilder(false);
+            b.appendDate((int) LocalDate.of(2024, 1, 15).toEpochDay());
+            GenericVariant v = b.result();
+            write.write(GenericRow.of(4, BinaryString.fromString("Dave"), v));
+
+            b = new GenericVariantBuilder(false);
+            b.appendTimestampNtz(
+                    toEpochMicros(LocalDateTime.of(2024, 1, 15, 12, 30, 45, 123456000)));
+            v = b.result();
+            write.write(GenericRow.of(5, BinaryString.fromString("Eve"), v));
+
+            b = new GenericVariantBuilder(false);
+            b.appendTimestamp(toEpochMicros(Instant.parse("2024-01-15T12:30:45.123456Z")));
+            v = b.result();
+            write.write(GenericRow.of(6, BinaryString.fromString("Frank"), v));
+
+            b = new GenericVariantBuilder(false);
+            b.appendUuid(UUID.fromString("12345678-1234-5678-1234-567812345678"));
+            v = b.result();
+            write.write(GenericRow.of(7, BinaryString.fromString("Grace"), v));
             commit.commit(write.prepareCommit());
         }
 
@@ -1464,7 +1732,7 @@ public class JavaPyE2ETest {
         TableRead read = readTable.newRead();
         List<String> res =
                 getResult(read, splits, row -> internalRowToString(row, readTable.rowType()));
-        assertThat(res).hasSize(3);
+        assertThat(res).hasSize(7);
         LOG.info("testJavaWriteVariantTable: wrote and read back {} VARIANT rows", res.size());
 
         // Also write a shredded VARIANT table for Python to read (variant_shredded_test).
@@ -1535,7 +1803,7 @@ public class JavaPyE2ETest {
         TableRead read = table.newRead();
         List<String> res =
                 getResult(read, splits, row -> internalRowToString(row, table.rowType()));
-        assertThat(res).hasSize(4);
+        assertThat(res).hasSize(7);
 
         // Verify the VARIANT column is present in the schema
         assertThat(table.rowType().getFieldNames()).contains("payload");
@@ -1554,8 +1822,29 @@ public class JavaPyE2ETest {
                             assertThat(row.isNullAt(2)).isTrue();
                         } else {
                             assertThat(row.isNullAt(2)).isFalse();
-                            org.apache.paimon.data.variant.Variant v = row.getVariant(2);
+                            GenericVariant v = (GenericVariant) row.getVariant(2);
                             assertThat(v).isNotNull();
+                            if (id == 5) {
+                                // DATE '2024-01-15'
+                                assertThat(v.getType()).isEqualTo(Type.DATE);
+                                assertThat(v.getLong())
+                                        .isEqualTo(LocalDate.of(2024, 1, 15).toEpochDay());
+                            } else if (id == 6) {
+                                // TIMESTAMP_NTZ '2024-01-15 12:30:45.123456'
+                                assertThat(v.getType()).isEqualTo(Type.TIMESTAMP_NTZ);
+                                long expectedMicros =
+                                        toEpochMicros(
+                                                LocalDateTime.of(
+                                                        2024, 1, 15, 12, 30, 45, 123456000));
+                                assertThat(v.getLong()).isEqualTo(expectedMicros);
+                            } else if (id == 7) {
+                                // UUID '12345678-1234-5678-1234-567812345678'
+                                assertThat(v.getType()).isEqualTo(Type.UUID);
+                                assertThat(v.getUuid())
+                                        .isEqualTo(
+                                                UUID.fromString(
+                                                        "12345678-1234-5678-1234-567812345678"));
+                            }
                         }
                     });
         }
@@ -1601,6 +1890,15 @@ public class JavaPyE2ETest {
         LOG.info(
                 "testJavaReadVariantTable: Java read {} shredded VARIANT rows written by Python",
                 shreddedRes.size());
+    }
+
+    private static long toEpochMicros(LocalDateTime dateTime) {
+        return dateTime.toInstant(ZoneOffset.UTC).getEpochSecond() * 1_000_000L
+                + dateTime.getNano() / 1000L;
+    }
+
+    private static long toEpochMicros(Instant instant) {
+        return instant.getEpochSecond() * 1_000_000L + instant.getNano() / 1000L;
     }
 
     /** Step 1: Write 5 base files for compact conflict test. */
@@ -1888,6 +2186,29 @@ public class JavaPyE2ETest {
             result.put(anchor.nonNullRowIdRange(), anchor.fileName());
         }
         return result;
+    }
+
+    private List<CommitMessage> buildSortedIndex(
+            FileStoreTable table, String indexType, String indexFieldName) throws Exception {
+        SortedGlobalIndexScanner scanner =
+                new SortedGlobalIndexScanner(table, indexType).withIndexField(indexFieldName);
+        ScanResult<DataSplit> scanResult =
+                scanner.scan()
+                        .orElseThrow(
+                                () ->
+                                        new IllegalStateException(
+                                                "Expected scan result when building index."));
+        List<CommitMessage> commitMessages = new ArrayList<>();
+        for (DataSplit dataSplit : scanResult.entries()) {
+            commitMessages.addAll(
+                    SortedGlobalIndexTestUtils.buildIndex(
+                            table,
+                            indexType,
+                            indexFieldName,
+                            dataSplit,
+                            scanResult.scanSnapshotId()));
+        }
+        return commitMessages;
     }
 
     private static class E2eDvSpec {

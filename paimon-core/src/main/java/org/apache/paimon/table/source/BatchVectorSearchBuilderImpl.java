@@ -149,7 +149,7 @@ public class BatchVectorSearchBuilderImpl implements BatchVectorSearchBuilder {
             return new PrimaryKeyBatchVectorRead(
                     table, vectorColumn, vectors, limit, options, filter);
         }
-        return new BatchVectorReadImpl(
+        return new DataEvolutionBatchVectorRead(
                 table, partitionFilter, filter, limit, vectorColumn, vectors, options);
     }
 

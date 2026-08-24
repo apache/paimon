@@ -44,9 +44,9 @@ import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.ExceptionUtils;
-import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.spark.sql.PaimonSparkSession$;
 import org.apache.spark.sql.SparkSession;
@@ -611,22 +611,8 @@ public class SparkCatalog extends SparkBaseCatalog
                 type = toBlobType(field, false);
             } else if (blobFields.contains(name)) {
                 type = toBlobType(field, true);
-            } else if (vectorFields.contains(field.name())) {
-                Preconditions.checkArgument(
-                        field.dataType() instanceof ArrayType,
-                        "The type of blob field must be array");
-                ArrayType arrayType = (ArrayType) field.dataType();
-                String dimKey = String.format("field.%s.vector-dim", field.name());
-                Preconditions.checkArgument(
-                        properties.containsKey(dimKey),
-                        "When setting '"
-                                + CoreOptions.VECTOR_FIELD.key()
-                                + "', you must also set 'field.%s.vector-dim',"
-                                + " where %s is the name of the vector field.");
-                type =
-                        DataTypes.VECTOR(
-                                Integer.parseInt(properties.get(dimKey)),
-                                toPaimonType(arrayType.elementType()));
+            } else if (vectorFields.contains(name)) {
+                type = toVectorType(field, properties);
             } else {
                 type = toPaimonType(field.dataType()).copy(field.nullable());
             }
@@ -642,14 +628,44 @@ public class SparkCatalog extends SparkBaseCatalog
         return schemaBuilder.build();
     }
 
-    private static DataType toBlobType(StructField field, boolean allowArray) {
+    private static DataType toVectorType(StructField field, Map<String, String> properties) {
+        checkArgument(
+                field.dataType() instanceof ArrayType,
+                "The type of vector field '%s' must be array, but is %s.",
+                field.name(),
+                field.dataType().catalogString());
+        ArrayType arrayType = (ArrayType) field.dataType();
+
+        String dimKey = String.format("field.%s.vector-dim", field.name());
+        checkArgument(
+                properties.containsKey(dimKey),
+                "When setting '%s', you must also set '%s'.",
+                CoreOptions.VECTOR_FIELD.key(),
+                dimKey);
+        String vectorDim = properties.get(dimKey);
+        checkArgument(
+                !StringUtils.isNullOrWhitespaceOnly(vectorDim),
+                "Expected an integer for '%s', but got empty value.",
+                dimKey);
+
+        int dim;
+        try {
+            dim = Integer.parseInt(vectorDim.trim());
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException(
+                    String.format("Expected an integer for '%s', but got: %s.", dimKey, vectorDim));
+        }
+        return new VectorType(field.nullable(), dim, toPaimonType(arrayType.elementType()));
+    }
+
+    private static DataType toBlobType(StructField field, boolean allowNested) {
         org.apache.spark.sql.types.DataType sparkType = field.dataType();
         if (sparkType instanceof BinaryType) {
             return new BlobType(field.nullable());
         }
         if (sparkType instanceof ArrayType) {
             checkArgument(
-                    allowArray,
+                    allowNested,
                     "ARRAY<BLOB> is only supported by '" + CoreOptions.BLOB_FIELD.key() + "'.");
             ArrayType arrayType = (ArrayType) sparkType;
             checkArgument(
@@ -658,8 +674,22 @@ public class SparkCatalog extends SparkBaseCatalog
             return new org.apache.paimon.types.ArrayType(
                     field.nullable(), new BlobType(arrayType.containsNull()));
         }
+        if (sparkType instanceof org.apache.spark.sql.types.MapType) {
+            checkArgument(
+                    allowNested,
+                    "MAP<X, BLOB> is only supported by '" + CoreOptions.BLOB_FIELD.key() + "'.");
+            org.apache.spark.sql.types.MapType mapType =
+                    (org.apache.spark.sql.types.MapType) sparkType;
+            checkArgument(
+                    mapType.valueType() instanceof BinaryType,
+                    "The value type of a MAP<X, BLOB> field must be binary");
+            return new org.apache.paimon.types.MapType(
+                    field.nullable(),
+                    toPaimonType(mapType.keyType()).copy(false),
+                    new BlobType(mapType.valueContainsNull()));
+        }
         throw new IllegalArgumentException(
-                "The type of blob field must be binary or array of binary");
+                "The type of blob field must be binary, array of binary, or map with binary values");
     }
 
     private void validateAlterProperty(String alterKey) {
@@ -709,7 +739,7 @@ public class SparkCatalog extends SparkBaseCatalog
     public UnboundFunction loadFunction(Identifier ident) throws NoSuchFunctionException {
         String[] namespace = ident.namespace();
         if (isSystemFunctionNamespace(namespace)) {
-            UnboundFunction func = PaimonFunctions.load(ident.name());
+            UnboundFunction func = PaimonFunctions.load(ident.name(), catalogName);
             if (func != null) {
                 return func;
             }

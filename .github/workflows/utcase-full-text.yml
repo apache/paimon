@@ -24,13 +24,11 @@ on:
       - 'paimon-full-text/**'
       - 'pom.xml'
       - '.github/workflows/utcase-full-text.yml'
-      - '.github/workflows/install-paimon-full-text.sh'
   pull_request:
     paths:
       - 'paimon-full-text/**'
       - 'pom.xml'
       - '.github/workflows/utcase-full-text.yml'
-      - '.github/workflows/install-paimon-full-text.sh'
 
 env:
   JDK_VERSION: 8
@@ -53,15 +51,6 @@ jobs:
         with:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'temurin'
-
-      - name: Install Rust toolchain
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-
-      - name: Install paimon-full-text native dependency
-        run: |
-          bash .github/workflows/install-paimon-full-text.sh native
 
       - name: Build and test full-text module
         timeout-minutes: 30

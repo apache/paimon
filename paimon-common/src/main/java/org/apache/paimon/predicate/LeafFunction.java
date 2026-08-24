@@ -63,6 +63,9 @@ public abstract class LeafFunction implements Serializable {
             registry.put(StartsWith.NAME, StartsWith.INSTANCE);
             registry.put(EndsWith.NAME, EndsWith.INSTANCE);
             registry.put(Contains.NAME, Contains.INSTANCE);
+            registry.put(ArrayContains.NAME, ArrayContains.INSTANCE);
+            registry.put(ArraysOverlap.NAME, ArraysOverlap.INSTANCE);
+            registry.put(ArrayContainsAll.NAME, ArrayContainsAll.INSTANCE);
             registry.put(Like.NAME, Like.INSTANCE);
             registry.put(In.NAME, In.INSTANCE);
             registry.put(NotIn.NAME, NotIn.INSTANCE);
@@ -88,6 +91,11 @@ public abstract class LeafFunction implements Serializable {
             List<Object> literals);
 
     public abstract Optional<LeafFunction> negate();
+
+    /** Returns the type used to serialize literals for a field of the given type. */
+    public DataType literalType(DataType fieldType) {
+        return fieldType;
+    }
 
     @Override
     public int hashCode() {

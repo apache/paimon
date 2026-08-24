@@ -15,7 +15,30 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from pypaimon.tag.tag import Tag
-from pypaimon.tag.tag_manager import TagManager
+import importlib
+import sys
+
+if sys.version_info[:2] < (3, 7):
+    # Module-level __getattr__ is unavailable before Python 3.7.
+    from pypaimon.tag.tag import Tag
+    from pypaimon.tag.tag_manager import TagManager
 
 __all__ = ["Tag", "TagManager"]
+
+_MODULE_BY_EXPORT = {
+    "Tag": "pypaimon.tag.tag",
+    "TagManager": "pypaimon.tag.tag_manager",
+}
+
+
+# Lazy resolution avoids the eager sibling imports that let threads lock
+# tag and tag_manager in opposite orders. Python's own module locks make
+# this thread-safe; an extra lock here would deadlock against them.
+def __getattr__(name):
+    module_name = _MODULE_BY_EXPORT.get(name)
+    if module_name is None:
+        raise AttributeError(
+            "module 'pypaimon.tag' has no attribute {}".format(name))
+    value = getattr(importlib.import_module(module_name), name)
+    globals()[name] = value
+    return value

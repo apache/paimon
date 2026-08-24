@@ -34,6 +34,7 @@ import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.FileRecordReader;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
@@ -62,8 +63,8 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
     private final FileIO fileIO;
     private final SchemaManager schemaManager;
     private final TableSchema schema;
-    private final RowType keyType;
-    private final RowType valueType;
+    protected final RowType keyType;
+    protected final RowType valueType;
 
     private final FormatReaderMapping.Builder formatReaderMappingBuilder;
     private final DataFilePathFactory pathFactory;
@@ -73,7 +74,8 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
     private final boolean snapshotSequenceOrdering;
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
     private final BinaryRow partition;
-    private final DeletionVector.Factory dvFactory;
+    protected final DeletionVector.Factory dvFactory;
+    @Nullable private final ReadBatchSizer readBatchSizer;
 
     protected KeyValueFileReaderFactory(
             FileIO fileIO,
@@ -85,7 +87,8 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
             DataFilePathFactory pathFactory,
             BinaryRow partition,
             DeletionVector.Factory dvFactory,
-            CoreOptions coreOptions) {
+            CoreOptions coreOptions,
+            @Nullable ReadBatchSizer readBatchSizer) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schema = schema;
@@ -100,6 +103,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
         this.partition = partition;
         this.formatReaderMappings = new ConcurrentHashMap<>();
         this.dvFactory = dvFactory;
+        this.readBatchSizer = readBatchSizer;
     }
 
     public TableSchema schema() {
@@ -127,6 +131,26 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
         return createRecordReader(file, true, null);
     }
 
+    protected FileRecordReader<KeyValue> createRecordReader(
+            DataFileMeta file,
+            FileRecordReader<InternalRow> fileRecordReader,
+            boolean overrideSequenceWithSnapshotId)
+            throws IOException {
+        Optional<DeletionVector> deletionVector = dvFactory.create(file.fileName());
+        if (deletionVector.isPresent() && !deletionVector.get().isEmpty()) {
+            fileRecordReader =
+                    new ApplyDeletionVectorReader(fileRecordReader, deletionVector.get());
+        }
+
+        return new KeyValueDataFileRecordReader(
+                fileRecordReader,
+                keyType,
+                valueType,
+                file.level(),
+                overrideSequenceWithSnapshotId,
+                file.minSequenceNumber());
+    }
+
     private FileRecordReader<KeyValue> createRecordReader(
             DataFileMeta file, boolean reuseFormat, @Nullable Integer orcPoolSize)
             throws IOException {
@@ -152,9 +176,10 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                         schema.logicalRowType(),
                         formatReaderMapping.getReaderFactory(),
                         orcPoolSize == null
-                                ? new FormatReaderContext(fileIO, filePath, fileSize)
+                                ? new FormatReaderContext(
+                                        fileIO, filePath, fileSize, null, readBatchSizer)
                                 : new OrcFormatReaderContext(
-                                        fileIO, filePath, fileSize, orcPoolSize),
+                                        fileIO, filePath, fileSize, orcPoolSize, readBatchSizer),
                         ignoreCorruptFiles,
                         ignoreLostFiles,
                         formatReaderMapping.getIndexMapping(),
@@ -165,12 +190,6 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                         null,
                         -1,
                         Collections.emptyMap());
-
-        Optional<DeletionVector> deletionVector = dvFactory.create(file.fileName());
-        if (deletionVector.isPresent() && !deletionVector.get().isEmpty()) {
-            fileRecordReader =
-                    new ApplyDeletionVectorReader(fileRecordReader, deletionVector.get());
-        }
 
         // In snapshot-ordering mode, APPEND files carry the commit snapshot id in
         // minSequenceNumber (stamped at commit time); override per-record sequence with it so
@@ -185,13 +204,8 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                             + "Legacy files without fileSource cannot be ordered by commit snapshot id.");
             overrideSequenceWithSnapshotId = file.fileSource().get() == FileSource.APPEND;
         }
-        return new KeyValueDataFileRecordReader(
-                fileRecordReader,
-                keyType,
-                valueType,
-                file.level(),
-                overrideSequenceWithSnapshotId,
-                file.minSequenceNumber());
+
+        return createRecordReader(file, fileRecordReader, overrideSequenceWithSnapshotId);
     }
 
     public static Builder builder(
@@ -231,6 +245,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
 
         protected RowType readKeyType;
         protected RowType readValueType;
+        @Nullable protected ReadBatchSizer readBatchSizer;
 
         private Builder(
                 FileIO fileIO,
@@ -257,29 +272,35 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
         }
 
         public Builder copyWithoutProjection() {
-            return new Builder(
-                    fileIO,
-                    schemaManager,
-                    schema,
-                    keyType,
-                    valueType,
-                    formatDiscover,
-                    pathFactory,
-                    extractor,
-                    options);
+            Builder copy =
+                    new Builder(
+                            fileIO,
+                            schemaManager,
+                            schema,
+                            keyType,
+                            valueType,
+                            formatDiscover,
+                            pathFactory,
+                            extractor,
+                            options);
+            copy.readBatchSizer = readBatchSizer;
+            return copy;
         }
 
         public Builder copyWithoutValue() {
-            return new Builder(
-                    fileIO,
-                    schemaManager,
-                    schema,
-                    keyType,
-                    RowType.of(),
-                    formatDiscover,
-                    pathFactory,
-                    extractor,
-                    options);
+            Builder copy =
+                    new Builder(
+                            fileIO,
+                            schemaManager,
+                            schema,
+                            keyType,
+                            RowType.of(),
+                            formatDiscover,
+                            pathFactory,
+                            extractor,
+                            options);
+            copy.readBatchSizer = readBatchSizer;
+            return copy;
         }
 
         public Builder withReadKeyType(RowType readKeyType) {
@@ -289,6 +310,11 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
 
         public Builder withReadValueType(RowType readValueType) {
             this.readValueType = readValueType;
+            return this;
+        }
+
+        public Builder withReadBatchSizer(ReadBatchSizer sizer) {
+            this.readBatchSizer = sizer;
             return this;
         }
 
@@ -332,7 +358,8 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                     pathFactory.createDataFilePathFactory(partition, bucket),
                     partition,
                     dvFactory,
-                    options);
+                    options,
+                    readBatchSizer);
         }
 
         protected FormatReaderMapping.Builder formatReaderMappingBuilder(

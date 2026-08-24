@@ -447,6 +447,7 @@ class PrimaryKeyVectorBucketSearchTest {
         long rowCount = sources.stream().mapToLong(DataFileMeta::rowCount).sum();
         byte[] sourceMeta =
                 new PrimaryKeyIndexSourceMeta(
+                                1,
                                 sources.stream()
                                         .map(
                                                 source ->

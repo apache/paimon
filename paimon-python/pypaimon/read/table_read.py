@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import os
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, Iterator, List, Optional
@@ -23,12 +24,18 @@ import pandas
 import pyarrow
 
 from pypaimon.common.predicate import Predicate
+from pypaimon.common.predicate_json_parser import extract_referenced_fields
 from pypaimon.read.push_down_utils import predicate_field_names
+from pypaimon.read.query_auth_split import QueryAuthSplit
+from pypaimon.read.reader.auth_masking_reader import (
+    AuthFilterReader, AuthMaskingReader, ColumnProjectReader,
+    RecordReaderToBatchAdapter, BatchToRecordReaderAdapter)
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
+from pypaimon.read.reader.limited_record_reader import LimitedRecordBatchReader
 from pypaimon.read.split import Split
 from pypaimon.read.split_read import (DataEvolutionSplitRead,
                                       MergeFileSplitRead, RawFileSplitRead,
-                                      SplitRead)
+                                      SplitRead, deferred_blob_field_names)
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.row.offset_row import OffsetRow
 
@@ -106,6 +113,15 @@ class TableRead:
         self._predicate_extra_fields = self._predicate_fields_outside_read_type()
         self._scan_read_type = self.read_type + self._predicate_extra_fields
         self._output_column_names = [f.name for f in self.read_type]
+        self._deferred_blob_fields = (
+            deferred_blob_field_names(
+                self.table,
+                self._scan_read_type,
+                self.predicate,
+                limit,
+            )
+            if self.table.options.data_evolution_enabled() else set()
+        )
         self.include_row_kind = include_row_kind
         self.nested_name_paths = nested_name_paths
         self.limit = limit
@@ -119,7 +135,9 @@ class TableRead:
             for split in splits:
                 if limit is not None and count >= limit:
                     return
-                reader = self._create_split_read(split).create_reader()
+                remaining = None if limit is None else limit - count
+                reader = self.__create_reader_for_split(
+                    split, limit=remaining)
                 try:
                     for batch in iter(reader.read_batch, None):
                         for row in iter(batch.next, None):
@@ -176,11 +194,16 @@ class TableRead:
             splits: scan-plan splits returned from a ``TableScan``.
             parallelism: optional runtime override of the
                 ``read.parallelism`` table option. ``None`` (default) falls
-                back to the table option; a non-None value temporarily
-                overrides it for this call. ``1`` keeps reads serial;
-                ``>= 2`` enables a thread pool that reads splits
-                concurrently and assembles the final table in input order.
-                Must be ``>= 1``.
+                back to the table option; when that is also unset the read
+                auto-scales to ``min(number of splits, CPU count)``. ``1``
+                keeps reads serial; ``>= 2`` caps the thread pool that reads
+                splits concurrently and assembles the final table in input
+                order. Must be ``>= 1``. Note that with ``>= 2`` (or auto)
+                and a ``limit`` set, the returned rows are an arbitrary
+                subset of the requested size, since which splits fill the row
+                quota first is non-deterministic. Data-evolution reads with
+                deferred BLOB resolution run serially when a limit may discard
+                rows, so payloads are not materialized from discarded splits.
             blob_parallelism: number of threads for concurrent blob reads
                 within each batch. ``None`` or ``1`` (default) reads blobs
                 serially; ``>= 2`` uses a thread pool with ``pread`` for
@@ -191,8 +214,7 @@ class TableRead:
                 shrunk to stay within it.
         """
         effective_bp = self._resolve_blob_parallelism(blob_parallelism)
-        # TODO: default read.parallelism to min(splits, cpu_count()) once stable
-        effective = self._resolve_parallelism(parallelism)
+        effective = self._resolve_parallelism(parallelism, len(splits))
         schema = PyarrowFieldParser.from_paimon_schema(self.read_type)
         if self.include_row_kind:
             schema = self._add_row_kind_to_schema(schema)
@@ -223,15 +245,19 @@ class TableRead:
         for split in splits:
             if remaining is not None and remaining <= 0:
                 break
-            reader = self._create_split_read(split, blob_parallelism).create_reader()
+            reader = self.__create_reader_for_split(
+                split, blob_parallelism, limit=remaining)
             try:
                 if isinstance(reader, RecordBatchReader):
                     for batch in iter(reader.read_arrow_batch, None):
+                        if batch.num_rows == 0:
+                            continue
                         if remaining is not None and batch.num_rows > remaining:
                             batch = batch.slice(0, remaining)
                         batch = self._project_batch_to_output(batch)
                         if self.include_row_kind:
-                            batch = self._add_row_kind_column_to_batch(batch, "+I")
+                            if "_row_kind" not in batch.schema.names:
+                                batch = self._add_row_kind_column_to_batch(batch, "+I")
                         yield batch
                         if remaining is not None:
                             remaining -= batch.num_rows
@@ -274,20 +300,23 @@ class TableRead:
             finally:
                 reader.close()
 
-    def _resolve_parallelism(self, runtime: Optional[int]) -> int:
+    def _resolve_parallelism(self, runtime: Optional[int], num_splits: int) -> int:
         """Pick the effective parallelism and reject illegal values.
 
         Priority: explicit ``parallelism`` argument > ``read.parallelism``
-        table option > built-in default of 1. The validation message names
-        whichever source produced the offending value, so users know where
-        to fix it.
+        table option > auto. When neither the argument nor the option is set
+        the read auto-scales to ``min(num_splits, CPU count)``. A value >= 1
+        caps the thread pool; ``1`` forces serial reads. The validation
+        message names whichever source produced the offending value.
         """
         if runtime is not None:
-            value = runtime
-            source = "parallelism"
+            value, source = runtime, "parallelism"
+        elif self._read_parallelism is not None:
+            value, source = self._read_parallelism, "read.parallelism"
         else:
-            value = self._read_parallelism
-            source = "read.parallelism"
+            # os.cpu_count() may return None on exotic platforms; fall back
+            # to 1. min() with num_splits avoids more workers than work.
+            return max(1, min(num_splits, os.cpu_count() or 1))
         if value < 1:
             raise ValueError(f"{source} must be >= 1, got {value}")
         return value
@@ -318,7 +347,25 @@ class TableRead:
         overhead, no behavior change). A single split is never
         parallelized since there is nothing to fan out across.
         """
-        return effective >= 2 and len(splits) >= 2
+        deferred_limit_may_prune = (
+            self.limit is not None
+            and self._deferred_blob_fields
+            and not self._limit_covers_all_splits(splits)
+        )
+        return (effective >= 2 and len(splits) >= 2
+                and not deferred_limit_may_prune)
+
+    def _limit_covers_all_splits(self, splits: List[Split]) -> bool:
+        """Return whether split metadata proves that LIMIT cannot drop rows."""
+        total_rows = 0
+        for split in splits:
+            merged_row_count = split.merged_row_count()
+            if merged_row_count is None:
+                return False
+            total_rows += merged_row_count
+            if total_rows > self.limit:
+                return False
+        return True
 
     def _to_arrow_parallel(
         self,
@@ -387,10 +434,12 @@ class TableRead:
         """
         chunk_size = 65536
         out: List[pyarrow.RecordBatch] = []
-        reader = self._create_split_read(split, blob_parallelism).create_reader()
+        reader = self.__create_reader_for_split(split, blob_parallelism)
         try:
             if isinstance(reader, RecordBatchReader):
                 for batch in iter(reader.read_arrow_batch, None):
+                    if batch.num_rows == 0:
+                        continue
                     allowed = remaining_state.try_consume(batch.num_rows)
                     if allowed == 0:
                         break
@@ -398,7 +447,8 @@ class TableRead:
                         batch = batch.slice(0, allowed)
                     batch = self._project_batch_to_output(batch)
                     if self.include_row_kind:
-                        batch = self._add_row_kind_column_to_batch(batch, "+I")
+                        if "_row_kind" not in batch.schema.names:
+                            batch = self._add_row_kind_column_to_batch(batch, "+I")
                     out.append(batch)
                     if remaining_state.exhausted():
                         break
@@ -522,11 +572,16 @@ class TableRead:
         return arrow_table.to_pandas()
 
     def to_duckdb(self, splits: List[Split], table_name: str,
-                  connection: Optional["DuckDBPyConnection"] = None) -> "DuckDBPyConnection":
+                  connection: Optional["DuckDBPyConnection"] = None,
+                  parallelism: Optional[int] = None) -> "DuckDBPyConnection":
+        """Materialize ``splits`` into an in-memory table registered with DuckDB.
+
+        See :meth:`to_arrow` for the semantics of ``parallelism``.
+        """
         import duckdb
 
         con = connection or duckdb.connect(database=":memory:")
-        con.register(table_name, self.to_arrow(splits))
+        con.register(table_name, self.to_arrow(splits, parallelism=parallelism))
         return con
 
     def to_ray(
@@ -629,14 +684,37 @@ class TableRead:
             dataset = TorchDataset(self, splits)
             return dataset
 
-    def _create_split_read(self, split: Split, blob_parallelism: int = 1) -> SplitRead:
-        sr = self._build_split_read(split)
+    def _create_split_read(self, split: Split, blob_parallelism: int = 1,
+                           read_type=None, limit: Optional[int] = None,
+                           push_down_limit: bool = True,
+                           post_merge_filter=None,
+                           eager_blob_fields=None,
+                           post_filter_after_inline: bool = False) -> SplitRead:
+        sr = self._build_split_read(
+            split,
+            read_type,
+            limit,
+            push_down_limit,
+            post_merge_filter,
+            eager_blob_fields,
+            post_filter_after_inline,
+        )
         sr._blob_parallelism = blob_parallelism
         return sr
 
-    def _build_split_read(self, split: Split) -> SplitRead:
+    def _build_split_read(self, split: Split, read_type=None,
+                          limit: Optional[int] = None,
+                          push_down_limit: bool = True,
+                          post_merge_filter=None,
+                          eager_blob_fields=None,
+                          post_filter_after_inline: bool = False) -> SplitRead:
+        effective_limit = (
+            self.limit if limit is None else limit
+        ) if push_down_limit else None
+        effective_read_type = read_type if read_type is not None else self.read_type
+        scan_read_type = self._with_predicate_extra_fields(read_type) if read_type is not None else self._scan_read_type
         if self.table.is_primary_key_table and not split.raw_convertible:
-            inner_read_type = self._scan_read_type
+            inner_read_type = scan_read_type
             outer_extract_name_paths: Optional[List[List[str]]] = None
             if self.nested_name_paths and any(
                     len(p) > 1 for p in self.nested_name_paths):
@@ -670,10 +748,8 @@ class TableRead:
                         # Drop the injected seq columns: project back to the
                         # user's requested (flat) columns in order.
                         outer_extract_name_paths = [
-                            [f.name] for f in self.read_type]
-            if outer_extract_name_paths is None and self._needs_output_projection():
-                # Split readers own the output projection for iterator reads;
-                # the TableRead Arrow projection below is a final guard.
+                            [f.name] for f in effective_read_type]
+            if read_type is None and outer_extract_name_paths is None and self._needs_output_projection():
                 outer_extract_name_paths = self._output_extract_name_paths()
             return MergeFileSplitRead(
                 table=self.table,
@@ -683,8 +759,8 @@ class TableRead:
                 row_tracking_enabled=False,
                 outer_extract_name_paths=outer_extract_name_paths,
                 outer_flat_read_type=(
-                    self.read_type if outer_extract_name_paths else None),
-                limit=self.limit,
+                    effective_read_type if outer_extract_name_paths else None),
+                limit=effective_limit,
             )
         elif self.table.options.data_evolution_enabled():
             if self.nested_name_paths and any(
@@ -693,23 +769,25 @@ class TableRead:
                     "Nested-field projection on data-evolution tables is "
                     "not yet supported")
             outer_extract_name_paths = None
-            if self._needs_output_projection():
-                # Keep iterator output narrow inside DataEvolutionSplitRead.
+            if read_type is None and self._needs_output_projection():
                 outer_extract_name_paths = self._output_extract_name_paths()
             return DataEvolutionSplitRead(
                 table=self.table,
                 predicate=self.predicate,
-                read_type=self._scan_read_type,
+                read_type=scan_read_type,
                 split=split,
                 row_tracking_enabled=True,
                 nested_name_paths=self.nested_name_paths,
                 outer_extract_name_paths=outer_extract_name_paths,
                 outer_flat_read_type=(
                     self.read_type if outer_extract_name_paths else None),
-                limit=self.limit,
+                limit=effective_limit,
+                post_merge_filter=post_merge_filter,
+                eager_blob_fields=eager_blob_fields,
+                post_filter_after_inline=post_filter_after_inline,
             )
         else:
-            inner_read_type = self._scan_read_type
+            inner_read_type = scan_read_type
             outer_extract_name_paths: Optional[List[List[str]]] = None
             if self.nested_name_paths and any(
                     len(p) > 1 for p in self.nested_name_paths):
@@ -721,9 +799,7 @@ class TableRead:
                 inner_read_type = self._with_predicate_extra_fields(
                     self._widen_to_top_level_for_merge())
                 outer_extract_name_paths = self.nested_name_paths
-            if outer_extract_name_paths is None and self._needs_output_projection():
-                # Split readers own the output projection for iterator reads;
-                # the TableRead Arrow projection below is a final guard.
+            if read_type is None and outer_extract_name_paths is None and self._needs_output_projection():
                 outer_extract_name_paths = self._output_extract_name_paths()
             return RawFileSplitRead(
                 table=self.table,
@@ -733,8 +809,8 @@ class TableRead:
                 row_tracking_enabled=self.table.options.row_tracking_enabled(),
                 outer_extract_name_paths=outer_extract_name_paths,
                 outer_flat_read_type=(
-                    self.read_type if outer_extract_name_paths else None),
-                limit=self.limit,
+                    effective_read_type if outer_extract_name_paths else None),
+                limit=effective_limit,
             )
 
     def _project_batch_to_output(self, batch: pyarrow.RecordBatch) -> pyarrow.RecordBatch:
@@ -793,6 +869,97 @@ class TableRead:
                     "table schema" % (top_name,))
             widened.append(field)
         return widened
+
+    def __create_reader_for_split(self, split, blob_parallelism=1,
+                                  limit: Optional[int] = None):
+        auth_result = None
+        if isinstance(split, QueryAuthSplit):
+            auth_result = split.auth_result
+            split = split.split
+
+        if auth_result is not None:
+            return self.__authed_reader(
+                split, auth_result, blob_parallelism, limit)
+        if limit is None:
+            return self._create_split_read(
+                split, blob_parallelism=blob_parallelism).create_reader()
+        return self._create_split_read(
+            split,
+            blob_parallelism=blob_parallelism,
+            limit=limit,
+        ).create_reader()
+
+    def __authed_reader(self, split, auth_result, blob_parallelism=1,
+                        limit: Optional[int] = None):
+        table_fields = self.table.fields
+        read_fields = self.read_type
+
+        extra_fields = auth_result.get_extra_fields_for_filter(read_fields, table_fields)
+        effective_read_type = read_fields
+        if extra_fields:
+            effective_read_type = read_fields + extra_fields
+
+        filter_fn = auth_result.extract_row_filter()
+        effective_limit = self.limit if limit is None else limit
+        auth_fields = (
+            self._auth_filter_field_names(auth_result, effective_read_type)
+            if filter_fn is not None else set()
+        )
+        inline_blob_fields = (
+            self.table.options.blob_descriptor_fields()
+            | self.table.options.blob_view_fields()
+        )
+        embed_filter = (
+            filter_fn is not None
+            and self.table.options.data_evolution_enabled()
+        )
+        # If the auth filter references an inline BLOB, run it after inline resolution (in
+        # the split read) so it sees resolved payloads while scalar BLOBs still defer.
+        post_filter_after_inline = embed_filter and bool(auth_fields & inline_blob_fields)
+        split_read = self._create_split_read(
+            split,
+            blob_parallelism=blob_parallelism,
+            read_type=effective_read_type,
+            limit=limit,
+            push_down_limit=filter_fn is None or embed_filter,
+            post_merge_filter=filter_fn if embed_filter else None,
+            eager_blob_fields=auth_fields if embed_filter else None,
+            post_filter_after_inline=post_filter_after_inline,
+        )
+        reader = split_read.create_reader()
+
+        needs_convert_back = False
+        if not isinstance(reader, RecordBatchReader):
+            schema = PyarrowFieldParser.from_paimon_schema(effective_read_type)
+            reader = RecordReaderToBatchAdapter(reader, schema, include_row_kind=self.include_row_kind)
+            needs_convert_back = True
+
+        if filter_fn and not embed_filter:
+            reader = AuthFilterReader(reader, filter_fn)
+            if effective_limit is not None:
+                reader = LimitedRecordBatchReader(reader, effective_limit)
+
+        if auth_result.column_masking:
+            reader = AuthMaskingReader(reader, auth_result.column_masking, effective_read_type)
+
+        if extra_fields:
+            original_columns = [f.name for f in read_fields]
+            reader = ColumnProjectReader(reader, original_columns)
+
+        if needs_convert_back:
+            reader = BatchToRecordReaderAdapter(reader)
+
+        return reader
+
+    @staticmethod
+    def _auth_filter_field_names(auth_result, read_fields) -> set:
+        filters = getattr(auth_result, "filter", None)
+        if not filters:
+            return {field.name for field in read_fields}
+        names = set()
+        for filter_json in filters:
+            names.update(extract_referenced_fields(filter_json))
+        return names
 
     @staticmethod
     def convert_rows_to_arrow_batch(row_tuples: List[tuple], schema: pyarrow.Schema) -> pyarrow.RecordBatch:

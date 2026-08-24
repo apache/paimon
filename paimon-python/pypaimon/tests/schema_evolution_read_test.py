@@ -22,6 +22,7 @@ import unittest
 
 import pandas
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 
@@ -59,6 +60,7 @@ class SchemaEvolutionReadTest(unittest.TestCase):
     def tearDownClass(cls):
         shutil.rmtree(cls.tempdir, ignore_errors=True)
 
+    @pytest.mark.python_plan
     def test_schema_evolution(self):
         # schema 0
         pa_schema = pa.schema([
@@ -129,6 +131,7 @@ class SchemaEvolutionReadTest(unittest.TestCase):
         }, schema=pa_schema)
         self.assertEqual(expected, actual)
 
+    @pytest.mark.python_plan
     def test_schema_evolution_type(self):
         # schema 0
         pa_schema = pa.schema([
@@ -419,6 +422,7 @@ class SchemaEvolutionReadTest(unittest.TestCase):
         entries = new_scan.file_scanner.read_manifest_entries(manifest_files)
         self.assertEqual(1, len(entries))  # verify scan filter success for schema evolution
 
+    @pytest.mark.python_plan
     def test_schema_evolution_with_read_filter(self):
         # schema 0
         pa_schema = pa.schema([

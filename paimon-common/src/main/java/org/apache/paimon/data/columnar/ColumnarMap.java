@@ -20,6 +20,7 @@ package org.apache.paimon.data.columnar;
 
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
+import org.apache.paimon.fs.FileIO;
 
 import java.io.Serializable;
 
@@ -32,6 +33,7 @@ public final class ColumnarMap implements InternalMap, Serializable {
     private final ColumnVector valueColumnVector;
     private final int offset;
     private final int numElements;
+    private FileIO fileIO;
 
     public ColumnarMap(
             ColumnVector keyColumnVector,
@@ -44,6 +46,10 @@ public final class ColumnarMap implements InternalMap, Serializable {
         this.numElements = numElements;
     }
 
+    void setFileIO(FileIO fileIO) {
+        this.fileIO = fileIO;
+    }
+
     @Override
     public int size() {
         return numElements;
@@ -51,12 +57,16 @@ public final class ColumnarMap implements InternalMap, Serializable {
 
     @Override
     public InternalArray keyArray() {
-        return new ColumnarArray(keyColumnVector, offset, numElements);
+        ColumnarArray array = new ColumnarArray(keyColumnVector, offset, numElements);
+        array.setFileIO(fileIO);
+        return array;
     }
 
     @Override
     public InternalArray valueArray() {
-        return new ColumnarArray(valueColumnVector, offset, numElements);
+        ColumnarArray array = new ColumnarArray(valueColumnVector, offset, numElements);
+        array.setFileIO(fileIO);
+        return array;
     }
 
     @Override

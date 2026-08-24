@@ -28,7 +28,7 @@ import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
-import org.apache.paimon.lookup.sort.db.SimpleLsmKvDb;
+import org.apache.paimon.lookup.sort.db.LocalKvDb;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.RecordReader;
@@ -58,7 +58,7 @@ import static org.apache.paimon.utils.VarLengthIntUtils.encodeInt;
 
 /**
  * Manages the primary key index for clustering compaction. Maps each primary key to its file
- * location (fileId + row position) using a {@link SimpleLsmKvDb}.
+ * location (fileId + row position) using a {@link LocalKvDb}.
  */
 public class ClusteringKeyIndex implements Closeable {
 
@@ -66,7 +66,7 @@ public class ClusteringKeyIndex implements Closeable {
     private final IOManager ioManager;
     private final KeyValueFileReaderFactory keyReaderFactory;
     private final @Nullable BucketedDvMaintainer dvMaintainer;
-    private final SimpleLsmKvDb kvDb;
+    private final LocalKvDb kvDb;
     private final ClusteringFiles fileLevels;
     private final boolean firstRow;
     private final long sortSpillBufferSize;
@@ -79,7 +79,7 @@ public class ClusteringKeyIndex implements Closeable {
             IOManager ioManager,
             KeyValueFileReaderFactory keyReaderFactory,
             @Nullable BucketedDvMaintainer dvMaintainer,
-            SimpleLsmKvDb kvDb,
+            LocalKvDb kvDb,
             ClusteringFiles fileLevels,
             boolean firstRow,
             long sortSpillBufferSize,
@@ -132,6 +132,7 @@ public class ClusteringKeyIndex implements Closeable {
             keyFieldGetters[i] = InternalRow.createFieldGetter(keyType.getTypeAt(i), i);
         }
         try {
+            long numEntries = 0;
             for (DataFileMeta file : restoreFiles) {
                 if (file.level() == 0) {
                     continue;
@@ -155,6 +156,7 @@ public class ClusteringKeyIndex implements Closeable {
                             }
                             combinedRow.setField(valueFieldIndex, valueBytes);
                             sortBuffer.write(combinedRow);
+                            numEntries++;
                         }
                         batch.releaseBatch();
                     }
@@ -199,7 +201,7 @@ public class ClusteringKeyIndex implements Closeable {
                         }
                     };
 
-            kvDb.bulkLoad(entryIterator);
+            kvDb.bulkLoad(entryIterator, numEntries);
         } catch (Exception e) {
             throw new RuntimeException(e);
         } finally {

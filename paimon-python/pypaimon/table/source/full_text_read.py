@@ -51,7 +51,7 @@ class FullTextRead(ABC):
         pass
 
 
-class FullTextReadImpl(FullTextRead):
+class DataEvolutionFullTextRead(FullTextRead):
     """Implementation for FullTextRead."""
 
     def __init__(
@@ -197,8 +197,7 @@ class FullTextReadImpl(FullTextRead):
 
         projection = [self._text_columns[0].name, SpecialFields.ROW_ID.name]
         read_builder = read_builder.with_projection(projection)
-        plan = read_builder.new_scan().with_global_index_result(
-            GlobalIndexResult.from_ranges(raw_row_ranges)).plan()
+        plan = read_builder.new_scan().with_row_ranges(raw_row_ranges).plan()
         return read_builder.new_read().to_arrow(plan.splits())
 
     def _build_raw_index(self, row_ids, texts, row_range_start):
@@ -207,8 +206,8 @@ class FullTextReadImpl(FullTextRead):
         except ImportError as e:
             raise ImportError(
                 "paimon-ftindex is required to search uncovered full-text "
-                "row ranges. Install paimon-full-text's Python package and "
-                "native FFI library."
+                "row ranges. Install paimon-ftindex==0.1.0 or "
+                "pypaimon[full-text]."
             ) from e
 
         from pypaimon.globalindex.full_text.native_full_text_global_index_reader import (

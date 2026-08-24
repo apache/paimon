@@ -35,6 +35,9 @@ public class BlobFileFormatFactory implements FileFormatFactory {
     @Override
     public FileFormat create(FormatContext formatContext) {
         boolean blobAsDescriptor = formatContext.options().get(CoreOptions.BLOB_AS_DESCRIPTOR);
-        return new BlobFileFormat(blobAsDescriptor);
+        int copyBufferSize =
+                CoreOptions.checkedBlobCopyBufferSize(
+                        formatContext.options().get(CoreOptions.BLOB_COPY_BUFFER_SIZE).getBytes());
+        return new BlobFileFormat(blobAsDescriptor, copyBufferSize);
     }
 }

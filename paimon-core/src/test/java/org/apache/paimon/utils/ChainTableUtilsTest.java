@@ -24,9 +24,15 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.stats.StatsTestUtils;
+import org.apache.paimon.table.source.ChainSplit;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
@@ -34,17 +40,18 @@ import org.assertj.core.util.Lists;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.LinkedHashMap;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test class for {@link org.apache.paimon.utils.ChainTableUtils}. */
 public class ChainTableUtilsTest {
@@ -175,38 +182,6 @@ public class ChainTableUtilsTest {
         predicates.add(builder.equal(1, partitionValue.getString(1)));
         Predicate expected = PredicateBuilder.and(predicates);
         Assertions.assertTrue(predicate.equals(expected));
-    }
-
-    @Test
-    public void testGeneratePartitionValues() {
-        LinkedHashMap<String, String> partitionValues =
-                ChainTableUtils.calPartValues(
-                        LocalDateTime.of(2023, 1, 1, 12, 0, 0),
-                        Arrays.asList("dt", "hour"),
-                        "$dt $hour:00:00",
-                        "yyyyMMdd HH:mm:ss");
-        assertEquals(
-                new LinkedHashMap<String, String>() {
-                    {
-                        put("dt", "20230101");
-                        put("hour", "12");
-                    }
-                },
-                partitionValues);
-
-        partitionValues =
-                ChainTableUtils.calPartValues(
-                        LocalDateTime.of(2023, 1, 1, 0, 0, 0),
-                        Arrays.asList("dt"),
-                        "$dt",
-                        "yyyyMMdd");
-        assertEquals(
-                new LinkedHashMap<String, String>() {
-                    {
-                        put("dt", "20230101");
-                    }
-                },
-                partitionValues);
     }
 
     // ========================== Tests for findFirstLatestPartitionsWithProjector
@@ -766,5 +741,259 @@ public class ChainTableUtilsTest {
         assertThat(matched2).isNotNull();
         assertThat(getString(matched2, 0)).isEqualTo("20250809");
         assertThat(getString(matched2, 1)).isEqualTo("02");
+    }
+
+    @Test
+    public void testBuildChainSplitsWithKeyRangeSplitting() {
+        // Single bucket. Snapshot files S1=[a,b], S2=[m,n]; delta files D1=[a,b] (overlaps S1),
+        // D2=[m,n] (overlaps S2). The two sections are key-disjoint, so they form two splits;
+        // within each section the overlapping snapshot and delta files must stay together so that
+        // all versions of a key are merged in the same split.
+        BinaryRow partition = row(Lists.newArrayList("p0"));
+        String snapBranch = "snap";
+        String deltaBranch = "delta";
+
+        DataFileMeta s1 = makeFile("S1", "a", "b", 100);
+        DataFileMeta s2 = makeFile("S2", "m", "n", 100);
+        DataFileMeta d1 = makeFile("D1", "a", "b", 100);
+        DataFileMeta d2 = makeFile("D2", "m", "n", 100);
+
+        DataSplit snapshotSplit = dataSplit(partition, 0, Lists.newArrayList(s1, s2));
+        DataSplit deltaSplit = dataSplit(partition, 0, Lists.newArrayList(d1, d2));
+
+        // Small targetSplitSize so each section forms its own split.
+        List<ChainSplit> splits =
+                ChainTableUtils.buildChainSplits(
+                        partition,
+                        Collections.singletonList(snapshotSplit),
+                        Collections.singletonList(deltaSplit),
+                        snapBranch,
+                        deltaBranch,
+                        KEY_COMPARATOR,
+                        1L,
+                        1L);
+
+        assertThat(splits).hasSize(2);
+
+        List<Set<String>> groups =
+                splits.stream().map(ChainTableUtilsTest::fileNames).collect(Collectors.toList());
+        // Overlapping files are kept together: {S1,D1} and {S2,D2}, never mixed.
+        assertThat(groups)
+                .containsExactlyInAnyOrder(
+                        new HashSet<>(Arrays.asList("S1", "D1")),
+                        new HashSet<>(Arrays.asList("S2", "D2")));
+
+        // Branch tagging is preserved per file across the resulting splits.
+        ChainSplit s1Split =
+                splits.stream().filter(s -> fileNames(s).contains("S1")).findFirst().get();
+        assertThat(s1Split.fileBranchMapping().get("S1")).isEqualTo(snapBranch);
+        assertThat(s1Split.fileBranchMapping().get("D1")).isEqualTo(deltaBranch);
+        ChainSplit s2Split =
+                splits.stream().filter(s -> fileNames(s).contains("S2")).findFirst().get();
+        assertThat(s2Split.fileBranchMapping().get("S2")).isEqualTo(snapBranch);
+        assertThat(s2Split.fileBranchMapping().get("D2")).isEqualTo(deltaBranch);
+    }
+
+    @Test
+    public void testBuildChainSplitsKeyRangeSplittingLargeTargetKeepsOneSplit() {
+        // With a large targetSplitSize all key-disjoint sections are packed into a single split.
+        BinaryRow partition = row(Lists.newArrayList("p0"));
+        DataFileMeta s1 = makeFile("S1", "a", "b", 100);
+        DataFileMeta s2 = makeFile("S2", "m", "n", 100);
+        DataFileMeta d1 = makeFile("D1", "a", "b", 100);
+        DataFileMeta d2 = makeFile("D2", "m", "n", 100);
+
+        DataSplit snapshotSplit = dataSplit(partition, 0, Lists.newArrayList(s1, s2));
+        DataSplit deltaSplit = dataSplit(partition, 0, Lists.newArrayList(d1, d2));
+
+        List<ChainSplit> splits =
+                ChainTableUtils.buildChainSplits(
+                        partition,
+                        Collections.singletonList(snapshotSplit),
+                        Collections.singletonList(deltaSplit),
+                        "snap",
+                        "delta",
+                        KEY_COMPARATOR,
+                        Long.MAX_VALUE,
+                        1L);
+
+        assertThat(splits).hasSize(1);
+        assertThat(fileNames(splits.get(0))).containsExactlyInAnyOrder("S1", "S2", "D1", "D2");
+    }
+
+    @Test
+    public void testBuildChainSplitsWithoutKeyRangeSplitting() {
+        // A null keyComparator keeps the original one-split-per-bucket behavior (used by
+        // streaming).
+        BinaryRow partition = row(Lists.newArrayList("p0"));
+        DataFileMeta s1 = makeFile("S1", "a", "b", 100);
+        DataFileMeta d1 = makeFile("D1", "a", "b", 100);
+        DataSplit snapshotSplit = dataSplit(partition, 0, Lists.newArrayList(s1));
+        DataSplit deltaSplit = dataSplit(partition, 0, Lists.newArrayList(d1));
+
+        List<ChainSplit> splits =
+                ChainTableUtils.buildChainSplits(
+                        partition,
+                        Collections.singletonList(snapshotSplit),
+                        Collections.singletonList(deltaSplit),
+                        "snap",
+                        "delta",
+                        null,
+                        0L,
+                        0L);
+
+        assertThat(splits).hasSize(1);
+        assertThat(fileNames(splits.get(0))).containsExactlyInAnyOrder("S1", "D1");
+    }
+
+    private static DataFileMeta makeFile(String name, String min, String max, long size) {
+        return DataFileMeta.create(
+                name,
+                size,
+                10L,
+                row(Lists.newArrayList(min)),
+                row(Lists.newArrayList(max)),
+                StatsTestUtils.newEmptySimpleStats(),
+                StatsTestUtils.newEmptySimpleStats(),
+                0L,
+                9L,
+                0L,
+                0,
+                Collections.emptyList(),
+                Timestamp.fromEpochMillis(1000L),
+                0L,
+                null,
+                FileSource.APPEND,
+                null,
+                null,
+                null,
+                null,
+                null);
+    }
+
+    private static DataSplit dataSplit(BinaryRow partition, int bucket, List<DataFileMeta> files) {
+        return DataSplit.builder()
+                .withPartition(partition)
+                .withBucket(bucket)
+                .withBucketPath("bucket_" + bucket)
+                .withTotalBuckets(1)
+                .withDataFiles(files)
+                .build();
+    }
+
+    private static Set<String> fileNames(ChainSplit split) {
+        return split.dataFiles().stream().map(DataFileMeta::fileName).collect(Collectors.toSet());
+    }
+
+    @Test
+    public void testGetDeltaPartitionsWithHourMinuteGranularity() {
+        // partition keys: (region, dt, hour_minute), chain keys: (dt, hour_minute)
+        RowType fullType =
+                RowType.builder()
+                        .field("region", DataTypes.STRING().notNull())
+                        .field("dt", DataTypes.STRING().notNull())
+                        .field("hour_minute", DataTypes.STRING().notNull())
+                        .build();
+
+        ChainPartitionProjector projector = new ChainPartitionProjector(fullType, 2);
+
+        // Compare chain partition (dt, hour_minute) lexicographically
+        RecordComparator chainComparator = (a, b) -> a.getString(1).compareTo(b.getString(1));
+
+        Options opts = new Options();
+        opts.set(CoreOptions.PARTITION_TIMESTAMP_PATTERN, "$dtT$hour_minute");
+        opts.set(CoreOptions.PARTITION_TIMESTAMP_FORMATTER, "yyyyMMdd'T'HHmm");
+        CoreOptions options = new CoreOptions(opts);
+
+        BinaryRow begin = row(Lists.newArrayList("CN", "20260609", "1010"));
+        BinaryRow end = row(Lists.newArrayList("CN", "20260609", "1015"));
+
+        List<BinaryRow> deltas =
+                ChainTableUtils.getDeltaPartitionsWithProjector(
+                        begin, end, options, chainComparator, projector);
+
+        assertThat(deltas).hasSize(5);
+        for (BinaryRow delta : deltas) {
+            assertThat(getString(delta, 0)).isEqualTo("CN");
+            assertThat(getString(delta, 1)).isEqualTo("20260609");
+        }
+        assertThat(getString(deltas.get(0), 2)).isEqualTo("1011");
+        assertThat(getString(deltas.get(1), 2)).isEqualTo("1012");
+        assertThat(getString(deltas.get(2), 2)).isEqualTo("1013");
+        assertThat(getString(deltas.get(3), 2)).isEqualTo("1014");
+        assertThat(getString(deltas.get(4), 2)).isEqualTo("1015");
+    }
+
+    @Test
+    public void testGetDeltaPartitionsWithSeparateHourAndMinute() {
+        // partition keys: (region, dt, hour, minute), chain keys: (dt, hour, minute)
+        RowType fullType =
+                RowType.builder()
+                        .field("region", DataTypes.STRING().notNull())
+                        .field("dt", DataTypes.STRING().notNull())
+                        .field("hour", DataTypes.STRING().notNull())
+                        .field("minute", DataTypes.STRING().notNull())
+                        .build();
+
+        ChainPartitionProjector projector = new ChainPartitionProjector(fullType, 3);
+
+        // Compare chain partition (dt, hour, minute) lexicographically
+        RecordComparator chainComparator = (a, b) -> a.getString(2).compareTo(b.getString(2));
+
+        Options opts = new Options();
+        opts.set(CoreOptions.PARTITION_TIMESTAMP_PATTERN, "$dtT$hour$minute00");
+        opts.set(CoreOptions.PARTITION_TIMESTAMP_FORMATTER, "yyyyMMdd'T'HHmmss");
+        CoreOptions options = new CoreOptions(opts);
+
+        BinaryRow begin = row(Lists.newArrayList("CN", "20260609", "10", "10"));
+        BinaryRow end = row(Lists.newArrayList("CN", "20260609", "10", "15"));
+
+        List<BinaryRow> deltas =
+                ChainTableUtils.getDeltaPartitionsWithProjector(
+                        begin, end, options, chainComparator, projector);
+
+        assertThat(deltas).hasSize(5);
+        for (BinaryRow delta : deltas) {
+            assertThat(getString(delta, 0)).isEqualTo("CN");
+            assertThat(getString(delta, 1)).isEqualTo("20260609");
+            assertThat(getString(delta, 2)).isEqualTo("10");
+        }
+        assertThat(getString(deltas.get(0), 3)).isEqualTo("11");
+        assertThat(getString(deltas.get(1), 3)).isEqualTo("12");
+        assertThat(getString(deltas.get(2), 3)).isEqualTo("13");
+        assertThat(getString(deltas.get(3), 3)).isEqualTo("14");
+        assertThat(getString(deltas.get(4), 3)).isEqualTo("15");
+    }
+
+    @Test
+    public void testGetDeltaPartitionsExceedsMaxLimit() {
+        RowType partType = RowType.builder().field("dt", DataTypes.STRING().notNull()).build();
+
+        Options opts = new Options();
+        opts.set(CoreOptions.PARTITION_TIMESTAMP_PATTERN, "$dt");
+        opts.set(CoreOptions.PARTITION_TIMESTAMP_FORMATTER, "yyyyMMddHHmmss");
+        CoreOptions options = new CoreOptions(opts);
+
+        InternalRowPartitionComputer partitionComputer =
+                new InternalRowPartitionComputer(
+                        options.partitionDefaultName(),
+                        partType,
+                        new String[] {"dt"},
+                        options.legacyPartitionName());
+
+        BinaryRow begin = row(Lists.newArrayList("20250101000000"));
+        BinaryRow end = row(Lists.newArrayList("20260101000000"));
+
+        assertThatThrownBy(
+                        () ->
+                                ChainTableUtils.getDeltaPartitions(
+                                        begin,
+                                        end,
+                                        Collections.singletonList("dt"),
+                                        partType,
+                                        options,
+                                        partitionComputer))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Too many delta partitions generated");
     }
 }

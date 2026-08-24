@@ -47,7 +47,7 @@ public class SimpleHttpClient implements Closeable {
     }
 
     public String post(String url, Object body, Map<String, String> headers) throws IOException {
-        HttpPost httpPost = new HttpPost(url);
+        HttpPost httpPost = HttpClientUtils.newHttpPost(url);
         if (headers != null) {
             httpPost.setHeaders(
                     headers.entrySet().stream()
@@ -68,7 +68,7 @@ public class SimpleHttpClient implements Closeable {
 
     public String get(String url, Map<String, String> queryParams, Map<String, String> headers)
             throws IOException {
-        HttpGet httpGet = new HttpGet(RESTUtil.buildRequestUrl(url, queryParams));
+        HttpGet httpGet = HttpClientUtils.newHttpGet(RESTUtil.buildRequestUrl(url, queryParams));
         if (headers != null) {
             httpGet.setHeaders(
                     headers.entrySet().stream()
@@ -101,8 +101,8 @@ public class SimpleHttpClient implements Closeable {
                         return responseBodyStr;
                     });
         } catch (IOException e) {
-            throw new RuntimeException(
-                    "Failed to convert HTTP response body to string, error : " + e.getMessage());
+            // No message from e: a redirect/protocol error can echo the target URL (a signed URL).
+            throw new RuntimeException("Failed to convert HTTP response body to string.");
         }
     }
 

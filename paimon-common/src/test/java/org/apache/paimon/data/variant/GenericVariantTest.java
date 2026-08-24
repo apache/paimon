@@ -139,6 +139,41 @@ public class GenericVariantTest {
     }
 
     @Test
+    public void testObjectFieldOrderingCompatibility() {
+        String bmpKey = "\uE000";
+        String supplementaryKey = new String(Character.toChars(0x10000));
+        StringBuilder json = new StringBuilder("{");
+        for (int i = 0; i < 30; i++) {
+            if (i > 0) {
+                json.append(',');
+            }
+            json.append("\"k").append(i < 10 ? "0" : "").append(i).append("\":null");
+        }
+        json.append(",\"").append(bmpKey).append("\":null");
+        json.append(",\"").append(supplementaryKey).append("\":null}");
+
+        GenericVariant specOrdered = GenericVariant.fromJson(json.toString());
+        byte[] specValue = specOrdered.value();
+        int idStart = 2;
+        int offsetStart = idStart + 32;
+        assertThat(specValue[idStart + 30] & 0xFF).isEqualTo(30);
+        assertThat(specValue[idStart + 31] & 0xFF).isEqualTo(31);
+        assertThat(specOrdered.getFieldByKey(bmpKey)).isNotNull();
+        assertThat(specOrdered.getFieldByKey(supplementaryKey)).isNotNull();
+
+        byte[] legacyValue = specValue.clone();
+        byte temporary = legacyValue[idStart + 30];
+        legacyValue[idStart + 30] = legacyValue[idStart + 31];
+        legacyValue[idStart + 31] = temporary;
+        temporary = legacyValue[offsetStart + 30];
+        legacyValue[offsetStart + 30] = legacyValue[offsetStart + 31];
+        legacyValue[offsetStart + 31] = temporary;
+        GenericVariant legacyOrdered = new GenericVariant(legacyValue, specOrdered.metadata());
+        assertThat(legacyOrdered.getFieldByKey(bmpKey)).isNotNull();
+        assertThat(legacyOrdered.getFieldByKey(supplementaryKey)).isNotNull();
+    }
+
+    @Test
     public void testShredding() {
         GenericVariant variant = GenericVariant.fromJson("{\"a\": 1, \"b\": \"hello\"}");
 

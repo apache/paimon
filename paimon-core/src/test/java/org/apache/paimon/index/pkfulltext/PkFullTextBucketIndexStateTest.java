@@ -41,8 +41,7 @@ class PkFullTextBucketIndexStateTest {
         IndexFileMeta otherField = payload("other", "third-data", 8);
 
         PkFullTextBucketIndexState state =
-                PkFullTextBucketIndexState.fromActivePayloads(
-                        7, Arrays.asList(current, alsoCurrent, otherField));
+                new PkFullTextBucketIndexState(7, Arrays.asList(current, alsoCurrent, otherField));
 
         assertThat(state.currentPayloads()).containsExactly(current, alsoCurrent);
         assertThat(state.stalePayloads()).containsExactly(otherField);
@@ -53,7 +52,7 @@ class PkFullTextBucketIndexStateTest {
     void testRejectsDuplicateCurrentCoverage() {
         assertThatThrownBy(
                         () ->
-                                PkFullTextBucketIndexState.fromActivePayloads(
+                                new PkFullTextBucketIndexState(
                                         7,
                                         Arrays.asList(
                                                 payload("first", "data", 7),
@@ -66,14 +65,14 @@ class PkFullTextBucketIndexStateTest {
     void testMapsEverySourceOfMultiSourceArchive() {
         PrimaryKeyIndexSourceMeta sourceMeta =
                 new PrimaryKeyIndexSourceMeta(
+                        1,
                         Arrays.asList(
                                 new PrimaryKeyIndexSourceFile("data-1", 1),
                                 new PrimaryKeyIndexSourceFile("data-2", 1)));
         IndexFileMeta payload = payload("multi", 7, 2, sourceMeta);
 
         PkFullTextBucketIndexState state =
-                PkFullTextBucketIndexState.fromActivePayloads(
-                        7, Collections.singletonList(payload));
+                new PkFullTextBucketIndexState(7, Collections.singletonList(payload));
 
         assertThat(state.currentPayloads()).containsExactly(payload);
         assertThat(state.payloadBySourceFile())
@@ -86,7 +85,7 @@ class PkFullTextBucketIndexStateTest {
                 payloadName,
                 fieldId,
                 1,
-                new PrimaryKeyIndexSourceMeta(new PrimaryKeyIndexSourceFile(sourceName, 1)));
+                new PrimaryKeyIndexSourceMeta(1, new PrimaryKeyIndexSourceFile(sourceName, 1)));
     }
 
     private static IndexFileMeta payload(

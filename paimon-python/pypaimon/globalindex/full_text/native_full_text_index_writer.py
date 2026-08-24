@@ -120,8 +120,7 @@ class NativeFullTextIndexWriter:
         except ImportError as e:
             raise ImportError(
                 "paimon-ftindex is required to build full-text indexes. "
-                "Install paimon-full-text's Python package and native FFI "
-                "library."
+                "Install paimon-ftindex==0.1.0 or pypaimon[full-text]."
             ) from e
 
         self._native_writer = FullTextIndexWriter(

@@ -37,6 +37,7 @@ import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
+import org.apache.paimon.utils.SensitiveConfigUtils;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -180,7 +181,10 @@ public abstract class FlinkTableSource
             // In older versions of Flink, however, lookup sources will first be treated as normal
             // sources. So this method will also be visited by lookup tables, and the options might
             // cause IllegalArgumentException. In this case we ignore the filters.
-            LOG.info("Failed to get filter with table options {} ", table.options(), e);
+            LOG.info(
+                    "Failed to get filter with table options {} ",
+                    SensitiveConfigUtils.redactMap(table.options()),
+                    e);
             return null;
         }
     }

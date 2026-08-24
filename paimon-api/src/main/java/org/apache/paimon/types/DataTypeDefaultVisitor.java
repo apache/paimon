@@ -120,6 +120,16 @@ public abstract class DataTypeDefaultVisitor<R> implements DataTypeVisitor<R> {
     }
 
     @Override
+    public R visit(GeometryType geometryType) {
+        return defaultMethod(geometryType);
+    }
+
+    @Override
+    public R visit(GeographyType geographyType) {
+        return defaultMethod(geographyType);
+    }
+
+    @Override
     public R visit(ArrayType arrayType) {
         return defaultMethod(arrayType);
     }

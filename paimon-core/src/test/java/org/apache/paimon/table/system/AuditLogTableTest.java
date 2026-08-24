@@ -31,6 +31,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.ReadBatchSizer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -43,22 +44,43 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.source.ChainSplit;
+import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /** Unit tests for {@link AuditLogTable}. */
 public class AuditLogTableTest extends TableTestBase {
+
+    @Test
+    public void testReadBatchSizerPropagatesToDataRead() {
+        FileStoreTable wrapped = mock(FileStoreTable.class);
+        InnerTableRead dataRead = mock(InnerTableRead.class);
+        when(wrapped.options()).thenReturn(Collections.emptyMap());
+        when(wrapped.rowType()).thenReturn(RowType.of(DataTypes.INT()));
+        when(wrapped.newRead()).thenReturn(dataRead);
+        when(dataRead.forceKeepDelete()).thenReturn(dataRead);
+        ReadBatchSizer sizer = new ReadBatchSizer();
+
+        new AuditLogTable(wrapped).newRead().withReadBatchSizer(sizer);
+
+        verify(dataRead).withReadBatchSizer(sizer);
+    }
 
     @Test
     public void testReadAuditLogFromLatest() throws Exception {
@@ -211,6 +233,42 @@ public class AuditLogTableTest extends TableTestBase {
         List<InternalRow> result = read(auditLogTable);
         List<InternalRow> expectRow = getExpectedResultWithSequenceNumber();
         assertThat(result).containsExactlyInAnyOrderElementsOf(expectRow);
+    }
+
+    @Test
+    public void testReadBaseTableAfterAuditLogDoesNotIncludeSequenceNumber() throws Exception {
+        String tableName = "audit_table_share_check";
+        Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, tableName));
+        FileIO fileIO = LocalFileIO.create();
+
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(fileIO, tablePath),
+                        Schema.newBuilder()
+                                .column("pk", DataTypes.INT())
+                                .column("pt", DataTypes.INT())
+                                .column("col1", DataTypes.INT())
+                                .partitionKeys("pt")
+                                .primaryKey("pk", "pt")
+                                .option(CoreOptions.CHANGELOG_PRODUCER.key(), "input")
+                                .option("bucket", "1")
+                                .option(
+                                        CoreOptions.TABLE_READ_SEQUENCE_NUMBER_ENABLED.key(),
+                                        "true")
+                                .build());
+        FileStoreTable baseTable =
+                FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
+        writeTestData(baseTable);
+
+        // Wrap in AuditLogTable, this should NOT mutate the shared underlying options map.
+        AuditLogTable auditLogTable = new AuditLogTable(baseTable);
+        assertThat(auditLogTable.rowType().getFieldNames())
+                .containsExactly("rowkind", "_SEQUENCE_NUMBER", "pk", "pt", "col1");
+
+        // Base table row type must remain unchanged - no leaked `_SEQUENCE_NUMBER` field.
+        assertThat(baseTable.rowType().getFieldNames()).containsExactly("pk", "pt", "col1");
+        assertThat(baseTable.options())
+                .doesNotContainKey(CoreOptions.KEY_VALUE_SEQUENCE_NUMBER_ENABLED.key());
     }
 
     @Test

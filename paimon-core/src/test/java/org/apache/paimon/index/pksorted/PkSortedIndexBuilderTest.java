@@ -19,6 +19,7 @@
 package org.apache.paimon.index.pksorted;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.disk.BufferFileWriter;
 import org.apache.paimon.disk.FileIOChannel;
 import org.apache.paimon.disk.IOManager;
@@ -34,6 +35,7 @@ import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.options.Options;
@@ -104,7 +106,160 @@ class PkSortedIndexBuilderTest {
 
             assertQuery(fileIO, pathFactory, indexType, options, payload, false, 20, 0L, 3L);
             assertQuery(fileIO, pathFactory, indexType, options, payload, true, null, 1L);
+            assertThat(PrimaryKeyIndexSourceMeta.fromIndexFile(payload).dataLevel())
+                    .isEqualTo(source.level());
         }
+    }
+
+    @Test
+    void testBuildsQueryableMultiValueFromUnsortedArrayRows() throws Exception {
+        DataField tags = new DataField(8, "tags", DataTypes.ARRAY(DataTypes.INT()));
+        List<PkSortedDataFileReader.Entry> entries =
+                Arrays.asList(
+                        entry(new GenericArray(new Integer[] {2, 1}), 0),
+                        entry(null, 1),
+                        entry(new GenericArray(new Integer[0]), 2),
+                        entry(new GenericArray(new Integer[] {3, 2}), 3));
+        DataFileMeta source = dataFile("data-file", entries.size());
+        LocalFileIO fileIO = LocalFileIO.create();
+        IndexPathFactory pathFactory = pathFactory(tempPath);
+        Options options = options();
+        IndexFileMeta payload =
+                new PkSortedIndexBuilder(
+                                ignored -> new ArrayReader(entries),
+                                new PkSortedIndexFile(fileIO, pathFactory),
+                                tags,
+                                "multivalue",
+                                options,
+                                null)
+                        .build(Collections.singletonList(source));
+
+        List<GlobalIndexIOMeta> ioMetas =
+                Collections.singletonList(
+                        new GlobalIndexIOMeta(
+                                pathFactory.toPath(payload.fileName()),
+                                payload.fileSize(),
+                                payload.globalIndexMeta().indexMeta()));
+        ExecutorService executor = newDirectExecutorService();
+        try (GlobalIndexReader reader =
+                GlobalIndexer.create("multivalue", tags, options)
+                        .createReader(
+                                new GlobalIndexFileReadWrite(fileIO, pathFactory),
+                                ioMetas,
+                                payload.rowCount(),
+                                executor)) {
+            FieldRef fieldRef = new FieldRef(8, "tags", tags.type());
+            assertThat(reader.visitArrayContains(fieldRef, 2).join().get().results())
+                    .containsExactlyInAnyOrder(0L, 3L);
+            assertThat(reader.visitArrayContains(fieldRef, 4).join().get().results()).isEmpty();
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void testExpandsAndSortsMultivalueInputInSourceOrdinalOrder() throws Exception {
+        DataField tags = new DataField(8, "tags", DataTypes.ARRAY(DataTypes.INT()));
+        DataFileMeta sourceB = dataFile("data-b", 2);
+        DataFileMeta sourceA = dataFile("data-a", 2);
+        List<PrimaryKeyIndexSourceFile> capturedSources = new ArrayList<>();
+        List<PkSortedIndexFile.Entry> capturedEntries = new ArrayList<>();
+        List<ArrayReader> openedReaders = new ArrayList<>();
+        List<PkSortedDataFileReader.Entry> entriesA =
+                Arrays.asList(
+                        entry(new GenericArray(new Integer[] {3}), 0),
+                        entry(new GenericArray(new Integer[] {1}), 1));
+        List<PkSortedDataFileReader.Entry> entriesB =
+                Arrays.asList(
+                        entry(new GenericArray(new Integer[] {4}), 0),
+                        entry(new GenericArray(new Integer[] {2}), 1));
+        PkSortedIndexFile capturingFile =
+                new PkSortedIndexFile(LocalFileIO.create(), pathFactory(tempPath)) {
+                    @Override
+                    public IndexFileMeta build(
+                            int dataLevel,
+                            List<PrimaryKeyIndexSourceFile> sourceFiles,
+                            DataField indexField,
+                            String indexType,
+                            Options indexOptions,
+                            Iterator<Entry> entries) {
+                        capturedSources.addAll(sourceFiles);
+                        entries.forEachRemaining(capturedEntries::add);
+                        return ignoredPayload();
+                    }
+                };
+
+        new PkSortedIndexBuilder(
+                        dataFile -> {
+                            ArrayReader reader =
+                                    new ArrayReader(
+                                            dataFile.fileName().equals("data-a")
+                                                    ? entriesA
+                                                    : entriesB);
+                            openedReaders.add(reader);
+                            return reader;
+                        },
+                        capturingFile,
+                        tags,
+                        "multivalue",
+                        options(),
+                        null)
+                .build(Arrays.asList(sourceB, sourceA));
+
+        assertThat(capturedSources)
+                .extracting(PrimaryKeyIndexSourceFile::fileName)
+                .containsExactly("data-a", "data-b");
+        assertThat(capturedEntries)
+                .extracting(PkSortedIndexFile.Entry::value)
+                .containsExactly(1, 2, 3, 4);
+        assertThat(capturedEntries)
+                .extracting(PkSortedIndexFile.Entry::rowId)
+                .containsExactly(1L, 3L, 0L, 2L);
+        assertThat(openedReaders).allMatch(ArrayReader::isClosed);
+    }
+
+    @Test
+    void testAllEmptyMultivalueRowsStillBuildSourceCoverage() throws Exception {
+        DataField tags = new DataField(8, "tags", DataTypes.ARRAY(DataTypes.INT()));
+        List<PkSortedIndexFile.Entry> capturedEntries = new ArrayList<>();
+        List<PrimaryKeyIndexSourceFile> capturedSources = new ArrayList<>();
+        PkSortedIndexFile capturingFile =
+                new PkSortedIndexFile(LocalFileIO.create(), pathFactory(tempPath)) {
+                    @Override
+                    public IndexFileMeta build(
+                            int dataLevel,
+                            List<PrimaryKeyIndexSourceFile> sourceFiles,
+                            DataField indexField,
+                            String indexType,
+                            Options indexOptions,
+                            Iterator<Entry> entries) {
+                        capturedSources.addAll(sourceFiles);
+                        entries.forEachRemaining(capturedEntries::add);
+                        return ignoredPayload();
+                    }
+                };
+
+        new PkSortedIndexBuilder(
+                        ignored ->
+                                new ArrayReader(
+                                        Arrays.asList(
+                                                entry(null, 0),
+                                                entry(new GenericArray(new Integer[0]), 1),
+                                                entry(
+                                                        new GenericArray(
+                                                                new Integer[] {null, null}),
+                                                        2))),
+                        capturingFile,
+                        tags,
+                        "multivalue",
+                        options(),
+                        null)
+                .build(Collections.singletonList(dataFile("empty-data", 3)));
+
+        assertThat(capturedEntries).isEmpty();
+        assertThat(capturedSources)
+                .extracting(PrimaryKeyIndexSourceFile::rowCount)
+                .containsOnly(3L);
     }
 
     @Test
@@ -117,6 +272,7 @@ class PkSortedIndexBuilderTest {
                 new PkSortedIndexFile(LocalFileIO.create(), pathFactory(tempPath)) {
                     @Override
                     public IndexFileMeta build(
+                            int dataLevel,
                             List<PrimaryKeyIndexSourceFile> sourceFiles,
                             DataField indexField,
                             String indexType,
@@ -159,19 +315,24 @@ class PkSortedIndexBuilderTest {
     }
 
     @Test
-    void testForcedSpillSortsRowsAndClosesTaskOwnedIoManager() throws Exception {
+    void testForcedSpillSortsExpandedMultivalueKeysAndClosesTaskOwnedIoManager() throws Exception {
         int rowCount = 20_000;
         List<PkSortedDataFileReader.Entry> entries = new ArrayList<>(rowCount);
         for (int position = 0; position < rowCount; position++) {
-            entries.add(entry(rowCount - position - 1, position));
+            entries.add(
+                    entry(
+                            new GenericArray(
+                                    new Integer[] {rowCount - position - 1, rowCount + position}),
+                            position));
         }
-        List<Integer> sortedValues = new ArrayList<>(rowCount);
+        List<Integer> sortedValues = new ArrayList<>(rowCount * 2);
         TrackingIOManager ioManager =
                 new TrackingIOManager(tempPath.resolve("owned-spill").toString());
         PkSortedIndexFile capturingFile =
                 new PkSortedIndexFile(LocalFileIO.create(), pathFactory(tempPath)) {
                     @Override
                     public IndexFileMeta build(
+                            int dataLevel,
                             List<PrimaryKeyIndexSourceFile> sourceFiles,
                             DataField indexField,
                             String indexType,
@@ -192,8 +353,8 @@ class PkSortedIndexBuilderTest {
         new PkSortedIndexBuilder(
                 ignored -> new ArrayReader(entries),
                 capturingFile,
-                field(),
-                "btree",
+                new DataField(8, "tags", DataTypes.ARRAY(DataTypes.INT())),
+                "multivalue",
                 options,
                 null) {
             @Override
@@ -204,7 +365,7 @@ class PkSortedIndexBuilderTest {
 
         assertThat(sortedValues)
                 .containsExactlyElementsOf(
-                        LongStream.range(0, rowCount)
+                        LongStream.range(0, rowCount * 2L)
                                 .mapToObj(value -> (int) value)
                                 .collect(Collectors.toList()));
         assertThat(ioManager.createdSpillWriters).isGreaterThan(0);
@@ -233,6 +394,7 @@ class PkSortedIndexBuilderTest {
                         .createReader(
                                 new GlobalIndexFileReadWrite(fileIO, pathFactory),
                                 ioMetas,
+                                payload.rowCount(),
                                 executor)) {
             FieldRef fieldRef = new FieldRef(7, "indexed", DataTypes.INT());
             GlobalIndexResult result =
@@ -263,20 +425,21 @@ class PkSortedIndexBuilderTest {
 
     private static DataFileMeta dataFile(String fileName, long rowCount) {
         return DataFileMeta.forAppend(
-                fileName,
-                100,
-                rowCount,
-                SimpleStats.EMPTY_STATS,
-                0,
-                0,
-                1,
-                Collections.emptyList(),
-                null,
-                FileSource.COMPACT,
-                null,
-                null,
-                null,
-                null);
+                        fileName,
+                        100,
+                        rowCount,
+                        SimpleStats.EMPTY_STATS,
+                        0,
+                        0,
+                        1,
+                        Collections.emptyList(),
+                        null,
+                        FileSource.COMPACT,
+                        null,
+                        null,
+                        null,
+                        null)
+                .upgrade(3);
     }
 
     private static IndexPathFactory pathFactory(java.nio.file.Path directory) {
@@ -303,6 +466,7 @@ class PkSortedIndexBuilderTest {
 
         private final List<PkSortedDataFileReader.Entry> entries;
         private int position;
+        private boolean closed;
 
         private ArrayReader(List<PkSortedDataFileReader.Entry> entries) {
             this.entries = entries;
@@ -319,7 +483,13 @@ class PkSortedIndexBuilderTest {
         }
 
         @Override
-        public void close() {}
+        public void close() {
+            closed = true;
+        }
+
+        private boolean isClosed() {
+            return closed;
+        }
     }
 
     private static final class TrackingIOManager extends IOManagerImpl {

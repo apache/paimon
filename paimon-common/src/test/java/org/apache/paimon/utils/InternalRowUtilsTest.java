@@ -18,6 +18,9 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.data.BinaryArray;
+import org.apache.paimon.data.BinaryArrayWriter;
+import org.apache.paimon.data.BinaryMap;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.BinaryVector;
@@ -33,6 +36,7 @@ import org.apache.paimon.datagen.DataGenerator;
 import org.apache.paimon.datagen.RandomGeneratorVisitor;
 import org.apache.paimon.datagen.RowDataGenerator;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -120,6 +124,11 @@ public class InternalRowUtilsTest {
 
     @Test
     public void testCompare() {
+        // test BOOLEAN data type
+        assertThat(InternalRowUtils.compare(false, true, DataTypeRoot.BOOLEAN)).isLessThan(0);
+        assertThat(InternalRowUtils.compare(true, false, DataTypeRoot.BOOLEAN)).isGreaterThan(0);
+        assertThat(InternalRowUtils.compare(true, true, DataTypeRoot.BOOLEAN)).isEqualTo(0);
+
         // test DECIMAL data type
         Decimal xDecimalData = Decimal.fromBigDecimal(new BigDecimal("12.34"), 4, 2);
         Decimal yDecimalData = Decimal.fromBigDecimal(new BigDecimal("13.14"), 4, 2);
@@ -293,5 +302,35 @@ public class InternalRowUtilsTest {
         GenericRow rowWithMap2 = new GenericRow(1);
         rowWithMap2.setField(0, new GenericMap(map2));
         assertThat(InternalRowUtils.equals(rowWithMap1, rowWithMap2, rowType2)).isFalse();
+    }
+
+    @Test
+    public void testEqualsAcrossMapImplementations() {
+        DataType mapType = DataTypes.MAP(DataTypes.STRING(), DataTypes.INT());
+
+        Map<Object, Object> entries = new HashMap<>();
+        entries.put(BinaryString.fromString("a"), 1);
+        GenericMap generic = new GenericMap(entries);
+
+        BinaryArray keys = new BinaryArray();
+        BinaryArrayWriter keyWriter = new BinaryArrayWriter(keys, 1, 8);
+        keyWriter.writeString(0, BinaryString.fromString("a"));
+        keyWriter.complete();
+        BinaryArray values = new BinaryArray();
+        BinaryArrayWriter valueWriter = new BinaryArrayWriter(values, 1, 4);
+        valueWriter.writeInt(0, 1);
+        valueWriter.complete();
+        BinaryMap binary = BinaryMap.valueOf(keys, values);
+
+        // hash() already treats the two representations as interchangeable, so equals() throwing
+        // for one ordering is the inconsistency being fixed here.
+        assertThat(InternalRowUtils.hash(generic, mapType))
+                .isEqualTo(InternalRowUtils.hash(binary, mapType));
+
+        // Both orderings must agree. Only the generic-first one changes: it used to pick the
+        // GenericMap fast path off data1 and then cast data2 to GenericMap unconditionally,
+        // throwing ClassCastException for a BinaryMap.
+        assertThat(InternalRowUtils.equals(generic, binary, mapType)).isTrue();
+        assertThat(InternalRowUtils.equals(binary, generic, mapType)).isTrue();
     }
 }

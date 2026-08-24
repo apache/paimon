@@ -51,12 +51,10 @@ import org.apache.paimon.utils.Range;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
-import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -70,7 +68,6 @@ import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_ENABLED;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.ROW_TRACKING_ENABLED;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * Mixed language E2E test for Java native full-text index building and Python reading.
@@ -78,16 +75,6 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * <p>Java writes data and builds a native full-text index, then Python reads and searches it.
  */
 public class JavaPyNativeFullTextE2ETest {
-
-    @BeforeAll
-    public static void checkNativeLibrary() {
-        assumeTrue(isNativeAvailable(), "Native full-text library not available, skipping tests");
-    }
-
-    private static boolean isNativeAvailable() {
-        String path = System.getenv("PAIMON_FTINDEX_JNI_LIB_PATH");
-        return path != null && !path.isEmpty() && new File(path).isFile();
-    }
 
     java.nio.file.Path tempDir = Paths.get("../paimon-python/pypaimon/tests/e2e").toAbsolutePath();
 

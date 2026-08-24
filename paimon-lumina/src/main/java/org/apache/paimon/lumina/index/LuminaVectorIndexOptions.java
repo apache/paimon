@@ -125,6 +125,9 @@ public class LuminaVectorIndexOptions {
         this.indexType = options.get(INDEX_TYPE);
         validateEncodingMetricCombination(options.get(ENCODING_TYPE), this.metric);
         this.luminaOptions = buildLuminaOptions(options);
+        // Persist the canonical native metric name so LuminaIndexMeta.metric() can read it
+        // back, regardless of whether the user configured "L2" (enum) or "l2" (native).
+        this.luminaOptions.put(toLuminaKey(DISTANCE_METRIC), metric.getLuminaName());
     }
 
     /**

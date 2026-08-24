@@ -18,7 +18,15 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogFactory;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.util.AbstractTestBase;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.index.DeletionVectorMeta;
+import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
@@ -41,6 +49,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -178,6 +187,70 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
             expected.add(String.format("+I[%d, %d]", i, val));
         }
         assertThat(collect(tEnv.executeSql(query))).hasSameElementsAs(expected);
+    }
+
+    @Test
+    public void testMergeOnRead() throws Exception {
+        String warehouse = getTempDirPath();
+        TableEnvironment tEnv =
+                tableEnvironmentBuilder()
+                        .batchMode()
+                        .parallelism(3)
+                        .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                        .build();
+
+        tEnv.executeSql(
+                "CREATE CATALOG mycat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "'\n"
+                        + ")");
+        tEnv.executeSql("USE CATALOG mycat");
+        tEnv.executeSql(
+                "CREATE TABLE T (\n"
+                        + "  pt INT,\n"
+                        + "  k INT,\n"
+                        + "  v STRING,\n"
+                        + "  seq INT,\n"
+                        + "  PRIMARY KEY (pt, k) NOT ENFORCED\n"
+                        + ") PARTITIONED BY (pt) WITH (\n"
+                        + "  'bucket' = '-2',\n"
+                        + "  'sequence.field' = 'seq',\n"
+                        + "  'postpone.default-bucket-num' = '4',\n"
+                        + "  'source.split.target-size' = '1 B'\n"
+                        + ")");
+
+        // Create multiple real-bucket splits.
+        tEnv.executeSql("INSERT INTO T VALUES (0, 1, 'base-1', 10)").await();
+        tEnv.executeSql("INSERT INTO T VALUES (0, 2, 'base-2', 10)").await();
+        tEnv.executeSql(
+                        "INSERT INTO T /*+ OPTIONS('postpone.batch-write-fixed-bucket' = 'false') */ "
+                                + "VALUES (0, 1, 'new-1', 20), "
+                                + "(0, 1, 'newer-1', 20), "
+                                + "(0, 2, 'older-2', 5), (1, 3, 'new-3', 1)")
+                .await();
+
+        // MOR is opt-in; postpone records remain hidden by default.
+        assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
+                .containsExactlyInAnyOrder("+I[0, 1, base-1, 10]", "+I[0, 2, base-2, 10]");
+
+        String hint = "/*+ OPTIONS('postpone.merge-on-read' = 'true') */";
+        assertThat(collect(tEnv.executeSql("SELECT * FROM T " + hint)))
+                .containsExactlyInAnyOrder(
+                        "+I[0, 1, newer-1, 20]", "+I[0, 2, base-2, 10]", "+I[1, 3, new-3, 1]");
+        assertThat(collect(tEnv.executeSql("SELECT v FROM T " + hint + " WHERE pt = 0 AND k = 2")))
+                .containsExactly("+I[base-2]");
+        assertThat(collect(tEnv.executeSql("SELECT * FROM T " + hint + " WHERE v = 'base-1'")))
+                .isEmpty();
+        assertThat(collect(tEnv.executeSql("SELECT COUNT(*) FROM T " + hint)))
+                .containsExactly("+I[3]");
+
+        // MOR remains correct after postpone files are compacted into real buckets.
+        tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
+        assertThat(collect(tEnv.executeSql("SELECT * FROM T " + hint)))
+                .containsExactlyInAnyOrder(
+                        "+I[0, 1, newer-1, 20]", "+I[0, 2, base-2, 10]", "+I[1, 3, new-3, 1]");
     }
 
     @Test
@@ -487,6 +560,22 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                                         "SELECT `partition`, COUNT(DISTINCT bucket) FROM `T$files` "
                                                 + "GROUP BY `partition`")))
                 .containsExactlyInAnyOrder("+I[{0}, 1]", "+I[{1}, 3]");
+
+        tEnv.executeSql("ALTER TABLE T SET ('postpone.default-bucket-num' = '2')").await();
+        values.clear();
+        for (int j = 0; j < 450; j++) {
+            values.add(String.format("(2, %d, %d)", j, j));
+        }
+        tEnv.executeSql("INSERT INTO T VALUES " + String.join(", ", values)).await();
+        tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
+
+        // An explicitly configured default takes precedence over the row-count estimate of 3.
+        assertThat(
+                        collect(
+                                tEnv.executeSql(
+                                        "SELECT COUNT(DISTINCT bucket) FROM `T$files` "
+                                                + "WHERE `partition` = '{2}'")))
+                .containsExactly("+I[2]");
     }
 
     @Timeout(TIMEOUT)
@@ -748,7 +837,8 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                         + ") WITH (\n"
                         + "  'bucket' = '-2',\n"
                         + "  'postpone.batch-write-fixed-bucket' = 'false',\n"
-                        + "  'deletion-vectors.enabled' = 'true'\n"
+                        + "  'deletion-vectors.enabled' = 'true',\n"
+                        + "  'deletion-vectors.merge-on-read' = 'true'\n"
                         + ")");
 
         tEnv.executeSql("INSERT INTO T VALUES (1, 10), (2, 20), (3, 30), (4, 40)").await();
@@ -761,12 +851,39 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
         assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
                 .containsExactlyInAnyOrder(
                         "+I[1, 11]", "+I[2, 20]", "+I[3, 30]", "+I[4, 40]", "+I[5, 51]");
+        assertThat(deletionVectorCardinality(warehouse)).isPositive();
 
         tEnv.executeSql("INSERT INTO T VALUES (2, 52), (3, 32)").await();
+        assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
+                .containsExactlyInAnyOrder(
+                        "+I[1, 11]", "+I[2, 20]", "+I[3, 30]", "+I[4, 40]", "+I[5, 51]");
+        String mergeOnReadHint =
+                "/*+ OPTIONS("
+                        + "'postpone.merge-on-read' = 'true', "
+                        + "'deletion-vectors.merge-on-read' = 'true') */";
+        assertThat(collect(tEnv.executeSql("SELECT * FROM T " + mergeOnReadHint)))
+                .containsExactlyInAnyOrder(
+                        "+I[1, 11]", "+I[2, 52]", "+I[3, 32]", "+I[4, 40]", "+I[5, 51]");
+
         tEnv.executeSql("CALL sys.compact(`table` => 'default.T')").await();
         assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
                 .containsExactlyInAnyOrder(
                         "+I[1, 11]", "+I[2, 52]", "+I[3, 32]", "+I[4, 40]", "+I[5, 51]");
+    }
+
+    private long deletionVectorCardinality(String warehouse) throws Exception {
+        try (Catalog catalog =
+                CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)))) {
+            FileStoreTable table =
+                    (FileStoreTable) catalog.getTable(Identifier.create("default", "T"));
+            return table.store().newIndexFileHandler()
+                    .scan(table.latestSnapshot().get(), DELETION_VECTORS_INDEX).stream()
+                    .map(IndexManifestEntry::indexFile)
+                    .filter(index -> index.dvRanges() != null)
+                    .flatMap(index -> index.dvRanges().values().stream())
+                    .mapToLong(DeletionVectorMeta::cardinality)
+                    .sum();
+        }
     }
 
     @Test
@@ -904,6 +1021,43 @@ public class PostponeBucketTableITCase extends AbstractTestBase {
                         "+I[4, 42]",
                         "+I[1, 103]",
                         "+I[5, 53]");
+    }
+
+    @Test
+    public void testFixedBucketWriteDoesNotCompact() throws Exception {
+        String warehouse = getTempDirPath();
+        TableEnvironment tEnv =
+                tableEnvironmentBuilder()
+                        .batchMode()
+                        .setConf(TableConfigOptions.TABLE_DML_SYNC, true)
+                        .build();
+
+        tEnv.executeSql(
+                "CREATE CATALOG mycat WITH (\n"
+                        + "  'type' = 'paimon',\n"
+                        + "  'warehouse' = '"
+                        + warehouse
+                        + "'\n"
+                        + ")");
+        tEnv.executeSql("USE CATALOG mycat");
+        tEnv.executeSql(
+                "CREATE TABLE T (\n"
+                        + "  k INT,\n"
+                        + "  v STRING,\n"
+                        + "  PRIMARY KEY (k) NOT ENFORCED\n"
+                        + ") WITH (\n"
+                        + "  'bucket' = '-2',\n"
+                        + "  'postpone.batch-write-fixed-bucket.max-parallelism' = '1',\n"
+                        + "  'num-sorted-run.compaction-trigger' = '2'\n"
+                        + ")");
+
+        tEnv.executeSql("INSERT INTO T VALUES (1, 'a')").await();
+        tEnv.executeSql("INSERT INTO T VALUES (2, 'b')").await();
+
+        assertThat(collect(tEnv.executeSql("SELECT * FROM T")))
+                .containsExactlyInAnyOrder("+I[1, a]", "+I[2, b]");
+        assertThat(collect(tEnv.executeSql("SELECT * FROM `T$files` WHERE level = 0"))).hasSize(2);
+        assertThat(collect(tEnv.executeSql("SELECT * FROM `T$files` WHERE level > 0"))).isEmpty();
     }
 
     @Test

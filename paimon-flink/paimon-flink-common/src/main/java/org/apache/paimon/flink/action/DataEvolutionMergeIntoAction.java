@@ -46,10 +46,13 @@ import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 
+import org.apache.flink.api.common.functions.OpenContext;
+import org.apache.flink.api.common.functions.RichMapFunction;
 import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.typeutils.TupleTypeInfo;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.functions.sink.v2.DiscardingSink;
 import org.apache.flink.streaming.api.operators.StreamFlatMap;
@@ -62,6 +65,7 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.conversion.DataStructureConverter;
 import org.apache.flink.table.data.conversion.DataStructureConverters;
 import org.apache.flink.table.types.logical.LogicalTypeRoot;
+import org.apache.flink.types.Row;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -304,11 +308,13 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
             // _ROW_ID is the first field of joined table.
             query =
                     String.format(
-                            "SELECT %s, %s FROM %s INNER JOIN %s AS RT ON %s",
+                            "SELECT %s, %s FROM %s INNER JOIN %s "
+                                    + "/*+ OPTIONS('%s'='full') */ AS RT ON %s",
                             "`RT`.`_ROW_ID` as `_ROW_ID`",
                             String.join(",", project),
                             escapedSourceName(),
                             escapedRowTrackingTargetName(),
+                            CoreOptions.SCALAR_INDEX_SEARCH_MODE.key(),
                             rewriteMergeCondition(mergeCondition));
         }
 
@@ -438,14 +444,36 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
         return batchTEnv
                 .toDataStream(source)
                 .map(
-                        row -> {
-                            int arity = row.getArity();
-                            GenericRowData rowData = new GenericRowData(row.getKind(), arity);
-                            for (int i = 0; i < arity; i++) {
-                                rowData.setField(
-                                        i, converters.get(i).toInternalOrNull(row.getField(i)));
+                        new RichMapFunction<Row, RowData>() {
+
+                            /**
+                             * Do not annotate with <code>@override</code> here to maintain
+                             * compatibility with Flink 1.18-.
+                             */
+                            public void open(OpenContext openContext) {
+                                open(new Configuration());
                             }
-                            return rowData;
+
+                            /**
+                             * Do not annotate with <code>@override</code> here to maintain
+                             * compatibility with Flink 2.0+.
+                             */
+                            public void open(Configuration parameters) {
+                                ClassLoader classLoader =
+                                        getRuntimeContext().getUserCodeClassLoader();
+                                converters.forEach(converter -> converter.open(classLoader));
+                            }
+
+                            @Override
+                            public RowData map(Row row) {
+                                int arity = row.getArity();
+                                GenericRowData rowData = new GenericRowData(row.getKind(), arity);
+                                for (int i = 0; i < arity; i++) {
+                                    rowData.setField(
+                                            i, converters.get(i).toInternalOrNull(row.getField(i)));
+                                }
+                                return rowData;
+                            }
                         });
     }
 
@@ -503,7 +531,7 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
                 if (BlobType.isBlobFileField(targetField.type())
                         && !updatableBlobFields.contains(flinkColumn.getName())) {
                     throw new IllegalStateException(
-                            "Should not append/update raw-data BLOB or ARRAY<BLOB> column '"
+                            "Should not append/update raw-data BLOB, ARRAY<BLOB> or MAP<X, BLOB> column '"
                                     + flinkColumn.getName()
                                     + "' through MERGE INTO. "
                                     + "Only descriptor-based BLOB columns (configured via '"

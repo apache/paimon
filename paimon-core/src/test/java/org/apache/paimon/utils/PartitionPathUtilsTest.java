@@ -19,17 +19,25 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+
+import java.util.Arrays;
+import java.util.LinkedHashMap;
 
 import static org.apache.paimon.utils.PartitionPathUtils.mightMatch;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.entry;
 
-/** Tests for {@link PartitionPathUtils#mightMatch}. */
+/** Tests for {@link PartitionPathUtils}. */
 class PartitionPathUtilsTest {
 
     private final RowType partitionType =
@@ -38,6 +46,46 @@ class PartitionPathUtilsTest {
                     .field("month", DataTypes.INT())
                     .build();
     private final PredicateBuilder builder = new PredicateBuilder(partitionType);
+
+    @ParameterizedTest
+    @ValueSource(strings = {".", ".."})
+    void testValueOnlyDotSegmentIsRejected(String rawValue) {
+        LinkedHashMap<String, String> partitionSpec = new LinkedHashMap<>();
+        partitionSpec.put("pt", rawValue);
+
+        assertThatThrownBy(() -> PartitionPathUtils.generatePartitionPathUtil(partitionSpec, true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(rawValue);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {".", ".."})
+    void testKeyedDotValueKeepsCompatibleSafeLayout(String rawValue) {
+        LinkedHashMap<String, String> partitionSpec = new LinkedHashMap<>();
+        partitionSpec.put("pt", rawValue);
+
+        String partitionPath = PartitionPathUtils.generatePartitionPathUtil(partitionSpec, false);
+        Path resolvedPath = new Path(new Path("file:///warehouse/table"), partitionPath);
+
+        assertThat(partitionPath).isEqualTo("pt=" + rawValue + Path.SEPARATOR);
+        assertThat(PartitionPathUtils.extractPartitionSpecFromPath(resolvedPath))
+                .containsExactly(entry("pt", rawValue));
+    }
+
+    @Test
+    void testTrailingPartitionExtractionStopsAtTableBoundary() {
+        Path partitionPath = new Path("file:///warehouse/env=prod/table/dt=20260718/hh=10");
+
+        assertThat(
+                        PartitionPathUtils.extractPartitionSpecFromPath(
+                                partitionPath, Arrays.asList("dt", "hh")))
+                .containsExactly(entry("dt", "20260718"), entry("hh", "10"));
+        assertThat(
+                        PartitionPathUtils.extractPartitionSpecFromPath(
+                                new Path("file:///warehouse/dt=parent/table/wrong=20260718/hh=10"),
+                                Arrays.asList("dt", "hh")))
+                .isNull();
+    }
 
     @Test
     void testNullPredicate() {
@@ -102,5 +150,19 @@ class PartitionPathUtilsTest {
         assertThat(mightMatch(p, 0, 1, GenericRow.of(2024, 6))).isFalse();
         assertThat(mightMatch(p, 0, 1, GenericRow.of(2025, 6))).isTrue();
         assertThat(mightMatch(p, 0, 1, GenericRow.of(2025, 5))).isFalse();
+    }
+
+    @Test
+    void testIsHiddenName() {
+        for (String name :
+                new String[] {"File.txt", "file.txt", "123file.txt", "data", "a_b.log"}) {
+            assertThat(PartitionPathUtils.isHiddenName(name)).as(name).isFalse();
+        }
+        for (String name : new String[] {".hidden", "_file.txt", "_temporary", "__magic_job-1"}) {
+            assertThat(PartitionPathUtils.isHiddenName(name)).as(name).isTrue();
+        }
+        // A name that is absent or empty is not a hidden one.
+        assertThat(PartitionPathUtils.isHiddenName(null)).isFalse();
+        assertThat(PartitionPathUtils.isHiddenName("")).isFalse();
     }
 }

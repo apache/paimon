@@ -57,13 +57,6 @@ public class PrimaryKeyFullTextScan implements FullTextScan {
     @Nullable private final PartitionPredicate partitionFilter;
     @Nullable private final Snapshot pinnedSnapshot;
 
-    public PrimaryKeyFullTextScan(
-            FileStoreTable table,
-            PrimaryKeyIndexDefinition definition,
-            @Nullable PartitionPredicate partitionFilter) {
-        this(table, definition, partitionFilter, null);
-    }
-
     PrimaryKeyFullTextScan(
             FileStoreTable table,
             PrimaryKeyIndexDefinition definition,
@@ -193,8 +186,9 @@ public class PrimaryKeyFullTextScan implements FullTextScan {
                 continue;
             }
             PkFullTextBucketIndexState state =
-                    PkFullTextBucketIndexState.fromActivePayloads(
+                    PkFullTextBucketIndexState.fromActiveDataFiles(
                             textFieldId,
+                            bucket.dataFiles(),
                             payloads.getOrDefault(entry.getKey(), Collections.emptyList()));
             Set<String> activeSources = bucket.dataFileNames();
             Map<String, IndexFileMeta> currentPayloads = new LinkedHashMap<>();

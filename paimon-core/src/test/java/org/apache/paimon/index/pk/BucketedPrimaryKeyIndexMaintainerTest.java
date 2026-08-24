@@ -129,8 +129,6 @@ class BucketedPrimaryKeyIndexMaintainerTest {
     void testFactoryCreatesConfiguredFullTextMaintainer() {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS.key(), "content");
-        options.put("fields.content.pk-index.compaction.level-fanout", "2");
-        options.put("fields.content.pk-index.compaction.stale-ratio-threshold", "1.0");
         TableSchema schema =
                 new TableSchema(
                         0,
@@ -321,8 +319,6 @@ class BucketedPrimaryKeyIndexMaintainerTest {
                             release.await();
                             return merged;
                         },
-                        2,
-                        1.0,
                         Arrays.asList(sourceA, sourceB),
                         Arrays.asList(payloadA, payloadB),
                         buildExecutor);
@@ -413,8 +409,6 @@ class BucketedPrimaryKeyIndexMaintainerTest {
                 indexType,
                 new PkSortedIndexFile(LocalFileIO.create(), pathFactory()),
                 buildFunction,
-                5,
-                0.2,
                 Collections.emptyList(),
                 Collections.emptyList(),
                 buildExecutor);
@@ -475,13 +469,14 @@ class BucketedPrimaryKeyIndexMaintainerTest {
                         fieldId,
                         null,
                         new byte[] {1},
-                        new PrimaryKeyIndexSourceMeta(sources).serialize()),
+                        new PrimaryKeyIndexSourceMeta(1, sources).serialize()),
                 null);
     }
 
     private static IndexFileMeta fullTextPayload(String fileName, DataFileMeta sourceFile) {
         PrimaryKeyIndexSourceMeta sourceMeta =
                 new PrimaryKeyIndexSourceMeta(
+                        1,
                         new PrimaryKeyIndexSourceFile(
                                 sourceFile.fileName(), sourceFile.rowCount()));
         return new IndexFileMeta(

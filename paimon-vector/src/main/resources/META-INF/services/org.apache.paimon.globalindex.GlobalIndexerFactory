@@ -15,5 +15,6 @@
 
 org.apache.paimon.vector.index.IvfFlatVectorGlobalIndexerFactory
 org.apache.paimon.vector.index.IvfPqAlgorithmVectorGlobalIndexerFactory
-org.apache.paimon.vector.index.IvfHnswFlatVectorGlobalIndexerFactory
-org.apache.paimon.vector.index.IvfHnswSqVectorGlobalIndexerFactory
+org.apache.paimon.vector.index.IvfSqVectorGlobalIndexerFactory
+org.apache.paimon.vector.index.IvfRqVectorGlobalIndexerFactory
+org.apache.paimon.vector.index.DiskAnnVectorGlobalIndexerFactory

@@ -24,28 +24,38 @@ import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.ExternalBuffer;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.disk.RowBuffer;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.SimpleFileEntry;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.StreamTableCommit;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataTypes;
 
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -117,6 +127,52 @@ public class BucketedAppendFileStoreWriteTest {
         Assertions.assertThat(records).isEqualTo(11);
     }
 
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"parquet", "orc"})
+    public void testSharedShreddingForceBufferSpill(String fileFormat) throws Exception {
+        FileStoreTable table = createSharedShreddingForceBufferSpillTable(fileFormat);
+        BucketedAppendFileStoreWrite write =
+                (BucketedAppendFileStoreWrite) table.store().newWrite("ss");
+        write.withIOManager(IOManager.create(tempDir.toString()));
+
+        write.write(partition(0), 0, GenericRow.of(0, 0, map("a", 10L)));
+        Assertions.assertThat(writeBuffers(write)).containsExactly((RowBuffer) null);
+
+        // Creating the second writer reaches the configured limit and triggers force spill.
+        write.write(partition(1), 1, GenericRow.of(1, 1, map("b", 20L)));
+        Assertions.assertThat(writeBuffers(write))
+                .hasSize(2)
+                .allSatisfy(
+                        buffer -> Assertions.assertThat(buffer).isInstanceOf(ExternalBuffer.class));
+
+        write.write(partition(0), 0, GenericRow.of(0, 2, map("c", 30L)));
+        write.write(partition(1), 1, GenericRow.of(1, 3, map("d", 40L)));
+
+        List<CommitMessage> messages = write.prepareCommit(true, Long.MAX_VALUE);
+        try (StreamTableCommit commit = table.newStreamWriteBuilder().newCommit()) {
+            commit.commit(0, messages);
+        }
+
+        List<List<Object>> actual = new ArrayList<>();
+        ReadBuilder readBuilder = table.newReadBuilder();
+        try (RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan())) {
+            reader.forEachRemaining(
+                    row ->
+                            actual.add(
+                                    Arrays.asList(
+                                            row.getInt(0),
+                                            row.getInt(1),
+                                            toJavaMap(row.getMap(2)))));
+        }
+        Assertions.assertThat(actual)
+                .containsExactlyInAnyOrder(
+                        Arrays.asList(0, 0, Collections.singletonMap("a", 10L)),
+                        Arrays.asList(1, 1, Collections.singletonMap("b", 20L)),
+                        Arrays.asList(0, 2, Collections.singletonMap("c", 30L)),
+                        Arrays.asList(1, 3, Collections.singletonMap("d", 40L)));
+    }
+
     @Test
     public void testWritesInBatchWithNoExtraFiles() throws Exception {
         FileStoreTable table = createFileStoreTable();
@@ -174,6 +230,55 @@ public class BucketedAppendFileStoreWriteTest {
         catalog.createDatabase("default", false);
         catalog.createTable(identifier, schema, false);
         return (FileStoreTable) catalog.getTable(identifier);
+    }
+
+    private FileStoreTable createSharedShreddingForceBufferSpillTable(String fileFormat)
+            throws Exception {
+        Catalog catalog = new FileSystemCatalog(LocalFileIO.create(), new Path(tempDir.toString()));
+        Schema schema =
+                Schema.newBuilder()
+                        .column("f0", DataTypes.INT())
+                        .column("f1", DataTypes.INT())
+                        .column(
+                                "metrics",
+                                DataTypes.MAP(DataTypes.STRING().notNull(), DataTypes.BIGINT()))
+                        .partitionKeys("f0")
+                        .option(BUCKET.key(), "100")
+                        .option("bucket-key", "f1")
+                        .option(WRITE_ONLY.key(), "true")
+                        .option("file.format", fileFormat)
+                        .option(WRITE_MAX_WRITERS_TO_SPILL.key(), "1")
+                        .option("fields.metrics.map.storage-layout", "shared-shredding")
+                        .option("fields.metrics.map.shared-shredding.max-columns", "2")
+                        .build();
+        Identifier identifier = Identifier.create("default", "spill_" + fileFormat);
+        catalog.createDatabase("default", true);
+        catalog.createTable(identifier, schema, false);
+        return (FileStoreTable) catalog.getTable(identifier);
+    }
+
+    private GenericMap map(String key, long value) {
+        return new GenericMap(Collections.singletonMap(BinaryString.fromString(key), value));
+    }
+
+    private List<RowBuffer> writeBuffers(BucketedAppendFileStoreWrite write) {
+        List<RowBuffer> buffers = new ArrayList<>();
+        for (Map<Integer, AbstractFileStoreWrite.WriterContainer<InternalRow>> bucketWriters :
+                write.writers().values()) {
+            for (AbstractFileStoreWrite.WriterContainer<InternalRow> writerContainer :
+                    bucketWriters.values()) {
+                buffers.add(((AppendOnlyWriter) writerContainer.writer).getWriteBuffer());
+            }
+        }
+        return buffers;
+    }
+
+    private Map<String, Long> toJavaMap(InternalMap map) {
+        Map<String, Long> result = new LinkedHashMap<>();
+        for (int i = 0; i < map.size(); i++) {
+            result.put(map.keyArray().getString(i).toString(), map.valueArray().getLong(i));
+        }
+        return result;
     }
 
     @Test

@@ -44,45 +44,27 @@ class PrimaryKeyIndexDefinitionsTest {
         options.put("fields.embedding.pk-vector.index.type", "ivf-pq");
         options.put(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "name");
         options.put(CoreOptions.PK_BITMAP_INDEX_COLUMNS.key(), "status");
+        options.put(CoreOptions.PK_MULTIVALUE_INDEX_COLUMNS.key(), "tags");
 
         List<PrimaryKeyIndexDefinition> definitions =
                 PrimaryKeyIndexDefinitions.create(schema(options)).definitions();
 
         assertThat(definitions)
                 .extracting(PrimaryKeyIndexDefinition::column)
-                .containsExactly("name", "status", "embedding");
+                .containsExactly("name", "status", "embedding", "tags");
         assertThat(definitions)
                 .extracting(PrimaryKeyIndexDefinition::family)
                 .containsExactly(
                         PrimaryKeyIndexDefinition.Family.BTREE,
                         PrimaryKeyIndexDefinition.Family.BITMAP,
-                        PrimaryKeyIndexDefinition.Family.VECTOR);
+                        PrimaryKeyIndexDefinition.Family.VECTOR,
+                        PrimaryKeyIndexDefinition.Family.MULTI_VALUE);
         assertThat(definitions)
                 .extracting(PrimaryKeyIndexDefinition::fieldId)
-                .containsExactly(1, 2, 3);
+                .containsExactly(1, 2, 3, 4);
         assertThat(definitions)
                 .extracting(PrimaryKeyIndexDefinition::indexType)
-                .containsExactly("btree", "bitmap", "ivf-pq");
-        assertThat(definitions)
-                .extracting(PrimaryKeyIndexDefinition::compactionLevelFanout)
-                .containsOnly(5);
-        assertThat(definitions)
-                .extracting(PrimaryKeyIndexDefinition::compactionStaleRatioThreshold)
-                .containsOnly(0.2);
-    }
-
-    @Test
-    void testResolvesFieldScopedCompactionOptions() {
-        Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "name");
-        options.put("fields.name.pk-index.compaction.level-fanout", "7");
-        options.put("fields.name.pk-index.compaction.stale-ratio-threshold", "0.4");
-
-        PrimaryKeyIndexDefinition definition =
-                PrimaryKeyIndexDefinitions.create(schema(options)).definitions().get(0);
-
-        assertThat(definition.compactionLevelFanout()).isEqualTo(7);
-        assertThat(definition.compactionStaleRatioThreshold()).isEqualTo(0.4);
+                .containsExactly("btree", "bitmap", "ivf-pq", "multivalue");
     }
 
     @Test
@@ -118,21 +100,6 @@ class PrimaryKeyIndexDefinitionsTest {
     }
 
     @Test
-    void testLegacyVectorCompactionOptionsAreIgnored() {
-        Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.PK_VECTOR_INDEX_COLUMNS.key(), "embedding");
-        options.put("fields.embedding.pk-vector.index.type", "ivf-pq");
-        options.put("pk-vector.index.compaction.level-fanout", "9");
-        options.put("pk-vector.index.compaction.stale-ratio-threshold", "0.8");
-
-        PrimaryKeyIndexDefinition definition =
-                PrimaryKeyIndexDefinitions.create(schema(options)).definitions().get(0);
-
-        assertThat(definition.compactionLevelFanout()).isEqualTo(5);
-        assertThat(definition.compactionStaleRatioThreshold()).isEqualTo(0.2);
-    }
-
-    @Test
     void testRejectsDuplicateColumnWithinFamily() {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "name,name");
@@ -161,7 +128,8 @@ class PrimaryKeyIndexDefinitionsTest {
                         new DataField(0, "id", DataTypes.INT().notNull()),
                         new DataField(1, "name", DataTypes.STRING()),
                         new DataField(2, "status", DataTypes.INT()),
-                        new DataField(3, "embedding", DataTypes.VECTOR(3, DataTypes.FLOAT()))),
+                        new DataField(3, "embedding", DataTypes.VECTOR(3, DataTypes.FLOAT())),
+                        new DataField(4, "tags", DataTypes.ARRAY(DataTypes.STRING()))),
                 3,
                 Collections.emptyList(),
                 Collections.singletonList("id"),

@@ -24,6 +24,7 @@ from unittest.mock import MagicMock, patch
 
 import pyarrow.fs as pafs
 
+from pypaimon.common.file_io import create_temp_path
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
 from pypaimon.filesystem.local_file_io import LocalFileIO
@@ -32,6 +33,18 @@ from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO, _pyarrow_lt_7
 
 class FileIOTest(unittest.TestCase):
     """Test cases for FileIO.to_filesystem_path method."""
+
+    @patch('pypaimon.common.file_io.uuid.uuid4', return_value='test-uuid')
+    def test_create_temp_path(self, _):
+        self.assertEqual(
+            create_temp_path("oss://bucket/table/snapshot/snapshot-1"),
+            "oss://bucket/table/snapshot/.snapshot-1.test-uuid.tmp")
+        self.assertEqual(
+            create_temp_path("snapshot-1"),
+            ".snapshot-1.test-uuid.tmp")
+        self.assertEqual(
+            create_temp_path(r"C:\table\snapshot\snapshot-1"),
+            r"C:\table\snapshot\.snapshot-1.test-uuid.tmp")
 
     def test_filesystem_path_conversion(self):
         """Test S3FileSystem path conversion with various formats."""
@@ -65,25 +78,26 @@ class FileIOTest(unittest.TestCase):
         parent_str = str(Path(converted_path).parent)
         self.assertEqual(file_io.to_filesystem_path(parent_str), parent_str)
 
-        lt7 = _pyarrow_lt_7()
         oss_io = PyArrowFileIO("oss://test-bucket/warehouse", Options({
             OssOptions.OSS_ENDPOINT.key(): 'oss-cn-hangzhou.aliyuncs.com',
             OssOptions.OSS_ACCESS_KEY_ID.key(): 'test-key',
             OssOptions.OSS_ACCESS_KEY_SECRET.key(): 'test-secret',
             OssOptions.OSS_IMPL.key(): 'legacy',
         }))
+        # PyArrow <16 bakes the bucket into endpoint_override, so keys omit it.
+        bucket_stripped = oss_io._oss_bucket_in_endpoint
         got = oss_io.to_filesystem_path("oss://test-bucket/path/to/file.txt")
-        self.assertEqual(got, "path/to/file.txt" if lt7 else "test-bucket/path/to/file.txt")
-        if lt7:
+        self.assertEqual(got, "path/to/file.txt" if bucket_stripped else "test-bucket/path/to/file.txt")
+        if bucket_stripped:
             self.assertEqual(oss_io.to_filesystem_path("db-xxx.db/tbl-xxx/data.parquet"),
                              "db-xxx.db/tbl-xxx/data.parquet")
             self.assertEqual(oss_io.to_filesystem_path("db-xxx.db/tbl-xxx"), "db-xxx.db/tbl-xxx")
             manifest_uri = "oss://test-bucket/warehouse/db.db/table/manifest/manifest-list-abc-0"
             manifest_key = oss_io.to_filesystem_path(manifest_uri)
             self.assertEqual(manifest_key, "warehouse/db.db/table/manifest/manifest-list-abc-0",
-                             "OSS+PyArrow6 must pass key only to PyArrow so manifest is written to correct bucket")
+                             "OSS+PyArrow<16 must pass key only so manifest lands in the right bucket")
             self.assertFalse(manifest_key.startswith("test-bucket/"),
-                             "path must not start with bucket name or PyArrow 6 writes to wrong bucket")
+                             "path must not start with bucket or PyArrow <16 writes to wrong bucket")
         nf = MagicMock(type=pafs.FileType.NotFound)
         get_file_info_calls = []
 
@@ -92,24 +106,29 @@ class FileIOTest(unittest.TestCase):
             return [MagicMock(type=pafs.FileType.NotFound) for _ in paths]
 
         mock_fs = MagicMock()
-        mock_fs.get_file_info.side_effect = record_get_file_info if lt7 else [[nf], [nf]]
+        mock_fs.get_file_info.side_effect = record_get_file_info if bucket_stripped else [[nf], [nf]]
         mock_fs.create_dir = MagicMock()
         mock_fs.open_output_stream.return_value = MagicMock()
         oss_io.filesystem = mock_fs
-        oss_io.new_output_stream("oss://test-bucket/path/to/file.txt")
-        mock_fs.create_dir.assert_called_once()
-        path_str = oss_io.to_filesystem_path("oss://test-bucket/path/to/file.txt")
-        if lt7:
-            expected_parent = '/'.join(path_str.split('/')[:-1]) if '/' in path_str else ''
+        # Bucket-in-endpoint mode (PyArrow < 16) mkdirs probes the real bucket
+        # over HTTP; keep the test offline.
+        with patch("requests.get", return_value=MagicMock(status_code=403)):
+            oss_io.new_output_stream("oss://test-bucket/path/to/file.txt")
+        if bucket_stripped:
+            # Legacy mkdirs must not create_dir (it would CreateBucket the
+            # first key segment and corrupt the parent directory).
+            mock_fs.create_dir.assert_not_called()
         else:
+            mock_fs.create_dir.assert_called_once()
+            path_str = oss_io.to_filesystem_path("oss://test-bucket/path/to/file.txt")
             expected_parent = "/".join(path_str.split("/")[:-1]) if "/" in path_str else str(Path(path_str).parent)
-        self.assertEqual(mock_fs.create_dir.call_args[0][0], expected_parent)
-        if lt7:
+            self.assertEqual(mock_fs.create_dir.call_args[0][0], expected_parent)
+        if bucket_stripped:
             for call_paths in get_file_info_calls:
                 for p in call_paths:
                     self.assertFalse(
                         p.startswith("test-bucket/"),
-                        "OSS+PyArrow<7 must pass key only to get_file_info, not bucket/key. Got: %r" % (p,)
+                        "OSS+PyArrow<16 must pass key only to get_file_info, not bucket/key. Got: %r" % (p,)
                     )
 
     def test_exists(self):
@@ -479,11 +498,13 @@ class FileIOTest(unittest.TestCase):
         mock_fs.copy_file = MagicMock()
         oss_io.filesystem = mock_fs
 
-        oss_io.new_output_stream("oss://test-bucket/db.db/tbl/bucket-0/data.parquet")
-        oss_io.rename("oss://test-bucket/db.db/tbl/old.parquet",
-                      "oss://test-bucket/db.db/tbl/new.parquet")
-        oss_io.copy_file("oss://test-bucket/db.db/tbl/src.parquet",
-                         "oss://test-bucket/db.db/tbl/dst.parquet")
+        # PyArrow < 16 mkdirs probes the real bucket over HTTP; keep the test offline.
+        with patch("requests.get", return_value=MagicMock(status_code=403)):
+            oss_io.new_output_stream("oss://test-bucket/db.db/tbl/bucket-0/data.parquet")
+            oss_io.rename("oss://test-bucket/db.db/tbl/old.parquet",
+                          "oss://test-bucket/db.db/tbl/new.parquet")
+            oss_io.copy_file("oss://test-bucket/db.db/tbl/src.parquet",
+                             "oss://test-bucket/db.db/tbl/dst.parquet")
 
         for call in mock_fs.create_dir.call_args_list:
             self.assertNotIn("\\", call[0][0], f"backslash in path: {call[0][0]}")

@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -106,6 +106,35 @@ def _constructed_to_string_array(array, file_type):
     return pa.array(out, type=pa.string())
 
 
+class _RowIdRangeCursor:
+    """Generate selected row offsets batch by batch from compact ranges."""
+
+    def __init__(self, ranges: List[Tuple[int, int]]):
+        self._ranges = ranges
+        self._range_index = 0
+        self._next_offset = ranges[0][0] if ranges else None
+
+    def take(self, count: int) -> List[int]:
+        offsets = []
+        while len(offsets) < count:
+            if self._range_index >= len(self._ranges):
+                raise ValueError(
+                    "Row range offsets were exhausted before the reader")
+            lower, upper = self._ranges[self._range_index]
+            current = max(lower, self._next_offset)
+            take_count = min(count - len(offsets), upper - current + 1)
+            offsets.extend(range(current, current + take_count))
+            current += take_count
+            if current > upper:
+                self._range_index += 1
+                self._next_offset = (
+                    self._ranges[self._range_index][0]
+                    if self._range_index < len(self._ranges) else None)
+            else:
+                self._next_offset = current
+        return offsets
+
+
 class DataFileBatchReader(RecordBatchReader):
     """
     Reads record batch from files of different formats
@@ -120,7 +149,13 @@ class DataFileBatchReader(RecordBatchReader):
                  file_io: Optional[FileIO] = None,
                  row_id_offsets: Optional[List[int]] = None,
                  file_data_fields: Optional[List[DataField]] = None,
-                 target_data_fields: Optional[List[DataField]] = None):
+                 target_data_fields: Optional[List[DataField]] = None,
+                 row_id_offset_ranges: Optional[List[Tuple[int, int]]] = None):
+        if (row_id_offsets is not None
+                and row_id_offset_ranges is not None):
+            raise ValueError(
+                "row_id_offsets and row_id_offset_ranges cannot both "
+                "be provided")
         self.format_reader = format_reader
         self.index_mapping = index_mapping
         self.partition_info = partition_info
@@ -130,6 +165,9 @@ class DataFileBatchReader(RecordBatchReader):
         self.first_row_id = first_row_id
         self.row_id_offsets = row_id_offsets
         self._row_id_cursor = 0
+        self._row_id_range_cursor = (
+            _RowIdRangeCursor(row_id_offset_ranges)
+            if row_id_offset_ranges is not None else None)
         self.max_sequence_number = max_sequence_number
         self.system_fields = system_fields
         self.file_io = file_io
@@ -351,6 +389,13 @@ class DataFileBatchReader(RecordBatchReader):
                 row_ids = [self.first_row_id + o for o in self.row_id_offsets[self._row_id_cursor:end]]
                 arrays[idx] = pa.array(row_ids, type=pa.int64())
                 self._row_id_cursor = end
+            elif self._row_id_range_cursor is not None:
+                row_ids = [
+                    self.first_row_id + offset
+                    for offset in self._row_id_range_cursor.take(
+                        record_batch.num_rows)
+                ]
+                arrays[idx] = pa.array(row_ids, type=pa.int64())
             else:
                 row_id_range = range(self.first_row_id, self.first_row_id + record_batch.num_rows)
                 arrays[idx] = pa.array(row_id_range, type=pa.int64())

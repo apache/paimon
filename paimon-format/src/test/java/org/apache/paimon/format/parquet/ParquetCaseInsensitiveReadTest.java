@@ -33,7 +33,6 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.parquet.column.ParquetProperties;
 import org.apache.parquet.example.data.Group;
 import org.apache.parquet.example.data.simple.SimpleGroupFactory;
-import org.apache.parquet.filter2.compat.FilterCompat;
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.example.ExampleParquetWriter;
 import org.apache.parquet.hadoop.util.HadoopOutputFile;
@@ -134,13 +133,13 @@ class ParquetCaseInsensitiveReadTest {
             throws Exception {
         Options options = new Options();
         options.set(CatalogOptions.CASE_SENSITIVE, caseSensitive);
-        ParquetReaderFactory factory =
-                new ParquetReaderFactory(options, readType, 1024, FilterCompat.NOOP);
+        ParquetReaderFactory factory = new ParquetReaderFactory(options, readType, 1024, null);
         LocalFileIO fileIO = new LocalFileIO();
         List<InternalRow> rows = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
                 factory.createReader(
-                        new FormatReaderContext(fileIO, path, fileIO.getFileSize(path)))) {
+                        new FormatReaderContext(
+                                fileIO, path, fileIO.getFileSize(path), null, null))) {
             // Materialize a copy because InternalRow instances are reused across iterations.
             reader.forEachRemaining(row -> rows.add(copy(row, readType)));
         }

@@ -18,7 +18,6 @@
 import re
 from abc import ABC, ABCMeta, abstractmethod
 from dataclasses import dataclass
-from functools import reduce
 from typing import Any, Dict, List, Optional
 from typing import ClassVar
 
@@ -28,6 +27,20 @@ from pyarrow import dataset as pyarrow_dataset
 
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.table.row.internal_row import InternalRow
+
+
+def _combine_arrow_expressions(expressions, combine):
+    while len(expressions) > 1:
+        next_level = []
+        for index in range(0, len(expressions), 2):
+            if index + 1 == len(expressions):
+                next_level.append(expressions[index])
+            else:
+                next_level.append(combine(
+                    expressions[index], expressions[index + 1],
+                ))
+        expressions = next_level
+    return expressions[0]
 
 
 @dataclass
@@ -72,15 +85,35 @@ class Predicate:
         if self.method == 'or':
             return any(p.test_by_simple_stats(stat, row_count) for p in self.literals)
 
-        null_count = stat.null_counts[self.index]
+        index = self.index
+        if index is None or index < 0:
+            # Missing stats cannot prove that the file does not match.
+            return True
+
+        null_count = (
+            stat.null_counts[index]
+            if stat.null_counts is not None and index < len(stat.null_counts)
+            else None
+        )
 
         if self.method == 'isNull':
             return null_count is None or null_count > 0
         if self.method == 'isNotNull':
             return null_count is None or row_count is None or null_count < row_count
 
-        min_value = stat.min_values.get_field(self.index)
-        max_value = stat.max_values.get_field(self.index)
+        try:
+            min_value = (
+                stat.min_values.get_field(index)
+                if index < len(stat.min_values)
+                else None
+            )
+            max_value = (
+                stat.max_values.get_field(index)
+                if index < len(stat.max_values)
+                else None
+            )
+        except IndexError:
+            return True
 
         if min_value is None or max_value is None or (null_count is not None and null_count == row_count):
             # invalid stats, skip validation
@@ -93,11 +126,15 @@ class Predicate:
 
     def to_arrow(self) -> Any:
         if self.method == 'and':
-            return reduce(lambda x, y: x & y,
-                          [p.to_arrow() for p in self.literals])
+            return _combine_arrow_expressions(
+                [p.to_arrow() for p in self.literals],
+                lambda left, right: left & right,
+            )
         if self.method == 'or':
-            return reduce(lambda x, y: x | y,
-                          [p.to_arrow() for p in self.literals])
+            return _combine_arrow_expressions(
+                [p.to_arrow() for p in self.literals],
+                lambda left, right: left | right,
+            )
 
         if self.method == 'startsWith':
             pattern = self.literals[0]
@@ -281,24 +318,38 @@ class In(Tester):
         return val in literals
 
     def test_by_stats(self, min_v, max_v, literals) -> bool:
-        return any(min_v <= l <= max_v for l in literals)
+        return any(
+            min_v <= literal <= max_v
+            for literal in literals
+            if literal is not None
+        )
 
     def test_by_arrow(self, val, literals) -> bool:
-        return val.isin(literals)
+        # Arrow treats null as a set member, while SQL IN never returns true
+        # solely because both the field and an IN literal are null.
+        non_null_literals = [literal for literal in literals if literal is not None]
+        if not non_null_literals:
+            return val.is_valid() & val.is_null()
+        return val.isin(non_null_literals) & val.is_valid()
 
 
 class NotIn(Tester):
     name = "notIn"
 
     def test_by_value(self, val, literals) -> bool:
-        if val is None:
+        if val is None or any(literal is None for literal in literals):
             return False
         return val not in literals
 
     def test_by_stats(self, min_v, max_v, literals) -> bool:
+        if any(literal is None for literal in literals):
+            return False
         return not any(min_v == l == max_v for l in literals)
 
     def test_by_arrow(self, val, literals) -> bool:
+        # Any null literal makes SQL NOT IN unknown for every non-matching row.
+        if any(literal is None for literal in literals):
+            return val.is_valid() & val.is_null()
         return (~val.isin(literals)) & val.is_valid()
 
 

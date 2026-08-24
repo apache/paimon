@@ -40,6 +40,8 @@ TABLE_TYPE = RowType(False, [
     DataField(11, "changelog_record_count", AtomicType("BIGINT", nullable=True)),
     DataField(12, "watermark", AtomicType("BIGINT", nullable=True)),
     DataField(13, "next_row_id", AtomicType("BIGINT", nullable=True)),
+    # Keep the field ID aligned with Java; ID 14 is reserved for operation.
+    DataField(15, "writer_version", AtomicType("STRING", nullable=True)),
 ])
 
 
@@ -75,6 +77,7 @@ class SnapshotsTable(SystemTable):
         changelog_record_counts: List[Optional[int]] = []
         watermarks: List[Optional[int]] = []
         next_row_ids: List[Optional[int]] = []
+        writer_versions: List[Optional[str]] = []
 
         for snap in snapshots:
             snapshot_ids.append(int(snap.id))
@@ -99,6 +102,7 @@ class SnapshotsTable(SystemTable):
                 None if snap.watermark is None else int(snap.watermark))
             next_row_ids.append(
                 None if snap.next_row_id is None else int(snap.next_row_id))
+            writer_versions.append(snap.writer_version)
 
         return pyarrow.table({
             "snapshot_id": pyarrow.array(snapshot_ids, type=pyarrow.int64()),
@@ -122,4 +126,5 @@ class SnapshotsTable(SystemTable):
                 changelog_record_counts, type=pyarrow.int64()),
             "watermark": pyarrow.array(watermarks, type=pyarrow.int64()),
             "next_row_id": pyarrow.array(next_row_ids, type=pyarrow.int64()),
+            "writer_version": pyarrow.array(writer_versions, type=pyarrow.string()),
         })

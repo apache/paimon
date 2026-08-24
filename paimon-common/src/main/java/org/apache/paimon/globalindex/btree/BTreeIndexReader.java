@@ -25,14 +25,18 @@ import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.KeySerializer;
 import org.apache.paimon.globalindex.SortedFileMetaSelector;
 import org.apache.paimon.globalindex.SortedIndexFileMeta;
+import org.apache.paimon.globalindex.TopNGlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceInput;
+import org.apache.paimon.predicate.SortValue;
+import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.sst.BlockCache;
 import org.apache.paimon.sst.BlockHandle;
 import org.apache.paimon.sst.BlockIterator;
+import org.apache.paimon.sst.ReverseBlockIterator;
 import org.apache.paimon.sst.SstFileReader;
 import org.apache.paimon.utils.FileBasedBloomFilter;
 import org.apache.paimon.utils.LazyField;
@@ -43,6 +47,7 @@ import javax.annotation.Nullable;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -339,6 +344,20 @@ public class BTreeIndexReader implements Closeable {
         return createResult(() -> rangeQuery(from, to, true, true));
     }
 
+    public Optional<GlobalIndexResult> visitTopN(TopN topN) {
+        List<SortValue> orders = topN.orders();
+        if (orders.size() != 1) {
+            return Optional.empty();
+        }
+        Preconditions.checkArgument(topN.limit() >= 0, "TopN limit must not be negative.");
+        SortValue order = orders.get(0);
+        try {
+            return Optional.of(topN(topN.limit(), order.direction(), order.nullOrdering()));
+        } catch (IOException e) {
+            throw new RuntimeException("fail to read btree index file.", e);
+        }
+    }
+
     private Optional<GlobalIndexResult> createResult(IOSupplier<RoaringNavigableMap64> supplier) {
         try {
             return Optional.of(GlobalIndexResult.create(supplier.get()));
@@ -360,6 +379,84 @@ public class BTreeIndexReader implements Closeable {
             return new RoaringNavigableMap64();
         }
         return rangeQuery(minKey, maxKey, true, true);
+    }
+
+    private TopNGlobalIndexResult topN(
+            int limit, SortValue.SortDirection direction, SortValue.NullOrdering nullOrdering)
+            throws IOException {
+        List<KeyRowIds> result = new ArrayList<>();
+        if (limit == 0) {
+            return TopNGlobalIndexResult.create(result, comparator, direction, nullOrdering, limit);
+        }
+
+        int remaining = limit;
+        if (nullOrdering == SortValue.NullOrdering.NULLS_FIRST) {
+            remaining = addNullRows(result, remaining);
+        }
+        if (remaining > 0) {
+            remaining =
+                    direction == SortValue.SortDirection.ASCENDING
+                            ? addAscendingNonNullRows(result, remaining)
+                            : addDescendingNonNullRows(result, remaining);
+        }
+        if (remaining > 0 && nullOrdering == SortValue.NullOrdering.NULLS_LAST) {
+            addNullRows(result, remaining);
+        }
+        return TopNGlobalIndexResult.create(result, comparator, direction, nullOrdering, limit);
+    }
+
+    private int addNullRows(List<KeyRowIds> result, int remaining) {
+        int count = (int) Math.min(nullBitmap.get().getLongCardinality(), remaining);
+        long[] rowIds = new long[count];
+        int position = 0;
+        for (long rowId : nullBitmap.get()) {
+            rowIds[position++] = rowId;
+            if (position == count) {
+                break;
+            }
+        }
+        if (count > 0) {
+            result.add(new KeyRowIds(null, rowIds));
+        }
+        return remaining - count;
+    }
+
+    private int addDescendingNonNullRows(List<KeyRowIds> result, int remaining) throws IOException {
+        if (maxKey == null) {
+            return remaining;
+        }
+
+        SstFileReader.SstFileReverseIterator fileIterator = reader.createReverseIterator();
+        ReverseBlockIterator dataIterator;
+        while (remaining > 0 && (dataIterator = fileIterator.readBatch()) != null) {
+            while (remaining > 0 && dataIterator.hasNext()) {
+                Map.Entry<MemorySlice, MemorySlice> entry = dataIterator.next();
+                Object key = keySerializer.deserialize(entry.getKey());
+                long[] rowIds = deserializeRowIds(entry.getValue(), remaining);
+                result.add(new KeyRowIds(key, rowIds));
+                remaining -= rowIds.length;
+            }
+        }
+        return remaining;
+    }
+
+    private int addAscendingNonNullRows(List<KeyRowIds> result, int remaining) throws IOException {
+        if (minKey == null) {
+            return remaining;
+        }
+
+        SstFileReader.SstFileIterator fileIterator = reader.createIterator();
+        BlockIterator dataIterator;
+        while (remaining > 0 && (dataIterator = fileIterator.readBatch()) != null) {
+            while (remaining > 0 && dataIterator.hasNext()) {
+                Map.Entry<MemorySlice, MemorySlice> entry = dataIterator.next();
+                Object key = keySerializer.deserialize(entry.getKey());
+                long[] rowIds = deserializeRowIds(entry.getValue(), remaining);
+                result.add(new KeyRowIds(key, rowIds));
+                remaining -= rowIds.length;
+            }
+        }
+        return remaining;
     }
 
     /**
@@ -402,11 +499,17 @@ public class BTreeIndexReader implements Closeable {
     }
 
     private long[] deserializeRowIds(MemorySlice slice) {
+        return deserializeRowIds(slice, Integer.MAX_VALUE);
+    }
+
+    static long[] deserializeRowIds(MemorySlice slice, int maxRowIds) {
+        Preconditions.checkArgument(maxRowIds >= 0, "Max row id count must not be negative.");
         MemorySliceInput sliceInput = slice.toInput();
         int length = sliceInput.readVarLenInt();
         Preconditions.checkState(length > 0, "Invalid row id length: 0");
-        long[] ids = new long[length];
-        for (int i = 0; i < length; i++) {
+        int resultLength = Math.min(length, maxRowIds);
+        long[] ids = new long[resultLength];
+        for (int i = 0; i < resultLength; i++) {
             ids[i] = sliceInput.readVarLenLong();
         }
         return ids;

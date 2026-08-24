@@ -32,12 +32,36 @@ public class CheckpointCommittables {
     private final long checkpointId;
     private final List<Committable> committables;
     private final long watermark;
+    // Idle bit is frozen at barrier time together with watermark; mirrors what Flink's
+    // StatusWatermarkValve would have observed on the writer's input at the moment of the barrier.
+    private final boolean idle;
+    // Whether a savepoint tag should be created for the checkpoint that produced these
+    // committables.
+    private final boolean shouldCreateSavepointTag;
 
     public CheckpointCommittables(
-            long checkpointId, List<Committable> committables, long watermark) {
+            long checkpointId,
+            List<Committable> committables,
+            long watermark,
+            boolean idle,
+            boolean shouldCreateSavepointTag) {
         this.checkpointId = checkpointId;
         this.committables = committables;
         this.watermark = watermark;
+        this.idle = idle;
+        this.shouldCreateSavepointTag = shouldCreateSavepointTag;
+    }
+
+    // Convenience for callers that are not savepoint-aware yet.
+    public CheckpointCommittables(
+            long checkpointId, List<Committable> committables, long watermark, boolean idle) {
+        this(checkpointId, committables, watermark, idle, false);
+    }
+
+    // Convenience for callers that only need the pre-idle-aware shape (ACTIVE writer).
+    public CheckpointCommittables(
+            long checkpointId, List<Committable> committables, long watermark) {
+        this(checkpointId, committables, watermark, false, false);
     }
 
     public long checkpointId() {
@@ -52,6 +76,20 @@ public class CheckpointCommittables {
         return watermark;
     }
 
+    public boolean idle() {
+        return idle;
+    }
+
+    public boolean shouldCreateSavepointTag() {
+        return shouldCreateSavepointTag;
+    }
+
+    /** Returns a copy with the savepoint-tag intent set; all other fields preserved. */
+    public CheckpointCommittables withShouldCreateSavepointTag(boolean shouldCreateSavepointTag) {
+        return new CheckpointCommittables(
+                checkpointId, committables, watermark, idle, shouldCreateSavepointTag);
+    }
+
     public int size() {
         return committables.size();
     }
@@ -63,7 +101,7 @@ public class CheckpointCommittables {
     @Override
     public String toString() {
         return String.format(
-                "CheckpointCommittables{checkpointId=%d, watermark=%d, committables=%s}",
-                checkpointId, watermark, committables);
+                "CheckpointCommittables{checkpointId=%d, watermark=%d, idle=%s, shouldCreateSavepointTag=%s, committables=%s}",
+                checkpointId, watermark, idle, shouldCreateSavepointTag, committables);
     }
 }

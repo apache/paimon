@@ -54,8 +54,6 @@ jobs:
         with:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'temurin'
-      - name: Install paimon-full-text Java dependency
-        run: bash .github/workflows/install-paimon-full-text.sh java
       - name: Build
         run:  mvn -T 1C -B -ntp clean install -DskipTests -Pflink1,spark3
       - name: Test

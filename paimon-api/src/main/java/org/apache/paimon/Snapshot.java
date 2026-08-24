@@ -32,6 +32,7 @@ import javax.annotation.Nullable;
 import java.io.Serializable;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * This file is the entrance to all data committed at some specific time point.
@@ -49,6 +50,7 @@ public class Snapshot implements Serializable {
     protected static final int CURRENT_VERSION = 3;
 
     protected static final String FIELD_VERSION = "version";
+    protected static final String FIELD_UUID = "uuid";
     protected static final String FIELD_ID = "id";
     protected static final String FIELD_SCHEMA_ID = "schemaId";
     protected static final String FIELD_BASE_MANIFEST_LIST = "baseManifestList";
@@ -59,6 +61,7 @@ public class Snapshot implements Serializable {
     protected static final String FIELD_CHANGELOG_MANIFEST_LIST_SIZE = "changelogManifestListSize";
     protected static final String FIELD_INDEX_MANIFEST = "indexManifest";
     protected static final String FIELD_COMMIT_USER = "commitUser";
+    protected static final String FIELD_WRITER_VERSION = "writerVersion";
     protected static final String FIELD_COMMIT_IDENTIFIER = "commitIdentifier";
     protected static final String FIELD_COMMIT_KIND = "commitKind";
     protected static final String FIELD_TIME_MILLIS = "timeMillis";
@@ -74,6 +77,12 @@ public class Snapshot implements Serializable {
     // version of snapshot
     @JsonProperty(FIELD_VERSION)
     protected final int version;
+
+    // null for snapshots created before UUID was introduced
+    @JsonProperty(FIELD_UUID)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @Nullable
+    protected final String uuid;
 
     @JsonProperty(FIELD_ID)
     protected final long id;
@@ -124,6 +133,13 @@ public class Snapshot implements Serializable {
     @JsonProperty(FIELD_COMMIT_USER)
     protected final String commitUser;
 
+    // Version of the Paimon writer which created this snapshot.
+    // Null for snapshots created before writer version was introduced.
+    @JsonProperty(FIELD_WRITER_VERSION)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @Nullable
+    protected final String writerVersion;
+
     // Mainly for snapshot deduplication.
     //
     // If multiple snapshots have the same commitIdentifier, reading from any of these snapshots
@@ -140,11 +156,11 @@ public class Snapshot implements Serializable {
     @JsonProperty(FIELD_TIME_MILLIS)
     protected final long timeMillis;
 
-    // record count of all changes occurred in this snapshot
+    // unmerged record count of all live data files in this snapshot
     @JsonProperty(FIELD_TOTAL_RECORD_COUNT)
     protected final long totalRecordCount;
 
-    // record count of all new changes occurred in this snapshot
+    // net change of the unmerged record count from data files added and deleted in this snapshot
     @JsonProperty(FIELD_DELTA_RECORD_COUNT)
     protected final long deltaRecordCount;
 
@@ -198,51 +214,7 @@ public class Snapshot implements Serializable {
             @Nullable Long changelogManifestListSize,
             @Nullable String indexManifest,
             String commitUser,
-            long commitIdentifier,
-            CommitKind commitKind,
-            long timeMillis,
-            long totalRecordCount,
-            long deltaRecordCount,
-            @Nullable Long changelogRecordCount,
-            @Nullable Long watermark,
-            @Nullable String statistics,
-            @Nullable Map<String, String> properties,
-            @Nullable Long nextRowId) {
-        this(
-                id,
-                schemaId,
-                baseManifestList,
-                baseManifestListSize,
-                deltaManifestList,
-                deltaManifestListSize,
-                changelogManifestList,
-                changelogManifestListSize,
-                indexManifest,
-                commitUser,
-                commitIdentifier,
-                commitKind,
-                timeMillis,
-                totalRecordCount,
-                deltaRecordCount,
-                changelogRecordCount,
-                watermark,
-                statistics,
-                properties,
-                nextRowId,
-                null);
-    }
-
-    public Snapshot(
-            long id,
-            long schemaId,
-            String baseManifestList,
-            @Nullable Long baseManifestListSize,
-            String deltaManifestList,
-            @Nullable Long deltaManifestListSize,
-            @Nullable String changelogManifestList,
-            @Nullable Long changelogManifestListSize,
-            @Nullable String indexManifest,
-            String commitUser,
+            @Nullable String writerVersion,
             long commitIdentifier,
             CommitKind commitKind,
             long timeMillis,
@@ -256,6 +228,7 @@ public class Snapshot implements Serializable {
             @Nullable Operation operation) {
         this(
                 CURRENT_VERSION,
+                UUID.randomUUID().toString(),
                 id,
                 schemaId,
                 baseManifestList,
@@ -266,6 +239,7 @@ public class Snapshot implements Serializable {
                 changelogManifestListSize,
                 indexManifest,
                 commitUser,
+                writerVersion,
                 commitIdentifier,
                 commitKind,
                 timeMillis,
@@ -279,56 +253,10 @@ public class Snapshot implements Serializable {
                 operation);
     }
 
-    public Snapshot(
-            int version,
-            long id,
-            long schemaId,
-            String baseManifestList,
-            @Nullable Long baseManifestListSize,
-            String deltaManifestList,
-            @Nullable Long deltaManifestListSize,
-            @Nullable String changelogManifestList,
-            @Nullable Long changelogManifestListSize,
-            @Nullable String indexManifest,
-            String commitUser,
-            long commitIdentifier,
-            CommitKind commitKind,
-            long timeMillis,
-            long totalRecordCount,
-            long deltaRecordCount,
-            @Nullable Long changelogRecordCount,
-            @Nullable Long watermark,
-            @Nullable String statistics,
-            @Nullable Map<String, String> properties,
-            @Nullable Long nextRowId) {
-        this(
-                version,
-                id,
-                schemaId,
-                baseManifestList,
-                baseManifestListSize,
-                deltaManifestList,
-                deltaManifestListSize,
-                changelogManifestList,
-                changelogManifestListSize,
-                indexManifest,
-                commitUser,
-                commitIdentifier,
-                commitKind,
-                timeMillis,
-                totalRecordCount,
-                deltaRecordCount,
-                changelogRecordCount,
-                watermark,
-                statistics,
-                properties,
-                nextRowId,
-                null);
-    }
-
     @JsonCreator
     public Snapshot(
             @JsonProperty(FIELD_VERSION) int version,
+            @JsonProperty(FIELD_UUID) @Nullable String uuid,
             @JsonProperty(FIELD_ID) long id,
             @JsonProperty(FIELD_SCHEMA_ID) long schemaId,
             @JsonProperty(FIELD_BASE_MANIFEST_LIST) String baseManifestList,
@@ -340,6 +268,7 @@ public class Snapshot implements Serializable {
                     Long changelogManifestListSize,
             @JsonProperty(FIELD_INDEX_MANIFEST) @Nullable String indexManifest,
             @JsonProperty(FIELD_COMMIT_USER) String commitUser,
+            @JsonProperty(FIELD_WRITER_VERSION) @Nullable String writerVersion,
             @JsonProperty(FIELD_COMMIT_IDENTIFIER) long commitIdentifier,
             @JsonProperty(FIELD_COMMIT_KIND) CommitKind commitKind,
             @JsonProperty(FIELD_TIME_MILLIS) long timeMillis,
@@ -352,6 +281,7 @@ public class Snapshot implements Serializable {
             @JsonProperty(FIELD_NEXT_ROW_ID) @Nullable Long nextRowId,
             @JsonProperty(FIELD_OPERATION) @Nullable Operation operation) {
         this.version = version;
+        this.uuid = uuid;
         this.id = id;
         this.schemaId = schemaId;
         this.baseManifestList = baseManifestList;
@@ -362,6 +292,7 @@ public class Snapshot implements Serializable {
         this.changelogManifestListSize = changelogManifestListSize;
         this.indexManifest = indexManifest;
         this.commitUser = commitUser;
+        this.writerVersion = writerVersion;
         this.commitIdentifier = commitIdentifier;
         this.commitKind = commitKind;
         this.timeMillis = timeMillis;
@@ -378,6 +309,12 @@ public class Snapshot implements Serializable {
     @JsonGetter(FIELD_VERSION)
     public int version() {
         return version;
+    }
+
+    @JsonGetter(FIELD_UUID)
+    @Nullable
+    public String uuid() {
+        return uuid;
     }
 
     @JsonGetter(FIELD_ID)
@@ -433,6 +370,12 @@ public class Snapshot implements Serializable {
     @JsonGetter(FIELD_COMMIT_USER)
     public String commitUser() {
         return commitUser;
+    }
+
+    @JsonGetter(FIELD_WRITER_VERSION)
+    @Nullable
+    public String writerVersion() {
+        return writerVersion;
     }
 
     @JsonGetter(FIELD_COMMIT_IDENTIFIER)
@@ -504,6 +447,7 @@ public class Snapshot implements Serializable {
     public int hashCode() {
         return Objects.hash(
                 version,
+                uuid,
                 id,
                 schemaId,
                 baseManifestList,
@@ -514,6 +458,7 @@ public class Snapshot implements Serializable {
                 changelogManifestListSize,
                 indexManifest,
                 commitUser,
+                writerVersion,
                 commitIdentifier,
                 commitKind,
                 timeMillis,
@@ -537,6 +482,7 @@ public class Snapshot implements Serializable {
         }
         Snapshot that = (Snapshot) o;
         return Objects.equals(version, that.version)
+                && Objects.equals(uuid, that.uuid)
                 && id == that.id
                 && schemaId == that.schemaId
                 && Objects.equals(baseManifestList, that.baseManifestList)
@@ -547,6 +493,7 @@ public class Snapshot implements Serializable {
                 && Objects.equals(changelogManifestListSize, that.changelogManifestListSize)
                 && Objects.equals(indexManifest, that.indexManifest)
                 && Objects.equals(commitUser, that.commitUser)
+                && Objects.equals(writerVersion, that.writerVersion)
                 && commitIdentifier == that.commitIdentifier
                 && commitKind == that.commitKind
                 && timeMillis == that.timeMillis

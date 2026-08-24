@@ -17,7 +17,7 @@ limitations under the License.
 """
 import struct
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from pypaimon.schema.data_types import AtomicType, DataField
@@ -171,13 +171,14 @@ class TimestampTest(unittest.TestCase):
     def test_timestamp_ltz_default_precision_is_six(self):
         """Bare TIMESTAMP_LTZ must also default to precision 6 (non-compact)."""
         fields = [DataField(0, "ts", AtomicType("TIMESTAMP_LTZ"))]
-        row = GenericRow([TS_2025_04_08_10_30_00_123456], fields, RowKind.INSERT)
+        ts = TS_2025_04_08_10_30_00_123456.replace(tzinfo=timezone.utc)
+        row = GenericRow([ts], fields, RowKind.INSERT)
         serialized = GenericRowSerializer.to_bytes(row)
         fixed_part_size = 8 + 1 * 8
         self.assertEqual(len(serialized[4:]), fixed_part_size + 8)
 
         result = GenericRowDeserializer.from_bytes(serialized, fields)
-        self.assertEqual(result.values[0], TS_2025_04_08_10_30_00_123456)
+        self.assertEqual(result.values[0], ts)
 
     def test_timestamp_golden_2025_01_01(self):
         """Hard-coded Java golden: 2025-01-01 00:00:00 UTC == 1_735_689_600_000 ms.
@@ -213,12 +214,24 @@ class TimestampTest(unittest.TestCase):
         self.assertEqual(result6.values[0], ts_pre_us)
 
     def test_timestamp_ltz_non_compact(self):
-        fields = [DataField(0, "ts", AtomicType("TIMESTAMP_LTZ(6)"))]
-        ts = datetime(2025, 4, 8, 10, 30, 0, 654321)
-        row = GenericRow([ts], fields, RowKind.INSERT)
-        serialized = GenericRowSerializer.to_bytes(row)
+        source_tz = timezone(timedelta(hours=8))
+        ts = datetime(2025, 4, 8, 10, 30, 0, 654321, tzinfo=source_tz)
+        for type_name in ('TIMESTAMP_LTZ(6)',
+                          'TIMESTAMP WITH LOCAL TIME ZONE(6)'):
+            fields = [DataField(0, "ts", AtomicType(type_name))]
+            serialized = GenericRowSerializer.to_bytes(
+                GenericRow([ts], fields, RowKind.INSERT))
+            result = GenericRowDeserializer.from_bytes(serialized, fields)
+            self.assertEqual(result.values[0], ts.astimezone(timezone.utc))
+
+    def test_timestamp_ltz_compact_is_utc_aware(self):
+        source_tz = timezone(timedelta(hours=8))
+        ts = datetime(2025, 4, 8, 10, 30, 0, 123000, tzinfo=source_tz)
+        fields = [DataField(0, "ts", AtomicType("TIMESTAMP_LTZ(3)"))]
+        serialized = GenericRowSerializer.to_bytes(
+            GenericRow([ts], fields, RowKind.INSERT))
         result = GenericRowDeserializer.from_bytes(serialized, fields)
-        self.assertEqual(result.values[0], ts)
+        self.assertEqual(result.values[0], ts.astimezone(timezone.utc))
 
 
 if __name__ == '__main__':

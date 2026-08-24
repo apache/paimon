@@ -18,7 +18,7 @@
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from pypaimon.common.json_util import json_field
 from pypaimon.snapshot.snapshot import Snapshot
@@ -72,11 +72,17 @@ class SnapshotCommit(ABC):
     """Interface to commit snapshot atomically."""
 
     @abstractmethod
-    def commit(self, snapshot: Snapshot, statistics: List[PartitionStatistics]) -> bool:
+    def commit(
+            self,
+            base_snapshot_uuid: Optional[str],
+            snapshot: Snapshot,
+            statistics: List[PartitionStatistics],
+    ) -> bool:
         """
         Commit the given snapshot.
 
         Args:
+            base_snapshot_uuid: UUID of the snapshot on which the commit is based
             snapshot: The snapshot to commit
             statistics: List of partition statistics
 

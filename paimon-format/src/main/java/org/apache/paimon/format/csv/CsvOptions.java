@@ -33,7 +33,7 @@ public class CsvOptions {
             ConfigOptions.key("csv.field-delimiter")
                     .stringType()
                     .defaultValue(",")
-                    .withFallbackKeys("field-delimiter", "seq")
+                    .withFallbackKeys("field-delimiter", "seq", "delimiter")
                     .withDescription("The field delimiter for CSV or TXT format");
 
     public static final ConfigOption<String> LINE_DELIMITER =

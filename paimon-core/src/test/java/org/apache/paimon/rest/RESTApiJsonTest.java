@@ -18,19 +18,26 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.function.FunctionChange;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterFunctionRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
 import org.apache.paimon.rest.requests.AlterViewRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateFunctionRequest;
+import org.apache.paimon.rest.requests.CreatePartitionsRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
+import org.apache.paimon.rest.requests.DropPartitionsRequest;
+import org.apache.paimon.rest.requests.ListPartitionsByFilterRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.AuthTableQueryResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
+import org.apache.paimon.rest.responses.CreatePartitionsResponse;
+import org.apache.paimon.rest.responses.DropPartitionsResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
@@ -41,19 +48,24 @@ import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
 import org.apache.paimon.rest.responses.ListViewsResponse;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.view.ViewChange;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 
 import org.junit.Test;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Test for {@link RESTApi} json. */
@@ -148,15 +160,61 @@ public class RESTApiJsonTest {
         String name = "col1";
         IntType type = DataTypes.INT();
         String descStr = "desc";
+        String defaultValue = "42";
         String dataFieldStr =
                 String.format(
-                        "{\"id\": %d,\"name\":\"%s\",\"type\":\"%s\", \"description\":\"%s\"}",
-                        id, name, type, descStr);
+                        "{\"id\": %d,\"name\":\"%s\",\"type\":\"%s\","
+                                + "\"description\":\"%s\",\"defaultValue\":\"%s\"}",
+                        id, name, type, descStr, defaultValue);
         DataField parseData = RESTApi.fromJson(dataFieldStr, DataField.class);
         assertEquals(id, parseData.id());
         assertEquals(name, parseData.name());
         assertEquals(type, parseData.type());
         assertEquals(descStr, parseData.description());
+        assertEquals(defaultValue, parseData.defaultValue());
+
+        DataField field = new DataField(id, name, type, descStr, defaultValue);
+        assertEquals(field, RESTApi.fromJson(RESTApi.toJson(field), DataField.class));
+    }
+
+    @Test
+    public void providerFacingTypeAndChangeJsonShapeTest() throws Exception {
+        DataField vectorField =
+                new DataField(2, "embedding", DataTypes.VECTOR(3, DataTypes.FLOAT()));
+        Map<?, ?> vectorJson = RESTApi.fromJson(RESTApi.toJson(vectorField), Map.class);
+        Map<?, ?> vectorType = (Map<?, ?>) vectorJson.get("type");
+        assertEquals("VECTOR", vectorType.get("type"));
+        assertEquals("FLOAT", vectorType.get("element"));
+        assertEquals(3, vectorType.get("length"));
+
+        assertEquals(
+                Collections.singletonMap("action", "dropPrimaryKey"),
+                RESTApi.fromJson(RESTApi.toJson(SchemaChange.dropPrimaryKey()), Map.class));
+
+        Map<String, Object> expectedViewComment = new HashMap<>();
+        expectedViewComment.put("action", "updateComment");
+        expectedViewComment.put("comment", "new comment");
+        assertEquals(
+                expectedViewComment,
+                RESTApi.fromJson(
+                        RESTApi.toJson(ViewChange.updateComment("new comment")), Map.class));
+    }
+
+    @Test
+    public void nullableCommentChangesJsonShapeTest() throws Exception {
+        Map<String, Object> expected = new HashMap<>();
+        expected.put("action", "updateComment");
+        expected.put("comment", null);
+
+        assertEquals(
+                expected,
+                RESTApi.fromJson(RESTApi.toJson(SchemaChange.updateComment(null)), Map.class));
+        assertEquals(
+                expected,
+                RESTApi.fromJson(RESTApi.toJson(ViewChange.updateComment(null)), Map.class));
+        assertEquals(
+                expected,
+                RESTApi.fromJson(RESTApi.toJson(FunctionChange.updateComment(null)), Map.class));
     }
 
     @Test
@@ -205,6 +263,161 @@ public class RESTApiJsonTest {
     }
 
     @Test
+    public void listPartitionsByFilterRequestJsonShapeTest() throws Exception {
+        ListPartitionsByFilterRequest request =
+                new ListPartitionsByFilterRequest("filter-json", "dt=2026%", 2, "p2");
+        String json = RESTApi.toJson(request);
+
+        Map<String, Object> expected = new HashMap<>();
+        expected.put("filter", "filter-json");
+        expected.put("partitionNamePattern", "dt=2026%");
+        expected.put("maxResults", 2);
+        expected.put("pageToken", "p2");
+        assertEquals(expected, RESTApi.fromJson(json, Map.class));
+        ListPartitionsByFilterRequest parsed =
+                RESTApi.fromJson(json, ListPartitionsByFilterRequest.class);
+        assertEquals(request.getFilter(), parsed.getFilter());
+        assertEquals(request.getPartitionNamePattern(), parsed.getPartitionNamePattern());
+        assertEquals(request.getMaxResults(), parsed.getMaxResults());
+        assertEquals(request.getPageToken(), parsed.getPageToken());
+
+        assertEquals(
+                Collections.singletonMap("filter", "filter-json"),
+                RESTApi.fromJson(
+                        RESTApi.toJson(
+                                new ListPartitionsByFilterRequest("filter-json", null, null, null)),
+                        Map.class));
+    }
+
+    @Test
+    public void createPartitionsResponseParseTest() throws Exception {
+        Map<String, String> created = new HashMap<>();
+        created.put("dt", "20260714");
+        created.put("region", "cn");
+        Map<String, String> existed = new HashMap<>();
+        existed.put("dt", "20260713");
+        existed.put("region", "us");
+        CreatePartitionsResponse response =
+                new CreatePartitionsResponse(
+                        Collections.singletonList(created), Collections.singletonList(existed));
+        CreatePartitionsResponse parsed =
+                RESTApi.fromJson(RESTApi.toJson(response), CreatePartitionsResponse.class);
+
+        assertEquals(Collections.singletonList(created), parsed.getCreated());
+        assertEquals(Collections.singletonList(existed), parsed.getExisted());
+    }
+
+    @Test
+    public void createPartitionsRequestParseTest() throws Exception {
+        String requestWithoutIgnoreIfExists = "{\"partitionSpecs\":[{\"dt\":\"20260715\"}]}";
+        CreatePartitionsRequest defaultRequest =
+                RESTApi.fromJson(requestWithoutIgnoreIfExists, CreatePartitionsRequest.class);
+
+        assertEquals(
+                Collections.singletonList(Collections.singletonMap("dt", "20260715")),
+                defaultRequest.getPartitionSpecs());
+        assertTrue(defaultRequest.ignoreIfExists());
+
+        CreatePartitionsRequest explicitRequest =
+                new CreatePartitionsRequest(defaultRequest.getPartitionSpecs(), false);
+        String explicitRequestJson = RESTApi.toJson(explicitRequest);
+        assertTrue(explicitRequestJson.contains("\"partitionSpecs\""));
+        assertFalse(explicitRequestJson.contains("\"specs\""));
+        assertTrue(explicitRequestJson.contains("\"ignoreIfExists\":false"));
+
+        CreatePartitionsRequest parsedExplicitRequest =
+                RESTApi.fromJson(explicitRequestJson, CreatePartitionsRequest.class);
+        assertFalse(parsedExplicitRequest.ignoreIfExists());
+
+        // A client that reports nothing sends neither field, so an older server sees exactly the
+        // request it saw before.
+        assertFalse(explicitRequestJson.contains("partitionStatistics"));
+        assertFalse(explicitRequestJson.contains("replaceStatistics"));
+        assertNull(defaultRequest.getPartitionStatistics());
+        assertNull(defaultRequest.replaceStatistics());
+    }
+
+    @Test
+    public void createPartitionsRequestCarriesStatisticsTest() throws Exception {
+        Map<String, String> spec = Collections.singletonMap("dt", "20260728");
+        PartitionStatistics statistics =
+                new PartitionStatistics(spec, 7L, 4096L, 2L, 1753660800000L, -1);
+        CreatePartitionsRequest request =
+                new CreatePartitionsRequest(
+                        Collections.singletonList(spec),
+                        true,
+                        Collections.singletonList(statistics),
+                        true);
+
+        String json = RESTApi.toJson(request);
+        // Asserted literally: renaming both ends together would keep every parse below passing.
+        assertTrue(json.contains("\"partitionStatistics\""));
+        assertTrue(json.contains("\"replaceStatistics\":true"));
+        // How the client treats its own request; the server is not told and would reject the
+        // field. It is a getter on a serialized type, so it only stays off the wire on purpose.
+        assertFalse(json.contains("retrySafe"));
+
+        CreatePartitionsRequest parsed = RESTApi.fromJson(json, CreatePartitionsRequest.class);
+        assertEquals(Boolean.TRUE, parsed.replaceStatistics());
+        assertEquals(Collections.singletonList(statistics), parsed.getPartitionStatistics());
+
+        // An unknown field stays unknown across the wire rather than turning into a zero.
+        PartitionStatistics unknown = PartitionStatistics.unknown(spec);
+        CreatePartitionsRequest unknownRequest =
+                new CreatePartitionsRequest(
+                        Collections.singletonList(spec),
+                        true,
+                        Collections.singletonList(unknown),
+                        false);
+        PartitionStatistics parsedUnknown =
+                RESTApi.fromJson(RESTApi.toJson(unknownRequest), CreatePartitionsRequest.class)
+                        .getPartitionStatistics()
+                        .get(0);
+        assertFalse(PartitionStatistics.isKnown(parsedUnknown.recordCount()));
+        assertFalse(PartitionStatistics.isKnown(parsedUnknown.fileCount()));
+    }
+
+    @Test
+    public void dropPartitionsResponseParseTest() throws Exception {
+        Map<String, String> dropped = new HashMap<>();
+        dropped.put("dt", "20260714");
+        dropped.put("region", "cn");
+        Map<String, String> missing = new HashMap<>();
+        missing.put("dt", "20260713");
+        missing.put("region", "us");
+        DropPartitionsResponse response =
+                new DropPartitionsResponse(
+                        Collections.singletonList(dropped), Collections.singletonList(missing));
+        DropPartitionsResponse parsed =
+                RESTApi.fromJson(RESTApi.toJson(response), DropPartitionsResponse.class);
+
+        assertEquals(Collections.singletonList(dropped), parsed.getDropped());
+        assertEquals(Collections.singletonList(missing), parsed.getMissing());
+    }
+
+    @Test
+    public void dropPartitionsRequestParseTest() throws Exception {
+        String requestWithoutIgnoreIfNotExists = "{\"partitionSpecs\":[{\"dt\":\"20260715\"}]}";
+        DropPartitionsRequest defaultRequest =
+                RESTApi.fromJson(requestWithoutIgnoreIfNotExists, DropPartitionsRequest.class);
+
+        assertEquals(
+                Collections.singletonList(Collections.singletonMap("dt", "20260715")),
+                defaultRequest.getPartitionSpecs());
+        assertTrue(defaultRequest.ignoreIfNotExists());
+
+        DropPartitionsRequest explicitRequest =
+                new DropPartitionsRequest(defaultRequest.getPartitionSpecs(), false);
+        String explicitRequestJson = RESTApi.toJson(explicitRequest);
+        assertTrue(explicitRequestJson.contains("\"partitionSpecs\""));
+        assertTrue(explicitRequestJson.contains("\"ignoreIfNotExists\":false"));
+
+        DropPartitionsRequest parsedExplicitRequest =
+                RESTApi.fromJson(explicitRequestJson, DropPartitionsRequest.class);
+        assertFalse(parsedExplicitRequest.ignoreIfNotExists());
+    }
+
+    @Test
     public void createViewRequestParseTest() throws Exception {
         CreateViewRequest request = MockRESTMessage.createViewRequest("t1");
         String requestStr = RESTApi.toJson(request);
@@ -248,6 +461,9 @@ public class RESTApiJsonTest {
         RollbackTableRequest rollbackTableRequestBySnapshot =
                 MockRESTMessage.rollbackTableRequestBySnapshot(snapshotId);
         String rollbackTableRequestBySnapshotStr = RESTApi.toJson(rollbackTableRequestBySnapshot);
+        Map<?, ?> rollbackJson = RESTApi.fromJson(rollbackTableRequestBySnapshotStr, Map.class);
+        Map<?, ?> instantJson = (Map<?, ?>) rollbackJson.get("instant");
+        assertEquals("snapshot", instantJson.get("type"));
         Instant.SnapshotInstant rollbackTableRequestParseData =
                 (Instant.SnapshotInstant)
                         RESTApi.fromJson(

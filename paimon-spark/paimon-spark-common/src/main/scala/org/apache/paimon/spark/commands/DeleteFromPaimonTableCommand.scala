@@ -104,7 +104,6 @@ case class DeleteFromPaimonTableCommand(
         data = selectWithRowTracking(data)
       }
 
-      // only write new files, should have no compaction
       val addCommitMessage = writer.writeOnly().withRowTracking().write(data)
 
       // Step5: convert the deleted files that need to be written to commit message.

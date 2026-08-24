@@ -30,6 +30,7 @@ from daft.io import IOConfig, S3Config
 from pypaimon.daft.daft_blob import (
     blob_array_column_to_file_array,
     blob_column_to_file_array,
+    blob_map_column_to_file_array,
 )
 from pypaimon.daft.daft_compat import (
     file_range_position_field,
@@ -102,6 +103,41 @@ class BlobColumnToFileArrayTest(unittest.TestCase):
             None if value is None else value[file_range_position_field()]
             for value in files
         ], [1, None, 3])
+        self.assertFalse(converted[1].is_valid)
+        self.assertEqual(converted[2].as_py(), [])
+
+    def test_blob_map_column_to_file_array(self):
+        descriptor_a = BlobDescriptor("oss://b/a", 1, 2).serialize()
+        descriptor_b = BlobDescriptor("oss://b/b", 3, 4).serialize()
+        io_config = b"serialized-io-config"
+        column = pa.array(
+            [
+                [(1, descriptor_a), (1, None), (2, descriptor_b)],
+                None,
+                [],
+            ],
+            type=pa.map_(pa.int32(), pa.large_binary()),
+        )
+
+        converted = blob_map_column_to_file_array(column, io_config)
+
+        files = converted[0].as_py()
+        self.assertEqual([key for key, _ in files], [1, 1, 2])
+        self.assertEqual(
+            [None if value is None else value["url"] for _, value in files],
+            ["oss://b/a", None, "oss://b/b"],
+        )
+        self.assertEqual(
+            [
+                None if value is None else value[file_range_position_field()]
+                for _, value in files
+            ],
+            [1, None, 3],
+        )
+        self.assertEqual(
+            [None if value is None else value["io_config"] for _, value in files],
+            [io_config, None, io_config],
+        )
         self.assertFalse(converted[1].is_valid)
         self.assertEqual(converted[2].as_py(), [])
 

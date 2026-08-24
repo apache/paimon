@@ -45,6 +45,8 @@ import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.GeographyType;
+import org.apache.paimon.types.GeometryType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
@@ -73,6 +75,8 @@ import java.nio.ByteOrder;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
+import static org.apache.paimon.format.parquet.ParquetSchemaConverter.isBigIntLogicalTypeCompatible;
+import static org.apache.paimon.format.parquet.ParquetSchemaConverter.isUnsignedInt;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Updater Factory to get {@link ParquetVectorUpdater}. */
@@ -128,6 +132,16 @@ public class ParquetVectorUpdaterFactory {
         }
 
         @Override
+        public UpdaterFactory visit(GeometryType geometryType) {
+            return c -> new BinaryUpdater();
+        }
+
+        @Override
+        public UpdaterFactory visit(GeographyType geographyType) {
+            return c -> new BinaryUpdater();
+        }
+
+        @Override
         public UpdaterFactory visit(DecimalType decimalType) {
             return c -> {
                 switch (c.getPrimitiveType().getPrimitiveTypeName()) {
@@ -180,7 +194,26 @@ public class ParquetVectorUpdaterFactory {
 
         @Override
         public UpdaterFactory visit(BigIntType bigIntType) {
-            return c -> new LongUpdater();
+            return c -> {
+                PrimitiveType parquetType = c.getPrimitiveType();
+                if (!isBigIntLogicalTypeCompatible(parquetType)) {
+                    throw new UnsupportedOperationException(
+                            "Cannot read "
+                                    + parquetType.getPrimitiveTypeName()
+                                    + " logical type "
+                                    + parquetType.getLogicalTypeAnnotation()
+                                    + " as BIGINT");
+                }
+                if (parquetType.getPrimitiveTypeName() == PrimitiveType.PrimitiveTypeName.INT32) {
+                    // The file kept the narrower int, either because the column was widened in
+                    // the metastore after the data was written, or because it is unsigned and
+                    // BIGINT is the only Paimon type that can hold every value.
+                    return isUnsignedInt(parquetType)
+                            ? new LongFromUnsignedIntegerUpdater()
+                            : new LongFromIntegerUpdater();
+                }
+                return new LongUpdater();
+            };
         }
 
         @Override
@@ -196,7 +229,13 @@ public class ParquetVectorUpdaterFactory {
 
         @Override
         public UpdaterFactory visit(DoubleType doubleType) {
-            return c -> new DoubleUpdater();
+            return c -> {
+                if (c.getPrimitiveType().getPrimitiveTypeName()
+                        == PrimitiveType.PrimitiveTypeName.FLOAT) {
+                    return new DoubleFromFloatUpdater();
+                }
+                return new DoubleUpdater();
+            };
         }
 
         @Override
@@ -563,6 +602,79 @@ public class ParquetVectorUpdaterFactory {
         }
     }
 
+    /** Reads a signed INT32 column into a BIGINT vector. */
+    private static class LongFromIntegerUpdater
+            implements ParquetVectorUpdater<WritableLongVector> {
+        @Override
+        public void readValues(
+                int total,
+                int offset,
+                WritableLongVector values,
+                VectorizedValuesReader valuesReader) {
+            valuesReader.readIntegersAsLongs(total, values, offset);
+        }
+
+        @Override
+        public void skipValues(int total, VectorizedValuesReader valuesReader) {
+            valuesReader.skipIntegers(total);
+        }
+
+        @Override
+        public void readValue(
+                int offset, WritableLongVector values, VectorizedValuesReader valuesReader) {
+            values.setLong(offset, valuesReader.readInteger());
+        }
+
+        @Override
+        public void decodeSingleDictionaryId(
+                int offset,
+                WritableLongVector values,
+                WritableIntVector dictionaryIds,
+                Dictionary dictionary) {
+            values.setLong(offset, dictionary.decodeToInt(dictionaryIds.getInt(offset)));
+        }
+    }
+
+    /**
+     * Reads an unsigned INT32 column into a BIGINT vector. The stored bits are a signed int, so
+     * every value above {@link Integer#MAX_VALUE} arrives negative and has to be reinterpreted.
+     */
+    private static class LongFromUnsignedIntegerUpdater
+            implements ParquetVectorUpdater<WritableLongVector> {
+        @Override
+        public void readValues(
+                int total,
+                int offset,
+                WritableLongVector values,
+                VectorizedValuesReader valuesReader) {
+            for (int i = 0; i < total; i++) {
+                values.setLong(offset + i, Integer.toUnsignedLong(valuesReader.readInteger()));
+            }
+        }
+
+        @Override
+        public void skipValues(int total, VectorizedValuesReader valuesReader) {
+            valuesReader.skipIntegers(total);
+        }
+
+        @Override
+        public void readValue(
+                int offset, WritableLongVector values, VectorizedValuesReader valuesReader) {
+            values.setLong(offset, Integer.toUnsignedLong(valuesReader.readInteger()));
+        }
+
+        @Override
+        public void decodeSingleDictionaryId(
+                int offset,
+                WritableLongVector values,
+                WritableIntVector dictionaryIds,
+                Dictionary dictionary) {
+            values.setLong(
+                    offset,
+                    Integer.toUnsignedLong(dictionary.decodeToInt(dictionaryIds.getInt(offset))));
+        }
+    }
+
     private abstract static class AbstractTimestampUpdater
             implements ParquetVectorUpdater<WritableColumnVector> {
 
@@ -876,6 +988,39 @@ public class ParquetVectorUpdaterFactory {
         }
     }
 
+    /** Reads a FLOAT column into a DOUBLE vector. */
+    private static class DoubleFromFloatUpdater
+            implements ParquetVectorUpdater<WritableDoubleVector> {
+        @Override
+        public void readValues(
+                int total,
+                int offset,
+                WritableDoubleVector values,
+                VectorizedValuesReader valuesReader) {
+            valuesReader.readFloatsAsDoubles(total, values, offset);
+        }
+
+        @Override
+        public void skipValues(int total, VectorizedValuesReader valuesReader) {
+            valuesReader.skipFloats(total);
+        }
+
+        @Override
+        public void readValue(
+                int offset, WritableDoubleVector values, VectorizedValuesReader valuesReader) {
+            values.setDouble(offset, valuesReader.readFloat());
+        }
+
+        @Override
+        public void decodeSingleDictionaryId(
+                int offset,
+                WritableDoubleVector values,
+                WritableIntVector dictionaryIds,
+                Dictionary dictionary) {
+            values.setDouble(offset, dictionary.decodeToFloat(dictionaryIds.getInt(offset)));
+        }
+    }
+
     private static class BinaryUpdater implements ParquetVectorUpdater<WritableBytesVector> {
         @Override
         public void readValues(
@@ -922,9 +1067,7 @@ public class ParquetVectorUpdaterFactory {
                 int offset,
                 WritableBytesVector values,
                 VectorizedValuesReader valuesReader) {
-            for (int i = 0; i < total; i++) {
-                readValue(offset + i, values, valuesReader);
-            }
+            valuesReader.readFixedLenByteArray(total, arrayLen, values, offset);
         }
 
         @Override

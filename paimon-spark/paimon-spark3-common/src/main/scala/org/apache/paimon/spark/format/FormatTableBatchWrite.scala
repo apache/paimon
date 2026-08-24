@@ -29,10 +29,9 @@ import org.apache.spark.sql.types.StructType
  */
 class FormatTableBatchWrite(
     table: FormatTable,
-    overwriteDynamic: Option[Boolean],
     overwritePartitions: Option[Map[String, String]],
     writeSchema: StructType)
-  extends FormatTableBatchWriteBase(table, overwriteDynamic, overwritePartitions, writeSchema)
+  extends FormatTableBatchWriteBase(table, overwritePartitions, writeSchema)
   with BatchWrite
   with Serializable {
 

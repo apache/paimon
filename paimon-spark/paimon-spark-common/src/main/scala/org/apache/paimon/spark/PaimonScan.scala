@@ -21,6 +21,7 @@ package org.apache.paimon.spark
 import org.apache.paimon.CoreOptions.BucketFunctionType
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate.{FullTextSearch, HybridSearch, Predicate, TopN, VectorSearch}
+import org.apache.paimon.spark.catalog.functions.BucketFunction
 import org.apache.paimon.spark.commands.BucketExpression.quote
 import org.apache.paimon.spark.read.VariantExtractionInfo
 import org.apache.paimon.table.{BucketMode, FileStoreTable, InnerTable}
@@ -66,6 +67,15 @@ case class PaimonScan(
           bucketSpec.getBucketMode != BucketMode.HASH_FIXED || coreOptions
             .bucketFunctionType() != BucketFunctionType.DEFAULT
         ) {
+          None
+        } else if (!BucketFunction.supportsTable(fileStoreTable)) {
+          // Spark tells two scans apart by the canonical name of the bound bucket function, which
+          // is derived from Spark types. Spark's timestamp precision is fixed to 6, so bucket keys
+          // carrying any other precision are indistinguishable there, while Paimon lays their
+          // BinaryRow out differently and thus puts the same value into a different bucket.
+          // Reporting a bucket transform would let Spark treat such tables as co-partitioned and
+          // drop a shuffle that is actually required. This mirrors the same check the write side
+          // already does in `PaimonSparkWriter`.
           None
         } else if (bucketSpec.getBucketKeys.size() > 1) {
           None
@@ -157,7 +167,7 @@ case class PaimonScan(
       .map(Expressions.identity)
       .map {
         sortExpr =>
-          // Primary key can not be null, the null ordering is no matter.
+          // Paimon MergeTree comparators and Spark ascending expressions both order nulls first.
           Expressions.sort(sortExpr, SortDirection.ASCENDING)
       }
       .toArray

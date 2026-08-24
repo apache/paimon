@@ -29,13 +29,17 @@ import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RangeHelper;
+import org.apache.paimon.utils.RowRangeIndex;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,6 +56,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.BiFunction;
+import java.util.function.Supplier;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -70,7 +75,15 @@ public class GlobalIndexBuilderUtils {
             List<ResultEntry> entries)
             throws IOException {
         return toIndexFileMetas(
-                fileIO, indexPathFactory, options, range, indexFieldId, null, indexType, entries);
+                fileIO,
+                indexPathFactory,
+                options,
+                range,
+                indexFieldId,
+                null,
+                indexType,
+                entries,
+                null);
     }
 
     /**
@@ -86,52 +99,52 @@ public class GlobalIndexBuilderUtils {
             Range range,
             List<DataField> fields,
             String indexType,
-            List<ResultEntry> entries)
+            List<ResultEntry> entries,
+            @Nullable byte[] sourceMeta)
             throws IOException {
-        // The first column is the primary index column and is stored as indexFieldId; the
-        // remaining columns (if any) go into extraFieldIds.
-        int indexFieldId = fields.get(0).id();
-        int[] extraFieldIds = extraFieldIds(fields);
         return toIndexFileMetas(
                 fileIO,
                 indexPathFactory,
                 options,
                 range,
-                indexFieldId,
-                extraFieldIds,
+                fields.get(0).id(),
+                extraFieldIds(fields),
                 indexType,
-                entries);
+                entries,
+                sourceMeta);
     }
 
     public static List<Range> unindexedRowRanges(
-            FileStoreTable table,
-            @Nullable Snapshot snapshot,
-            String indexType,
-            List<DataField> fields,
-            @Nullable PartitionPredicate partitionPredicate) {
+            @Nullable Snapshot snapshot, List<IndexManifestEntry> currentIndexes) {
         if (snapshot == null || snapshot.nextRowId() == null || snapshot.nextRowId() <= 0) {
             return Collections.emptyList();
         }
 
         Range dataRange = new Range(0, snapshot.nextRowId() - 1);
-        List<Range> indexedRanges =
-                indexedRowRanges(table, snapshot, indexType, fields, partitionPredicate);
+        List<Range> indexedRanges = new ArrayList<>(currentIndexes.size());
+        for (IndexManifestEntry entry : currentIndexes) {
+            GlobalIndexMeta meta = entry.indexFile().globalIndexMeta();
+            if (meta != null) {
+                indexedRanges.add(meta.rowRange());
+            }
+        }
+        indexedRanges = Range.sortAndMergeOverlap(indexedRanges, true);
         return Range.sortAndMergeOverlap(dataRange.exclude(indexedRanges), true);
     }
 
-    public static List<Range> indexedRowRanges(
+    public static List<IndexManifestEntry> currentIndexEntries(
             FileStoreTable table,
-            @Nullable Snapshot snapshot,
+            Snapshot snapshot,
             String indexType,
             List<DataField> fields,
             @Nullable PartitionPredicate partitionPredicate) {
-        if (snapshot == null || fields.isEmpty()) {
+        if (fields.isEmpty()) {
             return Collections.emptyList();
         }
 
         int indexFieldId = fields.get(0).id();
         int[] extraFieldIds = extraFieldIds(fields);
-        List<Range> ranges = new ArrayList<>();
+        List<IndexManifestEntry> entries = new ArrayList<>();
         for (IndexManifestEntry entry :
                 table.store().newIndexFileHandler().scan(snapshot, indexType)) {
             if (partitionPredicate != null && !partitionPredicate.test(entry.partition())) {
@@ -147,20 +160,232 @@ public class GlobalIndexBuilderUtils {
             if (!sameExtraFieldIds(meta.extraFieldIds(), extraFieldIds)) {
                 continue;
             }
-            ranges.add(meta.rowRange());
+            entries.add(entry);
+        }
+        return entries;
+    }
+
+    public static List<Pair<Range, Split>> splitByRowRangeIndex(
+            RowRangeIndex rowRangeIndex, DataSplit dataSplit) {
+        if (rowRangeIndex == null) {
+            Range range = calcRowRange(dataSplit);
+            return range == null
+                    ? Collections.emptyList()
+                    : Collections.singletonList(Pair.of(range, dataSplit));
+        }
+
+        List<Pair<Range, Split>> result = new ArrayList<>();
+        for (Split split :
+                DataEvolutionBatchScan.wrapToIndexSplits(
+                                Collections.singletonList(dataSplit), rowRangeIndex, null)
+                        .splits()) {
+            IndexedSplit indexedSplit = (IndexedSplit) split;
+            for (Range rowRange : indexedSplit.rowRanges()) {
+                result.add(
+                        Pair.of(
+                                rowRange,
+                                new IndexedSplit(
+                                        indexedSplit.dataSplit(),
+                                        Collections.singletonList(rowRange),
+                                        null)));
+            }
+        }
+        return result;
+    }
+
+    @Nullable
+    public static Range calcRowRange(DataSplit dataSplit) {
+        List<Range> ranges = calcRowRanges(Collections.singletonList(dataSplit));
+        if (ranges.isEmpty()) {
+            return null;
+        }
+        return new Range(ranges.get(0).from, ranges.get(ranges.size() - 1).to);
+    }
+
+    public static List<Range> calcRowRanges(List<DataSplit> dataSplits) {
+        List<Range> ranges = new ArrayList<>();
+        for (DataSplit dataSplit : dataSplits) {
+            for (DataFileMeta file : dataSplit.dataFiles()) {
+                ranges.add(file.nonNullRowIdRange());
+            }
         }
         return Range.sortAndMergeOverlap(ranges, true);
     }
 
-    @Nullable
-    public static List<Range> rowRangesAfter(long maxIndexedRowId) {
-        if (maxIndexedRowId < 0) {
-            return null;
+    public static List<DataSplit> splitByContiguousRowRange(List<DataSplit> splits) {
+        List<DataSplit> result = new ArrayList<>();
+        for (DataSplit split : splits) {
+            result.addAll(splitByContiguousRowRange(split));
         }
-        if (maxIndexedRowId == Long.MAX_VALUE) {
-            return Collections.emptyList();
+        return result;
+    }
+
+    public static Map<BinaryRow, Map<Range, List<Split>>> groupSplitsByRange(
+            RowRangeIndex rowRangeIndex, List<DataSplit> splits) {
+        Map<BinaryRow, List<Pair<Range, Split>>> partitionSplitRanges = new HashMap<>();
+        for (DataSplit split : splits) {
+            for (Pair<Range, Split> keyPair : splitByRowRangeIndex(rowRangeIndex, split)) {
+                Range splitRange = keyPair.getKey();
+                Split splitWithRange = keyPair.getValue();
+                if (splitRange == null) {
+                    continue;
+                }
+                BinaryRow partition = split.partition();
+                partitionSplitRanges
+                        .computeIfAbsent(partition, p -> new ArrayList<>())
+                        .add(Pair.of(splitRange, splitWithRange));
+            }
         }
-        return Collections.singletonList(new Range(maxIndexedRowId + 1, Long.MAX_VALUE));
+
+        Map<BinaryRow, Map<Range, List<Split>>> result = new HashMap<>();
+        for (Map.Entry<BinaryRow, List<Pair<Range, Split>>> partitionEntry :
+                partitionSplitRanges.entrySet()) {
+            List<Pair<Range, Split>> splitRanges = partitionEntry.getValue();
+            splitRanges.sort(
+                    Comparator.comparingLong((Pair<Range, Split> e) -> e.getKey().from)
+                            .thenComparingLong(e -> e.getKey().to));
+
+            Map<Range, List<Split>> partitionRanges = new LinkedHashMap<>();
+            Range current = null;
+            List<Split> currentSplits = new ArrayList<>();
+            for (Map.Entry<Range, Split> entry : splitRanges) {
+                Range splitRange = entry.getKey();
+                if (current == null) {
+                    current = splitRange;
+                    currentSplits.add(entry.getValue());
+                    continue;
+                }
+                Range merged = Range.union(current, splitRange);
+                if (merged != null) {
+                    current = merged;
+                    currentSplits.add(entry.getValue());
+                } else {
+                    partitionRanges.put(current, currentSplits);
+                    current = splitRange;
+                    currentSplits = new ArrayList<>();
+                    currentSplits.add(entry.getValue());
+                }
+            }
+            if (current != null) {
+                partitionRanges.put(current, currentSplits);
+            }
+            result.put(partitionEntry.getKey(), partitionRanges);
+        }
+
+        return result;
+    }
+
+    /** Splits contiguous build ranges into globally aligned, source-row bounded shards. */
+    public static Map<Range, List<Split>> shardSplitsByRowRange(
+            Map<Range, List<Split>> rangeSplits, long rowsPerShard) {
+        checkArgument(rowsPerShard > 0, "Rows per sorted-index shard must be positive.");
+        Map<Range, List<Split>> result = new LinkedHashMap<>();
+        for (Map.Entry<Range, List<Split>> entry : rangeSplits.entrySet()) {
+            Range buildRange = entry.getKey();
+            checkArgument(
+                    buildRange.from >= 0,
+                    "Sorted-index row IDs must be non-negative, but range starts at %s.",
+                    buildRange.from);
+            long shardStart = (buildRange.from / rowsPerShard) * rowsPerShard;
+            while (shardStart <= buildRange.to) {
+                long unboundedShardEnd = shardStart + rowsPerShard - 1;
+                long shardEnd = unboundedShardEnd < shardStart ? Long.MAX_VALUE : unboundedShardEnd;
+                Range shardRange =
+                        new Range(
+                                Math.max(buildRange.from, shardStart),
+                                Math.min(buildRange.to, shardEnd));
+                List<Split> shardSplits = new ArrayList<>();
+                for (Split split : entry.getValue()) {
+                    DataSplit dataSplit;
+                    List<Range> splitRanges;
+                    if (split instanceof IndexedSplit) {
+                        IndexedSplit indexedSplit = (IndexedSplit) split;
+                        dataSplit = indexedSplit.dataSplit();
+                        splitRanges = indexedSplit.rowRanges();
+                    } else {
+                        dataSplit = (DataSplit) split;
+                        splitRanges = calcRowRanges(Collections.singletonList(dataSplit));
+                    }
+                    List<Range> intersections =
+                            Range.and(splitRanges, Collections.singletonList(shardRange));
+                    if (!intersections.isEmpty()) {
+                        shardSplits.add(new IndexedSplit(dataSplit, intersections, null));
+                    }
+                }
+                if (!shardSplits.isEmpty()) {
+                    result.put(shardRange, shardSplits);
+                }
+                if (shardEnd == Long.MAX_VALUE) {
+                    break;
+                }
+                shardStart = shardEnd + 1;
+            }
+        }
+        return result;
+    }
+
+    private static List<DataSplit> splitByContiguousRowRange(DataSplit split) {
+        List<DataFileMeta> input = split.dataFiles();
+        RangeHelper<DataFileMeta> rangeHelper = new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
+        List<List<DataFileMeta>> ranges = rangeHelper.mergeOverlappingRanges(input);
+
+        Supplier<DataSplit.Builder> builderSupplier =
+                () ->
+                        DataSplit.builder()
+                                .withSnapshot(split.snapshotId())
+                                .withPartition(split.partition())
+                                .withBucket(split.bucket())
+                                .withBucketPath(split.bucketPath())
+                                .withTotalBuckets(split.totalBuckets())
+                                .isStreaming(split.isStreaming())
+                                .rawConvertible(split.rawConvertible());
+        return packByContiguousRanges(builderSupplier, ranges);
+    }
+
+    private static List<DataSplit> packByContiguousRanges(
+            Supplier<DataSplit.Builder> builderFactory, List<List<DataFileMeta>> ranges) {
+        if (ranges.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        List<DataSplit> result = new ArrayList<>();
+        List<DataFileMeta> currentSegment = new ArrayList<>();
+        long currentMaxRowId = Long.MIN_VALUE;
+
+        for (List<DataFileMeta> rangeFiles : ranges) {
+            long minRowId = minRowId(rangeFiles);
+            long maxRowId = maxRowId(rangeFiles);
+            if (currentSegment.isEmpty() || areContiguous(currentMaxRowId, minRowId)) {
+                currentSegment.addAll(rangeFiles);
+                currentMaxRowId = maxRowId;
+            } else {
+                DataSplit.Builder builder = builderFactory.get();
+                builder.withDataFiles(currentSegment);
+                result.add(builder.build());
+                currentSegment = new ArrayList<>(rangeFiles);
+                currentMaxRowId = maxRowId;
+            }
+        }
+
+        DataSplit.Builder builder = builderFactory.get();
+        builder.withDataFiles(currentSegment);
+        result.add(builder.build());
+        return result;
+    }
+
+    private static long minRowId(List<DataFileMeta> files) {
+        return files.stream()
+                .mapToLong(f -> f.nonNullRowIdRange().from)
+                .min()
+                .orElse(Long.MAX_VALUE);
+    }
+
+    private static long maxRowId(List<DataFileMeta> files) {
+        return files.stream().mapToLong(f -> f.nonNullRowIdRange().to).max().orElse(Long.MIN_VALUE);
+    }
+
+    private static boolean areContiguous(long previousMaxRowId, long currentMinRowId) {
+        return previousMaxRowId >= currentMinRowId - 1;
     }
 
     public static List<IndexedSplit> createShardIndexedSplits(
@@ -197,13 +422,7 @@ public class GlobalIndexBuilderUtils {
         }
 
         Map<BinaryRow, Map<Integer, List<ManifestEntry>>> entriesByPartitionAndBucket =
-                new LinkedHashMap<>();
-        for (ManifestEntry entry : entries) {
-            entriesByPartitionAndBucket
-                    .computeIfAbsent(entry.partition(), key -> new LinkedHashMap<>())
-                    .computeIfAbsent(entry.bucket(), key -> new ArrayList<>())
-                    .add(entry);
-        }
+                FileStoreScan.Plan.groupByPartFiles(entries);
 
         List<IndexedSplit> result = new ArrayList<>();
         for (Map.Entry<BinaryRow, Map<Integer, List<ManifestEntry>>> partitionEntry :
@@ -349,7 +568,8 @@ public class GlobalIndexBuilderUtils {
             int indexFieldId,
             @Nullable int[] extraFieldIds,
             String indexType,
-            List<ResultEntry> entries)
+            List<ResultEntry> entries,
+            @Nullable byte[] sourceMeta)
             throws IOException {
         List<IndexFileMeta> results = new ArrayList<>();
         for (ResultEntry entry : entries) {
@@ -357,7 +577,12 @@ public class GlobalIndexBuilderUtils {
             long fileSize = fileIO.getFileSize(indexPathFactory.toPath(fileName));
             GlobalIndexMeta globalIndexMeta =
                     new GlobalIndexMeta(
-                            range.from, range.to, indexFieldId, extraFieldIds, entry.meta());
+                            range.from,
+                            range.to,
+                            indexFieldId,
+                            extraFieldIds,
+                            entry.meta(),
+                            sourceMeta);
 
             Path externalPathDir = options.globalIndexExternalPath();
             String externalPathString = null;
@@ -395,70 +620,6 @@ public class GlobalIndexBuilderUtils {
         GlobalIndexer globalIndexer =
                 GlobalIndexer.create(indexType, indexField, extraFields, options);
         return globalIndexer.createWriter(createGlobalIndexFileReadWrite(table));
-    }
-
-    /**
-     * Find the minimum firstRowId among files whose schema does not contain all index columns.
-     * Files at or beyond this rowId cannot be indexed because the column was added later via ALTER
-     * TABLE.
-     *
-     * @return the boundary rowId, or {@link Long#MAX_VALUE} if all files contain the columns
-     */
-    public static long findMinNonIndexableRowId(
-            SchemaManager schemaManager, List<ManifestEntry> entries, List<String> indexColumns) {
-        Map<Long, Boolean> schemaContainsColumns = new HashMap<>();
-        long minRowId = Long.MAX_VALUE;
-        long minSchemaId = -1;
-        for (ManifestEntry entry : entries) {
-            long sid = entry.file().schemaId();
-            boolean contains =
-                    schemaContainsColumns.computeIfAbsent(
-                            sid,
-                            id -> schemaManager.schema(id).fieldNames().containsAll(indexColumns));
-            if (!contains && entry.file().firstRowId() != null) {
-                long rowId = entry.file().nonNullFirstRowId();
-                if (rowId < minRowId) {
-                    minRowId = rowId;
-                    minSchemaId = sid;
-                }
-            }
-        }
-        if (minRowId != Long.MAX_VALUE) {
-            List<String> schemaFields = schemaManager.schema(minSchemaId).fieldNames();
-            List<String> missingColumns = new ArrayList<>();
-            for (String col : indexColumns) {
-                if (!schemaFields.contains(col)) {
-                    missingColumns.add(col);
-                }
-            }
-            LOG.info(
-                    "Found non-indexable files: schemaId={} missing columns {}, boundaryRowId={}.",
-                    minSchemaId,
-                    missingColumns,
-                    minRowId);
-        }
-        return minRowId;
-    }
-
-    /** Keep only entries whose firstRowId is strictly less than the given boundary. */
-    public static List<ManifestEntry> filterEntriesBefore(
-            List<ManifestEntry> entries, long boundaryRowId) {
-        if (boundaryRowId == Long.MAX_VALUE) {
-            return entries;
-        }
-        List<ManifestEntry> result = new ArrayList<>();
-        for (ManifestEntry entry : entries) {
-            if (entry.file().firstRowId() != null
-                    && entry.file().nonNullFirstRowId() < boundaryRowId) {
-                result.add(entry);
-            }
-        }
-        LOG.info(
-                "Filtered {} files to {} indexable files (boundaryRowId={}).",
-                entries.size(),
-                result.size(),
-                boundaryRowId);
-        return result;
     }
 
     private static GlobalIndexFileReadWrite createGlobalIndexFileReadWrite(FileStoreTable table) {

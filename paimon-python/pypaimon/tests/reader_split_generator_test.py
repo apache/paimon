@@ -348,6 +348,7 @@ class ApplyPushDownLimitUnitTest(unittest.TestCase):
         scanner.limit = limit
         scanner.data_evolution = data_evolution
         scanner.deletion_vectors_enabled = deletion_vectors_enabled
+        scanner.auth_has_non_partition_filter = False
         scanner._has_non_partition_filter = lambda: has_non_partition_filter
         return FileScanner._apply_push_down_limit(scanner, splits)
 

@@ -27,6 +27,7 @@ import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.StringUtils;
 
@@ -191,6 +192,60 @@ public class SimpleColStatsCollectorTest {
         SimpleColStats stats = collector.result();
         assertThat(stats.min()).isNotSameAs(str);
         assertThat(stats.max()).isNotSameAs(str);
+    }
+
+    @Test
+    public void testFullBinaryMinMax() {
+        Serializer<Object> serializer =
+                (Serializer) InternalSerializers.create(new VarBinaryType());
+        FullSimpleColStatsCollector collector = new FullSimpleColStatsCollector();
+        collector.collect(new byte[] {1, 2, 3}, serializer);
+        collector.collect(new byte[] {(byte) 200}, serializer);
+        collector.collect(new byte[] {0}, serializer);
+        collector.collect(null, serializer);
+
+        SimpleColStats stats = collector.result();
+        assertThat((byte[]) stats.min()).isEqualTo(new byte[] {0});
+        assertThat((byte[]) stats.max()).isEqualTo(new byte[] {(byte) 200});
+        assertThat(stats.nullCount()).isEqualTo(1L);
+    }
+
+    @Test
+    public void testTruncateBinaryMinMax() {
+        Serializer<Object> serializer =
+                (Serializer) InternalSerializers.create(new VarBinaryType());
+        TruncateSimpleColStatsCollector collector = new TruncateSimpleColStatsCollector(2);
+        collector.collect(new byte[] {5, 7, 9, 11}, serializer);
+        collector.collect(new byte[] {5, 7, (byte) 200}, serializer);
+        collector.collect(null, serializer);
+
+        SimpleColStats stats = collector.result();
+        assertThat((byte[]) stats.min()).isEqualTo(new byte[] {5, 7});
+        assertThat((byte[]) stats.max()).isEqualTo(new byte[] {5, 8});
+        assertThat(stats.nullCount()).isEqualTo(1L);
+
+        stats =
+                collector.convert(
+                        new SimpleColStats(new byte[] {1, 2, 3}, new byte[] {1, 2, 3}, 0L));
+        assertThat((byte[]) stats.min()).isEqualTo(new byte[] {1, 2});
+        assertThat((byte[]) stats.max()).isEqualTo(new byte[] {1, 3});
+    }
+
+    @Test
+    public void testTruncateBinaryFail() {
+        TruncateSimpleColStatsCollector collector = new TruncateSimpleColStatsCollector(2);
+        Serializer<Object> serializer =
+                (Serializer) InternalSerializers.create(new VarBinaryType());
+        byte[] bytes = new byte[] {(byte) 0xFF, (byte) 0xFF, 7};
+
+        collector.collect(bytes, serializer);
+        SimpleColStats stats = collector.result();
+        assertThat(stats.min()).isNull();
+        assertThat(stats.max()).isNull();
+
+        stats = collector.convert(new SimpleColStats(bytes, bytes, 0L));
+        assertThat(stats.min()).isNull();
+        assertThat(stats.max()).isNull();
     }
 
     @Test

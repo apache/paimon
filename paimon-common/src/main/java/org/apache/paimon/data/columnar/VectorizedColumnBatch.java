@@ -122,7 +122,12 @@ public class VectorizedColumnBatch implements Serializable {
     }
 
     public InternalArray getArray(int rowId, int colId) {
-        return ((ArrayColumnVector) columns[colId]).getArray(rowId);
+        ColumnVector column = columns[colId];
+        if (column instanceof VecColumnVector) {
+            // A VECTOR is exposed as ARRAY; a vector is an array.
+            return ((VecColumnVector) column).getVector(rowId);
+        }
+        return ((ArrayColumnVector) column).getArray(rowId);
     }
 
     public InternalVector getVector(int rowId, int colId) {

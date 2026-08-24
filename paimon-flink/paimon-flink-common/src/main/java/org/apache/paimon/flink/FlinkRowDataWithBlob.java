@@ -21,10 +21,12 @@ package org.apache.paimon.flink;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobView;
 import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 
 import org.apache.flink.table.data.ArrayData;
 import org.apache.flink.table.data.GenericArrayData;
+import org.apache.flink.table.data.MapData;
 
 import java.util.Set;
 
@@ -54,14 +56,55 @@ public class FlinkRowDataWithBlob extends FlinkRowData {
     public ArrayData getArray(int pos) {
         if (blobFields.contains(pos)) {
             InternalArray array = row.getArray(pos);
-            Object[] elements = new Object[array.size()];
-            for (int i = 0; i < array.size(); i++) {
-                elements[i] = array.isNullAt(i) ? null : blobToBytes(array.getBlob(i));
-            }
-            return new GenericArrayData(elements);
+            return toFlinkBlobArray(array);
         } else {
             return super.getArray(pos);
         }
+    }
+
+    @Override
+    public MapData getMap(int pos) {
+        if (!blobFields.contains(pos)) {
+            return super.getMap(pos);
+        }
+
+        InternalMap map = row.getMap(pos);
+        InternalArray keys = map.keyArray();
+
+        // Keys should never be null in FlinkMap, but Paimon could. Check here.
+        for (int i = 0; i < map.size(); i++) {
+            if (keys.isNullAt(i)) {
+                throw new IllegalArgumentException(
+                        "Flink MAP<X, BLOB> does not support null keys.");
+            }
+        }
+
+        return new MapData() {
+            @Override
+            public int size() {
+                return map.size();
+            }
+
+            @Override
+            public ArrayData keyArray() {
+                return new FlinkArrayData(keys);
+            }
+
+            @Override
+            public ArrayData valueArray() {
+                return toFlinkBlobArray(map.valueArray());
+            }
+        };
+    }
+
+    private ArrayData toFlinkBlobArray(InternalArray array) {
+        Object[] elements = new Object[array.size()];
+
+        for (int i = 0; i < array.size(); i++) {
+            elements[i] = array.isNullAt(i) ? null : blobToBytes(array.getBlob(i));
+        }
+
+        return new GenericArrayData(elements);
     }
 
     private byte[] blobToBytes(Blob blob) {

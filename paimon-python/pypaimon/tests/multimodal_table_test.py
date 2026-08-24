@@ -184,7 +184,7 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual("TIMESTAMP(6)", types_by_name["created_at"])
         self.assertEqual("TIMESTAMP_LTZ(6)", types_by_name["created_ltz"])
         self.assertEqual("ARRAY<STRING>", types_by_name["tags"])
-        self.assertEqual("MAP<STRING, INT>", types_by_name["attrs"])
+        self.assertEqual("MAP<STRING NOT NULL, INT>", types_by_name["attrs"])
         self.assertEqual("ROW<rank: INT>", types_by_name["meta"])
         self.assertEqual("VECTOR<FLOAT, 3>", types_by_name["embedding"])
 

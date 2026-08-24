@@ -241,4 +241,14 @@ public class PostponeBucketFileStoreWrite extends MemoryFileStoreWrite<KeyValue>
                     e);
         }
     }
+
+    /** Returns the unique prefix shared by files produced by the same postpone writer. */
+    public static String getWriterPrefix(String fileName) {
+        int separator = fileName.lastIndexOf("-w-");
+        if (separator < 0) {
+            throw new IllegalArgumentException(
+                    "Data file name " + fileName + " does not match the postpone writer pattern.");
+        }
+        return fileName.substring(0, separator + 3);
+    }
 }

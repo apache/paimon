@@ -26,8 +26,12 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.TableQueryAuthResult;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.Partition;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -43,10 +47,16 @@ import org.apache.paimon.rest.auth.DLFTokenLoader;
 import org.apache.paimon.rest.auth.DLFTokenLoaderFactory;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.NotAuthorizedException;
+import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.BlobDescriptorReaderFactory;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.format.FormatTablePartitionManager;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
@@ -55,8 +65,11 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.io.File;
 import java.io.IOException;
+import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -65,6 +78,7 @@ import java.util.UUID;
 
 import static org.apache.paimon.catalog.Catalog.TABLE_DEFAULT_OPTION_PREFIX;
 import static org.apache.paimon.rest.RESTApi.HEADER_PREFIX;
+import static org.apache.paimon.rest.RESTApi.READ_VIA_HEADER;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -142,25 +156,32 @@ class MockRESTCatalogTest extends RESTCatalogTest {
     void testDlfStSTokenPathAuth() throws Exception {
         String uri = "https://cn-hangzhou-vpc.dlf.aliyuncs.com";
         String region = "cn-hangzhou";
-        String tokenPath = dataPath + UUID.randomUUID();
-        generateTokenAndWriteToFile(tokenPath);
-        DLFTokenLoader tokenLoader =
-                DLFTokenLoaderFactory.createDLFTokenLoader(
-                        "local_file",
-                        new Options(
-                                ImmutableMap.of(
-                                        RESTCatalogOptions.DLF_TOKEN_PATH.key(), tokenPath)));
-        DLFToken dlfToken = tokenLoader.loadToken();
-        this.authProvider = new TestDLFAuthProvider(dlfToken, uri, region);
-        this.authMap =
-                ImmutableMap.of(
-                        RESTCatalogOptions.TOKEN_PROVIDER.key(), AuthProviderEnum.DLF.identifier(),
-                        RESTCatalogOptions.DLF_REGION.key(), region,
-                        RESTCatalogOptions.DLF_TOKEN_PATH.key(), tokenPath);
-        RESTCatalog restCatalog = initCatalog(false);
-        testDlfAuth(restCatalog);
-        File file = new File(tokenPath);
-        file.delete();
+        java.nio.file.Path tokenFile =
+                Paths.get(URI.create(dataPath)).resolve(UUID.randomUUID().toString());
+        String tokenPath = tokenFile.toString();
+        try {
+            generateTokenAndWriteToFile(tokenPath);
+            DLFTokenLoader tokenLoader =
+                    DLFTokenLoaderFactory.createDLFTokenLoader(
+                            "local_file",
+                            new Options(
+                                    ImmutableMap.of(
+                                            RESTCatalogOptions.DLF_TOKEN_PATH.key(), tokenPath)));
+            DLFToken dlfToken = tokenLoader.loadToken();
+            this.authProvider = new TestDLFAuthProvider(dlfToken, uri, region);
+            this.authMap =
+                    ImmutableMap.of(
+                            RESTCatalogOptions.TOKEN_PROVIDER.key(),
+                            AuthProviderEnum.DLF.identifier(),
+                            RESTCatalogOptions.DLF_REGION.key(),
+                            region,
+                            RESTCatalogOptions.DLF_TOKEN_PATH.key(),
+                            tokenPath);
+            RESTCatalog restCatalog = initCatalog(false);
+            testDlfAuth(restCatalog);
+        } finally {
+            Files.deleteIfExists(tokenFile);
+        }
     }
 
     @Test
@@ -215,6 +236,338 @@ class MockRESTCatalogTest extends RESTCatalogTest {
     }
 
     @Test
+    void testCatalogManagedPagedPartitionListingDoesNotFallback() throws Exception {
+        Identifier identifier = createFormatTableWithCatalogManagedPartitions();
+        restCatalogServer.setPartitionListingSupported(false);
+
+        assertThatThrownBy(() -> restCatalog.listPartitionsPaged(identifier, null, null, null))
+                .isInstanceOf(NotImplementedException.class);
+    }
+
+    @Test
+    void testCatalogManagedPartitionListingByNamesDoesNotFallback() throws Exception {
+        Identifier identifier = createFormatTableWithCatalogManagedPartitions();
+        restCatalogServer.setPartitionListingSupported(false);
+
+        assertThatThrownBy(
+                        () ->
+                                restCatalog.listPartitionsByNames(
+                                        identifier,
+                                        Collections.singletonList(
+                                                Collections.singletonMap("dt", "20260717"))))
+                .isInstanceOf(NotImplementedException.class);
+    }
+
+    @Test
+    void testCatalogManagedPartitionListingDoesNotFallback() throws Exception {
+        Identifier identifier = createFormatTableWithCatalogManagedPartitions();
+        restCatalogServer.setPartitionListingSupported(false);
+
+        assertThatThrownBy(() -> restCatalog.listPartitions(identifier))
+                .isInstanceOf(NotImplementedException.class);
+    }
+
+    @Test
+    void testCatalogManagedPartitionListingReflectsCatalogMutationsImmediately() throws Exception {
+        Identifier identifier = createFormatTableWithCatalogManagedPartitions();
+        FormatTable table = (FormatTable) restCatalog.getTable(identifier);
+        FormatTablePartitionManager partitionManager = table.partitionManager();
+        assertThat(partitionManager).isNotNull();
+        assertThat(partitionManager.listPartitions(Collections.emptyMap(), null)).isEmpty();
+        Map<String, String> partition = Collections.singletonMap("dt", "20260717");
+
+        restCatalog.createPartitions(identifier, Collections.singletonList(partition));
+
+        // Listings are not cached, so a mutation through the catalog is visible to the next read.
+        assertThat(partitionManager.listPartitions(Collections.emptyMap(), null))
+                .extracting(org.apache.paimon.partition.Partition::spec)
+                .containsExactly(partition);
+
+        restCatalog.dropPartitions(identifier, Collections.singletonList(partition));
+
+        assertThat(partitionManager.listPartitions(Collections.emptyMap(), null)).isEmpty();
+    }
+
+    @Test
+    void testPartitionManagerSurvivesSerialization() throws Exception {
+        Identifier identifier = createFormatTableWithCatalogManagedPartitions();
+        FormatTable table = (FormatTable) restCatalog.getTable(identifier);
+        Map<String, String> partition = Collections.singletonMap("dt", "20260717");
+        restCatalog.createPartitions(identifier, Collections.singletonList(partition));
+
+        // A table travels to task processes; its partition catalog must rebuild its client there.
+        FormatTablePartitionManager roundTripped =
+                InstantiationUtil.clone(table.partitionManager());
+
+        assertThat(roundTripped.listPartitions(Collections.emptyMap(), null))
+                .extracting(org.apache.paimon.partition.Partition::spec)
+                .containsExactly(partition);
+    }
+
+    @Test
+    void testReportedPartitionStatisticsAreStoredAndReadBack() throws Exception {
+        Identifier identifier = createFormatTableWithCatalogManagedPartitions();
+        Map<String, String> spec = Collections.singletonMap("dt", "20260717");
+        List<Map<String, String>> specs = Collections.singletonList(spec);
+        FormatTablePartitionManager partitionManager =
+                ((FormatTable) restCatalog.getTable(identifier)).partitionManager();
+        assertThat(partitionManager).isNotNull();
+
+        // A registration on its own measures nothing, so everything starts out unknown.
+        restCatalog.createPartitions(identifier, specs);
+        Partition registered = onlyPartition(identifier);
+        assertThat(PartitionStatistics.isKnown(registered.recordCount())).isFalse();
+        assertThat(PartitionStatistics.isKnown(registered.fileCount())).isFalse();
+
+        // ADD onto a partition nobody measured yet: the report becomes what it holds.
+        restCatalog
+                .api()
+                .createPartitions(
+                        identifier,
+                        specs,
+                        true,
+                        Collections.singletonList(
+                                new PartitionStatistics(spec, 3L, 300L, 1L, 1000L, -1)),
+                        false);
+        assertStatistics(identifier, 3L, 300L, 1L, 1000L);
+
+        // ADD again, through the partition manager a writer commits with: the counts accumulate
+        // and an older file does not move the newest one backwards.
+        partitionManager.createPartitions(
+                specs,
+                true,
+                Collections.singletonList(new PartitionStatistics(spec, 4L, 400L, 2L, 500L, -1)),
+                false);
+        assertStatistics(identifier, 7L, 700L, 3L, 1000L);
+
+        // A field reported as unknown leaves the stored one alone rather than zeroing it.
+        restCatalog.createPartitions(
+                identifier,
+                specs,
+                true,
+                Collections.singletonList(
+                        new PartitionStatistics(
+                                spec,
+                                PartitionStatistics.UNKNOWN,
+                                100L,
+                                PartitionStatistics.UNKNOWN,
+                                PartitionStatistics.UNKNOWN,
+                                -1)),
+                false);
+        assertStatistics(identifier, 7L, 800L, 3L, 1000L);
+
+        // SET is the whole partition now: every reported field is replaced, including a creation
+        // time that moves backwards because the newer files are gone.
+        restCatalog
+                .api()
+                .createPartitions(
+                        identifier,
+                        specs,
+                        true,
+                        Collections.singletonList(
+                                new PartitionStatistics(spec, 5L, 500L, 1L, 700L, -1)),
+                        true);
+        assertStatistics(identifier, 5L, 500L, 1L, 700L);
+
+        // Unknown is skipped under SET too: it reports nothing about that field, not a zero.
+        restCatalog.createPartitions(
+                identifier,
+                specs,
+                true,
+                Collections.singletonList(
+                        new PartitionStatistics(
+                                spec,
+                                PartitionStatistics.UNKNOWN,
+                                900L,
+                                PartitionStatistics.UNKNOWN,
+                                PartitionStatistics.UNKNOWN,
+                                -1)),
+                true);
+        assertStatistics(identifier, 5L, 900L, 1L, 700L);
+
+        // Reporting never registers or unregisters anything.
+        assertThat(restCatalog.listPartitions(identifier)).hasSize(1);
+    }
+
+    @Test
+    void testStatisticsOfAnUnstoredPartitionAreDropped() throws Exception {
+        Identifier identifier = createFormatTableWithCatalogManagedPartitions();
+        Map<String, String> spec = Collections.singletonMap("dt", "20260717");
+
+        // The statistics describe a partition this request does not register, so the server drops
+        // them and keeps the registration.
+        restCatalog.createPartitions(
+                identifier,
+                Collections.singletonList(spec),
+                true,
+                Collections.singletonList(
+                        new PartitionStatistics(
+                                Collections.singletonMap("dt", "20260718"),
+                                9L,
+                                900L,
+                                3L,
+                                1000L,
+                                -1)),
+                false);
+
+        assertThat(restCatalog.listPartitions(identifier))
+                .extracting(Partition::spec)
+                .containsExactly(spec);
+        assertThat(PartitionStatistics.isKnown(onlyPartition(identifier).recordCount())).isFalse();
+    }
+
+    @Test
+    void testAReportThatOnlyPartlyMatchesIsNotAppliedAtAll() throws Exception {
+        Identifier identifier = createFormatTableWithCatalogManagedPartitions();
+        Map<String, String> stored = Collections.singletonMap("dt", "20260717");
+        Map<String, String> absent = Collections.singletonMap("dt", "20260718");
+        restCatalog.createPartitions(identifier, Collections.singletonList(stored));
+
+        restCatalog.createPartitions(
+                identifier,
+                Collections.singletonList(stored),
+                true,
+                Arrays.asList(
+                        new PartitionStatistics(stored, 3L, 300L, 1L, 1000L, -1),
+                        new PartitionStatistics(absent, 9L, 900L, 3L, 2000L, -1)),
+                false);
+
+        // Applying the half that matched would count it twice on the next report.
+        Partition partition = onlyPartition(identifier);
+        assertThat(PartitionStatistics.isKnown(partition.recordCount())).isFalse();
+        assertThat(PartitionStatistics.isKnown(partition.fileSizeInBytes())).isFalse();
+        assertThat(PartitionStatistics.isKnown(partition.fileCount())).isFalse();
+        assertThat(PartitionStatistics.isKnown(partition.lastFileCreationTime())).isFalse();
+    }
+
+    private Partition onlyPartition(Identifier identifier) throws Exception {
+        List<Partition> partitions = restCatalog.listPartitions(identifier);
+        assertThat(partitions).hasSize(1);
+        return partitions.get(0);
+    }
+
+    private void assertStatistics(
+            Identifier identifier,
+            long recordCount,
+            long fileSizeInBytes,
+            long fileCount,
+            long lastFileCreationTime)
+            throws Exception {
+        Partition partition = onlyPartition(identifier);
+        assertThat(
+                        Arrays.asList(
+                                partition.recordCount(),
+                                partition.fileSizeInBytes(),
+                                partition.fileCount(),
+                                partition.lastFileCreationTime()))
+                .containsExactly(recordCount, fileSizeInBytes, fileCount, lastFileCreationTime);
+    }
+
+    @Test
+    void testFilteredListingPreservesNextTokenAcrossSparsePage() throws Exception {
+        Identifier identifier = createFormatTableWithCatalogManagedPartitions();
+        Predicate predicate = partitionFilter("20260717");
+        Partition partition =
+                new Partition(Collections.singletonMap("dt", "20260717"), 0, 0, 0, 0, -1, false);
+        restCatalogServer.enqueueListPartitionsByFilterResponse(null, "p2");
+        restCatalogServer.enqueueListPartitionsByFilterResponse(
+                Collections.singletonList(partition), null);
+
+        PagedList<Partition> firstPage =
+                restCatalog.listPartitionsByFilterPaged(identifier, predicate, 1, null, "dt=2026%");
+        assertThat(firstPage.getElements()).isEmpty();
+        assertThat(firstPage.getNextPageToken()).isEqualTo("p2");
+
+        PagedList<Partition> secondPage =
+                restCatalog.listPartitionsByFilterPaged(
+                        identifier, predicate, 1, firstPage.getNextPageToken(), "dt=2026%");
+        assertThat(secondPage.getElements()).containsExactly(partition);
+        assertThat(secondPage.getNextPageToken()).isNull();
+
+        assertThat(restCatalogServer.getReceivedListPartitionsByFilterRequests())
+                .extracting(
+                        request ->
+                                Arrays.asList(
+                                        request.getFilter(),
+                                        request.getMaxResults(),
+                                        request.getPageToken(),
+                                        request.getPartitionNamePattern()))
+                .containsExactly(
+                        Arrays.asList(JsonSerdeUtil.toFlatJson(predicate), 1, null, "dt=2026%"),
+                        Arrays.asList(JsonSerdeUtil.toFlatJson(predicate), 1, "p2", "dt=2026%"));
+    }
+
+    @Test
+    void testRejectCatalogManagedPartitionsOnExternalTableBeforeCreate() throws Exception {
+        Identifier identifier = Identifier.create("db1", "external_partitioned_format_table");
+        restCatalog.createDatabase(identifier.getDatabaseName(), true);
+        String externalPath = dataPath + "/external-partitioned-format-table";
+        Schema schema =
+                Schema.newBuilder()
+                        .option(CoreOptions.TYPE.key(), TableType.FORMAT_TABLE.toString())
+                        .option(CoreOptions.METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(CoreOptions.FILE_FORMAT.key(), "parquet")
+                        .option(CoreOptions.PATH.key(), externalPath)
+                        .column("id", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build();
+
+        assertThatThrownBy(() -> restCatalog.createTable(identifier, schema, false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("internal table");
+        assertThat(restCatalog.listTables(identifier.getDatabaseName()))
+                .doesNotContain(identifier.getTableName());
+        assertThat(LocalFileIO.create().exists(new Path(externalPath))).isFalse();
+    }
+
+    @Test
+    void testRoundTrippedFormatTableReplacePassesClientValidation() throws Exception {
+        Identifier identifier = createFormatTableWithCatalogManagedPartitions();
+        FormatTable existing = (FormatTable) restCatalog.getTable(identifier);
+        Schema replacement =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .options(existing.options())
+                        .build();
+        assertThat(replacement.options())
+                .containsEntry(CoreOptions.PATH.key(), existing.location());
+
+        // The mock service does not implement Format Table replacement. Reaching that response
+        // proves the REST client accepted the unchanged synthetic path from the loaded table.
+        assertThatThrownBy(() -> restCatalog.replaceTable(identifier, replacement, false))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("replaceTable does not support format tables");
+    }
+
+    private Identifier createFormatTableWithCatalogManagedPartitions() throws Exception {
+        Identifier identifier = Identifier.create("db1", "managed_partition_table");
+        restCatalog.createDatabase(identifier.getDatabaseName(), true);
+        restCatalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(CoreOptions.TYPE.key(), TableType.FORMAT_TABLE.toString())
+                        .option(CoreOptions.METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(CoreOptions.FILE_FORMAT.key(), "parquet")
+                        .column("id", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build(),
+                false);
+        return identifier;
+    }
+
+    private static Predicate partitionFilter(String value) {
+        return new PredicateBuilder(
+                        RowType.of(
+                                new org.apache.paimon.types.DataType[] {DataTypes.STRING()},
+                                new String[] {"dt"}))
+                .equal(0, value);
+    }
+
+    @Test
     void testBaseHeadersInRequests() throws Exception {
         // Set custom headers in options
         String customHeaderName = "custom-header";
@@ -237,6 +590,37 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         // Perform an operation that will trigger REST request
         restCatalog.listDatabases();
         checkHeader(customHeaderName, customHeaderValue);
+    }
+
+    @Test
+    void testReadViaHeaderOnDependencyTableAndDataTokenRequests() throws Exception {
+        Identifier root = Identifier.create("db", "root");
+        Identifier target = Identifier.create("db", "target");
+        RESTCatalog restCatalog = initCatalog(true);
+        restCatalog.createDatabase(target.getDatabaseName(), true);
+        restCatalog.createTable(target, DEFAULT_TABLE_SCHEMA, false);
+        restCatalog.createTable(
+                root,
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .option(
+                                CoreOptions.BLOB_DESCRIPTOR_SOURCE_TABLE.key(),
+                                target.getFullName())
+                        .build(),
+                false);
+        FileStoreTable rootTable = (FileStoreTable) restCatalog.getTable(root);
+
+        restCatalogServer.clearReceivedHeaders();
+        BlobDescriptorReaderFactory.create(rootTable);
+
+        String readVia = RESTUtil.encodeString(JsonSerdeUtil.toFlatJson(root));
+        ResourcePaths resourcePaths =
+                ResourcePaths.forCatalogProperties(restCatalog.api().options());
+        assertReadViaHeader(
+                resourcePaths.table(target.getDatabaseName(), target.getObjectName()), readVia);
+        assertReadViaHeader(
+                resourcePaths.tableToken(target.getDatabaseName(), target.getObjectName()),
+                readVia);
     }
 
     @Test
@@ -312,6 +696,15 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         }
 
         assert foundCustomHeader : "Header was not found in any request";
+    }
+
+    private void assertReadViaHeader(String resourcePath, String readVia) {
+        assertThat(restCatalogServer.getReceivedHeaders(resourcePath))
+                .singleElement()
+                .satisfies(
+                        headers ->
+                                assertThat(headers)
+                                        .containsEntry(READ_VIA_HEADER.toLowerCase(), readVia));
     }
 
     private void testDlfAuth(RESTCatalog restCatalog) throws Exception {

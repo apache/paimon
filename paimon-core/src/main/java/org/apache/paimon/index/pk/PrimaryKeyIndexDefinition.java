@@ -28,6 +28,7 @@ public class PrimaryKeyIndexDefinition {
         VECTOR,
         BTREE,
         BITMAP,
+        MULTI_VALUE,
         FULL_TEXT
     }
 
@@ -36,24 +37,14 @@ public class PrimaryKeyIndexDefinition {
     private final String indexType;
     private final Options options;
     private final Family family;
-    private final int compactionLevelFanout;
-    private final double compactionStaleRatioThreshold;
 
     public PrimaryKeyIndexDefinition(
-            String column,
-            int fieldId,
-            String indexType,
-            Options options,
-            Family family,
-            int compactionLevelFanout,
-            double compactionStaleRatioThreshold) {
+            String column, int fieldId, String indexType, Options options, Family family) {
         this.column = column;
         this.fieldId = fieldId;
         this.indexType = indexType;
         this.options = options;
         this.family = family;
-        this.compactionLevelFanout = compactionLevelFanout;
-        this.compactionStaleRatioThreshold = compactionStaleRatioThreshold;
     }
 
     public String column() {
@@ -74,13 +65,5 @@ public class PrimaryKeyIndexDefinition {
 
     public Family family() {
         return family;
-    }
-
-    public int compactionLevelFanout() {
-        return compactionLevelFanout;
-    }
-
-    public double compactionStaleRatioThreshold() {
-        return compactionStaleRatioThreshold;
     }
 }

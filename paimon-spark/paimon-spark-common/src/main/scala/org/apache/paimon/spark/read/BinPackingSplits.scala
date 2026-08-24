@@ -43,31 +43,11 @@ case class BinPackingSplits(coreOptions: CoreOptions, readRowSizeRatio: Double =
 
   private lazy val deletionVectors: Boolean = coreOptions.deletionVectorsEnabled()
 
-  private lazy val filesMaxPartitionBytes: Long = {
-    val options = coreOptions.toConfiguration
-    var _filesMaxPartitionBytes = SOURCE_SPLIT_TARGET_SIZE.defaultValue().getBytes
+  private lazy val filesMaxPartitionBytes: Long =
+    BinPackingSplits.filesMaxPartitionBytes(coreOptions, conf)
 
-    if (conf.contains(SQLConf.FILES_MAX_PARTITION_BYTES.key)) {
-      _filesMaxPartitionBytes = conf.getConf(SQLConf.FILES_MAX_PARTITION_BYTES)
-    }
-    if (options.containsKey(SOURCE_SPLIT_TARGET_SIZE.key())) {
-      _filesMaxPartitionBytes = options.get(SOURCE_SPLIT_TARGET_SIZE).getBytes
-    }
-    _filesMaxPartitionBytes
-  }
-
-  private lazy val openCostInBytes: Long = {
-    val options = coreOptions.toConfiguration
-    var _openCostBytes = SOURCE_SPLIT_OPEN_FILE_COST.defaultValue().getBytes
-
-    if (conf.contains(SQLConf.FILES_OPEN_COST_IN_BYTES.key)) {
-      _openCostBytes = conf.getConf(SQLConf.FILES_OPEN_COST_IN_BYTES)
-    }
-    if (options.containsKey(SOURCE_SPLIT_OPEN_FILE_COST.key())) {
-      _openCostBytes = options.get(SOURCE_SPLIT_OPEN_FILE_COST).getBytes
-    }
-    _openCostBytes
-  }
+  private lazy val openCostInBytes: Long =
+    BinPackingSplits.openCostInBytes(coreOptions, conf)
 
   private lazy val leafNodeDefaultParallelism: Int = {
     conf
@@ -232,8 +212,7 @@ case class BinPackingSplits(coreOptions: CoreOptions, readRowSizeRatio: Double =
     val defaultMaxSplitBytes = filesMaxPartitionBytes
     val minPartitionNum = conf.filesMinPartitionNum.getOrElse(leafNodeDefaultParallelism)
 
-    val totalRawBytes =
-      dataSplits.map(s => SplitUtils.splitSize(s) + SplitUtils.fileCount(s) * openCostInBytes).sum
+    val totalRawBytes = BinPackingSplits.estimatedSize(dataSplits, openCostInBytes)
     val bytesPerCore = totalRawBytes / minPartitionNum
 
     val maxSplitBytes = Math.min(defaultMaxSplitBytes, Math.max(openCostInBytes, bytesPerCore))
@@ -244,5 +223,36 @@ case class BinPackingSplits(coreOptions: CoreOptions, readRowSizeRatio: Double =
         s"final max split bytes: $maxSplitBytes")
 
     maxSplitBytes
+  }
+}
+
+object BinPackingSplits {
+
+  private[spark] def filesMaxPartitionBytes(coreOptions: CoreOptions, conf: SQLConf): Long = {
+    val options = coreOptions.toConfiguration
+    if (options.containsKey(SOURCE_SPLIT_TARGET_SIZE.key())) {
+      options.get(SOURCE_SPLIT_TARGET_SIZE).getBytes
+    } else if (conf.contains(SQLConf.FILES_MAX_PARTITION_BYTES.key)) {
+      conf.getConf(SQLConf.FILES_MAX_PARTITION_BYTES)
+    } else {
+      SOURCE_SPLIT_TARGET_SIZE.defaultValue().getBytes
+    }
+  }
+
+  private[spark] def openCostInBytes(coreOptions: CoreOptions, conf: SQLConf): Long = {
+    val options = coreOptions.toConfiguration
+    if (options.containsKey(SOURCE_SPLIT_OPEN_FILE_COST.key())) {
+      options.get(SOURCE_SPLIT_OPEN_FILE_COST).getBytes
+    } else if (conf.contains(SQLConf.FILES_OPEN_COST_IN_BYTES.key)) {
+      conf.getConf(SQLConf.FILES_OPEN_COST_IN_BYTES)
+    } else {
+      SOURCE_SPLIT_OPEN_FILE_COST.defaultValue().getBytes
+    }
+  }
+
+  private[spark] def estimatedSize(splits: Iterable[Split], openCostInBytes: Long): Long = {
+    splits
+      .map(split => SplitUtils.splitSize(split) + SplitUtils.fileCount(split) * openCostInBytes)
+      .sum
   }
 }

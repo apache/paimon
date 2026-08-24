@@ -20,6 +20,7 @@ package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValueFileStore;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.options.Options;
@@ -127,7 +128,8 @@ public class LookupFileStoreTable extends DelegatedFileStoreTable {
         return this;
     }
 
-    private LookupStreamScanMode lookupStreamScanMode(FileStoreTable table, List<String> joinKeys) {
+    @VisibleForTesting
+    LookupStreamScanMode lookupStreamScanMode(FileStoreTable table, List<String> joinKeys) {
         Options options = Options.fromMap(table.options());
         if (options.get(LOOKUP_CACHE_MODE) == FlinkConnectorOptions.LookupCacheMode.AUTO
                 && new HashSet<>(table.primaryKeys()).equals(new HashSet<>(joinKeys))) {

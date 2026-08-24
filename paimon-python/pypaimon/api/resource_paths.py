@@ -133,3 +133,9 @@ class ResourcePaths:
     def forward_branch(self, database_name: str, table_name: str, branch_name: str) -> str:
         return "{}/{}".format(
             self.branch(database_name, table_name, branch_name), self.FORWARD)
+
+    def auth_table(self, database_name: str, table_name: str) -> str:
+        return "{}/{}/{}/{}/{}/auth".format(
+            self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
+            self.TABLES, RESTUtil.encode_string(table_name)
+        )

@@ -24,7 +24,7 @@
     <parent>
         <artifactId>paimon-filesystems</artifactId>
         <groupId>org.apache.paimon</groupId>
-        <version>2.0-SNAPSHOT</version>
+        <version>2.1-SNAPSHOT</version>
     </parent>
 
     <artifactId>paimon-jindodls</artifactId>
@@ -38,7 +38,7 @@
     <repositories>
         <repository>
             <id>jindodata</id>
-            <url>https://jindodata-binary.oss-cn-shanghai.aliyuncs.com/mvn-repo/</url>
+            <url>https://jindodata-binary.oss-accelerate.aliyuncs.com/mvn-repo/</url>
         </repository>
     </repositories>
 

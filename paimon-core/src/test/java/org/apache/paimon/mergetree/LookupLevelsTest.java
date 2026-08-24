@@ -364,7 +364,7 @@ public class LookupLevelsTest {
                         fileName ->
                                 new File(tempDir.toFile(), LOOKUP_FILE_PREFIX + UUID.randomUUID()),
                         createLookupStoreFactory(),
-                        rowCount -> BloomFilter.builder(rowCount, 0.05),
+                        rowCount -> BloomFilter.fixedBuilder(rowCount, 0.05),
                         LookupFile.createCache(Duration.ofHours(1), MemorySize.ofMebiBytes(10))) {
                     @Override
                     public LookupFile createLookupFile(DataFileMeta file) throws IOException {
@@ -461,8 +461,9 @@ public class LookupLevelsTest {
                         new LookupStoreFactory() {
                             @Override
                             public LookupStoreWriter createWriter(
-                                    File file, BloomFilter.Builder bloomFilter) throws IOException {
-                                return delegate.createWriter(file, bloomFilter);
+                                    File file, BloomFilter.Builder bloomFilterBuilder)
+                                    throws IOException {
+                                return delegate.createWriter(file, bloomFilterBuilder);
                             }
 
                             @Override
@@ -491,8 +492,9 @@ public class LookupLevelsTest {
                         new LookupStoreFactory() {
                             @Override
                             public LookupStoreWriter createWriter(
-                                    File file, BloomFilter.Builder bloomFilter) throws IOException {
-                                return delegate.createWriter(file, bloomFilter);
+                                    File file, BloomFilter.Builder bloomFilterBuilder)
+                                    throws IOException {
+                                return delegate.createWriter(file, bloomFilterBuilder);
                             }
 
                             @Override
@@ -536,14 +538,14 @@ public class LookupLevelsTest {
                 file -> createReaderFactory().createRecordReader(file),
                 localFileFactory,
                 lookupStoreFactory,
-                rowCount -> BloomFilter.builder(rowCount, 0.05),
+                rowCount -> BloomFilter.fixedBuilder(rowCount, 0.05),
                 LookupFile.createCache(Duration.ofHours(1), maxDiskSize));
     }
 
     private SortLookupStoreFactory createLookupStoreFactory() {
         return new SortLookupStoreFactory(
                 new RowCompactedSerializer(keyType).createSliceComparator(),
-                new CacheManager(MemorySize.ofMebiBytes(1)),
+                new CacheManager(MemorySize.ofMebiBytes(1), 0),
                 4096,
                 new CompressOptions("none", 1));
     }

@@ -183,7 +183,7 @@ public class VortexFileFormat extends FileFormat {
 
         @Override
         public Void visit(ArrayType arrayType) {
-            return null;
+            return arrayType.getElementType().accept(this);
         }
 
         @Override

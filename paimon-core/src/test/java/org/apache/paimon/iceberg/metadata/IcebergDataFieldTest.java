@@ -28,7 +28,10 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
+import org.apache.paimon.types.EdgeAlgorithm;
 import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.GeographyType;
+import org.apache.paimon.types.GeometryType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
@@ -37,6 +40,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.types.VariantType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.junit.jupiter.api.DisplayName;
@@ -150,6 +154,53 @@ class IcebergDataFieldTest {
         DataField varBinaryField = new DataField(12, "varbinary", new VarBinaryType(false, 32));
         IcebergDataField icebergVarBinary = new IcebergDataField(varBinaryField);
         assertThat(icebergVarBinary.type()).isEqualTo("binary");
+    }
+
+    @Test
+    @DisplayName("Test Iceberg v3 geospatial type conversions")
+    void testGeospatialTypeConversions() {
+        IcebergDataField geometry =
+                new IcebergDataField(
+                        new DataField(1, "geom", new GeometryType(false, "EPSG:3857")));
+        assertThat(geometry.type()).isEqualTo("geometry(EPSG:3857)");
+
+        IcebergDataField geography =
+                new IcebergDataField(
+                        new DataField(
+                                2,
+                                "geog",
+                                new GeographyType(true, "OGC:CRS84", EdgeAlgorithm.KARNEY)));
+        assertThat(geography.type()).isEqualTo("geography(OGC:CRS84, karney)");
+
+        assertThat(new IcebergDataField(3, "geom", true, "geometry(EPSG:3857)", null).dataType())
+                .isEqualTo(new GeometryType(false, "EPSG:3857"));
+        assertThat(
+                        new IcebergDataField(
+                                        4, "geog", false, "geography(OGC:CRS84, vincenty)", null)
+                                .dataType())
+                .isEqualTo(new GeographyType(true, "OGC:CRS84", EdgeAlgorithm.VINCENTY));
+
+        assertThat(new IcebergDataField(5, "geom", false, "geometry", null).dataType())
+                .isEqualTo(new GeometryType());
+        assertThat(new IcebergDataField(6, "geog", false, "geography", null).dataType())
+                .isEqualTo(new GeographyType());
+        assertThat(new IcebergDataField(7, "geog", false, "geography(EPSG:4326)", null).dataType())
+                .isEqualTo(new GeographyType(true, "EPSG:4326", GeographyType.DEFAULT_ALGORITHM));
+        assertThat(
+                        new IcebergDataField(8, "geom", false, "geometry(custom, definition)", null)
+                                .dataType())
+                .isEqualTo(new GeometryType("custom, definition"));
+
+        assertThatThrownBy(
+                        () ->
+                                new IcebergDataField(
+                                        new DataField(
+                                                9,
+                                                "geog",
+                                                new GeographyType("custom, definition"))))
+                .hasMessageContaining("Geography CRS")
+                .hasMessageContaining("custom, definition")
+                .hasMessageContaining("Iceberg metadata");
     }
 
     @Test
@@ -267,6 +318,19 @@ class IcebergDataFieldTest {
         assertThat(listType.type()).isEqualTo("list");
         assertThat(listType.element()).isEqualTo("int");
         assertThat(listType.elementRequired()).isTrue();
+    }
+
+    @Test
+    @DisplayName("Test array element-required follows the element, not the array")
+    void testArrayElementNullabilityIndependentOfArray() {
+        DataField arrayField =
+                new DataField(1, "array", new ArrayType(true, new VariantType(false)));
+        IcebergDataField icebergArray = new IcebergDataField(arrayField);
+
+        IcebergListType listType = (IcebergListType) icebergArray.type();
+        assertThat(listType.element()).isEqualTo("variant");
+        assertThat(listType.elementRequired()).isTrue();
+        assertThat(icebergArray.dataType()).isEqualTo(new ArrayType(true, new VariantType(false)));
     }
 
     @Test
@@ -459,6 +523,43 @@ class IcebergDataFieldTest {
         IcebergDataField timestamptzNsField =
                 new IcebergDataField(4, "timestamptz_ns", false, "timestamptz_ns", null, "doc");
         assertThat(timestamptzNsField.dataType()).isEqualTo(new LocalZonedTimestampType(true, 9));
+    }
+
+    @Test
+    @DisplayName("Test variant type conversion")
+    void testVariantTypeConversion() {
+        DataField variantField = new DataField(1, "variant", new VariantType(true));
+        IcebergDataField icebergVariant = new IcebergDataField(variantField);
+
+        assertThat(icebergVariant.type()).isEqualTo("variant");
+        assertThat(icebergVariant.required()).isFalse();
+        assertThat(icebergVariant.dataType()).isEqualTo(new VariantType(true));
+    }
+
+    @Test
+    @DisplayName("Test variant type parsing")
+    void testVariantTypeParsing() {
+        IcebergDataField optionalVariant =
+                new IcebergDataField(1, "variant", false, "variant", null, "doc");
+        assertThat(optionalVariant.dataType()).isEqualTo(new VariantType(true));
+
+        IcebergDataField requiredVariant =
+                new IcebergDataField(2, "variant", true, "variant", null, "doc");
+        assertThat(requiredVariant.dataType()).isEqualTo(new VariantType(false));
+    }
+
+    @Test
+    @DisplayName("Test variant type serialization round trip")
+    void testVariantTypeSerializationRoundTrip() {
+        DataField variantField = new DataField(1, "variant", new VariantType(true));
+        IcebergDataField originalField = new IcebergDataField(variantField);
+
+        String json = JsonSerdeUtil.toJson(originalField);
+        IcebergDataField deserializedField = JsonSerdeUtil.fromJson(json, IcebergDataField.class);
+
+        assertThat(deserializedField.type()).isEqualTo("variant");
+        assertThat(deserializedField.dataType()).isEqualTo(new VariantType(true));
+        assertThat(deserializedField.toDatafield()).isEqualTo(variantField);
     }
 
     @Test

@@ -44,6 +44,8 @@ class BlobWriter(AppendOnlyDataWriter):
 
         options = self.table.options
         self.blob_target_file_size = CoreOptions.blob_target_file_size(options)
+        # Use the effective options (constructor-provided), consistent with the other accessors.
+        self.blob_copy_buffer_size = self.options.blob_copy_buffer_size()
 
         self._blob_consumer = blob_consumer
         self.current_writer: Optional[BlobFileWriter] = None
@@ -100,13 +102,21 @@ class BlobWriter(AppendOnlyDataWriter):
         self.file_count += 1  # Increment counter for next file
         file_path = self._generate_file_path(file_name)
         self.current_file_path = file_path
-        self.current_writer = BlobFileWriter(self.file_io, file_path, blob_consumer=self._blob_consumer)
+        self.current_writer = BlobFileWriter(
+            self.file_io,
+            file_path,
+            blob_consumer=self._blob_consumer,
+            copy_buffer_size=self.blob_copy_buffer_size,
+        )
 
     def rolling_file(self) -> bool:
         if self.current_writer is None:
             return False
 
-        return self.current_writer.reach_target_size(self.blob_target_file_size)
+        return (
+            self.current_writer.row_count >= self.target_file_row_num
+            or self.current_writer.reach_target_size(self.blob_target_file_size)
+        )
 
     def close_current_writer(self):
         """Close current writer and create metadata."""
@@ -230,6 +240,9 @@ class BlobWriter(AppendOnlyDataWriter):
         # Call parent to handle pending_data fallback.
         super().close()
 
+    def delete_file_upon_abort(self) -> bool:
+        return self._blob_consumer is None
+
     def abort(self):
         if self.current_writer is not None:
             try:
@@ -238,7 +251,7 @@ class BlobWriter(AppendOnlyDataWriter):
                 logger.warning(f"Error aborting blob writer: {e}", exc_info=e)
             self.current_writer = None
             self.current_file_path = None
-        if self._blob_consumer is not None:
+        if not self.delete_file_upon_abort():
             self.pending_data = None
             self.committed_files.clear()
         else:

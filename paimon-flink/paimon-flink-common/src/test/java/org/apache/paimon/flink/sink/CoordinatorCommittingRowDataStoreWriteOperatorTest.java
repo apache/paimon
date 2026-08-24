@@ -34,9 +34,11 @@ import org.apache.paimon.table.sink.CommitMessageSerializer;
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
+import org.apache.flink.core.execution.SavepointFormatType;
 import org.apache.flink.core.io.SimpleVersionedSerializerTypeSerializerProxy;
 import org.apache.flink.runtime.checkpoint.CheckpointCoordinator;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
+import org.apache.flink.runtime.checkpoint.SavepointType;
 import org.apache.flink.runtime.checkpoint.TaskStateSnapshot;
 import org.apache.flink.runtime.jobgraph.OperatorID;
 import org.apache.flink.runtime.operators.coordination.CoordinatorStore;
@@ -48,6 +50,7 @@ import org.apache.flink.streaming.api.operators.StreamOperator;
 import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
+import org.apache.flink.streaming.runtime.watermarkstatus.WatermarkStatus;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.apache.flink.util.FlinkRuntimeException;
 import org.junit.jupiter.api.Test;
@@ -63,7 +66,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link CoordinatorCommittingRowDataStoreWriteOperator}. */
-public class CoordinatorCommittingRowDataStoreWriteOperatorTest extends CommitterOperatorTestBase {
+public class CoordinatorCommittingRowDataStoreWriteOperatorTest extends CommitterTestBase {
 
     private static final TypeSerializer<CheckpointCommittables> COMMITTABLES_SERIALIZER =
             new SimpleVersionedSerializerTypeSerializerProxy<>(
@@ -91,7 +94,7 @@ public class CoordinatorCommittingRowDataStoreWriteOperatorTest extends Committe
                                         table, table.newCommit(context.commitUser()), context),
                         true,
                         commitUser,
-                        false);
+                        null);
         coordinator.start();
         coordinator.waitProcessAllActions();
 
@@ -353,6 +356,210 @@ public class CoordinatorCommittingRowDataStoreWriteOperatorTest extends Committe
         secondHarness.close();
     }
 
+    @Test
+    @Timeout(30)
+    public void testWatermarkStatusFrozenAtBarrierAcrossCheckpoints() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        String commitUser = UUID.randomUUID().toString();
+        List<OperatorEvent> events = new ArrayList<>();
+
+        OneInputStreamOperatorTestHarness<InternalRow, Committable> harness =
+                createHarness(table, commitUser, events::add);
+        TypeSerializer<Committable> committableSerializer =
+                new CommittableTypeInfo().createSerializer(new ExecutionConfig());
+        harness.setup(committableSerializer);
+        harness.open();
+
+        // cp1: writer is IDLE at barrier time.
+        harness.processWatermark(new Watermark(100L));
+        harness.processWatermarkStatus(WatermarkStatus.IDLE);
+        harness.prepareSnapshotPreBarrier(1);
+        harness.snapshot(1, 10);
+
+        // cp2: back to ACTIVE with a new watermark. Idle status must not linger on cp2 just
+        // because cp1 was idle.
+        harness.processWatermarkStatus(WatermarkStatus.ACTIVE);
+        harness.processWatermark(new Watermark(500L));
+        harness.prepareSnapshotPreBarrier(2);
+        harness.snapshot(2, 20);
+
+        assertThat(events).hasSize(2);
+        CheckpointCommittables cp1 =
+                ((CommittableEvent) events.get(0)).deserialize(COMMITTABLES_SERIALIZER);
+        assertThat(cp1.checkpointId()).isEqualTo(1L);
+        assertThat(cp1.watermark()).isEqualTo(100L);
+        assertThat(cp1.idle()).isTrue();
+
+        CheckpointCommittables cp2 =
+                ((CommittableEvent) events.get(1)).deserialize(COMMITTABLES_SERIALIZER);
+        assertThat(cp2.checkpointId()).isEqualTo(2L);
+        assertThat(cp2.watermark()).isEqualTo(500L);
+        assertThat(cp2.idle()).isFalse();
+
+        harness.close();
+    }
+
+    @Test
+    @Timeout(30)
+    public void testIdleFlagResetsToActiveOnRestore() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        String commitUser = UUID.randomUUID().toString();
+        TypeSerializer<Committable> committableSerializer =
+                new CommittableTypeInfo().createSerializer(new ExecutionConfig());
+
+        // session 1: end the session while IDLE so the restore path is exercised on a snapshot
+        // taken from an idle writer.
+        List<OperatorEvent> firstEvents = new ArrayList<>();
+        OneInputStreamOperatorTestHarness<InternalRow, Committable> firstHarness =
+                createHarness(table, commitUser, firstEvents::add);
+        firstHarness.setup(committableSerializer);
+        firstHarness.open();
+
+        firstHarness.processWatermark(new Watermark(100L));
+        firstHarness.processWatermarkStatus(WatermarkStatus.IDLE);
+        firstHarness.prepareSnapshotPreBarrier(1);
+        OperatorSubtaskState snapshot = firstHarness.snapshot(1, 10);
+        firstHarness.close();
+
+        // session 2: restore. Flink runtime does not replay the last WatermarkStatus, and the
+        // aligner treats channels as ACTIVE + Long.MIN_VALUE on rebuild, so the writer must also
+        // default to ACTIVE. The next barrier — before any WatermarkStatus event — must emit
+        // idle=false, matching Flink's own valve-rebuild contract.
+        List<OperatorEvent> restoredEvents = new ArrayList<>();
+        OneInputStreamOperatorTestHarness<InternalRow, Committable> secondHarness =
+                createHarness(table, commitUser, restoredEvents::add);
+        secondHarness.setup(committableSerializer);
+        restoreWithCheckpointId(secondHarness, snapshot, 1L);
+        secondHarness.open();
+
+        secondHarness.prepareSnapshotPreBarrier(2);
+        secondHarness.snapshot(2, 20);
+
+        // First event is the restore replay; the second is the freshly frozen cp2.
+        assertThat(restoredEvents).hasSize(2);
+        CommittableEvent cp2Event = (CommittableEvent) restoredEvents.get(1);
+        CheckpointCommittables cp2 = cp2Event.deserialize(COMMITTABLES_SERIALIZER);
+        assertThat(cp2.checkpointId()).isEqualTo(2L);
+        assertThat(cp2.idle()).isFalse();
+
+        secondHarness.close();
+    }
+
+    @Test
+    @Timeout(30)
+    public void testSavepointBitRidesOnCommittableEventAndPendingState() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        String commitUser = UUID.randomUUID().toString();
+        List<OperatorEvent> events = new ArrayList<>();
+
+        OneInputStreamOperatorTestHarness<InternalRow, Committable> harness =
+                createHarness(table, commitUser, events::add);
+        TypeSerializer<Committable> committableSerializer =
+                new CommittableTypeInfo().createSerializer(new ExecutionConfig());
+        harness.setup(committableSerializer);
+        harness.open();
+        CoordinatorCommittingRowDataStoreWriteOperator operator =
+                (CoordinatorCommittingRowDataStoreWriteOperator) harness.getOperator();
+
+        // cp1: a normal checkpoint carries savepoint=false in both the event and the pending state.
+        harness.processElement(GenericRow.of(1, 10L), 1);
+        harness.prepareSnapshotPreBarrier(1);
+        harness.snapshot(1, 10);
+        assertThat(
+                        ((CommittableEvent) events.get(0))
+                                .deserialize(COMMITTABLES_SERIALIZER)
+                                .shouldCreateSavepointTag())
+                .isFalse();
+        assertThat(operator.getPendingCommittables().get(1L).shouldCreateSavepointTag()).isFalse();
+
+        // cp2: a savepoint sets savepoint=true on both the emitted event and the persisted entry.
+        harness.processElement(GenericRow.of(2, 20L), 2);
+        harness.prepareSnapshotPreBarrier(2);
+        harness.snapshotWithLocalState(
+                2, 20, SavepointType.savepoint(SavepointFormatType.CANONICAL));
+        assertThat(
+                        ((CommittableEvent) events.get(1))
+                                .deserialize(COMMITTABLES_SERIALIZER)
+                                .shouldCreateSavepointTag())
+                .isTrue();
+        assertThat(operator.getPendingCommittables().get(2L).shouldCreateSavepointTag()).isTrue();
+
+        harness.close();
+    }
+
+    @Test
+    @Timeout(30)
+    public void testSavepointBitStaysFalseWhenAutoTagDisabled() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        String commitUser = UUID.randomUUID().toString();
+        List<OperatorEvent> events = new ArrayList<>();
+
+        OneInputStreamOperatorTestHarness<InternalRow, Committable> harness =
+                createHarness(table, commitUser, events::add, /* autoTagForSavepoint */ false);
+        TypeSerializer<Committable> committableSerializer =
+                new CommittableTypeInfo().createSerializer(new ExecutionConfig());
+        harness.setup(committableSerializer);
+        harness.open();
+        CoordinatorCommittingRowDataStoreWriteOperator operator =
+                (CoordinatorCommittingRowDataStoreWriteOperator) harness.getOperator();
+
+        // Even on a savepoint, a writer without auto-tag enabled must not flag a tag intent: the
+        // checkpoint is a savepoint, but no savepoint tag should be created for it.
+        harness.processElement(GenericRow.of(1, 10L), 1);
+        harness.prepareSnapshotPreBarrier(1);
+        harness.snapshotWithLocalState(
+                1, 10, SavepointType.savepoint(SavepointFormatType.CANONICAL));
+        assertThat(
+                        ((CommittableEvent) events.get(0))
+                                .deserialize(COMMITTABLES_SERIALIZER)
+                                .shouldCreateSavepointTag())
+                .isFalse();
+        assertThat(operator.getPendingCommittables().get(1L).shouldCreateSavepointTag()).isFalse();
+
+        harness.close();
+    }
+
+    @Test
+    @Timeout(30)
+    public void testSavepointBitReplayedOnRestore() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        String commitUser = UUID.randomUUID().toString();
+        TypeSerializer<Committable> committableSerializer =
+                new CommittableTypeInfo().createSerializer(new ExecutionConfig());
+
+        // session 1: take a savepoint that is never notified complete, then crash.
+        List<OperatorEvent> firstEvents = new ArrayList<>();
+        OneInputStreamOperatorTestHarness<InternalRow, Committable> firstHarness =
+                createHarness(table, commitUser, firstEvents::add);
+        firstHarness.setup(committableSerializer);
+        firstHarness.open();
+        firstHarness.processElement(GenericRow.of(1, 10L), 1);
+        firstHarness.prepareSnapshotPreBarrier(1);
+        OperatorSubtaskState snapshot =
+                firstHarness
+                        .snapshotWithLocalState(
+                                1, 10, SavepointType.savepoint(SavepointFormatType.CANONICAL))
+                        .getJobManagerOwnedState();
+        firstHarness.close();
+
+        // session 2: restore replays the persisted savepoint bit in the RestoredCommittableEvent.
+        List<OperatorEvent> restoredEvents = new ArrayList<>();
+        OneInputStreamOperatorTestHarness<InternalRow, Committable> secondHarness =
+                createHarness(table, commitUser, restoredEvents::add);
+        secondHarness.setup(committableSerializer);
+        restoreWithCheckpointId(secondHarness, snapshot, 1L);
+        secondHarness.open();
+
+        assertThat(restoredEvents).hasSize(1);
+        RestoredCommittableEvent restoredEvent = (RestoredCommittableEvent) restoredEvents.get(0);
+        List<CheckpointCommittables> entries = restoredEvent.deserialize(COMMITTABLES_SERIALIZER);
+        assertThat(entries).hasSize(1);
+        assertThat(entries.get(0).checkpointId()).isEqualTo(1L);
+        assertThat(entries.get(0).shouldCreateSavepointTag()).isTrue();
+
+        secondHarness.close();
+    }
+
     private void assertCommittableEventCheckpoint(OperatorEvent event, long expectedCheckpointId) {
         CommittableEvent committableEvent = (CommittableEvent) event;
         assertThat(committableEvent.getCheckpointId()).isEqualTo(expectedCheckpointId);
@@ -396,6 +603,15 @@ public class CoordinatorCommittingRowDataStoreWriteOperatorTest extends Committe
     private OneInputStreamOperatorTestHarness<InternalRow, Committable> createHarness(
             FileStoreTable table, String commitUser, OperatorEventGateway gateway)
             throws Exception {
+        return createHarness(table, commitUser, gateway, /* autoTagForSavepoint */ true);
+    }
+
+    private OneInputStreamOperatorTestHarness<InternalRow, Committable> createHarness(
+            FileStoreTable table,
+            String commitUser,
+            OperatorEventGateway gateway,
+            boolean autoTagForSavepoint)
+            throws Exception {
         RowDataStoreWriteOperator.Factory operatorFactory =
                 new RowDataStoreWriteOperator.Factory(
                         table,
@@ -426,7 +642,8 @@ public class CoordinatorCommittingRowDataStoreWriteOperatorTest extends Committe
                                         table,
                                         storeSinkWriteProvider,
                                         commitUser,
-                                        gateway);
+                                        gateway,
+                                        autoTagForSavepoint);
                     }
 
                     @Override

@@ -18,6 +18,10 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.Snapshot;
+
+import javax.annotation.Nullable;
+
 import java.util.List;
 
 /** Full-text scan to scan index files. */
@@ -28,5 +32,11 @@ public interface FullTextScan {
     /** Plan of full-text scan. */
     interface Plan {
         List<FullTextSearchSplit> splits();
+
+        /** Snapshot the plan was built against; the read pins live-row filtering to it. */
+        @Nullable
+        default Snapshot snapshot() {
+            return null;
+        }
     }
 }

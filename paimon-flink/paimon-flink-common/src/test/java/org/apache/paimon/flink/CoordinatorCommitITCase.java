@@ -18,26 +18,42 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.flink.sink.FlinkSinkBuilder;
+import org.apache.paimon.flink.source.AbstractNonCoordinatedSource;
+import org.apache.paimon.flink.source.AbstractNonCoordinatedSourceReader;
+import org.apache.paimon.flink.source.SimpleSourceSplit;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.CloseableIterator;
 
 import org.apache.flink.api.common.JobID;
+import org.apache.flink.api.common.eventtime.Watermark;
+import org.apache.flink.api.connector.source.Boundedness;
+import org.apache.flink.api.connector.source.ReaderOutput;
+import org.apache.flink.api.connector.source.SourceReader;
+import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.client.program.ClusterClient;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.execution.JobClient;
+import org.apache.flink.core.io.InputStatus;
 import org.apache.flink.metrics.Metric;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.metrics.groups.OperatorMetricGroup;
 import org.apache.flink.runtime.client.JobStatusMessage;
 import org.apache.flink.runtime.testutils.InMemoryReporter;
 import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
+import org.apache.flink.streaming.api.datastream.DataStreamSource;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.TableResult;
+import org.apache.flink.table.data.GenericRowData;
+import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.data.StringData;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -54,6 +70,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class CoordinatorCommitITCase {
 
     private static final int DEFAULT_PARALLELISM = 2;
+    private static final int SCRIPTED_PARALLELISM = 2;
     private static final long WAIT_TIMEOUT_MILLIS = 60_000L;
     private static final InMemoryReporter reporter = InMemoryReporter.create();
 
@@ -108,6 +125,114 @@ public class CoordinatorCommitITCase {
         runningJob.cancel();
 
         assertThat(readRowCount(runningJob.table)).isGreaterThan(0L);
+    }
+
+    /**
+     * Idle watermark parity: the snapshot watermark observed with coordinator-commit enabled must
+     * match the one produced by the classic {@code CommitterOperator} path under the same input
+     * script. See {@link IdleWatermarkScriptedSource} for the three scenarios covered — steady
+     * multi-active min, one subtask idle, and all subtasks idle.
+     */
+    @Timeout(value = 240, unit = TimeUnit.SECONDS)
+    @Test
+    public void testIdleWatermarkParityAcrossCommitPaths() throws Exception {
+        for (IdleWatermarkScriptedSource.Scenario scenario :
+                IdleWatermarkScriptedSource.Scenario.values()) {
+            long coordinatorWatermark = runIdleWatermarkScenario(scenario, true);
+            long committerWatermark = runIdleWatermarkScenario(scenario, false);
+            assertThat(coordinatorWatermark)
+                    .describedAs(
+                            "coordinator vs committer snapshot watermark mismatch for scenario "
+                                    + scenario)
+                    .isEqualTo(committerWatermark);
+            assertThat(coordinatorWatermark)
+                    .describedAs("scenario " + scenario + " expected watermark")
+                    .isEqualTo(scenario.expectedWatermark);
+        }
+    }
+
+    private long runIdleWatermarkScenario(
+            IdleWatermarkScriptedSource.Scenario scenario, boolean coordinatorCommitEnabled)
+            throws Exception {
+        String tableName =
+                "T_IDLE_"
+                        + scenario.name()
+                        + "_"
+                        + (coordinatorCommitEnabled ? "COORD" : "CLASSIC");
+        TableEnvironment tEnv =
+                TableEnvironment.create(
+                        EnvironmentSettings.newInstance().inStreamingMode().build());
+        tEnv.getConfig().getConfiguration().setString("execution.checkpointing.interval", "200 ms");
+        tEnv.executeSql(
+                "CREATE CATALOG idlecat WITH ( 'type' = 'paimon', 'warehouse' = '"
+                        + tempPath
+                        + "/"
+                        + scenario.name()
+                        + '_'
+                        + coordinatorCommitEnabled
+                        + "' )");
+        tEnv.executeSql("USE CATALOG idlecat");
+        // write-only=true is kept identical across both paths so the only variable under test is
+        // sink.coordinator-commit.enabled; otherwise compaction snapshots would perturb the
+        // "latest snapshot watermark" observations differently between paths.
+        String coordinatorOption =
+                coordinatorCommitEnabled ? ", 'sink.coordinator-commit.enabled' = 'true'" : "";
+        tEnv.executeSql(
+                "CREATE TABLE "
+                        + tableName
+                        + " (id INT, data STRING) WITH ("
+                        + "'bucket' = '-1', 'write-only' = 'true'"
+                        + coordinatorOption
+                        + ")");
+
+        FileStoreTable table =
+                (FileStoreTable)
+                        ((FlinkCatalog) tEnv.getCatalog("idlecat").get())
+                                .catalog()
+                                .getTable(Identifier.create("default", tableName));
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setParallelism(SCRIPTED_PARALLELISM);
+        env.enableCheckpointing(200);
+
+        DataStreamSource<RowData> source =
+                env.fromSource(
+                                new IdleWatermarkScriptedSource(scenario),
+                                org.apache.flink.api.common.eventtime.WatermarkStrategy
+                                        .noWatermarks(),
+                                "idle-watermark-source")
+                        .setParallelism(SCRIPTED_PARALLELISM);
+
+        new FlinkSinkBuilder(table).forRowData(source).build();
+
+        JobClient client = env.executeAsync("idle-watermark-" + tableName);
+        JobID jobId = client.getJobID();
+        try {
+            // The option only expresses intent; a failed precondition would silently fall back to
+            // the classic path. Confirm the intended path is actually running by waiting for its
+            // own positive metric signal before trusting any watermark observation.
+            if (coordinatorCommitEnabled) {
+                waitUntilCoordinatorCommitMetricsRegistered(jobId);
+            } else {
+                waitUntilGlobalCommitterMetricGroupsRegistered(jobId);
+            }
+
+            long deadline = System.currentTimeMillis() + WAIT_TIMEOUT_MILLIS;
+            long observedWatermark = Long.MIN_VALUE;
+            while (System.currentTimeMillis() < deadline) {
+                Snapshot snapshot = table.snapshotManager().latestSnapshot();
+                if (snapshot != null && snapshot.watermark() != null) {
+                    observedWatermark = snapshot.watermark();
+                    if (observedWatermark >= scenario.expectedWatermark) {
+                        break;
+                    }
+                }
+                Thread.sleep(200);
+            }
+            return observedWatermark;
+        } finally {
+            client.cancel().get(30, TimeUnit.SECONDS);
+        }
     }
 
     private RunningJob startStreamingInsert(boolean coordinatorCommitEnabled) throws Exception {
@@ -301,6 +426,135 @@ public class CoordinatorCommitITCase {
 
         private void cancel() throws Exception {
             client.cancel().get(30, TimeUnit.SECONDS);
+        }
+    }
+
+    /**
+     * Scripted source that emits controlled ({@link Watermark}, {@link
+     * org.apache.flink.api.connector.source.SourceOutput#markIdle()}) sequences on a per-subtask
+     * basis, so the same input drives both commit paths deterministically without depending on
+     * datagen timing. Subtask-0 and subtask-1 follow the {@code Scenario}'s script; each step emits
+     * a watermark or marks the split idle, sleeps briefly to let checkpoints run, then the source
+     * stays available forever so the job is only stopped by the outer cancel.
+     */
+    private static class IdleWatermarkScriptedSource extends AbstractNonCoordinatedSource<RowData> {
+
+        private static final long serialVersionUID = 1L;
+
+        enum Scenario {
+            /** Both subtasks stay active; snapshot watermark equals the smaller of the two. */
+            ALL_ACTIVE(300L),
+            /**
+             * Subtask-0 emits a small watermark then goes idle; subtask-1 keeps emitting bigger
+             * watermarks. The idle subtask must not hold the snapshot back.
+             */
+            PARTIAL_IDLE(700L),
+            /**
+             * Both subtasks emit a watermark and go idle. Once every input is idle, Flink's valve
+             * flushes {@code max} over all channels — so the snapshot watermark advances to the
+             * larger of the two, then stays put (not regresses back to {@code Long.MIN_VALUE}).
+             */
+            ALL_IDLE(600L);
+
+            final long expectedWatermark;
+
+            Scenario(long expectedWatermark) {
+                this.expectedWatermark = expectedWatermark;
+            }
+        }
+
+        private final Scenario scenario;
+
+        IdleWatermarkScriptedSource(Scenario scenario) {
+            this.scenario = scenario;
+        }
+
+        @Override
+        public Boundedness getBoundedness() {
+            return Boundedness.CONTINUOUS_UNBOUNDED;
+        }
+
+        @Override
+        public SourceReader<RowData, SimpleSourceSplit> createReader(
+                SourceReaderContext sourceReaderContext) {
+            return new Reader(scenario, sourceReaderContext.getIndexOfSubtask());
+        }
+
+        private static class Reader extends AbstractNonCoordinatedSourceReader<RowData> {
+
+            private final Scenario scenario;
+            private final int subtaskIndex;
+
+            private int step;
+
+            Reader(Scenario scenario, int subtaskIndex) {
+                this.scenario = scenario;
+                this.subtaskIndex = subtaskIndex;
+            }
+
+            @Override
+            public InputStatus pollNext(ReaderOutput<RowData> output) throws InterruptedException {
+                if (step == 0) {
+                    // Emit one record so the writer has something to commit and thus produces a
+                    // snapshot carrying the watermark for us to observe.
+                    output.collect(
+                            GenericRowData.of(
+                                    subtaskIndex, StringData.fromString("s" + subtaskIndex)));
+                }
+                switch (scenario) {
+                    case ALL_ACTIVE:
+                        return driveAllActive(output);
+                    case PARTIAL_IDLE:
+                        return drivePartialIdle(output);
+                    case ALL_IDLE:
+                        return driveAllIdle(output);
+                    default:
+                        throw new IllegalStateException("Unknown scenario " + scenario);
+                }
+            }
+
+            private InputStatus driveAllActive(ReaderOutput<RowData> output)
+                    throws InterruptedException {
+                // Both subtasks keep emitting increasing watermarks. Min across subtasks = 300.
+                long watermark = subtaskIndex == 0 ? 300L : 500L;
+                output.emitWatermark(new Watermark(watermark));
+                Thread.sleep(200);
+                step++;
+                return InputStatus.MORE_AVAILABLE;
+            }
+
+            private InputStatus drivePartialIdle(ReaderOutput<RowData> output)
+                    throws InterruptedException {
+                if (subtaskIndex == 0) {
+                    if (step == 0) {
+                        output.emitWatermark(new Watermark(100L));
+                        Thread.sleep(200);
+                        output.markIdle();
+                    }
+                    Thread.sleep(200);
+                    step++;
+                    return InputStatus.MORE_AVAILABLE;
+                }
+                // subtask-1 keeps advancing; peers at 700 by the second step.
+                long watermark = 500L + Math.min(step, 1) * 200L;
+                output.emitWatermark(new Watermark(watermark));
+                Thread.sleep(200);
+                step++;
+                return InputStatus.MORE_AVAILABLE;
+            }
+
+            private InputStatus driveAllIdle(ReaderOutput<RowData> output)
+                    throws InterruptedException {
+                if (step == 0) {
+                    long watermark = subtaskIndex == 0 ? 400L : 600L;
+                    output.emitWatermark(new Watermark(watermark));
+                    Thread.sleep(200);
+                    output.markIdle();
+                }
+                Thread.sleep(200);
+                step++;
+                return InputStatus.MORE_AVAILABLE;
+            }
         }
     }
 }

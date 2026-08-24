@@ -39,19 +39,21 @@ import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
 import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, Assignment, ColumnDefinition, CTERelationRef, InsertAction, LogicalPlan, MergeAction, MergeIntoTable, MergeRows, SubqueryAlias, TableSpec, UnresolvedWith, UpdateAction}
 import org.apache.spark.sql.catalyst.plans.logical.MergeRows.{Copy, Insert, Keep, Update}
+import org.apache.spark.sql.catalyst.plans.physical.{ClusteredDistribution, Distribution}
 import org.apache.spark.sql.catalyst.rules.Rule
-import org.apache.spark.sql.catalyst.util.{ArrayData, GeneratedColumn, IdentityColumn, ResolveDefaultColumns}
+import org.apache.spark.sql.catalyst.util.{ArrayData, GeneratedColumn, IdentityColumn, ResolveDefaultColumns, STUtils}
 import org.apache.spark.sql.connector.catalog.{CatalogV2Util, Column, Identifier, StagingTableCatalog, Table, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
+import org.apache.spark.sql.connector.read.Scan
 import org.apache.spark.sql.connector.write.BatchWrite
 import org.apache.spark.sql.execution.{SparkFormatTable, SparkPlan}
 import org.apache.spark.sql.execution.datasources.{PartitioningAwareFileIndex, PartitionSpec}
 import org.apache.spark.sql.execution.datasources.v2.{AtomicReplaceTableAsSelectExec, AtomicReplaceTableExec, ReplaceTableAsSelectExec, ReplaceTableExec}
-import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
+import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, DataSourceV2ScanRelation}
 import org.apache.spark.sql.execution.streaming.runtime.MetadataLogFileIndex
 import org.apache.spark.sql.execution.streaming.sinks.FileStreamSink
 import org.apache.spark.sql.internal.SQLConf
-import org.apache.spark.sql.types.{DataTypes, StructType, VariantType}
+import org.apache.spark.sql.types.{DataTypes, Geography, GeographyType, Geometry, GeometryType, StructType, VariantType}
 import org.apache.spark.unsafe.types.VariantVal
 
 import java.util.{Map => JMap}
@@ -214,10 +216,9 @@ class Spark4Shim extends SparkShim {
 
   override def createFormatTableBatchWrite(
       table: FormatTable,
-      overwriteDynamic: Option[Boolean],
       overwritePartitions: Option[Map[String, String]],
       writeSchema: StructType): BatchWrite =
-    new FormatTableBatchWrite(table, overwriteDynamic, overwritePartitions, writeSchema)
+    new FormatTableBatchWrite(table, overwritePartitions, writeSchema)
 
   override def createCTERelationRef(
       cteId: Long,
@@ -226,6 +227,14 @@ class Spark4Shim extends SparkShim {
       isStreaming: Boolean): CTERelationRef = {
     CTERelationRef(cteId, resolved, output.toSeq, isStreaming)
   }
+
+  override def createClusteredDistribution(
+      expressions: Seq[Expression],
+      numPartitions: Int): Distribution =
+    ClusteredDistribution(
+      expressions,
+      requireAllClusterKeys = false,
+      requiredNumPartitions = Some(numPartitions))
 
   override def supportsHashAggregate(
       aggregateBufferAttributes: Seq[Attribute],
@@ -274,6 +283,19 @@ class Spark4Shim extends SparkShim {
       table: Table,
       output: Seq[AttributeReference]): DataSourceV2Relation = {
     relation.copy(table = table, output = output)
+  }
+
+  override def createDataSourceV2ScanRelation(
+      relation: DataSourceV2ScanRelation,
+      scan: Scan,
+      output: Seq[AttributeReference]): DataSourceV2ScanRelation = {
+    DataSourceV2ScanRelation(relation.relation, scan, output, None, None)
+  }
+
+  override def createClusteredDistribution(
+      expressions: Seq[Expression],
+      requiredNumPartitions: Option[Int]): Distribution = {
+    ClusteredDistribution(expressions, requiredNumPartitions = requiredNumPartitions)
   }
 
   override def earlyBatchRules(): Seq[Rule[LogicalPlan]] = Seq(CTESubstitution)
@@ -335,6 +357,74 @@ class Spark4Shim extends SparkShim {
     dataType.isInstanceOf[VariantType]
 
   override def SparkVariantType(): org.apache.spark.sql.types.DataType = DataTypes.VariantType
+
+  override def toPaimonGeometry(o: Object): Array[Byte] =
+    o.asInstanceOf[Geometry].getBytes
+
+  override def toPaimonGeometry(row: InternalRow, pos: Int): Array[Byte] =
+    STUtils.stAsBinary(row.getGeometry(pos))
+
+  override def toPaimonGeometry(array: ArrayData, pos: Int): Array[Byte] =
+    STUtils.stAsBinary(array.getGeometry(pos))
+
+  override def toPaimonGeography(o: Object): Array[Byte] =
+    o.asInstanceOf[Geography].getBytes
+
+  override def toPaimonGeography(row: InternalRow, pos: Int): Array[Byte] =
+    STUtils.stAsBinary(row.getGeography(pos))
+
+  override def toPaimonGeography(array: ArrayData, pos: Int): Array[Byte] =
+    STUtils.stAsBinary(array.getGeography(pos))
+
+  override def toSparkGeometry(wkb: Array[Byte], crs: String): Object = {
+    val geometryType = sparkGeometryType(crs)
+    STUtils.stGeomFromWKB(wkb, geometryType.srid)
+  }
+
+  override def toSparkGeography(wkb: Array[Byte], crs: String, algorithm: String): Object = {
+    val geographyType = sparkGeographyType(crs, algorithm)
+    STUtils.stSetSrid(STUtils.stGeogFromWKB(wkb), geographyType.srid)
+  }
+
+  override def isSparkGeometryType(dataType: org.apache.spark.sql.types.DataType): Boolean =
+    dataType.isInstanceOf[GeometryType]
+
+  override def isSparkGeographyType(dataType: org.apache.spark.sql.types.DataType): Boolean =
+    dataType.isInstanceOf[GeographyType]
+
+  override def SparkGeometryType(crs: String): org.apache.spark.sql.types.DataType =
+    sparkGeometryType(crs)
+
+  override def SparkGeographyType(
+      crs: String,
+      algorithm: String): org.apache.spark.sql.types.DataType = sparkGeographyType(crs, algorithm)
+
+  override def sparkGeometryCrs(dataType: org.apache.spark.sql.types.DataType): String = {
+    val geometryType = dataType.asInstanceOf[GeometryType]
+    require(!geometryType.isMixedSrid, "Paimon does not support mixed-SRID geometry values")
+    geometryType.crs
+  }
+
+  override def sparkGeographyCrs(dataType: org.apache.spark.sql.types.DataType): String = {
+    val geographyType = dataType.asInstanceOf[GeographyType]
+    require(!geographyType.isMixedSrid, "Paimon does not support mixed-SRID geography values")
+    geographyType.crs
+  }
+
+  override def sparkGeographyAlgorithm(dataType: org.apache.spark.sql.types.DataType): String =
+    dataType.asInstanceOf[GeographyType].algorithm.toString
+
+  private def sparkGeometryType(crs: String): GeometryType = {
+    val geometryType = GeometryType(crs)
+    require(!geometryType.isMixedSrid, "Paimon does not support mixed-SRID geometry values")
+    geometryType
+  }
+
+  private def sparkGeographyType(crs: String, algorithm: String): GeographyType = {
+    val geographyType = GeographyType(crs, algorithm)
+    require(!geographyType.isMixedSrid, "Paimon does not support mixed-SRID geography values")
+    geographyType
+  }
 
   // SQL UDFs (CREATE FUNCTION ... RETURN ...).
   override def rewritePaimonSQLFunctionCommands(spark: SparkSession): Rule[LogicalPlan] =

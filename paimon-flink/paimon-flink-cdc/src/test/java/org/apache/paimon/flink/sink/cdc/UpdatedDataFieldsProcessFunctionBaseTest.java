@@ -29,6 +29,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.SmallIntType;
+import org.apache.paimon.types.TimeType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VarCharType;
 
@@ -93,6 +94,24 @@ public class UpdatedDataFieldsProcessFunctionBaseTest {
                         oldType, smallerRangeType, TypeMapping.defaultMapping());
 
         assertEquals(UpdatedDataFieldsProcessFunctionBase.ConvertAction.IGNORE, convertAction);
+    }
+
+    @Test
+    public void testCanConvertTime() {
+        // Debezium maps every PostgreSQL time(0..3) column to TIME(3), while the JDBC schema path
+        // keeps TIME(n); widening TIME(0) -> TIME(3) must convert instead of throwing.
+        TimeType oldType = new TimeType(true, 0);
+        TimeType biggerPrecision = new TimeType(true, 3);
+        TimeType smallerPrecision = new TimeType(true, 0);
+
+        assertEquals(
+                UpdatedDataFieldsProcessFunctionBase.ConvertAction.CONVERT,
+                UpdatedDataFieldsProcessFunctionBase.canConvert(
+                        oldType, biggerPrecision, TypeMapping.defaultMapping()));
+        assertEquals(
+                UpdatedDataFieldsProcessFunctionBase.ConvertAction.IGNORE,
+                UpdatedDataFieldsProcessFunctionBase.canConvert(
+                        biggerPrecision, smallerPrecision, TypeMapping.defaultMapping()));
     }
 
     @Test

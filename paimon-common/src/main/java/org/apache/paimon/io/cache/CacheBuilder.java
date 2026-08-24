@@ -22,69 +22,33 @@ import org.apache.paimon.options.MemorySize;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.RemovalCause;
-import org.apache.paimon.shade.guava30.com.google.common.cache.RemovalNotification;
 
-/** Cache builder builds cache from cache type. */
-public abstract class CacheBuilder {
-    protected MemorySize memorySize;
+/** Builder for a Caffeine cache. */
+public class CacheBuilder {
+    private MemorySize memorySize;
 
     CacheBuilder maximumWeight(MemorySize memorySize) {
         this.memorySize = memorySize;
         return this;
     }
 
-    public abstract Cache build();
-
-    public static CacheBuilder newBuilder(Cache.CacheType type) {
-        switch (type) {
-            case CAFFEINE:
-                return new CaffeineCacheBuilder();
-            case GUAVA:
-                return new GuavaCacheBuilder();
-            default:
-                throw new UnsupportedOperationException("Unsupported CacheType: " + type);
-        }
+    public static CacheBuilder newBuilder() {
+        return new CacheBuilder();
     }
 
-    static class CaffeineCacheBuilder extends CacheBuilder {
-        @Override
-        public Cache build() {
-            return new CaffeineCache(
-                    Caffeine.newBuilder()
-                            .weigher(CacheBuilder::weigh)
-                            .maximumWeight(memorySize.getBytes())
-                            .removalListener(this::onRemoval)
-                            .executor(Runnable::run)
-                            .build());
-        }
-
-        private void onRemoval(CacheKey key, Cache.CacheValue value, RemovalCause cause) {
-            if (value != null) {
-                value.callback.onRemoval(key);
-            }
-        }
+    public Cache build() {
+        return new CaffeineCache(
+                Caffeine.newBuilder()
+                        .weigher(CacheBuilder::weigh)
+                        .maximumWeight(memorySize.getBytes())
+                        .removalListener(this::onRemoval)
+                        .executor(Runnable::run)
+                        .build());
     }
 
-    static class GuavaCacheBuilder extends CacheBuilder {
-        @Override
-        public Cache build() {
-            return new GuavaCache(
-                    org.apache.paimon.shade.guava30.com.google.common.cache.CacheBuilder
-                            .newBuilder()
-                            .weigher(CacheBuilder::weigh)
-                            // The concurrency level determines the number of segment caches in
-                            // Guava,limiting the maximum block entries held in cache. Since we do
-                            // not access this cache concurrently, it is set to 1.
-                            .concurrencyLevel(1)
-                            .maximumWeight(memorySize.getBytes())
-                            .removalListener(this::onRemoval)
-                            .build());
-        }
-
-        private void onRemoval(RemovalNotification<CacheKey, Cache.CacheValue> notification) {
-            if (notification.getValue() != null) {
-                notification.getValue().callback.onRemoval(notification.getKey());
-            }
+    private void onRemoval(CacheKey key, Cache.CacheValue value, RemovalCause cause) {
+        if (value != null) {
+            value.callback.onRemoval(key);
         }
     }
 

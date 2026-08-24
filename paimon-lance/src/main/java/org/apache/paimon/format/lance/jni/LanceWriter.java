@@ -18,6 +18,8 @@
 
 package org.apache.paimon.format.lance.jni;
 
+import org.apache.paimon.arrow.ArrowUtils;
+
 import com.lancedb.lance.file.LanceFileWriter;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.FieldVector;
@@ -32,6 +34,7 @@ public class LanceWriter {
     private final String path;
     private final Map<String, String> storageOptions;
     private LanceFileWriter writer;
+    private BufferAllocator allocator;
     private long bytesWritten = 0;
 
     public LanceWriter(String path, Map<String, String> storageOptions) {
@@ -44,10 +47,23 @@ public class LanceWriter {
     }
 
     public void writeVsr(VectorSchemaRoot vsr) throws IOException {
-        initWriteLazy(vsr.getVector(0).getAllocator());
+        BufferAllocator sourceAllocator = vsr.getVector(0).getAllocator();
+        initWriteLazy(sourceAllocator);
+        if (!ArrowUtils.hasSameRootAllocator(vsr, allocator)) {
+            throw new IllegalArgumentException(
+                    "Lance writer cannot consume Arrow buffers from a different allocator root.");
+        }
         this.bytesWritten +=
                 vsr.getFieldVectors().stream().mapToLong(FieldVector::getBufferSize).sum();
         this.writer.write(vsr);
+    }
+
+    /**
+     * Initializes the native writer with an allocator whose lifetime is owned by the surrounding
+     * format writer.
+     */
+    public void ensureInitialized(BufferAllocator bufferAllocator) throws IOException {
+        initWriteLazy(bufferAllocator);
     }
 
     public void close() throws IOException {
@@ -58,6 +74,7 @@ public class LanceWriter {
                 throw new IOException(e);
             }
             this.writer = null;
+            this.allocator = null;
         }
     }
 
@@ -68,6 +85,7 @@ public class LanceWriter {
     private void initWriteLazy(BufferAllocator bufferAllocator) throws IOException {
         if (writer == null) {
             writer = LanceFileWriter.open(path, bufferAllocator, null, storageOptions);
+            allocator = bufferAllocator;
         }
     }
 }

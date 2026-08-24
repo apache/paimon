@@ -307,7 +307,7 @@ public class ESIndexOptions {
         if (vectorAlgorithm == VectorAlgorithm.NATIVE) {
             throw new IllegalArgumentException(
                     "Vector algorithm 'native' is not supported by paimon-eslib; "
-                            + "use 'hnsw' or 'diskbbq'");
+                            + "use 'hnsw', 'int8_hnsw', or 'diskbbq'");
         }
 
         String dimStr = resolve(options, fieldName, "dimension", null);
@@ -352,15 +352,16 @@ public class ESIndexOptions {
         // table can contain HNSW and DiskBBQ fields at the same time, so a global HNSW parameter
         // must not make a DiskBBQ field invalid (and vice versa). Field-level parameters remain
         // strict because they unambiguously target this field.
+        boolean hnswAlgorithm = isHnswAlgorithm(vectorAlgorithm);
         String mStr =
-                vectorAlgorithm == VectorAlgorithm.HNSW
+                hnswAlgorithm
                         ? resolve(options, fieldName, "m", null)
                         : resolveField(options, fieldName, "m");
         String efStr =
-                vectorAlgorithm == VectorAlgorithm.HNSW
+                hnswAlgorithm
                         ? resolve(options, fieldName, "ef_construction", null)
                         : resolveField(options, fieldName, "ef_construction");
-        if (vectorAlgorithm == VectorAlgorithm.HNSW) {
+        if (hnswAlgorithm) {
             putBoundedPositiveIntegerParameter(
                     params, fieldName, "m", mStr, Lucene99HnswVectorsFormat.MAXIMUM_MAX_CONN);
             putBoundedPositiveIntegerParameter(
@@ -375,7 +376,7 @@ public class ESIndexOptions {
                             + fieldName
                             + "' configures m/ef_construction but algorithm is "
                             + algorithm
-                            + "; these parameters require algorithm=hnsw.");
+                            + "; these parameters require algorithm=hnsw or int8_hnsw.");
         }
         String vpcStr =
                 vectorAlgorithm == VectorAlgorithm.DISKBBQ
@@ -419,6 +420,10 @@ public class ESIndexOptions {
                 .metric(metric)
                 .algorithmParams(params)
                 .build();
+    }
+
+    private static boolean isHnswAlgorithm(VectorAlgorithm algorithm) {
+        return algorithm == VectorAlgorithm.HNSW || algorithm == VectorAlgorithm.INT8_HNSW;
     }
 
     private static BuiltinAnalyzer parseAnalyzer(String fieldName, String analyzerName) {

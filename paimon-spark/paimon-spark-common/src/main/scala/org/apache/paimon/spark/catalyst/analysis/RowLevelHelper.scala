@@ -66,6 +66,7 @@ trait RowLevelHelper extends SQLConfHelper {
       .filterNot {
         case BinaryExpression(left, right) => left == right
         case Assignment(key, value) => key == value
+        case _ => false
       }
       .exists {
         case EqualTo(left: AttributeReference, right: AttributeReference) =>

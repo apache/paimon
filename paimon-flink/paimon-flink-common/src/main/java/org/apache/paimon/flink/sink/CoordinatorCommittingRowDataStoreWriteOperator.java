@@ -33,13 +33,16 @@ import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.common.typeutils.base.array.BytePrimitiveArraySerializer;
 import org.apache.flink.core.io.SimpleVersionedSerializerTypeSerializerProxy;
+import org.apache.flink.runtime.checkpoint.CheckpointOptions;
 import org.apache.flink.runtime.operators.coordination.OperatorEventGateway;
+import org.apache.flink.runtime.state.CheckpointStreamFactory;
 import org.apache.flink.runtime.state.StateInitializationContext;
-import org.apache.flink.runtime.state.StateSnapshotContext;
+import org.apache.flink.streaming.api.operators.OperatorSnapshotFutures;
 import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
 import org.apache.flink.streaming.api.operators.util.SimpleVersionedListState;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
+import org.apache.flink.streaming.runtime.watermarkstatus.WatermarkStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -70,6 +73,9 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
 
     private final OperatorEventGateway operatorEventGateway;
 
+    /** Whether savepoint auto-tagging is enabled; when off the writer never flags a tag intent. */
+    private final boolean autoTagForSavepoint;
+
     /** Persisted buffer of pending checkpoints not yet acknowledged by the coordinator. */
     private transient ListState<CheckpointCommittables> pendingCommittableState;
 
@@ -79,6 +85,15 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
     /** Latest watermark observed on the input; forwarded on subsequent events. */
     private transient long currentWatermark;
 
+    /**
+     * Latest {@code WatermarkStatus} observed on the input, mirroring what Flink's upstream {@code
+     * StatusWatermarkValve} exposes. Frozen at barrier time alongside {@link #currentWatermark} so
+     * the coordinator can reproduce valve-faithful idle handling from the per-checkpoint entries.
+     * Not checkpointed: on restore we default to ACTIVE and let upstream re-emit {@link
+     * WatermarkStatus#IDLE} if it still applies, matching Flink valve's rebuilt initial state.
+     */
+    private transient boolean currentIdle;
+
     private transient CheckpointCommittablesSerializer stateSerializer;
     private transient TypeSerializer<CheckpointCommittables> eventSerializer;
 
@@ -87,9 +102,11 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
             FileStoreTable table,
             StoreSinkWrite.Provider storeSinkWriteProvider,
             String initialCommitUser,
-            OperatorEventGateway operatorEventGateway) {
+            OperatorEventGateway operatorEventGateway,
+            boolean autoTagForSavepoint) {
         super(parameters, table, storeSinkWriteProvider, initialCommitUser);
         this.operatorEventGateway = Preconditions.checkNotNull(operatorEventGateway);
+        this.autoTagForSavepoint = autoTagForSavepoint;
     }
 
     @Override
@@ -116,6 +133,7 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
                         stateSerializer);
         pendingCommittables = new TreeMap<>();
         currentWatermark = Long.MIN_VALUE;
+        currentIdle = false;
 
         if (context.isRestored()) {
             Preconditions.checkState(context.getRestoredCheckpointId().isPresent());
@@ -141,10 +159,26 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
     }
 
     @Override
-    public void snapshotState(StateSnapshotContext context) throws Exception {
-        super.snapshotState(context);
+    public OperatorSnapshotFutures snapshotState(
+            long checkpointId,
+            long timestamp,
+            CheckpointOptions checkpointOptions,
+            CheckpointStreamFactory storageLocation)
+            throws Exception {
+        // Ordering within a checkpoint: emitCommittables already ran (in prepareSnapshotPreBarrier,
+        // before the barrier) and buffered this checkpoint's committables into pendingCommittables.
+        if (autoTagForSavepoint && checkpointOptions.getCheckpointType().isSavepoint()) {
+            pendingCommittables.computeIfPresent(
+                    checkpointId,
+                    (id, checkpointCommittables) ->
+                            checkpointCommittables.withShouldCreateSavepointTag(true));
+        }
+        // Report here, not in emitCommittables, so the savepoint-tag intent is known before
+        // sending.
+        reportToCoordinator(checkpointId);
         pendingCommittableState.clear();
         pendingCommittableState.addAll(new ArrayList<>(pendingCommittables.values()));
+        return super.snapshotState(checkpointId, timestamp, checkpointOptions, storageLocation);
     }
 
     @Override
@@ -156,13 +190,26 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
     }
 
     @Override
+    public void notifyCheckpointAborted(long checkpointId) throws Exception {
+        super.notifyCheckpointAborted(checkpointId);
+        if (!autoTagForSavepoint) {
+            return;
+        }
+        // Drop only the savepoint-tag intent on the aborted committables (keep the data). A later
+        // checkpoint must not persist a stale intent, or the coordinator would recreate a tag for a
+        // gone savepoint. Mirrors the operator path pruning the aborted id.
+        pendingCommittables.computeIfPresent(
+                checkpointId,
+                (id, checkpointCommittables) ->
+                        checkpointCommittables.withShouldCreateSavepointTag(false));
+    }
+
+    @Override
     protected void emitCommittables(boolean waitCompaction, long checkpointId) throws IOException {
         List<Committable> committables = prepareCommit(waitCompaction, checkpointId);
         CheckpointCommittables entry =
-                new CheckpointCommittables(checkpointId, committables, currentWatermark);
-        // Emit an event per (subtask, checkpoint) regardless of whether committables is empty.
-        operatorEventGateway.sendEventToCoordinator(
-                CommittableEvent.create(checkpointId, entry, eventSerializer));
+                new CheckpointCommittables(
+                        checkpointId, committables, currentWatermark, currentIdle);
         // Always buffer the per-checkpoint entry so an empty barrier — even one that has not seen
         // a real watermark yet — survives restore. The coordinator relies on every subtask
         // having an entry for the checkpoint being aligned so its watermark min stays sound.
@@ -174,12 +221,37 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
     }
 
     @Override
+    public void endInput() throws Exception {
+        super.endInput();
+        // endInput emits the Long.MAX_VALUE committables but is not followed by a snapshotState,
+        // so report them here just to keep the existing behavior.
+        // TODO: revisit how end-of-input committables should be handled.
+        reportToCoordinator(Long.MAX_VALUE);
+    }
+
+    /**
+     * Sends the buffered committables for {@code checkpointId} to the coordinator, one per
+     * checkpoint.
+     */
+    private void reportToCoordinator(long checkpointId) throws IOException {
+        operatorEventGateway.sendEventToCoordinator(
+                CommittableEvent.create(
+                        checkpointId, pendingCommittables.get(checkpointId), eventSerializer));
+    }
+
+    @Override
     public void processWatermark(Watermark mark) throws Exception {
         super.processWatermark(mark);
         // Skip Long.MAX_VALUE watermarks (batch or bounded stream end markers).
         if (mark.getTimestamp() != Long.MAX_VALUE) {
             currentWatermark = mark.getTimestamp();
         }
+    }
+
+    @Override
+    public void processWatermarkStatus(WatermarkStatus watermarkStatus) throws Exception {
+        super.processWatermarkStatus(watermarkStatus);
+        currentIdle = watermarkStatus.isIdle();
     }
 
     @VisibleForTesting

@@ -78,6 +78,7 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
         nativeOptions.put("index.type", identifier.replace('-', '_'));
         nativeOptions.put(
                 "dimension", String.valueOf(dimension(fieldType, nativeOptions, identifier)));
+        nativeOptions.putIfAbsent("metric", NativeVectorGlobalIndexer.DEFAULT_METRIC);
         return nativeOptions;
     }
 
@@ -146,14 +147,45 @@ public abstract class NativeVectorGlobalIndexerFactory implements GlobalIndexerF
             case "metric":
                 return "metric";
             case "nlist":
+            case "expected-vector-count":
             case "pq.m":
-            case "hnsw.m":
-            case "hnsw.ef-construction":
-            case "hnsw.max-level":
+            case "pq.code-ratio":
+            case "pq.bits":
+            case "rq.bits":
+            case "target-recall":
+            case "max-bytes-per-vector":
+            case "deployment-profile":
                 return optionKey;
             case "pq.use-opq":
             case "use-opq":
                 return "use-opq";
+            case "build-preset":
+            case "diskann.build-preset":
+                return "diskann.build-preset";
+            case "max-degree":
+            case "diskann.max-degree":
+                return "diskann.max-degree";
+            case "build-search-list-size":
+            case "diskann.build-search-list-size":
+                return "diskann.build-search-list-size";
+            case "alpha":
+            case "diskann.alpha":
+                return "diskann.alpha";
+            case "seed":
+            case "diskann.seed":
+                return "diskann.seed";
+            case "memory-budget-bytes":
+            case "diskann.memory-budget-bytes":
+                return "diskann.memory-budget-bytes";
+            case "storage-layout":
+            case "diskann.storage-layout":
+                return "diskann.storage-layout";
+            case "raw-vector-encoding":
+            case "diskann.raw-vector-encoding":
+                return "diskann.raw-vector-encoding";
+            case "build-distance":
+            case "diskann.build-distance":
+                return "diskann.build-distance";
             default:
                 return null;
         }

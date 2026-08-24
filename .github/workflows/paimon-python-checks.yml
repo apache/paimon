@@ -24,18 +24,17 @@ on:
       - 'paimon-python/**'
       - '!**/*.md'
       - '.github/workflows/paimon-python-checks.yml'
-      - '.github/workflows/install-paimon-full-text.sh'
   pull_request:
     paths:
       - 'paimon-python/**'
       - '!**/*.md'
       - '.github/workflows/paimon-python-checks.yml'
-      - '.github/workflows/install-paimon-full-text.sh'
 
 env:
   JDK_VERSION: 8
   MAVEN_OPTS: -Dmaven.wagon.httpconnectionManager.ttlSeconds=30 -Dmaven.wagon.http.retryHandler.requestSentEnabled=true
   LUMINA_DATA_VERSION: 0.1.0
+  PYPAIMON_RUST_REV: be5456e96b326939570b6ef5d63acddda3311c4f
 
 
 concurrency:
@@ -43,14 +42,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Lint + test on 3.6 and 3.10 only (not every Python version).
+  # Lint + test on selected versions only (3.6 / 3.7 low end, 3.10 / 3.11 / 3.12 / 3.13 current), not every Python version.
   lint-python:
     runs-on: ubuntu-latest
     container: "python:${{ matrix.python-version }}-slim"
     strategy:
       fail-fast: false
       matrix:
-        python-version: [ '3.6.15', '3.10', '3.11' ]
+        python-version: [ '3.6.15', '3.7', '3.10', '3.11', '3.12', '3.13' ]
 
     steps:
       - name: Checkout code
@@ -86,13 +85,10 @@ jobs:
           mvn -version
 
       - name: Install Rust toolchain
+        if: matrix.python-version == '3.11'
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-
-      - name: Install paimon-full-text native dependency
-        run: |
-          bash .github/workflows/install-paimon-full-text.sh native
 
       - name: Verify Python version
         run: python --version
@@ -123,31 +119,52 @@ jobs:
           if [[ "${{ matrix.python-version }}" == "3.6.15" ]]; then
             python -m pip install --upgrade pip==21.3.1
             python --version
-            python -m pip install --no-cache-dir pyroaring readerwriterlock==1.0.9 'fsspec==2021.10.1' 'cachetools==4.2.4' 'ossfs==2021.8.0' pyarrow==6.0.1 pandas==1.1.5 'polars==0.9.12' 'fastavro==1.4.7' zstandard==0.19.0 dataclasses==0.8.0 flake8 pytest py4j==0.10.9.9 requests parameterized==0.8.1 2>&1 >/dev/null
+            python -m pip install --no-cache-dir pyroaring readerwriterlock==1.0.9 'fsspec==2021.10.1' 'cachetools==4.2.4' 'ossfs==2021.8.0' pyarrow==6.0.1 pandas==1.1.5 'polars==0.9.12' 'fastavro==1.4.7' zstandard==0.19.0 dataclasses==0.8.0 flake8 pytest py4j==0.10.9.9 requests parameterized==0.8.1 datasketches==4.1.0 2>&1 >/dev/null
+            python -m pip install 'lumina-data>=${{ env.LUMINA_DATA_VERSION }}' -i https://pypi.org/simple/
+          elif [[ "${{ matrix.python-version }}" == "3.7" ]]; then
+            # 3.7 installs the version-pinned set declared for 3.7 in dev/requirements.txt.
+            # ray/lance/daft/torch have no 3.7 wheels; those tests are importorskip-ed (as on 3.6.15).
+            python -m pip install --upgrade pip
+            python -m pip install -r paimon-python/dev/requirements.txt
+            python -m pip install flake8==4.0.1 'pytest~=7.0' py4j==0.10.9.9 parameterized==0.9.0 datasketches==4.1.0
             python -m pip install 'lumina-data>=${{ env.LUMINA_DATA_VERSION }}' -i https://pypi.org/simple/
           else
             python -m pip install --upgrade pip
             pip install torch --index-url https://download.pytorch.org/whl/cpu
-            python -m pip install pyroaring readerwriterlock==1.0.9 fsspec==2024.3.1 cachetools==5.3.3 ossfs==2023.12.0 ray==2.54.0 fastavro==1.11.1 pyarrow==16.0.0 zstandard==0.24.0 polars==1.32.0 duckdb==1.3.2 numpy==1.24.3 pandas==2.0.3 pylance==0.39.0 cramjam flake8==4.0.1 pytest~=7.0 py4j==0.10.9.9 requests parameterized==0.9.0 'daft>=0.7.6' pypaimon-rust==0.2.0 'datafusion>=52'
+            python -m pip install pyroaring readerwriterlock==1.0.9 fsspec==2024.3.1 cachetools==5.3.3 ossfs==2023.12.0 ray==2.54.0 fastavro==1.11.1 'isal>=1.8,<2' zstandard==0.24.0 polars==1.32.0 duckdb==1.3.2 pylance==0.39.0 cramjam pytest~=7.0 py4j==0.10.9.9 requests parameterized==0.9.0 'daft>=0.7.6' 'datafusion>=54,<55' datasketches
+            if python -c "import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)"; then
+              python -m pip install pyarrow==24.0.0 numpy==2.4.6 pandas==2.3.3 flake8==7.1.2
+            else
+              python -m pip install pyarrow==16.0.0 numpy==1.24.3 pandas==2.0.3 flake8==4.0.1
+            fi
+
+            if [[ "${{ matrix.python-version }}" == "3.11" ]]; then
+              # Exercise the 0.4 API in one lane until its wheel is published.
+              python -m pip install "git+https://github.com/apache/paimon-rust.git@${PYPAIMON_RUST_REV}#subdirectory=bindings/python"
+              python -m pip install "./paimon-python[sql]"
+              python -c "import importlib.metadata as m; from pypaimon_rust.datafusion import PaimonCatalog, Split; assert m.version('pypaimon-rust') == '0.4.0'; assert hasattr(PaimonCatalog, 'get_table'); assert hasattr(Split, 'serialize')"
+            else
+              python -m pip install pypaimon-rust==0.3.0
+            fi
             python -m pip install 'lumina-data>=${{ env.LUMINA_DATA_VERSION }}' -i https://pypi.org/simple/
             if python -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)"; then
-              python -m pip install vortex-data==0.70.0
+              # Vortex requires pyarrow >= 17, while Pypaimon requires pyarrow < 20 and != 19.
+              python -m pip install vortex-data==0.70.0 pyarrow==18.1.0
             fi
             python -m pip install 'paimon-mosaic>=0.1.0'
+            if [[ "${{ matrix.python-version }}" == "3.11" ]]; then
+              python -m pip check
+            fi
           fi
           df -h
-
-      - name: Install paimon-full-text Python dependency
-        if: matrix.python-version != '3.6.15'
-        shell: bash
-        run: |
-          python -m pip install "${PAIMON_FULL_TEXT_DIR}/python"
-
 
       - name: Run lint-python.sh
         shell: bash
         run: |
           chmod +x paimon-python/dev/lint-python.sh
+          if [[ "${{ matrix.python-version }}" == "3.11" ]]; then
+            export PYPAIMON_TEST_NATIVE_PLAN=1
+          fi
           ./paimon-python/dev/lint-python.sh -e pytest_torch
 
   torch_test:
@@ -176,7 +193,7 @@ jobs:
         run: |
             python -m pip install --upgrade pip
             pip install torch --index-url https://download.pytorch.org/whl/cpu
-            python -m pip install pyroaring readerwriterlock==1.0.9 fsspec==2024.3.1 cachetools==5.3.3 ossfs==2023.12.0 ray==2.54.0 fastavro==1.11.1 pyarrow==16.0.0 zstandard==0.24.0 polars==1.32.0 duckdb==1.3.2 numpy==1.24.3 pandas==2.0.3 pylance==0.39.0 flake8==4.0.1 pytest~=7.0 py4j==0.10.9.9 requests parameterized==0.9.0
+            python -m pip install pyroaring readerwriterlock==1.0.9 fsspec==2024.3.1 cachetools==5.3.3 ossfs==2023.12.0 ray==2.54.0 fastavro==1.11.1 pyarrow==16.0.0 zstandard==0.24.0 polars==1.32.0 duckdb==1.3.2 numpy==1.24.3 pandas==2.0.3 pylance==0.39.0 flake8==4.0.1 pytest~=7.0 py4j==0.10.9.9 requests parameterized==0.9.0 datasketches
             python -m pip install 'lumina-data>=${{ env.LUMINA_DATA_VERSION }}' -i https://pypi.org/simple/
       - name: Run lint-python.sh
         shell: bash
@@ -275,7 +292,7 @@ jobs:
             pyroaring readerwriterlock==1.0.9 fsspec==2024.3.1 cachetools==5.3.3 ossfs==2023.12.0 \
             fastavro==1.11.1 pyarrow==16.0.0 zstandard==0.24.0 polars==1.32.0 duckdb==1.3.2 \
             numpy==1.24.3 pandas==2.0.3 cramjam pytest~=7.0 py4j==0.10.9.9 requests \
-            parameterized==0.9.0 packaging
+            parameterized==0.9.0 packaging datasketches
           python -m pip install 'lumina-data>=${{ env.LUMINA_DATA_VERSION }}' -i https://pypi.org/simple/
       - name: Test Ray version compatibility
         run: |
@@ -283,12 +300,16 @@ jobs:
           echo "=========================================="
           echo "Testing Ray version compatibility"
           echo "=========================================="
-          for ray_version in 2.44.0 2.48.0 2.53.0; do
+          for ray_version in 2.44.0 2.48.0 2.50.1 2.53.0; do
             echo "Testing Ray version: $ray_version"
             python -m pip install --no-cache-dir -q ray==$ray_version
             python -c "import ray; print(f'Ray version: {ray.__version__}')"
             python -c "from packaging.version import parse; import ray; assert parse(ray.__version__) == parse('$ray_version'), f'Expected Ray $ray_version, got {ray.__version__}'"
-            python -m pytest pypaimon/tests/ray_data_test.py::RayDataTest -v --tb=short || {
+            tests="pypaimon/tests/ray_data_test.py::RayDataTest pypaimon/tests/ray_range_join_test.py::RayRangeJoinTest"
+            if [ "$ray_version" = "2.50.1" ]; then
+              tests="$tests pypaimon/tests/ray_update_by_row_id_test.py::RayUpdateByRowIdTest::test_empty_dataset_after_transform_is_noop"
+            fi
+            python -m pytest $tests -v --tb=short || {
               echo "Tests failed for Ray $ray_version"; python -m pip uninstall -y ray; exit 1;
             }
             python -m pip uninstall -y ray

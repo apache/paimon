@@ -74,7 +74,7 @@ abstract class PaimonDeltaWriteBase(
       batchWriteBuilder,
       rowSchema,
       coreOptions,
-      catalogContextForBlobDescriptor,
+      uriReaderFactoryForBlobDescriptor,
       rowIdSchema.fieldIndex(FILE_PATH_COLUMN),
       rowIdSchema.fieldIndex(ROW_INDEX_COLUMN)
     )

@@ -22,23 +22,33 @@ Each class registers itself with the global registry at import time
 via :func:`register_aggregator`, so importing
 ``pypaimon.read.reader.aggregate`` makes all of them discoverable.
 
-This module ships 10 aggregators — the primary-key placeholder plus
-the 9 most commonly-used value aggregators: ``primary_key`` /
+This module ships 20 aggregators — the primary-key placeholder plus
+the 19 most commonly-used value aggregators: ``primary_key`` /
 ``last_value`` / ``last_non_null_value`` / ``first_value`` /
 ``first_non_null_value`` / ``sum`` / ``max`` / ``min`` / ``bool_or``
-/ ``bool_and``. Other aggregators (``product`` / ``listagg`` /
-``collect`` / ``merge_map`` / ``nested_update`` / ``theta_sketch`` /
-``hll_sketch`` / ``roaring_bitmap_*``) are intentionally deferred —
-the registry will report them as unsupported so users see a clear
-error rather than a silent fallback.
+/ ``bool_and`` / ``product`` / ``listagg`` / ``collect`` /
+``merge_map`` / ``merge_map_with_keytime`` / ``nested_update`` /
+``nested_partial_update`` / ``theta_sketch`` / ``hll_sketch`` /
+``rbm32``. The remaining aggregator (``rbm64``) is intentionally
+deferred — Java serializes it with ``Roaring64Bitmap``'s private ART
+format, which has no portable counterpart in ``pyroaring``, so the
+bytes are not interchangeable. The registry reports it as unsupported
+so users see a clear error rather than a silent fallback.
 """
-
-from typing import Any
+from typing import Any, List, Dict, Optional, Tuple, Union, Set
 
 from pypaimon.common.options import CoreOptions
+from pypaimon.common.options.core_options import NestedKeyNullStrategy
+from pypaimon.data.decimal import Decimal
 from pypaimon.read.reader.aggregate import register_aggregator
 from pypaimon.read.reader.aggregate.field_aggregator import FieldAggregator
-from pypaimon.schema.data_types import AtomicType, DataType
+from pypaimon.schema.data_types import AtomicType, DataType, ArrayType, RowType, MapType
+from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.table.row.internal_row import InternalRow
+from pypaimon.utils.roaring_bitmap import RoaringBitmap
+
+# aggregator input type hints variables
+Record = Union[InternalRow, Dict[str, Any]]
 
 
 # Aggregator identifiers exposed via ``fields.<name>.aggregate-function``
@@ -49,12 +59,31 @@ NAME_LAST_NON_NULL_VALUE = "last_non_null_value"
 NAME_FIRST_VALUE = "first_value"
 NAME_FIRST_NON_NULL_VALUE = "first_non_null_value"
 NAME_SUM = "sum"
+NAME_PRODUCT = "product"
 NAME_MAX = "max"
 NAME_MIN = "min"
 NAME_BOOL_OR = "bool_or"
 NAME_BOOL_AND = "bool_and"
 NAME_LISTAGG = "listagg"
+NAME_NESTED_UPDATE = "nested_update"
+NAME_NESTED_PARTIAL_UPDATE = "nested_partial_update"
+NAME_COLLECT = "collect"
+NAME_MERGE_MAP_WITH_KEYTIME = "merge_map_with_keytime"
+NAME_MERGE_MAP = "merge_map"
+NAME_THETA_SKETCH = "theta_sketch"
+NAME_HLL_SKETCH = "hll_sketch"
+NAME_RBM32 = "rbm32"
 
+
+# Integer range limits used for overflow checking.
+_BYTE_MIN = -128
+_BYTE_MAX = 127
+_SHORT_MIN = -32768
+_SHORT_MAX = 32767
+_INT_MIN = -(1 << 31)
+_INT_MAX = (1 << 31) - 1
+_LONG_MIN = -(1 << 63)
+_LONG_MAX = (1 << 63) - 1
 
 # Base SQL type names treated as numeric for sum/product-style
 # aggregators. NUMERIC / DEC are SQL synonyms accepted by the parser;
@@ -63,6 +92,16 @@ _NUMERIC_BASE_TYPES = frozenset([
     "TINYINT", "SMALLINT", "INT", "INTEGER", "BIGINT",
     "FLOAT", "DOUBLE", "DECIMAL", "NUMERIC", "DEC",
 ])
+
+# SQL type names treated as decimal. NUMERIC / DEC are SQL
+# synonyms accepted by the parser; treat them the same as DECIMAL.
+_DECIMAL_TYPES = frozenset({"DECIMAL", "NUMERIC", "DEC"})
+
+# SQL type names treated as integer.
+_INT_TYPES = frozenset({"INT", "INTEGER"})
+
+# SQL type names treated as floating-point.
+_FLOAT_TYPES = frozenset({"FLOAT", "DOUBLE"})
 
 
 def _atomic_base_name(field_type: DataType):
@@ -96,6 +135,36 @@ def _check_boolean(name: str, field_type: DataType) -> None:
         )
 
 
+def _check_array_row(name: str, field_type: DataType) -> ArrayType:
+    """Check field_type is ARRAY<ROW> and return the ArrayType."""
+
+    if not isinstance(field_type, ArrayType):
+        raise ValueError(
+            "Data type for '{}' column must be 'ARRAY<ROW>' but was '{}'."
+            .format(name, field_type)
+        )
+
+    if not isinstance(field_type.element, RowType):
+        raise ValueError(
+            "Data type for '{}' column must be 'ARRAY<ROW>' but was '{}'."
+            .format(name, field_type)
+        )
+
+    return field_type
+
+
+def _check_roaring_bitmap(name: str, field_type: DataType):
+    """Check field_type is VarBinaryType and return the VarBinaryType."""
+
+    base = _atomic_base_name(field_type)
+    if base not in ("VARBINARY", "BYTES"):
+        raise ValueError(
+            "Data type for {} column must be 'VARBINARY' or 'BYTES' but was "
+            "'{}'.".format(name, field_type)
+        )
+    return field_type
+
+
 def is_blank(s: str) -> bool:
     if s is None:
         return True
@@ -105,6 +174,144 @@ def is_blank(s: str) -> bool:
             return False
 
     return True
+
+
+def _compare_objects(left: Any, right: Any) -> int:
+    """
+    Compare two comparable Python objects using Paimon's ordering.
+
+    Nulls are ordered before non-null values (Nulls First).
+    """
+
+    if left is None:
+        return 0 if right is None else -1
+
+    if right is None:
+        return 1
+
+    return (left > right) - (left < right)
+
+
+def _compare_tuple(left: Tuple[Any, ...], right: Tuple[Any, ...]) -> int:
+    """
+    Lexicographical comparison with Nulls First.
+    """
+
+    for l, r in zip(left, right):
+        cmp = _compare_objects(l, r)
+        if cmp != 0:
+            return cmp
+
+    if len(left) == len(right):
+        return 0
+
+    return -1 if len(left) < len(right) else 1
+
+
+def _row_equals(left: Record, right: Record) -> bool:
+    """
+    Compare two records for equality.
+
+    Supports both ``InternalRow`` and ``dict`` representations.
+    """
+    if isinstance(left, dict) and isinstance(right, dict):
+        return left == right
+
+    if isinstance(left, InternalRow) and isinstance(right, InternalRow):
+        if len(left) != len(right):
+            return False
+
+        for i in range(len(left)):
+            if left.get_field(i) != right.get_field(i):
+                return False
+
+        return True
+
+    raise TypeError(
+        "Cannot compare records of different or unsupported types: "
+        f"{type(left).__name__} and {type(right).__name__}. "
+        "Expected both records to be either InternalRow or dict."
+    )
+
+
+class FieldProjection:
+    """
+    Extracts selected fields from a row.
+
+    This helper is primarily used by nested aggregators (e.g.
+    ``nested_update`` and ``nested_partial_update``) to retrieve
+    configured fields from nested rows.
+
+    It supports both row representations currently used by pypaimon:
+
+      * :class:`InternalRow` - fields are accessed by ordinal position.
+      * ``dict`` - fields are accessed by field name (used by the
+        PyArrow -> Polars read path).
+
+    The extracted values are returned as a tuple so they can be used
+    directly as comparison keys, dictionary keys, or sequence values.
+    """
+
+    def __init__(
+            self,
+            index_mapping: List[int],
+            field_names: List[str],
+    ):
+        """
+        Create a FieldProjection.
+
+        Args:
+            index_mapping: Ordinal positions of the selected fields.
+            field_names: Corresponding field names. Used when the input
+                row is represented as a dict.
+        """
+        if len(index_mapping) != len(field_names):
+            raise ValueError(
+                "index_mapping and field_names must have the same length."
+            )
+
+        self.index_mapping = index_mapping
+        self.field_names = field_names
+
+    @staticmethod
+    def from_fields(
+            index_mapping: List[int],
+            field_names: List[str],
+    ) -> "FieldProjection":
+        """Create a FieldProjection from field indexes and names."""
+        return FieldProjection(index_mapping, field_names)
+
+    def apply(self, element: Record) -> Tuple[Any, ...]:
+        """
+        Return the projected fields as a tuple.
+
+        Args:
+            element: Either an ``InternalRow`` or a ``dict``.
+
+        Returns:
+            Tuple containing projected field values.
+
+        Raises:
+            TypeError: If the row type is unsupported.
+        """
+
+        if isinstance(element, InternalRow):
+            return tuple(
+                element.get_field(index) if index >= 0 else None
+                for index in self.index_mapping
+            )
+
+        if isinstance(element, dict):
+            return tuple(
+                element.get(name)
+                for name in self.field_names
+            )
+
+        raise TypeError(
+            "Unsupported row type '{}', expected InternalRow or dict.".format(
+                type(element).__name__
+            )
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -176,17 +383,301 @@ class FieldFirstNonNullValueAgg(FieldAggregator):
 
 
 class FieldSumAgg(FieldAggregator):
-    """Numeric sum. ``None`` on either side returns the non-null
-    operand. Python's native ``+`` works uniformly for int / float /
-    Decimal — the values produced by the pyarrow read path already
-    arrive as the right Python primitive for the column's SQL type, so
-    no per-type branching is needed.
     """
+    Numeric sum aggregator.
+
+    Returns the non-null operand if either side is ``None``. Performs
+    overflow checking for integral types and preserves decimal
+    precision and scale for DECIMAL values.
+    """
+    def __init__(self, name: str, field_type: DataType):
+        super().__init__(name, field_type)
+        self._base_type = _atomic_base_name(field_type)
+        if self._base_type in _DECIMAL_TYPES:
+            self._precision, self._scale = Decimal.extract_decimal_precision_scale(field_type.type)
+        else:
+            self._precision = None
+            self._scale = None
 
     def agg(self, accumulator: Any, input_field: Any) -> Any:
         if accumulator is None or input_field is None:
             return accumulator if input_field is None else input_field
-        return accumulator + input_field
+
+        if self._base_type in _DECIMAL_TYPES:
+            result = Decimal.add(accumulator, input_field, self._precision)
+
+            value = Decimal.from_big_decimal(
+                result,
+                self._precision,
+                self._scale
+            )
+            return None if value is None else value.to_big_decimal()
+
+        elif self._base_type == "TINYINT":
+            value = accumulator + input_field
+            if value < _BYTE_MIN or value > _BYTE_MAX:
+                raise ArithmeticError(
+                    "byte overflow: {} + {} = {}".format(accumulator, input_field, value)
+                )
+            return value
+
+        elif self._base_type == "SMALLINT":
+            value = accumulator + input_field
+            if value < _SHORT_MIN or value > _SHORT_MAX:
+                raise ArithmeticError(
+                    "short overflow: {} + {} = {}".format(accumulator, input_field, value)
+                )
+            return value
+
+        elif self._base_type in _INT_TYPES:
+            value = accumulator + input_field
+            if value < _INT_MIN or value > _INT_MAX:
+                raise ArithmeticError(
+                    "int overflow: {} + {}".format(accumulator, input_field)
+                )
+            return value
+
+        elif self._base_type == "BIGINT":
+            value = accumulator + input_field
+            if value < _LONG_MIN or value > _LONG_MAX:
+                raise ArithmeticError(
+                    "long overflow: {} + {}".format(accumulator, input_field)
+                )
+            return value
+
+        elif self._base_type in _FLOAT_TYPES:
+            return accumulator + input_field
+
+        raise ValueError(
+            "type {} not support in {}".format(self._base_type, self.__class__.__name__)
+        )
+
+    def retract(self, accumulator: Any, retract_field: Any) -> Any:
+        if accumulator is None or retract_field is None:
+            return self._negative(retract_field) if accumulator is None else accumulator
+
+        if self._base_type in _DECIMAL_TYPES:
+            result = Decimal.subtract(accumulator, retract_field, self._precision)
+
+            value = Decimal.from_big_decimal(
+                result,
+                self._precision,
+                self._scale,
+            )
+            return None if value is None else value.to_big_decimal()
+
+        elif self._base_type == "TINYINT":
+            value = accumulator - retract_field
+            if value < _BYTE_MIN or value > _BYTE_MAX:
+                raise ArithmeticError(
+                    "byte overflow: {} - {} = {}".format(accumulator, retract_field, value)
+                )
+            return value
+
+        elif self._base_type == "SMALLINT":
+            value = accumulator - retract_field
+            if value < _SHORT_MIN or value > _SHORT_MAX:
+                raise ArithmeticError(
+                    "short overflow: {} - {} = {}".format(accumulator, retract_field, value)
+                )
+            return value
+
+        elif self._base_type in _INT_TYPES:
+            value = accumulator - retract_field
+            if value < _INT_MIN or value > _INT_MAX:
+                raise ArithmeticError(
+                    "int overflow: {} - {}".format(accumulator, retract_field)
+                )
+            return value
+
+        elif self._base_type == "BIGINT":
+            value = accumulator - retract_field
+            if value < _LONG_MIN or value > _LONG_MAX:
+                raise ArithmeticError(
+                    "long overflow: {} - {}".format(accumulator,  retract_field)
+                )
+            return value
+
+        elif self._base_type in _FLOAT_TYPES:
+            return accumulator - retract_field
+
+        raise ValueError(
+            "type {} not support in {}".format(self._base_type, self.__class__.__name__)
+        )
+
+    def _negative(self, value: Any) -> Any:
+        if value is None:
+            return None
+
+        if self._base_type in _DECIMAL_TYPES:
+            return -value
+
+        elif self._base_type == "TINYINT":
+            result = -value
+            if result < _BYTE_MIN or result > _BYTE_MAX:
+                raise ArithmeticError("byte overflow: -{} = {}".format(value, result))
+            return result
+
+        elif self._base_type == "SMALLINT":
+            result = -value
+            if result < _SHORT_MIN or result > _SHORT_MAX:
+                raise ArithmeticError("short overflow: -{} = {}".format(value, result))
+            return result
+
+        elif self._base_type in _INT_TYPES:
+            result = -value
+            if result < _INT_MIN or result > _INT_MAX:
+                raise ArithmeticError("int overflow: -{}".format(value))
+            return result
+
+        elif self._base_type == "BIGINT":
+            result = -value
+            if result < _LONG_MIN or result > _LONG_MAX:
+                raise ArithmeticError("long overflow: -{}".format(value))
+            return result
+
+        elif self._base_type in _FLOAT_TYPES:
+            return -value
+
+        raise ValueError(
+            "type {} not support in {}".format(self._base_type, self.__class__.__name__)
+        )
+
+
+class FieldProductAgg(FieldAggregator):
+    """
+    Numeric product aggregator.
+
+    Null values are ignored and the non-null operand is returned.
+    Otherwise, returns the product of accumulator and input value.
+    """
+    def __init__(self, name: str, field_type: DataType):
+        super().__init__(name, field_type)
+        self._base_type = _atomic_base_name(field_type)
+        if self._base_type in _DECIMAL_TYPES:
+            self._precision, self._scale = Decimal.extract_decimal_precision_scale(field_type.type)
+        else:
+            self._precision = None
+            self._scale = None
+
+    def agg(self, accumulator: Any, input_field: Any) -> Any:
+        if accumulator is None or input_field is None:
+            return accumulator if input_field is None else input_field
+
+        if self._base_type in _DECIMAL_TYPES:
+            mul = Decimal.multiply(accumulator, input_field, self._precision)
+
+            value = Decimal.from_big_decimal(
+                mul,
+                self._precision,
+                self._scale,
+            )
+            return None if value is None else value.to_big_decimal()
+
+        elif self._base_type == "TINYINT":
+            value = accumulator * input_field
+            if value < _BYTE_MIN or value > _BYTE_MAX:
+                raise ArithmeticError(
+                    "byte overflow: {} * {} = {}".format(accumulator, input_field, value)
+                )
+            return value
+
+        elif self._base_type == "SMALLINT":
+            value = accumulator * input_field
+            if value < _SHORT_MIN or value > _SHORT_MAX:
+                raise ArithmeticError(
+                    "short overflow: {} * {} = {}".format(accumulator, input_field, value)
+                )
+            return value
+
+        elif self._base_type in _INT_TYPES:
+            value = accumulator * input_field
+            if value < _INT_MIN or value > _INT_MAX:
+                raise ArithmeticError(
+                    "int overflow: {} * {}".format(accumulator, input_field)
+                )
+            return value
+
+        elif self._base_type == "BIGINT":
+            value = accumulator * input_field
+            if value < _LONG_MIN or value > _LONG_MAX:
+                raise ArithmeticError(
+                    "long overflow: {} * {}".format(accumulator, input_field)
+                )
+            return value
+
+        elif self._base_type in _FLOAT_TYPES:
+            return accumulator * input_field
+
+        raise ValueError(
+            "type {} not support in {}".format(self._base_type, self.__class__.__name__)
+        )
+
+    def retract(self, accumulator: Any, retract_field: Any) -> Any:
+        if accumulator is None or retract_field is None:
+            return accumulator
+
+        if self._base_type in _DECIMAL_TYPES:
+            div = Decimal.divide(accumulator, retract_field, self._precision)
+
+            value = Decimal.from_big_decimal(
+                div,
+                self._precision,
+                self._scale,
+            )
+            return None if value is None else value.to_big_decimal()
+
+        elif self._base_type == "TINYINT":
+            value = int(accumulator / retract_field)
+            if value > _BYTE_MAX or value < _BYTE_MIN:
+                raise ArithmeticError(
+                    "byte overflow: {} / {} = {}".format(accumulator, retract_field, value)
+                )
+            return value
+
+        elif self._base_type == "SMALLINT":
+            value = int(accumulator / retract_field)
+            if value > _SHORT_MAX or value < _SHORT_MIN:
+                raise ArithmeticError(
+                    "short overflow: {} / {} = {}".format(accumulator, retract_field, value)
+                )
+            return value
+
+        elif self._base_type in _INT_TYPES:
+            if accumulator == _INT_MIN and retract_field == -1:
+                raise ArithmeticError(
+                    "int overflow: {} / {}".format(accumulator, retract_field)
+                )
+            return int(accumulator / retract_field)
+
+        elif self._base_type == "BIGINT":
+            if accumulator == _LONG_MIN and retract_field == -1:
+                raise ArithmeticError(
+                    "long overflow: {} / {}".format(accumulator, retract_field)
+                )
+
+            # Java integer division truncates toward zero, while Python's "//"
+            # floors toward negative infinity. Divide absolute values first, then
+            # restore the sign to match Java semantics without converting through
+            # float (which would lose precision for BIGINT values).
+            if (accumulator >= 0) == (retract_field >= 0):
+                return abs(accumulator) // abs(retract_field)
+            else:
+                return -(abs(accumulator) // abs(retract_field))
+
+        elif self._base_type in _FLOAT_TYPES:
+            if retract_field == 0.0:
+                if accumulator == 0.0:
+                    return float("nan")
+                elif accumulator > 0:
+                    return float("inf")
+                else:
+                    return float("-inf")
+            return accumulator / retract_field
+
+        raise ValueError(
+            "type {} not support in {}".format(self._base_type, self.__class__.__name__)
+        )
 
 
 class FieldMaxAgg(FieldAggregator):
@@ -293,6 +784,730 @@ class FieldListaggAgg(FieldAggregator):
         return self.delimiter.join(result)
 
 
+class FieldCollectAgg(FieldAggregator):
+
+    def __init__(
+            self,
+            name: str,
+            field_type: ArrayType,
+            field_name: str,
+            options: CoreOptions,
+    ):
+        super().__init__(name, field_type)
+
+        if not isinstance(field_type, ArrayType):
+            raise ValueError(
+                "Data type for collect column must be 'Array' but was '{}'.".format(field_type)
+            )
+
+        self.distinct = options.field_collect_distinct(field_name)
+
+    def agg_reversed(self, accumulator: Any, input_field: Any) -> Any:
+        # we don't need to actually do the reverse here for this agg
+        # because accumulator has been distinct, just let accumulator be accumulator will speed up
+        # distinct process
+        return self.agg(accumulator, input_field)
+
+    def agg(self, accumulator: Any, input_field: Any) -> Any:
+        if accumulator is None and input_field is None:
+            return None
+
+        if (accumulator is None or input_field is None) and not self.distinct:
+            return input_field if accumulator is None else accumulator
+
+        if self.distinct:
+            result = []
+            self._collect(result, accumulator)
+            self._collect(result, input_field)
+
+            return result
+        else:
+            return list(accumulator) + list(input_field)
+
+    def retract(self, accumulator: Any, retract_field: Any) -> Any:
+        if accumulator is None:
+            return None
+
+        if retract_field is None:
+            return accumulator
+
+        if len(retract_field) == 0:
+            return accumulator
+
+        result = list(accumulator)
+        for element in retract_field:
+            if element in result:
+                result.remove(element)
+
+        return result
+
+    def _collect(self, result: List[Any], data: List[Any]):
+        if data is None:
+            return
+        for element in data:
+            if element not in result:
+                result.append(element)
+
+
+class FieldNestedUpdateAgg(FieldAggregator):
+    """
+    Used to update a field which representing a nested table.
+    The data type of nested table field is ARRAY<ROW>.
+    """
+
+    def __init__(
+            self,
+            name: str,
+            field_type: ArrayType,
+            field_name: str,
+            options: CoreOptions,
+    ):
+        field_type = _check_array_row(field_name, field_type)
+        self._check_option_dependencies(options, field_name)
+
+        super().__init__(name, field_type)
+
+        nested_type: RowType = field_type.element
+
+        self.nested_key = options.field_nested_update_agg_nested_key(field_name)
+        self.nested_key_null_strategy = options.field_nested_update_agg_nested_key_null_strategy(field_name)
+        self.nested_sequence_field = options.field_nested_update_agg_nested_sequence_field(field_name)
+        self.count_limit = options.field_nested_update_agg_count_limit(field_name)
+
+        if self.nested_key:
+            self.key_projection = FieldProjection.from_fields(
+                [nested_type.get_field_index(name) for name in self.nested_key],
+                self.nested_key
+            )
+        else:
+            self.key_projection = None
+
+        if self.nested_sequence_field:
+            self.sequence_projection = FieldProjection.from_fields(
+                [nested_type.get_field_index(name) for name in self.nested_sequence_field],
+                self.nested_sequence_field
+            )
+            self.has_sequence_field = True
+        else:
+            self.sequence_projection = None
+            self.has_sequence_field = False
+
+    def agg(self, accumulator: Any, input_field: Any) -> Any:
+        if input_field is None:
+            return accumulator
+
+        if self.key_projection is None:
+            if accumulator is None:
+                rows: List[Record] = []
+                self._add_non_null_rows(input_field, rows, self.count_limit)
+                return rows
+
+            if len(accumulator) >= self.count_limit:
+                return accumulator
+
+            remain_count = self.count_limit - len(accumulator)
+            rows: List[Record] = []
+            self._add_non_null_rows(accumulator, rows)
+            self._add_non_null_rows(input_field, rows, remain_count)
+            return rows
+        else:
+            row_map: Dict[Tuple[Any, ...], Record] = {}
+            if accumulator is not None:
+                self._add_nested_rows(accumulator, row_map, False)
+            self._add_nested_rows(input_field, row_map, True)
+            return list(row_map.values())
+
+    def retract(self, accumulator: Any, retract_field: Any) -> Any:
+        if accumulator is None or retract_field is None:
+            return accumulator
+
+        if self.key_projection is None:
+            rows: List[Record] = []
+            self._add_non_null_rows(accumulator, rows)
+            for retract_row in retract_field:
+                if retract_row is None:
+                    continue
+                rows = [row for row in rows if not _row_equals(row, retract_row)]
+            return rows
+        else:
+            row_map: Dict[Tuple[Any, ...], Record] = {}
+            for row in accumulator:
+                if row is None:
+                    continue
+                key = self.key_projection.apply(row)
+                if not self._apply_nested_key_null_strategy(key):
+                    continue
+                row_map[key] = row
+
+            for row in retract_field:
+                if row is None:
+                    continue
+                key = self.key_projection.apply(row)
+                if not self._apply_nested_key_null_strategy(key):
+                    continue
+                row_map.pop(key, None)
+            return list(row_map.values())
+
+    @staticmethod
+    def _check_option_dependencies(
+            options: CoreOptions,
+            field: str,
+    ) -> None:
+        nested_key = options.field_nested_update_agg_nested_key(field)
+        strategy_configured = options.options.contains_key(
+            f"{CoreOptions.FIELDS_PREFIX}.{field}.{CoreOptions.NESTED_KEY_NULL_STRATEGY}")
+
+        if strategy_configured and not nested_key:
+            raise ValueError(
+                "Option 'fields.<field-name>.nested-key-null-strategy' "
+                "requires 'fields.<field-name>.nested-key' to be configured."
+            )
+
+        if (
+                options.field_nested_update_agg_nested_sequence_field(field)
+                and not nested_key
+        ):
+            raise ValueError(
+                "Option 'fields.<field-name>.nested-sequence-field' "
+                "requires 'fields.<field-name>.nested-key' to be configured."
+            )
+
+    def _compare_sequence(self, new_row: Record, old_row: Record) -> int:
+        if not self.has_sequence_field:
+            raise ValueError(
+                "compare_sequence() called but no nested_sequence_field configured."
+            )
+
+        new_seq_key = self.sequence_projection.apply(new_row)
+        old_seq_key = self.sequence_projection.apply(old_row)
+
+        return _compare_tuple(new_seq_key, old_seq_key)
+
+    def _add_non_null_rows(
+            self,
+            array: List[Record],
+            rows: List[Record],
+            remain_size: Optional[int] = None,
+    ) -> None:
+        """Append non-null rows from array.
+
+        If remain_size is specified, append at most remain_size rows.
+        """
+
+        count = 0
+
+        for row in array:
+            if row is None:
+                continue
+
+            if remain_size is not None and count >= remain_size:
+                break
+
+            rows.append(row)
+            count += 1
+
+    def _add_nested_rows(
+            self,
+            array: List[Record],
+            row_map: Dict[Tuple[Any, ...], Record],
+            limit_new_keys: bool,
+    ) -> None:
+        """Merge rows from ``array`` into ``rows`` using nested keys."""
+
+        if self.key_projection is None:
+            raise ValueError(
+                "key_projection should not be None when nested_key is configured."
+            )
+
+        for row in array:
+            if row is None:
+                continue
+            key = self.key_projection.apply(row)
+            if not self._apply_nested_key_null_strategy(key):
+                continue
+
+            exists = row_map.get(key)
+            if exists is not None:
+                if not self.has_sequence_field or self._compare_sequence(row, exists) >= 0:
+                    row_map[key] = row
+            elif not limit_new_keys or len(row_map) < self.count_limit:
+                row_map[key] = row
+
+    def _apply_nested_key_null_strategy(self, key: Tuple[Any, ...]) -> bool:
+        """Apply nested-key-null-strategy."""
+
+        if all(v is not None for v in key):
+            return True
+
+        if self.nested_key_null_strategy == NestedKeyNullStrategy.MERGE:
+            return True
+
+        if self.nested_key_null_strategy == NestedKeyNullStrategy.IGNORE:
+            return False
+
+        if self.nested_key_null_strategy == NestedKeyNullStrategy.ERROR:
+            raise ValueError(
+                "Nested key contains null values. "
+                "Primary key fields must not be null."
+            )
+
+        raise ValueError(
+            "Unsupported nested-key-null-strategy '{}'".format(
+                self.nested_key_null_strategy
+            )
+        )
+
+
+class FieldNestedPartialUpdateAgg(FieldAggregator):
+    """
+    Used to partial update a field which representing a nested table.
+    The data type of nested table field is ARRAY<ROW>
+    """
+    def __init__(
+            self,
+            name: str,
+            field_type: ArrayType,
+            field_name: str,
+            options: CoreOptions,
+    ):
+        field_type = _check_array_row(field_name, field_type)
+        super().__init__(name, field_type)
+
+        nested_type: RowType = field_type.element
+        self.nested_fields = len(nested_type.fields)
+
+        self.nested_key = options.field_nested_update_agg_nested_key(field_name)
+        if not self.nested_key:
+            raise ValueError("nested_update_partial requires 'nested-key' to be configured.")
+
+        self.key_projection = FieldProjection.from_fields(
+            [nested_type.get_field_index(name) for name in self.nested_key],
+            self.nested_key
+        )
+
+        self.nested_key_null_strategy = (
+            options.field_nested_update_agg_nested_key_null_strategy(field_name)
+        )
+
+    def agg(self, accumulator: Any, input_field: Any) -> Any:
+        if input_field is None:
+            return accumulator
+
+        rows: List[Record] = []
+        if accumulator is not None:
+            self._add_non_null_rows(accumulator, rows)
+        self._add_non_null_rows(input_field, rows)
+
+        row_map: Dict[Tuple[Any, ...], Record] = {}
+        for row in rows:
+            key = self.key_projection.apply(row)
+            if not self._apply_nested_key_null_strategy(key):
+                continue
+
+            to_update = row_map.get(key)
+            if to_update is None:
+                if isinstance(row, InternalRow):
+                    to_update = GenericRow([None] * self.nested_fields, row.fields)
+                elif isinstance(row, dict):
+                    to_update = {}.fromkeys(row.keys())
+                else:
+                    raise TypeError(
+                        "Unsupported row type '{}'. Expected InternalRow or dict.".format(
+                            type(row).__name__
+                        )
+                    )
+            self._partial_update(to_update, row)
+            row_map[key] = to_update
+
+        return list(row_map.values())
+
+    def _partial_update(self, to_update: Record, input_row: Record) -> None:
+        if isinstance(to_update, InternalRow) and isinstance(input_row, InternalRow):
+            for i in range(self.nested_fields):
+                value = input_row.get_field(i)
+                if value is not None:
+                    to_update.values[i] = value
+        elif isinstance(to_update, dict) and isinstance(input_row, dict):
+            for k, v in input_row.items():
+                if v is not None:
+                    to_update[k] = v
+        else:
+            raise TypeError(
+                "Unsupported row types: to_update={}, input_row={}. "
+                "Expected both to be either InternalRow or dict.".format(
+                    type(to_update).__name__,
+                    type(input_row).__name__,
+                )
+            )
+
+    def _add_non_null_rows(
+            self,
+            array: List[Record],
+            rows: List[Record],
+    ) -> None:
+        """Append non-null rows from array."""
+
+        for row in array:
+            if row is None:
+                continue
+            rows.append(row)
+
+    def _apply_nested_key_null_strategy(self, key: Tuple[Any, ...]) -> bool:
+        """Apply nested-key-null-strategy."""
+
+        if all(v is not None for v in key):
+            return True
+
+        if self.nested_key_null_strategy == NestedKeyNullStrategy.MERGE:
+            return True
+
+        if self.nested_key_null_strategy == NestedKeyNullStrategy.IGNORE:
+            return False
+
+        if self.nested_key_null_strategy == NestedKeyNullStrategy.ERROR:
+            raise ValueError(
+                "Nested key contains null values. "
+                "Primary key fields must not be null."
+            )
+
+        raise ValueError(
+            "Unsupported nested-key-null-strategy '{}'".format(
+                self.nested_key_null_strategy
+            )
+        )
+
+
+class FieldMergeMapWithKeyTimeAgg(FieldAggregator):
+    """
+    Aggregator for merging MAP values with key and timestamp.
+
+    The input field type must be MAP with ROW values. Each ROW value must
+    contain a timestamp field, which is used to resolve conflicts when the
+    same key appears multiple times.
+
+    For the same key:
+    - A value with a newer timestamp replaces the existing value.
+    - A value with a null timestamp is ignored.
+    - A null value removes the corresponding key from the map.
+    """
+    def __init__(
+            self,
+            name: str,
+            field_type: DataType,
+            field_name: str,
+            options: CoreOptions,
+    ):
+        super().__init__(name, field_type)
+        if not isinstance(field_type, MapType):
+            raise ValueError(
+                "Data type for field '{}' must be 'MAP' but was '{}'".format(field_name, field_type)
+            )
+        if not isinstance(field_type.value, RowType):
+            raise ValueError(
+                "Value type of MAP for field '{}' must be 'ROW' but was '{}'".format(field_name, field_type.value)
+            )
+        if len(field_type.value.fields) < 2:
+            raise ValueError(
+                "ROW type for field '{}' must have at least 2 fields, but found {}".format(
+                    field_name, len(field_type.value.fields)
+                )
+            )
+
+        self._resolve_ts_field_index(field_type.value, options, field_name)
+
+    def agg(self, accumulator: Any, input_field: Any) -> Any:
+        if accumulator is None or input_field is None:
+            return input_field if accumulator is None else accumulator
+
+        result_map = {}
+        self._put_to_map(result_map, accumulator)
+        self._merge_input_map(result_map, input_field)
+
+        return result_map
+
+    def _resolve_ts_field_index(self, row_type: RowType, options: CoreOptions, field_name: str) -> None:
+        ts_field_name = options.field_merge_map_ts_field(field_name)
+        if ts_field_name is None:
+            # default to the last field
+            ts_field_index = len(row_type.fields) - 1
+            ts_field_name = row_type.fields[ts_field_index].name
+        else:
+            ts_field_index = row_type.get_field_index(ts_field_name)
+            if ts_field_index < 0:
+                raise ValueError(
+                    "Timestamp field '{}' not found in ROW type for field '{}'. Available fields: {}".format(
+                        ts_field_name, field_name, [field.name for field in row_type.fields]
+                    )
+                )
+
+        self.ts_field_name = ts_field_name
+        self.ts_field_index = ts_field_index
+
+    def _put_to_map(self, maps: Dict[Any, Any], input_field: Any):
+        if isinstance(input_field, dict):
+            maps.update(input_field)
+        elif isinstance(input_field, list):
+            tmp_map = {}
+            for item in input_field:
+                if not isinstance(item, dict):
+                    raise TypeError(
+                        "list element must be dict, got {}".format(type(item))
+                    )
+                tmp_map[item['key']] = item['value']
+
+            maps.update(tmp_map)
+        else:
+            raise TypeError(
+                "input_field must be dict or list[dict], got {}".format(type(input_field))
+            )
+
+    def _merge_input_map(self, result_map: Dict[Any, Any], input_field: Any):
+        input_map = {}
+        self._put_to_map(input_map, input_field)
+
+        for key, new_row in input_map.items():
+            if new_row is None:
+                result_map.pop(key, None)
+                continue
+
+            new_ts = self._get_ts_field(new_row)
+            if new_ts is None:
+                continue
+
+            existing_row = result_map.get(key)
+            if existing_row is None:
+                result_map[key] = new_row
+                continue
+
+            existing_ts = self._get_ts_field(existing_row)
+            if existing_ts is None or new_ts > existing_ts:
+                result_map[key] = new_row
+
+    def _get_ts_field(self, input_row: Any) -> Any:
+        if isinstance(input_row, dict):
+            return input_row.get(self.ts_field_name)
+
+        if isinstance(input_row, InternalRow):
+            return input_row.get_field(self.ts_field_index)
+
+        raise TypeError(
+            "Unsupported row type '{}', expected InternalRow or dict.".format(
+                type(input_row).__name__
+            )
+        )
+
+
+class FieldMergeMapAgg(FieldAggregator):
+    """
+    Merge map values by combining all key-value pairs.
+
+    When the same key exists in both maps, the value from the input map
+    overwrites the value from the accumulator map.
+    """
+
+    def __init__(self, name: str, field_type: DataType):
+        super().__init__(name, field_type)
+        if not isinstance(field_type, MapType):
+            raise ValueError(
+                "Data type for merge map column must be 'MAP' but was '{}'".format(field_type)
+            )
+
+    def agg(self, accumulator: Any, input_field: Any) -> Any:
+        if accumulator is None or input_field is None:
+            return input_field if accumulator is None else accumulator
+
+        result = {}
+
+        self._put_to_map(result, accumulator)
+        self._put_to_map(result, input_field)
+
+        return result
+
+    def retract(self, accumulator: Any, retract_field: Any) -> Any:
+        # it's hard to mark the input is retracted without accumulator
+        if accumulator is None:
+            return None
+
+        # nothing to be retracted
+        if retract_field is None:
+            return accumulator
+
+        if len(retract_field) == 0:
+            return accumulator
+
+        retract_keys = self._get_keys(retract_field)
+        acc = {}
+        self._put_to_map(acc, accumulator)
+
+        result = {
+            key: value
+            for key, value in acc.items()
+            if key not in retract_keys
+        }
+
+        return result
+
+    def _put_to_map(self, maps: Dict[Any, Any], input_field: Any):
+        if isinstance(input_field, dict):
+            maps.update(input_field)
+        elif isinstance(input_field, list):
+            tmp_map = {}
+            for item in input_field:
+                if not isinstance(item, dict):
+                    raise TypeError(
+                        "list element must be dict, got {}".format(type(item))
+                    )
+                tmp_map[item['key']] = item['value']
+
+            maps.update(tmp_map)
+        else:
+            raise TypeError(
+                "input_field must be dict or list[dict], got {}".format(type(input_field))
+            )
+
+    def _get_keys(self, retract_field: Any) -> Set[Any]:
+        keys = set()
+
+        if isinstance(retract_field, dict):
+            keys.update(retract_field.keys())
+
+        elif isinstance(retract_field, list):
+            for item in retract_field:
+                if not isinstance(item, dict):
+                    raise TypeError(
+                        "list element must be dict, got {}".format(type(item))
+                    )
+
+                keys.add(item["key"])
+        else:
+            raise TypeError(
+                "retract_field must be dict or list[dict], got {}".format(type(retract_field))
+            )
+
+        return keys
+
+
+class FieldThetaSketchAgg(FieldAggregator):
+    """Aggregator for ThetaSketch."""
+
+    def __init__(self, name: str, field_type: DataType):
+        super().__init__(name, field_type)
+        if _atomic_base_name(field_type) not in ("VARBINARY", "BYTES"):
+            raise ValueError(
+                "Data type for theta sketch column must be 'VarBinaryType' but was '{}'.".format(field_type)
+            )
+
+    def agg(self, accumulator: Any, input_field: Any) -> Any:
+        if accumulator is None or input_field is None:
+            return input_field if accumulator is None else accumulator
+
+        if not isinstance(accumulator, (bytes, bytearray)):
+            raise TypeError(
+                "ThetaSketch accumulator must be bytes, got {}".format(type(accumulator))
+            )
+
+        if not isinstance(input_field, (bytes, bytearray)):
+            raise TypeError(
+                "ThetaSketch input must be bytes, got {}".format(type(input_field))
+            )
+
+        if isinstance(accumulator, bytearray):
+            accumulator = bytes(accumulator)
+        if isinstance(input_field, bytearray):
+            input_field = bytes(input_field)
+
+        try:
+            from _datasketches import compact_theta_sketch, theta_union
+        except ImportError as exc:
+            raise ImportError(
+                "The theta_sketch aggregator requires the 'datasketches' "
+                "package. Install it with "
+                "\"pip install 'pypaimon[theta-sketch]'\"."
+            ) from exc
+
+        sketch1 = compact_theta_sketch.deserialize(accumulator)
+        sketch2 = compact_theta_sketch.deserialize(input_field)
+
+        union = theta_union()
+        union.update(sketch1)
+        union.update(sketch2)
+
+        return union.get_result().serialize()
+
+
+class FieldHllSketchAgg(FieldAggregator):
+    """Aggregator for HyperLogLog sketches.
+
+    Mirrors Java's ``FieldHllSketchAgg`` / ``HllSketchUtil.union``: the
+    union is seeded from ``input_field`` and then updated with
+    ``accumulator``, and the result is emitted as a compact ``HLL_4``
+    sketch. Both sides use Apache DataSketches, so the serialized bytes
+    are interchangeable with Java's ``HllSketch.toCompactByteArray()``.
+    """
+
+    def __init__(self, name: str, field_type: DataType):
+        super().__init__(name, field_type)
+        if _atomic_base_name(field_type) not in ("VARBINARY", "BYTES"):
+            raise ValueError(
+                "Data type for hll sketch column must be 'VarBinaryType' but was '{}'.".format(field_type)
+            )
+
+    def agg(self, accumulator: Any, input_field: Any) -> Any:
+        if accumulator is None or input_field is None:
+            return input_field if accumulator is None else accumulator
+
+        if not isinstance(accumulator, (bytes, bytearray)):
+            raise TypeError(
+                "HllSketch accumulator must be bytes, got {}".format(type(accumulator))
+            )
+
+        if not isinstance(input_field, (bytes, bytearray)):
+            raise TypeError(
+                "HllSketch input must be bytes, got {}".format(type(input_field))
+            )
+
+        if isinstance(accumulator, bytearray):
+            accumulator = bytes(accumulator)
+        if isinstance(input_field, bytearray):
+            input_field = bytes(input_field)
+
+        try:
+            from _datasketches import hll_sketch, hll_union, tgt_hll_type
+        except ImportError as exc:
+            raise ImportError(
+                "The hll_sketch aggregator requires the 'datasketches' "
+                "package. Install it with "
+                "\"pip install 'pypaimon[hll-sketch]'\"."
+            ) from exc
+
+        sketch1 = hll_sketch.deserialize(accumulator)
+        sketch2 = hll_sketch.deserialize(input_field)
+
+        # Java builds the union from the input sketch (``Union.heapify``)
+        # and folds the accumulator in afterwards; keep that order so the
+        # union's lg_k is taken from the same side as Java's.
+        union = hll_union(sketch2.lg_config_k)
+        union.update(sketch2)
+        union.update(sketch1)
+
+        return bytes(union.get_result(tgt_hll_type.HLL_4).serialize_compact())
+
+
+class FieldRoaringBitmap32Agg(FieldAggregator):
+    """roaring bitmap 32 aggregate a field of a row."""
+
+    def agg(self, accumulator: Any, input_field: Any) -> Any:
+        if accumulator is None or input_field is None:
+            return input_field if accumulator is None else accumulator
+
+        try:
+            acc = RoaringBitmap.deserialize(accumulator)
+            input_bitmap = RoaringBitmap.deserialize(input_field)
+            return RoaringBitmap.or_(acc, input_bitmap).serialize()
+        except Exception as ex:
+            raise RuntimeError("Unable to se/deserialize roaring bitmap.") from ex
+
+
 # ---------------------------------------------------------------------------
 # Registration. Each builder binds an identifier to a factory that
 # optionally validates the column DataType before constructing the
@@ -334,6 +1549,13 @@ def _build_field_options(cls, identifier: str):
     return _factory
 
 
+def _build_roaring_bitmap(cls, identifier: str):
+    def _factory(field_type, field_name, options):
+        _check_roaring_bitmap(identifier, field_type)
+        return cls(identifier, field_type)
+    return _factory
+
+
 register_aggregator(
     NAME_PRIMARY_KEY,
     _build_no_type_check(FieldPrimaryKeyAgg, NAME_PRIMARY_KEY),
@@ -355,6 +1577,7 @@ register_aggregator(
     _build_no_type_check(FieldFirstNonNullValueAgg, NAME_FIRST_NON_NULL_VALUE),
 )
 register_aggregator(NAME_SUM, _build_numeric(FieldSumAgg, NAME_SUM))
+register_aggregator(NAME_PRODUCT, _build_numeric(FieldProductAgg, NAME_PRODUCT))
 register_aggregator(NAME_MAX, _build_no_type_check(FieldMaxAgg, NAME_MAX))
 register_aggregator(NAME_MIN, _build_no_type_check(FieldMinAgg, NAME_MIN))
 register_aggregator(
@@ -365,4 +1588,28 @@ register_aggregator(
 )
 register_aggregator(
     NAME_LISTAGG, _build_field_options(FieldListaggAgg, NAME_LISTAGG)
+)
+register_aggregator(
+    NAME_NESTED_UPDATE, _build_field_options(FieldNestedUpdateAgg, NAME_NESTED_UPDATE)
+)
+register_aggregator(
+    NAME_NESTED_PARTIAL_UPDATE, _build_field_options(FieldNestedPartialUpdateAgg, NAME_NESTED_PARTIAL_UPDATE)
+)
+register_aggregator(
+    NAME_COLLECT, _build_field_options(FieldCollectAgg, NAME_COLLECT)
+)
+register_aggregator(
+    NAME_MERGE_MAP_WITH_KEYTIME, _build_field_options(FieldMergeMapWithKeyTimeAgg, NAME_MERGE_MAP_WITH_KEYTIME)
+)
+register_aggregator(
+    NAME_MERGE_MAP, _build_no_type_check(FieldMergeMapAgg, NAME_MERGE_MAP)
+)
+register_aggregator(
+    NAME_THETA_SKETCH, _build_no_type_check(FieldThetaSketchAgg, NAME_THETA_SKETCH)
+)
+register_aggregator(
+    NAME_HLL_SKETCH, _build_no_type_check(FieldHllSketchAgg, NAME_HLL_SKETCH)
+)
+register_aggregator(
+    NAME_RBM32, _build_roaring_bitmap(FieldRoaringBitmap32Agg, NAME_RBM32)
 )

@@ -21,29 +21,47 @@ package org.apache.paimon.utils;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
-import org.apache.paimon.partition.PartitionTimeExtractor;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.mergetree.SortedRun;
+import org.apache.paimon.mergetree.compact.IntervalPartition;
+import org.apache.paimon.partition.PartitionTimeResolver;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.ChainGroupReadTable;
 import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.ChainSplit;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.types.RowType;
 
+import javax.annotation.Nullable;
+
+import java.time.Duration;
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
+import java.time.temporal.TemporalAmount;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.function.BiFunction;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.function.Function;
 import java.util.stream.Collectors;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Utils for chain table. */
 public class ChainTableUtils {
+    public static final int MAX_DELTA_PARTITIONS = 10_000_000;
 
     public static boolean isChainTable(Map<String, String> tblOptions) {
         return CoreOptions.fromMap(tblOptions).isChainTable();
@@ -75,61 +93,50 @@ public class ChainTableUtils {
             List<String> partitionColumns,
             RowType partType,
             CoreOptions options,
-            RecordComparator partitionComparator,
             InternalRowPartitionComputer partitionComputer) {
         InternalRowSerializer serializer = new InternalRowSerializer(partType);
         List<BinaryRow> deltaPartitions = new ArrayList<>();
-        boolean isDailyPartition = partitionColumns.size() == 1;
         List<String> startPartitionValues =
                 new ArrayList<>(partitionComputer.generatePartValues(beginPartition).values());
         List<String> endPartitionValues =
                 new ArrayList<>(partitionComputer.generatePartValues(endPartition).values());
-        PartitionTimeExtractor timeExtractor =
-                new PartitionTimeExtractor(
-                        options.partitionTimestampPattern(), options.partitionTimestampFormatter());
-        LocalDateTime stratPartitionTime =
-                timeExtractor.extract(partitionColumns, startPartitionValues);
-        LocalDateTime candidateTime = stratPartitionTime;
-        LocalDateTime endPartitionTime =
-                timeExtractor.extract(partitionColumns, endPartitionValues);
+        PartitionTimeResolver timeResolver =
+                new PartitionTimeResolver(
+                        partitionColumns,
+                        options.partitionTimestampPattern(),
+                        options.partitionTimestampFormatter());
+        LocalDateTime startPartitionTime = timeResolver.parsePartitionValues(startPartitionValues);
+        LocalDateTime endPartitionTime = timeResolver.parsePartitionValues(endPartitionValues);
+        TemporalAmount step = timeResolver.extractMinStep();
+        // Period-based steps (year/month) are coarse-grained and cannot explode, so only
+        // fine-grained Duration steps need the partition-count guard.
+        if (step instanceof Duration) {
+            long totalSeconds = ChronoUnit.SECONDS.between(startPartitionTime, endPartitionTime);
+            long stepSeconds = ((Duration) step).getSeconds();
+            long estimatedCount = stepSeconds == 0 ? 0 : totalSeconds / stepSeconds;
+            checkArgument(
+                    estimatedCount < MAX_DELTA_PARTITIONS,
+                    "Too many delta partitions generated between '%s' and '%s' "
+                            + "(exceeds %s). Please widen the partition granularity or reduce "
+                            + "the query range. Pattern: '%s', formatter: '%s'.",
+                    startPartitionValues,
+                    endPartitionValues,
+                    MAX_DELTA_PARTITIONS,
+                    options.partitionTimestampPattern(),
+                    options.partitionTimestampFormatter());
+        }
+        LocalDateTime candidateTime = startPartitionTime.plus(step);
         while (!candidateTime.isAfter(endPartitionTime)) {
-            if (isDailyPartition) {
-                if (candidateTime.isAfter(stratPartitionTime)) {
-                    deltaPartitions.add(
-                            serializer
-                                    .toBinaryRow(
-                                            InternalRowPartitionComputer.convertSpecToInternalRow(
-                                                    calPartValues(
-                                                            candidateTime,
-                                                            partitionColumns,
-                                                            options.partitionTimestampPattern(),
-                                                            options.partitionTimestampFormatter()),
-                                                    partType,
-                                                    options.partitionDefaultName()))
-                                    .copy());
-                }
-            } else {
-                for (int hour = 0; hour <= 23; hour++) {
-                    candidateTime = candidateTime.toLocalDate().atStartOfDay().plusHours(hour);
-                    BinaryRow candidatePartition =
-                            serializer
-                                    .toBinaryRow(
-                                            InternalRowPartitionComputer.convertSpecToInternalRow(
-                                                    calPartValues(
-                                                            candidateTime,
-                                                            partitionColumns,
-                                                            options.partitionTimestampPattern(),
-                                                            options.partitionTimestampFormatter()),
-                                                    partType,
-                                                    options.partitionDefaultName()))
-                                    .copy();
-                    if (partitionComparator.compare(candidatePartition, beginPartition) > 0
-                            && partitionComparator.compare(candidatePartition, endPartition) <= 0) {
-                        deltaPartitions.add(candidatePartition);
-                    }
-                }
-            }
-            candidateTime = candidateTime.toLocalDate().plusDays(1).atStartOfDay();
+            BinaryRow candidatePartition =
+                    serializer
+                            .toBinaryRow(
+                                    InternalRowPartitionComputer.convertSpecToInternalRow(
+                                            timeResolver.resolvePartitionValues(candidateTime),
+                                            partType,
+                                            options.partitionDefaultName()))
+                            .copy();
+            deltaPartitions.add(candidatePartition);
+            candidateTime = candidateTime.plus(step);
         }
         return deltaPartitions;
     }
@@ -164,48 +171,6 @@ public class ChainTableUtils {
             fieldPredicates.add(func.apply(i, partitionObjects[i]));
         }
         return PredicateBuilder.and(fieldPredicates);
-    }
-
-    public static LinkedHashMap<String, String> calPartValues(
-            LocalDateTime dateTime,
-            List<String> partitionKeys,
-            String timestampPattern,
-            String timestampFormatter) {
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern(timestampFormatter);
-        String formattedDateTime = dateTime.format(formatter);
-        Pattern keyPattern = Pattern.compile("\\$(\\w+)");
-        Matcher keyMatcher = keyPattern.matcher(timestampPattern);
-        List<String> keyOrder = new ArrayList<>();
-        StringBuilder regexBuilder = new StringBuilder();
-        int lastPosition = 0;
-        while (keyMatcher.find()) {
-            regexBuilder.append(
-                    Pattern.quote(timestampPattern.substring(lastPosition, keyMatcher.start())));
-            regexBuilder.append("(.+)");
-            keyOrder.add(keyMatcher.group(1));
-            lastPosition = keyMatcher.end();
-        }
-        regexBuilder.append(Pattern.quote(timestampPattern.substring(lastPosition)));
-
-        Matcher valueMatcher = Pattern.compile(regexBuilder.toString()).matcher(formattedDateTime);
-        if (!valueMatcher.matches() || valueMatcher.groupCount() != keyOrder.size()) {
-            throw new IllegalArgumentException(
-                    "Formatted datetime does not match timestamp pattern");
-        }
-
-        Map<String, String> keyValues = new HashMap<>();
-        for (int i = 0; i < keyOrder.size(); i++) {
-            keyValues.put(keyOrder.get(i), valueMatcher.group(i + 1));
-        }
-        List<String> values =
-                partitionKeys.stream()
-                        .map(key -> keyValues.getOrDefault(key, ""))
-                        .collect(Collectors.toList());
-        LinkedHashMap<String, String> res = new LinkedHashMap<>();
-        for (int i = 0; i < partitionKeys.size(); i++) {
-            res.put(partitionKeys.get(i), values.get(i));
-        }
-        return res;
     }
 
     public static boolean isScanFallbackDeltaBranch(CoreOptions options) {
@@ -312,7 +277,6 @@ public class ChainTableUtils {
                         chainPartitionColumns,
                         chainPartType,
                         options,
-                        chainPartitionComparator,
                         chainPartitionComputer);
 
         // Combine each chain-only BinaryRow with the group part into a full partition
@@ -363,6 +327,206 @@ public class ChainTableUtils {
         }
 
         return PredicateBuilder.and(conditions);
+    }
+
+    /**
+     * Builds per-bucket {@link ChainSplit}s from the given snapshot and delta splits. Files that
+     * originate from the snapshot splits are tagged with {@code snapshotBranch}; all other files
+     * are tagged with {@code deltaBranch}.
+     *
+     * <p>This overload produces one {@link ChainSplit} per bucket (no key-range splitting). It is
+     * used by streaming read, where splitting a bucket by key range is not desired.
+     *
+     * @param logicalPartition the logical partition for the resulting ChainSplits
+     * @param snapshotSplits splits from the snapshot branch
+     * @param deltaSplits splits from the delta branch
+     * @param snapshotBranch name of the snapshot branch
+     * @param deltaBranch name of the delta branch
+     * @return one ChainSplit per bucket
+     */
+    public static List<ChainSplit> buildChainSplits(
+            BinaryRow logicalPartition,
+            List<DataSplit> snapshotSplits,
+            List<DataSplit> deltaSplits,
+            String snapshotBranch,
+            String deltaBranch) {
+        return buildChainSplits(
+                logicalPartition,
+                snapshotSplits,
+                deltaSplits,
+                snapshotBranch,
+                deltaBranch,
+                null,
+                0L,
+                0L);
+    }
+
+    /**
+     * Builds {@link ChainSplit}s from the given snapshot and delta splits, optionally splitting
+     * each bucket's files into multiple splits by key range to improve batch read parallelism.
+     *
+     * <p>When {@code keyComparator} is non-null, each bucket's snapshot and delta files are split
+     * via interval partition: files with intersecting key ranges always go to the same split, so
+     * that all versions of a key across the snapshot and delta branches are merged together within
+     * one split. Key-disjoint sections are then packed into splits up to {@code targetSplitSize}.
+     * This is the same invariant the ordinary primary-key table relies on (see {@link
+     * org.apache.paimon.table.source.MergeTreeSplitGenerator}), except the chain path always goes
+     * through the interval partition because snapshot and delta files from different branches may
+     * have intersecting key ranges.
+     *
+     * <p>When {@code keyComparator} is null, each bucket produces a single {@link ChainSplit} (the
+     * original behavior, used by streaming).
+     *
+     * @param keyComparator primary-key comparator used to order files by min/max key; null disables
+     *     key-range splitting
+     * @param targetSplitSize target size (in bytes) of each split; ignored when {@code
+     *     keyComparator} is null
+     * @param openFileCost per-file open cost accounted for in packing; ignored when {@code
+     *     keyComparator} is null
+     */
+    public static List<ChainSplit> buildChainSplits(
+            BinaryRow logicalPartition,
+            List<DataSplit> snapshotSplits,
+            List<DataSplit> deltaSplits,
+            String snapshotBranch,
+            String deltaBranch,
+            @Nullable Comparator<InternalRow> keyComparator,
+            long targetSplitSize,
+            long openFileCost) {
+        Set<String> snapshotFileNames =
+                snapshotSplits.stream()
+                        .flatMap(s -> s.dataFiles().stream().map(DataFileMeta::fileName))
+                        .collect(Collectors.toSet());
+
+        Map<Integer, List<DataSplit>> bucketSplits = new LinkedHashMap<>();
+        Integer bucketInAll = null;
+        for (DataSplit ds : snapshotSplits) {
+            bucketInAll = addToBucketMap(ds, bucketSplits, bucketInAll);
+        }
+        for (DataSplit ds : deltaSplits) {
+            bucketInAll = addToBucketMap(ds, bucketSplits, bucketInAll);
+        }
+
+        List<ChainSplit> result = new ArrayList<>();
+        for (Map.Entry<Integer, List<DataSplit>> entry : bucketSplits.entrySet()) {
+            Map<String, String> fileBranchMapping = new HashMap<>();
+            Map<String, String> fileBucketPathMapping = new HashMap<>();
+            Map<String, DeletionFile> fileDeletionMapping = new HashMap<>();
+            List<DataFileMeta> bucketFiles = new ArrayList<>();
+            for (DataSplit dataSplit : entry.getValue()) {
+                Optional<List<DeletionFile>> deletionFilesOpt = dataSplit.deletionFiles();
+                for (int i = 0; i < dataSplit.dataFiles().size(); i++) {
+                    DataFileMeta file = dataSplit.dataFiles().get(i);
+                    DeletionFile deletionFile =
+                            deletionFilesOpt.isPresent() ? deletionFilesOpt.get().get(i) : null;
+                    fileBucketPathMapping.put(file.fileName(), dataSplit.bucketPath());
+                    String branch =
+                            snapshotFileNames.contains(file.fileName())
+                                    ? snapshotBranch
+                                    : deltaBranch;
+                    fileBranchMapping.put(file.fileName(), branch);
+                    fileDeletionMapping.put(file.fileName(), deletionFile);
+                    bucketFiles.add(file);
+                }
+            }
+
+            List<List<DataFileMeta>> fileGroups;
+            if (keyComparator == null) {
+                fileGroups = Collections.singletonList(bucketFiles);
+            } else {
+                fileGroups =
+                        splitBucketByKeyRange(
+                                bucketFiles, keyComparator, targetSplitSize, openFileCost);
+            }
+
+            for (List<DataFileMeta> groupFiles : fileGroups) {
+                result.add(
+                        new ChainSplit(
+                                logicalPartition,
+                                groupFiles,
+                                subMapping(fileBranchMapping, groupFiles),
+                                subMapping(fileBucketPathMapping, groupFiles),
+                                subDeletionFiles(fileDeletionMapping, groupFiles)));
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Splits a bucket's files (snapshot + delta combined) into key-range groups. The interval
+     * partition first sorts files by (minKey, maxKey) and groups key-overlapping files into the
+     * same section, guaranteeing all versions of a key stay in one split. Sections are key-disjoint
+     * and key-ordered, so packing consecutive sections up to {@code targetSplitSize} preserves that
+     * invariant.
+     */
+    private static List<List<DataFileMeta>> splitBucketByKeyRange(
+            List<DataFileMeta> files,
+            Comparator<InternalRow> keyComparator,
+            long targetSplitSize,
+            long openFileCost) {
+        List<List<DataFileMeta>> sections = new ArrayList<>();
+        for (List<SortedRun> section : new IntervalPartition(files, keyComparator).partition()) {
+            List<DataFileMeta> sectionFiles = new ArrayList<>();
+            for (SortedRun run : section) {
+                sectionFiles.addAll(run.files());
+            }
+            sections.add(sectionFiles);
+        }
+
+        Function<List<DataFileMeta>, Long> weightFunc =
+                section -> Math.max(totalSize(section), openFileCost);
+        return BinPacking.packForOrdered(sections, weightFunc, targetSplitSize).stream()
+                .map(ChainTableUtils::flatFiles)
+                .collect(Collectors.toList());
+    }
+
+    private static long totalSize(List<DataFileMeta> files) {
+        long size = 0L;
+        for (DataFileMeta file : files) {
+            size += file.fileSize();
+        }
+        return size;
+    }
+
+    private static List<DataFileMeta> flatFiles(List<List<DataFileMeta>> packedSections) {
+        List<DataFileMeta> files = new ArrayList<>();
+        packedSections.forEach(files::addAll);
+        return files;
+    }
+
+    private static Map<String, String> subMapping(
+            Map<String, String> mapping, List<DataFileMeta> files) {
+        Map<String, String> sub = new HashMap<>();
+        for (DataFileMeta file : files) {
+            sub.put(file.fileName(), mapping.get(file.fileName()));
+        }
+        return sub;
+    }
+
+    private static List<DeletionFile> subDeletionFiles(
+            Map<String, DeletionFile> mapping, List<DataFileMeta> files) {
+        boolean hasDeletionFile = false;
+        List<DeletionFile> result = new ArrayList<>(files.size());
+        for (DataFileMeta file : files) {
+            DeletionFile deletionFile = mapping.get(file.fileName());
+            if (deletionFile != null) {
+                hasDeletionFile = true;
+            }
+            result.add(deletionFile);
+        }
+        return hasDeletionFile ? result : null;
+    }
+
+    private static Integer addToBucketMap(
+            DataSplit ds, Map<Integer, List<DataSplit>> bucketSplits, Integer bucketInAll) {
+        Integer totalBuckets = ds.totalBuckets();
+        checkNotNull(totalBuckets, "totalBuckets should not be null");
+        if (bucketInAll != null) {
+            checkArgument(
+                    totalBuckets.equals(bucketInAll), "Inconsistent bucket num " + ds.bucket());
+        }
+        bucketSplits.computeIfAbsent(ds.bucket(), k -> new ArrayList<>()).add(ds);
+        return totalBuckets;
     }
 
     /**

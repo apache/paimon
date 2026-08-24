@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from pypaimon.common.options import ConfigOption
+from pypaimon.common.options.config_option import ConfigOption
 from pypaimon.common.options.options_utils import OptionsUtils
 
 

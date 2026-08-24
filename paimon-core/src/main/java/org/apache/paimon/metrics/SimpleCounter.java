@@ -18,16 +18,18 @@
 
 package org.apache.paimon.metrics;
 
+import java.util.concurrent.atomic.AtomicLong;
+
 /** A simple low-overhead {@link org.apache.paimon.metrics.Counter}. */
 public class SimpleCounter implements Counter {
 
     /** the current count. */
-    private long count;
+    private final AtomicLong count = new AtomicLong();
 
     /** Increment the current count by 1. */
     @Override
     public void inc() {
-        count++;
+        count.incrementAndGet();
     }
 
     /**
@@ -37,13 +39,13 @@ public class SimpleCounter implements Counter {
      */
     @Override
     public void inc(long n) {
-        count += n;
+        count.addAndGet(n);
     }
 
     /** Decrement the current count by 1. */
     @Override
     public void dec() {
-        count--;
+        count.decrementAndGet();
     }
 
     /**
@@ -53,7 +55,7 @@ public class SimpleCounter implements Counter {
      */
     @Override
     public void dec(long n) {
-        count -= n;
+        count.addAndGet(-n);
     }
 
     /**
@@ -63,6 +65,6 @@ public class SimpleCounter implements Counter {
      */
     @Override
     public long getCount() {
-        return count;
+        return count.get();
     }
 }

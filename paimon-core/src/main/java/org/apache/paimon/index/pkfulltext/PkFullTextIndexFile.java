@@ -97,9 +97,16 @@ public class PkFullTextIndexFile extends IndexFile {
     IndexFileMeta build(List<Source> sources, DataField textField, GlobalIndexer indexer)
             throws IOException {
         checkArgument(!sources.isEmpty(), "A full-text archive must reference source files.");
+        int dataLevel = sources.get(0).sourceFile.level();
+        checkArgument(dataLevel > 0, "A full-text archive requires a positive data level.");
         long totalRowCount = 0;
         List<PrimaryKeyIndexSourceFile> sourceFiles = new ArrayList<>(sources.size());
         for (Source source : sources) {
+            checkArgument(
+                    source.sourceFile.level() == dataLevel,
+                    "A full-text archive cannot mix data levels %s and %s.",
+                    dataLevel,
+                    source.sourceFile.level());
             checkArgument(
                     source.sourceFile.rowCount() > 0, "Full-text source file must contain rows.");
             totalRowCount = Math.addExact(totalRowCount, source.sourceFile.rowCount());
@@ -163,7 +170,8 @@ public class PkFullTextIndexFile extends IndexFile {
                                     textField.id(),
                                     null,
                                     archiveMetadata,
-                                    new PrimaryKeyIndexSourceMeta(sourceFiles).serialize()),
+                                    new PrimaryKeyIndexSourceMeta(dataLevel, sourceFiles)
+                                            .serialize()),
                             pathFactory.isExternalPath() ? archivePath.toString() : null);
             success = true;
             return archive;

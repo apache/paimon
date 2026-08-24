@@ -27,12 +27,16 @@ import org.apache.paimon.flink.sink.FlinkSink;
 import org.apache.paimon.flink.source.align.AlignedContinuousFileStoreSource;
 import org.apache.paimon.flink.source.operator.MonitorSource;
 import org.apache.paimon.flink.utils.TableScanUtils;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.PostponeMergePlan;
+import org.apache.paimon.table.source.PostponeMergeReadBuilder;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.utils.StringUtils;
 
@@ -40,6 +44,7 @@ import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.connector.source.Source;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
@@ -57,6 +62,7 @@ import org.apache.flink.types.Row;
 
 import javax.annotation.Nullable;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
@@ -65,6 +71,7 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SOURCE_OPERATOR_UID_
 import static org.apache.paimon.flink.FlinkConnectorOptions.generateCustomUid;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 import static org.apache.paimon.flink.utils.ParallelismUtils.forwardParallelism;
+import static org.apache.paimon.options.OptionsUtils.PAIMON_PREFIX;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -224,6 +231,103 @@ public class FlinkSourceBuilder {
                         skipPreloadTargetSnapshot));
     }
 
+    private @Nullable DataStream<RowData> buildPostponeMergeSource() {
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
+        if (fileStoreTable.coreOptions().startupMode() == CoreOptions.StartupMode.COMPACTED_FULL) {
+            return null;
+        }
+
+        Optional<PostponeMergeReadBuilder> optionalBuilder =
+                PostponeMergeReadBuilder.createSnapshotBound(fileStoreTable, partitionPredicate);
+        if (!optionalBuilder.isPresent()) {
+            return env.fromCollection(Collections.<RowData>emptyList(), produceTypeInfo())
+                    .name(sourceName)
+                    .forceNonParallel();
+        }
+
+        int baseParallelism = basePostponeMergeParallelism();
+        PostponeMergeReadBuilder readBuilder = optionalBuilder.get();
+        org.apache.paimon.types.RowType readType = projectedRowType();
+        if (readType != null) {
+            readBuilder.withReadType(readType);
+        }
+        if (predicate != null) {
+            readBuilder.withFilter(predicate);
+        }
+        PostponeMergePlan plan = readBuilder.plan();
+        int mergeParallelism = inferPostponeMergeParallelism(plan, baseParallelism);
+        return PostponeMergeOnRead.build(
+                env,
+                sourceName,
+                fileStoreTable,
+                readBuilder,
+                plan,
+                mergeParallelism,
+                produceTypeInfo(),
+                outerProject(),
+                limit,
+                conf.get(CoreOptions.BLOB_AS_DESCRIPTOR));
+    }
+
+    private int basePostponeMergeParallelism() {
+        if (parallelism != null) {
+            return parallelism;
+        }
+
+        Integer configuredParallelism = conf.get(FlinkConnectorOptions.SCAN_PARALLELISM);
+        if (configuredParallelism != null) {
+            return configuredParallelism;
+        }
+        return Math.max(1, env.getParallelism());
+    }
+
+    private int inferPostponeMergeParallelism(PostponeMergePlan plan, int baseParallelism) {
+        if (parallelism != null
+                || conf.get(FlinkConnectorOptions.SCAN_PARALLELISM) != null
+                || env.getParallelism() > 0
+                || !inferScanParallelism()) {
+            return baseParallelism;
+        }
+
+        long inferred =
+                Math.max(
+                        plan.numPotentialBuckets(),
+                        (long) plan.realSplits().size() + plan.postponeSplits().size());
+        long totalFileSize = 0L;
+        for (org.apache.paimon.table.source.Split split : plan.splits()) {
+            for (DataFileMeta file : ((DataSplit) split).dataFiles()) {
+                if (file.fileSize() > Long.MAX_VALUE - totalFileSize) {
+                    totalFileSize = Long.MAX_VALUE;
+                    break;
+                }
+                totalFileSize += file.fileSize();
+            }
+            if (totalFileSize == Long.MAX_VALUE) {
+                break;
+            }
+        }
+        long splitTargetSize = ((FileStoreTable) table).coreOptions().splitTargetSize();
+        long sizeParallelism = totalFileSize == 0 ? 1 : (totalFileSize - 1) / splitTargetSize + 1;
+        inferred = Math.max(inferred, sizeParallelism);
+        if (limit != null && limit > 0) {
+            inferred = Math.min(inferred, limit);
+        }
+        inferred =
+                Math.min(
+                        Math.max(1L, inferred),
+                        conf.get(FlinkConnectorOptions.INFER_SCAN_MAX_PARALLELISM));
+        return (int) inferred;
+    }
+
+    private boolean inferScanParallelism() {
+        Configuration envConfig = (Configuration) env.getConfiguration();
+        String flinkOption = PAIMON_PREFIX + FlinkConnectorOptions.INFER_SCAN_PARALLELISM.key();
+        if (envConfig.containsKey(flinkOption)) {
+            return Boolean.parseBoolean(envConfig.toMap().get(flinkOption));
+        }
+        return conf.get(FlinkConnectorOptions.INFER_SCAN_PARALLELISM);
+    }
+
     private DataStream<RowData> buildContinuousFileSource() {
         return toDataStream(
                 new ContinuousFileStoreSource(
@@ -325,6 +429,17 @@ public class FlinkSourceBuilder {
                             + " too many snapshots that could pose a risk to the file system.");
         }
 
+        if (PostponeMergeOnRead.configured(table)) {
+            if (!sourceBounded) {
+                throw new UnsupportedOperationException(
+                        "Option 'postpone.merge-on-read' is only supported for batch reads.");
+            }
+            DataStream<RowData> mergeSource = buildPostponeMergeSource();
+            if (mergeSource != null) {
+                return mergeSource;
+            }
+        }
+
         if (sourceBounded) {
             if (conf.get(FlinkConnectorOptions.SCAN_DEDICATED_SPLIT_GENERATION)) {
                 return buildDedicatedSplitGenSource(true);
@@ -356,12 +471,13 @@ public class FlinkSourceBuilder {
             throw new IllegalArgumentException(
                     "Cannot limit streaming source, please use batch execution mode.");
         }
+        ReadBuilder readBuilder = createReadBuilder(projectedRowType());
         dataStream =
                 MonitorSource.buildSource(
                         env,
                         sourceName,
                         produceTypeInfo(),
-                        createReadBuilder(projectedRowType()),
+                        readBuilder,
                         conf.get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL).toMillis(),
                         watermarkStrategy == null,
                         conf.get(FlinkConnectorOptions.READ_SHUFFLE_BUCKET_WITH_PARTITION),
@@ -369,7 +485,9 @@ public class FlinkSourceBuilder {
                         outerProject(),
                         isBounded,
                         limit,
-                        table);
+                        table,
+                        readBuilder.readType(),
+                        conf.get(CoreOptions.BLOB_AS_DESCRIPTOR));
         if (parallelism != null) {
             dataStream.getTransformation().setParallelism(parallelism);
         }

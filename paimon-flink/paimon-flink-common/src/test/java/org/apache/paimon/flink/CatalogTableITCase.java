@@ -278,7 +278,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql("ALTER TABLE T SET ('snapshot.time-retained' = '5 h')");
         sql("ALTER TABLE T SET ('snapshot.num-retained.max' = '20')");
         sql("ALTER TABLE T SET ('snapshot.num-retained.min' = '18')");
-        sql("ALTER TABLE T SET ('manifest.format' = 'avro')");
+        sql("ALTER TABLE T SET ('manifest.compression' = 'snappy')");
 
         String actualResult = sql("SHOW CREATE TABLE T$schemas").toString();
         String expectedResult =
@@ -315,8 +315,8 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                 + "{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], "
                                 + "{\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\",\"b.bb.bbb\":\"val2\",\"snapshot.num-retained.max\":\"20\",\"snapshot.num-retained.min\":\"18\"}, ], "
                                 + "+I[4, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], "
-                                + "{\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\",\"b.bb.bbb\":\"val2\",\"snapshot.num-retained.max\":\"20\",\"manifest.format\":\"avro\","
-                                + "\"snapshot.num-retained.min\":\"18\"}, ]]");
+                                + "{\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\",\"b.bb.bbb\":\"val2\",\"snapshot.num-retained.max\":\"20\",\"snapshot.num-retained.min\":\"18\","
+                                + "\"manifest.compression\":\"snappy\"}, ]]");
 
         result =
                 sql(
@@ -375,17 +375,15 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                 + "{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], "
                                 + "{\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\",\"b.bb.bbb\":\"val2\",\"snapshot.num-retained.max\":\"20\",\"snapshot.num-retained.min\":\"18\"}, ], "
                                 + "+I[4, [{\"id\":0,\"name\":\"a\",\"type\":\"INT NOT NULL\"},{\"id\":1,\"name\":\"b\",\"type\":\"INT\"},{\"id\":2,\"name\":\"c\",\"type\":\"STRING\"}], [], [\"a\"], "
-                                + "{\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\",\"b.bb.bbb\":\"val2\",\"snapshot.num-retained.max\":\"20\",\"manifest.format\":\"avro\","
-                                + "\"snapshot.num-retained.min\":\"18\"}, ]]");
+                                + "{\"a.aa.aaa\":\"val1\",\"snapshot.time-retained\":\"5 h\",\"b.bb.bbb\":\"val2\",\"snapshot.num-retained.max\":\"20\",\"snapshot.num-retained.min\":\"18\","
+                                + "\"manifest.compression\":\"snappy\"}, ]]");
 
         // check with not exist schema id
-        assertThatThrownBy(
-                        () ->
-                                sql(
-                                        "SELECT schema_id, fields, partition_keys, "
-                                                + "primary_keys, options, `comment` FROM T$schemas where schema_id = 5"))
-                .hasCauseInstanceOf(RuntimeException.class)
-                .hasRootCauseMessage("schema id: 5 should not greater than max schema id: 4");
+        assertThat(
+                        sql(
+                                "SELECT schema_id, fields, partition_keys, "
+                                        + "primary_keys, options, `comment` FROM T$schemas where schema_id = 5"))
+                .isEmpty();
 
         // check with not exist schema id
         assertThatThrownBy(

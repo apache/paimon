@@ -28,6 +28,7 @@ import tempfile
 import unittest
 
 import pyarrow as pa
+import pytest
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
@@ -330,6 +331,7 @@ class DataEvolutionFormatsTest(unittest.TestCase):
             {'k': [10, 20], 'v': ['new1', 'new2']}, schema=pa_schema)
         self.assertEqual(actual, expect)
 
+    @pytest.mark.python_plan
     def test_parquet_append_new_rows(self):
         """Append new rows (new first_row_id) with column subsets, merge-read all."""
         pa_schema = pa.schema([
@@ -738,7 +740,7 @@ class DataEvolutionFormatsTest(unittest.TestCase):
         self.assertEqual(actual.num_rows, 3)
         expect = pa.Table.from_pydict(
             {'x': [1, 2, 3], 'y': ['a', 'b', 'c']}, schema=pa_schema)
-        self.assertEqual(actual, expect)
+        self.assertEqual(actual.sort_by('x'), expect)
 
     @unittest.skipIf(sys.version_info < (3, 11), "vortex-data requires Python >= 3.11")
     @unittest.skipUnless(

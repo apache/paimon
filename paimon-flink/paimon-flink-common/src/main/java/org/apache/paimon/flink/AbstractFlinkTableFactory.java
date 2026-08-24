@@ -26,6 +26,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.sink.FlinkFormatTableSink;
 import org.apache.paimon.flink.sink.FlinkTableSink;
+import org.apache.paimon.flink.source.DataEvolutionDataTableSource;
 import org.apache.paimon.flink.source.DataTableSource;
 import org.apache.paimon.flink.source.SystemTableSource;
 import org.apache.paimon.options.Options;
@@ -37,6 +38,7 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.SensitiveConfigUtils;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ConfigOption;
@@ -97,6 +99,9 @@ public abstract class AbstractFlinkTableFactory
         }
         if (origin instanceof SystemCatalogTable) {
             return new SystemTableSource(table, unbounded, context.getObjectIdentifier());
+        } else if (CoreOptions.fromMap(table.options()).dataEvolutionEnabled()) {
+            return new DataEvolutionDataTableSource(
+                    context.getObjectIdentifier(), table, unbounded, context);
         } else {
             return new DataTableSource(context.getObjectIdentifier(), table, unbounded, context);
         }
@@ -289,7 +294,7 @@ public abstract class AbstractFlinkTableFactory
             LOG.info(
                     "Loading dynamic table options for {} in table config: {}",
                     tableName,
-                    optionsFromTableConfig);
+                    SensitiveConfigUtils.redactMap(optionsFromTableConfig));
         }
         return optionsFromTableConfig;
     }

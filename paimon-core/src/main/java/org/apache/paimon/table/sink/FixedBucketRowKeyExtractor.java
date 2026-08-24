@@ -38,6 +38,10 @@ public class FixedBucketRowKeyExtractor extends RowKeyExtractor {
     private Integer reuseBucket;
     private final BucketFunction bucketFunction;
 
+    public FixedBucketRowKeyExtractor(TableSchema schema) {
+        this(schema, PartitionBucketMapping.defaultBuckets(schema.numBuckets()));
+    }
+
     public FixedBucketRowKeyExtractor(
             TableSchema schema, PartitionBucketMapping partitionBucketMapping) {
         super(schema);

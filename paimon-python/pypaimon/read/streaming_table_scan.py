@@ -36,6 +36,7 @@ from pypaimon.consumer.consumer_manager import ConsumerManager
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.read.plan import Plan
+from pypaimon.read.query_auth_split import resolve_auth_result, wrap_plan_with_auth
 from pypaimon.read.scanner.append_table_split_generator import \
     AppendTableSplitGenerator
 from pypaimon.read.scanner.changelog_follow_up_scanner import \
@@ -108,6 +109,9 @@ class AsyncStreamingTableScan:
 
         # Consumer management for persisting streaming progress
         self._consumer_id = consumer_id
+        self._read_type = None
+        self._query_auth_fn = self.table.catalog_environment.table_query_auth(
+            self.table.options, self.table.identifier)
         self._consumer_manager = (
             ConsumerManager(table.file_io, table.table_path)
             if consumer_id else None
@@ -267,6 +271,12 @@ class AsyncStreamingTableScan:
             )
             self._pending_consumer_snapshot = None
 
+    def __apply_auth(self, plan) -> Plan:
+        return wrap_plan_with_auth(self.__auth_query(), plan)
+
+    def __auth_query(self):
+        return resolve_auth_result(self._query_auth_fn, self._read_type)
+
     def _start_prefetch(self, snapshot_id: int) -> None:
         """Start prefetching the next scannable snapshot in a background thread."""
         if self._prefetch_future is not None or self._prefetch_executor is None:
@@ -300,9 +310,10 @@ class AsyncStreamingTableScan:
     def _create_follow_up_plan(self, snapshot: Snapshot) -> Plan:
         """Route to changelog or delta plan based on scanner type."""
         if isinstance(self.follow_up_scanner, ChangelogFollowUpScanner):
-            return self._create_changelog_plan(snapshot)
+            plan = self._create_changelog_plan(snapshot)
         else:
-            return self._create_delta_plan(snapshot)
+            plan = self._create_delta_plan(snapshot)
+        return self.__apply_auth(plan)
 
     def _create_follow_up_scanner(self) -> FollowUpScanner:
         """Create the appropriate follow-up scanner based on changelog-producer option."""
@@ -319,8 +330,7 @@ class AsyncStreamingTableScan:
             return [e for e in entries if self._bucket_filter(e.bucket)]
         return entries
 
-    def _create_initial_plan(self, snapshot: Snapshot) -> Plan:
-        """Create a Plan for the initial full scan of the latest snapshot."""
+    def __create_initial_plan_raw(self, snapshot, auth_result=None):
         def all_manifests():
             return self._manifest_list_manager.read_all(snapshot), snapshot
 
@@ -330,7 +340,16 @@ class AsyncStreamingTableScan:
             predicate=self.predicate,
             limit=None
         )
+        if auth_result is not None:
+            from pypaimon.read.table_scan import prune_scanner_by_auth
+            prune_scanner_by_auth(self.table, starting_scanner, auth_result)
         return starting_scanner.scan()
+
+    def _create_initial_plan(self, snapshot: Snapshot) -> Plan:
+        """Create a Plan for the initial full scan of the latest snapshot."""
+        auth_result = self.__auth_query()
+        plan = self.__create_initial_plan_raw(snapshot, auth_result)
+        return wrap_plan_with_auth(auth_result, plan)
 
     def _create_delta_plan(self, snapshot: Snapshot) -> Plan:
         """Read new files from delta_manifest_list (changelog-producer=none)."""
@@ -403,13 +422,13 @@ class AsyncStreamingTableScan:
 
     def _create_catch_up_plan(self, start_id: int, end_snapshot: Snapshot) -> Plan:
         """Create a catch-up plan using diff-based scanning between start and end snapshots."""
-        # Get start snapshot (one before where we want to start reading).
-        # If start_id is 0 or 1, fall back to a full scan of end_snapshot.
         start_snapshot = None
         if start_id > 1:
             start_snapshot = self._snapshot_manager.get_snapshot_by_id(start_id - 1)
 
+        auth_result = self.__auth_query()
         if start_snapshot is None:
-            return self._create_initial_plan(end_snapshot)
-
-        return IncrementalDiffScanner(self.table).scan(start_snapshot, end_snapshot)
+            plan = self.__create_initial_plan_raw(end_snapshot, auth_result)
+        else:
+            plan = IncrementalDiffScanner(self.table).scan(start_snapshot, end_snapshot)
+        return wrap_plan_with_auth(auth_result, plan)

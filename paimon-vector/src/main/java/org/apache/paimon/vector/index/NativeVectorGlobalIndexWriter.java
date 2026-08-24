@@ -44,6 +44,7 @@ import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -252,7 +253,6 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
         LOG.info("{} vector index build started: {} vectors, dim={}", identifier, count, dim);
         long buildStart = System.currentTimeMillis();
 
-        NativeVectorIndexLoader.loadJni();
         // Phase 1: Train
         long phaseStart = System.currentTimeMillis();
         LOG.info("{} train phase started", identifier);
@@ -305,7 +305,7 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
         float[] batchVectors = new float[trainBatchSize * dim];
         logTrainingMemoryEstimate(trainCount);
 
-        try (VectorIndexTrainer trainer = VectorIndexTrainer.create(nativeOptions);
+        try (VectorIndexTrainer trainer = VectorIndexTrainer.create(trainingOptions());
                 RandomAccessFile raf = new RandomAccessFile(tempVectorFile, "r");
                 FileChannel channel = raf.getChannel()) {
             ByteBuffer readBuf = ByteBuffer.allocateDirect(IO_BUFFER_SIZE);
@@ -353,6 +353,19 @@ public class NativeVectorGlobalIndexWriter implements GlobalIndexSingleColumnWri
 
             return trainer.finishTraining();
         }
+    }
+
+    private Map<String, String> trainingOptions() {
+        Map<String, String> options = new LinkedHashMap<>(nativeOptions);
+        String indexType = options.get("index.type");
+        String nlist = options.get("nlist");
+        if (indexType != null
+                && indexType.startsWith("ivf_")
+                && (nlist == null || "auto".equals(nlist))
+                && !options.containsKey("expected-vector-count")) {
+            options.put("expected-vector-count", Long.toString(count));
+        }
+        return options;
     }
 
     private void addVectorsFromTempFile(VectorIndexWriter writer) throws IOException {

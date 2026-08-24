@@ -27,11 +27,13 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.manifest.BinaryIndexManifestEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.IndexFilePathFactories;
 import org.apache.paimon.utils.Pair;
@@ -149,6 +151,18 @@ public class IndexFileHandlerTest {
 
         Snapshot snapshot = store.snapshotManager().latestSnapshot();
         IndexFileHandler indexFileHandler = store.newIndexFileHandler();
+        int binaryEntryCount = 0;
+        try (CloseableIterator<BinaryIndexManifestEntry> entries =
+                indexFileHandler.scan(snapshot, BinaryIndexManifestEntry.GLOBAL_INDEX_PROJECTION)) {
+            while (entries.hasNext()) {
+                BinaryIndexManifestEntry entry = entries.next();
+                assertThat(entry.isAdd()).isTrue();
+                assertThat(entry.indexType()).isNotNull();
+                binaryEntryCount++;
+            }
+        }
+        assertThat(binaryEntryCount).isEqualTo(3);
+
         assertThat(
                         indexFileHandler.scanBuckets(
                                 snapshot, DELETION_VECTORS_INDEX, Collections.emptySet()))

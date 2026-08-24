@@ -123,10 +123,16 @@ public class FileSystemBranchManager implements BranchManager {
                     tagManager.tagPath(tagName),
                     tagManager.copyWithBranch(branchName).tagPath(tagName),
                     true);
-            fileIO.copyFile(
-                    snapshotManager.snapshotPath(snapshot.id()),
-                    snapshotManager.copyWithBranch(branchName).snapshotPath(snapshot.id()),
-                    true);
+            Path branchSnapshotPath =
+                    snapshotManager.copyWithBranch(branchName).snapshotPath(snapshot.id());
+            if (snapshotManager.snapshotExists(snapshot.id())) {
+                fileIO.copyFile(
+                        snapshotManager.snapshotPath(snapshot.id()), branchSnapshotPath, true);
+            } else {
+                // The snapshot may have expired while the tag preserved its content, so write the
+                // snapshot from the tag instead of copying a file that no longer exists.
+                fileIO.writeFile(branchSnapshotPath, snapshot.toJson(), true);
+            }
             copySchemasToBranch(branchName, snapshot.schemaId());
         } catch (IOException e) {
             throw new RuntimeException(

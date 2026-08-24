@@ -155,10 +155,18 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
             |  (5, 5, X'05'), (6, 6, X'06'), (7, 7, X'07'), (8, 8, X'08'), (9, 9, X'09')
             |  AS v(id, b, picture)
             |""".stripMargin)
-      sql("DELETE FROM t WHERE id IN (0, 1, 2, 3, 4, 6, 9)")
+      sql("""
+            |INSERT INTO t SELECT /*+ REPARTITION(1) */ id, b, picture FROM VALUES
+            |  (10, 10, X'0A'), (11, 11, X'0B'), (12, 12, X'0C'),
+            |  (13, 13, X'0D'), (14, 14, X'0E')
+            |  AS v(id, b, picture)
+            |""".stripMargin)
+      sql("DELETE FROM t WHERE id IN (0, 1, 2, 3, 4, 6, 9, 14)")
 
       sql("CREATE TABLE s (id INT, picture BINARY)")
-      sql("INSERT INTO s VALUES (2, X'22'), (6, X'66'), (7, X'4D'), (9, X'79')")
+      sql(
+        "INSERT INTO s VALUES " +
+          "(2, X'22'), (6, X'66'), (7, X'4D'), (9, X'79'), (12, X'7A')")
 
       sql("""
             |MERGE INTO t
@@ -172,7 +180,13 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
         Seq(
           Row(5, 5, Array[Byte](5), 5L),
           Row(7, 7, Array[Byte](77), 7L),
-          Row(8, 8, Array[Byte](8), 8L)))
+          Row(8, 8, Array[Byte](8), 8L),
+          Row(10, 10, Array[Byte](10), 10L),
+          Row(11, 11, Array[Byte](11), 11L),
+          Row(12, 12, Array[Byte](122), 12L),
+          Row(13, 13, Array[Byte](13), 13L)
+        )
+      )
     }
   }
 
@@ -605,7 +619,7 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
             |WHEN MATCHED THEN UPDATE SET t.b = s.b
             |""".stripMargin)
 
-      compactDataEvolutionTable(rewriteRowIds = false)
+      compactDataEvolutionTable()
 
       checkAnswer(
         sql("SELECT id, b, c, _ROW_ID FROM t ORDER BY id"),
@@ -623,7 +637,7 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
     }
   }
 
-  test("Data Evolution deletion: materialized compact after delete and merge") {
+  test("Data Evolution deletion: materialize deletion vectors after delete and merge") {
     withTable("t", "s") {
       sql("""
             |CREATE TABLE t (id INT, b INT, c INT)
@@ -645,19 +659,19 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
             |WHEN MATCHED THEN UPDATE SET t.b = s.b
             |""".stripMargin)
 
-      compactDataEvolutionTable(rewriteRowIds = true)
+      materializeDeletionVectors()
 
       checkAnswer(
-        sql("SELECT id, b, c FROM t ORDER BY id"),
+        sql("SELECT id, b, c, _ROW_ID FROM t ORDER BY id"),
         Seq(
-          Row(0, 0, 0),
-          Row(2, 200, 2),
-          Row(3, 3, 3),
-          Row(4, 4, 4),
-          Row(5, 5, 5),
-          Row(7, 700, 7),
-          Row(8, 8, 8),
-          Row(9, 9, 9))
+          Row(0, 0, 0, 10L),
+          Row(2, 200, 2, 11L),
+          Row(3, 3, 3, 12L),
+          Row(4, 4, 4, 13L),
+          Row(5, 5, 5, 14L),
+          Row(7, 700, 7, 15L),
+          Row(8, 8, 8, 16L),
+          Row(9, 9, 9, 17L))
       )
     }
   }
@@ -692,7 +706,7 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
       assert(btreeIndexEntryCount("t") > 0)
 
       sql("DELETE FROM t WHERE id IN (2, 4)")
-      compactDataEvolutionTable(rewriteRowIds = true)
+      materializeDeletionVectors()
 
       checkAnswer(
         sql("SELECT id, name, b FROM t WHERE name IN ('name-1', 'name-2') ORDER BY id"),
@@ -701,15 +715,14 @@ abstract class DataEvolutionDeletionTestBase extends PaimonSparkTestBase {
     }
   }
 
-  private def compactDataEvolutionTable(rewriteRowIds: Boolean): Unit = {
-    val rewriteRowIdsOption =
-      if (rewriteRowIds) {
-        ",data-evolution.compaction.rewrite-row-ids=true"
-      } else {
-        ""
-      }
+  private def compactDataEvolutionTable(): Unit = {
+    sql("CALL sys.compact(table => 't', options => 'compaction.min.file-num=2')")
+  }
+
+  private def materializeDeletionVectors(): Unit = {
     sql(
-      s"CALL sys.compact(table => 't', options => 'compaction.min.file-num=2$rewriteRowIdsOption')")
+      "CALL sys.materialize_deletion_vectors(" +
+        "table => 't', options => 'compaction.min.file-num=2')")
   }
 
   private def btreeIndexEntryCount(tableName: String): Int = {

@@ -114,6 +114,7 @@ public class TestHiveMetastore {
     private ExecutorService executorService;
     private TServer server;
     private HiveMetaStore.HMSHandler baseHandler;
+    private int port;
 
     public void start(Configuration configuration, int port) {
         start(configuration, DEFAULT_POOL_SIZE, port);
@@ -144,7 +145,7 @@ public class TestHiveMetastore {
     public void start(Configuration conf, int poolSize, int portNum) {
         try {
             TServerSocket socket = new TServerSocket(portNum);
-            int port = socket.getServerSocket().getLocalPort();
+            this.port = socket.getServerSocket().getLocalPort();
             this.hiveConf = initConf(conf, port);
             this.server = newThriftServer(socket, poolSize, hiveConf);
             this.executorService = Executors.newSingleThreadExecutor();
@@ -175,6 +176,10 @@ public class TestHiveMetastore {
         }
         System.clearProperty(HiveConf.ConfVars.METASTOREURIS.varname);
         System.clearProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname);
+    }
+
+    public int getPort() {
+        return port;
     }
 
     public void reset() throws Exception {

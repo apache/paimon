@@ -41,12 +41,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class SparkMultimodalITCase {
 
     private static TestHiveMetastore testHiveMetastore;
-    private static final int PORT = 9092;
+    private static int port;
 
     @BeforeAll
     public static void startMetastore() {
         testHiveMetastore = new TestHiveMetastore();
-        testHiveMetastore.start(PORT);
+        testHiveMetastore.start(0);
+        port = testHiveMetastore.getPort();
     }
 
     @AfterAll
@@ -59,12 +60,12 @@ public class SparkMultimodalITCase {
                 .config("spark.sql.warehouse.dir", warehousePath.toString())
                 // with hive metastore
                 .config("spark.sql.catalogImplementation", "hive")
-                .config("hive.metastore.uris", "thrift://localhost:" + PORT)
+                .config("hive.metastore.uris", "thrift://localhost:" + port)
                 .config("spark.sql.catalog.spark_catalog", SparkCatalog.class.getName())
                 .config("spark.sql.catalog.spark_catalog.metastore", "hive")
                 .config(
                         "spark.sql.catalog.spark_catalog.hive.metastore.uris",
-                        "thrift://localhost:" + PORT)
+                        "thrift://localhost:" + port)
                 .config("spark.sql.catalog.spark_catalog.format-table.enabled", "true")
                 .config("spark.sql.catalog.spark_catalog.warehouse", warehousePath.toString())
                 .config(
@@ -84,9 +85,9 @@ public class SparkMultimodalITCase {
         spark.sql(
                 "\n"
                         + "CREATE TABLE my_db1.vector_test (gid BIGINT, sid STRING, embs ARRAY<FLOAT>)"
-                        + " PARTITIONED BY (`date` STRING COMMENT 'date') ROW FORMAT SERDE 'org.apache.paimon.hive.PaimonSerDe'\n"
-                        + "WITH\n"
-                        + "  SERDEPROPERTIES ('serialization.format' = '1') STORED AS INPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonInputFormat' OUTPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonOutputFormat' TBLPROPERTIES (\n"
+                        + " USING paimon\n"
+                        + "PARTITIONED BY (`date` STRING COMMENT 'date')\n"
+                        + "TBLPROPERTIES (\n"
                         + "    'vector.file.format'='lance',\n"
                         + "    'vector-field'='embs',\n"
                         + "    'field.embs.vector-dim'='4',\n"

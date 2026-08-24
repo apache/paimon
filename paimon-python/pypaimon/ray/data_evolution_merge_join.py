@@ -16,6 +16,7 @@
 # limitations under the License.
 ################################################################################
 
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import pyarrow as pa
@@ -42,6 +43,39 @@ def _map_kwargs(
     if ray_remote_args:
         kwargs.update(ray_remote_args)
     return kwargs
+
+
+@dataclass(frozen=True)
+class _SelfMergeUpdatePlan:
+    """Pinned target file groups for self-merge update execution."""
+
+    table: Any
+    scan_table: Any
+    file_groups: list
+    predicate: Any
+    read_type: list
+    clauses: List[_NormalizedClause]
+    update_cols: List[str]
+    update_schema: pa.Schema
+    row_id_name: str
+    snapshot_id: int
+    callable_input_columns: Optional[List[str]]
+
+
+@dataclass(frozen=True)
+class _SelfMergeUpdateContext:
+    """Worker state shared by all file groups."""
+
+    table: Any
+    scan_table: Any
+    predicate: Any
+    read_type: list
+    clauses: List[_NormalizedClause]
+    update_cols: List[str]
+    update_schema: pa.Schema
+    row_id_name: str
+    snapshot_id: int
+    callable_input_columns: Optional[List[str]]
 
 
 def _resolve_source_projection(
@@ -73,6 +107,7 @@ def _build_matched_transform(
     update_cols: List[str],
     row_id_name: str,
     update_schema: pa.Schema,
+    callable_input_columns: Optional[Sequence[str]] = None,
 ):
     prepared_clauses = []
     for clause in clauses:
@@ -105,10 +140,20 @@ def _build_matched_transform(
             if matched.num_rows == 0:
                 continue
             if not is_delete:
+                callable_input = None
+                if (callable_input_columns is not None
+                        and any(callable(value) and not isinstance(value, type)
+                                for value in spec.values())):
+                    callable_input = pa.Table.from_arrays(
+                        [matched.column(f"t.{col}")
+                         for col in callable_input_columns],
+                        names=list(callable_input_columns),
+                    )
                 parts.append(vectorized_matched_transform(
                     matched, spec, on_pairs,
                     update_cols, row_id_name,
                     update_schema,
+                    callable_input=callable_input,
                 ))
             if rewritten is not None and matched.num_rows < remaining.num_rows:
                 not_cond = f"COALESCE(NOT ({rewritten}), TRUE)"
@@ -178,25 +223,29 @@ def _build_matched_delete_transform(
     return _transform
 
 
-def build_self_merge_update_ds(
+def build_self_merge_update_plan(
     *,
-    target_identifier: str,
+    table,
     clauses: List[_NormalizedClause],
     target_field_names: Sequence[str],
     target_pa_schema: pa.Schema,
     update_cols: Sequence[str],
-    catalog_options: Dict[str, str],
     resolve_target_projection,
     snapshot_id: Optional[int] = None,
-    ray_remote_args: Optional[Dict[str, Any]] = None,
-) -> Tuple:
-    from pypaimon.ray.ray_paimon import read_paimon
+    scan_predicate=None,
+    read_columns: Sequence[str] = (),
+) -> _SelfMergeUpdatePlan:
+    from pypaimon.common.options.core_options import (
+        CoreOptions, GlobalIndexSearchMode,
+    )
     from pypaimon.table.special_fields import SpecialFields
+    from pypaimon.write.table_update import TableUpdate
 
     row_id_name = SpecialFields.ROW_ID.name
     needed_cols = set(resolve_target_projection(
         clauses, [row_id_name], update_cols, target_field_names,
     ))
+    needed_cols.update(read_columns)
     for clause in clauses:
         for value in clause.spec.values():
             if isinstance(value, SourceColumnRef):
@@ -213,43 +262,195 @@ def build_self_merge_update_ds(
         c for c in target_field_names if c in needed_cols
     ]
 
-    target_ds = read_paimon(
-        target_identifier, catalog_options,
-        projection=projection, snapshot_id=snapshot_id,
+    dynamic_options = {}
+    if snapshot_id is not None:
+        dynamic_options[CoreOptions.SCAN_SNAPSHOT_ID.key()] = str(snapshot_id)
+    if scan_predicate is not None:
+        dynamic_options[CoreOptions.SCALAR_INDEX_SEARCH_MODE.key()] = (
+            GlobalIndexSearchMode.FULL.value
+        )
+    scan_table = (
+        table.copy_without_time_travel(dynamic_options)
+        if dynamic_options else table
     )
+    read_builder = scan_table.new_read_builder().with_projection(projection)
+    if scan_predicate is not None:
+        read_builder.with_filter(scan_predicate)
+    scan_plan = read_builder.new_scan().plan_for_write()
+    planned_snapshot_id = (
+        scan_plan.snapshot_id
+        if scan_plan.snapshot_id is not None else -1
+    )
+    # A packed scan split may contain multiple logical row-id groups. Keep
+    # each group intact, but do not materialize unrelated groups together.
+    file_groups = list(TableUpdate._predicate_update_file_groups(
+        scan_plan.splits()
+    ))
     update_schema = build_update_schema(target_pa_schema, update_cols, row_id_name)
-
-    orig_names = target_ds.schema().names
-    target_renamed = target_ds.rename_columns(
-        {c: f"t.{c}" for c in orig_names}
-    )
-
-    def _add_source_aliases(batch: pa.Table) -> pa.Table:
-        columns = list(batch.columns)
-        names = list(batch.schema.names)
-        for orig in orig_names:
-            if orig == row_id_name:
-                continue
-            t_col_name = f"t.{orig}"
-            if t_col_name in names:
-                idx = names.index(t_col_name)
-                columns.append(columns[idx])
-                names.append(f"s.{orig}")
-        return pa.table(columns, names=names)
-
-    aliased = target_renamed.map_batches(
-        _add_source_aliases, **_map_kwargs(ray_remote_args),
-    )
-
-    _transform = _build_matched_transform(
-        clauses,
-        on_map={row_id_name: row_id_name},
-        on_pairs=[(row_id_name, row_id_name)],
+    return _SelfMergeUpdatePlan(
+        table=table,
+        scan_table=scan_table,
+        file_groups=file_groups,
+        predicate=scan_predicate,
+        read_type=read_builder.read_type(),
+        clauses=clauses,
         update_cols=list(update_cols),
-        row_id_name=row_id_name,
         update_schema=update_schema,
+        row_id_name=row_id_name,
+        snapshot_id=planned_snapshot_id,
+        callable_input_columns=(
+            list(read_columns) + [row_id_name]
+            if read_columns else None
+        ),
     )
-    return aliased.map_batches(_transform, **_map_kwargs(ray_remote_args))
+
+
+def _self_merge_aliases(batch: pa.Table, row_id_name: str) -> pa.Table:
+    columns = []
+    names = []
+    for name, column in zip(batch.schema.names, batch.columns):
+        columns.append(column)
+        names.append(f"t.{name}")
+        if name != row_id_name:
+            columns.append(column)
+            names.append(f"s.{name}")
+    return pa.table(columns, names=names)
+
+
+def _apply_self_merge_update_group(context, file_group, collect_row_ids):
+    """Read, transform, and stage one complete first-row-id file group."""
+    from pypaimon.read.table_read import TableRead
+    from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
+    from pypaimon.write.file_store_commit import _abort_commit_messages
+    from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+
+    table_read = TableRead(
+        context.scan_table,
+        context.predicate,
+        context.read_type,
+    )
+    transform = _build_matched_transform(
+        context.clauses,
+        on_map={context.row_id_name: context.row_id_name},
+        on_pairs=[(context.row_id_name, context.row_id_name)],
+        update_cols=context.update_cols,
+        row_id_name=context.row_id_name,
+        update_schema=context.update_schema,
+        callable_input_columns=context.callable_input_columns,
+    )
+    update_parts = []
+    batch_reader = table_read.to_arrow_batch_reader([file_group])
+    for batch in iter(batch_reader.read_next_batch, None):
+        if batch.num_rows == 0:
+            continue
+        matched = pa.Table.from_batches([batch])
+        updates = transform(_self_merge_aliases(
+            matched, context.row_id_name,
+        ))
+        if updates.num_rows > 0:
+            update_parts.append(updates)
+
+    if not update_parts:
+        return [], 0, []
+    updates = (
+        update_parts[0]
+        if len(update_parts) == 1 else pa.concat_tables(update_parts)
+    )
+
+    row_ids = (
+        updates.column(context.row_id_name).to_pylist()
+        if collect_row_ids else []
+    )
+
+    import uuid
+    files_info = TableUpdateByRowId._files_info_from_splits(
+        context.snapshot_id, [file_group],
+    )
+    updater = TableUpdateByRowId(
+        context.table,
+        "_self_merge_group_" + uuid.uuid4().hex[:8],
+        BATCH_COMMIT_IDENTIFIER,
+        _precomputed_files_info=files_info,
+    )
+    try:
+        messages = updater.update_columns(updates, context.update_cols)
+    except Exception:
+        _abort_commit_messages(context.table, updater.commit_messages)
+        raise
+    return messages, updates.num_rows, row_ids
+
+
+def distributed_self_merge_update_apply(
+    plan: _SelfMergeUpdatePlan,
+    *,
+    num_partitions: int,
+    ray_remote_args: Optional[Dict[str, Any]] = None,
+    collect_row_ids: bool = False,
+) -> Tuple[list, int, list]:
+    """Stage self-merge updates in scan tasks without a routing shuffle."""
+    import ray
+
+    if not plan.file_groups:
+        return [], 0, []
+
+    remote_args = dict(ray_remote_args or {})
+    apply_remote = (
+        ray.remote(**remote_args)(_apply_self_merge_update_group)
+        if remote_args else ray.remote(_apply_self_merge_update_group)
+    )
+    context = ray.put(_SelfMergeUpdateContext(
+        table=plan.table,
+        scan_table=plan.scan_table,
+        predicate=plan.predicate,
+        read_type=plan.read_type,
+        clauses=plan.clauses,
+        update_cols=plan.update_cols,
+        update_schema=plan.update_schema,
+        row_id_name=plan.row_id_name,
+        snapshot_id=plan.snapshot_id,
+        callable_input_columns=plan.callable_input_columns,
+    ))
+    group_iter = iter(plan.file_groups)
+    max_in_flight = max(1, min(num_partitions, len(plan.file_groups)))
+    pending = set()
+    messages = []
+    num_updated = 0
+    row_ids = []
+    first_error = None
+
+    def submit_next():
+        try:
+            file_group = next(group_iter)
+        except StopIteration:
+            return False
+        pending.add(apply_remote.remote(
+            context, file_group, collect_row_ids
+        ))
+        return True
+
+    for _ in range(max_in_flight):
+        submit_next()
+
+    while pending:
+        ready, remaining = ray.wait(list(pending), num_returns=1)
+        pending = set(remaining)
+        ref = ready[0]
+        try:
+            split_messages, split_count, split_row_ids = ray.get(ref)
+            messages.extend(split_messages)
+            num_updated += split_count
+            row_ids.extend(split_row_ids)
+        except Exception as error:
+            if first_error is None:
+                first_error = error
+        if first_error is None:
+            submit_next()
+
+    if first_error is not None:
+        from pypaimon.write.file_store_commit import _abort_commit_messages
+        _abort_commit_messages(plan.table, messages)
+        raise first_error
+    return messages, num_updated, row_ids
 
 
 def build_self_merge_delete_ds(
@@ -260,6 +461,7 @@ def build_self_merge_delete_ds(
     catalog_options: Dict[str, str],
     resolve_target_projection,
     snapshot_id: Optional[int] = None,
+    scan_predicate=None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
 ) -> Tuple:
     from pypaimon.ray.ray_paimon import read_paimon
@@ -281,9 +483,21 @@ def build_self_merge_delete_ds(
         c for c in target_field_names if c in needed_cols
     ]
 
+    read_kwargs = {}
+    if scan_predicate is not None:
+        from pypaimon.common.options.core_options import (
+            CoreOptions, GlobalIndexSearchMode,
+        )
+        read_kwargs["filter"] = scan_predicate
+        read_kwargs["dynamic_options"] = {
+            CoreOptions.SCALAR_INDEX_SEARCH_MODE.key():
+                GlobalIndexSearchMode.FULL.value,
+        }
     target_ds = read_paimon(
         target_identifier, catalog_options,
         projection=projection, snapshot_id=snapshot_id,
+        _preserve_current_schema=True,
+        **read_kwargs,
     )
     delete_schema = build_delete_schema(row_id_name)
 
@@ -503,6 +717,7 @@ def distributed_update_apply(
     precomputed_info_ref = ray.put(files_info)
 
     frid_col = "_FIRST_ROW_ID"
+    sentinel_row_id = -1
     captured_sorted = sorted_first_row_ids
     captured_sorted_arr = np.asarray(captured_sorted, dtype=np.int64)
     valid_ranges = planner.valid_row_id_ranges
@@ -544,11 +759,25 @@ def distributed_update_apply(
     map_kwargs = _map_kwargs(ray_remote_args)
     with_frid = update_ds.map_batches(_assign_frid, **map_kwargs)
 
+    from pypaimon.schema.data_types import PyarrowFieldParser
+    target_pa = PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
+    update_schema = build_update_schema(target_pa, cols, row_id_name)
+    # Ray drops the schema of an empty shuffle input. A negative row id keeps
+    # the group-by schema in a separate group that is never written.
+    sentinel = pa.Table.from_arrays(
+        [pa.array([sentinel_row_id], type=pa.int64())]
+        + [pa.nulls(1, type=update_schema.field(col).type) for col in cols],
+        schema=update_schema,
+    ).append_column(
+        frid_col, pa.array([sentinel_row_id], type=pa.int64())
+    )
+    with_frid = with_frid.union(ray.data.from_arrow(sentinel))
+
     captured_table = table
     captured_cols = cols
 
     def _apply_group(group: pa.Table) -> pa.Table:
-        if group.num_rows == 0:
+        if group.column(frid_col)[0].as_py() == sentinel_row_id:
             return pa.Table.from_pydict({
                 "msgs_blob": pa.array([], type=pa.binary()),
                 "n_updated": pa.array([], type=pa.int64()),

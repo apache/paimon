@@ -21,6 +21,7 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.{CoreOptions, Snapshot}
 import org.apache.paimon.CoreOptions.MergeEngine
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.spark.catalyst.analysis.Delete
 
 import org.apache.spark.sql.Row
 import org.assertj.core.api.Assertions.{assertThat, assertThatThrownBy}
@@ -239,17 +240,36 @@ abstract class DeleteFromTableTestBase extends PaimonSparkTestBase {
           spark.sql("INSERT INTO T VALUES (2, 'b', NULL)")
           spark.sql("INSERT INTO T VALUES (1, NULL, 16)")
 
-          if (mergeEngine != MergeEngine.DEDUPLICATE) {
-            assertThatThrownBy(() => spark.sql("DELETE FROM T WHERE id = 1"))
-              .hasMessageContaining("please use 'COMPACT' procedure first")
-            spark.sql("CALL sys.compact(table => 'T')")
-          }
+          if (Delete.supportedMergeEngine.contains(mergeEngine)) {
+            if (mergeEngine != MergeEngine.DEDUPLICATE) {
+              assertThatThrownBy(() => spark.sql("DELETE FROM T WHERE id = 1"))
+                .hasMessageContaining("please use 'COMPACT' procedure first")
+              spark.sql("CALL sys.compact(table => 'T')")
+            }
 
-          spark.sql("DELETE FROM T WHERE id = 1")
-          assertThat(spark.sql("SELECT * FROM T").collectAsList().toString)
-            .isEqualTo("[[2,b,null]]")
+            spark.sql("DELETE FROM T WHERE id = 1")
+            assertThat(spark.sql("SELECT * FROM T").collectAsList().toString)
+              .isEqualTo("[[2,b,null]]")
+          } else {
+            assertThatThrownBy(() => spark.sql("DELETE FROM T WHERE id = 1"))
+              .isInstanceOf(classOf[UnsupportedOperationException])
+              .hasMessageContaining(s"merge engine $mergeEngine can not support Delete")
+          }
         }
       }
+  }
+
+  test("Paimon Delete: first-row table") {
+    withTable("t") {
+      sql("""CREATE TABLE t (id INT, name STRING)
+            |TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '1', 'merge-engine' = 'first-row')
+            |""".stripMargin)
+      sql("INSERT INTO t VALUES (1, 'a'), (2, 'b'), (3, 'c')")
+
+      assertThatThrownBy(() => sql("DELETE FROM t WHERE id = 3"))
+        .isInstanceOf(classOf[UnsupportedOperationException])
+        .hasMessageContaining("merge engine first-row can not support Delete")
+    }
   }
 
   test(s"test delete with primary key") {
@@ -476,9 +496,15 @@ abstract class DeleteFromTableTestBase extends PaimonSparkTestBase {
           // update
           spark.sql("INSERT INTO T VALUES (1, NULL, 16)")
           // delete
-          spark.sql("DELETE FROM T WHERE id = 1")
-          assertThat(spark.sql("SELECT * FROM T").collectAsList().toString)
-            .isEqualTo("[[2,b,null]]")
+          if (Delete.supportedMergeEngine.contains(mergeEngine)) {
+            spark.sql("DELETE FROM T WHERE id = 1")
+            assertThat(spark.sql("SELECT * FROM T").collectAsList().toString)
+              .isEqualTo("[[2,b,null]]")
+          } else {
+            assertThatThrownBy(() => spark.sql("DELETE FROM T WHERE id = 1"))
+              .isInstanceOf(classOf[UnsupportedOperationException])
+              .hasMessageContaining(s"merge engine $mergeEngine can not support Delete")
+          }
         }
       }
   }

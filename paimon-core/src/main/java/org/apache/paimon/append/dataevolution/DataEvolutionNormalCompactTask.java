@@ -23,26 +23,39 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.operation.AppendFileStoreWrite;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SetUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.types.BlobType.fieldNamesInBlobFile;
 import static org.apache.paimon.types.VectorType.fieldNamesInVectorFile;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
+import static org.apache.paimon.utils.DataEvolutionUtils.checkContiguousRowRange;
+import static org.apache.paimon.utils.DataEvolutionUtils.fieldMaxSequenceNumber;
+import static org.apache.paimon.utils.DataEvolutionUtils.fileFields;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Compacts normal structured files of a data evolution table. */
@@ -52,6 +65,7 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
 
     public DataEvolutionNormalCompactTask(BinaryRow partition, List<DataFileMeta> files) {
         super(partition, files);
+        checkContiguousRowRange(files);
     }
 
     @Override
@@ -96,6 +110,7 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
                 store.newDataEvolutionRead().withReadType(readWriteType).createReader(dataSplit);
         AppendFileStoreWrite storeWrite = (AppendFileStoreWrite) store.newWrite(commitUser);
         storeWrite.withWriteType(readWriteType);
+        storeWrite.withFileSource(FileSource.COMPACT);
         RecordWriter<InternalRow> writer = storeWrite.createWriter(partition, 0);
 
         reader.forEachRemaining(
@@ -122,8 +137,64 @@ public class DataEvolutionNormalCompactTask extends DataEvolutionCompactTask {
         dataFileMeta =
                 dataFileMeta.assignSequenceNumber(
                         minSequenceId(compactBefore), maxSequenceId(compactBefore));
+        if (options.ignoreIndexColumnUpdate()) {
+            long[] columnMaxSequenceNumbers =
+                    compactedColumnMaxSequenceNumbers(table, dataFileMeta);
+            if (columnMaxSequenceNumbers != null) {
+                dataFileMeta = dataFileMeta.withColumnMaxSequenceNumbers(columnMaxSequenceNumbers);
+            }
+        }
         compactAfter.add(dataFileMeta);
 
         return commitMessage(compactBefore, compactAfter);
+    }
+
+    @Nullable
+    private long[] compactedColumnMaxSequenceNumbers(
+            FileStoreTable table, DataFileMeta outputFile) {
+        SchemaManager schemaManager = table.schemaManager();
+        Map<Long, TableSchema> schemaCache = new HashMap<>();
+        Function<Long, TableSchema> schemaLoader =
+                schemaId -> schemaCache.computeIfAbsent(schemaId, schemaManager::schema);
+        Map<Pair<Long, List<String>>, List<DataField>> fileFieldsCache = new HashMap<>();
+
+        Map<Integer, Long> fieldMaxSequences = new HashMap<>();
+        for (DataFileMeta input : compactBefore) {
+            List<DataField> inputFields =
+                    fileFieldsCache.computeIfAbsent(
+                            Pair.of(input.schemaId(), input.writeCols()),
+                            key -> fileFields(schemaLoader, input));
+            long[] inputColumnSequences = input.columnMaxSequenceNumbers();
+            for (int inputPosition = 0; inputPosition < inputFields.size(); inputPosition++) {
+                fieldMaxSequences.merge(
+                        inputFields.get(inputPosition).id(),
+                        fieldMaxSequenceNumber(
+                                input, inputColumnSequences, inputPosition, inputFields.size()),
+                        Math::max);
+            }
+        }
+
+        long fallbackSequence = outputFile.maxSequenceNumber();
+        List<DataField> outputFields =
+                fileFieldsCache.computeIfAbsent(
+                        Pair.of(outputFile.schemaId(), outputFile.writeCols()),
+                        key -> fileFields(schemaLoader, outputFile));
+        boolean allEqualToFileMax =
+                outputFields.stream()
+                        .allMatch(
+                                field ->
+                                        fieldMaxSequences.getOrDefault(field.id(), fallbackSequence)
+                                                == fallbackSequence);
+        if (allEqualToFileMax) {
+            return null;
+        }
+
+        long[] result = new long[outputFields.size()];
+        for (int outputPosition = 0; outputPosition < outputFields.size(); outputPosition++) {
+            result[outputPosition] =
+                    fieldMaxSequences.getOrDefault(
+                            outputFields.get(outputPosition).id(), fallbackSequence);
+        }
+        return result;
     }
 }

@@ -136,4 +136,143 @@ class DeltaVarintCompressorTest {
                     DeltaVarintCompressor.decompress(corrupted);
                 });
     }
+
+    @Test
+    void testCompressLongArrayListNullAndEmpty() {
+        assertArrayEquals(new byte[0], DeltaVarintCompressor.compressLongArrayList(null));
+        assertArrayEquals(new byte[0], DeltaVarintCompressor.compressLongArrayList(toList()));
+    }
+
+    @Test
+    void testCompressLongArrayListMatchesArray() {
+        assertByteEquivalence(new long[] {42L});
+        assertByteEquivalence(new long[] {80L, 50L, 90L, 80L, 70L});
+        assertByteEquivalence(new long[] {7L, 7L, 7L, 7L});
+        assertByteEquivalence(new long[] {1L, 2L, 3L, 4L, 5L});
+        assertByteEquivalence(new long[] {100L, 90L, 80L, 70L, 60L});
+        assertByteEquivalence(new long[] {-1L, -2L});
+        assertByteEquivalence(new long[] {-1L, 5L, -2L, 8L});
+        assertByteEquivalence(new long[] {Long.MIN_VALUE, Long.MAX_VALUE});
+        assertByteEquivalence(new long[] {Long.MAX_VALUE, Long.MIN_VALUE});
+        assertByteEquivalence(new long[] {Long.MIN_VALUE, 0L, Long.MAX_VALUE});
+        assertByteEquivalence(new long[] {-3L, Long.MAX_VALUE, Long.MIN_VALUE, 3L});
+    }
+
+    @Test
+    void testCompressLongArrayListMatchesArrayRandom() {
+        long[] original = new long[100];
+        ThreadLocalRandom rnd = ThreadLocalRandom.current();
+        for (int i = 0; i < original.length; i++) {
+            original[i] = rnd.nextLong();
+        }
+        assertByteEquivalence(original);
+    }
+
+    @Test
+    void testCompressGoldenBytes() {
+        // ZigZag(42) = 84 -> single varint byte.
+        assertArrayEquals(new byte[] {0x54}, DeltaVarintCompressor.compress(new long[] {42L}));
+        assertArrayEquals(
+                new byte[] {0x54}, DeltaVarintCompressor.compressLongArrayList(toList(42L)));
+
+        // {80, 50, 90, 80, 70}: deltas are 80, -30, 40, -10, -10.
+        byte[] expected = {(byte) 0xA0, 0x01, 0x3B, 0x50, 0x13, 0x13};
+        assertArrayEquals(
+                expected, DeltaVarintCompressor.compress(new long[] {80L, 50L, 90L, 80L, 70L}));
+        assertArrayEquals(
+                expected,
+                DeltaVarintCompressor.compressLongArrayList(toList(80L, 50L, 90L, 80L, 70L)));
+    }
+
+    @Test
+    void testCompressGoldenBytesVarintWidths() {
+        // 2-byte varint boundary: ZigZag(64) = 128, ZigZag(-64) = 127.
+        assertGolden(new long[] {64L}, new byte[] {(byte) 0x80, 0x01});
+        assertGolden(new long[] {-64L}, new byte[] {0x7F});
+
+        // 3-byte varint boundary: ZigZag(8192) = 16384, ZigZag(-8192) = 16383.
+        assertGolden(new long[] {8192L}, new byte[] {(byte) 0x80, (byte) 0x80, 0x01});
+        assertGolden(new long[] {-8192L}, new byte[] {(byte) 0xFF, 0x7F});
+
+        // Full-width 10-byte varints.
+        assertGolden(
+                new long[] {Long.MIN_VALUE},
+                new byte[] {
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    0x01
+                });
+        assertGolden(
+                new long[] {Long.MAX_VALUE},
+                new byte[] {
+                    (byte) 0xFE,
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    0x01
+                });
+
+        // Adjacent values whose delta overflows long.
+        assertGolden(
+                new long[] {Long.MAX_VALUE, Long.MIN_VALUE},
+                new byte[] {
+                    (byte) 0xFE,
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    0x01,
+                    0x02
+                });
+        assertGolden(
+                new long[] {Long.MIN_VALUE, Long.MAX_VALUE},
+                new byte[] {
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    (byte) 0xFF,
+                    0x01,
+                    0x01
+                });
+    }
+
+    private static void assertGolden(long[] values, byte[] expected) {
+        assertArrayEquals(expected, DeltaVarintCompressor.compress(values));
+        assertArrayEquals(expected, DeltaVarintCompressor.compressLongArrayList(toList(values)));
+    }
+
+    private static void assertByteEquivalence(long[] values) {
+        assertArrayEquals(
+                DeltaVarintCompressor.compress(values),
+                DeltaVarintCompressor.compressLongArrayList(toList(values)));
+    }
+
+    private static LongArrayList toList(long... values) {
+        LongArrayList list = new LongArrayList(values.length);
+        for (long value : values) {
+            list.add(value);
+        }
+        return list;
+    }
 }

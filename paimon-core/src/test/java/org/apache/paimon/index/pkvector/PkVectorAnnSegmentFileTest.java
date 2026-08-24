@@ -75,6 +75,7 @@ class PkVectorAnnSegmentFileTest {
         assertThat(segment.indexType()).isEqualTo("test-vector-ann");
         assertThat(segment.rowCount()).isEqualTo(1);
         PrimaryKeyIndexSourceMeta sourceMeta = PrimaryKeyIndexSourceMeta.fromIndexFile(segment);
+        assertThat(sourceMeta.dataLevel()).isEqualTo(3);
         assertThat(sourceMeta.sourceFiles())
                 .extracting(PrimaryKeyIndexSourceFile::fileName)
                 .containsExactly("data-1");
@@ -308,20 +309,21 @@ class PkVectorAnnSegmentFileTest {
 
     private static DataFileMeta dataFile(String fileName, long rowCount) {
         return DataFileMeta.forAppend(
-                fileName,
-                100,
-                rowCount,
-                SimpleStats.EMPTY_STATS,
-                0,
-                0,
-                1,
-                Collections.emptyList(),
-                null,
-                FileSource.COMPACT,
-                null,
-                null,
-                null,
-                null);
+                        fileName,
+                        100,
+                        rowCount,
+                        SimpleStats.EMPTY_STATS,
+                        0,
+                        0,
+                        1,
+                        Collections.emptyList(),
+                        null,
+                        FileSource.COMPACT,
+                        null,
+                        null,
+                        null,
+                        null)
+                .upgrade(3);
     }
 
     private IndexPathFactory pathFactory() {

@@ -25,6 +25,7 @@ import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.columnar.RowToColumnConverter;
 import org.apache.paimon.data.columnar.heap.CastedRowColumnVector;
 import org.apache.paimon.data.columnar.writable.WritableBytesVector;
@@ -124,6 +125,11 @@ public class PaimonShreddingUtils {
         public UUID getUuid(int ordinal) {
             // Paimon currently does not shred UUID.
             throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Timestamp getTimestamp(int ordinal, int precision) {
+            return row.getTimestamp(ordinal, precision);
         }
 
         @Override
@@ -279,6 +285,9 @@ public class PaimonShreddingUtils {
             case BIGINT:
             case FLOAT:
             case DOUBLE:
+            case DATE:
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
                 builder.field(VARIANT_VALUE_FIELD_NAME, DataTypes.BYTES());
                 builder.field(TYPED_VALUE_FIELD_NAME, dataType);
                 break;
@@ -318,6 +327,9 @@ public class PaimonShreddingUtils {
                     typedIdx = i;
                     switch (field.type().getTypeRoot()) {
                         case ROW:
+                            if (!(dataType instanceof RowType)) {
+                                throw invalidVariantShreddingSchema(rowType);
+                            }
                             RowType r = (RowType) dataType;
                             List<DataField> rFields = r.getFields();
                             // The struct must not be empty or contain duplicate field names.
@@ -327,15 +339,11 @@ public class PaimonShreddingUtils {
                             }
                             objectSchema = new VariantSchema.ObjectField[rFields.size()];
                             for (int index = 0; index < rFields.size(); index++) {
-                                if (field.type() instanceof RowType) {
-                                    DataField f = rFields.get(index);
-                                    objectSchema[index] =
-                                            new VariantSchema.ObjectField(
-                                                    f.name(),
-                                                    buildVariantSchema((RowType) f.type(), false));
-                                } else {
-                                    throw invalidVariantShreddingSchema(rowType);
-                                }
+                                DataField f = rFields.get(index);
+                                objectSchema[index] =
+                                        new VariantSchema.ObjectField(
+                                                f.name(),
+                                                buildVariantSchema((RowType) f.type(), false));
                             }
                             break;
                         case ARRAY:
@@ -374,14 +382,22 @@ public class PaimonShreddingUtils {
                         case DOUBLE:
                             scalarSchema = new VariantSchema.DoubleType();
                             break;
+                        case CHAR:
                         case VARCHAR:
                             scalarSchema = new VariantSchema.StringType();
                             break;
                         case BINARY:
+                        case VARBINARY:
                             scalarSchema = new VariantSchema.BinaryType();
                             break;
                         case DATE:
                             scalarSchema = new VariantSchema.DateType();
+                            break;
+                        case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                            scalarSchema = new VariantSchema.TimestampType();
+                            break;
+                        case TIMESTAMP_WITHOUT_TIME_ZONE:
+                            scalarSchema = new VariantSchema.TimestampNTZType();
                             break;
                         case DECIMAL:
                             DecimalType d = (DecimalType) dataType;
@@ -513,6 +529,9 @@ public class PaimonShreddingUtils {
             } else if (schema.scalarSchema instanceof VariantSchema.DecimalType) {
                 VariantSchema.DecimalType dt = (VariantSchema.DecimalType) schema.scalarSchema;
                 paimonValue = Decimal.fromBigDecimal((BigDecimal) result, dt.precision, dt.scale);
+            } else if (schema.scalarSchema instanceof VariantSchema.TimestampType
+                    || schema.scalarSchema instanceof VariantSchema.TimestampNTZType) {
+                paimonValue = Timestamp.fromMicros((Long) result);
             } else {
                 paimonValue = result;
             }

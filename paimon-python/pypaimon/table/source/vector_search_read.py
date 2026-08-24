@@ -41,11 +41,14 @@ class VectorSearchRead(ABC):
 
     def read_plan(self, plan):
         # type: (VectorSearchScanPlan) -> GlobalIndexResult
-        return self.read(plan.splits())
+        return self._read(plan.splits(), plan.snapshot())
 
-    @abstractmethod
     def read(self, splits):
         # type: (List[VectorSearchSplit]) -> GlobalIndexResult
+        return self._read(splits, None)
+
+    @abstractmethod
+    def _read(self, splits, snapshot):
         pass
 
 
@@ -54,11 +57,14 @@ class BatchVectorSearchRead(ABC):
 
     def read_batch_plan(self, plan):
         # type: (VectorSearchScanPlan) -> List[GlobalIndexResult]
-        return self.read_batch(plan.splits())
+        return self._read_batch(plan.splits(), plan.snapshot())
 
-    @abstractmethod
     def read_batch(self, splits):
         # type: (List[VectorSearchSplit]) -> List[GlobalIndexResult]
+        return self._read_batch(splits, None)
+
+    @abstractmethod
+    def _read_batch(self, splits, snapshot):
         pass
 
 
@@ -81,15 +87,15 @@ class AbstractVectorSearchReadImpl:
         self._partition_filter = partition_filter
         self._options = dict(options or {})
 
-    def _pre_filters(self, splits):
+    def _pre_filters(self, splits, snapshot=None):
         # type: (list) -> List[RoaringBitmap64]
         """Evaluate live-row/scalar filters and return one bitmap per index split."""
         if not splits:
             return []
 
         live_rows = global_index_live_row_filter.live_rows(
-            self._table, self._partition_filter)
-        matched_rows = self._scalar_matched_rows(splits)
+            self._table, self._partition_filter, snapshot)
+        matched_rows = self._scalar_matched_rows(splits, snapshot)
         if live_rows is None and matched_rows is None:
             return []
 
@@ -110,7 +116,7 @@ class AbstractVectorSearchReadImpl:
                 has_filter = True
         return include_row_ids if has_filter else []
 
-    def _scalar_matched_rows(self, splits):
+    def _scalar_matched_rows(self, splits, snapshot=None):
         """Evaluate scalar indexes and return matching global row ids."""
         if self._filter is None:
             return None
@@ -128,11 +134,12 @@ class AbstractVectorSearchReadImpl:
         if not scalar_files:
             return RoaringBitmap64()
 
-        from pypaimon.globalindex.global_index_scanner import GlobalIndexScanner
-        scanner = GlobalIndexScanner.create(
+        from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
+        scanner = DataEvolutionGlobalIndexScanner.create(
             self._table,
             index_files=scalar_files,
             partition_filter=self._partition_filter,
+            snapshot=snapshot,
         )
         if scanner is None:
             return RoaringBitmap64()
@@ -144,9 +151,9 @@ class AbstractVectorSearchReadImpl:
         finally:
             scanner.close()
 
-    def _pre_filter(self, splits):
+    def _pre_filter(self, splits, snapshot=None):
         # Backwards-compatible helper used by older tests/callers.
-        pre_filters = self._pre_filters(splits)
+        pre_filters = self._pre_filters(splits, snapshot)
         if not pre_filters:
             return None
         merged = RoaringBitmap64()
@@ -157,11 +164,11 @@ class AbstractVectorSearchReadImpl:
                 merged = RoaringBitmap64.or_(merged, bitmap)
         return merged
 
-    def _raw_pre_filter(self, splits):
+    def _raw_pre_filter(self, splits, snapshot=None):
         if self._filter is None:
             return None
-        raw_rows = _bitmap_of_ranges(_raw_row_ranges(splits))
-        if raw_rows.is_empty():
+        raw_row_ranges = _raw_row_ranges(splits)
+        if not raw_row_ranges:
             return None
 
         seen = set()
@@ -175,23 +182,31 @@ class AbstractVectorSearchReadImpl:
         if not scalar_files:
             return None
 
-        from pypaimon.globalindex.global_index_scanner import GlobalIndexScanner
-        scanner = GlobalIndexScanner.create(
+        from pypaimon.globalindex.data_evolution_global_index_scanner import DataEvolutionGlobalIndexScanner
+        scanner = DataEvolutionGlobalIndexScanner.create(
             self._table,
             index_files=scalar_files,
             partition_filter=self._partition_filter,
+            snapshot=snapshot,
         )
         if scanner is None:
             return None
         try:
-            result = scanner.scan(self._filter)
-            if result is None:
+            evaluation = scanner.scan_with_coverage(self._filter)
+            if evaluation is None:
                 return None
-            include = result.results()
-            include = RoaringBitmap64.or_(
-                include,
-                scanner.unindexed_rows(self._filter).results())
-            return RoaringBitmap64.and_(include, raw_rows)
+            include_ranges = evaluation.result.results().to_range_list()
+            include_ranges.extend(
+                scanner.unindexed_ranges(
+                    self._filter,
+                    search_mode=self._table.options.scalar_index_search_mode(),
+                    contributing_field_ids=(
+                        evaluation.contributing_field_ids),
+                ))
+            return Range.and_(
+                raw_row_ranges,
+                Range.sort_and_merge_overlap(include_ranges, True),
+            )
         finally:
             scanner.close()
 
@@ -246,12 +261,12 @@ class AbstractVectorSearchReadImpl:
 
     def _read_raw_search(self, raw_row_ranges, pre_filter, query_vector,
                          index_type=None, include_filter=True,
-                         score_candidates=None):
+                         score_candidates=None, snapshot=None):
         raw_row_ranges = _filtered_raw_row_ranges(raw_row_ranges, pre_filter)
         if not raw_row_ranges:
             return DictBasedScoredIndexResult({})
 
-        table = self._read_raw_arrow(raw_row_ranges, include_filter)
+        table = self._read_raw_arrow(raw_row_ranges, include_filter, snapshot)
         if table is None or table.num_rows == 0:
             return DictBasedScoredIndexResult({})
 
@@ -275,17 +290,17 @@ class AbstractVectorSearchReadImpl:
             )
         return _scored_result(top_k_heap)
 
-    def _read_raw_vectors(self, candidates, include_filter=True):
+    def _read_raw_vectors(self, candidates, include_filter=True, snapshot=None):
         return self._read_raw_candidate_vectors(
-            candidates.to_range_list(), candidates, include_filter)
+            candidates.to_range_list(), candidates, include_filter, snapshot)
 
     def _read_raw_candidate_vectors(self, raw_row_ranges, candidates,
-                                    include_filter=True):
+                                    include_filter=True, snapshot=None):
         raw_row_ranges = _filtered_raw_row_ranges(raw_row_ranges, None)
         if not raw_row_ranges:
             return {}
 
-        table = self._read_raw_arrow(raw_row_ranges, include_filter)
+        table = self._read_raw_arrow(raw_row_ranges, include_filter, snapshot)
         if table is None or table.num_rows == 0:
             return {}
 
@@ -300,8 +315,10 @@ class AbstractVectorSearchReadImpl:
             raw_vectors[row_id] = _to_vector_list(stored)
         return raw_vectors
 
-    def _read_raw_arrow(self, raw_row_ranges, include_filter):
-        read_builder = self._table.new_read_builder()
+    def _read_raw_arrow(self, raw_row_ranges, include_filter, snapshot=None):
+        read_table = global_index_live_row_filter.table_at_snapshot(
+            self._table, snapshot)
+        read_builder = read_table.new_read_builder()
         if self._partition_filter is not None:
             read_builder = read_builder.with_partition_filter(
                 self._partition_filter)
@@ -309,8 +326,7 @@ class AbstractVectorSearchReadImpl:
             read_builder = read_builder.with_filter(self._filter)
         read_builder = read_builder.with_projection(
             self._raw_search_projection(include_filter))
-        plan = read_builder.new_scan().with_global_index_result(
-            GlobalIndexResult.from_ranges(raw_row_ranges)).plan()
+        plan = read_builder.new_scan().with_row_ranges(raw_row_ranges).plan()
         return read_builder.new_read().to_arrow(plan.splits())
 
     def _score_raw_vectors(self, candidates, raw_vectors, query_vector, metric, top_k):
@@ -328,17 +344,20 @@ class AbstractVectorSearchReadImpl:
             )
         return _scored_result(top_k_heap)
 
-    def _read_raw_refine_search(self, candidates, query_vector, index_type=None):
+    def _read_raw_refine_search(self, candidates, query_vector, index_type=None,
+                                snapshot=None):
         return self._read_raw_candidate_search(
             candidates.to_range_list(),
             candidates,
             query_vector,
             index_type,
             include_filter=False,
+            snapshot=snapshot,
         )
 
     def _read_raw_candidate_search(self, raw_row_ranges, candidates, query_vector,
-                                   index_type=None, include_filter=False):
+                                   index_type=None, include_filter=False,
+                                   snapshot=None):
         return self._read_raw_search(
             raw_row_ranges,
             None,
@@ -346,6 +365,7 @@ class AbstractVectorSearchReadImpl:
             index_type,
             include_filter=include_filter,
             score_candidates=candidates,
+            snapshot=snapshot,
         )
 
     def _raw_search_projection(self, include_filter):
@@ -387,7 +407,8 @@ class AbstractVectorSearchReadImpl:
             return self._limit
         return self._limit * refine_factor
 
-    def _maybe_rerank_indexed_result(self, result, index_type, query_vector):
+    def _maybe_rerank_indexed_result(self, result, index_type, query_vector,
+                                     snapshot=None):
         if (self._configured_refine_factor(index_type) == 0 or
                 result.results().is_empty()):
             return result
@@ -396,9 +417,11 @@ class AbstractVectorSearchReadImpl:
             candidates.results(),
             query_vector,
             index_type,
+            snapshot,
         )
 
-    def _maybe_rerank_indexed_results(self, results, index_type, query_vectors):
+    def _maybe_rerank_indexed_results(self, results, index_type, query_vectors,
+                                      snapshot=None):
         if self._configured_refine_factor(index_type) == 0:
             return results
 
@@ -411,7 +434,8 @@ class AbstractVectorSearchReadImpl:
         if union_candidates.is_empty():
             return candidates
 
-        raw_vectors = self._read_raw_vectors(union_candidates, include_filter=False)
+        raw_vectors = self._read_raw_vectors(
+            union_candidates, include_filter=False, snapshot=snapshot)
         metric = _raw_search_metric(
             self._table, self._vector_column, self._options, index_type)
         return [
@@ -444,7 +468,7 @@ class AbstractVectorSearchReadImpl:
         return factor
 
 
-class VectorSearchReadImpl(AbstractVectorSearchReadImpl, VectorSearchRead):
+class DataEvolutionVectorRead(AbstractVectorSearchReadImpl, VectorSearchRead):
     """Implementation for VectorSearchRead."""
 
     def __init__(self, table, limit, vector_column, query_vector, filter_=None,
@@ -455,8 +479,7 @@ class VectorSearchReadImpl(AbstractVectorSearchReadImpl, VectorSearchRead):
                          options=options)
         self._query_vector = query_vector
 
-    def read(self, splits):
-        # type: (List[VectorSearchSplit]) -> GlobalIndexResult
+    def _read(self, splits, snapshot):
         index_splits, raw_splits = _split_search_splits(splits)
         if not index_splits and not raw_splits:
             return GlobalIndexResult.create_empty()
@@ -464,20 +487,21 @@ class VectorSearchReadImpl(AbstractVectorSearchReadImpl, VectorSearchRead):
         indexed = (
             DictBasedScoredIndexResult({})
             if not index_splits
-            else self._read_indexed(index_splits, self._query_vector)
+            else self._read_indexed(index_splits, self._query_vector, snapshot)
         )
         raw_result = self._read_raw_search(
             _raw_row_ranges(raw_splits),
-            self._raw_pre_filter(raw_splits),
+            self._raw_pre_filter(raw_splits, snapshot),
             self._query_vector,
             _raw_search_index_type(raw_splits),
+            snapshot=snapshot,
         )
         return indexed.or_(raw_result).top_k(self._limit)
 
-    def _read_indexed(self, splits, query_vector):
+    def _read_indexed(self, splits, query_vector, snapshot):
         index_type = _vector_index_type(splits)
         search_limit = self._indexed_search_limit(index_type)
-        pre_filters = self._pre_filters(splits)
+        pre_filters = self._pre_filters(splits, snapshot)
         futures = [
             self._eval(
                 split.row_range_start, split.row_range_end,
@@ -501,7 +525,8 @@ class VectorSearchReadImpl(AbstractVectorSearchReadImpl, VectorSearchRead):
                         merged_scores[row_id] = score_getter(row_id)
 
         indexed = DictBasedScoredIndexResult(merged_scores).top_k(search_limit)
-        return self._maybe_rerank_indexed_result(indexed, index_type, query_vector)
+        return self._maybe_rerank_indexed_result(
+            indexed, index_type, query_vector, snapshot)
 
 
 class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
@@ -516,8 +541,7 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
                          options=options)
         self._query_vectors = list(query_vectors)
 
-    def read_batch(self, splits):
-        # type: (List[VectorSearchSplit]) -> List[GlobalIndexResult]
+    def _read_batch(self, splits, snapshot):
         n = len(self._query_vectors)
         index_splits, raw_splits = _split_search_splits(splits)
         if not index_splits and not raw_splits:
@@ -527,7 +551,7 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
         # passing that split's pre-filter. Each future returns n per-query results.
         index_type = _vector_index_type(index_splits)
         search_limit = self._indexed_search_limit(index_type)
-        pre_filters = self._pre_filters(index_splits)
+        pre_filters = self._pre_filters(index_splits, snapshot)
         futures = [
             self._eval_batch(
                 split.row_range_start, split.row_range_end,
@@ -558,16 +582,17 @@ class BatchVectorSearchReadImpl(AbstractVectorSearchReadImpl,
             for i in range(n)
         ]
         indexed_results = self._maybe_rerank_indexed_results(
-            indexed_results, index_type, self._query_vectors)
+            indexed_results, index_type, self._query_vectors, snapshot)
 
         # Each query: merge indexed results with the raw (brute-force) fallback.
-        raw_pre_filter = self._raw_pre_filter(raw_splits)
+        raw_pre_filter = self._raw_pre_filter(raw_splits, snapshot)
         raw_ranges = _raw_row_ranges(raw_splits)
         raw_index_type = _raw_search_index_type(raw_splits)
         results = []
         for i in range(n):
             raw = self._read_raw_search(
-                raw_ranges, raw_pre_filter, self._query_vectors[i], raw_index_type)
+                raw_ranges, raw_pre_filter, self._query_vectors[i], raw_index_type,
+                snapshot=snapshot)
             results.append(indexed_results[i].or_(raw).top_k(self._limit))
         return results
 
@@ -617,7 +642,7 @@ def _filtered_raw_row_ranges(raw_row_ranges, pre_filter):
         return raw_row_ranges
     return Range.and_(
         raw_row_ranges,
-        Range.sort_and_merge_overlap(pre_filter.to_range_list(), True),
+        Range.sort_and_merge_overlap(pre_filter, True),
     )
 
 
@@ -653,13 +678,6 @@ def _empty_bitmaps(size):
 def _bitmap_of_range(row_range):
     bitmap = RoaringBitmap64()
     bitmap.add_range(row_range.from_, row_range.to)
-    return bitmap
-
-
-def _bitmap_of_ranges(ranges):
-    bitmap = RoaringBitmap64()
-    for row_range in ranges:
-        bitmap.add_range(row_range.from_, row_range.to)
     return bitmap
 
 

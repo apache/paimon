@@ -136,7 +136,7 @@ public class ParquetFileReader implements Closeable {
         return readFooter(file, options, f, /*closeStreamOnFailure*/ false);
     }
 
-    private static final ParquetMetadata readFooter(
+    public static final ParquetMetadata readFooter(
             InputFile file,
             ParquetReadOptions options,
             SeekableInputStream f,

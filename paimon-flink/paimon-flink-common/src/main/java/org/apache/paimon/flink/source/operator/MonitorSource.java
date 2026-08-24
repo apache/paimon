@@ -34,6 +34,7 @@ import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.types.RowType;
 
 import org.apache.flink.api.common.eventtime.Watermark;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -274,6 +275,38 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
             boolean isBounded,
             @Nullable Long limit,
             @Nullable Table table) {
+        return buildSource(
+                env,
+                name,
+                typeInfo,
+                readBuilder,
+                monitorInterval,
+                emitSnapshotWatermark,
+                shuffleBucketWithPartition,
+                unordered,
+                nestedProjectedRowData,
+                isBounded,
+                limit,
+                table,
+                readBuilder.readType(),
+                false);
+    }
+
+    public static DataStream<RowData> buildSource(
+            StreamExecutionEnvironment env,
+            String name,
+            TypeInformation<RowData> typeInfo,
+            ReadBuilder readBuilder,
+            long monitorInterval,
+            boolean emitSnapshotWatermark,
+            boolean shuffleBucketWithPartition,
+            boolean unordered,
+            NestedProjectedRowData nestedProjectedRowData,
+            boolean isBounded,
+            @Nullable Long limit,
+            @Nullable Table table,
+            RowType readType,
+            boolean blobAsDescriptor) {
         MonitorSource monitorSource =
                 new MonitorSource(readBuilder, monitorInterval, emitSnapshotWatermark, isBounded);
         Source<Split, SimpleSourceSplit, NoOpEnumState> source = monitorSource;
@@ -296,7 +329,12 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
         return sourceDataStream.transform(
                 name + "-Reader",
                 typeInfo,
-                new ReadOperator(readBuilder::newRead, nestedProjectedRowData, limit));
+                new ReadOperator(
+                        readBuilder::newRead,
+                        nestedProjectedRowData,
+                        limit,
+                        readType,
+                        blobAsDescriptor));
     }
 
     private static DataStream<Split> shuffleUnordered(

@@ -23,6 +23,7 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableSet;
 
 import org.apache.hc.client5.http.HttpRequestRetryStrategy;
+import org.apache.hc.client5.http.protocol.HttpClientContext;
 import org.apache.hc.client5.http.utils.DateUtils;
 import org.apache.hc.core5.concurrent.CancellableDependency;
 import org.apache.hc.core5.http.ConnectionClosedException;
@@ -35,6 +36,7 @@ import org.apache.hc.core5.http.Method;
 import org.apache.hc.core5.http.protocol.HttpContext;
 import org.apache.hc.core5.util.TimeValue;
 
+import javax.annotation.Nullable;
 import javax.net.ssl.SSLException;
 
 import java.io.IOException;
@@ -47,6 +49,16 @@ import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 
 class ExponentialHttpRequestRetryStrategy implements HttpRequestRetryStrategy {
+
+    /**
+     * Context attribute marking one exchange as "must not be sent twice". A 429 or a 503 can reach
+     * the client from a proxy after the server already applied the request, so replaying it applies
+     * it again; for a request that is not idempotent by content that is a silent double apply. The
+     * mark travels in the context rather than in the request, so it never reaches the wire and
+     * survives whatever the exec chain does to the request object.
+     */
+    static final String RETRY_UNSAFE_ATTRIBUTE = "paimon.rest.retry-unsafe";
+
     private final int maxRetries;
     private final Set<Class<? extends IOException>> nonRetriableExceptions;
     private final Set<Integer> retriableCodes;
@@ -98,7 +110,24 @@ class ExponentialHttpRequestRetryStrategy implements HttpRequestRetryStrategy {
 
     @Override
     public boolean retryRequest(HttpResponse response, int execCount, HttpContext context) {
+        if (isRetryUnsafe(context)) {
+            // The status says nothing about whether the server applied the request: a 503 from an
+            // intermediary can follow a request that already took effect. Replaying it would apply
+            // it twice with nobody the wiser, so the failure goes back to the caller instead.
+            return false;
+        }
         return execCount <= maxRetries && retriableCodes.contains(response.getCode());
+    }
+
+    /** A context for one exchange that must be sent exactly once. */
+    static HttpClientContext retryUnsafeContext() {
+        HttpClientContext context = HttpClientContext.create();
+        context.setAttribute(RETRY_UNSAFE_ATTRIBUTE, Boolean.TRUE);
+        return context;
+    }
+
+    static boolean isRetryUnsafe(@Nullable HttpContext context) {
+        return context != null && Boolean.TRUE.equals(context.getAttribute(RETRY_UNSAFE_ATTRIBUTE));
     }
 
     @Override

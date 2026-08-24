@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.data.BlobDescriptor
 import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.SparkConf
@@ -59,24 +60,93 @@ class BlobUpdateTestBase extends PaimonSparkTestBase {
     }
   }
 
-  test("Blob: merge-into rejects updating raw-data array blob column") {
+  test("Blob: merge-into updates raw-data array blob column") {
     withTable("s", "t") {
       sql("CREATE TABLE t (id INT, name STRING, pictures ARRAY<BINARY>) TBLPROPERTIES " +
         "('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='pictures')")
-      sql("INSERT INTO t VALUES (1, 'name1', array(X'48656C6C6F'))")
+      sql(
+        "INSERT INTO t VALUES " +
+          "(1, 'name1', array(X'48656C6C6F')), " +
+          "(2, 'name2', array(X'414243')), " +
+          "(3, 'name3', CAST(NULL AS ARRAY<BINARY>))")
 
-      sql("CREATE TABLE s (id INT, pictures ARRAY<BINARY>)")
-      sql("INSERT INTO s VALUES (1, array(X'4E4557'))")
+      sql("CREATE TABLE s (id INT, pictures ARRAY<BINARY>, picture BINARY)")
+      sql(
+        "INSERT INTO s VALUES " +
+          "(1, array(X'4E4557', CAST(NULL AS BINARY)), X'21'), " +
+          "(3, CAST(array() AS ARRAY<BINARY>), CAST(NULL AS BINARY))")
 
-      val e = intercept[UnsupportedOperationException] {
-        sql("""
-              |MERGE INTO t
-              |USING s
-              |ON t.id = s.id
-              |WHEN MATCHED THEN UPDATE SET t.pictures = s.pictures
-              |""".stripMargin)
-      }
-      assert(e.getMessage.contains("raw-data ARRAY<BLOB>"))
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN MATCHED AND s.id = 1 THEN UPDATE SET
+            |  t.pictures = concat(t.pictures, s.pictures, array(s.picture))
+            |WHEN MATCHED THEN UPDATE SET t.pictures = s.pictures
+            |""".stripMargin)
+
+      val updated = sql(
+        "SELECT size(pictures), pictures[0], pictures[1], pictures[2] IS NULL, pictures[3] " +
+          "FROM t WHERE id = 1").collect()(0)
+      assert(updated.getInt(0) == 4)
+      assert(
+        java.util.Arrays.equals(updated.getAs[Array[Byte]](1), Array[Byte](72, 101, 108, 108, 111)))
+      assert(java.util.Arrays.equals(updated.getAs[Array[Byte]](2), Array[Byte](78, 69, 87)))
+      assert(updated.getBoolean(3))
+      assert(java.util.Arrays.equals(updated.getAs[Array[Byte]](4), Array[Byte](33)))
+
+      val unchanged = sql("SELECT size(pictures), pictures[0] FROM t WHERE id = 2").collect()(0)
+      assert(unchanged.getInt(0) == 1)
+      assert(java.util.Arrays.equals(unchanged.getAs[Array[Byte]](1), Array[Byte](65, 66, 67)))
+
+      checkAnswer(
+        sql("SELECT pictures IS NOT NULL, size(pictures) FROM t WHERE id = 3"),
+        Seq(Row(true, 0)))
+    }
+  }
+
+  test("Blob: merge-into updates raw-data map blob column") {
+    withTable("s", "t") {
+      sql("CREATE TABLE t (id INT, name STRING, pictures MAP<STRING, BINARY>) TBLPROPERTIES " +
+        "('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='pictures')")
+      sql(
+        "INSERT INTO t VALUES " +
+          "(1, 'name1', map('old', X'48656C6C6F')), " +
+          "(2, 'name2', map('keep', X'414243')), " +
+          "(3, 'name3', CAST(NULL AS MAP<STRING, BINARY>))")
+
+      sql("CREATE TABLE s (id INT, pictures MAP<STRING, BINARY>)")
+      sql(
+        "INSERT INTO s VALUES " +
+          "(1, map('new', X'4E4557', 'missing', CAST(NULL AS BINARY))), " +
+          "(3, CAST(map() AS MAP<STRING, BINARY>))")
+
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN MATCHED AND s.id = 1 THEN UPDATE SET
+            |  t.pictures = map_concat(t.pictures, s.pictures)
+            |WHEN MATCHED THEN UPDATE SET t.pictures = s.pictures
+            |""".stripMargin)
+
+      val updated = sql(
+        "SELECT size(pictures), pictures['old'], pictures['new'], " +
+          "pictures['missing'] IS NULL FROM t WHERE id = 1").collect()(0)
+      assert(updated.getInt(0) == 3)
+      assert(
+        java.util.Arrays.equals(updated.getAs[Array[Byte]](1), Array[Byte](72, 101, 108, 108, 111)))
+      assert(java.util.Arrays.equals(updated.getAs[Array[Byte]](2), Array[Byte](78, 69, 87)))
+      assert(updated.getBoolean(3))
+
+      val unchanged =
+        sql("SELECT size(pictures), pictures['keep'] FROM t WHERE id = 2").collect()(0)
+      assert(unchanged.getInt(0) == 1)
+      assert(java.util.Arrays.equals(unchanged.getAs[Array[Byte]](1), Array[Byte](65, 66, 67)))
+
+      checkAnswer(
+        sql("SELECT pictures IS NOT NULL, size(pictures) FROM t WHERE id = 3"),
+        Seq(Row(true, 0)))
     }
   }
 
@@ -172,6 +242,107 @@ class BlobUpdateTestBase extends PaimonSparkTestBase {
           Row(2, Array[Byte](89, 69)),
           Row(3, Array[Byte](65, 66, 67)))
       )
+    }
+  }
+
+  test("Blob: self merge updates descriptor array blob column") {
+    withTable("t") {
+      sql(
+        "CREATE TABLE t (id INT, pictures ARRAY<BINARY>) TBLPROPERTIES (" +
+          "'row-tracking.enabled'='true', 'data-evolution.enabled'='true', " +
+          "'blob-field'='pictures', 'blob-as-descriptor'='true')")
+      sql(
+        "INSERT INTO t VALUES " +
+          "(1, array(X'48656C6C6F', X'5945')), " +
+          "(2, array(X'414243'))")
+
+      val sourceDescriptor =
+        sql("SELECT pictures[0] FROM t WHERE id = 1").collect()(0).getAs[Array[Byte]](0)
+      assert(BlobDescriptor.deserialize(sourceDescriptor).length() == 5)
+
+      sql("""
+            |MERGE INTO t
+            |USING t AS source
+            |ON t._ROW_ID = source._ROW_ID
+            |WHEN MATCHED AND source.id = 1 THEN UPDATE SET
+            |  t.pictures = concat(source.pictures, array(source.pictures[0]))
+            |""".stripMargin)
+
+      val descriptorRow =
+        sql(
+          "SELECT size(pictures), pictures[0], pictures[1], pictures[2] " +
+            "FROM t WHERE id = 1")
+          .collect()(0)
+      assert(descriptorRow.getInt(0) == 3)
+      assert(BlobDescriptor.deserialize(descriptorRow.getAs[Array[Byte]](1)).length() == 5)
+      assert(BlobDescriptor.deserialize(descriptorRow.getAs[Array[Byte]](2)).length() == 2)
+      assert(BlobDescriptor.deserialize(descriptorRow.getAs[Array[Byte]](3)).length() == 5)
+
+      sql("ALTER TABLE t SET TBLPROPERTIES ('blob-as-descriptor'='false')")
+      val rawRow =
+        sql(
+          "SELECT pictures[0], pictures[1], pictures[2] " +
+            "FROM t WHERE id = 1")
+          .collect()(0)
+      assert(
+        java.util.Arrays.equals(rawRow.getAs[Array[Byte]](0), Array[Byte](72, 101, 108, 108, 111)))
+      assert(java.util.Arrays.equals(rawRow.getAs[Array[Byte]](1), Array[Byte](89, 69)))
+      assert(
+        java.util.Arrays.equals(rawRow.getAs[Array[Byte]](2), Array[Byte](72, 101, 108, 108, 111)))
+
+      val unchanged = sql("SELECT pictures[0] FROM t WHERE id = 2").collect()(0)
+      assert(java.util.Arrays.equals(unchanged.getAs[Array[Byte]](0), Array[Byte](65, 66, 67)))
+    }
+  }
+
+  test("Blob: self merge updates descriptor map blob column") {
+    withTable("t") {
+      sql(
+        "CREATE TABLE t (id INT, pictures MAP<STRING, BINARY>) TBLPROPERTIES (" +
+          "'row-tracking.enabled'='true', 'data-evolution.enabled'='true', " +
+          "'blob-field'='pictures', 'blob-as-descriptor'='true')")
+      sql(
+        "INSERT INTO t VALUES " +
+          "(1, map('old', X'48656C6C6F', 'small', X'5945')), " +
+          "(2, map('keep', X'414243'))")
+
+      val sourceDescriptor =
+        sql("SELECT pictures['old'] FROM t WHERE id = 1").collect()(0).getAs[Array[Byte]](0)
+      assert(BlobDescriptor.deserialize(sourceDescriptor).length() == 5)
+
+      sql("""
+            |MERGE INTO t
+            |USING t AS source
+            |ON t._ROW_ID = source._ROW_ID
+            |WHEN MATCHED AND source.id = 1 THEN UPDATE SET
+            |  t.pictures = map_concat(
+            |    source.pictures, map('copied', source.pictures['old']))
+            |""".stripMargin)
+
+      val descriptorRow =
+        sql(
+          "SELECT size(pictures), pictures['old'], pictures['small'], pictures['copied'] " +
+            "FROM t WHERE id = 1")
+          .collect()(0)
+      assert(descriptorRow.getInt(0) == 3)
+      assert(BlobDescriptor.deserialize(descriptorRow.getAs[Array[Byte]](1)).length() == 5)
+      assert(BlobDescriptor.deserialize(descriptorRow.getAs[Array[Byte]](2)).length() == 2)
+      assert(BlobDescriptor.deserialize(descriptorRow.getAs[Array[Byte]](3)).length() == 5)
+
+      sql("ALTER TABLE t SET TBLPROPERTIES ('blob-as-descriptor'='false')")
+      val rawRow =
+        sql(
+          "SELECT pictures['old'], pictures['small'], pictures['copied'] " +
+            "FROM t WHERE id = 1")
+          .collect()(0)
+      assert(
+        java.util.Arrays.equals(rawRow.getAs[Array[Byte]](0), Array[Byte](72, 101, 108, 108, 111)))
+      assert(java.util.Arrays.equals(rawRow.getAs[Array[Byte]](1), Array[Byte](89, 69)))
+      assert(
+        java.util.Arrays.equals(rawRow.getAs[Array[Byte]](2), Array[Byte](72, 101, 108, 108, 111)))
+
+      val unchanged = sql("SELECT pictures['keep'] FROM t WHERE id = 2").collect()(0)
+      assert(java.util.Arrays.equals(unchanged.getAs[Array[Byte]](0), Array[Byte](65, 66, 67)))
     }
   }
 
