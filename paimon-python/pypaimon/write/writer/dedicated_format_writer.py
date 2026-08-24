@@ -39,6 +39,7 @@ from pypaimon.write.row_utils import (
     row_values_to_arrow_table,
 )
 from pypaimon.write.writer.data_writer import DataWriter
+from pypaimon.write.writer.write_buffer import WriteBuffer
 
 logger = logging.getLogger(__name__)
 
@@ -134,8 +135,9 @@ class DedicatedFormatWriter(DataWriter):
         self.record_count = 0
         self.closed = False
 
-        # Track pending data for normal data only
-        self.pending_normal_data: Optional[pa.Table] = None
+        # Normal columns are buffered separately from the blob and vector
+        # columns, which their own writers own.
+        self._normal_buffer = WriteBuffer(self._merge_normal_data)
         self._committed_files_to_delete_on_abort: List[DataFileMeta] = []
 
         # Initialize blob writers for each blob-file column.
@@ -229,10 +231,7 @@ class DedicatedFormatWriter(DataWriter):
         # Process and accumulate normal data (may be None for partial writes)
         processed_normal = self._process_normal_data(normal_data)
         if processed_normal is not None:
-            if self.pending_normal_data is None:
-                self.pending_normal_data = processed_normal
-            else:
-                self.pending_normal_data = self._merge_normal_data(self.pending_normal_data, processed_normal)
+            self._normal_buffer.append(processed_normal)
 
         # Write blob-file columns to dedicated blob writers.
         for blob_column, blob_data in blob_data_map.items():
@@ -274,11 +273,7 @@ class DedicatedFormatWriter(DataWriter):
                 ).to_batches()[0]
                 processed_normal = self._process_normal_data(normal_data)
                 if processed_normal is not None:
-                    if self.pending_normal_data is None:
-                        self.pending_normal_data = processed_normal
-                    else:
-                        self.pending_normal_data = self._merge_normal_data(
-                            self.pending_normal_data, processed_normal)
+                    self._normal_buffer.append(processed_normal)
 
             for blob_column in self.blob_file_column_names:
                 arrow_type = PyarrowFieldParser.from_paimon_type(
@@ -344,7 +339,7 @@ class DedicatedFormatWriter(DataWriter):
             raise
         finally:
             self.closed = True
-            self.pending_normal_data = None
+            self._normal_buffer.reset()
 
     def abort(self):
         """Abort all writers and clean up resources."""
@@ -353,8 +348,8 @@ class DedicatedFormatWriter(DataWriter):
         if self.vector_writer is not None:
             self.vector_writer.abort()
         self._delete_committed_files(self._committed_files_to_delete_on_abort)
-        self.pending_normal_data = None
-        self.pending_data = None
+        self._normal_buffer.reset()
+        self._buffer.reset()
         self.committed_files.clear()
         self._committed_files_to_delete_on_abort.clear()
 
@@ -465,10 +460,11 @@ class DedicatedFormatWriter(DataWriter):
         return pa.concat_tables([existing_data, new_data])
 
     def _should_roll_normal(self) -> bool:
-        if self.pending_normal_data is None:
+        # Runs on every write, so it answers from the running counts only.
+        if self._normal_buffer.is_empty:
             return False
 
-        if self.pending_normal_data.num_rows >= self.target_file_row_num:
+        if self._normal_buffer.num_rows >= self.target_file_row_num:
             return True
 
         # Check rolling condition periodically (every CHECK_ROLLING_RECORD_CNT records)
@@ -476,24 +472,25 @@ class DedicatedFormatWriter(DataWriter):
             return False
 
         # Check if normal data exceeds target size
-        current_size = self.pending_normal_data.nbytes
-        return current_size > self.target_file_size
+        return self._normal_buffer.nbytes > self.target_file_size
 
     def _current_row_count(self) -> int:
-        if self.pending_normal_data is not None:
-            return self.pending_normal_data.num_rows
+        if not self._normal_buffer.is_empty:
+            return self._normal_buffer.num_rows
         for blob_writer in self.blob_writers.values():
             if blob_writer.current_writer is not None:
                 return blob_writer.current_writer.row_count
-        if self.vector_writer is not None and self.vector_writer.pending_data is not None:
-            return self.vector_writer.pending_data.num_rows
+        if self.vector_writer is not None:
+            # Running count, not a folded buffer: this runs on every write.
+            return self.vector_writer.pending_row_count
         return 0
 
     def _close_current_writers(self):
         """Close normal, blob, and vector writers; add metadata in order: normal, blob, vector."""
+        normal_data = self._normal_buffer.take()
         normal_meta = None
-        if self.pending_normal_data is not None and self.pending_normal_data.num_rows > 0:
-            normal_meta = self._write_normal_data_to_file(self.pending_normal_data)
+        if normal_data is not None and normal_data.num_rows > 0:
+            normal_meta = self._write_normal_data_to_file(normal_data)
             self.committed_files.append(normal_meta)
             self._committed_files_to_delete_on_abort.append(normal_meta)
 
@@ -518,7 +515,6 @@ class DedicatedFormatWriter(DataWriter):
             self._committed_files_to_delete_on_abort.extend(vector_metas)
             self.vector_writer.committed_files.clear()
 
-        self.pending_normal_data = None
         self.record_count = 0
 
         if normal_meta is not None or blob_metas or vector_metas:

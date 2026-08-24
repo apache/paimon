@@ -28,6 +28,7 @@ from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.schema.data_types import VectorType
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.write.writer.data_writer import DataWriter
+from pypaimon.write.writer.write_buffer import WriteBuffer
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,9 @@ class DataVectorWriter(DataWriter):
 
         self.record_count = 0
         self.closed = False
-        self.pending_normal_data: Optional[pa.Table] = None
+        # Normal columns are buffered separately from the vector columns, which
+        # the vector writer owns.
+        self._normal_buffer = WriteBuffer(self._merge_data)
 
         from pypaimon.write.writer.vector_writer import VectorWriter
         self.vector_writer: Optional[VectorWriter] = None
@@ -133,11 +136,8 @@ class DataVectorWriter(DataWriter):
 
         normal_data, vector_data = self._split_data(data)
 
-        processed_normal = pa.Table.from_batches([normal_data]) if normal_data is not None else None
-        if self.pending_normal_data is None:
-            self.pending_normal_data = processed_normal
-        elif processed_normal is not None:
-            self.pending_normal_data = pa.concat_tables([self.pending_normal_data, processed_normal])
+        if normal_data is not None:
+            self._normal_buffer.append(pa.Table.from_batches([normal_data]))
 
         if self.vector_writer is not None and vector_data is not None and vector_data.num_rows > 0:
             self.vector_writer.write(vector_data)
@@ -162,12 +162,12 @@ class DataVectorWriter(DataWriter):
             raise
         finally:
             self.closed = True
-            self.pending_normal_data = None
+            self._normal_buffer.reset()
 
     def abort(self):
         if self.vector_writer is not None:
             self.vector_writer.abort()
-        self.pending_normal_data = None
+        self._normal_buffer.reset()
         super().abort()
 
     def _split_data(self, data: pa.RecordBatch) -> Tuple[pa.RecordBatch, pa.RecordBatch]:
@@ -188,27 +188,29 @@ class DataVectorWriter(DataWriter):
         return normal_data, vector_data
 
     def _should_roll_normal(self) -> bool:
-        if self.pending_normal_data is None:
+        # Runs on every write, so it answers from the running counts only.
+        if self._normal_buffer.is_empty:
             return False
-        if self.pending_normal_data.num_rows >= self.target_file_row_num:
+        if self._normal_buffer.num_rows >= self.target_file_row_num:
             return True
         if self.record_count % self.CHECK_ROLLING_RECORD_CNT != 0:
             return False
-        return self.pending_normal_data.nbytes > self.target_file_size
+        return self._normal_buffer.nbytes > self.target_file_size
 
     def _current_row_count(self) -> int:
-        if self.pending_normal_data is not None:
-            return self.pending_normal_data.num_rows
-        if self.vector_writer is not None and self.vector_writer.pending_data is not None:
-            return self.vector_writer.pending_data.num_rows
+        if not self._normal_buffer.is_empty:
+            return self._normal_buffer.num_rows
+        if self.vector_writer is not None:
+            # Running count, not a folded buffer: this runs on every write.
+            return self.vector_writer.pending_row_count
         return 0
 
     def _close_current_writers(self):
-        has_normal = self.pending_normal_data is not None and self.pending_normal_data.num_rows > 0
+        normal_data = self._normal_buffer.take()
 
         normal_meta = None
-        if has_normal:
-            normal_meta = self._write_normal_data_to_file(self.pending_normal_data)
+        if normal_data is not None and normal_data.num_rows > 0:
+            normal_meta = self._write_normal_data_to_file(normal_data)
             self.committed_files.append(normal_meta)
 
         if self.vector_writer is not None:
@@ -219,7 +221,6 @@ class DataVectorWriter(DataWriter):
                 self.committed_files.extend(vector_metas)
             self.vector_writer.committed_files.clear()
 
-        self.pending_normal_data = None
         self.record_count = 0
 
     def _write_normal_data_to_file(self, data: pa.Table) -> Optional[DataFileMeta]:

@@ -31,7 +31,7 @@ from pypaimon.write.writer.data_writer import DataWriter
 class KeyValueDataWriter(DataWriter):
     """Data writer for primary key tables with system fields and sorting.
 
-    Accumulates incoming batches in ``pending_data`` without sorting or
+    Accumulates incoming batches in the write buffer without sorting or
     folding on the write path. Sort and ``MergeFunction``-based fold
     are deferred to flush time (``_flush_all``), where the result is
     roll-written into one or more data files. This enforces the LSM
@@ -52,9 +52,9 @@ class KeyValueDataWriter(DataWriter):
 
     def _process_data(self, data: pa.RecordBatch) -> pa.Table:
         # No sort here: sorting once at flush is strictly cheaper than
-        # per-batch sort + a final global sort. ``pending_data`` ends
-        # up as a concat of unsorted batches; ``_flush_all`` sorts it
-        # exactly once before folding.
+        # per-batch sort + a final global sort. The buffer ends up as a
+        # concat of unsorted batches; ``_flush_all`` sorts it exactly
+        # once before folding.
         enhanced_data = self._add_system_fields(data)
         return pa.Table.from_batches([enhanced_data])
 
@@ -64,31 +64,30 @@ class KeyValueDataWriter(DataWriter):
         return pa.concat_tables([existing_data, new_data])
 
     def prepare_commit(self) -> List[DataFileMeta]:
-        if self.pending_data is not None and self.pending_data.num_rows > 0:
+        if self._buffer.num_rows > 0:
             self._flush_all()
-        # ``_flush_all`` leaves ``pending_data = None``, so super's
-        # prepare_commit just returns ``committed_files``.
+        # ``_flush_all`` empties the buffer, so super's prepare_commit just
+        # returns ``committed_files``.
         return super().prepare_commit()
 
     def _check_and_roll_if_needed(self):
-        # Buffer overflowed target_file_size: sort + fold + roll-write
-        # the whole buffer as multiple files in one pass. Unlike the
-        # base class's slice loop, we never keep a slice remainder in
-        # ``pending_data`` -- flush empties the buffer outright.
-        if (self.pending_data is not None
-                and self.pending_data.num_rows > 0
-                and self.pending_data.nbytes > self.target_file_size):
+        # Buffer overflowed target_file_size: sort + fold + roll-write the whole
+        # buffer as multiple files in one pass. Unlike the base class's slice
+        # loop, we never keep a slice remainder -- flush empties the buffer
+        # outright. There is no row-count trigger here, and none is needed:
+        # ``FileStoreWrite`` rejects target-file-row-num on primary key tables.
+        if self._buffer.num_rows > 0 and self._buffer.nbytes > self.target_file_size:
             self._flush_all()
 
     def close(self):
         # Override the base ``close`` because its straight
-        # ``_write_data_to_file(pending_data)`` would land an unsorted,
-        # un-folded buffer on disk -- violating the file-internal
+        # ``_write_data_to_file`` of the whole buffer would land an unsorted,
+        # un-folded table on disk -- violating the file-internal
         # PK-unique invariant. Route the final flush through
         # ``_flush_all`` so the contract holds even on the
         # close-without-prepare_commit path.
         try:
-            if self.pending_data is not None and self.pending_data.num_rows > 0:
+            if self._buffer.num_rows > 0:
                 self._flush_all()
         except Exception as e:
             import logging
@@ -99,22 +98,20 @@ class KeyValueDataWriter(DataWriter):
             self.abort()
             raise e
         finally:
-            self.pending_data = None
+            self._buffer.reset()
 
     def _flush_all(self) -> None:
         """Sort + fold the entire buffer, then roll-write as files.
 
-        On return, ``pending_data is None`` and every flushed chunk
-        has been recorded in ``committed_files``. The buffer is
-        always fully drained per flush: no slice remainder is
-        carried back into ``pending_data``.
+        On return, the buffer is empty and every flushed chunk has been
+        recorded in ``committed_files``. The buffer is always fully drained
+        per flush: no slice remainder is carried back into it.
         """
-        if self.pending_data is None or self.pending_data.num_rows == 0:
-            self.pending_data = None
+        pending = self._buffer.take()
+        if pending is None or pending.num_rows == 0:
             return
-        sorted_data = self._sort_by_primary_key(self.pending_data)
+        sorted_data = self._sort_by_primary_key(pending)
         folded = self._merge_pending_by_pk(sorted_data)
-        self.pending_data = None
         if folded.num_rows == 0:
             return
         self._roll_write(folded)

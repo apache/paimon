@@ -19,9 +19,9 @@
 """Unit tests for ``KeyValueDataWriter`` buffer behaviour.
 
 Covers the fold algorithm (`_merge_pending_by_pk`), the flush lifecycle
-(`_flush_all` empties the buffer + clears pending_data), and the
-roll-write helper (`_roll_write` splits oversized buffers across
-multiple files). Drives a thin harness that bypasses
+(`_flush_all` drains the buffer), and the roll-write helper
+(`_roll_write` splits oversized buffers across multiple files).
+Drives a thin harness that bypasses
 ``DataWriter.__init__`` so tests can exercise these paths without
 spinning up the real catalog/write stack.
 """
@@ -36,6 +36,7 @@ from pypaimon.read.reader.deduplicate_merge_function import \
 from pypaimon.read.reader.partial_update_merge_function import \
     PartialUpdateMergeFunction
 from pypaimon.write.writer.key_value_data_writer import KeyValueDataWriter
+from pypaimon.write.writer.write_buffer import WriteBuffer
 
 
 # Layout matches what ``KeyValueDataWriter._add_system_fields`` emits:
@@ -87,7 +88,7 @@ class _Harness(KeyValueDataWriter):
         # Large enough that ``_check_and_roll_if_needed`` does not
         # trigger on its own in tests that don't care about rolling.
         self.target_file_size = target_file_size
-        self.pending_data = None
+        self._buffer = WriteBuffer(self._merge_data)
         self.committed_files = []
         self.written_chunks = []
 
@@ -133,13 +134,13 @@ class WriteMergeBufferTest(unittest.TestCase):
 
     def test_dedupe_nullable_pk_uses_null_safe_equality_and_nulls_first(self):
         writer = _Harness(DeduplicateMergeFunction())
-        writer.pending_data = pa.Table.from_pylist(
+        writer._buffer.append(pa.Table.from_pylist(
             [_row(2, 1, 'two', None),
              _row(None, 2, 'null-old', None),
              _row(1, 3, 'one', None),
              _row(None, 4, 'null-new', None)],
             schema=_NULLABLE_PK_SCHEMA,
-        )
+        ))
 
         writer._flush_all()
 
@@ -290,18 +291,18 @@ class WriteMergeBufferTest(unittest.TestCase):
         # responsible for sorting before folding, so unsorted input is
         # the right stress case.
         writer = _Harness(DeduplicateMergeFunction())
-        writer.pending_data = pa.Table.from_pylist(
+        writer._buffer.append(pa.Table.from_pylist(
             [_row(2, 5, 'B2-new', None),
              _row(1, 2, 'A1-mid', None),
              _row(1, 1, 'A1-old', None),
              _row(2, 4, 'B2-old', None),
              _row(1, 3, 'A1-new', None)],
             schema=_SCHEMA,
-        )
+        ))
         writer._flush_all()
 
         # Buffer cleared.
-        self.assertIsNone(writer.pending_data)
+        self.assertTrue(writer._buffer.is_empty)
         # Exactly one file written (size well under target).
         self.assertEqual(len(writer.written_chunks), 1)
         flushed = writer.written_chunks[0]
@@ -314,15 +315,14 @@ class WriteMergeBufferTest(unittest.TestCase):
 
     def test_flush_all_on_empty_buffer_is_noop(self):
         writer = _Harness(DeduplicateMergeFunction())
-        writer.pending_data = None
         writer._flush_all()
-        self.assertIsNone(writer.pending_data)
+        self.assertTrue(writer._buffer.is_empty)
         self.assertEqual(writer.written_chunks, [])
 
     def test_flush_all_clears_buffer_even_when_fold_drops_everything(self):
         # MergeFunction that returns None for every group; verifies
-        # ``_flush_all`` still resets ``pending_data`` so a subsequent
-        # write starts from a clean slate.
+        # ``_flush_all`` still drains the buffer so a subsequent write
+        # starts from a clean slate.
         class DropAll:
             def reset(self):
                 pass
@@ -334,12 +334,12 @@ class WriteMergeBufferTest(unittest.TestCase):
                 return None
 
         writer = _Harness(DropAll())
-        writer.pending_data = pa.Table.from_pylist(
+        writer._buffer.append(pa.Table.from_pylist(
             [_row(1, 1, 'A', None), _row(1, 2, 'B', None)],
             schema=_SCHEMA,
-        )
+        ))
         writer._flush_all()
-        self.assertIsNone(writer.pending_data)
+        self.assertTrue(writer._buffer.is_empty)
         self.assertEqual(writer.written_chunks, [])
 
     # -- _roll_write ------------------------------------------------------
@@ -376,6 +376,53 @@ class WriteMergeBufferTest(unittest.TestCase):
         # Each chunk except possibly the last should respect the target.
         for chunk in writer.written_chunks[:-1]:
             self.assertLessEqual(chunk.nbytes, target)
+
+
+class KeyValueWriteBufferTest(unittest.TestCase):
+    """The write path must not fold the buffer on every write.
+
+    ``_check_and_roll_if_needed`` flushes on size alone, and it reads that size
+    from the buffer's running total, so a write that stays under
+    ``target_file_size`` never needs the buffered batches as one table. Folding
+    there anyway would make writing N batches O(N^2): each fold leaves one more
+    chunk per column for the next ``pa.Table.nbytes`` walk to visit.
+    """
+
+    def test_writes_under_target_size_do_not_fold(self):
+        writer = _Harness(DeduplicateMergeFunction())
+        writer.sequence_generator = _StubSeqGen()
+        batch = pa.RecordBatch.from_pylist(
+            [{'id': 1, 'a': 'A', 'b': None}],
+            schema=pa.schema([
+                pa.field('id', pa.int64(), nullable=False),
+                pa.field('a', pa.string()),
+                pa.field('b', pa.string()),
+            ]),
+        )
+
+        folds = []
+        original = pa.concat_tables
+
+        def counting(*args, **kwargs):
+            folds.append(1)
+            return original(*args, **kwargs)
+
+        pa.concat_tables = counting
+        try:
+            for _ in range(100):
+                writer.write(batch)
+        finally:
+            pa.concat_tables = original
+
+        self.assertEqual(folds, [])
+        self.assertEqual(writer.written_chunks, [])
+        self.assertEqual(writer.pending_row_count, 100)
+
+        # The rows are all still there; flushing folds them exactly once.
+        writer._flush_all()
+        self.assertEqual(len(writer.written_chunks), 1)
+        # Dedup collapses the 100 same-PK rows to one.
+        self.assertEqual(writer.written_chunks[0].num_rows, 1)
 
 
 class _StubSeqGen:

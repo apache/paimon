@@ -30,6 +30,7 @@ from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.write.writer.mosaic_writer_options import create_mosaic_writer_options
+from pypaimon.write.writer.write_buffer import WriteBuffer
 
 
 class DataWriter(ABC):
@@ -72,7 +73,7 @@ class DataWriter(ABC):
         )
         self.sequence_generator = SequenceGenerator(max_seq_number)
 
-        self.pending_data: Optional[pa.Table] = None
+        self._buffer = WriteBuffer(self._merge_data)
         self.committed_files: List[DataFileMeta] = []
         self.committed_changelog_files: List[DataFileMeta] = []
         self.changelog_producer = changelog_producer
@@ -104,15 +105,15 @@ class DataWriter(ABC):
         # the table schema is fixed for the lifetime of this writer.
         self._paimon_field_id: Dict[str, int] = {pf.name: pf.id for pf in self.table.fields}
 
+    @property
+    def pending_row_count(self) -> int:
+        """Number of buffered rows not yet written to a file."""
+        return self._buffer.num_rows
+
     def write(self, data: pa.RecordBatch):
         try:
             processed_data = self._process_data(data)
-
-            if self.pending_data is None:
-                self.pending_data = processed_data
-            else:
-                self.pending_data = self._merge_data(self.pending_data, processed_data)
-
+            self._buffer.append(processed_data)
             self._check_and_roll_if_needed()
         except Exception as e:
             import logging
@@ -122,9 +123,8 @@ class DataWriter(ABC):
             raise e
 
     def prepare_commit(self) -> List[DataFileMeta]:
-        if self.pending_data is not None and self.pending_data.num_rows > 0:
-            self._write_data_to_file(self.pending_data)
-            self.pending_data = None
+        if self._buffer.num_rows > 0:
+            self._write_data_to_file(self._buffer.take())
 
         return self.committed_files.copy()
 
@@ -133,8 +133,8 @@ class DataWriter(ABC):
 
     def close(self):
         try:
-            if self.pending_data is not None and self.pending_data.num_rows > 0:
-                self._write_data_to_file(self.pending_data)
+            if self._buffer.num_rows > 0:
+                self._write_data_to_file(self._buffer.take())
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)
@@ -142,7 +142,7 @@ class DataWriter(ABC):
             self.abort()
             raise e
         finally:
-            self.pending_data = None
+            self._buffer.reset()
             # Note: Don't clear committed_files in close() - they should be returned by prepare_commit()
 
     def abort(self):
@@ -153,7 +153,7 @@ class DataWriter(ABC):
         self._delete_committed_files(self.committed_files + self.committed_changelog_files)
 
         # Clean up resources
-        self.pending_data = None
+        self._buffer.reset()
         self.committed_files.clear()
         self.committed_changelog_files.clear()
 
@@ -191,16 +191,20 @@ class DataWriter(ABC):
         return -1, -1
 
     def _check_and_roll_if_needed(self):
-        while self.pending_data is not None:
-            num_rows = self.pending_data.num_rows
+        # Neither trigger can fire below these thresholds, so the running counts
+        # rule out rolling -- the common case -- without concatenating anything.
+        while (self._buffer.nbytes > self.target_file_size
+                or self._buffer.num_rows > self.target_file_row_num):
+            pending = self._buffer.materialize()
+            num_rows = pending.num_rows
             # Row-count trigger: keep at most target_file_row_num rows per file.
             split_row = num_rows
             if num_rows > self.target_file_row_num:
                 split_row = self.target_file_row_num
             # Size trigger: roll earlier if the size split point comes first.
-            if self.pending_data.nbytes > self.target_file_size:
+            if pending.nbytes > self.target_file_size:
                 size_split = self._find_optimal_split_point(
-                    self.pending_data, self.target_file_size)
+                    pending, self.target_file_size)
                 # First row alone exceeds target_file_size: roll it by itself.
                 if size_split <= 0:
                     size_split = 1
@@ -208,8 +212,8 @@ class DataWriter(ABC):
                     split_row = size_split
             if split_row <= 0 or split_row >= num_rows:
                 break
-            self._write_data_to_file(self.pending_data.slice(0, split_row))
-            self.pending_data = self.pending_data.slice(split_row)
+            self._write_data_to_file(pending.slice(0, split_row))
+            self._buffer.reset(pending.slice(split_row))
 
     def _write_data_to_file(self, data: pa.Table):
         if data.num_rows == 0:
