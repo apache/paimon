@@ -213,6 +213,12 @@ under the License.
             <td>The mode used by StaticFileStoreSplitEnumerator to assign splits.<br /><br />Possible values:<ul><li>"fair": Distribute splits evenly when batch reading to prevent a few tasks from reading all.</li><li>"preemptive": Distribute splits preemptively according to the consumption speed of the task.</li></ul></td>
         </tr>
         <tr>
+            <td><h5>scan.split-enumerator.weight-mode</h5></td>
+            <td style="word-wrap: break-word;">row-count</td>
+            <td><p>Enum</p></td>
+            <td>The weight metric used by StaticFileStoreSplitEnumerator. 'row-count' balances by split row count. 'file-size' only works with 'scan.split-enumerator.mode' = 'fair', balances by total data file size for DataSplit, and falls back to row count otherwise.<br /><br />Possible values:<ul><li>"row-count": Balance splits by row count.</li><li>"file-size": Balance splits by total data file size for DataSplit and fall back to row count otherwise. Only works with fair assign mode.</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>scan.watermark.alignment.group</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
