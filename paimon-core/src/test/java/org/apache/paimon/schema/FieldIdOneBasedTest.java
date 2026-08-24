@@ -35,6 +35,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link CoreOptions#FIELD_ID_ONE_BASED} at table creation and evolution. */
 public class FieldIdOneBasedTest {
@@ -105,14 +106,33 @@ public class FieldIdOneBasedTest {
     public void testOneBasedImmutableAndCreateTimeOnly() throws Exception {
         // registered as immutable, so ALTER is rejected once the table has snapshots
         assertThat(CoreOptions.IMMUTABLE_OPTIONS).contains(CoreOptions.FIELD_ID_ONE_BASED.key());
-        // a pre-snapshot option change must not re-base ids: assignment happens at creation only
+        // ids are assigned once at creation, so changing the value is rejected even before the
+        // first snapshot: the ids would keep their base while the option claims another one
         SchemaManager manager = newSchemaManager("t");
         manager.createTable(schemaBuilder().build());
-        TableSchema altered =
+        assertThatThrownBy(
+                        () ->
+                                manager.commitChanges(
+                                        SchemaChange.setOption(
+                                                CoreOptions.FIELD_ID_ONE_BASED.key(), "true")))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining(CoreOptions.FIELD_ID_ONE_BASED.key());
+        // removing the option from a one-based table would change the effective value back
+        SchemaManager oneBased = newSchemaManager("t2");
+        oneBased.createTable(
+                schemaBuilder().option(CoreOptions.FIELD_ID_ONE_BASED.key(), "true").build());
+        assertThatThrownBy(
+                        () ->
+                                oneBased.commitChanges(
+                                        SchemaChange.removeOption(
+                                                CoreOptions.FIELD_ID_ONE_BASED.key())))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining(CoreOptions.FIELD_ID_ONE_BASED.key());
+        // re-stating the current value is a no-op, not a change, and stays allowed
+        TableSchema unchanged =
                 manager.commitChanges(
-                        SchemaChange.setOption(CoreOptions.FIELD_ID_ONE_BASED.key(), "true"));
-        assertThat(topLevelIds(altered)).containsExactly(0, 1, 4);
-        assertThat(altered.highestFieldId()).isEqualTo(4);
+                        SchemaChange.setOption(CoreOptions.FIELD_ID_ONE_BASED.key(), "false"));
+        assertThat(topLevelIds(unchanged)).containsExactly(0, 1, 4);
     }
 
     private static List<Integer> topLevelIds(TableSchema schema) {
