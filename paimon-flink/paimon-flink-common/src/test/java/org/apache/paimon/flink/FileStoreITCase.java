@@ -528,7 +528,7 @@ public class FileStoreITCase extends AbstractTestBase {
         @Override
         public Row map(RowData value) {
             return Row.of(
-                    getRuntimeContext().getIndexOfThisSubtask(),
+                    getRuntimeContext().getTaskInfo().getIndexOfThisSubtask(),
                     value.getInt(0),
                     value.getString(1).toString().length());
         }
