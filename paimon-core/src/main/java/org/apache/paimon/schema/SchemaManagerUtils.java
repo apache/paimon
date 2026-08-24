@@ -153,6 +153,16 @@ final class SchemaManagerUtils {
                 if (!unchanged && CoreOptions.TYPE.key().equals(setOption.key())) {
                     throw new UnsupportedOperationException("Change 'type' is not supported yet.");
                 }
+                // reject even without snapshots: field ids are assigned once at creation,
+                // so changing the value later only makes the option lie about the schema
+                // (restating the effective value, e.g. an explicit default, stays allowed)
+                if (CoreOptions.FIELD_ID_ONE_BASED.key().equals(setOption.key())
+                        && Boolean.parseBoolean(oldValue) != Boolean.parseBoolean(newValue)) {
+                    throw new UnsupportedOperationException(
+                            "Change '"
+                                    + CoreOptions.FIELD_ID_ONE_BASED.key()
+                                    + "' is not supported.");
+                }
                 if (hasSnapshots.get() && !unchanged) {
                     checkAlterTableOption(oldOptions, setOption.key(), oldValue, newValue);
                 }
@@ -163,6 +173,14 @@ final class SchemaManagerUtils {
                 RemoveOption removeOption = (RemoveOption) change;
                 if (CoreOptions.TYPE.key().equals(removeOption.key())) {
                     throw new UnsupportedOperationException("Change 'type' is not supported yet.");
+                }
+                if (CoreOptions.FIELD_ID_ONE_BASED.key().equals(removeOption.key())
+                        && Boolean.parseBoolean(oldOptions.get(removeOption.key()))) {
+                    // removing the option while it is true changes the effective value
+                    throw new UnsupportedOperationException(
+                            "Change '"
+                                    + CoreOptions.FIELD_ID_ONE_BASED.key()
+                                    + "' is not supported.");
                 }
                 if (hasSnapshots.get()) {
                     checkResetTableOption(oldOptions, removeOption.key());
