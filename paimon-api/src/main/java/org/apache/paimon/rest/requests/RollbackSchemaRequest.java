@@ -25,6 +25,8 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGet
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.beans.ConstructorProperties;
+
 /** Request for rollback table schema. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class RollbackSchemaRequest implements RESTRequest {
@@ -35,6 +37,7 @@ public class RollbackSchemaRequest implements RESTRequest {
     private final long schemaId;
 
     @JsonCreator
+    @ConstructorProperties({FIELD_SCHEMA_ID})
     public RollbackSchemaRequest(@JsonProperty(FIELD_SCHEMA_ID) long schemaId) {
         this.schemaId = schemaId;
     }
