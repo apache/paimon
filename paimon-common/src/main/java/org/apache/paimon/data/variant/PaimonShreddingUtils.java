@@ -26,6 +26,8 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.columnar.ColumnarArray;
+import org.apache.paimon.data.columnar.ColumnarRow;
 import org.apache.paimon.data.columnar.RowToColumnConverter;
 import org.apache.paimon.data.columnar.heap.CastedRowColumnVector;
 import org.apache.paimon.data.columnar.writable.WritableBytesVector;
@@ -41,6 +43,8 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarBinaryType;
 
 import java.math.BigDecimal;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
@@ -122,6 +126,11 @@ public class PaimonShreddingUtils {
         }
 
         @Override
+        public ByteBuffer getBinaryBuffer(int ordinal) {
+            return binaryBuffer(row, ordinal);
+        }
+
+        @Override
         public UUID getUuid(int ordinal) {
             // Paimon currently does not shred UUID.
             throw new UnsupportedOperationException();
@@ -146,6 +155,16 @@ public class PaimonShreddingUtils {
         public int numElements() {
             return ((InternalArray) row).size();
         }
+    }
+
+    static ByteBuffer binaryBuffer(DataGetters row, int ordinal) {
+        if (row instanceof ColumnarRow) {
+            return ((ColumnarRow) row).getBinaryBuffer(ordinal);
+        }
+        if (row instanceof ColumnarArray) {
+            return ((ColumnarArray) row).getBinaryBuffer(ordinal);
+        }
+        return ByteBuffer.wrap(row.getBinary(ordinal)).order(ByteOrder.LITTLE_ENDIAN);
     }
 
     /** The search result of a `VariantPathSegment` in a `VariantSchema`. */
@@ -578,7 +597,7 @@ public class PaimonShreddingUtils {
         if (inputRow.isNullAt(schema.topLevelMetadataIdx)) {
             throw malformedVariant();
         }
-        byte[] topLevelMetadata = inputRow.getBinary(schema.topLevelMetadataIdx);
+        ByteBuffer topLevelMetadata = binaryBuffer(inputRow, schema.topLevelMetadataIdx);
         int numFields = fields.length;
         GenericRow resultRow = new GenericRow(numFields);
         int fieldIdx = 0;
@@ -683,7 +702,7 @@ public class PaimonShreddingUtils {
      */
     private static Object extractField(
             InternalRow inputRow,
-            byte[] topLevelMetadata,
+            ByteBuffer topLevelMetadata,
             VariantSchema inputSchema,
             SchemaPathSegment[] pathList,
             BaseVariantReader reader) {
@@ -702,7 +721,8 @@ public class PaimonShreddingUtils {
                 if (variantIdx < 0 || row.isNullAt(variantIdx)) {
                     return null;
                 }
-                GenericVariant v = new GenericVariant(row.getBinary(variantIdx), topLevelMetadata);
+                GenericVariant v =
+                        new GenericVariant(binaryBuffer(row, variantIdx), topLevelMetadata);
                 while (pathIdx < pathLen) {
                     VariantPathSegment rowPath = pathList[pathIdx].rawPath();
                     if (rowPath instanceof ObjectExtraction && v.getType() == OBJECT) {
@@ -768,10 +788,8 @@ public class PaimonShreddingUtils {
                 output.setNullAt(i);
             } else {
                 Variant v = assembleVariant(input.getRow(i), variantSchema);
-                byte[] value = v.value();
-                byte[] metadata = v.metadata();
-                valueChild.putByteArray(i, value, 0, value.length);
-                metadataChild.putByteArray(i, metadata, 0, metadata.length);
+                valueChild.putByteBuffer(i, v.valueBuffer());
+                metadataChild.putByteBuffer(i, v.metadataBuffer());
             }
         }
     }

@@ -18,12 +18,23 @@
 
 package org.apache.paimon.data.columnar;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+
 /**
  * Bytes column vector to get {@link Bytes}, it include original data and offset and length. The
  * data in {@link Bytes} maybe reuse.
  */
 public interface BytesColumnVector extends ColumnVector {
     Bytes getBytes(int i);
+
+    /** Returns a view of the bytes without requiring callers to materialize a new array. */
+    default ByteBuffer getByteBuffer(int i) {
+        Bytes bytes = getBytes(i);
+        return ByteBuffer.wrap(bytes.data, bytes.offset, bytes.len)
+                .slice()
+                .order(ByteOrder.LITTLE_ENDIAN);
+    }
 
     /** Bytes data. */
     class Bytes {

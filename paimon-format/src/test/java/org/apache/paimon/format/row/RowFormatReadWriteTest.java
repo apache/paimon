@@ -25,7 +25,9 @@ import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.variant.BufferOnlyVariant;
 import org.apache.paimon.data.variant.GenericVariant;
+import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -481,7 +483,8 @@ public class RowFormatReadWriteTest {
         Path path = new Path(tempDir.toUri().toString(), "variant.row");
         FileFormat format = FileFormat.fromIdentifier("row", new Options());
 
-        GenericVariant v1 = GenericVariant.fromJson("{\"key\": 123}");
+        GenericVariant expected1 = GenericVariant.fromJson("{\"key\": 123}");
+        Variant v1 = new BufferOnlyVariant(expected1);
         GenericVariant v2 = GenericVariant.fromJson("[1, 2, 3]");
 
         List<InternalRow> expected = new ArrayList<>();
@@ -494,8 +497,8 @@ public class RowFormatReadWriteTest {
 
         assertThat(result.size()).isEqualTo(3);
         assertThat(result.get(0).getInt(0)).isEqualTo(1);
-        assertThat(result.get(0).getVariant(1).value()).isEqualTo(v1.value());
-        assertThat(result.get(0).getVariant(1).metadata()).isEqualTo(v1.metadata());
+        assertThat(result.get(0).getVariant(1).value()).isEqualTo(expected1.value());
+        assertThat(result.get(0).getVariant(1).metadata()).isEqualTo(expected1.metadata());
         assertThat(result.get(1).getVariant(1).value()).isEqualTo(v2.value());
         assertThat(result.get(1).getVariant(1).metadata()).isEqualTo(v2.metadata());
         assertThat(result.get(2).isNullAt(1)).isTrue();

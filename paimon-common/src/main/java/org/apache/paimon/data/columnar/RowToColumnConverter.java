@@ -491,10 +491,8 @@ public class RowToColumnConverter {
                                     (WritableBytesVector) cv.getChildren()[1];
 
                             Variant variant = row.getVariant(column);
-                            byte[] value = variant.value();
-                            byte[] metadata = variant.metadata();
-                            valueVector.appendByteArray(value, 0, value.length);
-                            metaDataVector.appendByteArray(metadata, 0, metadata.length);
+                            valueVector.appendByteBuffer(variant.valueBuffer());
+                            metaDataVector.appendByteBuffer(variant.metadataBuffer());
                         });
             }
 

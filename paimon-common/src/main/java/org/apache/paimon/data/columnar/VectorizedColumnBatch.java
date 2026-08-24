@@ -26,10 +26,10 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.columnar.BytesColumnVector.Bytes;
-import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.data.variant.Variant;
 
 import java.io.Serializable;
+import java.nio.ByteBuffer;
 
 /**
  * A VectorizedColumnBatch is a set of rows, organized with each column as a vector. It is the unit
@@ -113,6 +113,10 @@ public class VectorizedColumnBatch implements Serializable {
         return ((BytesColumnVector) columns[colId]).getBytes(rowId);
     }
 
+    public ByteBuffer getByteBuffer(int rowId, int colId) {
+        return ((BytesColumnVector) columns[colId]).getByteBuffer(rowId);
+    }
+
     public Decimal getDecimal(int rowId, int colId, int precision, int scale) {
         return ((DecimalColumnVector) (columns[colId])).getDecimal(rowId, precision, scale);
     }
@@ -140,9 +144,7 @@ public class VectorizedColumnBatch implements Serializable {
 
     public Variant getVariant(int rowId, int colId) {
         InternalRow row = getRow(rowId, colId);
-        byte[] value = row.getBinary(0);
-        byte[] metadata = row.getBinary(1);
-        return new GenericVariant(value, metadata);
+        return Variant.fromRow(row);
     }
 
     public InternalMap getMap(int rowId, int colId) {
