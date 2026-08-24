@@ -229,8 +229,7 @@ public class VariantShreddingWriter {
                     // Use getDecimalWithOriginalScale so that we retain scale information if
                     // allowNumericScaleChanges() is false.
                     BigDecimal value =
-                            GenericVariantUtil.getDecimalWithOriginalScale(
-                                    v.rawValueBuffer(), v.pos());
+                            GenericVariantUtil.getDecimalWithOriginalScale(v.valueBuffer(), 0);
                     if (value.precision() <= decimalType.precision
                             && value.scale() == decimalType.scale) {
                         return value;

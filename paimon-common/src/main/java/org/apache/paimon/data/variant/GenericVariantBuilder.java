@@ -453,7 +453,7 @@ public class GenericVariantBuilder {
     // variant into the current variant dictionary and rebuild it with new field ids. For scalar
     // values in the input variant, we can directly copy the binary slice.
     public void appendVariant(GenericVariant v) {
-        appendVariantImpl(v.rawValueBuffer(), v.metadataBuffer(), v.pos());
+        appendVariantImpl(v.valueBuffer(), v.metadataBuffer(), 0);
     }
 
     private void appendVariantImpl(ByteBuffer value, ByteBuffer metadata, int pos) {
@@ -511,7 +511,7 @@ public class GenericVariantBuilder {
     // building an object during shredding, where there is a fixed pre-existing metadata that
     // all shredded values will refer to.
     public void shallowAppendVariant(GenericVariant v) {
-        shallowAppendVariantImpl(v.rawValueBuffer(), v.pos());
+        shallowAppendVariantImpl(v.valueBuffer(), 0);
     }
 
     private void shallowAppendVariantImpl(ByteBuffer value, int pos) {

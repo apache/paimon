@@ -71,10 +71,6 @@ public final class GenericVariant implements Variant, Serializable {
 
     private final ByteBuffer value;
     private final ByteBuffer metadata;
-    // The variant value doesn't use the whole `value` binary, but starts from its `pos` index and
-    // spans a size of `valueSize(value, pos)`. This design avoids frequent copies of the value
-    // binary when reading a sub-variant in the array/object element.
-    private final int pos;
 
     public GenericVariant(byte[] value, byte[] metadata) {
         this(ByteBuffer.wrap(value), ByteBuffer.wrap(metadata));
@@ -82,7 +78,12 @@ public final class GenericVariant implements Variant, Serializable {
 
     /** Creates a Variant backed by the bytes between each buffer's position and limit. */
     public GenericVariant(ByteBuffer value, ByteBuffer metadata) {
-        this(normalize(value), normalize(metadata), 0);
+        ByteBuffer normalizedValue = normalize(value);
+        this.metadata = normalize(metadata);
+        validate(normalizedValue, this.metadata);
+        int size = valueSize(normalizedValue, 0);
+        checkIndex(size - 1, normalizedValue.remaining());
+        this.value = slice(normalizedValue, 0, size);
     }
 
     /** Returns this variant as a GenericVariant without copying its serialized buffers. */
@@ -92,14 +93,12 @@ public final class GenericVariant implements Variant, Serializable {
                 : new GenericVariant(variant.valueBuffer(), variant.metadataBuffer());
     }
 
-    private GenericVariant(ByteBuffer value, ByteBuffer metadata, int pos) {
-        this.value = value;
+    private GenericVariant(ByteBuffer value, ByteBuffer metadata, int offset, int size) {
+        this.value = slice(value, offset, size);
         this.metadata = metadata;
-        this.pos = pos;
-        validate();
     }
 
-    private void validate() {
+    private static void validate(ByteBuffer value, ByteBuffer metadata) {
         // There is currently only one allowed version.
         if (metadata.remaining() < 1
                 || (GenericVariantUtil.getByte(metadata, 0) & VERSION_MASK) != VERSION) {
@@ -118,24 +117,18 @@ public final class GenericVariant implements Variant, Serializable {
 
     @Override
     public byte[] value() {
-        int size = valueSize(value, pos);
-        checkIndex(pos + size - 1, value.remaining());
-        return toByteArray(value, pos, size);
+        return toByteArray(value, 0, value.remaining());
     }
 
     @Override
     public ByteBuffer valueBuffer() {
-        int size = valueSize(value, pos);
-        checkIndex(pos + size - 1, value.remaining());
-        return slice(value, pos, size);
-    }
-
-    public byte[] rawValue() {
-        return toByteArray(value, 0, value.remaining());
-    }
-
-    ByteBuffer rawValueBuffer() {
         return value.duplicate().order(ByteOrder.LITTLE_ENDIAN);
+    }
+
+    /** @deprecated Use {@link #value()} for the current logical value. */
+    @Deprecated
+    public byte[] rawValue() {
+        return value();
     }
 
     @Override
@@ -173,22 +166,22 @@ public final class GenericVariant implements Variant, Serializable {
 
         private final byte[] value;
         private final byte[] metadata;
-        private final int pos;
 
         private SerializationProxy(GenericVariant variant) {
             this.value = GenericVariantUtil.copyBytes(variant.value, 0, variant.value.remaining());
             this.metadata =
                     GenericVariantUtil.copyBytes(variant.metadata, 0, variant.metadata.remaining());
-            this.pos = variant.pos;
         }
 
         private Object readResolve() {
-            return new GenericVariant(ByteBuffer.wrap(value), ByteBuffer.wrap(metadata), pos);
+            return new GenericVariant(value, metadata);
         }
     }
 
+    /** @deprecated Each GenericVariant now stores a bounded value buffer starting at position 0. */
+    @Deprecated
     public int pos() {
-        return pos;
+        return 0;
     }
 
     @Override
@@ -197,12 +190,12 @@ public final class GenericVariant implements Variant, Serializable {
             return false;
         }
         GenericVariant that = (GenericVariant) o;
-        return pos == that.pos && value.equals(that.value) && metadata.equals(that.metadata);
+        return value.equals(that.value) && metadata.equals(that.metadata);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(value, metadata, pos);
+        return Objects.hash(value, metadata);
     }
 
     public static GenericVariant fromJson(String json) {
@@ -218,7 +211,7 @@ public final class GenericVariant implements Variant, Serializable {
     @Override
     public String toJson(ZoneId zoneId) {
         StringBuilder sb = new StringBuilder();
-        toJsonImpl(value, metadata, pos, sb, zoneId);
+        toJsonImpl(value, metadata, 0, sb, zoneId);
         return sb.toString();
     }
 
@@ -251,65 +244,64 @@ public final class GenericVariant implements Variant, Serializable {
     public Variant copy() {
         return new GenericVariant(
                 ByteBuffer.wrap(GenericVariantUtil.copyBytes(value, 0, value.remaining())),
-                ByteBuffer.wrap(GenericVariantUtil.copyBytes(metadata, 0, metadata.remaining())),
-                pos);
+                ByteBuffer.wrap(GenericVariantUtil.copyBytes(metadata, 0, metadata.remaining())));
     }
 
     // Get a boolean value from the variant.
     public boolean getBoolean() {
-        return GenericVariantUtil.getBoolean(value, pos);
+        return GenericVariantUtil.getBoolean(value, 0);
     }
 
     // Get a long value from the variant.
     public long getLong() {
-        return GenericVariantUtil.getLong(value, pos);
+        return GenericVariantUtil.getLong(value, 0);
     }
 
     // Get a double value from the variant.
     public double getDouble() {
-        return GenericVariantUtil.getDouble(value, pos);
+        return GenericVariantUtil.getDouble(value, 0);
     }
 
     // Get a decimal value from the variant.
     public BigDecimal getDecimal() {
-        return GenericVariantUtil.getDecimal(value, pos);
+        return GenericVariantUtil.getDecimal(value, 0);
     }
 
     // Get a float value from the variant.
     public float getFloat() {
-        return GenericVariantUtil.getFloat(value, pos);
+        return GenericVariantUtil.getFloat(value, 0);
     }
 
     // Get a binary value from the variant.
     public byte[] getBinary() {
-        return GenericVariantUtil.getBinary(value, pos);
+        return GenericVariantUtil.getBinary(value, 0);
     }
 
     // Get a string value from the variant.
     public String getString() {
-        return GenericVariantUtil.getString(value, pos);
+        return GenericVariantUtil.getString(value, 0);
     }
 
     // Get the type info bits from a variant value.
     public int getTypeInfo() {
-        return GenericVariantUtil.getTypeInfo(value, pos);
+        return GenericVariantUtil.getTypeInfo(value, 0);
     }
 
     // Get the value type of the variant.
     public Type getType() {
-        return GenericVariantUtil.getType(value, pos);
+        return GenericVariantUtil.getType(value, 0);
     }
 
     // Get a UUID value from the variant.
     public UUID getUuid() {
-        return GenericVariantUtil.getUuid(value, pos);
+        return GenericVariantUtil.getUuid(value, 0);
     }
 
     // Get the number of object fields in the variant.
     // It is only legal to call it when `getType()` is `Type.OBJECT`.
     public int objectSize() {
         return handleObject(
-                value, pos, (size, idSize, offsetSize, idStart, offsetStart, dataStart) -> size);
+                value, 0, (size, idSize, offsetSize, idStart, offsetStart, dataStart) -> size);
     }
 
     // Find the field value whose key is equal to `key`. Return null if the key is not found.
@@ -317,7 +309,7 @@ public final class GenericVariant implements Variant, Serializable {
     public GenericVariant getFieldByKey(String key) {
         return handleObject(
                 value,
-                pos,
+                0,
                 (size, idSize, offsetSize, idStart, offsetStart, dataStart) -> {
                     MetadataKeyLookup keyLookup = new MetadataKeyLookup(metadata, key);
                     // Use linear search for a short list. Switch to binary search when the length
@@ -329,7 +321,7 @@ public final class GenericVariant implements Variant, Serializable {
                                 int offset =
                                         readUnsigned(
                                                 value, offsetStart + offsetSize * i, offsetSize);
-                                return new GenericVariant(value, metadata, dataStart + offset);
+                                return variantAt(dataStart + offset);
                             }
                         }
                     } else {
@@ -383,7 +375,7 @@ public final class GenericVariant implements Variant, Serializable {
                 high = mid - 1;
             } else {
                 int offset = readUnsigned(value, offsetStart + offsetSize * mid, offsetSize);
-                return new GenericVariant(value, metadata, dataStart + offset);
+                return variantAt(dataStart + offset);
             }
         }
         return null;
@@ -422,7 +414,7 @@ public final class GenericVariant implements Variant, Serializable {
     public ObjectField getFieldAtIndex(int index) {
         return handleObject(
                 value,
-                pos,
+                0,
                 (size, idSize, offsetSize, idStart, offsetStart, dataStart) -> {
                     if (index < 0 || index >= size) {
                         return null;
@@ -430,7 +422,7 @@ public final class GenericVariant implements Variant, Serializable {
                     int id = readUnsigned(value, idStart + idSize * index, idSize);
                     int offset = readUnsigned(value, offsetStart + offsetSize * index, offsetSize);
                     String key = getMetadataKey(metadata, id);
-                    GenericVariant v = new GenericVariant(value, metadata, dataStart + offset);
+                    GenericVariant v = variantAt(dataStart + offset);
                     return new ObjectField(key, v);
                 });
     }
@@ -441,7 +433,7 @@ public final class GenericVariant implements Variant, Serializable {
     public int getDictionaryIdAtIndex(int index) {
         return handleObject(
                 value,
-                pos,
+                0,
                 (size, idSize, offsetSize, idStart, offsetStart, dataStart) -> {
                     if (index < 0 || index >= size) {
                         throw malformedVariant();
@@ -453,7 +445,7 @@ public final class GenericVariant implements Variant, Serializable {
     // Get the number of array elements in the variant.
     // It is only legal to call it when `getType()` is `Type.ARRAY`.
     public int arraySize() {
-        return handleArray(value, pos, (size, offsetSize, offsetStart, dataStart) -> size);
+        return handleArray(value, 0, (size, offsetSize, offsetStart, dataStart) -> size);
     }
 
     // Get the array element at the `index` slot. Return null if `index` is out of the bound of
@@ -462,14 +454,20 @@ public final class GenericVariant implements Variant, Serializable {
     public GenericVariant getElementAtIndex(int index) {
         return handleArray(
                 value,
-                pos,
+                0,
                 (size, offsetSize, offsetStart, dataStart) -> {
                     if (index < 0 || index >= size) {
                         return null;
                     }
                     int offset = readUnsigned(value, offsetStart + offsetSize * index, offsetSize);
-                    return new GenericVariant(value, metadata, dataStart + offset);
+                    return variantAt(dataStart + offset);
                 });
+    }
+
+    private GenericVariant variantAt(int offset) {
+        int size = valueSize(value, offset);
+        checkIndex(offset + size - 1, value.remaining());
+        return new GenericVariant(value, metadata, offset, size);
     }
 
     // Escape a string so that it can be pasted into JSON structure.
