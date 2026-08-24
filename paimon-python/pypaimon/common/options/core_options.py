@@ -24,7 +24,7 @@ from typing import Dict, List, Optional
 from urllib.parse import urlparse
 
 from pypaimon.common.memory_size import MemorySize
-from pypaimon.common.options import Options
+from pypaimon.common.options.options import Options
 from pypaimon.common.options.config_option import ConfigOption
 from pypaimon.common.options.config_options import ConfigOptions
 from pypaimon.common.options.options_utils import OptionsUtils
@@ -703,6 +703,17 @@ class CoreOptions:
         .with_description("Whether to enable row tracking.")
     )
 
+    ROW_TRACKING_PARTITION_GROUP_ON_COMMIT: ConfigOption[bool] = (
+        ConfigOptions.key("row-tracking.partition-group-on-commit")
+        .boolean_type()
+        .default_value(True)
+        .with_description(
+            "When row-tracking is enabled, whether to group new file metas "
+            "by partition before commit, so that assigned row IDs are "
+            "contiguous within each partition."
+        )
+    )
+
     DATA_EVOLUTION_ENABLED: ConfigOption[bool] = (
         ConfigOptions.key("data-evolution.enabled")
         .boolean_type()
@@ -1354,6 +1365,10 @@ class CoreOptions:
 
     def row_tracking_enabled(self, default=None):
         return self.options.get(CoreOptions.ROW_TRACKING_ENABLED, default)
+
+    def row_tracking_partition_group_on_commit(self, default=None):
+        return self.options.get(
+            CoreOptions.ROW_TRACKING_PARTITION_GROUP_ON_COMMIT, default)
 
     def data_evolution_enabled(self, default=None):
         return self.options.get(CoreOptions.DATA_EVOLUTION_ENABLED, default)

@@ -50,6 +50,17 @@ class PrimaryKeySortedIndexOptionsTest {
     }
 
     @Test
+    void testResolvesMultiValueIndexColumns() {
+        CoreOptions options =
+                new CoreOptions(
+                        Collections.singletonMap(
+                                "pk-multivalue.index.columns", " tags,  categories "));
+
+        assertThat(options.primaryKeyMultiValueIndexColumns())
+                .containsExactly("tags", "categories");
+    }
+
+    @Test
     void testResolvesBTreeIndexAndSortOptions() {
         Map<String, String> values = new HashMap<>();
         values.put("sorted-index.records-per-range", "10");
@@ -79,5 +90,16 @@ class PrimaryKeySortedIndexOptionsTest {
         Options options = new CoreOptions(values).primaryKeyBitmapIndexOptions("status");
 
         assertThat(options.get("bitmap-index.dictionary-block-size")).isEqualTo("8 kb");
+    }
+
+    @Test
+    void testResolvesMultiValueIndexOptions() {
+        Map<String, String> values = new HashMap<>();
+        values.put(
+                "fields.tags.pk-multivalue.index.options", "{\"dictionary-block-size\":\"8 kb\"}");
+
+        Options options = new CoreOptions(values).primaryKeyMultiValueIndexOptions("tags");
+
+        assertThat(options.get("multivalue-index.dictionary-block-size")).isEqualTo("8 kb");
     }
 }

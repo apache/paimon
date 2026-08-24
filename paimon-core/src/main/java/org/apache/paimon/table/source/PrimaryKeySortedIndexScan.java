@@ -74,7 +74,7 @@ import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
-/** Plans source-backed scalar index groups in file-local row-position space. */
+/** Plans source-backed sorted-index groups in file-local row-position space. */
 public final class PrimaryKeySortedIndexScan {
 
     private static final Logger LOG = LoggerFactory.getLogger(PrimaryKeySortedIndexScan.class);
@@ -138,7 +138,8 @@ public final class PrimaryKeySortedIndexScan {
         List<PrimaryKeyIndexDefinition> scalarDefinitions = new ArrayList<>();
         for (PrimaryKeyIndexDefinition definition : definitions) {
             if (definition.family() == PrimaryKeyIndexDefinition.Family.BTREE
-                    || definition.family() == PrimaryKeyIndexDefinition.Family.BITMAP) {
+                    || definition.family() == PrimaryKeyIndexDefinition.Family.BITMAP
+                    || definition.family() == PrimaryKeyIndexDefinition.Family.MULTI_VALUE) {
                 scalarDefinitions.add(definition);
             }
         }
@@ -242,7 +243,8 @@ public final class PrimaryKeySortedIndexScan {
         Map<Integer, PrimaryKeyIndexDefinition> definitionsByField = new LinkedHashMap<>();
         for (PrimaryKeyIndexDefinition definition : definitions) {
             if (definition.family() == PrimaryKeyIndexDefinition.Family.BTREE
-                    || definition.family() == PrimaryKeyIndexDefinition.Family.BITMAP) {
+                    || definition.family() == PrimaryKeyIndexDefinition.Family.BITMAP
+                    || definition.family() == PrimaryKeyIndexDefinition.Family.MULTI_VALUE) {
                 definitionsByField.put(definition.fieldId(), definition);
             }
         }
@@ -448,6 +450,30 @@ public final class PrimaryKeySortedIndexScan {
         }
 
         @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitArrayContains(
+                FieldRef fieldRef, Object literal) {
+            return query(
+                    QueryKey.of(QueryOperation.ARRAY_CONTAINS, fieldRef, literal),
+                    () -> reader().visitArrayContains(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitArraysOverlap(
+                FieldRef fieldRef, List<Object> literals) {
+            return query(
+                    QueryKey.ofLiterals(QueryOperation.ARRAYS_OVERLAP, fieldRef, literals),
+                    () -> reader().visitArraysOverlap(fieldRef, literals));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitArrayContainsAll(
+                FieldRef fieldRef, List<Object> literals) {
+            return query(
+                    QueryKey.ofLiterals(QueryOperation.ARRAY_CONTAINS_ALL, fieldRef, literals),
+                    () -> reader().visitArrayContainsAll(fieldRef, literals));
+        }
+
+        @Override
         public CompletableFuture<Optional<GlobalIndexResult>> visitLike(
                 FieldRef fieldRef, Object literal) {
             return query(
@@ -628,6 +654,9 @@ public final class PrimaryKeySortedIndexScan {
         STARTS_WITH,
         ENDS_WITH,
         CONTAINS,
+        ARRAY_CONTAINS,
+        ARRAYS_OVERLAP,
+        ARRAY_CONTAINS_ALL,
         LIKE,
         LESS_THAN,
         GREATER_OR_EQUAL,
@@ -720,6 +749,24 @@ public final class PrimaryKeySortedIndexScan {
         public CompletableFuture<Optional<GlobalIndexResult>> visitContains(
                 FieldRef fieldRef, Object literal) {
             return localize(wrapped.visitContains(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitArrayContains(
+                FieldRef fieldRef, Object literal) {
+            return localize(wrapped.visitArrayContains(fieldRef, literal));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitArraysOverlap(
+                FieldRef fieldRef, List<Object> literals) {
+            return localize(wrapped.visitArraysOverlap(fieldRef, literals));
+        }
+
+        @Override
+        public CompletableFuture<Optional<GlobalIndexResult>> visitArrayContainsAll(
+                FieldRef fieldRef, List<Object> literals) {
+            return localize(wrapped.visitArrayContainsAll(fieldRef, literals));
         }
 
         @Override

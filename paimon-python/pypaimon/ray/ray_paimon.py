@@ -60,6 +60,7 @@ def read_paimon(
     ray_remote_args: Optional[Dict[str, Any]] = None,
     concurrency: Optional[int] = None,
     override_num_blocks: Optional[int] = None,
+    _preserve_current_schema: bool = False,
     **read_args,
 ) -> "ray.data.Dataset":
     """Read a Paimon table into a Ray Dataset.
@@ -109,6 +110,7 @@ def read_paimon(
         snapshot_id=snapshot_id,
         tag_name=tag_name,
         dynamic_options=dynamic_options,
+        preserve_current_schema=_preserve_current_schema,
     )
 
     if not split_provider.splits():

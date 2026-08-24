@@ -158,8 +158,9 @@ You can specify aggregation function for the input field, all the functions in t
 
 **Sequence-group behavior changes when aggregate functions are involved.**
 
-Without aggregate functions, a sequence-group field acts as a **version filter**: incoming records whose
-sequence value does not exceed the stored value are ignored for the associated columns.
+Without aggregate functions, a sequence-group field acts as a **version filter**: an incoming sequence value
+that is newer than or equal to the stored value replaces the sequence fields and every protected field, including
+with NULL values. Only records with an older sequence value are ignored for the group.
 
 With aggregate functions, the sequence-group field acts as an **ordering key**: every incoming record with
 a non-NULL sequence value participates in the aggregation, regardless of whether its sequence value is

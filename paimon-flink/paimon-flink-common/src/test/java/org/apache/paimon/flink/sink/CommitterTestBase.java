@@ -46,8 +46,10 @@ import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Base test class for {@link CommitterOperatorTest}. */
-public abstract class CommitterOperatorTestBase {
+/**
+ * Base test class providing an unaware/fixed-bucket {@link FileStoreTable} and result assertions.
+ */
+public abstract class CommitterTestBase {
 
     private static final RowType ROW_TYPE =
             RowType.of(

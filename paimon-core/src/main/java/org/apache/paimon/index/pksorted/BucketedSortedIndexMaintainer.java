@@ -45,7 +45,7 @@ import java.util.concurrent.Future;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Maintains one bucket-local source-backed BTree or Bitmap definition. */
+/** Maintains one bucket-local source-backed sorted-index definition. */
 public class BucketedSortedIndexMaintainer {
 
     private static final Logger LOG = LoggerFactory.getLogger(BucketedSortedIndexMaintainer.class);

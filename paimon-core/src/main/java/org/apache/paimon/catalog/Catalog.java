@@ -31,6 +31,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
@@ -1040,21 +1041,23 @@ public interface Catalog extends AutoCloseable {
     // ==================== Partition Modifications ==========================
 
     /**
-     * Whether this catalog supports partition modification for tables.
+     * Whether committing a table through this catalog maintains that table's partitions in the
+     * catalog.
      *
-     * <p>If not, following methods will do nothing:
+     * <p>What this gates is the handler a table is given: {@link
+     * CatalogEnvironment#partitionModification()} is null for a catalog that says false, so the
+     * commits of a table loaded from it register, alter and drop nothing. It does not disable the
+     * methods themselves, which is how a Format Table with catalog-managed partitions registers
+     * what a commit wrote even though its catalog reports false here:
      *
      * <ul>
      *   <li>{@link #createPartitions(Identifier, List)}.
      *   <li>{@link #alterPartitions(Identifier, List)}.
-     * </ul>
-     *
-     * <p>If not, following method will be exactly the same as directly using {@link
-     * BatchTableCommit#truncatePartitions}:
-     *
-     * <ul>
      *   <li>{@link #dropPartitions(Identifier, List)}.
      * </ul>
+     *
+     * <p>A catalog that keeps no partitions of its own inherits defaults that match: creating and
+     * altering do nothing, and dropping is exactly {@link BatchTableCommit#truncatePartitions}.
      */
     boolean supportsPartitionModification();
 
@@ -1069,16 +1072,34 @@ public interface Catalog extends AutoCloseable {
             throws TableNotExistException {}
 
     /**
-     * Create partitions of the specify table with explicit existence semantics.
+     * Create partitions of the specify table, with explicit existence semantics and optionally
+     * reporting statistics for them in the same call.
+     *
+     * <p>The statistics are matched to {@code partitions} by {@link PartitionStatistics#spec()}, so
+     * they may cover only some of them, and {@code replaceStatistics} says whether they replace
+     * what the catalog already holds or add to it. What decides whether they survive is whether a
+     * catalog overrides this method: one that does not registers the partitions exactly as {@link
+     * #createPartitions(Identifier, List)} does and drops the report, however much of it the
+     * catalog could have stored, and for a catalog that keeps no partitions at all that means it
+     * does nothing.
      *
      * @param identifier path of the table to create partitions
      * @param partitions partitions to be created
      * @param ignoreIfExists if false, fail when any partition already exists and apply none of the
      *     batch; if true, behave like {@link #createPartitions(Identifier, List)}
+     * @param statistics statistics to report, or null to report none
+     * @param replaceStatistics whether the report replaces the stored values rather than adding to
+     *     them; ignored when {@code statistics} is null
      * @throws TableNotExistException if the table does not exist
+     * @throws UnsupportedOperationException if {@code ignoreIfExists} is false and the catalog does
+     *     not implement strict creation, which is what the default here does
      */
     default void createPartitions(
-            Identifier identifier, List<Map<String, String>> partitions, boolean ignoreIfExists)
+            Identifier identifier,
+            List<Map<String, String>> partitions,
+            boolean ignoreIfExists,
+            @Nullable List<PartitionStatistics> statistics,
+            boolean replaceStatistics)
             throws TableNotExistException {
         if (!ignoreIfExists) {
             throw new UnsupportedOperationException(

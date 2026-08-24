@@ -20,6 +20,8 @@ package org.apache.paimon.spark.execution
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.spark.format.{FormatTablePartitionRepair, PaimonFormatTable}
+import org.apache.paimon.spark.util.OptionUtils
+import org.apache.paimon.table.format.FormatTablePartitionStatsCollector
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.{NoSuchPartitionsException, ResolvedPartitionSpec}
@@ -189,8 +191,18 @@ case class PaimonRepairFormatTablePartitionsExec(
   extends LeafV2CommandExec {
 
   override protected def run(): Seq[InternalRow] = {
+    // A repair stops at the numbers a directory listing already gives; a record count needs the
+    // file footers, which no listing opens.
+    val statsCollector =
+      if (OptionUtils.formatTableRepairCollectStatistics()) {
+        new FormatTablePartitionStatsCollector(
+          table.table,
+          OptionUtils.formatTableStatisticsParallelism())
+      } else {
+        null
+      }
     PaimonFormatTablePartitionDdlExec.refreshingCache(refreshCache) {
-      FormatTablePartitionRepair.repair(table, addPartitions, dropPartitions)
+      FormatTablePartitionRepair.repair(table, addPartitions, dropPartitions, statsCollector)
     }
     Seq.empty
   }

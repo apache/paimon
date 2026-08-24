@@ -38,8 +38,7 @@ case class PaimonDataWrite(
     fullCompactionDeltaCommits: Option[Int],
     batchId: Option[Long],
     uriReaderFactory: UriReaderFactory,
-    postponePartitionBucketComputer: Option[BinaryRow => Integer],
-    ignorePreviousFiles: Boolean = false)
+    postponePartitionBucketComputer: Option[BinaryRow => Integer])
   extends abstractInnerTableDataWrite[Row]
   with InnerTableV1DataWrite {
 
@@ -48,9 +47,6 @@ case class PaimonDataWrite(
   val write: TableWriteImpl[Row] = {
     val _write = writeBuilder.newWrite().asInstanceOf[TableWriteImpl[Row]]
     _write.withIOManager(ioManager)
-    if (ignorePreviousFiles) {
-      _write.withIgnorePreviousFiles(true)
-    }
     if (writeRowTracking) {
       _write.withWriteType(writeType)
     }

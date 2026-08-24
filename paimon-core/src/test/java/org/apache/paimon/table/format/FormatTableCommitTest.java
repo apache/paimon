@@ -23,6 +23,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.RenamingTwoPhaseOutputStream;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.utils.PartitionPathUtils;
 
@@ -41,12 +42,15 @@ import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.entry;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /** Tests for {@link FormatTableCommit}. */
 class FormatTableCommitTest {
@@ -65,7 +69,9 @@ class FormatTableCommitTest {
         FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
         RuntimeException registrationFailure =
                 new RuntimeException("Catalog partition registration unavailable");
-        doThrow(registrationFailure).when(partitionManager).createPartitions(anyList(), eq(true));
+        doThrow(registrationFailure)
+                .when(partitionManager)
+                .createPartitions(anyList(), eq(true), any(), anyBoolean());
 
         FormatTableCommit commit =
                 new FormatTableCommit(
@@ -79,7 +85,8 @@ class FormatTableCommitTest {
                         null,
                         null,
                         null,
-                        partitionManager);
+                        partitionManager,
+                        /* dynamicPartitionOverwrite */ true);
         CommitMessage message = new TwoPhaseCommitMessage(committer);
 
         assertThatThrownBy(() -> commit.commit(Collections.singletonList(message)))
@@ -89,7 +96,7 @@ class FormatTableCommitTest {
         // A failed write leaves nothing behind, whichever step failed: rerunning it converges,
         // and an idempotent registration makes a partition that was registered anyway harmless.
         assertThat(fileIO.exists(targetPath)).isFalse();
-        verify(partitionManager).createPartitions(anyList(), eq(true));
+        verify(partitionManager).createPartitions(anyList(), eq(true), any(), anyBoolean());
     }
 
     @Test
@@ -111,7 +118,8 @@ class FormatTableCommitTest {
                         null,
                         null,
                         null,
-                        partitionManager);
+                        partitionManager,
+                        /* dynamicPartitionOverwrite */ true);
         CommitMessage message = new TwoPhaseCommitMessage(committer);
 
         assertThatThrownBy(() -> commit.commit(Collections.singletonList(message)))
@@ -119,7 +127,8 @@ class FormatTableCommitTest {
                 .hasRootCauseMessage("data commit failed");
 
         verify(committer).discard(fileIO);
-        verify(partitionManager, never()).createPartitions(anyList(), eq(true));
+        verify(partitionManager, never())
+                .createPartitions(anyList(), eq(true), any(), anyBoolean());
     }
 
     @Test
@@ -205,7 +214,8 @@ class FormatTableCommitTest {
                         staticPartition,
                         null,
                         null,
-                        null);
+                        null,
+                        /* dynamicPartitionOverwrite */ true);
 
         commit.commit(Collections.singletonList(new TwoPhaseCommitMessage(committer)));
 
@@ -253,7 +263,8 @@ class FormatTableCommitTest {
                         Collections.singletonMap("year", "2025"),
                         null,
                         null,
-                        null);
+                        null,
+                        /* dynamicPartitionOverwrite */ true);
 
         commit.commit(Collections.emptyList());
 
@@ -296,7 +307,8 @@ class FormatTableCommitTest {
                         Collections.singletonMap("year", "2025"),
                         null,
                         null,
-                        null);
+                        null,
+                        /* dynamicPartitionOverwrite */ true);
 
         commit.commit(Collections.emptyList());
 
@@ -343,7 +355,8 @@ class FormatTableCommitTest {
                         staticPartition,
                         null,
                         null,
-                        null);
+                        null,
+                        /* dynamicPartitionOverwrite */ true);
 
         assertThatThrownBy(() -> commit.commit(Collections.emptyList()))
                 .isInstanceOf(RuntimeException.class)
@@ -352,6 +365,323 @@ class FormatTableCommitTest {
                         "Partition value '..' cannot be used as a partition path component.");
         assertThat(fileIO.exists(tablePath)).isTrue();
         assertThat(fileIO.exists(siblingPath)).isTrue();
+    }
+
+    @Test
+    void testTruncateTableEmptiesEveryPartitionAndLeavesThePartitionsThemselves() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        Path october = new Path(tablePath, "year=2025/month=10");
+        Path november = new Path(tablePath, "year=2025/month=11");
+        Path octoberData = new Path(october, "data-1.csv");
+        Path novemberData = new Path(november, "data-2.csv");
+        fileIO.writeFile(octoberData, "1", false);
+        fileIO.writeFile(novemberData, "2", false);
+        // Another writer is mid-write in this partition; its staging tree is not table data.
+        Path stagingFile = new Path(october, "_temporary/attempt/part-00000.csv");
+        fileIO.writeFile(stagingFile, "3", false);
+        FormatTableCommit commit =
+                truncatingCommit(tablePath, fileIO, false, null, "year", "month");
+
+        commit.truncateTable();
+
+        assertThat(fileIO.exists(octoberData)).isFalse();
+        assertThat(fileIO.exists(novemberData)).isFalse();
+        assertThat(fileIO.exists(stagingFile)).isTrue();
+        // Emptying a table does not redefine which partitions it has: the directories stay.
+        assertThat(fileIO.exists(october)).isTrue();
+        assertThat(fileIO.exists(november)).isTrue();
+    }
+
+    @Test
+    void testTruncateTableEmptiesTheRegisteredPartitionsOfACatalogManagedTable() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        Path registered = new Path(tablePath, "year=2025/month=10");
+        Path registeredData = new Path(registered, "data-1.csv");
+        fileIO.writeFile(registeredData, "1", false);
+        // Dropped there by something outside Paimon and not registered yet, so it is not part of
+        // the table: MSCK REPAIR TABLE is what would make it so.
+        Path awaitingRepair = new Path(tablePath, "year=2025/month=11");
+        Path awaitingRepairData = new Path(awaitingRepair, "data-2.csv");
+        fileIO.writeFile(awaitingRepairData, "2", false);
+        FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
+        when(partitionManager.listPartitions(Collections.emptyMap(), null))
+                .thenReturn(
+                        Collections.singletonList(
+                                new Partition(partitionSpec("2025", "10"), 0, 0, 0, 0, -1, false)));
+        FormatTableCommit commit =
+                truncatingCommit(tablePath, fileIO, false, partitionManager, "year", "month");
+
+        commit.truncateTable();
+
+        assertThat(fileIO.exists(registeredData)).isFalse();
+        assertThat(fileIO.exists(registered)).isTrue();
+        assertThat(fileIO.exists(awaitingRepairData)).isTrue();
+    }
+
+    @Test
+    void testTruncateTableOnlyEmptiesTheDirectoriesThatAreItsPartitions() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        Path partitionData = new Path(tablePath, "year=2025/month=10/data-1.csv");
+        fileIO.writeFile(partitionData, "1", false);
+        // Neither of these is a partition: the scan reads the directories that parse into the
+        // partition keys, so nothing else under the table directory is table data.
+        Path atTheTableRoot = new Path(tablePath, "notes.csv");
+        fileIO.writeFile(atTheTableRoot, "2", false);
+        Path outsideThePartitionLayout = new Path(tablePath, "tmp/unknown/x.csv");
+        fileIO.writeFile(outsideThePartitionLayout, "3", false);
+        FormatTableCommit commit =
+                truncatingCommit(tablePath, fileIO, false, null, "year", "month");
+
+        commit.truncateTable();
+
+        assertThat(fileIO.exists(partitionData)).isFalse();
+        assertThat(fileIO.exists(atTheTableRoot)).isTrue();
+        assertThat(fileIO.exists(outsideThePartitionLayout)).isTrue();
+    }
+
+    @Test
+    void testTruncateTableClearsAValueOnlyDefaultPartitionBelowTheTableDirectory()
+            throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        // Value-only layout: a null month is the default partition name, which starts with '_'
+        // without being a staging directory, and here it sits below the listed directory instead
+        // of being it.
+        Path defaultPartition =
+                new Path(tablePath, "2025/" + PARTITION_DEFAULT_NAME.defaultValue());
+        Path staleFile = new Path(defaultPartition, "data-old.csv");
+        fileIO.writeFile(staleFile, "1", false);
+        Path stagingFile = new Path(tablePath, "2025/_temporary/attempt/part-00000.csv");
+        fileIO.writeFile(stagingFile, "2", false);
+        FormatTableCommit commit = truncatingCommit(tablePath, fileIO, true, null, "year", "month");
+
+        commit.truncateTable();
+
+        assertThat(fileIO.exists(staleFile)).isFalse();
+        assertThat(fileIO.exists(stagingFile)).isTrue();
+        assertThat(fileIO.exists(defaultPartition)).isTrue();
+    }
+
+    @Test
+    void testTruncateTableOfAnUnpartitionedTableClearsTheTableDirectory() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        Path dataFile = new Path(tablePath, "data-1.csv");
+        fileIO.writeFile(dataFile, "1", false);
+        Path stagingFile = new Path(tablePath, "_temporary/attempt/part-00000.csv");
+        fileIO.writeFile(stagingFile, "2", false);
+        FormatTableCommit commit = truncatingCommit(tablePath, fileIO, false, null);
+
+        commit.truncateTable();
+
+        assertThat(fileIO.exists(dataFile)).isFalse();
+        assertThat(fileIO.exists(stagingFile)).isTrue();
+        assertThat(fileIO.exists(tablePath)).isTrue();
+    }
+
+    @Test
+    void testTruncatePartitionsStaysInsideThePartitionsItNames() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        Path october = new Path(tablePath, "year=2025/month=10");
+        Path november = new Path(tablePath, "year=2025/month=11");
+        Path octoberData = new Path(october, "data-1.csv");
+        Path novemberData = new Path(november, "data-2.csv");
+        fileIO.writeFile(octoberData, "1", false);
+        fileIO.writeFile(novemberData, "2", false);
+        Map<String, String> october2025 = new LinkedHashMap<>();
+        october2025.put("year", "2025");
+        october2025.put("month", "10");
+        FormatTableCommit commit =
+                truncatingCommit(tablePath, fileIO, false, null, "year", "month");
+
+        commit.truncatePartitions(Collections.singletonList(october2025));
+
+        assertThat(fileIO.exists(octoberData)).isFalse();
+        assertThat(fileIO.exists(october)).isTrue();
+        assertThat(fileIO.exists(novemberData)).isTrue();
+    }
+
+    @Test
+    void testTruncatingAPrefixClearsThePartitionsBelowItButNotStagingTrees() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        Path staleFile = new Path(tablePath, "year=2025/month=10/data-old.csv");
+        fileIO.writeFile(staleFile, "1", false);
+        // A job writing this prefix with the month left dynamic stages exactly where the month
+        // directories sit, so a directory at a partition level is not automatically partition data.
+        Path stagingFile =
+                new Path(tablePath, "year=2025/_temporary/attempt/month=11/part-00011.csv");
+        fileIO.writeFile(stagingFile, "2", false);
+        Path otherYear = new Path(tablePath, "year=2024/month=10/data-old.csv");
+        fileIO.writeFile(otherYear, "3", false);
+        FormatTableCommit commit =
+                truncatingCommit(tablePath, fileIO, false, null, "year", "month");
+
+        commit.truncatePartitions(
+                Collections.singletonList(Collections.singletonMap("year", "2025")));
+
+        assertThat(fileIO.exists(staleFile)).isFalse();
+        assertThat(fileIO.exists(stagingFile)).isTrue();
+        assertThat(fileIO.exists(otherYear)).isTrue();
+    }
+
+    @Test
+    void testTruncatingTheValueOnlyDefaultPartitionClearsIt() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        // Value-only layout: a null partition value is the default partition name, which starts
+        // with '_' without being a staging directory. The scan reads it, so TRUNCATE clears it.
+        Path defaultPartition = new Path(tablePath, PARTITION_DEFAULT_NAME.defaultValue());
+        Path staleFile = new Path(defaultPartition, "data-old.csv");
+        fileIO.writeFile(staleFile, "1", false);
+        FormatTableCommit commit = truncatingCommit(tablePath, fileIO, true, null, "year");
+
+        commit.truncatePartitions(
+                Collections.singletonList(
+                        Collections.singletonMap("year", PARTITION_DEFAULT_NAME.defaultValue())));
+
+        assertThat(fileIO.exists(staleFile)).isFalse();
+        assertThat(fileIO.exists(defaultPartition)).isTrue();
+    }
+
+    @Test
+    void testOverwritingWithoutAStaticPartitionEmptiesAnUnpartitionedTable() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        Path previousData = new Path(tablePath, "data-1.csv");
+        fileIO.writeFile(previousData, "1", false);
+        // Another writer is mid-write; its staging tree is not table data.
+        Path stagingFile = new Path(tablePath, "_temporary/attempt/part-00000.csv");
+        fileIO.writeFile(stagingFile, "2", false);
+        FormatTableCommit commit = overwritingCommit(tablePath, fileIO, true);
+
+        // Nothing to write: the query behind the statement returned no rows.
+        commit.commit(Collections.emptyList());
+
+        // An unpartitioned overwrite is about the table, so the files it replaces are the table's,
+        // not the ones this commit happens to write.
+        assertThat(fileIO.exists(previousData)).isFalse();
+        assertThat(fileIO.exists(stagingFile)).isTrue();
+    }
+
+    @Test
+    void testOverwritingAPartitionedTableFollowsDynamicPartitionOverwrite() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path dynamicTable = new Path(new Path(tempDir.toUri()), "dynamic");
+        Path staticTable = new Path(new Path(tempDir.toUri()), "static");
+        for (Path table : Arrays.asList(dynamicTable, staticTable)) {
+            fileIO.writeFile(new Path(table, "year=2025/month=10/data-1.csv"), "1", false);
+            fileIO.writeFile(new Path(table, "year=2025/month=11/data-2.csv"), "2", false);
+        }
+
+        overwritingCommit(dynamicTable, fileIO, true, "year", "month")
+                .commit(Collections.emptyList());
+        overwritingCommit(staticTable, fileIO, false, "year", "month")
+                .commit(Collections.emptyList());
+
+        // Dynamic overwrite selects the partitions written, and this commit wrote none.
+        assertThat(fileIO.exists(new Path(dynamicTable, "year=2025/month=10/data-1.csv"))).isTrue();
+        assertThat(fileIO.exists(new Path(dynamicTable, "year=2025/month=11/data-2.csv"))).isTrue();
+        // With it off, the statement is about the whole table, whatever the query returned.
+        assertThat(fileIO.exists(new Path(staticTable, "year=2025/month=10/data-1.csv"))).isFalse();
+        assertThat(fileIO.exists(new Path(staticTable, "year=2025/month=11/data-2.csv"))).isFalse();
+    }
+
+    @Test
+    void testDynamicOverwriteReplacesOnlyThePartitionsItWrites() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        Path rewritten = new Path(tablePath, "year=2025/month=10/data-1.csv");
+        Path untouched = new Path(tablePath, "year=2025/month=11/data-2.csv");
+        fileIO.writeFile(rewritten, "1", false);
+        fileIO.writeFile(untouched, "2", false);
+        RenamingTwoPhaseOutputStream outputStream =
+                new RenamingTwoPhaseOutputStream(
+                        fileIO, new Path(tablePath, "year=2025/month=10/data-new.csv"), false);
+        outputStream.write(1);
+        TwoPhaseOutputStream.Committer committer = outputStream.closeForCommit();
+
+        overwritingCommit(tablePath, fileIO, true, "year", "month")
+                .commit(Collections.singletonList(new TwoPhaseCommitMessage(committer)));
+
+        // The partitions a dynamic overwrite replaces are the ones it writes, and only those.
+        assertThat(fileIO.exists(rewritten)).isFalse();
+        assertThat(fileIO.exists(new Path(tablePath, "year=2025/month=10/data-new.csv"))).isTrue();
+        assertThat(fileIO.exists(untouched)).isTrue();
+    }
+
+    @Test
+    void testOverwritingTheWholeTableLeavesADirectoryThatIsNoPartitionOfIt() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        fileIO.writeFile(new Path(tablePath, "year=2025/month=10/data-1.csv"), "1", false);
+        // Neither of these parses into the partition keys, so no scan of the table reads them:
+        // replacing what the table holds is none of their business.
+        fileIO.writeFile(new Path(tablePath, "year=2025/nomonth/data-2.csv"), "2", false);
+        fileIO.writeFile(new Path(tablePath, "loose.csv"), "3", false);
+
+        overwritingCommit(tablePath, fileIO, false, "year", "month")
+                .commit(Collections.emptyList());
+
+        assertThat(fileIO.exists(new Path(tablePath, "year=2025/month=10/data-1.csv"))).isFalse();
+        assertThat(fileIO.exists(new Path(tablePath, "year=2025/nomonth/data-2.csv"))).isTrue();
+        assertThat(fileIO.exists(new Path(tablePath, "loose.csv"))).isTrue();
+    }
+
+    /**
+     * An overwrite that names no partition: what INSERT OVERWRITE without a PARTITION clause is.
+     */
+    private FormatTableCommit overwritingCommit(
+            Path tableLocation,
+            LocalFileIO fileIO,
+            boolean dynamicPartitionOverwrite,
+            String... partitionKeys) {
+        return new FormatTableCommit(
+                tableLocation.toString(),
+                Arrays.asList(partitionKeys),
+                fileIO,
+                false,
+                PARTITION_DEFAULT_NAME.defaultValue(),
+                true,
+                Identifier.create("overwrite_db", "overwrite_table"),
+                null,
+                null,
+                null,
+                null,
+                dynamicPartitionOverwrite);
+    }
+
+    private static Map<String, String> partitionSpec(String year, String month) {
+        LinkedHashMap<String, String> spec = new LinkedHashMap<>();
+        spec.put("year", year);
+        spec.put("month", month);
+        return spec;
+    }
+
+    /** The commit TRUNCATE makes: nothing to write, so no overwrite and no static partition. */
+    private FormatTableCommit truncatingCommit(
+            Path tableLocation,
+            LocalFileIO fileIO,
+            boolean onlyValueInPath,
+            FormatTablePartitionManager partitionManager,
+            String... partitionKeys) {
+        return new FormatTableCommit(
+                tableLocation.toString(),
+                Arrays.asList(partitionKeys),
+                fileIO,
+                onlyValueInPath,
+                PARTITION_DEFAULT_NAME.defaultValue(),
+                false,
+                Identifier.create("truncate_db", "truncate_table"),
+                null,
+                null,
+                null,
+                partitionManager,
+                /* dynamicPartitionOverwrite */ true);
     }
 
     private FormatTablePartitionManager commitPartitionedFile(
@@ -375,7 +705,8 @@ class FormatTableCommitTest {
                         null,
                         null,
                         null,
-                        partitionManager);
+                        partitionManager,
+                        /* dynamicPartitionOverwrite */ true);
         commit.commit(Collections.singletonList(new TwoPhaseCommitMessage(committer)));
         return partitionManager;
     }
@@ -385,7 +716,7 @@ class FormatTableCommitTest {
             FormatTablePartitionManager partitionManager) {
         ArgumentCaptor<List<Map<String, String>>> captor =
                 ArgumentCaptor.forClass((Class) List.class);
-        verify(partitionManager).createPartitions(captor.capture(), eq(true));
+        verify(partitionManager).createPartitions(captor.capture(), eq(true), any(), anyBoolean());
         assertThat(captor.getValue()).hasSize(1);
         return captor.getValue().get(0);
     }

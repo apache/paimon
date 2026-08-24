@@ -78,6 +78,24 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
     }
 
     @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitArrayContains(
+            FieldRef fieldRef, Object literal) {
+        return unionAsync(reader -> reader.visitArrayContains(fieldRef, literal));
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitArraysOverlap(
+            FieldRef fieldRef, List<Object> literals) {
+        return unionAsync(reader -> reader.visitArraysOverlap(fieldRef, literals));
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitArrayContainsAll(
+            FieldRef fieldRef, List<Object> literals) {
+        return unionAsync(reader -> reader.visitArrayContainsAll(fieldRef, literals));
+    }
+
+    @Override
     public CompletableFuture<Optional<GlobalIndexResult>> visitLike(
             FieldRef fieldRef, Object literal) {
         return unionAsync(reader -> reader.visitLike(fieldRef, literal));

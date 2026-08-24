@@ -209,9 +209,9 @@ class OverwriteCommitConflictTest(unittest.TestCase):
         self.assertEqual(sorted(actual[actual['f0'] == 1]['f1'].tolist()), ['new'])
         self.assertEqual(sorted(actual[actual['f0'] == 2]['f1'].tolist()), ['c'])
 
-    def test_falls_back_to_full_scan_when_intermediate_snapshot_missing(self):
-        # A missing intermediate snapshot -> read_incremental_changes returns None
-        # and the retry falls back to a full scan.
+    def test_fails_when_intermediate_snapshot_missing(self):
+        # Match Java SnapshotManager.snapshot: duplicate detection cannot skip
+        # an unavailable snapshot in the retry history.
         K = 1
         missing_id = self.table.snapshot_manager().get_latest_snapshot().id + 1
 
@@ -239,8 +239,8 @@ class OverwriteCommitConflictTest(unittest.TestCase):
         fsc.commit_scanner.read_all_entries_from_changed_partitions = spy_full
         fsc.commit_scanner.read_incremental_changes = spy_incr
 
-        # Only the scanner's lookups see missing_id as absent; the commit's own
-        # manager (bound earlier) is untouched.
+        # Both duplicate detection and incremental conflict scanning observe
+        # the expired snapshot.
         real_mgr = fsc.commit_scanner.table.snapshot_manager()
 
         class _Wrap:
@@ -250,7 +250,9 @@ class OverwriteCommitConflictTest(unittest.TestCase):
             def get_snapshot_by_id(self, i):
                 return None if i == missing_id else real_mgr.get_snapshot_by_id(i)
 
-        fsc.commit_scanner.table.snapshot_manager = lambda: _Wrap()
+        wrapped_mgr = _Wrap()
+        fsc.snapshot_manager = wrapped_mgr
+        fsc.commit_scanner.table.snapshot_manager = lambda: wrapped_mgr
 
         orig_cas = fsc.snapshot_commit.commit
         cas = {'fails': 0}
@@ -264,12 +266,15 @@ class OverwriteCommitConflictTest(unittest.TestCase):
 
         fsc.snapshot_commit.commit = patched_cas
 
-        c.commit(messages)
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "snapshot {} cannot be found".format(missing_id)):
+            c.commit(messages)
         c.close()
 
         self.assertEqual(cas['fails'], K, "expected exactly K forced conflicts")
-        self.assertIn(None, incr_results)          # incremental bailed on missing
-        self.assertEqual(full_scans['n'], 2)       # first attempt + fallback
+        self.assertEqual([], incr_results)
+        self.assertEqual(full_scans['n'], 1)
 
     def test_incremental_merge_across_non_append_snapshot(self):
         self._assert_merge_equals_full_scan(self._overwrite_target)

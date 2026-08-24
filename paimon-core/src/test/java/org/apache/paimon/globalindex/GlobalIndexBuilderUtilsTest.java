@@ -49,6 +49,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -279,6 +280,28 @@ class GlobalIndexBuilderUtilsTest {
         assertIndexedSplitRowRanges(ranges.get(new Range(5938, 7599)), new Range(5938, 7599));
     }
 
+    @Test
+    void testShardSplitsUsesStableGlobalRowIdWindows() {
+        DataSplit split =
+                DataSplit.builder()
+                        .withPartition(BinaryRow.EMPTY_ROW)
+                        .withBucket(0)
+                        .withBucketPath("bucket-0")
+                        .withDataFiles(Collections.singletonList(createDataFileMeta(5L, 10L)))
+                        .rawConvertible(false)
+                        .build();
+        Map<Range, List<Split>> input = new LinkedHashMap<>();
+        input.put(new Range(5, 14), Collections.singletonList(split));
+
+        Map<Range, List<Split>> shards = GlobalIndexBuilderUtils.shardSplitsByRowRange(input, 6);
+
+        assertThat(shards.keySet())
+                .containsExactly(new Range(5, 5), new Range(6, 11), new Range(12, 14));
+        for (Map.Entry<Range, List<Split>> shard : shards.entrySet()) {
+            assertIndexedSplitRowRanges(shard.getValue(), shard.getKey());
+        }
+    }
+
     private List<ResultEntry> createDummyResultEntries() throws IOException {
         String fileName = "test-index-" + UUID.randomUUID();
         Path filePath = indexPathFactory.toPath(fileName);
@@ -308,6 +331,7 @@ class GlobalIndexBuilderUtilsTest {
                         null,
                         null,
                         firstRowId,
+                        null,
                         null);
         return ManifestEntry.create(FileKind.ADD, BinaryRow.EMPTY_ROW, 0, 1, file);
     }
@@ -339,6 +363,7 @@ class GlobalIndexBuilderUtilsTest {
                 null,
                 null,
                 firstRowId,
+                null,
                 null);
     }
 }

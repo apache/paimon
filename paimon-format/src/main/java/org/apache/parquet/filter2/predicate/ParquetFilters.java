@@ -200,6 +200,21 @@ public class ParquetFilters {
         }
 
         @Override
+        public FilterPredicate visitArrayContains(FieldRef fieldRef, Object literal) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public FilterPredicate visitArraysOverlap(FieldRef fieldRef, List<Object> literals) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public FilterPredicate visitArrayContainsAll(FieldRef fieldRef, List<Object> literals) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
         public FilterPredicate visitLike(FieldRef fieldRef, Object literal) {
             throw new UnsupportedOperationException();
         }

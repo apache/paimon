@@ -23,7 +23,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.CommittableSerializer;
 import org.apache.paimon.flink.sink.Committer;
-import org.apache.paimon.flink.sink.CommitterOperatorTestBase;
+import org.apache.paimon.flink.sink.CommitterTestBase;
 import org.apache.paimon.flink.sink.StoreCommitter;
 import org.apache.paimon.flink.sink.state.CoordinatorState;
 import org.apache.paimon.flink.sink.state.CoordinatorStateSerializer;
@@ -62,7 +62,7 @@ import java.util.concurrent.TimeUnit;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** EndInput scenarios for {@link CommittingWriteOperatorCoordinator}. */
-public class CommittingWriteOperatorCoordinatorEndInputTest extends CommitterOperatorTestBase {
+public class CommittingWriteOperatorCoordinatorEndInputTest extends CommitterTestBase {
 
     private static final TypeSerializer<CheckpointCommittables> SERIALIZER =
             new SimpleVersionedSerializerTypeSerializerProxy<>(
@@ -491,7 +491,8 @@ public class CommittingWriteOperatorCoordinatorEndInputTest extends CommitterOpe
                 new TestingContext(new OperatorID(), parallelism),
                 committerFactory,
                 true,
-                commitUser);
+                commitUser,
+                null);
     }
 
     private Committable committable(FileStoreTable table, long checkpointId, int value)

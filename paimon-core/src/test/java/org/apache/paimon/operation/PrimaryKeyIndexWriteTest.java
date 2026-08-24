@@ -52,7 +52,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests BTree and Bitmap primary-key index wiring through the file-store writer. */
+/** Tests source-backed primary-key index wiring through the file-store writer. */
 class PrimaryKeyIndexWriteTest {
 
     @TempDir java.nio.file.Path tempDir;
@@ -86,6 +86,30 @@ class PrimaryKeyIndexWriteTest {
 
         assertThat(container.primaryKeyIndexMaintainer).isNotNull();
         assertThat(container.primaryKeyIndexMaintainer.buildNotCompleted()).isFalse();
+        write.close();
+    }
+
+    @Test
+    void testCreatesCoordinatorForMultiValueDefinition() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "10");
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        options.put(CoreOptions.PK_MULTIVALUE_INDEX_COLUMNS.key(), "tags");
+        List<DataField> fields =
+                new ArrayList<>(TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields());
+        fields.add(new DataField(7, "tags", DataTypes.ARRAY(DataTypes.STRING())));
+        TestFileStore store = createStore(options, new RowType(fields));
+        KeyValueFileStoreWrite write = (KeyValueFileStoreWrite) store.newWrite();
+        write.withIOManager(ioManager);
+        TestKeyValueGenerator generator = new TestKeyValueGenerator();
+        KeyValue record = generator.next();
+
+        AbstractFileStoreWrite.WriterContainer<KeyValue> container =
+                write.createWriterContainer(generator.getPartition(record), 1);
+
+        assertThat(container.primaryKeyIndexMaintainer).isNotNull();
+        assertThat((List<?>) readField(container.primaryKeyIndexMaintainer, "sortedMaintainers"))
+                .hasSize(1);
         write.close();
     }
 

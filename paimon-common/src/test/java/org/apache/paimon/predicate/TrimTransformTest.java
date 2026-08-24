@@ -102,6 +102,18 @@ class TrimTransformTest {
     }
 
     @Test
+    public void testNullCharsToTrimYieldsNull() {
+        List<Object> inputs = new ArrayList<>();
+        inputs.add(new FieldRef(0, "f0", DataTypes.STRING()));
+        inputs.add(new FieldRef(1, "f1", DataTypes.STRING()));
+        GenericRow row = GenericRow.of(BinaryString.fromString("  x  "), null);
+
+        for (TrimTransform.Flag flag : TrimTransform.Flag.values()) {
+            assertThat(new TrimTransform(inputs, flag).transform(row)).isNull();
+        }
+    }
+
+    @Test
     public void testSubstringRefInputs() {
         List<Object> inputs = new ArrayList<>();
         inputs.add(new FieldRef(1, "f1", DataTypes.STRING()));

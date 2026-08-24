@@ -65,36 +65,64 @@ public class SubstringTransform implements Transform {
             return sourceString;
         }
 
-        String sourceJavaString = sourceString.toString();
-        Object begin = inputs.get(1);
-        int beginIndex;
-        if (begin instanceof FieldRef) {
-            FieldRef beginRef = (FieldRef) begin;
-            checkArgument(beginRef.type().is(INTEGER_NUMERIC));
-            beginIndex = row.getInt(beginRef.index());
-        } else {
-            beginIndex = Integer.parseInt(inputs.get(1).toString());
+        // SQL null propagation: any null input yields null, whether it arrives as a
+        // literal or as a null value in a referenced field
+        if (isNullPosition(inputs.get(1), row)) {
+            return null;
         }
-        if (beginIndex > sourceJavaString.length()) {
+        boolean hasLength = inputs.size() == 3;
+        if (hasLength && isNullPosition(inputs.get(2), row)) {
+            return null;
+        }
+
+        int sourceLength = sourceString.numChars();
+        int beginIndex = readPosition(inputs.get(1), row);
+        if (beginIndex > sourceLength) {
             return BinaryString.EMPTY_UTF8;
         }
 
-        int endIndex = sourceJavaString.length();
-        if (inputs.size() == 3) {
-            Object end = inputs.get(2);
-            if (end instanceof FieldRef) {
-                FieldRef endRef = (FieldRef) inputs.get(2);
-                checkArgument(endRef.type().is(INTEGER_NUMERIC));
-                endIndex = beginIndex + row.getInt(endRef.index()) - 1;
-            } else {
-                endIndex = beginIndex + Integer.parseInt(inputs.get(2).toString()) - 1;
-            }
+        int endIndex = sourceLength;
+        if (hasLength) {
+            endIndex = beginIndex + readPosition(inputs.get(2), row) - 1;
         }
-        endIndex = Math.min(endIndex, sourceJavaString.length());
+        endIndex = Math.min(endIndex, sourceLength);
         beginIndex--;
         checkArgument(beginIndex < endIndex);
 
-        return BinaryString.fromString(sourceJavaString.substring(beginIndex, endIndex));
+        return sourceString.substring(beginIndex, endIndex);
+    }
+
+    private static boolean isNullPosition(Object position, InternalRow row) {
+        if (position == null) {
+            return true;
+        }
+        if (position instanceof FieldRef) {
+            FieldRef ref = (FieldRef) position;
+            checkArgument(ref.type().is(INTEGER_NUMERIC));
+            // getInt on a null throws on GenericRow and reads an undefined value on columnar rows
+            return row.isNullAt(ref.index());
+        }
+        return false;
+    }
+
+    private static int readPosition(Object position, InternalRow row) {
+        if (position instanceof FieldRef) {
+            FieldRef ref = (FieldRef) position;
+            switch (ref.type().getTypeRoot()) {
+                case TINYINT:
+                    return row.getByte(ref.index());
+                case SMALLINT:
+                    return row.getShort(ref.index());
+                case INTEGER:
+                    return row.getInt(ref.index());
+                case BIGINT:
+                    return Math.toIntExact(row.getLong(ref.index()));
+                default:
+                    throw new IllegalArgumentException(
+                            "Unsupported substring position type: " + ref.type());
+            }
+        }
+        return Integer.parseInt(position.toString());
     }
 
     @Override

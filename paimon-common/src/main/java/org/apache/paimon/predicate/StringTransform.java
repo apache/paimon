@@ -158,7 +158,7 @@ public abstract class StringTransform implements Transform {
     @Override
     public String toString() {
         List<String> inputs =
-                this.inputs.stream().map(Object::toString).collect(Collectors.toList());
+                this.inputs.stream().map(String::valueOf).collect(Collectors.toList());
         return name() + "(" + String.join(", ", inputs) + ')';
     }
 }

@@ -403,6 +403,9 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         if (statsCache != null) {
             copied.setStatsCache(statsCache);
         }
+        if (dvmetaCache != null) {
+            copied.setDVMetaCache(dvmetaCache);
+        }
         return copied;
     }
 

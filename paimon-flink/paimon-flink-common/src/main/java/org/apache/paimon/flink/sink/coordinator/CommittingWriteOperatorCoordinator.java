@@ -39,6 +39,8 @@ import org.apache.flink.util.function.ThrowingRunnable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -78,6 +80,7 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
     private final Committer.Factory<Committable, ManifestCommittable> committerFactory;
     private final boolean streamingCheckpointEnabled;
     private final int parallelism;
+    @Nullable private final SavepointTagger.Factory savepointTaggerFactory;
 
     private final WriterCommittables[] subtaskCommittables;
     private final TypeSerializer<CheckpointCommittables> committablesSerializer;
@@ -96,16 +99,20 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
     private Committer<Committable, ManifestCommittable> committer;
     private String commitUser;
     private MemoryBackendStateStore stateStore;
+    // Built in initializeAfterRestore once commitUser is known; null when auto-tag is disabled.
+    @Nullable private SavepointTagger savepointTagger;
 
     public CommittingWriteOperatorCoordinator(
             OperatorCoordinator.Context context,
             Committer.Factory<Committable, ManifestCommittable> committerFactory,
             boolean streamingCheckpointEnabled,
-            String initialCommitUser) {
+            String initialCommitUser,
+            @Nullable SavepointTagger.Factory savepointTaggerFactory) {
         this.context = context;
         this.committerFactory = committerFactory;
         this.streamingCheckpointEnabled = streamingCheckpointEnabled;
         this.commitUser = initialCommitUser;
+        this.savepointTaggerFactory = savepointTaggerFactory;
         this.parallelism = context.currentParallelism();
         this.subtaskCommittables = new WriterCommittables[parallelism];
         this.committablesSerializer =
@@ -135,11 +142,11 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
                         restoreState(restoredCheckpointId, restoredCheckpointData);
                         // not needed after deserialization; release the reference
                         restoredCheckpointData = null;
-                        initializeCommitter(true);
+                        initializeAfterRestore(true);
                         // stay in RESTORING until writers re-emit committables and align catches up
                     } else {
                         restoreState(OperatorCoordinator.NO_CHECKPOINT, null);
-                        initializeCommitter(false);
+                        initializeAfterRestore(false);
                         transitionState(State.RUNNING);
                     }
                 },
@@ -248,8 +255,30 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
                                             throw new RuntimeException(e);
                                         }
                                     });
+                    // An async savepoint does not fire notifyCheckpointComplete for its own id
+                    // (FLIP-193), so its tag cannot be created when the savepoint completes.
+                    // Catch up on each checkpoint completion instead, tagging every pending
+                    // savepoint id up to checkpointId once the commit materialized its snapshot.
+                    if (savepointTagger != null) {
+                        savepointTagger.tagUpTo(checkpointId);
+                    }
                 },
                 "completing checkpoint %d",
+                checkpointId);
+    }
+
+    @Override
+    public void notifyCheckpointAborted(long checkpointId) {
+        // Runs tag I/O on the commit executor, never the JM main thread. An aborted savepoint may
+        // already have been tagged by a later checkpoint's completion (cumulative commit), so drop
+        // the pending intent and remove any tag that was created.
+        runInEventLoop(
+                () -> {
+                    if (savepointTagger != null) {
+                        savepointTagger.dropAborted(checkpointId);
+                    }
+                },
+                "aborting checkpoint %d",
                 checkpointId);
     }
 
@@ -354,6 +383,16 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
     }
 
     private void updateSubtaskCommittables(int subtask, WriterCommittables incoming) {
+        if (savepointTagger != null) {
+            // Collect savepoint intents as events arrive (steady state and restore both funnel
+            // here), rebuilding the pending-tag set without checkpointing it.
+            for (CheckpointCommittables checkpointCommittables :
+                    incoming.getCommittablesPerCheckpoint().values()) {
+                if (checkpointCommittables.shouldCreateSavepointTag()) {
+                    savepointTagger.add(checkpointCommittables.checkpointId());
+                }
+            }
+        }
         if (subtaskCommittables[subtask] != null) {
             subtaskCommittables[subtask].mergeWith(incoming);
         } else {
@@ -401,6 +440,11 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
                         includeEndInput),
                 watermarkPerCheckpoint,
                 committables -> committer.filterAndCommit(committables, true, true));
+        // Tag any restored savepoint(s) whose snapshot the re-commit materialized, so a
+        // restore-from-savepoint still produces the savepoint tag.
+        if (savepointTagger != null) {
+            savepointTagger.tagUpTo(checkpointId);
+        }
     }
 
     @VisibleForTesting
@@ -551,7 +595,7 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
         }
     }
 
-    private void initializeCommitter(boolean isRestored) {
+    private void initializeAfterRestore(boolean isRestored) {
         // Coordinator runs at parallelism 1 (single instance per JobVertex), matching
         // CommitterOperator's contract; hardcode parallelism=1 / subtaskIndex=0
         Committer.Context committerContext =
@@ -564,6 +608,11 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
                         1,
                         0);
         committer = committerFactory.create(committerContext);
+        // Bind the tagger to the (possibly restored) commit user, so findSnapshotsForIdentifiers
+        // matches the snapshots this coordinator commits.
+        if (savepointTaggerFactory != null) {
+            savepointTagger = savepointTaggerFactory.create(commitUser);
+        }
     }
 
     private void transitionState(State targetState) {
@@ -679,22 +728,29 @@ public class CommittingWriteOperatorCoordinator implements OperatorCoordinator {
         private final Committer.Factory<Committable, ManifestCommittable> committerFactory;
         private final boolean streamingCheckpointEnabled;
         private final String initialCommitUser;
+        @Nullable private final SavepointTagger.Factory savepointTaggerFactory;
 
         public Provider(
                 OperatorID operatorId,
                 Committer.Factory<Committable, ManifestCommittable> committerFactory,
                 boolean streamingCheckpointEnabled,
-                String initialCommitUser) {
+                String initialCommitUser,
+                @Nullable SavepointTagger.Factory savepointTaggerFactory) {
             super(operatorId);
             this.committerFactory = committerFactory;
             this.streamingCheckpointEnabled = streamingCheckpointEnabled;
             this.initialCommitUser = initialCommitUser;
+            this.savepointTaggerFactory = savepointTaggerFactory;
         }
 
         @Override
         public OperatorCoordinator getCoordinator(OperatorCoordinator.Context context) {
             return new CommittingWriteOperatorCoordinator(
-                    context, committerFactory, streamingCheckpointEnabled, initialCommitUser);
+                    context,
+                    committerFactory,
+                    streamingCheckpointEnabled,
+                    initialCommitUser,
+                    savepointTaggerFactory);
         }
     }
 }

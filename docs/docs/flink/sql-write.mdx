@@ -142,6 +142,13 @@ TRUNCATE TABLE my_table;
 
 </Tabs>
 
+On a Format Table read through Paimon (`format-table.implementation = paimon`, the default),
+`TRUNCATE TABLE` deletes the data files and keeps the partitions: their directories remain, and
+with `metastore.partitioned-table = true` so do their catalog registrations, whose statistics are
+replaced with zero. That setting also makes the catalog the answer to which partitions the table
+has, so truncating empties those and leaves an unregistered directory alone. Flink has no
+`TRUNCATE TABLE ... PARTITION`; use Spark's.
+
 ## Purging Partitions
 
 Currently, Paimon supports two ways to purge partitions.

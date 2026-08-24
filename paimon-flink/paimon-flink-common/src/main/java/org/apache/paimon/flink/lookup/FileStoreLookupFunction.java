@@ -399,8 +399,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
         // 2. check if async partition refresh has completed, and switch if so
         if (partitionRefresher != null && partitionRefresher.isPartitionRefreshAsync()) {
-            LookupTable newLookupTable =
-                    partitionRefresher.getNewLookupTable(partitionLoader.partitions());
+            LookupTable newLookupTable = partitionRefresher.getNewLookupTable();
             if (newLookupTable != null) {
                 lookupTable.close();
                 lookupTable = newLookupTable;

@@ -33,7 +33,7 @@ import static org.apache.paimon.schema.SchemaValidation.validateTableSchema;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Tests for primary-key BTree and Bitmap index validation. */
+/** Tests for source-backed primary-key sorted index validation. */
 class PrimaryKeySortedIndexValidationTest {
 
     @Test
@@ -68,6 +68,34 @@ class PrimaryKeySortedIndexValidationTest {
     }
 
     @Test
+    void testSupportsMultiValueIndexOnArrayColumn() {
+        Map<String, String> options = enabledOptions();
+        options.put(CoreOptions.PK_MULTIVALUE_INDEX_COLUMNS.key(), "tags");
+
+        assertThatCode(() -> validateTableSchema(arraySchema(options))).doesNotThrowAnyException();
+    }
+
+    @Test
+    void testRejectsDuplicateMultiValueIndexColumns() {
+        Map<String, String> options = enabledOptions();
+        options.put(CoreOptions.PK_MULTIVALUE_INDEX_COLUMNS.key(), "tags,tags");
+
+        assertThatThrownBy(() -> validateTableSchema(arraySchema(options)))
+                .hasMessageContaining(CoreOptions.PK_MULTIVALUE_INDEX_COLUMNS.key())
+                .hasMessageContaining("duplicate");
+    }
+
+    @Test
+    void testRejectsMultiValueIndexOnScalarColumn() {
+        Map<String, String> options = enabledOptions();
+        options.put(CoreOptions.PK_MULTIVALUE_INDEX_COLUMNS.key(), "payload");
+
+        assertThatThrownBy(() -> validateTableSchema(schema(options)))
+                .hasMessageContaining("Multivalue index requires an ARRAY column")
+                .hasMessageContaining("payload");
+    }
+
+    @Test
     void testRequiresDeletionVectors() {
         Map<String, String> options = enabledOptions();
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "false");
@@ -75,7 +103,7 @@ class PrimaryKeySortedIndexValidationTest {
 
         assertThatThrownBy(() -> validateTableSchema(schema(options)))
                 .hasMessageContaining(
-                        "Primary-key BTree and Bitmap indexes require deletion-vectors.enabled = true");
+                        "Primary-key BTree, Bitmap, and Multivalue indexes require deletion-vectors.enabled = true");
     }
 
     @Test
@@ -86,7 +114,7 @@ class PrimaryKeySortedIndexValidationTest {
 
         assertThatThrownBy(() -> validateTableSchema(schema(options, Collections.emptyList())))
                 .hasMessageContaining(
-                        "Primary-key BTree and Bitmap indexes require a primary-key table");
+                        "Primary-key BTree, Bitmap, and Multivalue indexes require a primary-key table");
     }
 
     @Test
@@ -97,7 +125,7 @@ class PrimaryKeySortedIndexValidationTest {
 
         assertThatThrownBy(() -> validateTableSchema(schema(options)))
                 .hasMessageContaining(
-                        "Primary-key BTree and Bitmap indexes require fixed or postpone bucket mode");
+                        "Primary-key BTree, Bitmap, and Multivalue indexes require fixed or postpone bucket mode");
     }
 
     @Test
@@ -117,7 +145,7 @@ class PrimaryKeySortedIndexValidationTest {
 
         assertThatThrownBy(() -> validateTableSchema(schema(options)))
                 .hasMessageContaining(
-                        "Primary-key BTree and Bitmap indexes require deletion-vectors.merge-on-read = false");
+                        "Primary-key BTree, Bitmap, and Multivalue indexes require deletion-vectors.merge-on-read = false");
     }
 
     @Test
@@ -129,7 +157,7 @@ class PrimaryKeySortedIndexValidationTest {
 
         assertThatThrownBy(() -> validateTableSchema(schema(options)))
                 .hasMessageContaining(
-                        "Primary-key BTree and Bitmap indexes do not support pk-clustering-override");
+                        "Primary-key BTree, Bitmap, and Multivalue indexes do not support pk-clustering-override");
     }
 
     @Test
@@ -173,6 +201,19 @@ class PrimaryKeySortedIndexValidationTest {
 
     private static TableSchema schema(Map<String, String> options) {
         return schema(options, Collections.singletonList("id"));
+    }
+
+    private static TableSchema arraySchema(Map<String, String> options) {
+        return new TableSchema(
+                0,
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT().notNull()),
+                        new DataField(1, "tags", DataTypes.ARRAY(DataTypes.STRING()))),
+                0,
+                Collections.emptyList(),
+                Collections.singletonList("id"),
+                options,
+                "");
     }
 
     private static TableSchema schema(

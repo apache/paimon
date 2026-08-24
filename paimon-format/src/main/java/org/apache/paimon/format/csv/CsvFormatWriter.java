@@ -98,22 +98,26 @@ public class CsvFormatWriter extends AbstractTextFileWriter {
             return csvOptions.nullLiteral();
         }
 
+        String quote = csvOptions.quoteCharacter();
+        String escape = csvOptions.escapeCharacter();
+        boolean escapable = !escape.isEmpty();
+
         // Optimized escaping with early exit checks
         boolean needsQuoting =
                 field.indexOf(csvOptions.fieldDelimiter().charAt(0)) >= 0
                         || field.indexOf(csvOptions.lineDelimiter().charAt(0)) >= 0
-                        || field.indexOf(csvOptions.quoteCharacter().charAt(0)) >= 0;
+                        || field.indexOf(quote.charAt(0)) >= 0
+                        || (escapable && field.indexOf(escape.charAt(0)) >= 0);
 
         if (!needsQuoting) {
             return field;
         }
 
-        // Only escape if needed
-        String escaped =
-                field.replace(
-                        csvOptions.quoteCharacter(),
-                        csvOptions.escapeCharacter() + csvOptions.quoteCharacter());
-        return csvOptions.quoteCharacter() + escaped + csvOptions.quoteCharacter();
+        // Only escape if needed. The escape character goes first: CsvParser drops an escape
+        // character that is not followed by a quote or another escape, and escaping the quotes
+        // first would double the escape characters inserted for them.
+        String escaped = escapable ? field.replace(escape, escape + escape) : field;
+        return quote + escaped.replace(quote, escape + quote) + quote;
     }
 
     /** Optimized string casting with caching and fast paths for common types. */

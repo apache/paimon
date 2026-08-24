@@ -58,10 +58,18 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 
 /** {@link TableScan} for {@link FormatTable}. */
 public class FormatTableScan implements InnerTableScan {
+
+    /** A format-table scan plan with statistics collected during split planning. */
+    public interface Plan extends TableScan.Plan {
+
+        /** Returns the row count of the planned partitions, or empty if any count is unknown. */
+        OptionalLong rowCount();
+    }
 
     final FormatTable table;
     final CoreOptions coreOptions;
@@ -93,7 +101,7 @@ public class FormatTableScan implements InnerTableScan {
 
     @Override
     public List<PartitionEntry> listPartitionEntries() {
-        return splitEnumerator.listPartitionEntries();
+        return splitEnumerator.listPartitionEntries(partitionFilter);
     }
 
     @Override
@@ -204,19 +212,34 @@ public class FormatTableScan implements InnerTableScan {
     }
 
     private class FormatTableScanPlan implements Plan {
+
+        @Nullable private SplitEnumerator.ScanPlan scanPlan;
+
         @Override
         public List<Split> splits() {
-            List<Split> splits = new ArrayList<>();
+            List<Split> splits = new ArrayList<>(scanPlan().splits());
+            // Keep all splits for a positive limit because FormatDataSplit has no row count.
+            if (limit != null && limit <= 0) {
+                return new ArrayList<>();
+            }
+            return splits;
+        }
+
+        @Override
+        public OptionalLong rowCount() {
+            return scanPlan().rowCount();
+        }
+
+        private synchronized SplitEnumerator.ScanPlan scanPlan() {
+            if (scanPlan != null) {
+                return scanPlan;
+            }
             try {
-                splits.addAll(splitEnumerator.enumerate(partitionFilter));
-                // Keep all splits for a positive limit because FormatDataSplit has no row count.
-                if (limit != null && limit <= 0) {
-                    return new ArrayList<>();
-                }
+                scanPlan = splitEnumerator.plan(partitionFilter);
             } catch (IOException e) {
                 throw new RuntimeException("Failed to scan files", e);
             }
-            return splits;
+            return scanPlan;
         }
     }
 

@@ -389,10 +389,18 @@ class IcebergMetadataTest {
     void testFormatVersionV3Table() throws Exception {
         // Create a v3 format version Iceberg table
         Table icebergTable = createIcebergTableV3("v3_snapshot_table");
-        TableMetadata base = ((HasTableOperations) icebergTable).operations().current();
-        ((HasTableOperations) icebergTable)
-                .operations()
-                .commit(base, TableMetadata.buildFrom(base).enableRowLineage().build());
+        try {
+            // pre-GA Iceberg (< 1.10) required opting into v3 row lineage; the builder
+            // method was removed in GA, where row lineage is always on for v3
+            java.lang.reflect.Method enableRowLineage =
+                    TableMetadata.Builder.class.getMethod("enableRowLineage");
+            TableMetadata base = ((HasTableOperations) icebergTable).operations().current();
+            TableMetadata.Builder builder = TableMetadata.buildFrom(base);
+            enableRowLineage.invoke(builder);
+            ((HasTableOperations) icebergTable).operations().commit(base, builder.build());
+        } catch (NoSuchMethodException e) {
+            // GA Iceberg: nothing to opt into
+        }
 
         // Read metadata using Paimon's IcebergMetadata
         IcebergMetadata paimonIcebergMetadata = readIcebergMetadata(icebergTable);

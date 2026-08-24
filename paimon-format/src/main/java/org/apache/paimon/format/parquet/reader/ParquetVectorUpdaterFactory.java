@@ -611,9 +611,7 @@ public class ParquetVectorUpdaterFactory {
                 int offset,
                 WritableLongVector values,
                 VectorizedValuesReader valuesReader) {
-            for (int i = 0; i < total; i++) {
-                values.setLong(offset + i, valuesReader.readInteger());
-            }
+            valuesReader.readIntegersAsLongs(total, values, offset);
         }
 
         @Override
@@ -999,9 +997,7 @@ public class ParquetVectorUpdaterFactory {
                 int offset,
                 WritableDoubleVector values,
                 VectorizedValuesReader valuesReader) {
-            for (int i = 0; i < total; i++) {
-                values.setDouble(offset + i, valuesReader.readFloat());
-            }
+            valuesReader.readFloatsAsDoubles(total, values, offset);
         }
 
         @Override
@@ -1071,9 +1067,7 @@ public class ParquetVectorUpdaterFactory {
                 int offset,
                 WritableBytesVector values,
                 VectorizedValuesReader valuesReader) {
-            for (int i = 0; i < total; i++) {
-                readValue(offset + i, values, valuesReader);
-            }
+            valuesReader.readFixedLenByteArray(total, arrayLen, values, offset);
         }
 
         @Override

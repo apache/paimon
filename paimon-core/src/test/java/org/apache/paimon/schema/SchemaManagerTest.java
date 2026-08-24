@@ -486,6 +486,36 @@ public class SchemaManagerTest {
     }
 
     @Test
+    public void testRejectChangeOfPrimaryKeyMultiValueIndexColumn() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        options.put(CoreOptions.PK_MULTIVALUE_INDEX_COLUMNS.key(), "tags");
+        Schema schema =
+                new Schema(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT().notNull()),
+                                new DataField(1, "tags", DataTypes.ARRAY(DataTypes.STRING()))),
+                        Collections.emptyList(),
+                        Collections.singletonList("id"),
+                        options,
+                        "");
+        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
+        manager.createTable(schema);
+
+        assertThatThrownBy(() -> manager.commitChanges(SchemaChange.dropColumn("tags")))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Cannot drop primary-key index column: [tags]");
+        assertThatThrownBy(
+                        () ->
+                                manager.commitChanges(
+                                        SchemaChange.updateColumnType(
+                                                "tags", DataTypes.ARRAY(DataTypes.BIGINT()))))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Cannot update type of primary-key index column: [tags]");
+    }
+
+    @Test
     public void testResetSequenceGroupForAggregateFunction() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.MERGE_ENGINE.key(), "partial-update");
@@ -1475,5 +1505,57 @@ public class SchemaManagerTest {
                                         new TagManager(LocalFileIO.create(), path),
                                         new ChangelogManager(LocalFileIO.create(), path, null)))
                 .hasMessageContaining("Schema 999 does not exist");
+    }
+
+    private Schema schemaWithDefault(String defaultValue) {
+        return new Schema(
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "c", DataTypes.STRING(), null, defaultValue)),
+                Collections.emptyList(),
+                Collections.emptyList(),
+                Collections.singletonMap(CoreOptions.BUCKET.key(), "-1"),
+                "");
+    }
+
+    @Test
+    public void testUpdateColumnTypeRejectsADefaultValueTheNewTypeCannotRead() throws Exception {
+        retryArtificialException(() -> manager.createTable(schemaWithDefault("'abc'")));
+
+        assertThatThrownBy(
+                        () ->
+                                retryArtificialException(
+                                        () ->
+                                                manager.commitChanges(
+                                                        SchemaChange.updateColumnType(
+                                                                "c", DataTypes.INT()))))
+                .rootCause()
+                .isInstanceOf(NumberFormatException.class);
+
+        // the column is untouched, so the table is still writable
+        TableSchema after = retryArtificialException(() -> manager.latest()).get();
+        assertThat(after.fields().get(1).type()).isEqualTo(DataTypes.STRING());
+        assertThatCode(
+                        () ->
+                                FileStoreTableFactory.create(LocalFileIO.create(), path, after)
+                                        .newWrite("u"))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testUpdateColumnTypeKeepsADefaultValueTheNewTypeCanRead() throws Exception {
+        retryArtificialException(() -> manager.createTable(schemaWithDefault("'123'")));
+
+        retryArtificialException(
+                () -> manager.commitChanges(SchemaChange.updateColumnType("c", DataTypes.INT())));
+
+        TableSchema after = retryArtificialException(() -> manager.latest()).get();
+        assertThat(after.fields().get(1).type()).isEqualTo(DataTypes.INT());
+        assertThat(after.fields().get(1).defaultValue()).isEqualTo("'123'");
+        assertThatCode(
+                        () ->
+                                FileStoreTableFactory.create(LocalFileIO.create(), path, after)
+                                        .newWrite("u"))
+                .doesNotThrowAnyException();
     }
 }

@@ -107,6 +107,7 @@ import static org.apache.paimon.catalog.Identifier.UNKNOWN_DATABASE;
 import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.SEQUENCE_GROUP;
 import static org.apache.paimon.schema.ColumnDirectiveUtils.applyAddColumnDirective;
 import static org.apache.paimon.schema.ColumnDirectiveUtils.applyDirectives;
+import static org.apache.paimon.schema.ColumnDirectiveUtils.parseAddColumnComment;
 import static org.apache.paimon.types.BlobType.isBlobFileField;
 import static org.apache.paimon.utils.DefaultValueUtils.validateDefaultValue;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
@@ -532,14 +533,20 @@ public class SchemaManager implements Serializable {
                                     String.format(
                                             "Column type %s[%s] cannot be converted to %s without losing information.",
                                             field.name(), sourceRootType, targetRootType));
-                            return new DataField(
-                                    field.id(),
-                                    field.name(),
+                            DataType newFieldType =
                                     getArrayMapTypeWithTargetTypeRoot(
                                             field.type(),
                                             targetRootType,
                                             depth,
-                                            update.fieldNames().length),
+                                            update.fieldNames().length);
+                            // the default value is carried over unchanged, so it has to stay
+                            // readable as the new type -- otherwise the table is left with a
+                            // default that createTable and ALTER .. SET DEFAULT would both reject
+                            validateDefaultValue(newFieldType, field.defaultValue());
+                            return new DataField(
+                                    field.id(),
+                                    field.name(),
+                                    newFieldType,
                                     field.description(),
                                     field.defaultValue());
                         },
@@ -577,6 +584,11 @@ public class SchemaManager implements Serializable {
                         lazyIdentifier);
             } else if (change instanceof UpdateColumnComment) {
                 UpdateColumnComment update = (UpdateColumnComment) change;
+                Preconditions.checkArgument(
+                        parseAddColumnComment(update.newDescription()) == null,
+                        "Should not alter existing field's type through column directives: %s",
+                        update.newDescription());
+
                 updateNestedColumn(
                         newFields,
                         update.fieldNames(),
@@ -1015,6 +1027,7 @@ public class SchemaManager implements Serializable {
         if (options.primaryKeyVectorIndexColumns().contains(fieldName)
                 || options.primaryKeyBTreeIndexColumns().contains(fieldName)
                 || options.primaryKeyBitmapIndexColumns().contains(fieldName)
+                || options.primaryKeyMultiValueIndexColumns().contains(fieldName)
                 || options.primaryKeyFullTextIndexColumns().contains(fieldName)) {
             throw new UnsupportedOperationException(
                     String.format(

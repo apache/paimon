@@ -21,11 +21,14 @@ package org.apache.paimon.flink.source;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.flink.RESTCatalogITCaseBase;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.rest.RESTToken;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import org.apache.flink.types.Row;
+import org.apache.flink.types.RowKind;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -42,19 +45,10 @@ public class FormatTableITCase extends RESTCatalogITCaseBase {
         Decimal decimal = Decimal.fromBigDecimal(new BigDecimal(bigDecimalStr), 8, 3);
         for (String format : new String[] {"parquet", "csv", "json"}) {
             String tableName = "format_table_parquet_" + format.toLowerCase();
-            Identifier identifier = Identifier.create("default", tableName);
             sql(
                     "CREATE TABLE %s (a DECIMAL(8, 3), b INT, c INT) WITH ('file.format'='%s', 'type'='format-table')",
                     tableName, format);
-            RESTToken expiredDataToken =
-                    new RESTToken(
-                            ImmutableMap.of(
-                                    "akId",
-                                    "akId-expire",
-                                    "akSecret",
-                                    UUID.randomUUID().toString()),
-                            System.currentTimeMillis() + 1000_000);
-            restCatalogServer.setDataToken(identifier, expiredDataToken);
+            setDataToken(tableName);
             sql("INSERT INTO %s VALUES (%s, 1, 1), (%s, 2, 2)", tableName, decimal, decimal);
             assertThat(sql("SELECT a, b FROM %s", tableName))
                     .containsExactlyInAnyOrder(
@@ -68,16 +62,10 @@ public class FormatTableITCase extends RESTCatalogITCaseBase {
     public void testPartitionedTableInsertOverwrite() {
 
         String ptTableName = "format_table_overwrite";
-        Identifier ptIdentifier = Identifier.create("default", ptTableName);
         sql(
                 "CREATE TABLE %s (a DECIMAL(8, 3), b INT, c INT) PARTITIONED BY (c) WITH ('file.format'='parquet', 'type'='format-table')",
                 ptTableName);
-        RESTToken expiredDataToken =
-                new RESTToken(
-                        ImmutableMap.of(
-                                "akId", "akId-expire", "akSecret", UUID.randomUUID().toString()),
-                        System.currentTimeMillis() + 1000_000);
-        restCatalogServer.setDataToken(ptIdentifier, expiredDataToken);
+        setDataToken(ptTableName);
 
         String ptBigDecimalStr1 = "10.001";
         String ptBigDecimalStr2 = "12.345";
@@ -125,16 +113,10 @@ public class FormatTableITCase extends RESTCatalogITCaseBase {
         Decimal decimal1 = Decimal.fromBigDecimal(new BigDecimal(bigDecimalStr1), 8, 3);
         Decimal decimal2 = Decimal.fromBigDecimal(new BigDecimal(bigDecimalStr2), 8, 3);
 
-        Identifier identifier = Identifier.create("default", tableName);
         sql(
                 "CREATE TABLE %s (a DECIMAL(8, 3), b INT, c INT) WITH ('file.format'='parquet', 'type'='format-table')",
                 tableName);
-        RESTToken expiredDataToken =
-                new RESTToken(
-                        ImmutableMap.of(
-                                "akId", "akId-expire", "akSecret", UUID.randomUUID().toString()),
-                        System.currentTimeMillis() + 1000_000);
-        restCatalogServer.setDataToken(identifier, expiredDataToken);
+        setDataToken(tableName);
 
         sql("INSERT INTO %s VALUES (%s, 1, 1), (%s, 2, 2)", tableName, decimal1, decimal1);
         assertThat(sql("SELECT a, b FROM %s", tableName))
@@ -149,5 +131,69 @@ public class FormatTableITCase extends RESTCatalogITCaseBase {
                         Row.of(new BigDecimal(bigDecimalStr2), 4));
 
         sql("Drop TABLE %s", tableName);
+    }
+
+    @Test
+    public void testTruncateTable() {
+        String tableName = "format_table_truncate";
+        sql(
+                "CREATE TABLE %s (a INT, b INT) WITH ('file.format'='parquet', 'type'='format-table')",
+                tableName);
+        setDataToken(tableName);
+
+        sql("INSERT INTO %s VALUES (1, 11), (2, 22)", tableName);
+        assertThat(sql("SELECT * FROM %s", tableName))
+                .containsExactlyInAnyOrder(Row.of(1, 11), Row.of(2, 22));
+
+        assertThat(sql("TRUNCATE TABLE %s", tableName))
+                .containsExactly(Row.ofKind(RowKind.INSERT, "OK"));
+        assertThat(sql("SELECT * FROM %s", tableName)).isEmpty();
+
+        // The table is empty, not gone: it takes writes again.
+        sql("INSERT INTO %s VALUES (3, 33)", tableName);
+        assertThat(sql("SELECT * FROM %s", tableName)).containsExactly(Row.of(3, 33));
+
+        sql("DROP TABLE %s", tableName);
+    }
+
+    @Test
+    public void testTruncatePartitionedTable() throws Exception {
+        String tableName = "format_table_truncate_partitioned";
+        sql(
+                "CREATE TABLE %s (a INT, b INT) PARTITIONED BY (b) WITH ('file.format'='parquet', 'type'='format-table')",
+                tableName);
+        setDataToken(tableName);
+
+        sql("INSERT INTO %s PARTITION (b = 1) VALUES (10)", tableName);
+        sql("INSERT INTO %s PARTITION (b = 2) VALUES (20)", tableName);
+        assertThat(sql("SELECT a, b FROM %s", tableName))
+                .containsExactlyInAnyOrder(Row.of(10, 1), Row.of(20, 2));
+
+        sql("TRUNCATE TABLE %s", tableName);
+        assertThat(sql("SELECT a, b FROM %s", tableName)).isEmpty();
+
+        // Emptied, not dropped: the partition directory of the one nothing was written back to
+        // is still there, and all that is left in it is a writer's staging tree.
+        Path emptied = new Path(dataPath, "default.db/" + tableName + "/b=2");
+        LocalFileIO fileIO = LocalFileIO.create();
+        assertThat(fileIO.exists(emptied)).isTrue();
+        assertThat(fileIO.listStatus(emptied))
+                .extracting(status -> status.getPath().getName())
+                .allMatch(name -> name.startsWith("_"));
+
+        // Every partition was emptied, and each of them takes writes again.
+        sql("INSERT INTO %s PARTITION (b = 1) VALUES (100)", tableName);
+        assertThat(sql("SELECT a, b FROM %s", tableName)).containsExactly(Row.of(100, 1));
+
+        sql("DROP TABLE %s", tableName);
+    }
+
+    private void setDataToken(String tableName) {
+        restCatalogServer.setDataToken(
+                Identifier.create("default", tableName),
+                new RESTToken(
+                        ImmutableMap.of(
+                                "akId", "akId-expire", "akSecret", UUID.randomUUID().toString()),
+                        System.currentTimeMillis() + 1000_000));
     }
 }

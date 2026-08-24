@@ -376,6 +376,7 @@ public final class BucketedPrimaryKeyIndexMaintainer {
                         break;
                     case BTREE:
                     case BITMAP:
+                    case MULTI_VALUE:
                         sortedFactories.add(
                                 new SortedDefinitionFactory(
                                         readerFactoryBuilder,

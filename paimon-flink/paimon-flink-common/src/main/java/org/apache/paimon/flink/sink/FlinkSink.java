@@ -410,14 +410,6 @@ public abstract class FlinkSink<T> implements Serializable {
                         + PRECOMMIT_COMPACT.key()
                         + " = false.");
 
-        // The OperatorCoordinator cannot tell a savepoint from a normal checkpoint.
-        // TODO support savepoint auto-tag.
-        checkArgument(
-                !options.get(SINK_AUTO_TAG_FOR_SAVEPOINT),
-                "Could not enable coordinator commit because "
-                        + SINK_AUTO_TAG_FOR_SAVEPOINT.key()
-                        + " is enabled, which is not supported yet.");
-
         // TODO concurrent checkpoints are not supported yet.
         checkArgument(
                 checkpointConfig.getMaxConcurrentCheckpoints() == 1,

@@ -18,7 +18,6 @@
 
 package org.apache.paimon.spark.commands
 
-import org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW
 import org.apache.paimon.Snapshot
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.schema.SparkSystemColumns.ROW_KIND_COL
@@ -105,13 +104,7 @@ case class DeleteFromPaimonTableCommand(
         data = selectWithRowTracking(data)
       }
 
-      val rewriteWriter =
-        if (coreOptions.mergeEngine() == FIRST_ROW) {
-          writer.withIgnorePreviousFiles()
-        } else {
-          writer.writeOnly()
-        }
-      val addCommitMessage = rewriteWriter.withRowTracking().write(data)
+      val addCommitMessage = writer.writeOnly().withRowTracking().write(data)
 
       // Step5: convert the deleted files that need to be written to commit message.
       val deletedCommitMessage = buildDeletedCommitMessage(touchedFiles)

@@ -299,6 +299,7 @@ public class ExpireSnapshotsTest {
                         null,
                         null,
                         null,
+                        null,
                         null);
         ManifestEntry add = ManifestEntry.create(FileKind.ADD, partition, 0, 1, dataFile);
         ManifestEntry delete = ManifestEntry.create(FileKind.DELETE, partition, 0, 1, dataFile);
@@ -360,6 +361,7 @@ public class ExpireSnapshotsTest {
                         null,
                         myDataFile.toString(),
                         null,
+                        null,
                         null);
         ManifestEntry add = ManifestEntry.create(FileKind.ADD, partition, 0, 1, dataFile);
         ManifestEntry delete = ManifestEntry.create(FileKind.DELETE, partition, 0, 1, dataFile);
@@ -411,6 +413,7 @@ public class ExpireSnapshotsTest {
                 null,
                 null,
                 "test",
+                null,
                 0L,
                 Snapshot.CommitKind.APPEND,
                 0L,

@@ -54,7 +54,6 @@ import java.util.TreeSet;
  */
 public class AutoTagForSavepointCommitterOperator<CommitT, GlobalCommitT>
         implements OneInputStreamOperator<CommitT, CommitT>, BoundedOneInput {
-    public static final String SAVEPOINT_TAG_PREFIX = "savepoint-";
 
     private static final long serialVersionUID = 1L;
 
@@ -152,10 +151,13 @@ public class AutoTagForSavepointCommitterOperator<CommitT, GlobalCommitT>
     public void notifyCheckpointAborted(long checkpointId) throws Exception {
         commitOperator.notifyCheckpointAborted(checkpointId);
         identifiersForTags.remove(checkpointId);
-        String tagName = SAVEPOINT_TAG_PREFIX + checkpointId;
-        if (tagManager.tagExists(tagName)) {
-            tagManager.deleteTag(tagName, tagDeletion, snapshotManager, callbacks);
-        }
+        SavepointTagUtils.deleteTagIfMatches(
+                tagManager,
+                commitOperator.getCommitUser(),
+                checkpointId,
+                tagDeletion,
+                snapshotManager,
+                callbacks);
     }
 
     private void createTagForIdentifiers(List<Long> identifiers) {
@@ -163,7 +165,7 @@ public class AutoTagForSavepointCommitterOperator<CommitT, GlobalCommitT>
                 snapshotManager.findSnapshotsForIdentifiers(
                         commitOperator.getCommitUser(), identifiers);
         for (Snapshot snapshot : snapshotForTags) {
-            String tagName = SAVEPOINT_TAG_PREFIX + snapshot.commitIdentifier();
+            String tagName = SavepointTagUtils.tagNameOf(snapshot.commitIdentifier());
             // shouldn't throw exception when tag exists
             tagManager.createTag(snapshot, tagName, tagTimeRetained, callbacks, true);
         }

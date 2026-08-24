@@ -23,6 +23,7 @@ import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexerFactory;
+import org.apache.paimon.globalindex.bitmap.MultiValueGlobalIndexerFactory;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -71,7 +72,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-/** Tests source-backed BTree and Bitmap planning in file-local row-position space. */
+/** Tests source-backed sorted-index planning in file-local row-position space. */
 class PrimaryKeySortedIndexScanTest {
 
     @Test
@@ -360,6 +361,130 @@ class PrimaryKeySortedIndexScanTest {
         IndexedSplit secondSplit = (IndexedSplit) result.splits().get(2);
         assertThat(secondSplit.dataSplit().dataFiles()).containsExactly(second);
         assertThat(secondSplit.rowRanges()).containsExactly(new Range(0, 0), new Range(2, 2));
+    }
+
+    @Test
+    void testArrayContainsIsCachedAndLocalized() throws IOException {
+        DataFileMeta first = dataFile("data-1", 2);
+        DataFileMeta second = dataFile("data-2", 3);
+        DataSplit split = dataSplit(11, 0, first, second);
+        PrimaryKeyIndexDefinition definition =
+                definition(
+                        7,
+                        MultiValueGlobalIndexerFactory.IDENTIFIER,
+                        PrimaryKeyIndexDefinition.Family.MULTI_VALUE);
+        IndexFileMeta mergedPayload =
+                payload(
+                        "multivalue-merged",
+                        Arrays.asList(
+                                new PrimaryKeyIndexSourceFile("data-1", 2),
+                                new PrimaryKeyIndexSourceFile("data-2", 3)),
+                        "multivalue",
+                        7,
+                        5);
+        PrimaryKeySortedIndexScan.Plan plan =
+                PrimaryKeySortedIndexScan.plan(
+                        11,
+                        Collections.singletonList(split),
+                        Collections.singletonList(definition),
+                        Collections.singletonList(payloadEntry(0, mergedPayload)));
+        RowType rowType = RowType.of(new DataField(7, "tags", DataTypes.ARRAY(DataTypes.INT())));
+        Predicate predicate = new PredicateBuilder(rowType).arrayContains(0, 42);
+        AtomicInteger queries = new AtomicInteger();
+        GlobalIndexReader reader = mock(GlobalIndexReader.class);
+        when(reader.visitArrayContains(any(), eq(42)))
+                .thenAnswer(
+                        ignored -> {
+                            queries.incrementAndGet();
+                            return completedResult(1, 2, 4);
+                        });
+
+        PrimaryKeySortedIndexScan.EvaluatedPlan evaluated =
+                PrimaryKeySortedIndexScan.evaluate(
+                        plan,
+                        rowType,
+                        predicate,
+                        Collections.singletonList(definition),
+                        (ignoredFile, ignoredDefinition, payloads, totalRowCount) -> {
+                            assertThat(payloads).containsExactly(mergedPayload);
+                            assertThat(totalRowCount).isEqualTo(5);
+                            return reader;
+                        });
+
+        assertThat(queries).hasValue(1);
+        assertThat(evaluated.files()).hasSize(2);
+        assertThat(evaluated.files().get(0).result()).isPresent();
+        assertThat(evaluated.files().get(0).result().get().results()).containsExactly(1L);
+        assertThat(evaluated.files().get(1).result()).isPresent();
+        assertThat(evaluated.files().get(1).result().get().results()).containsExactly(0L, 2L);
+        verify(reader).close();
+    }
+
+    @Test
+    void testArraySetPredicatesAreCachedAndLocalized() throws IOException {
+        DataFileMeta first = dataFile("data-1", 2);
+        DataFileMeta second = dataFile("data-2", 3);
+        DataSplit split = dataSplit(11, 0, first, second);
+        PrimaryKeyIndexDefinition definition =
+                definition(
+                        7,
+                        MultiValueGlobalIndexerFactory.IDENTIFIER,
+                        PrimaryKeyIndexDefinition.Family.MULTI_VALUE);
+        IndexFileMeta mergedPayload =
+                payload(
+                        "multivalue-merged",
+                        Arrays.asList(
+                                new PrimaryKeyIndexSourceFile("data-1", 2),
+                                new PrimaryKeyIndexSourceFile("data-2", 3)),
+                        "multivalue",
+                        7,
+                        5);
+        PrimaryKeySortedIndexScan.Plan plan =
+                PrimaryKeySortedIndexScan.plan(
+                        11,
+                        Collections.singletonList(split),
+                        Collections.singletonList(definition),
+                        Collections.singletonList(payloadEntry(0, mergedPayload)));
+        RowType rowType = RowType.of(new DataField(7, "tags", DataTypes.ARRAY(DataTypes.INT())));
+        List<Object> literals = Arrays.asList(42, 43);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        Predicate predicate =
+                PredicateBuilder.and(
+                        builder.arraysOverlap(0, literals), builder.arrayContainsAll(0, literals));
+        AtomicInteger queries = new AtomicInteger();
+        GlobalIndexReader reader = mock(GlobalIndexReader.class);
+        when(reader.visitArraysOverlap(any(), eq(literals)))
+                .thenAnswer(
+                        ignored -> {
+                            queries.incrementAndGet();
+                            return completedResult(1, 2, 4);
+                        });
+        when(reader.visitArrayContainsAll(any(), eq(literals)))
+                .thenAnswer(
+                        ignored -> {
+                            queries.incrementAndGet();
+                            return completedResult(1, 4);
+                        });
+
+        PrimaryKeySortedIndexScan.EvaluatedPlan evaluated =
+                PrimaryKeySortedIndexScan.evaluate(
+                        plan,
+                        rowType,
+                        predicate,
+                        Collections.singletonList(definition),
+                        (ignoredFile, ignoredDefinition, payloads, totalRowCount) -> {
+                            assertThat(payloads).containsExactly(mergedPayload);
+                            assertThat(totalRowCount).isEqualTo(5);
+                            return reader;
+                        });
+
+        assertThat(queries).hasValue(2);
+        assertThat(evaluated.files()).hasSize(2);
+        assertThat(evaluated.files().get(0).result()).isPresent();
+        assertThat(evaluated.files().get(0).result().get().results()).containsExactly(1L);
+        assertThat(evaluated.files().get(1).result()).isPresent();
+        assertThat(evaluated.files().get(1).result().get().results()).containsExactly(2L);
+        verify(reader).close();
     }
 
     @Test

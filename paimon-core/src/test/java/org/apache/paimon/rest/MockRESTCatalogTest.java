@@ -31,6 +31,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -301,6 +302,165 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         assertThat(roundTripped.listPartitions(Collections.emptyMap(), null))
                 .extracting(org.apache.paimon.partition.Partition::spec)
                 .containsExactly(partition);
+    }
+
+    @Test
+    void testReportedPartitionStatisticsAreStoredAndReadBack() throws Exception {
+        Identifier identifier = createFormatTableWithCatalogManagedPartitions();
+        Map<String, String> spec = Collections.singletonMap("dt", "20260717");
+        List<Map<String, String>> specs = Collections.singletonList(spec);
+        FormatTablePartitionManager partitionManager =
+                ((FormatTable) restCatalog.getTable(identifier)).partitionManager();
+        assertThat(partitionManager).isNotNull();
+
+        // A registration on its own measures nothing, so everything starts out unknown.
+        restCatalog.createPartitions(identifier, specs);
+        Partition registered = onlyPartition(identifier);
+        assertThat(PartitionStatistics.isKnown(registered.recordCount())).isFalse();
+        assertThat(PartitionStatistics.isKnown(registered.fileCount())).isFalse();
+
+        // ADD onto a partition nobody measured yet: the report becomes what it holds.
+        restCatalog
+                .api()
+                .createPartitions(
+                        identifier,
+                        specs,
+                        true,
+                        Collections.singletonList(
+                                new PartitionStatistics(spec, 3L, 300L, 1L, 1000L, -1)),
+                        false);
+        assertStatistics(identifier, 3L, 300L, 1L, 1000L);
+
+        // ADD again, through the partition manager a writer commits with: the counts accumulate
+        // and an older file does not move the newest one backwards.
+        partitionManager.createPartitions(
+                specs,
+                true,
+                Collections.singletonList(new PartitionStatistics(spec, 4L, 400L, 2L, 500L, -1)),
+                false);
+        assertStatistics(identifier, 7L, 700L, 3L, 1000L);
+
+        // A field reported as unknown leaves the stored one alone rather than zeroing it.
+        restCatalog.createPartitions(
+                identifier,
+                specs,
+                true,
+                Collections.singletonList(
+                        new PartitionStatistics(
+                                spec,
+                                PartitionStatistics.UNKNOWN,
+                                100L,
+                                PartitionStatistics.UNKNOWN,
+                                PartitionStatistics.UNKNOWN,
+                                -1)),
+                false);
+        assertStatistics(identifier, 7L, 800L, 3L, 1000L);
+
+        // SET is the whole partition now: every reported field is replaced, including a creation
+        // time that moves backwards because the newer files are gone.
+        restCatalog
+                .api()
+                .createPartitions(
+                        identifier,
+                        specs,
+                        true,
+                        Collections.singletonList(
+                                new PartitionStatistics(spec, 5L, 500L, 1L, 700L, -1)),
+                        true);
+        assertStatistics(identifier, 5L, 500L, 1L, 700L);
+
+        // Unknown is skipped under SET too: it reports nothing about that field, not a zero.
+        restCatalog.createPartitions(
+                identifier,
+                specs,
+                true,
+                Collections.singletonList(
+                        new PartitionStatistics(
+                                spec,
+                                PartitionStatistics.UNKNOWN,
+                                900L,
+                                PartitionStatistics.UNKNOWN,
+                                PartitionStatistics.UNKNOWN,
+                                -1)),
+                true);
+        assertStatistics(identifier, 5L, 900L, 1L, 700L);
+
+        // Reporting never registers or unregisters anything.
+        assertThat(restCatalog.listPartitions(identifier)).hasSize(1);
+    }
+
+    @Test
+    void testStatisticsOfAnUnstoredPartitionAreDropped() throws Exception {
+        Identifier identifier = createFormatTableWithCatalogManagedPartitions();
+        Map<String, String> spec = Collections.singletonMap("dt", "20260717");
+
+        // The statistics describe a partition this request does not register, so the server drops
+        // them and keeps the registration.
+        restCatalog.createPartitions(
+                identifier,
+                Collections.singletonList(spec),
+                true,
+                Collections.singletonList(
+                        new PartitionStatistics(
+                                Collections.singletonMap("dt", "20260718"),
+                                9L,
+                                900L,
+                                3L,
+                                1000L,
+                                -1)),
+                false);
+
+        assertThat(restCatalog.listPartitions(identifier))
+                .extracting(Partition::spec)
+                .containsExactly(spec);
+        assertThat(PartitionStatistics.isKnown(onlyPartition(identifier).recordCount())).isFalse();
+    }
+
+    @Test
+    void testAReportThatOnlyPartlyMatchesIsNotAppliedAtAll() throws Exception {
+        Identifier identifier = createFormatTableWithCatalogManagedPartitions();
+        Map<String, String> stored = Collections.singletonMap("dt", "20260717");
+        Map<String, String> absent = Collections.singletonMap("dt", "20260718");
+        restCatalog.createPartitions(identifier, Collections.singletonList(stored));
+
+        restCatalog.createPartitions(
+                identifier,
+                Collections.singletonList(stored),
+                true,
+                Arrays.asList(
+                        new PartitionStatistics(stored, 3L, 300L, 1L, 1000L, -1),
+                        new PartitionStatistics(absent, 9L, 900L, 3L, 2000L, -1)),
+                false);
+
+        // Applying the half that matched would count it twice on the next report.
+        Partition partition = onlyPartition(identifier);
+        assertThat(PartitionStatistics.isKnown(partition.recordCount())).isFalse();
+        assertThat(PartitionStatistics.isKnown(partition.fileSizeInBytes())).isFalse();
+        assertThat(PartitionStatistics.isKnown(partition.fileCount())).isFalse();
+        assertThat(PartitionStatistics.isKnown(partition.lastFileCreationTime())).isFalse();
+    }
+
+    private Partition onlyPartition(Identifier identifier) throws Exception {
+        List<Partition> partitions = restCatalog.listPartitions(identifier);
+        assertThat(partitions).hasSize(1);
+        return partitions.get(0);
+    }
+
+    private void assertStatistics(
+            Identifier identifier,
+            long recordCount,
+            long fileSizeInBytes,
+            long fileCount,
+            long lastFileCreationTime)
+            throws Exception {
+        Partition partition = onlyPartition(identifier);
+        assertThat(
+                        Arrays.asList(
+                                partition.recordCount(),
+                                partition.fileSizeInBytes(),
+                                partition.fileCount(),
+                                partition.lastFileCreationTime()))
+                .containsExactly(recordCount, fileSizeInBytes, fileCount, lastFileCreationTime);
     }
 
     @Test

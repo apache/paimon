@@ -73,7 +73,10 @@ public class CopyFilesUtil {
                 oldFileMeta.valueStatsCols(),
                 newExternalPath,
                 oldFileMeta.firstRowId(),
-                oldFileMeta.writeCols());
+                oldFileMeta.writeCols(),
+                // Column sequence numbers are positional and cannot be safely reused after
+                // changing the schema id. A null value makes readers fall back conservatively.
+                null);
     }
 
     public static IndexFileMeta toNewIndexFileMeta(IndexFileMeta oldFileMeta, String newFileName) {

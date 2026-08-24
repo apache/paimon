@@ -164,6 +164,7 @@ public class CommitMessageLegacyV2Serializer {
                     null,
                     null,
                     null,
+                    null,
                     null);
         }
     }
