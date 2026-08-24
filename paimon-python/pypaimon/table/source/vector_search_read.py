@@ -92,10 +92,9 @@ class AbstractVectorSearchReadImpl:
     def _index_thread_num(self):
         _opts = self._table.options
         _get = getattr(_opts, 'global_index_thread_num', None)
-        value = (
-            (_get() if _get else None)
-            or CoreOptions.GLOBAL_INDEX_THREAD_NUM._default_value
-        )
+        value = _get() if _get else None
+        if value is None:
+            value = CoreOptions.GLOBAL_INDEX_THREAD_NUM._default_value
         if value < 1:
             raise ValueError(
                 "global-index.thread-num must be positive, got %d" % value
@@ -1106,40 +1105,56 @@ def _raw_batch_search_from_arrow(arrow_table, vector_column_name, query_vectors,
 
 
 def _numpy_batch_topk(row_id_array, stored_matrix, query_matrix, metric, limit):
-    """Batch SGEMM distance computation + per-query topK. Reuses stored norms."""
+    """Batch distance computation + per-query topK with query-tiling to bound memory."""
     import numpy as np
 
+    QUERY_TILE = 8
     n_queries = query_matrix.shape[0]
+    n_rows = stored_matrix.shape[0]
 
-    if metric == "l2":
-        stored_sq = np.sum(stored_matrix * stored_matrix, axis=1, keepdims=True)
-        query_sq = np.sum(query_matrix * query_matrix, axis=1, keepdims=True)
-        dots = stored_matrix @ query_matrix.T
-        dists = stored_sq + query_sq.T - 2 * dots
-        np.maximum(dists, 0, out=dists)
-        all_scores = 1.0 / (1.0 + dists)
-    elif metric == "cosine":
+    # Pre-compute stored-side norms (reused across all tiles) for cosine.
+    if metric == "cosine":
         stored_norms = np.linalg.norm(stored_matrix, axis=1, keepdims=True)
-        query_norms = np.linalg.norm(query_matrix, axis=1, keepdims=True)
-        dots = stored_matrix @ query_matrix.T
-        denom = stored_norms @ query_norms.T
-        denom = np.where(denom == 0, 1.0, denom)
-        all_scores = dots / denom
-    elif metric == "inner_product":
-        all_scores = stored_matrix @ query_matrix.T
-    else:
-        raise ValueError("Unknown vector search metric: %s" % metric)
 
     results = []
-    n_rows = all_scores.shape[0]
-    for i in range(n_queries):
-        scores = all_scores[:, i]
-        if n_rows <= limit:
-            top_indices = np.argsort(-scores)
+    for q_start in range(0, n_queries, QUERY_TILE):
+        q_chunk = query_matrix[q_start:q_start + QUERY_TILE]
+
+        if metric == "l2":
+            # Direct subtraction avoids catastrophic cancellation in float32.
+            for i in range(q_chunk.shape[0]):
+                diffs = stored_matrix - q_chunk[i]
+                dists = np.sum(diffs * diffs, axis=1)
+                scores = 1.0 / (1.0 + dists)
+                if n_rows <= limit:
+                    top_indices = np.argsort(-scores)
+                else:
+                    top_indices = np.argpartition(-scores, limit)[:limit]
+                    top_indices = top_indices[np.argsort(-scores[top_indices])]
+                results.append(DictBasedScoredIndexResult(
+                    {int(row_id_array[j]): float(scores[j]) for j in top_indices}
+                ))
+            continue
+
+        if metric == "cosine":
+            query_norms = np.linalg.norm(q_chunk, axis=1, keepdims=True)
+            dots = stored_matrix @ q_chunk.T
+            denom = stored_norms @ query_norms.T
+            denom = np.where(denom == 0, 1.0, denom)
+            tile_scores = dots / denom
+        elif metric == "inner_product":
+            tile_scores = stored_matrix @ q_chunk.T
         else:
-            top_indices = np.argpartition(-scores, limit)[:limit]
-            top_indices = top_indices[np.argsort(-scores[top_indices])]
-        results.append(DictBasedScoredIndexResult(
-            {int(row_id_array[j]): float(scores[j]) for j in top_indices}
-        ))
+            raise ValueError("Unknown vector search metric: %s" % metric)
+
+        for i in range(tile_scores.shape[1]):
+            scores = tile_scores[:, i]
+            if n_rows <= limit:
+                top_indices = np.argsort(-scores)
+            else:
+                top_indices = np.argpartition(-scores, limit)[:limit]
+                top_indices = top_indices[np.argsort(-scores[top_indices])]
+            results.append(DictBasedScoredIndexResult(
+                {int(row_id_array[j]): float(scores[j]) for j in top_indices}
+            ))
     return results
