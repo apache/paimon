@@ -27,6 +27,8 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import javax.annotation.Nullable;
 
+import java.beans.ConstructorProperties;
+
 /** Request for creating tag. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class CreateTagRequest implements RESTRequest {
@@ -47,6 +49,7 @@ public class CreateTagRequest implements RESTRequest {
     private final String timeRetained;
 
     @JsonCreator
+    @ConstructorProperties({FIELD_TAG_NAME, FIELD_SNAPSHOT_ID, FIELD_TIME_RETAINED})
     public CreateTagRequest(
             @JsonProperty(FIELD_TAG_NAME) String tagName,
             @Nullable @JsonProperty(FIELD_SNAPSHOT_ID) Long snapshotId,

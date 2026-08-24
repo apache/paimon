@@ -27,6 +27,8 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import javax.annotation.Nullable;
 
+import java.beans.ConstructorProperties;
+
 /** Request for creating branch. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class CreateBranchRequest implements RESTRequest {
@@ -42,6 +44,7 @@ public class CreateBranchRequest implements RESTRequest {
     private final String fromTag;
 
     @JsonCreator
+    @ConstructorProperties({FIELD_BRANCH, FIELD_FROM_TAG})
     public CreateBranchRequest(
             @JsonProperty(FIELD_BRANCH) String branch,
             @Nullable @JsonProperty(FIELD_FROM_TAG) String fromTag) {
