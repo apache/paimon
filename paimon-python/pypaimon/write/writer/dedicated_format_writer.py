@@ -487,7 +487,10 @@ class DedicatedFormatWriter(DataWriter):
 
     def _close_current_writers(self):
         """Close normal, blob, and vector writers; add metadata in order: normal, blob, vector."""
-        normal_data = self._normal_buffer.take()
+        # Cleared at the end, once the normal file and every blob/vector sidecar
+        # have landed: a failure in any phase has to leave the normal rows
+        # buffered, or a retry would commit sidecar-only metadata.
+        normal_data = self._normal_buffer.materialize()
         normal_meta = None
         if normal_data is not None and normal_data.num_rows > 0:
             normal_meta = self._write_normal_data_to_file(normal_data)
@@ -515,6 +518,7 @@ class DedicatedFormatWriter(DataWriter):
             self._committed_files_to_delete_on_abort.extend(vector_metas)
             self.vector_writer.committed_files.clear()
 
+        self._normal_buffer.reset()
         self.record_count = 0
 
         if normal_meta is not None or blob_metas or vector_metas:

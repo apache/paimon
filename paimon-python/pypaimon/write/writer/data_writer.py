@@ -124,7 +124,10 @@ class DataWriter(ABC):
 
     def prepare_commit(self) -> List[DataFileMeta]:
         if self._buffer.num_rows > 0:
-            self._write_data_to_file(self._buffer.take())
+            # Clear only once the write lands: a caller that retries
+            # prepare_commit after a failed write has to still find its rows.
+            self._write_data_to_file(self._buffer.materialize())
+            self._buffer.reset()
 
         return self.committed_files.copy()
 
@@ -134,7 +137,7 @@ class DataWriter(ABC):
     def close(self):
         try:
             if self._buffer.num_rows > 0:
-                self._write_data_to_file(self._buffer.take())
+                self._write_data_to_file(self._buffer.materialize())
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)

@@ -206,7 +206,10 @@ class DataVectorWriter(DataWriter):
         return 0
 
     def _close_current_writers(self):
-        normal_data = self._normal_buffer.take()
+        # Cleared at the end, once the normal file and the vector sidecars have
+        # both landed: a failure in either half has to leave the normal rows
+        # buffered, or a retry would commit sidecar-only metadata.
+        normal_data = self._normal_buffer.materialize()
 
         normal_meta = None
         if normal_data is not None and normal_data.num_rows > 0:
@@ -221,6 +224,7 @@ class DataVectorWriter(DataWriter):
                 self.committed_files.extend(vector_metas)
             self.vector_writer.committed_files.clear()
 
+        self._normal_buffer.reset()
         self.record_count = 0
 
     def _write_normal_data_to_file(self, data: pa.Table) -> Optional[DataFileMeta]:

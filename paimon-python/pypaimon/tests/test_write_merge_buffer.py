@@ -377,6 +377,43 @@ class WriteMergeBufferTest(unittest.TestCase):
         for chunk in writer.written_chunks[:-1]:
             self.assertLessEqual(chunk.nbytes, target)
 
+    def test_roll_write_leaves_only_unwritten_rows_when_a_file_fails(self):
+        # A flush spans several files, so it cannot be all-or-nothing: keeping
+        # every row would make the retry rewrite what the first files already
+        # took. The buffer has to hold the remainder and nothing else.
+        rows = [_row(i, i, 'x' * 64, 'y' * 64) for i in range(1, 401)]
+        data = pa.Table.from_pylist(rows, schema=_SCHEMA)
+
+        class _FailOnSecondFile(_Harness):
+            """Fails once, on the second file, then writes normally."""
+
+            failed = False
+
+            def _write_data_to_file(self, chunk):
+                if not self.failed and len(self.written_chunks) == 1:
+                    self.failed = True
+                    raise IOError('transient storage failure')
+                super()._write_data_to_file(chunk)
+
+        writer = _FailOnSecondFile(DeduplicateMergeFunction(),
+                                   target_file_size=data.nbytes // 4)
+        writer._buffer.append(data)
+        with self.assertRaises(IOError):
+            writer._flush_all()
+
+        written = sum(c.num_rows for c in writer.written_chunks)
+        self.assertEqual(len(writer.written_chunks), 1)
+        self.assertEqual(written + writer._buffer.num_rows, data.num_rows)
+
+        # The retry picks up exactly where the failure left off.
+        writer._flush_all()
+        self.assertTrue(writer._buffer.is_empty)
+        self.assertEqual(sum(c.num_rows for c in writer.written_chunks),
+                         data.num_rows)
+        flushed_ids = [r['id'] for c in writer.written_chunks
+                       for r in c.to_pylist()]
+        self.assertEqual(sorted(flushed_ids), [r['id'] for r in rows])
+
 
 class KeyValueWriteBufferTest(unittest.TestCase):
     """The write path must not fold the buffer on every write.

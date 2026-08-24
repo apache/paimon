@@ -409,6 +409,74 @@ class DeferredFoldWritePathTest(unittest.TestCase):
         self.assertTrue(writer.aborted)
 
 
+class FlushFailureTest(unittest.TestCase):
+    """A failed flush leaves the rows buffered for the retry.
+
+    ``StreamTableWrite`` is reusable, so a transient storage error followed by
+    another ``prepare_commit`` on the same writer has to write the same rows,
+    not silently skip them. Draining the buffer before the write would lose
+    them.
+    """
+
+    class _FailOnceHarness(_Harness):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.fail_next = True
+
+        def _write_data_to_file(self, data: pa.Table):
+            if self.fail_next:
+                self.fail_next = False
+                raise IOError('transient storage failure')
+            super()._write_data_to_file(data)
+
+    def test_failed_prepare_commit_keeps_the_rows_for_the_retry(self):
+        writer = self._FailOnceHarness()
+        for i in range(3):
+            writer.write(_batch(i, 1))
+        with self.assertRaises(IOError):
+            writer.prepare_commit()
+        self.assertEqual(writer.pending_row_count, 3)
+        writer.prepare_commit()
+        self.assertEqual([c.num_rows for c in writer.written_chunks], [3])
+        self.assertEqual(writer.pending_row_count, 0)
+
+    class _FailOnceVectorHarness(DataVectorWriter):
+        """``_close_current_writers`` with the file layer stubbed out.
+
+        No ``vector_writer``, so this covers the normal half on its own; the
+        point is only where the buffer is cleared relative to the write.
+        """
+
+        def __init__(self):
+            self.target_file_size = _NO_LIMIT
+            self.target_file_row_num = _NO_LIMIT
+            self.record_count = 0
+            self.vector_writer = None
+            self._normal_buffer = WriteBuffer(self._merge_data)
+            self.committed_files = []
+            self.written = []
+            self.fail_next = True
+
+        def _write_normal_data_to_file(self, data: pa.Table):
+            if self.fail_next:
+                self.fail_next = False
+                raise IOError('transient storage failure')
+            self.written.append(data)
+            return object()
+
+    def test_failed_normal_flush_keeps_the_rows_for_the_retry(self):
+        # Otherwise the retry finds no normal_meta, flushes the sidecars alone
+        # and skips the row-count check, committing sidecar-only metadata.
+        writer = self._FailOnceVectorHarness()
+        writer._normal_buffer.append(_table(0, 3))
+        with self.assertRaises(IOError):
+            writer._close_current_writers()
+        self.assertEqual(writer._normal_buffer.num_rows, 3)
+        writer._close_current_writers()
+        self.assertEqual([t.num_rows for t in writer.written], [3])
+        self.assertEqual(writer._normal_buffer.num_rows, 0)
+
+
 class VectorNormalBufferTest(unittest.TestCase):
     """``DataVectorWriter`` keeps its own buffer for the normal columns."""
 

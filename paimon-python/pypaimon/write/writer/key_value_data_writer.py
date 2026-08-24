@@ -73,7 +73,7 @@ class KeyValueDataWriter(DataWriter):
     def _check_and_roll_if_needed(self):
         # Buffer overflowed target_file_size: sort + fold + roll-write the whole
         # buffer as multiple files in one pass. Unlike the base class's slice
-        # loop, we never keep a slice remainder -- flush empties the buffer
+        # loop, a successful flush leaves no remainder -- it empties the buffer
         # outright. There is no row-count trigger here, and none is needed:
         # ``FileStoreWrite`` rejects target-file-row-num on primary key tables.
         if self._buffer.num_rows > 0 and self._buffer.nbytes > self.target_file_size:
@@ -104,16 +104,23 @@ class KeyValueDataWriter(DataWriter):
         """Sort + fold the entire buffer, then roll-write as files.
 
         On return, the buffer is empty and every flushed chunk has been
-        recorded in ``committed_files``. The buffer is always fully drained
-        per flush: no slice remainder is carried back into it.
+        recorded in ``committed_files``. If a file write fails, the buffer is
+        left holding exactly the rows no file has taken yet, so a retried
+        flush neither loses nor duplicates them.
         """
-        pending = self._buffer.take()
+        pending = self._buffer.materialize()
         if pending is None or pending.num_rows == 0:
+            self._buffer.reset()
             return
         sorted_data = self._sort_by_primary_key(pending)
         folded = self._merge_pending_by_pk(sorted_data)
         if folded.num_rows == 0:
+            self._buffer.reset()
             return
+        # Park the folded rows in the buffer for ``_roll_write`` to drain. Both
+        # the sort and the fold are idempotent on their own output -- PKs are
+        # unique once folded -- so a retry over what is left is still correct.
+        self._buffer.reset(folded)
         self._roll_write(folded)
 
     def _roll_write(self, data: pa.Table) -> None:
@@ -124,10 +131,15 @@ class KeyValueDataWriter(DataWriter):
         size does not violate the LSM file-internal invariant.
         Reuses ``_find_optimal_split_point`` / ``_write_data_to_file``
         from the base class.
+
+        The buffer is narrowed to the rows still unwritten after each file, so
+        a failure part way through leaves the remainder -- and only the
+        remainder -- for whoever flushes next.
         """
         while data.num_rows > 0:
             if data.nbytes <= self.target_file_size:
                 self._write_data_to_file(data)
+                self._buffer.reset()
                 return
             split_row = self._find_optimal_split_point(
                 data, self.target_file_size)
@@ -135,9 +147,11 @@ class KeyValueDataWriter(DataWriter):
                 # Single row already exceeds target_file_size; nothing
                 # to gain from further slicing, write it as-is.
                 self._write_data_to_file(data)
+                self._buffer.reset()
                 return
             self._write_data_to_file(data.slice(0, split_row))
             data = data.slice(split_row)
+            self._buffer.reset(data)
 
     def _merge_pending_by_pk(self, data: pa.Table) -> pa.Table:
         """Fold same-PK runs in ``data`` using ``self._merge_function``.
