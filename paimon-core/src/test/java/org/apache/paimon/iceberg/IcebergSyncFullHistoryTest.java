@@ -275,6 +275,97 @@ public class IcebergSyncFullHistoryTest {
         assertThat(metadata.nextRowId()).isEqualTo(4);
     }
 
+    @Test
+    public void testRebuildFromCorruptedMetadataSucceeds() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(
+                IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                IcebergOptions.StorageType.TABLE_LOCATION.toString());
+        options.put(IcebergOptions.SYNC_FULL_HISTORY.key(), "true");
+        options.put(IcebergOptions.METADATA_DELETE_AFTER_COMMIT.key(), "false");
+        createAppendTable(options);
+        writeCommit(1, GenericRow.of(1, 10));
+        writeCommit(2, GenericRow.of(2, 20));
+
+        // corrupt the newest metadata: the next commit finds no usable base and must rebuild
+        // from scratch, tolerating the unreadable file in every step of the rebuild
+        Path corrupted = new Path(table.location(), "metadata/v2.metadata.json");
+        table.fileIO().deleteQuietly(corrupted);
+        table.fileIO().overwriteFileUtf8(corrupted, "{ not json");
+
+        writeCommit(3, GenericRow.of(3, 30));
+
+        IcebergMetadata metadata = readMetadata(3);
+        assertThat(
+                        metadata.snapshots().stream()
+                                .map(IcebergSnapshot::snapshotId)
+                                .collect(Collectors.toList()))
+                .containsExactly(1L, 2L, 3L);
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(1, 10)", "Record(2, 20)", "Record(3, 30)");
+    }
+
+    @Test
+    public void testRebuildCleansOldBuildOnlyAfterPublication() throws Exception {
+        createAppendTableWithoutIceberg();
+        writeCommit(1, GenericRow.of(1, 10));
+        writeCommit(2, GenericRow.of(2, 20));
+
+        // Iceberg enabled without full history: single-snapshot metadata, the "old build"
+        enableIceberg(false);
+        writeCommit(3, GenericRow.of(3, 30));
+        assertThat(readMetadata(3).snapshots()).hasSize(1);
+        List<Path> oldManifestLists = new ArrayList<>();
+        for (IcebergSnapshot snapshot : readMetadata(3).snapshots()) {
+            oldManifestLists.add(
+                    new Path(
+                            table.location(),
+                            "metadata/" + new Path(snapshot.manifestList()).getName()));
+        }
+        assertThat(oldManifestLists).isNotEmpty();
+
+        // full history enabled later and the newest metadata lost: the next commit rebuilds
+        // from scratch (the single-snapshot candidate is not a valid replay prefix)
+        Map<String, String> options = new HashMap<>();
+        options.put(IcebergOptions.SYNC_FULL_HISTORY.key(), "true");
+        reopen(options);
+        writeCommit(4, GenericRow.of(4, 40));
+        IcebergPathFactory pathFactory =
+                new IcebergPathFactory(new Path(table.location(), "metadata"));
+        table.fileIO().deleteQuietly(pathFactory.toMetadataPath(4));
+        // the old build stays fully readable up to this point
+        for (Path listPath : oldManifestLists) {
+            assertThat(table.fileIO().exists(listPath)).isTrue();
+        }
+
+        writeCommit(5, GenericRow.of(5, 50));
+
+        // the rebuild published a full replacement chain ...
+        IcebergMetadata metadata = readMetadata(5);
+        assertThat(
+                        metadata.snapshots().stream()
+                                .map(IcebergSnapshot::snapshotId)
+                                .collect(Collectors.toList()))
+                .containsExactly(1L, 2L, 3L, 4L, 5L);
+        // ... whose snapshots reference only freshly written manifest lists ...
+        List<String> oldNames =
+                oldManifestLists.stream().map(Path::getName).collect(Collectors.toList());
+        for (IcebergSnapshot snapshot : metadata.snapshots()) {
+            assertThat(new Path(snapshot.manifestList()).getName()).isNotIn(oldNames);
+        }
+        // ... and only then were the old build's files removed
+        for (Path listPath : oldManifestLists) {
+            assertThat(table.fileIO().exists(listPath)).isFalse();
+        }
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder(
+                        "Record(1, 10)",
+                        "Record(2, 20)",
+                        "Record(3, 30)",
+                        "Record(4, 40)",
+                        "Record(5, 50)");
+    }
+
     // ------------------------------------------------------------------------
     //  Utils
     // ------------------------------------------------------------------------
