@@ -32,6 +32,10 @@ public class FixedBucketWriteSelector implements WriteSelector {
 
     private transient KeyAndBucketExtractor<InternalRow> extractor;
 
+    public FixedBucketWriteSelector(TableSchema schema) {
+        this(schema, PartitionBucketMapping.defaultBuckets(schema.numBuckets()));
+    }
+
     public FixedBucketWriteSelector(
             TableSchema schema, PartitionBucketMapping partitionBucketMapping) {
         this.schema = schema;
