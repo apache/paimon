@@ -25,6 +25,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Collections;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests database requests with Paimon's shaded and external Jackson mappers. */
 public class DatabaseRequestJacksonCompatibilityTest {
@@ -66,6 +67,28 @@ public class DatabaseRequestJacksonCompatibilityTest {
         assertThat(roundTrip(create, CreateDatabaseRequest.class).getName()).isEqualTo("warehouse");
         assertThat(roundTrip(alter, AlterDatabaseRequest.class).getUpdates())
                 .containsEntry("comment", "analytics");
+    }
+
+    @Test
+    void testRequestsHaveNoNoArgConstructors() {
+        assertThatThrownBy(() -> CreateDatabaseRequest.class.getDeclaredConstructor())
+                .isInstanceOf(NoSuchMethodException.class);
+        assertThatThrownBy(() -> AlterDatabaseRequest.class.getDeclaredConstructor())
+                .isInstanceOf(NoSuchMethodException.class);
+    }
+
+    @Test
+    void testUnknownPropertiesFollowTheMapperConfiguration() throws Exception {
+        String json = "{\"name\":\"warehouse\",\"options\":{},\"unknown\":true}";
+
+        assertThatThrownBy(
+                        () ->
+                                new com.fasterxml.jackson.databind.ObjectMapper()
+                                        .readValue(json, CreateDatabaseRequest.class))
+                .isInstanceOf(
+                        com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException.class);
+        assertThat(RESTApi.OBJECT_MAPPER.readValue(json, CreateDatabaseRequest.class).getName())
+                .isEqualTo("warehouse");
     }
 
     private static <T> T roundTrip(T value, Class<T> type) throws Exception {
