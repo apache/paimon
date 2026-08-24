@@ -117,7 +117,7 @@ public final class GenericVariant implements Variant, Serializable {
 
     @Override
     public byte[] value() {
-        return toByteArray(value, 0, value.remaining());
+        return toByteArray(value, value.remaining());
     }
 
     @Override
@@ -127,7 +127,7 @@ public final class GenericVariant implements Variant, Serializable {
 
     @Override
     public byte[] metadata() {
-        return toByteArray(metadata, 0, metadata.remaining());
+        return toByteArray(metadata, metadata.remaining());
     }
 
     @Override
@@ -135,15 +135,14 @@ public final class GenericVariant implements Variant, Serializable {
         return metadata.duplicate().order(ByteOrder.LITTLE_ENDIAN);
     }
 
-    private static byte[] toByteArray(ByteBuffer buffer, int offset, int length) {
-        if (offset == 0
-                && buffer.hasArray()
+    private static byte[] toByteArray(ByteBuffer buffer, int length) {
+        if (buffer.hasArray()
                 && buffer.position() == 0
                 && buffer.arrayOffset() == 0
                 && length == buffer.array().length) {
             return buffer.array();
         }
-        return GenericVariantUtil.copyBytes(buffer, offset, length);
+        return GenericVariantUtil.copyBytes(buffer, 0, length);
     }
 
     private Object writeReplace() {
