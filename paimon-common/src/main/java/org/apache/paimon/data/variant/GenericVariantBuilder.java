@@ -155,15 +155,6 @@ public class GenericVariantBuilder {
         return new GenericVariant(Arrays.copyOfRange(writeBuffer, 0, writePos), metadata);
     }
 
-    // Return the variant value only, without metadata.
-    // Used in shredding to produce a final value, where all shredded values refer to a common
-    // metadata. It is expected to be called instead of `result()`, although it is valid to call
-    // both
-    // methods, in any order.
-    public byte[] valueWithoutMetadata() {
-        return Arrays.copyOfRange(writeBuffer, 0, writePos);
-    }
-
     /** Returns a view of the value written so far without copying the builder buffer. */
     public ByteBuffer valueWithoutMetadataBuffer() {
         return ByteBuffer.wrap(writeBuffer, 0, writePos).slice().order(ByteOrder.LITTLE_ENDIAN);
