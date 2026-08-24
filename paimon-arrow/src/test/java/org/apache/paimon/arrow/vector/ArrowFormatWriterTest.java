@@ -441,6 +441,38 @@ public class ArrowFormatWriterTest {
         }
     }
 
+    @Test
+    public void testWriteColumnarInputWithTwoFieldShreddingSchema() {
+        RowType rowType = new RowType(Arrays.asList(new DataField(0, "v", DataTypes.VARIANT())));
+        RowType shreddingSchemas =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(
+                                        0,
+                                        "v",
+                                        PaimonShreddingUtils.variantShreddingSchema(
+                                                DataTypes.VARIANT()))));
+        GenericVariant expected = GenericVariant.fromJson("{\"a\": 1, \"b\": \"x\"}");
+        HeapBytesVector values = new HeapBytesVector(1);
+        values.appendByteArray(expected.value(), 0, expected.value().length);
+        HeapBytesVector metadata = new HeapBytesVector(1);
+        metadata.appendByteArray(expected.metadata(), 0, expected.metadata().length);
+        HeapRowVector columnarVariant = new HeapRowVector(1, values, metadata);
+        columnarVariant.appendRow();
+
+        try (ArrowFormatWriter writer =
+                new ArrowFormatWriter(rowType, 16, true, null, shreddingSchemas)) {
+            writer.write(new ColumnVector[] {columnarVariant}, null, 0, 1);
+            writer.flush();
+
+            Iterator<InternalRow> rows =
+                    new ArrowBatchReader(rowType, shreddingSchemas, true)
+                            .readBatch(writer.getVectorSchemaRoot())
+                            .iterator();
+            assertThat(rows.next().getVariant(0).toJson()).isEqualTo(expected.toJson());
+        }
+    }
+
     private static class BufferOnlyVariant implements Variant {
 
         private final GenericVariant delegate;

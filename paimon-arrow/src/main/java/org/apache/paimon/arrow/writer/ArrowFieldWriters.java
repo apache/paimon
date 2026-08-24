@@ -596,17 +596,18 @@ public class ArrowFieldWriters {
                 }
 
                 InternalRow rowData = rowColumnVector.getRow(row);
-                if (variantSchema != null && rowData.getFieldCount() != fieldCount) {
+                if (variantSchema != null) {
+                    // ColumnVector input follows ArrowFormatWriter's logical row type. The
+                    // shredding schema describes only the output layout, so the input remains the
+                    // logical [value, metadata] Variant row even when both layouts have two fields.
                     Variant variant = Variant.fromRow(rowData);
                     GenericVariant genericVariant =
                             new GenericVariant(variant.valueBuffer(), variant.metadataBuffer());
                     InternalRow shreddedRow =
                             PaimonShreddingUtils.castShredded(genericVariant, variantSchema);
                     writeRow(i, shreddedRow);
-                } else if (variantSchema == null) {
-                    writeVariant(i, Variant.fromRow(rowData));
                 } else {
-                    writeRow(i, rowData);
+                    writeVariant(i, Variant.fromRow(rowData));
                 }
             }
         }
