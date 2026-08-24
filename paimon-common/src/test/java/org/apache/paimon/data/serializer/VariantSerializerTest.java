@@ -27,6 +27,7 @@ import org.apache.paimon.io.DataOutputSerializer;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.time.ZoneId;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -90,8 +91,18 @@ public class VariantSerializerTest extends SerializerTestBase<Variant> {
         }
 
         @Override
+        public ByteBuffer metadataBuffer() {
+            return delegate.metadataBuffer();
+        }
+
+        @Override
         public byte[] value() {
             return delegate.value();
+        }
+
+        @Override
+        public ByteBuffer valueBuffer() {
+            return delegate.valueBuffer();
         }
 
         @Override
