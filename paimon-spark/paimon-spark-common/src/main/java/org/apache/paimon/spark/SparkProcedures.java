@@ -39,6 +39,8 @@ import org.apache.paimon.spark.procedure.ExpirePartitionsProcedure;
 import org.apache.paimon.spark.procedure.ExpireSnapshotsProcedure;
 import org.apache.paimon.spark.procedure.ExpireTagsProcedure;
 import org.apache.paimon.spark.procedure.FastForwardProcedure;
+import org.apache.paimon.spark.procedure.GrantPermissionProcedure;
+import org.apache.paimon.spark.procedure.ListPermissionsProcedure;
 import org.apache.paimon.spark.procedure.MarkPartitionDoneProcedure;
 import org.apache.paimon.spark.procedure.MaterializeDeletionVectorsProcedure;
 import org.apache.paimon.spark.procedure.MergeBranchProcedure;
@@ -57,6 +59,7 @@ import org.apache.paimon.spark.procedure.RepairProcedure;
 import org.apache.paimon.spark.procedure.ReplaceTagProcedure;
 import org.apache.paimon.spark.procedure.RescaleProcedure;
 import org.apache.paimon.spark.procedure.ResetConsumerProcedure;
+import org.apache.paimon.spark.procedure.RevokePermissionProcedure;
 import org.apache.paimon.spark.procedure.RewriteFileIndexProcedure;
 import org.apache.paimon.spark.procedure.RollbackProcedure;
 import org.apache.paimon.spark.procedure.RollbackToTimestampProcedure;
@@ -134,6 +137,9 @@ public class SparkProcedures {
         procedureBuilders.put("rewrite_file_index", RewriteFileIndexProcedure::builder);
         procedureBuilders.put("copy", CopyFilesProcedure::builder);
         procedureBuilders.put("reassign_row_id", ReassignRowIdProcedure::builder);
+        procedureBuilders.put("grant_permission", GrantPermissionProcedure::builder);
+        procedureBuilders.put("revoke_permission", RevokePermissionProcedure::builder);
+        procedureBuilders.put("list_permissions", ListPermissionsProcedure::builder);
         return procedureBuilders.build();
     }
 }

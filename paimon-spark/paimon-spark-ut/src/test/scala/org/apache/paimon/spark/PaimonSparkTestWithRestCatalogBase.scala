@@ -19,7 +19,7 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.options.CatalogOptions
-import org.apache.paimon.rest.{RESTCatalogFactory, RESTCatalogInternalOptions, RESTCatalogServer}
+import org.apache.paimon.rest.{RESTCatalogFactory, RESTCatalogInternalOptions, RESTCatalogOptions, RESTCatalogServer}
 import org.apache.paimon.rest.auth.{AuthProviderEnum, BearTokenAuthProvider}
 import org.apache.paimon.rest.responses.ConfigResponse
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap
@@ -42,8 +42,11 @@ class PaimonSparkTestWithRestCatalogBase extends PaimonSparkTestBase {
         RESTCatalogInternalOptions.PREFIX.key,
         "paimon",
         CatalogOptions.WAREHOUSE.key,
+        warehouse,
+        RESTCatalogOptions.MANAGEMENT_CATALOG.key,
         warehouse),
-      ImmutableMap.of())
+      ImmutableMap.of()
+    )
     val authProvider = new BearTokenAuthProvider(initToken)
     restCatalogServer =
       new RESTCatalogServer(tempDBDir.getCanonicalPath, authProvider, config, warehouse)

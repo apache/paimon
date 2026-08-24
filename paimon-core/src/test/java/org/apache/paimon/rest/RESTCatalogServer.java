@@ -40,6 +40,8 @@ import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.function.FunctionDefinition;
 import org.apache.paimon.function.FunctionImpl;
+import org.apache.paimon.management.Permission;
+import org.apache.paimon.management.ResourceType;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
@@ -63,12 +65,14 @@ import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateTagRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
+import org.apache.paimon.rest.requests.GrantPermissionRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByFilterRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByNamesRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.requests.ReplaceTableRequest;
 import org.apache.paimon.rest.requests.ResetConsumerRequest;
+import org.apache.paimon.rest.requests.RevokePermissionRequest;
 import org.apache.paimon.rest.requests.RollbackSchemaRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
@@ -93,6 +97,7 @@ import org.apache.paimon.rest.responses.ListFunctionDetailsResponse;
 import org.apache.paimon.rest.responses.ListFunctionsGloballyResponse;
 import org.apache.paimon.rest.responses.ListFunctionsResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
+import org.apache.paimon.rest.responses.ListPermissionsResponse;
 import org.apache.paimon.rest.responses.ListSnapshotsResponse;
 import org.apache.paimon.rest.responses.ListTableDetailsResponse;
 import org.apache.paimon.rest.responses.ListTablesGloballyResponse;
@@ -195,6 +200,7 @@ public class RESTCatalogServer {
     public static final String AUTHORIZATION_HEADER_KEY = "Authorization";
 
     private final String databaseUri;
+    private final @Nullable String permissionUri;
 
     private final CatalogContext catalogContext;
     private final RESTFileSystemCatalog catalog;
@@ -202,6 +208,8 @@ public class RESTCatalogServer {
 
     private final Map<String, Database> databaseStore = new HashMap<>();
     private final Map<String, TableMetadata> tableMetadataStore = new HashMap<>();
+    private final List<Permission> permissionStore =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
 
     private final List<ListPartitionsByFilterRequest> receivedListPartitionsByFilterRequests =
             new java.util.concurrent.CopyOnWriteArrayList<>();
@@ -238,6 +246,10 @@ public class RESTCatalogServer {
                 this.configResponse.getDefaults().get(RESTCatalogInternalOptions.PREFIX.key());
         this.resourcePaths = new ResourcePaths(prefix);
         this.databaseUri = resourcePaths.databases();
+        String managementCatalog =
+                this.configResponse.getDefaults().get(RESTCatalogOptions.MANAGEMENT_CATALOG.key());
+        this.permissionUri =
+                managementCatalog == null ? null : ResourcePaths.permissions(managementCatalog);
         Options conf = new Options();
         this.configResponse.getDefaults().forEach(conf::setString);
         conf.setString(WAREHOUSE.key(), dataPath);
@@ -384,6 +396,11 @@ public class RESTCatalogServer {
                                     .queryParameter(WAREHOUSE.key())
                                     .equals(warehouse)) {
                         return mockResponse(configResponse, 200);
+                    } else if (permissionUri != null
+                            && (permissionUri.equals(resourcePath)
+                                    || request.getPath().startsWith(permissionUri + "/"))) {
+                        return permissionsApiHandler(
+                                request.getMethod(), resourcePath, data, parameters);
                     } else if (databaseUri.equals(request.getPath())
                             || request.getPath().contains(databaseUri + "?")) {
                         return databasesApiHandler(restAuthParameter.method(), data, parameters);
@@ -3111,6 +3128,109 @@ public class RESTCatalogServer {
             maxResults = Math.min(maxResults, DEFAULT_MAX_RESULTS);
         }
         return maxResults;
+    }
+
+    private MockResponse permissionsApiHandler(
+            String method, String resourcePath, String data, Map<String, String> parameters)
+            throws JsonProcessingException {
+        if ("GET".equals(method) && permissionUri.equals(resourcePath)) {
+            List<Permission> filtered =
+                    permissionStore.stream()
+                            .filter(permission -> matchesPermission(permission, parameters))
+                            .collect(Collectors.toList());
+            int start =
+                    parameters.containsKey(PAGE_TOKEN)
+                            ? Integer.parseInt(parameters.get(PAGE_TOKEN))
+                            : 0;
+            int end = Math.min(start + getMaxResults(parameters), filtered.size());
+            List<Permission> page = new ArrayList<>(filtered.subList(start, end));
+            String nextPageToken = end < filtered.size() ? String.valueOf(end) : null;
+            return mockResponse(new ListPermissionsResponse(page, nextPageToken), 200);
+        }
+
+        if ("POST".equals(method) && (permissionUri + "/grant").equals(resourcePath)) {
+            Permission permission =
+                    RESTApi.fromJson(data, GrantPermissionRequest.class).permission();
+            permissionStore.removeIf(existing -> sameIdentity(existing, permission));
+            permissionStore.add(permission);
+            return new MockResponse().setResponseCode(200);
+        }
+
+        if ("POST".equals(method) && (permissionUri + "/revoke").equals(resourcePath)) {
+            RevokePermissionRequest request = RESTApi.fromJson(data, RevokePermissionRequest.class);
+            boolean removed =
+                    permissionStore.removeIf(
+                            permission ->
+                                    sameIdentity(
+                                            permission,
+                                            new Permission(
+                                                    request.getResourceType(),
+                                                    request.getCatalog(),
+                                                    request.getDatabase(),
+                                                    request.getTable(),
+                                                    request.getFunction(),
+                                                    request.getView(),
+                                                    request.getColumns(),
+                                                    null,
+                                                    null,
+                                                    request.getAccess(),
+                                                    request.getPrincipal(),
+                                                    null)));
+            return removed
+                    ? new MockResponse().setResponseCode(200)
+                    : mockResponse(
+                            new ErrorResponse(
+                                    "PERMISSION",
+                                    request.getPrincipal(),
+                                    "Permission does not exist.",
+                                    404),
+                            404);
+        }
+
+        return new MockResponse().setResponseCode(404);
+    }
+
+    private static boolean matchesPermission(
+            Permission permission, Map<String, String> parameters) {
+        return matches(parameters, "principal", permission.getPrincipal())
+                && matchesResourceType(parameters, permission.getResourceType())
+                && matches(parameters, "database", permission.getDatabase())
+                && matches(parameters, "table", permission.getTable())
+                && matches(parameters, "function", permission.getFunction())
+                && matches(parameters, "view", permission.getView());
+    }
+
+    private static boolean matches(
+            Map<String, String> parameters, String key, @Nullable String value) {
+        return !parameters.containsKey(key) || Objects.equals(parameters.get(key), value);
+    }
+
+    private static boolean matchesResourceType(
+            Map<String, String> parameters, ResourceType resourceType) {
+        String filter = parameters.get("resourceType");
+        if (filter == null || filter.equals(resourceType.name())) {
+            return true;
+        }
+        if (ResourceType.CATALOG.name().equals(filter)) {
+            return resourceType == ResourceType.CATALOG_ALL;
+        }
+        if (ResourceType.DATABASE.name().equals(filter)) {
+            return resourceType == ResourceType.DATABASE_ALL;
+        }
+        return ResourceType.TABLE.name().equals(filter)
+                && (resourceType == ResourceType.COLUMN
+                        || resourceType == ResourceType.ROW_FILTER
+                        || resourceType == ResourceType.COLUMN_MASKING);
+    }
+
+    private static boolean sameIdentity(Permission left, Permission right) {
+        return left.getResourceType() == right.getResourceType()
+                && Objects.equals(left.getDatabase(), right.getDatabase())
+                && Objects.equals(left.getTable(), right.getTable())
+                && Objects.equals(left.getFunction(), right.getFunction())
+                && Objects.equals(left.getView(), right.getView())
+                && left.getAccess().equalsIgnoreCase(right.getAccess())
+                && left.getPrincipal().equals(right.getPrincipal());
     }
 
     private <T> String getNextPageTokenForEntities(List<T> entities, Integer maxResults) {

@@ -1,0 +1,361 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+openapi: 3.1.1
+info:
+  title: Paimon REST Management API
+  version: 1.0.0
+  description: |
+    Control-plane API for listing, granting, and revoking permissions. Permission payloads use a
+    flat resource-oriented model, and the resource paths belong to the Paimon REST Management API.
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0.html
+servers:
+  - url: http://localhost:8080
+security:
+  - BearerAuth: []
+paths:
+  /v1/catalogs/{catalog}/permissions:
+    get:
+      tags: [permission]
+      summary: List Permissions
+      operationId: listPermissions
+      description: |
+        Lists explicitly granted permissions. Filtering CATALOG also returns CATALOG_ALL;
+        DATABASE also returns DATABASE_ALL; TABLE also returns COLUMN, ROW_FILTER, and
+        COLUMN_MASKING permissions.
+      parameters:
+        - name: catalog
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: resourceType
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/ResourceType'
+        - name: database
+          in: query
+          schema:
+            type: string
+        - name: table
+          in: query
+          schema:
+            type: string
+        - name: function
+          in: query
+          schema:
+            type: string
+        - name: view
+          in: query
+          schema:
+            type: string
+        - name: principal
+          in: query
+          schema:
+            type: string
+        - name: pageToken
+          in: query
+          schema:
+            type: string
+        - name: maxResults
+          in: query
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+      responses:
+        "200":
+          description: Permission list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListPermissionsResponse'
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "403":
+          $ref: '#/components/responses/ForbiddenErrorResponse'
+        "404":
+          $ref: '#/components/responses/ResourceNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/catalogs/{catalog}/permissions/grant:
+    post:
+      tags: [permission]
+      summary: Grant Permission
+      operationId: grantPermission
+      parameters:
+        - name: catalog
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GrantPermissionRequest'
+      responses:
+        "200":
+          description: Permission granted.
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "403":
+          $ref: '#/components/responses/ForbiddenErrorResponse'
+        "404":
+          $ref: '#/components/responses/ResourceNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/catalogs/{catalog}/permissions/revoke:
+    post:
+      tags: [permission]
+      summary: Revoke Permission
+      operationId: revokePermission
+      description: Revokes the matching permission. A missing permission may return HTTP 404.
+      parameters:
+        - name: catalog
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevokePermissionRequest'
+      responses:
+        "200":
+          description: Permission revoked.
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "403":
+          $ref: '#/components/responses/ForbiddenErrorResponse'
+        "404":
+          $ref: '#/components/responses/ResourceNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    Catalog:
+      name: catalog
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Remote catalog identifier.
+  responses:
+    BadRequestErrorResponse:
+      description: The permission or list filter is invalid.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    UnauthorizedErrorResponse:
+      description: Authentication is required or has failed.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    ForbiddenErrorResponse:
+      description: The authenticated caller may not manage the requested permission.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    ResourceNotExistErrorResponse:
+      description: The catalog, resource, principal, or permission does not exist.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    ServerErrorResponse:
+      description: The server failed to process the request.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    GrantPermissionRequest:
+      type: object
+      required: [resourceType, access, principal]
+      properties:
+        resourceType:
+          $ref: '#/components/schemas/ResourceType'
+        catalog:
+          type: string
+        database:
+          type: string
+        table:
+          type: string
+        function:
+          type: string
+        view:
+          type: string
+        columns:
+          $ref: '#/components/schemas/ColumnSelection'
+        rowFilter:
+          $ref: '#/components/schemas/RowFilter'
+        columnMasking:
+          $ref: '#/components/schemas/ColumnMasking'
+        access:
+          type: string
+        principal:
+          type: string
+        expireTime:
+          $ref: '#/components/schemas/ExpireTime'
+    RevokePermissionRequest:
+      type: object
+      required: [resourceType, access, principal]
+      properties:
+        resourceType:
+          $ref: '#/components/schemas/ResourceType'
+        catalog:
+          type: string
+        database:
+          type: string
+        table:
+          type: string
+        function:
+          type: string
+        view:
+          type: string
+        columns:
+          $ref: '#/components/schemas/ColumnSelection'
+        access:
+          type: string
+        principal:
+          type: string
+    ListPermissionsResponse:
+      type: object
+      required: [permissions]
+      properties:
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Permission'
+        nextPageToken:
+          type: string
+    Permission:
+      type: object
+      required: [resourceType, access, principal]
+      properties:
+        resourceType:
+          $ref: '#/components/schemas/ResourceType'
+        catalog:
+          type: string
+        database:
+          type: string
+        table:
+          type: string
+        function:
+          type: string
+        view:
+          type: string
+        columns:
+          $ref: '#/components/schemas/ColumnSelection'
+        rowFilter:
+          $ref: '#/components/schemas/RowFilter'
+        columnMasking:
+          $ref: '#/components/schemas/ColumnMasking'
+        access:
+          type: string
+          description: Permission access such as SELECT, INSERT, UPDATE, DELETE, ALTER, or ALL.
+        principal:
+          type: string
+          description: Principal identifier understood by the server.
+        expireTime:
+          $ref: '#/components/schemas/ExpireTime'
+    ResourceType:
+      type: string
+      enum:
+        - CATALOG
+        - CATALOG_ALL
+        - DATABASE
+        - DATABASE_ALL
+        - TABLE
+        - FUNCTION
+        - VIEW
+        - COLUMN
+        - ROW_FILTER
+        - COLUMN_MASKING
+    ColumnSelection:
+      type: object
+      properties:
+        columnNames:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+        excludedColumnNames:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+      oneOf:
+        - required: [columnNames]
+        - required: [excludedColumnNames]
+    RowFilter:
+      type: object
+      properties:
+        expression:
+          type: string
+        predicate:
+          type: string
+      description: Grant requests provide expression; list responses may also include predicate.
+    ColumnMask:
+      type: object
+      properties:
+        expression:
+          type: string
+        transform:
+          type: string
+      description: Grant requests provide expression; list responses may also include transform.
+    ColumnMasking:
+      type: object
+      additionalProperties:
+        $ref: '#/components/schemas/ColumnMask'
+    ExpireTime:
+      type: string
+      description: Expiration time in ISO-8601 UTC form, for example 2025-12-31T23:59:59Z.
+      examples:
+        - 2025-12-31T23:59:59Z
+    ErrorResponse:
+      type: object
+      required: [message, code]
+      properties:
+        message:
+          type: string
+        resourceType:
+          type: string
+        resourceName:
+          type: string
+        code:
+          type: integer
+          format: int32

@@ -42,12 +42,26 @@ public class ResourcePaths {
     protected static final String REGISTER = "register";
     protected static final String FUNCTIONS = "functions";
     protected static final String FUNCTION_DETAILS = "function-details";
+    protected static final String CATALOGS = "catalogs";
+    protected static final String PERMISSIONS = "permissions";
     protected static final String ID = "id";
 
     private static final Joiner SLASH = Joiner.on("/").skipNulls();
 
     public static String config() {
         return String.format("%s/config", V1);
+    }
+
+    public static String permissions(String catalog) {
+        return SLASH.join(V1, CATALOGS, encodeString(catalog), PERMISSIONS);
+    }
+
+    public static String grantPermission(String catalog) {
+        return SLASH.join(permissions(catalog), "grant");
+    }
+
+    public static String revokePermission(String catalog) {
+        return SLASH.join(permissions(catalog), "revoke");
     }
 
     public static ResourcePaths forCatalogProperties(Options options) {

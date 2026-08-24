@@ -63,4 +63,5 @@ RESTCatalog supports multiple access authentication methods, including the follo
 
 ## REST Open API
 
-See [REST API](./rest-api).
+See [REST Catalog API](./rest-api) for catalog operations and
+[REST Management API](./management-api) for permission management.

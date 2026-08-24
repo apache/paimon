@@ -39,6 +39,7 @@ import org.apache.paimon.fs.cache.CachingFileIO;
 import org.apache.paimon.fs.cache.LocalCacheManager;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
+import org.apache.paimon.management.PermissionManagement;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -135,6 +136,11 @@ public class RESTCatalog implements Catalog {
     @Override
     public RESTCatalogLoader catalogLoader() {
         return new RESTCatalogLoader(context);
+    }
+
+    public PermissionManagement permissionManagement() {
+        return new RESTPermissionManagement(
+                api, context.options().get(RESTCatalogOptions.MANAGEMENT_CATALOG));
     }
 
     @Override
