@@ -116,7 +116,7 @@ public class Permission {
         FIELD_EXPIRE_TIME
     })
     public Permission(
-            @JsonProperty(FIELD_RESOURCE_TYPE) ResourceType resourceType,
+            @JsonProperty(FIELD_RESOURCE_TYPE) String resourceType,
             @Nullable @JsonProperty(FIELD_CATALOG) String catalog,
             @Nullable @JsonProperty(FIELD_DATABASE) String database,
             @Nullable @JsonProperty(FIELD_TABLE) String table,
@@ -128,6 +128,34 @@ public class Permission {
             @JsonProperty(FIELD_ACCESS) String access,
             @JsonProperty(FIELD_PRINCIPAL) String principal,
             @Nullable @JsonProperty(FIELD_EXPIRE_TIME) String expireTime) {
+        this(
+                ResourceType.fromString(resourceType),
+                catalog,
+                database,
+                table,
+                function,
+                view,
+                columns,
+                rowFilter,
+                columnMasking,
+                access,
+                principal,
+                expireTime);
+    }
+
+    public Permission(
+            ResourceType resourceType,
+            @Nullable String catalog,
+            @Nullable String database,
+            @Nullable String table,
+            @Nullable String function,
+            @Nullable String view,
+            @Nullable ColumnSelection columns,
+            @Nullable RowFilter rowFilter,
+            @Nullable Map<String, ColumnMask> columnMasking,
+            String access,
+            String principal,
+            @Nullable String expireTime) {
         this.resourceType = resourceType;
         this.catalog = catalog;
         this.database = database;

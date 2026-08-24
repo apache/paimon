@@ -18,6 +18,10 @@
 
 package org.apache.paimon.management;
 
+import javax.annotation.Nullable;
+
+import java.util.Locale;
+
 /** Resource types supported by permission management. */
 public enum ResourceType {
     CATALOG,
@@ -29,5 +33,10 @@ public enum ResourceType {
     FUNCTION,
     COLUMN,
     ROW_FILTER,
-    COLUMN_MASKING
+    COLUMN_MASKING;
+
+    @Nullable
+    public static ResourceType fromString(@Nullable String value) {
+        return value == null ? null : valueOf(value.toUpperCase(Locale.ROOT));
+    }
 }

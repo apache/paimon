@@ -20,6 +20,8 @@ package org.apache.paimon.management;
 
 import javax.annotation.Nullable;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /** Resource filters and pagination for listing explicitly granted permissions. */
 public class ListPermissionsRequest {
 
@@ -41,6 +43,9 @@ public class ListPermissionsRequest {
             @Nullable String principal,
             @Nullable String pageToken,
             @Nullable Integer maxResults) {
+        checkArgument(
+                !isBlank(database) || (isBlank(table) && isBlank(function) && isBlank(view)),
+                "database is required when table, function, or view is specified.");
         this.resourceType = resourceType;
         this.database = database;
         this.table = table;
@@ -88,5 +93,9 @@ public class ListPermissionsRequest {
     @Nullable
     public Integer getMaxResults() {
         return maxResults;
+    }
+
+    private static boolean isBlank(@Nullable String value) {
+        return value == null || value.trim().isEmpty();
     }
 }

@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** JSON compatibility tests for the permission management contract. */
 public class PermissionManagementJsonTest {
@@ -47,6 +48,62 @@ public class PermissionManagementJsonTest {
 
         assertPermission(shaded);
         assertPermission(external);
+    }
+
+    @Test
+    void testPermissionDeserializesLowerCaseResourceType() throws Exception {
+        String lowerCaseJson = PERMISSION_JSON.replace("\"COLUMN\"", "\"column\"");
+
+        Permission shaded = RESTApi.fromJson(lowerCaseJson, Permission.class);
+        Permission external =
+                new com.fasterxml.jackson.databind.ObjectMapper()
+                        .readValue(lowerCaseJson, Permission.class);
+
+        assertPermission(shaded);
+        assertPermission(external);
+    }
+
+    @Test
+    void testListObjectFiltersRequireDatabase() {
+        assertThatThrownBy(
+                        () ->
+                                new ListPermissionsRequest(
+                                        ResourceType.TABLE,
+                                        null,
+                                        "orders",
+                                        null,
+                                        null,
+                                        null,
+                                        null,
+                                        null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("database is required");
+        assertThatThrownBy(
+                        () ->
+                                new ListPermissionsRequest(
+                                        ResourceType.FUNCTION,
+                                        null,
+                                        null,
+                                        "calculate_tax",
+                                        null,
+                                        null,
+                                        null,
+                                        null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("database is required");
+        assertThatThrownBy(
+                        () ->
+                                new ListPermissionsRequest(
+                                        ResourceType.VIEW,
+                                        null,
+                                        null,
+                                        null,
+                                        "daily_orders",
+                                        null,
+                                        null,
+                                        null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("database is required");
     }
 
     @Test
