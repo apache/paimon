@@ -284,12 +284,21 @@ Search-time options are passed with each vector search request:
 | Option | Default | Description |
 |---|---|---|
 | `ivf.nprobe` | Automatic | Explicit number of IVF clusters to probe. When omitted, paimon-vindex derives the width from the index, `top_k`, and filter selectivity. |
+| `ivf.max_initial_filter_expansion_factor` | Disabled | Positive integer limiting filter-driven expansion of the initial automatic IVF probe width. A factor of `1` disables initial filter expansion. Progressive retries may still probe more clusters when fewer than `top_k` filtered results are found. |
 | `ivf.refine_factor` | Disabled | Retrieves `top_k * refine_factor` IVF candidates and reranks them with the original vectors stored in the Paimon table. It is most useful for compressed indexes such as `ivf-pq`, `ivf-sq`, and `ivf-rq` when recall is more important than latency. |
+| `ivf_pq.batch_table_reuse` | `auto` | IVF-PQ batch search distance-table reuse mode: `auto`, `on`, or `off`. Other index types and scalar searches ignore it. |
+| `ivf_pq.batch_table_reuse.max_bytes` | 512 MiB | Positive long integer limiting the memory used by IVF-PQ batch distance-table reuse. Search falls back to direct table construction when the reusable tables exceed the budget. |
 | `diskann.l_search` | Automatic | paimon-vindex DiskANN graph candidate width. The automatic value uses calibration when available, otherwise `max(100, 2 * top_k)`. |
 
 Use the same distance metric at build time and query time. Search options can be passed per query,
 so you can use a larger `ivf.nprobe` or `diskann.l_search` for higher recall queries and a smaller
 value for latency-sensitive queries. Do not set both in one query.
+
+`ivf.max_initial_filter_expansion_factor` applies only to automatic IVF search and cannot be combined
+with `ivf.nprobe` or `diskann.l_search`. Lower factors reduce initial filtered-search work but may
+reduce Recall@K compared with uncapped automatic search. Progressive expansion occurs only when
+fewer than `top_k` valid results are returned; if the capped initial search already fills `top_k`,
+probing stops.
 
 `ivf.refine_factor` can also be configured with `refine_factor`, `rerank_factor`, and hyphenated
 spellings such as `ivf.refine-factor`. Setting `ivf.refine_factor=1` still performs the raw-vector
