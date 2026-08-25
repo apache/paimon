@@ -21,6 +21,8 @@ package org.apache.paimon.rest;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.fs.BatchDeleteResult;
+import org.apache.paimon.fs.BatchFileDeleter;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -47,7 +49,9 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
@@ -143,6 +147,33 @@ public class RESTTokenFileIO implements FileIO {
     @Override
     public boolean exists(Path path) throws IOException {
         return fileIO().exists(path);
+    }
+
+    @Override
+    public Optional<BatchFileDeleter> batchFileDeleter(Path path) throws IOException {
+        Optional<BatchFileDeleter> capability = fileIO().batchFileDeleter(path);
+        if (!capability.isPresent()) {
+            return Optional.empty();
+        }
+
+        int maxBatchSize = capability.get().maxBatchSize();
+        return Optional.of(
+                new BatchFileDeleter() {
+                    @Override
+                    public int maxBatchSize() {
+                        return maxBatchSize;
+                    }
+
+                    @Override
+                    public BatchDeleteResult delete(List<Path> files) throws IOException {
+                        Optional<BatchFileDeleter> current = fileIO().batchFileDeleter(path);
+                        if (!current.isPresent()) {
+                            throw new IOException(
+                                    "Batch delete capability is unavailable after refreshing credentials.");
+                        }
+                        return current.get().delete(files);
+                    }
+                });
     }
 
     @Override
