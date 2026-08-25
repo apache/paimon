@@ -376,6 +376,45 @@ class CatalogManagedPartitionAnalyzeTest extends PaimonSparkTestWithRestCatalogB
     }
   }
 
+  test("a zero row count does not make a partition that still has files look free to read") {
+    val tableName = "analyze_zero_row_count_size"
+    withTable(tableName) {
+      createTable(tableName)
+      sql(
+        s"INSERT INTO ${qualified(tableName)} VALUES " +
+          s"(1, 'a', '20260101', '00'), (2, 'b', '20260101', '00')")
+
+      // Positive control: a real measurement gives both a row count and a size.
+      val measured = getFormatTableScan(s"SELECT * FROM ${qualified(tableName)}").estimateStatistics
+      assert(measured.numRows().getAsLong == 2L)
+      assert(measured.sizeInBytes().getAsLong > 0L)
+
+      // Rewrite the statistics to zero without touching the files, the way a catalog that cannot
+      // tell "never measured" from "measured, and empty" answers.
+      val spec = Map("dt" -> "20260101", "hour" -> "00").asJava
+      paimonCatalog.createPartitions(
+        Identifier.create(dbName0, tableName),
+        List(spec).asJava,
+        true,
+        List(
+          new PartitionStatistics(
+            spec,
+            0L,
+            0L,
+            0L,
+            0L,
+            PartitionStatistics.UNKNOWN_TOTAL_BUCKETS)).asJava,
+        true
+      )
+
+      val zeroed = getFormatTableScan(s"SELECT * FROM ${qualified(tableName)}").estimateStatistics
+      // Neither number may say the scan is free: the size drives broadcast, the row count drives
+      // join reordering.
+      assert(!zeroed.numRows().isPresent, zeroed.numRows().toString)
+      assert(zeroed.sizeInBytes().getAsLong > 0L, zeroed.sizeInBytes().toString)
+    }
+  }
+
   test("partition row count is not duplicated across format data splits") {
     val tableName = "analyze_multi_split_statistics"
     withTable(tableName) {

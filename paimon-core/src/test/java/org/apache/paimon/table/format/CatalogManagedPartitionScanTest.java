@@ -37,6 +37,7 @@ import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.PartitionPathUtils;
 
 import org.junit.jupiter.api.DisplayName;
@@ -204,6 +205,31 @@ class CatalogManagedPartitionScanTest {
         assertThat(plan.splits()).hasSize(2);
         assertThat(plan.rowCount()).isEqualTo(OptionalLong.of(5L));
         verify(catalog).listPartitionsPaged(IDENTIFIER, 1000, null, null);
+    }
+
+    @Test
+    void testPlanRowCountStaysUnknownWhenCatalogReportsNoStatistics() throws Exception {
+        // Partitions as they come off the wire from a catalog that stores no statistics. Summing
+        // them as zeros would tell Spark the table is empty and get a huge scan broadcast.
+        Catalog catalog = mock(Catalog.class);
+        Partition october =
+                JsonSerdeUtil.fromJson(
+                        "{\"spec\":{\"year\":\"2025\",\"month\":\"10\"}}", Partition.class);
+        Partition november =
+                JsonSerdeUtil.fromJson(
+                        "{\"spec\":{\"year\":\"2025\",\"month\":\"11\"}}", Partition.class);
+        when(catalog.listPartitionsPaged(eq(IDENTIFIER), eq(1000), isNull(), isNull()))
+                .thenReturn(new PagedList<>(Arrays.asList(october, november), null));
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        writeDataFile(fileIO, tablePath, "year=2025/month=10");
+        writeDataFile(fileIO, tablePath, "year=2025/month=11");
+        FormatTable table = createTable(fileIO, tablePath, partitionManager(catalog), false);
+
+        FormatTableScan.Plan plan = new FormatTableScan(table, null, null).plan();
+
+        assertThat(plan.splits()).hasSize(2);
+        assertThat(plan.rowCount()).isEqualTo(OptionalLong.empty());
     }
 
     @Test
