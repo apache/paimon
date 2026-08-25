@@ -75,21 +75,9 @@ public class SubstringTransform implements Transform {
             return null;
         }
 
-        int sourceLength = sourceString.numChars();
-        int beginIndex = readPosition(inputs.get(1), row);
-        if (beginIndex > sourceLength) {
-            return BinaryString.EMPTY_UTF8;
-        }
-
-        int endIndex = sourceLength;
-        if (hasLength) {
-            endIndex = beginIndex + readPosition(inputs.get(2), row) - 1;
-        }
-        endIndex = Math.min(endIndex, sourceLength);
-        beginIndex--;
-        checkArgument(beginIndex < endIndex);
-
-        return sourceString.substring(beginIndex, endIndex);
+        int pos = readPosition(inputs.get(1), row);
+        int length = hasLength ? readPosition(inputs.get(2), row) : Integer.MAX_VALUE;
+        return sourceString.substringSQL(pos, length);
     }
 
     private static boolean isNullPosition(Object position, InternalRow row) {

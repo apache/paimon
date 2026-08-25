@@ -152,6 +152,24 @@ public class BinaryStringTest {
     }
 
     @TestTemplate
+    public void substringSQL() {
+        BinaryString s = fromString("abcdef");
+        assertThat(s.substringSQL(0, 2)).isEqualTo(fromString("ab"));
+        assertThat(s.substringSQL(1, 2)).isEqualTo(fromString("ab"));
+        assertThat(s.substringSQL(-2, 2)).isEqualTo(fromString("ef"));
+        assertThat(s.substringSQL(-9, 2)).isEqualTo(EMPTY_UTF8);
+        assertThat(s.substringSQL(-9, 5)).isEqualTo(fromString("ab"));
+        assertThat(s.substringSQL(-9, Integer.MAX_VALUE)).isEqualTo(fromString("abcdef"));
+        assertThat(s.substringSQL(Integer.MIN_VALUE, Integer.MIN_VALUE)).isEqualTo(EMPTY_UTF8);
+        assertThat(s.substringSQL(2, 0)).isEqualTo(EMPTY_UTF8);
+        assertThat(s.substringSQL(9, 2)).isEqualTo(EMPTY_UTF8);
+        assertThat(s.substringSQL(1, Integer.MAX_VALUE)).isEqualTo(fromString("abcdef"));
+        assertThat(s.substringSQL(-2, Integer.MAX_VALUE)).isEqualTo(fromString("ef"));
+
+        assertThat(fromString("\uD83D\uDE00abc").substringSQL(2, 2)).isEqualTo(fromString("ab"));
+    }
+
+    @TestTemplate
     public void compareTo() {
         assertThat(fromString("   ").compareTo(blankString(3))).isEqualTo(0);
         assertThat(fromString("").compareTo(fromString("a"))).isLessThan(0);
