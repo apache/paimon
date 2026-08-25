@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.format;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
@@ -38,6 +39,7 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.TableCommit;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PartitionPathUtils;
+import org.apache.paimon.utils.ThreadPoolUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -55,6 +57,12 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.concurrent.CompletionService;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorCompletionService;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.table.format.FormatBatchWriteBuilder.validateStaticPartition;
@@ -63,6 +71,12 @@ import static org.apache.paimon.table.format.FormatBatchWriteBuilder.validateSta
 public class FormatTableCommit implements BatchTableCommit {
 
     private static final Logger LOG = LoggerFactory.getLogger(FormatTableCommit.class);
+
+    private static final int MAX_CLEANUP_THREAD_NUM = 64;
+
+    private static final ExecutorService CLEANUP_EXECUTOR =
+            ThreadPoolUtils.createCachedThreadPool(
+                    MAX_CLEANUP_THREAD_NUM, "FORMAT-TABLE-COMMIT-CLEANUP-THREAD-POOL");
 
     private String location;
     private final boolean formatTablePartitionOnlyValueInPath;
@@ -75,6 +89,8 @@ public class FormatTableCommit implements BatchTableCommit {
     private Identifier tableIdentifier;
     @Nullable private final FormatTablePartitionManager partitionManager;
     private final boolean dynamicPartitionOverwrite;
+    private final int cleanupThreadNum;
+    private final ExecutorService cleanupExecutor;
 
     public FormatTableCommit(
             String location,
@@ -89,6 +105,75 @@ public class FormatTableCommit implements BatchTableCommit {
             CatalogContext catalogContext,
             @Nullable FormatTablePartitionManager partitionManager,
             boolean dynamicPartitionOverwrite) {
+        this(
+                location,
+                partitionKeys,
+                fileIO,
+                formatTablePartitionOnlyValueInPath,
+                defaultPartName,
+                overwrite,
+                tableIdentifier,
+                staticPartitions,
+                syncHiveUri,
+                catalogContext,
+                partitionManager,
+                dynamicPartitionOverwrite,
+                1,
+                CLEANUP_EXECUTOR);
+    }
+
+    FormatTableCommit(
+            String location,
+            List<String> partitionKeys,
+            FileIO fileIO,
+            boolean formatTablePartitionOnlyValueInPath,
+            String defaultPartName,
+            boolean overwrite,
+            Identifier tableIdentifier,
+            @Nullable Map<String, String> staticPartitions,
+            @Nullable String syncHiveUri,
+            CatalogContext catalogContext,
+            @Nullable FormatTablePartitionManager partitionManager,
+            boolean dynamicPartitionOverwrite,
+            int cleanupThreadNum) {
+        this(
+                location,
+                partitionKeys,
+                fileIO,
+                formatTablePartitionOnlyValueInPath,
+                defaultPartName,
+                overwrite,
+                tableIdentifier,
+                staticPartitions,
+                syncHiveUri,
+                catalogContext,
+                partitionManager,
+                dynamicPartitionOverwrite,
+                cleanupThreadNum,
+                CLEANUP_EXECUTOR);
+    }
+
+    FormatTableCommit(
+            String location,
+            List<String> partitionKeys,
+            FileIO fileIO,
+            boolean formatTablePartitionOnlyValueInPath,
+            String defaultPartName,
+            boolean overwrite,
+            Identifier tableIdentifier,
+            @Nullable Map<String, String> staticPartitions,
+            @Nullable String syncHiveUri,
+            CatalogContext catalogContext,
+            @Nullable FormatTablePartitionManager partitionManager,
+            boolean dynamicPartitionOverwrite,
+            int cleanupThreadNum,
+            ExecutorService cleanupExecutor) {
+        if (cleanupThreadNum < 1 || cleanupThreadNum > MAX_CLEANUP_THREAD_NUM) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Format Table cleanup thread number must be between 1 and %s, but was %s.",
+                            MAX_CLEANUP_THREAD_NUM, cleanupThreadNum));
+        }
         this.location = location;
         this.fileIO = fileIO;
         this.formatTablePartitionOnlyValueInPath = formatTablePartitionOnlyValueInPath;
@@ -100,6 +185,8 @@ public class FormatTableCommit implements BatchTableCommit {
         this.tableIdentifier = tableIdentifier;
         this.partitionManager = partitionManager;
         this.dynamicPartitionOverwrite = dynamicPartitionOverwrite;
+        this.cleanupThreadNum = cleanupThreadNum;
+        this.cleanupExecutor = cleanupExecutor;
         if (syncHiveUri != null) {
             try {
                 Options options = new Options();
@@ -151,32 +238,31 @@ public class FormatTableCommit implements BatchTableCommit {
                     // A static partition may name only the leading keys, in which case the path
                     // is a prefix and the partition directories of the remaining keys sit below.
                     clearedPartitionPaths.addAll(
-                            deletePreviousDataFile(
-                                    partitionPath, partitionKeys.size() - staticPartitions.size()));
+                            deletePreviousDataFiles(
+                                    Collections.singletonList(partitionPath),
+                                    partitionKeys.size() - staticPartitions.size(),
+                                    cleanupThreadNum));
                 }
                 if (!fileIO.exists(partitionPath)) {
                     fileIO.mkdirs(partitionPath);
                 }
             } else if (overwrite) {
                 if (replacesOnlyWrittenPartitions()) {
-                    Set<Path> partitionPaths = new HashSet<>();
+                    Set<Path> partitionPaths = new LinkedHashSet<>();
                     for (TwoPhaseCommitMessage message : messages) {
                         partitionPaths.add(message.getCommitter().targetPath().getParent());
                     }
-                    for (Path p : partitionPaths) {
-                        // The parent of a written file is a complete partition directory - the
-                        // table directory itself when the table is unpartitioned - so there is no
-                        // partition level below it to descend, and it is a partition this commit
-                        // writes anyway.
-                        deletePreviousDataFile(p, 0);
-                    }
+                    // The parent of a written file is a complete partition directory - the table
+                    // directory itself when the table is unpartitioned - so there is no partition
+                    // level below it to descend. Collect every selected directory before deleting
+                    // so many small partitions can share the same cleanup concurrency window.
+                    deletePreviousDataFiles(new ArrayList<>(partitionPaths), 0, cleanupThreadNum);
                 } else {
                     // Overwriting without naming a partition replaces the table, so what has to go
                     // is everything the table holds rather than the files this commit happens to
                     // write: a statement whose query returns nothing still empties the table.
-                    for (Path dataDirectory : tableDataDirectories()) {
-                        clearedPartitionPaths.addAll(deletePreviousDataFile(dataDirectory, 0));
-                    }
+                    clearedPartitionPaths.addAll(
+                            deletePreviousDataFiles(tableDataDirectories(), 0, cleanupThreadNum));
                 }
             }
 
@@ -244,9 +330,26 @@ public class FormatTableCommit implements BatchTableCommit {
                 }
             }
 
-        } catch (Exception e) {
-            this.abort(commitMessages);
-            throw new RuntimeException(e);
+        } catch (Throwable failure) {
+            // Cleanup restores the caller's interrupt before failing. Clear it only while aborting
+            // staging output, then restore it; an abort failure is secondary to the commit failure
+            // that made abort necessary.
+            boolean interrupted = Thread.interrupted();
+            try {
+                this.abort(commitMessages);
+            } catch (Throwable abortFailure) {
+                if (failure != abortFailure) {
+                    failure.addSuppressed(abortFailure);
+                }
+            } finally {
+                if (interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            if (failure instanceof Error) {
+                throw (Error) failure;
+            }
+            throw new RuntimeException(failure);
         }
     }
 
@@ -506,40 +609,316 @@ public class FormatTableCommit implements BatchTableCommit {
      */
     private Set<Path> deletePreviousDataFile(Path partitionPath, int partitionLevels)
             throws IOException {
+        return deletePreviousDataFiles(
+                Collections.singletonList(partitionPath), partitionLevels, 1);
+    }
+
+    private Set<Path> deletePreviousDataFiles(
+            List<Path> partitionPaths, int partitionLevels, int threadNum) throws IOException {
+        PreviousDataFiles dataFiles = new PreviousDataFiles(partitionPaths, partitionLevels);
         Set<Path> clearedPartitionPaths = new HashSet<>();
-        if (fileIO.exists(partitionPath)) {
-            // Committed data files only: what sits under a staging directory is another writer's
-            // uncommitted output, whatever its name looks like.
-            for (FileStatus file :
-                    FormatTableScan.listDataFiles(
-                            fileIO,
-                            partitionPath,
-                            partitionLevels,
-                            formatTablePartitionOnlyValueInPath,
-                            defaultPartName)) {
-                boolean deleted;
-                try {
-                    deleted = fileIO.delete(file.getPath(), false);
-                } catch (FileNotFoundException ignore) {
-                    continue;
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
-                }
-                if (deleted) {
-                    // Only what this commit removed: a file another writer deleted first would
-                    // have every concurrent writer report the whole subtree.
+        if (threadNum == 1) {
+            FileStatus file;
+            while ((file = dataFiles.next()) != null) {
+                if (deleteDataFile(file)) {
                     clearedPartitionPaths.add(file.getPath().getParent());
-                } else if (fileIO.exists(file.getPath())) {
-                    // A refusal is not that race: the file is still readable, and going on would
-                    // report the partition as holding nothing while its rows are still there.
-                    throw new IOException(
-                            String.format(
-                                    "Failed to delete data file %s of table %s.",
-                                    file.getPath(), tableIdentifier.getFullName()));
+                }
+            }
+        } else {
+            clearedPartitionPaths.addAll(deleteDataFilesConcurrently(dataFiles, threadNum));
+        }
+        return clearedPartitionPaths;
+    }
+
+    /** Deletes one listed data file and reports whether this commit removed it. */
+    private boolean deleteDataFile(FileStatus file) throws IOException {
+        boolean deleted;
+        try {
+            deleted = fileIO.delete(file.getPath(), false);
+        } catch (FileNotFoundException ignore) {
+            return false;
+        }
+        if (deleted) {
+            return true;
+        }
+        if (fileIO.exists(file.getPath())) {
+            // A refusal is not a concurrent-delete race: the file is still readable, and going on
+            // would report the partition as holding nothing while its rows are still there.
+            throw new IOException(
+                    String.format(
+                            "Failed to delete data file %s of table %s.",
+                            file.getPath(), tableIdentifier.getFullName()));
+        }
+        return false;
+    }
+
+    /**
+     * Keeps at most {@code threadNum} deletes in flight. A listing or deletion failure stops new
+     * submissions and drains accepted work; file failures are then reported in discovery order. An
+     * interrupted caller is restored only after the drain completes.
+     */
+    private Set<Path> deleteDataFilesConcurrently(PreviousDataFiles dataFiles, int threadNum)
+            throws IOException {
+        CompletionService<CleanupResult> completions =
+                new ExecutorCompletionService<>(cleanupExecutor);
+        CleanupSubmissionState submissionState = new CleanupSubmissionState();
+        Set<Path> clearedPartitionPaths = new HashSet<>();
+        Map<Integer, Throwable> fileFailures = new TreeMap<>();
+        List<Throwable> coordinatorFailures = new ArrayList<>();
+        ClassLoader contextClassLoader = Thread.currentThread().getContextClassLoader();
+        InterruptedException interruption = null;
+        boolean exhausted = false;
+        int nextIndex = 0;
+        int inFlight = 0;
+
+        while ((!submissionState.isStopped() && !exhausted) || inFlight > 0) {
+            while (!submissionState.isStopped() && !exhausted && inFlight < threadNum) {
+                FileStatus file;
+                try {
+                    file = dataFiles.next();
+                } catch (Throwable failure) {
+                    submissionState.stop();
+                    coordinatorFailures.add(failure);
+                    break;
+                }
+                if (file == null) {
+                    exhausted = true;
+                    break;
+                }
+
+                int index = nextIndex;
+                try {
+                    boolean submitted =
+                            submissionState.submitIfRunning(
+                                    () ->
+                                            completions.submit(
+                                                    () ->
+                                                            cleanupDataFile(
+                                                                    index,
+                                                                    file,
+                                                                    contextClassLoader,
+                                                                    submissionState)));
+                    if (!submitted) {
+                        break;
+                    }
+                    nextIndex++;
+                    inFlight++;
+                } catch (Throwable failure) {
+                    submissionState.stop();
+                    coordinatorFailures.add(failure);
+                }
+            }
+
+            if (inFlight == 0) {
+                break;
+            }
+
+            Future<CleanupResult> completed = null;
+            while (completed == null) {
+                try {
+                    completed = completions.take();
+                } catch (InterruptedException e) {
+                    submissionState.stop();
+                    if (interruption == null) {
+                        interruption = e;
+                    } else {
+                        interruption.addSuppressed(e);
+                    }
+                }
+            }
+            inFlight--;
+
+            CleanupResult result = null;
+            while (result == null) {
+                try {
+                    result = completed.get();
+                } catch (InterruptedException e) {
+                    submissionState.stop();
+                    if (interruption == null) {
+                        interruption = e;
+                    } else {
+                        interruption.addSuppressed(e);
+                    }
+                } catch (ExecutionException e) {
+                    submissionState.stop();
+                    coordinatorFailures.add(e.getCause() == null ? e : e.getCause());
+                    break;
+                }
+            }
+            if (result != null) {
+                if (result.failure != null) {
+                    submissionState.stop();
+                    fileFailures.put(result.index, result.failure);
+                } else if (result.clearedPath != null) {
+                    clearedPartitionPaths.add(result.clearedPath);
                 }
             }
         }
+
+        Throwable primary = aggregateFailures(fileFailures.values());
+        for (Throwable failure : coordinatorFailures) {
+            if (primary == null) {
+                primary = failure;
+            } else if (primary != failure) {
+                primary.addSuppressed(failure);
+            }
+        }
+        if (interruption != null) {
+            if (primary == null) {
+                primary = interruption;
+            } else {
+                primary.addSuppressed(interruption);
+            }
+            Thread.currentThread().interrupt();
+        }
+        if (primary != null) {
+            rethrowCleanupFailure(primary);
+        }
         return clearedPartitionPaths;
+    }
+
+    private CleanupResult cleanupDataFile(
+            int index,
+            FileStatus file,
+            ClassLoader contextClassLoader,
+            CleanupSubmissionState submissionState) {
+        Thread currentThread = Thread.currentThread();
+        ClassLoader originalClassLoader = null;
+        boolean originalClassLoaderCaptured = false;
+        Path clearedPath = null;
+        Throwable failure = null;
+        try {
+            originalClassLoader = currentThread.getContextClassLoader();
+            originalClassLoaderCaptured = true;
+            currentThread.setContextClassLoader(contextClassLoader);
+            if (deleteDataFile(file)) {
+                clearedPath = file.getPath().getParent();
+            }
+        } catch (Throwable cleanupFailure) {
+            failure = cleanupFailure;
+            submissionState.stop();
+        } finally {
+            if (originalClassLoaderCaptured) {
+                try {
+                    currentThread.setContextClassLoader(originalClassLoader);
+                } catch (Throwable restoreFailure) {
+                    if (failure == null) {
+                        failure = restoreFailure;
+                    } else if (failure != restoreFailure) {
+                        failure.addSuppressed(restoreFailure);
+                    }
+                    submissionState.stop();
+                }
+            }
+        }
+        return new CleanupResult(index, clearedPath, failure);
+    }
+
+    private static void rethrowCleanupFailure(Throwable failure) throws IOException {
+        if (failure instanceof IOException) {
+            throw (IOException) failure;
+        }
+        if (failure instanceof RuntimeException) {
+            throw (RuntimeException) failure;
+        }
+        if (failure instanceof Error) {
+            throw (Error) failure;
+        }
+        throw new IOException("Interrupted while cleaning old Format Table data files.", failure);
+    }
+
+    @Nullable
+    private static Throwable aggregateFailures(Iterable<Throwable> failures) {
+        Throwable primary = null;
+        for (Throwable failure : failures) {
+            if (failure == null) {
+                continue;
+            }
+            if (primary == null) {
+                primary = failure;
+            } else if (primary != failure) {
+                primary.addSuppressed(failure);
+            }
+        }
+        return primary;
+    }
+
+    private final class PreviousDataFiles {
+
+        private final List<Path> partitionPaths;
+        private final int partitionLevels;
+        private List<FileStatus> currentFiles = Collections.emptyList();
+        private int nextPartition;
+        private int nextFile;
+
+        private PreviousDataFiles(List<Path> partitionPaths, int partitionLevels) {
+            this.partitionPaths = partitionPaths;
+            this.partitionLevels = partitionLevels;
+        }
+
+        @Nullable
+        private FileStatus next() throws IOException {
+            while (nextFile >= currentFiles.size()) {
+                if (nextPartition >= partitionPaths.size()) {
+                    return null;
+                }
+                Path partitionPath = partitionPaths.get(nextPartition++);
+                if (!fileIO.exists(partitionPath)) {
+                    continue;
+                }
+                // Committed data files only: what sits under a staging directory is another
+                // writer's uncommitted output, whatever its name looks like.
+                currentFiles =
+                        FormatTableScan.listDataFiles(
+                                fileIO,
+                                partitionPath,
+                                partitionLevels,
+                                formatTablePartitionOnlyValueInPath,
+                                defaultPartName);
+                nextFile = 0;
+            }
+            return currentFiles.get(nextFile++);
+        }
+    }
+
+    @VisibleForTesting
+    static final class CleanupSubmissionState {
+
+        private volatile boolean stopped;
+
+        synchronized boolean submitIfRunning(Runnable submission) {
+            if (stopped) {
+                return false;
+            }
+            submission.run();
+            return true;
+        }
+
+        void stop() {
+            // Publish before acquiring the monitor so another submitIfRunning call observes the
+            // stop, even if it enters the monitor before this call does.
+            stopped = true;
+            synchronized (this) {
+                // Wait for any accepted submission to leave the monitor.
+            }
+        }
+
+        boolean isStopped() {
+            return stopped;
+        }
+    }
+
+    private static final class CleanupResult {
+
+        private final int index;
+        @Nullable private final Path clearedPath;
+        @Nullable private final Throwable failure;
+
+        private CleanupResult(int index, @Nullable Path clearedPath, @Nullable Throwable failure) {
+            this.index = index;
+            this.clearedPath = clearedPath;
+            this.failure = failure;
+        }
     }
 
     @Override

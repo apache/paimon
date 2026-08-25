@@ -747,6 +747,12 @@ under the License.
             <td>Format table commit hive sync uri.</td>
         </tr>
         <tr>
+            <td><h5>format-table.commit.cleanup-thread-num</h5></td>
+            <td style="word-wrap: break-word;">64</td>
+            <td>Integer</td>
+            <td>The maximum number of concurrent old-data file deletions during overwrite commits for an internal Format Table with catalog-managed partitions. Supported values are 1 through 64. Other Format Tables use serial cleanup.</td>
+        </tr>
+        <tr>
             <td><h5>format-table.file.compression</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>

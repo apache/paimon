@@ -2654,6 +2654,16 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("Format table commit hive sync uri.");
 
+    public static final ConfigOption<Integer> FORMAT_TABLE_COMMIT_CLEANUP_THREAD_NUM =
+            key("format-table.commit.cleanup-thread-num")
+                    .intType()
+                    .defaultValue(64)
+                    .withDescription(
+                            "The maximum number of concurrent old-data file deletions during "
+                                    + "overwrite commits for an internal Format Table with "
+                                    + "catalog-managed partitions. Supported values are 1 through "
+                                    + "64. Other Format Tables use serial cleanup.");
+
     @Immutable
     public static final ConfigOption<String> BLOB_FIELD =
             key("blob-field")
@@ -3300,6 +3310,16 @@ public class CoreOptions implements Serializable {
 
     public String formatTableCommitSyncPartitionHiveUri() {
         return options.get(FORMAT_TABLE_COMMIT_HIVE_SYNC_URI);
+    }
+
+    public int formatTableCommitCleanupThreadNum() {
+        int threadNum = options.get(FORMAT_TABLE_COMMIT_CLEANUP_THREAD_NUM);
+        checkArgument(
+                threadNum >= 1 && threadNum <= 64,
+                "Option %s must be between 1 and 64, but was %s.",
+                FORMAT_TABLE_COMMIT_CLEANUP_THREAD_NUM.key(),
+                threadNum);
+        return threadNum;
     }
 
     public MemorySize fileReaderAsyncThreshold() {
