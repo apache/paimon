@@ -139,6 +139,10 @@ class DedicatedFormatWriter(DataWriter):
         # columns, which their own writers own.
         self._normal_buffer = WriteBuffer(self._merge_normal_data)
         self._committed_files_to_delete_on_abort: List[DataFileMeta] = []
+        # A normal data file that landed while a later phase of the same flush
+        # failed. Held so the retry resumes at that phase instead of writing the
+        # rows a second time.
+        self._pending_normal_meta: Optional[DataFileMeta] = None
 
         # Initialize blob writers for each blob-file column.
         from pypaimon.write.writer.blob_writer import BlobWriter
@@ -202,6 +206,9 @@ class DedicatedFormatWriter(DataWriter):
         return self._merge_normal_data(existing_data, new_data)
 
     def write(self, data: pa.RecordBatch):
+        # Outside the try on purpose: rejecting the write must not abort the
+        # writer, or the unfinished flush would lose its chance to be retried.
+        self._require_finished_flush()
         try:
             offset = 0
             # _write_batch keeps normal/blob/vector pending rows in lockstep
@@ -250,6 +257,7 @@ class DedicatedFormatWriter(DataWriter):
             self._close_current_writers()
 
     def write_row(self, row):
+        self._require_finished_flush()
         try:
             values_by_name = row_to_named_values(
                 row, self.table.table_schema.fields)
@@ -347,6 +355,9 @@ class DedicatedFormatWriter(DataWriter):
             blob_writer.abort()
         if self.vector_writer is not None:
             self.vector_writer.abort()
+        # An unpublished normal file is already in the delete list, added when it
+        # landed, so there is nothing left to resume.
+        self._pending_normal_meta = None
         self._delete_committed_files(self._committed_files_to_delete_on_abort)
         self._normal_buffer.reset()
         self._buffer.reset()
@@ -487,17 +498,26 @@ class DedicatedFormatWriter(DataWriter):
 
     def _close_current_writers(self):
         """Close normal, blob, and vector writers; add metadata in order: normal, blob, vector."""
-        # Cleared at the end, once the normal file and every blob/vector sidecar
-        # have landed: a failure in any phase has to leave the normal rows
-        # buffered, or a retry would commit sidecar-only metadata.
-        normal_data = self._normal_buffer.materialize()
-        normal_meta = None
-        if normal_data is not None and normal_data.num_rows > 0:
-            normal_meta = self._write_normal_data_to_file(normal_data)
-            self.committed_files.append(normal_meta)
-            self._committed_files_to_delete_on_abort.append(normal_meta)
+        # A flush spans the normal file and every blob/vector sidecar, and the
+        # sidecar writers drain their own buffers as they go, so their half cannot
+        # be replayed from scratch. Two rules make a retry resume rather than
+        # restart: the normal rows stay buffered until their file lands, and once
+        # it has landed the file is remembered instead of the rows. Nothing
+        # reaches ``committed_files`` until every phase has succeeded, so a retry
+        # never finds a half-published flush.
+        normal_meta = self._pending_normal_meta
+        if normal_meta is None:
+            normal_data = self._normal_buffer.materialize()
+            if normal_data is not None and normal_data.num_rows > 0:
+                normal_meta = self._write_normal_data_to_file(normal_data)
+                self._pending_normal_meta = normal_meta
+                # Tracked for abort right away: until the flush publishes it, this
+                # file is in no other list.
+                self._committed_files_to_delete_on_abort.append(normal_meta)
+            self._normal_buffer.reset()
 
         blob_metas = []
+        deletable_blob_metas = []
         for blob_column in self.blob_file_column_names:
             blob_writer = self.blob_writers[blob_column]
             writer_metas = blob_writer.prepare_commit()
@@ -505,20 +525,30 @@ class DedicatedFormatWriter(DataWriter):
                 self._validate_consistency(normal_meta, writer_metas, blob_column)
             blob_metas.extend(writer_metas)
             if blob_writer.delete_file_upon_abort():
-                self._committed_files_to_delete_on_abort.extend(writer_metas)
-            blob_writer.committed_files.clear()
-        self.committed_files.extend(blob_metas)
+                deletable_blob_metas.extend(writer_metas)
 
         vector_metas = []
         if self.vector_writer is not None:
             vector_metas = self.vector_writer.prepare_commit()
             if vector_metas and normal_meta is not None:
                 self._validate_consistency(normal_meta, vector_metas, 'vector')
-            self.committed_files.extend(vector_metas)
-            self._committed_files_to_delete_on_abort.extend(vector_metas)
+
+        # Every phase landed; publish in order: normal, blob, vector.
+        if normal_meta is not None:
+            self.committed_files.append(normal_meta)
+        self.committed_files.extend(blob_metas)
+        self.committed_files.extend(vector_metas)
+        self._committed_files_to_delete_on_abort.extend(deletable_blob_metas)
+        self._committed_files_to_delete_on_abort.extend(vector_metas)
+        # The sub-writers' metas are cleared only now: before the flush completes,
+        # a retry has to be able to harvest the same ones again, and an abort has
+        # to find them so each sub-writer can apply its own delete policy.
+        for blob_column in self.blob_file_column_names:
+            self.blob_writers[blob_column].committed_files.clear()
+        if self.vector_writer is not None:
             self.vector_writer.committed_files.clear()
 
-        self._normal_buffer.reset()
+        self._pending_normal_meta = None
         self.record_count = 0
 
         if normal_meta is not None or blob_metas or vector_metas:

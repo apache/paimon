@@ -33,6 +33,7 @@ import pyarrow as pa
 
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 from pypaimon.write.writer.data_vector_writer import DataVectorWriter
+from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
 from pypaimon.write.writer.write_buffer import WriteBuffer
 
 _SCHEMA = pa.schema([
@@ -475,6 +476,254 @@ class FlushFailureTest(unittest.TestCase):
         writer._close_current_writers()
         self.assertEqual([t.num_rows for t in writer.written], [3])
         self.assertEqual(writer._normal_buffer.num_rows, 0)
+
+
+class _StubMeta:
+    """The handful of ``DataFileMeta`` fields the flush and abort paths read."""
+
+    def __init__(self, row_count: int, file_name: str):
+        self.row_count = row_count
+        self.file_name = file_name
+        self.file_path = '/warehouse/%s' % file_name
+        self.external_path = None
+        self.extra_files = []
+
+
+class _RecordingFileIO:
+    def __init__(self):
+        self.deleted = []
+
+    def delete_quietly(self, path):
+        self.deleted.append(path)
+
+
+class _StubSidecarWriter:
+    """A blob/vector writer that fails its first ``prepare_commit``.
+
+    Models the real ones in the way that matters here: a failure produces no
+    metadata, and because the sub-writer drains its own buffer as it writes, a
+    later call returns whatever has landed so far -- so the parent must be able
+    to harvest the same metas twice without double-counting them.
+    """
+
+    def __init__(self, row_count: int, file_name: str, fail_times: int = 0,
+                 delete_on_abort: bool = True):
+        self.committed_files = []
+        self.pending_row_count = 0
+        self.prepare_commit_calls = 0
+        self.aborted = False
+        self._row_count = row_count
+        self._file_name = file_name
+        self._fail_times = fail_times
+        self._delete_on_abort = delete_on_abort
+
+    def prepare_commit(self):
+        self.prepare_commit_calls += 1
+        if self._fail_times > 0:
+            self._fail_times -= 1
+            raise IOError('transient sidecar failure')
+        if not self.committed_files:
+            self.committed_files.append(
+                _StubMeta(self._row_count, self._file_name))
+        return self.committed_files.copy()
+
+    def delete_file_upon_abort(self):
+        return self._delete_on_abort
+
+    def abort(self):
+        self.aborted = True
+        self.committed_files.clear()
+
+
+class CompositeFlushResumeTest(unittest.TestCase):
+    """A composite flush publishes all of its files or none of them.
+
+    One flush writes the normal data file and then the blob/vector sidecars. The
+    sidecar writers drain their own buffers as they go, so a failure part way
+    through cannot be rolled back -- deleting the sidecars that already landed
+    would lose rows nothing can replay. So the flush resumes instead: the normal
+    rows stay buffered until their file lands, the landed file is remembered so
+    the retry skips it, and no metadata is published until every phase is done.
+
+    Publishing the normal meta before the sidecars ran, as the code used to,
+    left the retry writing a second copy of rows the first meta already covered
+    -- and ``_validate_consistency`` then checked the sidecars against that
+    second copy only.
+    """
+
+    class _VectorHarness(DataVectorWriter):
+        def __init__(self, vector_writer, fail_normal_times: int = 0):
+            self.target_file_size = _NO_LIMIT
+            self.target_file_row_num = _NO_LIMIT
+            self.record_count = 0
+            self.vector_writer = vector_writer
+            self.normal_column_names = ['id', 'name']
+            self.vector_write_columns = []
+            self._normal_buffer = WriteBuffer(self._merge_data)
+            self._buffer = WriteBuffer(self._merge_data)
+            self.committed_files = []
+            self.committed_changelog_files = []
+            self.file_io = _RecordingFileIO()
+            self.written = []
+            self._fail_normal_times = fail_normal_times
+
+        def _write_normal_data_to_file(self, data: pa.Table):
+            if self._fail_normal_times > 0:
+                self._fail_normal_times -= 1
+                raise IOError('transient storage failure')
+            self.written.append(data)
+            return _StubMeta(data.num_rows, 'data-%d' % len(self.written))
+
+    class _DedicatedHarness(DedicatedFormatWriter):
+        def __init__(self, blob_writers, vector_writer=None):
+            self.target_file_size = _NO_LIMIT
+            self.target_file_row_num = _NO_LIMIT
+            self.record_count = 0
+            self.blob_writers = blob_writers
+            self.blob_file_column_names = list(blob_writers)
+            self.vector_writer = vector_writer
+            self._normal_buffer = WriteBuffer(self._merge_normal_data)
+            self._buffer = WriteBuffer(self._merge_normal_data)
+            self.committed_files = []
+            self._committed_files_to_delete_on_abort = []
+            self.file_io = _RecordingFileIO()
+            self.written = []
+
+        def _write_normal_data_to_file(self, data: pa.Table):
+            self.written.append(data)
+            return _StubMeta(data.num_rows, 'data-%d' % len(self.written))
+
+    def test_failed_sidecar_publishes_nothing_and_the_retry_resumes(self):
+        vector = _StubSidecarWriter(3, 'vector-0', fail_times=1)
+        writer = self._VectorHarness(vector)
+        writer._normal_buffer.append(_table(0, 3))
+
+        with self.assertRaises(IOError):
+            writer._close_current_writers()
+        # The normal file landed, so the rows are no longer buffered -- but
+        # nothing is committed and the file is remembered for the retry.
+        self.assertEqual([t.num_rows for t in writer.written], [3])
+        self.assertEqual(writer.committed_files, [])
+        self.assertEqual(writer._normal_buffer.num_rows, 0)
+        self.assertIsNotNone(writer._pending_normal_meta)
+
+        writer._close_current_writers()
+        # Still one normal file: the retry resumed at the sidecar phase rather
+        # than writing the same 3 rows again.
+        self.assertEqual([t.num_rows for t in writer.written], [3])
+        self.assertEqual([m.file_name for m in writer.committed_files],
+                         ['data-1', 'vector-0'])
+        self.assertIsNone(writer._pending_normal_meta)
+        # Harvested once the flush completed, and cleared only then.
+        self.assertEqual(vector.committed_files, [])
+
+    def test_successful_flush_publishes_normal_then_sidecars(self):
+        vector = _StubSidecarWriter(3, 'vector-0')
+        writer = self._VectorHarness(vector)
+        writer._normal_buffer.append(_table(0, 3))
+        writer._close_current_writers()
+        self.assertEqual([m.file_name for m in writer.committed_files],
+                         ['data-1', 'vector-0'])
+        self.assertEqual(vector.committed_files, [])
+        self.assertIsNone(writer._pending_normal_meta)
+        self.assertEqual(writer.record_count, 0)
+
+    def test_failed_normal_write_keeps_the_rows_and_publishes_nothing(self):
+        # The other half of the same rule: the sidecars are never reached, so
+        # the rows have to stay where a retry can find them.
+        vector = _StubSidecarWriter(3, 'vector-0')
+        writer = self._VectorHarness(vector, fail_normal_times=1)
+        writer._normal_buffer.append(_table(0, 3))
+        with self.assertRaises(IOError):
+            writer._close_current_writers()
+        self.assertEqual(writer._normal_buffer.num_rows, 3)
+        self.assertEqual(writer.committed_files, [])
+        self.assertIsNone(writer._pending_normal_meta)
+        self.assertEqual(vector.prepare_commit_calls, 0)
+
+        writer._close_current_writers()
+        self.assertEqual([t.num_rows for t in writer.written], [3])
+        self.assertEqual([m.file_name for m in writer.committed_files],
+                         ['data-1', 'vector-0'])
+
+    def test_write_is_rejected_while_a_flush_is_unfinished(self):
+        # Rows appended between a failed flush and its retry would belong to no
+        # file: the resumed flush skips the normal write, while the sidecar
+        # writer would drain them -- breaking the row-count check.
+        vector = _StubSidecarWriter(3, 'vector-0', fail_times=1)
+        writer = self._VectorHarness(vector)
+        writer._normal_buffer.append(_table(0, 3))
+        with self.assertRaises(IOError):
+            writer._close_current_writers()
+
+        with self.assertRaises(RuntimeError) as caught:
+            writer.write(_batch(3, 1))
+        self.assertIn('Cannot write', str(caught.exception))
+        # Rejecting does not abort, so the flush is still resumable.
+        self.assertIsNotNone(writer._pending_normal_meta)
+        writer._close_current_writers()
+        self.assertEqual([t.num_rows for t in writer.written], [3])
+
+    def test_abort_deletes_the_unpublished_normal_file(self):
+        # It is in no committed list, so abort has to know about it separately
+        # or it leaks a data file no snapshot references.
+        vector = _StubSidecarWriter(3, 'vector-0', fail_times=1)
+        writer = self._VectorHarness(vector)
+        writer._normal_buffer.append(_table(0, 3))
+        with self.assertRaises(IOError):
+            writer._close_current_writers()
+
+        writer.abort()
+        self.assertEqual(writer.file_io.deleted, ['/warehouse/data-1'])
+        self.assertIsNone(writer._pending_normal_meta)
+        self.assertTrue(vector.aborted)
+
+    def test_dedicated_writer_failed_blob_phase_publishes_nothing(self):
+        blob = _StubSidecarWriter(3, 'blob-0', fail_times=1)
+        writer = self._DedicatedHarness({'payload': blob})
+        writer._normal_buffer.append(_table(0, 3))
+
+        with self.assertRaises(IOError):
+            writer._close_current_writers()
+        self.assertEqual([t.num_rows for t in writer.written], [3])
+        self.assertEqual(writer.committed_files, [])
+        # Already tracked for abort, since no committed list holds it yet.
+        self.assertEqual(
+            [m.file_name for m in writer._committed_files_to_delete_on_abort],
+            ['data-1'])
+
+        writer._close_current_writers()
+        self.assertEqual([t.num_rows for t in writer.written], [3])
+        self.assertEqual([m.file_name for m in writer.committed_files],
+                         ['data-1', 'blob-0'])
+        self.assertEqual(blob.committed_files, [])
+        self.assertIsNone(writer._pending_normal_meta)
+
+    def test_dedicated_writer_keeps_the_documented_meta_order(self):
+        blob = _StubSidecarWriter(3, 'blob-0')
+        vector = _StubSidecarWriter(3, 'vector-0')
+        writer = self._DedicatedHarness({'payload': blob}, vector)
+        writer._normal_buffer.append(_table(0, 3))
+        writer._close_current_writers()
+        self.assertEqual([m.file_name for m in writer.committed_files],
+                         ['data-1', 'blob-0', 'vector-0'])
+        self.assertEqual(
+            [m.file_name for m in writer._committed_files_to_delete_on_abort],
+            ['data-1', 'blob-0', 'vector-0'])
+
+    def test_dedicated_writer_respects_the_blob_delete_policy(self):
+        # Externally managed blob files are not the writer's to delete, so they
+        # must stay out of the abort list even now that it is filled at publish
+        # time rather than as each sidecar lands.
+        blob = _StubSidecarWriter(3, 'blob-0', delete_on_abort=False)
+        writer = self._DedicatedHarness({'payload': blob})
+        writer._normal_buffer.append(_table(0, 3))
+        writer._close_current_writers()
+        self.assertEqual([m.file_name for m in writer.committed_files],
+                         ['data-1', 'blob-0'])
+        self.assertEqual(
+            [m.file_name for m in writer._committed_files_to_delete_on_abort],
+            ['data-1'])
 
 
 class VectorNormalBufferTest(unittest.TestCase):
