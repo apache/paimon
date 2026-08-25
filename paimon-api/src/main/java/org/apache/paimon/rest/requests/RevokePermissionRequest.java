@@ -21,15 +21,12 @@ package org.apache.paimon.rest.requests;
 import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.management.PermissionIdentity;
 import org.apache.paimon.management.PermissionResource;
-import org.apache.paimon.management.PermissionScope;
 import org.apache.paimon.rest.RESTRequest;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
-
-import javax.annotation.Nullable;
 
 import java.beans.ConstructorProperties;
 
@@ -39,7 +36,6 @@ import java.beans.ConstructorProperties;
 public class RevokePermissionRequest implements RESTRequest {
 
     private static final String FIELD_RESOURCE = "resource";
-    private static final String FIELD_SCOPE = "scope";
     private static final String FIELD_ACCESS = "access";
     private static final String FIELD_PRINCIPAL = "principal";
 
@@ -50,28 +46,17 @@ public class RevokePermissionRequest implements RESTRequest {
     }
 
     @JsonCreator
-    @ConstructorProperties({FIELD_RESOURCE, FIELD_SCOPE, FIELD_ACCESS, FIELD_PRINCIPAL})
+    @ConstructorProperties({FIELD_RESOURCE, FIELD_ACCESS, FIELD_PRINCIPAL})
     public RevokePermissionRequest(
             @JsonProperty(FIELD_RESOURCE) PermissionResource resource,
-            @Nullable @JsonProperty(FIELD_SCOPE) String scope,
             @JsonProperty(FIELD_ACCESS) String access,
             @JsonProperty(FIELD_PRINCIPAL) String principal) {
-        this.identity =
-                new PermissionIdentity(
-                        resource,
-                        scope == null ? PermissionScope.SELF : PermissionScope.fromString(scope),
-                        access,
-                        principal);
+        this.identity = new PermissionIdentity(resource, access, principal);
     }
 
     @JsonGetter(FIELD_RESOURCE)
     public PermissionResource getResource() {
         return identity.getResource();
-    }
-
-    @JsonGetter(FIELD_SCOPE)
-    public PermissionScope getScope() {
-        return identity.getScope();
     }
 
     @JsonGetter(FIELD_ACCESS)

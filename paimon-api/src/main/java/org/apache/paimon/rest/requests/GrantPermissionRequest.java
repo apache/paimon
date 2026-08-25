@@ -21,7 +21,6 @@ package org.apache.paimon.rest.requests;
 import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.management.PermissionAssignment;
 import org.apache.paimon.management.PermissionResource;
-import org.apache.paimon.management.PermissionScope;
 import org.apache.paimon.rest.RESTRequest;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -34,15 +33,12 @@ import javax.annotation.Nullable;
 
 import java.beans.ConstructorProperties;
 
-import static org.apache.paimon.utils.Preconditions.checkArgument;
-
 /** Request for granting or replacing a permission assignment. */
 @Experimental
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class GrantPermissionRequest implements RESTRequest {
 
     private static final String FIELD_RESOURCE = "resource";
-    private static final String FIELD_SCOPE = "scope";
     private static final String FIELD_ACCESS = "access";
     private static final String FIELD_PRINCIPAL = "principal";
     private static final String FIELD_EXPIRE_TIME = "expireTime";
@@ -50,34 +46,17 @@ public class GrantPermissionRequest implements RESTRequest {
     private final PermissionAssignment assignment;
 
     public GrantPermissionRequest(PermissionAssignment assignment) {
-        checkArgument(
-                assignment.getInheritedFrom() == null,
-                "An inherited permission view cannot be granted directly.");
         this.assignment = assignment;
     }
 
     @JsonCreator
-    @ConstructorProperties({
-        FIELD_RESOURCE,
-        FIELD_SCOPE,
-        FIELD_ACCESS,
-        FIELD_PRINCIPAL,
-        FIELD_EXPIRE_TIME
-    })
+    @ConstructorProperties({FIELD_RESOURCE, FIELD_ACCESS, FIELD_PRINCIPAL, FIELD_EXPIRE_TIME})
     public GrantPermissionRequest(
             @JsonProperty(FIELD_RESOURCE) PermissionResource resource,
-            @Nullable @JsonProperty(FIELD_SCOPE) String scope,
             @JsonProperty(FIELD_ACCESS) String access,
             @JsonProperty(FIELD_PRINCIPAL) String principal,
             @Nullable @JsonProperty(FIELD_EXPIRE_TIME) String expireTime) {
-        this.assignment =
-                new PermissionAssignment(
-                        resource,
-                        scope == null ? PermissionScope.SELF : PermissionScope.fromString(scope),
-                        access,
-                        principal,
-                        expireTime,
-                        null);
+        this.assignment = new PermissionAssignment(resource, access, principal, expireTime);
     }
 
     public PermissionAssignment assignment() {
@@ -87,11 +66,6 @@ public class GrantPermissionRequest implements RESTRequest {
     @JsonGetter(FIELD_RESOURCE)
     public PermissionResource getResource() {
         return assignment.getResource();
-    }
-
-    @JsonGetter(FIELD_SCOPE)
-    public PermissionScope getScope() {
-        return assignment.getScope();
     }
 
     @JsonGetter(FIELD_ACCESS)

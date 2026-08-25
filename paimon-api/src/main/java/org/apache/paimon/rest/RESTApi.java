@@ -851,18 +851,12 @@ public class RESTApi {
     public ListPermissionsResponse listPermissions(ListPermissionsRequest request) {
         Map<String, String> queryParams = Maps.newHashMap();
         putQueryParameter(queryParams, "resourceType", request.getResourceType().name());
-        if (request.getScope() != null) {
-            putQueryParameter(queryParams, "scope", request.getScope().name());
-        }
         putQueryParameter(queryParams, "database", request.getDatabase());
         putQueryParameter(queryParams, "table", request.getTable());
         putQueryParameter(queryParams, "function", request.getFunction());
         putQueryParameter(queryParams, "view", request.getView());
         putQueryParameter(queryParams, "principal", request.getPrincipal());
         putQueryParameter(queryParams, "access", request.getAccess());
-        if (request.includeInherited()) {
-            queryParams.put("includeInherited", "true");
-        }
         if (request.getMaxResults() != null) {
             queryParams.put(MAX_RESULTS, request.getMaxResults().toString());
         }

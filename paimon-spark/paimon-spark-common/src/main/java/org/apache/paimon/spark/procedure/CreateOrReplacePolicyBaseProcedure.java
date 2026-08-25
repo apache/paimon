@@ -39,9 +39,9 @@ abstract class CreateOrReplacePolicyBaseProcedure extends BasePolicyProcedure {
                 ProcedureParameter.required("table", StringType),
                 ProcedureParameter.required("policy_type", StringType),
                 ProcedureParameter.required("principal", StringType),
-                ProcedureParameter.required("function_name", StringType),
+                ProcedureParameter.optional("predicate_json", StringType),
                 ProcedureParameter.optional("on_column", StringType),
-                ProcedureParameter.optional("function_arguments", functionArgumentArrayType())
+                ProcedureParameter.optional("transform_json", StringType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -72,9 +72,9 @@ abstract class CreateOrReplacePolicyBaseProcedure extends BasePolicyProcedure {
                         args.getString(1),
                         enumValue(args.getString(2), PolicyType.class, PARAMETERS[2].name()),
                         args.getString(3),
-                        args.getString(4),
+                        args.isNullAt(4) ? null : args.getString(4),
                         args.isNullAt(5) ? null : args.getString(5),
-                        args.isNullAt(6) ? null : args.getArray(6));
+                        args.isNullAt(6) ? null : args.getString(6));
         writePolicy(policy);
         return new InternalRow[] {newInternalRow(true)};
     }

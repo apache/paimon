@@ -53,6 +53,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.partition.PartitionUtils;
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.rest.auth.AuthProvider;
@@ -177,7 +178,6 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.function.BiFunction;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -226,10 +226,6 @@ public class RESTCatalogServer {
     private final TableLifecycleLocks tableLifecycleLocks = new TableLifecycleLocks();
     private final Set<String> managementPrincipals = new HashSet<>();
     private final Set<String> queryPrincipals = new HashSet<>();
-    private final Map<String, BiFunction<TableSchema, RowFilter, Predicate>>
-            rowFilterPolicyFunctions = new HashMap<>();
-    private final Map<String, BiFunction<TableSchema, ColumnMask, Transform>>
-            columnMaskPolicyFunctions = new HashMap<>();
     private final Set<PermissionResource> noManagementPermissionResources =
             ConcurrentHashMap.newKeySet();
 
@@ -385,24 +381,6 @@ public class RESTCatalogServer {
     public void setQueryPrincipals(Set<String> principals) {
         queryPrincipals.clear();
         queryPrincipals.addAll(principals);
-    }
-
-    public void registerRowFilterPolicyFunction(String name, Predicate predicate) {
-        rowFilterPolicyFunctions.put(name, (schema, rowFilter) -> predicate);
-    }
-
-    public void registerColumnMaskPolicyFunction(String name, Transform transform) {
-        columnMaskPolicyFunctions.put(name, (schema, columnMask) -> transform);
-    }
-
-    public void registerRowFilterPolicyCompiler(
-            String name, BiFunction<TableSchema, RowFilter, Predicate> compiler) {
-        rowFilterPolicyFunctions.put(name, compiler);
-    }
-
-    public void registerColumnMaskPolicyCompiler(
-            String name, BiFunction<TableSchema, ColumnMask, Transform> compiler) {
-        columnMaskPolicyFunctions.put(name, compiler);
     }
 
     public void denyManagementPermission(PermissionResource resource) {
@@ -1077,6 +1055,17 @@ public class RESTCatalogServer {
         if (metadata == null) {
             throw new Catalog.TableNotExistException(identifier);
         }
+        synchronized (policyLock(metadata.uuid())) {
+            TableMetadata current = tableMetadataStore.get(identifier.getFullName());
+            if (current == null || !current.uuid().equals(metadata.uuid())) {
+                throw new Catalog.TableNotExistException(identifier);
+            }
+            return authTable(identifier, requestBody, current);
+        }
+    }
+
+    private MockResponse authTable(
+            Identifier identifier, AuthTableQueryRequest requestBody, TableMetadata metadata) {
         List<String> columnAuth = columnAuthHandler.get(identifier.getFullName());
         if (columnAuth != null) {
             List<String> select = requestBody.select();
@@ -1108,7 +1097,7 @@ public class RESTCatalogServer {
             if (rowFilter != null) {
                 Predicate predicate;
                 try {
-                    predicate = compileRowFilter(metadata.schema(), rowFilter);
+                    predicate = parseRowFilter(metadata.schema(), rowFilter);
                 } catch (RuntimeException e) {
                     throw new Catalog.TableNoPermissionException(identifier);
                 }
@@ -1121,7 +1110,7 @@ public class RESTCatalogServer {
             ColumnMask columnMask = policy.getColumnMask();
             Transform transform;
             try {
-                transform = compileColumnMask(metadata.schema(), columnMask);
+                transform = parseColumnMask(metadata.schema(), columnMask);
             } catch (RuntimeException e) {
                 throw new Catalog.TableNoPermissionException(identifier);
             }
@@ -3295,7 +3284,6 @@ public class RESTCatalogServer {
             String method, String resourcePath, String data, Map<String, String> parameters)
             throws JsonProcessingException {
         if ("GET".equals(method) && permissionUri.equals(resourcePath)) {
-            boolean includeInherited = Boolean.parseBoolean(parameters.get("includeInherited"));
             PermissionResource target = permissionResource(parameters);
             MockResponse authorization = validateManagementPermission(target);
             if (authorization != null) {
@@ -3305,8 +3293,7 @@ public class RESTCatalogServer {
             if (validation != null) {
                 return validation;
             }
-            List<PermissionAssignment> filtered =
-                    permissionStore.list(target, parameters, includeInherited);
+            List<PermissionAssignment> filtered = permissionStore.list(target, parameters);
             int start =
                     parameters.containsKey(PAGE_TOKEN)
                             ? Integer.parseInt(parameters.get(PAGE_TOKEN))
@@ -3541,6 +3528,7 @@ public class RESTCatalogServer {
                 if (validation != null) {
                     return validation;
                 }
+                policy = canonicalizePolicy(policy);
                 PolicyKey key = new PolicyKey(tableUuid, policy);
                 if (policyStore.putIfAbsent(key, policy) != null) {
                     return mockResponse(
@@ -3566,6 +3554,7 @@ public class RESTCatalogServer {
                 if (validation != null) {
                     return validation;
                 }
+                policy = canonicalizePolicy(policy);
                 policyStore.put(new PolicyKey(tableUuid, policy), policy);
             }
             return new MockResponse().setResponseCode(200);
@@ -3618,53 +3607,29 @@ public class RESTCatalogServer {
         }
 
         RowFilter rowFilter = policy.getRowFilter();
-        String functionName =
-                rowFilter == null
-                        ? policy.getColumnMask().getFunctionName()
-                        : rowFilter.getFunctionName();
-        boolean functionExists =
-                rowFilter == null
-                        ? columnMaskPolicyFunctions.containsKey(functionName)
-                        : rowFilterPolicyFunctions.containsKey(functionName);
-        if (!functionExists) {
+        try {
+            Set<String> columns = new HashSet<>(metadata.schema().fieldNames());
+            ColumnMask columnMask = policy.getColumnMask();
+            if (columnMask != null) {
+                checkArgument(
+                        columns.contains(columnMask.getOnColumn()),
+                        "Policy column %s does not exist in table %s.",
+                        columnMask.getOnColumn(),
+                        identifier.getFullName());
+            }
+            if (rowFilter == null) {
+                parseColumnMask(metadata.schema(), columnMask);
+            } else {
+                parseRowFilter(metadata.schema(), rowFilter);
+            }
+        } catch (RuntimeException e) {
             return mockResponse(
                     new ErrorResponse(
-                            ErrorResponse.RESOURCE_TYPE_FUNCTION,
-                            functionName,
-                            "Policy function does not exist.",
-                            404),
-                    404);
-        }
-
-        Set<String> columns = new HashSet<>(metadata.schema().fieldNames());
-        ColumnMask columnMask = policy.getColumnMask();
-        if (columnMask != null) {
-            checkArgument(
-                    columns.contains(columnMask.getOnColumn()),
-                    "Policy column %s does not exist in table %s.",
-                    columnMask.getOnColumn(),
-                    identifier.getFullName());
-        }
-        (rowFilter == null ? columnMask.getFunctionArguments() : rowFilter.getFunctionArguments())
-                .stream()
-                        .filter(argument -> argument.getColumn() != null)
-                        .forEach(
-                                argument ->
-                                        checkArgument(
-                                                columns.contains(argument.getColumn()),
-                                                "Policy argument column %s does not exist in table %s.",
-                                                argument.getColumn(),
-                                                identifier.getFullName()));
-        if (rowFilter == null) {
-            checkArgument(
-                    compileColumnMask(metadata.schema(), columnMask) != null,
-                    "Policy function %s returned no column transform.",
-                    functionName);
-        } else {
-            checkArgument(
-                    compileRowFilter(metadata.schema(), rowFilter) != null,
-                    "Policy function %s returned no row predicate.",
-                    functionName);
+                            ErrorResponse.RESOURCE_TYPE_POLICY,
+                            PolicyIdentity.fromPolicy(policy).resourceName(),
+                            e.getMessage(),
+                            400),
+                    400);
         }
         return null;
     }
@@ -3704,16 +3669,65 @@ public class RESTCatalogServer {
                 : DataPolicy.rowFilter(resource, policy.getRowFilter(), policy.getPrincipal());
     }
 
-    private Predicate compileRowFilter(TableSchema schema, RowFilter rowFilter) {
-        BiFunction<TableSchema, RowFilter, Predicate> compiler =
-                rowFilterPolicyFunctions.get(rowFilter.getFunctionName());
-        return compiler == null ? null : compiler.apply(schema, rowFilter);
+    private DataPolicy canonicalizePolicy(DataPolicy policy) {
+        Identifier identifier =
+                Identifier.create(
+                        policy.getResource().getDatabase(), policy.getResource().getTable());
+        TableSchema schema = tableMetadataStore.get(identifier.getFullName()).schema();
+        if (policy.getRowFilter() != null) {
+            String predicate =
+                    JsonSerdeUtil.toFlatJson(parseRowFilter(schema, policy.getRowFilter()));
+            return DataPolicy.rowFilter(
+                    policy.getResource(), new RowFilter(predicate), policy.getPrincipal());
+        }
+        ColumnMask columnMask = policy.getColumnMask();
+        String transform = JsonSerdeUtil.toFlatJson(parseColumnMask(schema, columnMask));
+        return DataPolicy.columnMask(
+                policy.getResource(),
+                new ColumnMask(columnMask.getOnColumn(), transform),
+                policy.getPrincipal());
     }
 
-    private Transform compileColumnMask(TableSchema schema, ColumnMask columnMask) {
-        BiFunction<TableSchema, ColumnMask, Transform> compiler =
-                columnMaskPolicyFunctions.get(columnMask.getFunctionName());
-        return compiler == null ? null : compiler.apply(schema, columnMask);
+    private static Predicate parseRowFilter(TableSchema schema, RowFilter rowFilter) {
+        Predicate predicate = JsonSerdeUtil.fromJson(rowFilter.getPredicate(), Predicate.class);
+        checkArgument(predicate != null, "Row filter predicate cannot be JSON null.");
+        Predicate remapped =
+                TableQueryAuthResult.remapPredicate(predicate, schema.logicalRowType());
+        checkArgument(remapped != null, "Row filter predicate cannot be empty.");
+        return remapped;
+    }
+
+    private static Transform parseColumnMask(TableSchema schema, ColumnMask columnMask) {
+        Transform transform = JsonSerdeUtil.fromJson(columnMask.getTransform(), Transform.class);
+        checkArgument(transform != null, "Column mask transform cannot be JSON null.");
+        RowType rowType = schema.logicalRowType();
+        List<Object> remappedInputs = new ArrayList<>();
+        for (Object input : transform.inputs()) {
+            if (input instanceof FieldRef) {
+                FieldRef ref = (FieldRef) input;
+                int index = rowType.getFieldIndex(ref.name());
+                checkArgument(
+                        index >= 0,
+                        "Column masking refers to field '%s' which is not present in table schema.",
+                        ref.name());
+                remappedInputs.add(new FieldRef(index, ref.name(), rowType.getTypeAt(index)));
+            } else {
+                remappedInputs.add(input);
+            }
+        }
+        Transform remapped = transform.copyWithNewInputs(remappedInputs);
+        int targetIndex = rowType.getFieldIndex(columnMask.getOnColumn());
+        checkArgument(
+                targetIndex >= 0,
+                "Policy column %s does not exist in table schema.",
+                columnMask.getOnColumn());
+        checkArgument(
+                rowType.getTypeAt(targetIndex).equals(remapped.outputType()),
+                "Column mask output type %s does not match target column %s type %s.",
+                remapped.outputType(),
+                columnMask.getOnColumn(),
+                rowType.getTypeAt(targetIndex));
+        return remapped;
     }
 
     private void removePolicies(@Nullable String tableUuid) {
@@ -3750,28 +3764,10 @@ public class RESTCatalogServer {
                         columnMask.getOnColumn(),
                         identifier.getFullName());
             }
-            (policy.getRowFilter() == null
-                            ? columnMask.getFunctionArguments()
-                            : policy.getRowFilter().getFunctionArguments())
-                    .stream()
-                            .filter(argument -> argument.getColumn() != null)
-                            .forEach(
-                                    argument ->
-                                            checkArgument(
-                                                    columns.contains(argument.getColumn()),
-                                                    "Cannot remove or rename policy argument column %s from table %s.",
-                                                    argument.getColumn(),
-                                                    identifier.getFullName()));
             if (policy.getRowFilter() == null) {
-                checkArgument(
-                        compileColumnMask(schema, columnMask) != null,
-                        "Column mask function %s is invalid for the changed schema.",
-                        columnMask.getFunctionName());
+                parseColumnMask(schema, columnMask);
             } else {
-                checkArgument(
-                        compileRowFilter(schema, policy.getRowFilter()) != null,
-                        "Row filter function %s is invalid for the changed schema.",
-                        policy.getRowFilter().getFunctionName());
+                parseRowFilter(schema, policy.getRowFilter());
             }
         }
     }

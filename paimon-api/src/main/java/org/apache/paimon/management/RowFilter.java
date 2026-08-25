@@ -25,58 +25,40 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGet
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-import javax.annotation.Nullable;
-
 import java.beans.ConstructorProperties;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import java.nio.charset.StandardCharsets;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Function and positional arguments for a row-filter policy. */
+/** Serialized Paimon predicate for a row-filter policy. */
 @Experimental
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class RowFilter {
 
-    private static final String FIELD_FUNCTION_NAME = "functionName";
-    private static final String FIELD_FUNCTION_ARGUMENTS = "functionArguments";
+    public static final int MAX_PREDICATE_BYTES = 60 * 1024;
 
-    @JsonProperty(FIELD_FUNCTION_NAME)
-    private final String functionName;
+    private static final String FIELD_PREDICATE = "predicate";
 
-    @JsonProperty(FIELD_FUNCTION_ARGUMENTS)
-    private final List<PolicyArgument> functionArguments;
+    @JsonProperty(FIELD_PREDICATE)
+    private final String predicate;
 
     @JsonCreator
-    @ConstructorProperties({FIELD_FUNCTION_NAME, FIELD_FUNCTION_ARGUMENTS})
-    public RowFilter(
-            @JsonProperty(FIELD_FUNCTION_NAME) String functionName,
-            @Nullable @JsonProperty(FIELD_FUNCTION_ARGUMENTS)
-                    List<PolicyArgument> functionArguments) {
-        checkArgument(!isBlank(functionName), "functionName cannot be empty.");
-        this.functionName = functionName;
-        this.functionArguments = immutable(functionArguments);
+    @ConstructorProperties({FIELD_PREDICATE})
+    public RowFilter(@JsonProperty(FIELD_PREDICATE) String predicate) {
+        checkArgument(!isBlank(predicate), "predicate cannot be empty.");
+        checkArgument(
+                predicate.getBytes(StandardCharsets.UTF_8).length <= MAX_PREDICATE_BYTES,
+                "predicate must not exceed %s UTF-8 bytes.",
+                MAX_PREDICATE_BYTES);
+        this.predicate = predicate;
     }
 
-    @JsonGetter(FIELD_FUNCTION_NAME)
-    public String getFunctionName() {
-        return functionName;
+    @JsonGetter(FIELD_PREDICATE)
+    public String getPredicate() {
+        return predicate;
     }
 
-    @JsonGetter(FIELD_FUNCTION_ARGUMENTS)
-    public List<PolicyArgument> getFunctionArguments() {
-        return functionArguments;
-    }
-
-    private static List<PolicyArgument> immutable(@Nullable List<PolicyArgument> arguments) {
-        List<PolicyArgument> result =
-                arguments == null ? Collections.emptyList() : new ArrayList<>(arguments);
-        checkArgument(!result.contains(null), "functionArguments cannot contain null arguments.");
-        return Collections.unmodifiableList(result);
-    }
-
-    private static boolean isBlank(@Nullable String value) {
+    private static boolean isBlank(String value) {
         return value == null || value.trim().isEmpty();
     }
 }

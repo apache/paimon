@@ -24,7 +24,6 @@ import org.apache.paimon.management.PermissionAssignment;
 import org.apache.paimon.management.PermissionIdentity;
 import org.apache.paimon.management.PermissionManagement;
 import org.apache.paimon.management.PermissionResource;
-import org.apache.paimon.management.PermissionScope;
 import org.apache.paimon.management.PolicyManagement;
 import org.apache.paimon.management.ResourceType;
 import org.apache.paimon.rest.RESTCatalog;
@@ -76,15 +75,12 @@ abstract class BasePermissionProcedure extends BaseProcedure {
             @Nullable String table,
             @Nullable String function,
             @Nullable String view,
-            @Nullable String scope,
             @Nullable String expireTime) {
         return new PermissionAssignment(
                 resource(resourceType, database, table, function, view),
-                scope(scope),
                 access,
                 principal,
-                emptyToNull(expireTime),
-                null);
+                emptyToNull(expireTime));
     }
 
     protected static PermissionIdentity identity(
@@ -94,13 +90,9 @@ abstract class BasePermissionProcedure extends BaseProcedure {
             @Nullable String database,
             @Nullable String table,
             @Nullable String function,
-            @Nullable String view,
-            @Nullable String scope) {
+            @Nullable String view) {
         return new PermissionIdentity(
-                resource(resourceType, database, table, function, view),
-                scope(scope),
-                access,
-                principal);
+                resource(resourceType, database, table, function, view), access, principal);
     }
 
     protected static PermissionResource resource(
@@ -115,12 +107,6 @@ abstract class BasePermissionProcedure extends BaseProcedure {
                 emptyToNull(table),
                 emptyToNull(function),
                 emptyToNull(view));
-    }
-
-    protected static PermissionScope scope(@Nullable String value) {
-        return isBlank(value)
-                ? PermissionScope.SELF
-                : enumValue(value, PermissionScope.class, "scope");
     }
 
     protected static <E extends Enum<E>> E enumValue(

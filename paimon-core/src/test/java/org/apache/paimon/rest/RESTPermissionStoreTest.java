@@ -20,20 +20,18 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.management.PermissionAssignment;
 import org.apache.paimon.management.PermissionResource;
-import org.apache.paimon.management.PermissionScope;
 import org.apache.paimon.management.ResourceType;
 
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests atomic replacement and effective-view filtering in {@link RESTPermissionStore}. */
+/** Tests atomic replacement and exact-resource filtering in {@link RESTPermissionStore}. */
 class RESTPermissionStoreTest {
 
     private static final String ANALYST = "analyst";
@@ -50,49 +48,25 @@ class RESTPermissionStoreTest {
                                 store.put(
                                         new PermissionAssignment(
                                                 table,
-                                                PermissionScope.SELF,
                                                 "SELECT",
                                                 ANALYST,
-                                                Instant.ofEpochSecond(i).toString(),
-                                                null)));
+                                                Instant.ofEpochSecond(i).toString())));
 
-        assertThat(store.list(table, tableParameters(), false)).hasSize(1);
+        assertThat(store.list(table, tableParameters())).hasSize(1);
     }
 
     @Test
-    void testScopeFilterAppliesToInheritedEffectiveView() {
+    void testListReturnsOnlyTheExactTarget() {
         RESTPermissionStore store = new RESTPermissionStore();
         PermissionResource catalog =
                 new PermissionResource(ResourceType.CATALOG, null, null, null, null);
-        store.put(
-                new PermissionAssignment(
-                        catalog, PermissionScope.DESCENDANTS, "SELECT", ANALYST, null, null));
-        Map<String, String> parameters = tableParameters();
-        parameters.put("scope", "SELF");
+        store.put(new PermissionAssignment(catalog, "USE_CATALOG", ANALYST, null));
+        store.put(new PermissionAssignment(tableResource(), "SELECT", ANALYST, null));
 
-        List<PermissionAssignment> assignments = store.list(tableResource(), parameters, true);
-
-        assertThat(assignments).hasSize(1);
-        assertThat(assignments.get(0).getScope()).isEqualTo(PermissionScope.SELF);
-        assertThat(assignments.get(0).getInheritedFrom()).isEqualTo(catalog);
-    }
-
-    @Test
-    void testIncludingInheritedAlsoKeepsDirectDescendantsAssignment() {
-        RESTPermissionStore store = new RESTPermissionStore();
-        PermissionResource catalog =
-                new PermissionResource(ResourceType.CATALOG, null, null, null, null);
-        store.put(
-                new PermissionAssignment(
-                        catalog, PermissionScope.DESCENDANTS, "SELECT", ANALYST, null, null));
-        Map<String, String> parameters = new HashMap<>();
-        parameters.put("resourceType", "CATALOG");
-
-        List<PermissionAssignment> assignments = store.list(catalog, parameters, true);
-
-        assertThat(assignments).hasSize(1);
-        assertThat(assignments.get(0).getScope()).isEqualTo(PermissionScope.DESCENDANTS);
-        assertThat(assignments.get(0).getInheritedFrom()).isNull();
+        assertThat(store.list(tableResource(), tableParameters()))
+                .singleElement()
+                .extracting(PermissionAssignment::getAccess)
+                .isEqualTo("SELECT");
     }
 
     private static PermissionResource tableResource() {

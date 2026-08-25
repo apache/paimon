@@ -377,29 +377,16 @@ function validateManagementOpenApi() {
     contract.requireResponses(operationId, ['409']),
   );
   contract.checkSpec(
-    contract.spec.info.version === '0.4.0' &&
+    contract.spec.info.version === '1.0' &&
       contract.spec.info.description.toLowerCase().includes('experimental'),
-    'The management contract must be versioned 0.4.0 and marked experimental',
+    'The management contract must be versioned 1.0 and marked experimental',
   );
 
-  const assignmentFields = [
-    'resource',
-    'scope',
-    'access',
-    'principal',
-    'expireTime',
-    'inheritedFrom',
-  ];
+  const assignmentFields = ['resource', 'access', 'principal', 'expireTime'];
   contract.requireProperties('PermissionAssignment', assignmentFields);
-  contract.requireRequiredProperties('PermissionAssignment', [
-    'resource',
-    'scope',
-    'access',
-    'principal',
-  ]);
+  contract.requireRequiredProperties('PermissionAssignment', ['resource', 'access', 'principal']);
   const grantProperties = contract.requireProperties('GrantPermissionRequest', [
     'resource',
-    'scope',
     'access',
     'principal',
     'expireTime',
@@ -409,11 +396,7 @@ function validateManagementOpenApi() {
     'access',
     'principal',
   ]);
-  contract.checkSpec(
-    grantProperties.scope.default === 'SELF',
-    'GrantPermissionRequest.scope must default to SELF',
-  );
-  ['inheritedFrom', 'columns', 'policy', 'grantOption'].forEach((field) =>
+  ['columns', 'policy', 'grantOption'].forEach((field) =>
     contract.checkSpec(
       !grantProperties[field],
       `Schema GrantPermissionRequest must omit field: ${field}`,
@@ -421,7 +404,6 @@ function validateManagementOpenApi() {
   );
   const revokeProperties = contract.requireProperties('RevokePermissionRequest', [
     'resource',
-    'scope',
     'access',
     'principal',
   ]);
@@ -430,11 +412,7 @@ function validateManagementOpenApi() {
     'access',
     'principal',
   ]);
-  contract.checkSpec(
-    revokeProperties.scope.default === 'SELF',
-    'RevokePermissionRequest.scope must default to SELF',
-  );
-  ['expireTime', 'inheritedFrom', 'columns', 'policy', 'grantOption'].forEach((field) =>
+  ['expireTime', 'columns', 'policy', 'grantOption'].forEach((field) =>
     contract.checkSpec(
       !revokeProperties[field],
       `Schema RevokePermissionRequest must omit field: ${field}`,
@@ -477,7 +455,6 @@ function validateManagementOpenApi() {
     'PrincipalQuery must reference Principal',
   );
   requireExactEnum(contract, 'ResourceType', ['CATALOG', 'DATABASE', 'TABLE', 'FUNCTION', 'VIEW']);
-  requireExactEnum(contract, 'PermissionScope', ['SELF', 'DESCENDANTS']);
   requireExactEnum(contract, 'PolicyType', ['ROW_FILTER', 'COLUMN_MASKING']);
 
   const accessAlternatives = contract.schema('PermissionAccess').oneOf || [];
@@ -583,16 +560,17 @@ function validateManagementOpenApi() {
   contract.requireSchemaReference('PolicyRequest', 'oneOf', 'ColumnMaskPolicyRequest');
   contract.requireSchemaReference('DataPolicy', 'oneOf', 'RowFilterDataPolicy');
   contract.requireSchemaReference('DataPolicy', 'oneOf', 'ColumnMaskDataPolicy');
-  contract.requireProperties('RowFilter', ['functionName', 'functionArguments']);
-  contract.requireProperties('ColumnMask', ['functionName', 'onColumn', 'functionArguments']);
-  contract.requireRequiredProperties('RowFilter', ['functionName']);
-  contract.requireRequiredProperties('ColumnMask', ['functionName', 'onColumn']);
-  ['RowFilter', 'ColumnMask'].forEach((schemaName) => {
-    const schema = contract.schema(schemaName);
+  const rowFilter = contract.requireProperties('RowFilter', ['predicate']);
+  const columnMask = contract.requireProperties('ColumnMask', ['onColumn', 'transform']);
+  contract.requireRequiredProperties('RowFilter', ['predicate']);
+  contract.requireRequiredProperties('ColumnMask', ['onColumn', 'transform']);
+  [rowFilter.predicate, columnMask.transform].forEach((definition) => {
     contract.checkSpec(
-      !(schema.required || []).includes('functionArguments') &&
-        schema.properties.functionArguments.default.length === 0,
-      `${schemaName}.functionArguments must be optional and default to an empty array`,
+      definition.type === 'string' &&
+        definition.minLength === 1 &&
+        definition['x-maxUtf8Bytes'] === 61440 &&
+        definition.contentMediaType === 'application/json',
+      'Policy definitions must be bounded non-empty JSON strings',
     );
   });
   ['RowFilterPolicyRequest', 'ColumnMaskPolicyRequest'].forEach((schemaName) => {
@@ -602,8 +580,7 @@ function validateManagementOpenApi() {
       `${schemaName}.principal must reference Principal`,
     );
     contract.checkSpec(
-      !properties.scope &&
-        !properties.type &&
+      !properties.type &&
         !properties.resource &&
         !properties.name &&
         !properties.toPrincipals &&
@@ -624,15 +601,6 @@ function validateManagementOpenApi() {
     'principal',
     'column',
   ]);
-  contract.checkSpec(
-    Array.isArray(contract.schema('PolicyArgument').oneOf) &&
-      contract.schema('PolicyArgument').oneOf.length === 2,
-    'PolicyArgument must contain exactly one column or constant',
-  );
-  contract.checkSpec(
-    !contract.schema('ConstantPolicyArgument').properties.constant.minLength,
-    'ConstantPolicyArgument.constant must allow the empty string',
-  );
   const tablePolicyResource = contract.requireProperties('TablePolicyResource', [
     'type',
     'database',
@@ -676,14 +644,12 @@ function validateManagementOpenApi() {
     );
   [
     'ResourceTypeQuery',
-    'ScopeQuery',
     'DatabaseQuery',
     'TableQuery',
     'FunctionQuery',
     'ViewQuery',
     'PrincipalQuery',
     'AccessQuery',
-    'IncludeInherited',
     'PageToken',
     'MaxResults',
   ].forEach((name) =>
@@ -691,6 +657,10 @@ function validateManagementOpenApi() {
       permissionParameters.includes(name),
       `Operation listPermissions is missing query parameter: ${name}`,
     ),
+  );
+  contract.checkSpec(
+    permissionParameters.length === 9,
+    'Operation listPermissions must expose only exact-resource filters and pagination',
   );
   contract.checkSpec(
     contract.spec.components.parameters.ResourceTypeQuery.required === true,
@@ -701,10 +671,6 @@ function validateManagementOpenApi() {
     .parameters.map((parameter) =>
       parameter.$ref ? parameter.$ref.split('/').pop() : parameter.name,
     );
-  contract.checkSpec(
-    !policyParameters.includes('IncludeInherited'),
-    'Table policies must not expose includeInherited',
-  );
   ['PolicyTypeQuery', 'PrincipalQuery', 'PolicyColumnQuery', 'PageToken', 'MaxResults'].forEach(
     (name) =>
       contract.checkSpec(

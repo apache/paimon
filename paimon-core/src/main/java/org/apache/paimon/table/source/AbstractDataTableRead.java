@@ -21,8 +21,10 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateProjectionConverter;
+import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.RowType;
@@ -35,6 +37,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -138,9 +141,21 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
         RowType tableType = schema.logicalRowType();
         RowType readType = this.readType == null ? tableType : this.readType;
         Predicate authPredicate = authResult.extractPredicate();
+        Map<String, Transform> columnMasking = authResult.extractColumnMasking();
         ProjectedRow backRow = null;
+        Set<String> authFields = new HashSet<>();
         if (authPredicate != null) {
-            Set<String> authFields = collectFieldNames(authPredicate);
+            authFields.addAll(collectFieldNames(authPredicate));
+        }
+        for (Map.Entry<String, Transform> mask : columnMasking.entrySet()) {
+            authFields.add(mask.getKey());
+            for (Object input : mask.getValue().inputs()) {
+                if (input instanceof FieldRef) {
+                    authFields.add(((FieldRef) input).name());
+                }
+            }
+        }
+        if (!authFields.isEmpty()) {
             List<String> readFields = readType.getFieldNames();
             List<String> authAddNames = new ArrayList<>();
             Set<String> readFieldSet = new HashSet<>(readFields);
@@ -151,7 +166,7 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
             }
             if (!authAddNames.isEmpty()) {
                 readType = tableType.project(ListUtils.union(readFields, authAddNames));
-                withReadType(readType);
+                applyReadType(readType);
                 backRow = ProjectedRow.from(readType.projectIndexes(readFields));
             }
         }

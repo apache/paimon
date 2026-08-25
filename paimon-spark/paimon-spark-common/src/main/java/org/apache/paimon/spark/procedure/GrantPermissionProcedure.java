@@ -41,7 +41,6 @@ public class GrantPermissionProcedure extends BasePermissionProcedure {
                 ProcedureParameter.optional("table", StringType),
                 ProcedureParameter.optional("function", StringType),
                 ProcedureParameter.optional("view", StringType),
-                ProcedureParameter.optional("scope", StringType),
                 ProcedureParameter.optional("expire_time", StringType)
             };
 
@@ -82,8 +81,7 @@ public class GrantPermissionProcedure extends BasePermissionProcedure {
                         args.isNullAt(4) ? null : args.getString(4),
                         args.isNullAt(5) ? null : args.getString(5),
                         args.isNullAt(6) ? null : args.getString(6),
-                        args.isNullAt(7) ? null : args.getString(7),
-                        args.isNullAt(8) ? null : args.getString(8));
+                        args.isNullAt(7) ? null : args.getString(7));
 
         permissionManagement().grantPermission(assignment);
         return new InternalRow[] {newInternalRow(true)};

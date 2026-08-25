@@ -21,9 +21,7 @@ package org.apache.paimon.spark.procedure;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.management.ListPermissionsRequest;
 import org.apache.paimon.management.PermissionAssignment;
-import org.apache.paimon.management.PermissionScope;
 import org.apache.paimon.management.ResourceType;
-import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
@@ -34,24 +32,21 @@ import org.apache.spark.unsafe.types.UTF8String;
 
 import java.util.List;
 
-import static org.apache.spark.sql.types.DataTypes.BooleanType;
 import static org.apache.spark.sql.types.DataTypes.IntegerType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
-/** Lists direct and optionally resource-inherited permissions on an exact target. */
+/** Lists direct permissions on an exact target. */
 public class ListPermissionsProcedure extends BasePermissionProcedure {
 
     private static final ProcedureParameter[] PARAMETERS =
             new ProcedureParameter[] {
                 ProcedureParameter.required("resource_type", StringType),
-                ProcedureParameter.optional("scope", StringType),
                 ProcedureParameter.optional("database", StringType),
                 ProcedureParameter.optional("table", StringType),
                 ProcedureParameter.optional("function", StringType),
                 ProcedureParameter.optional("view", StringType),
                 ProcedureParameter.optional("principal", StringType),
                 ProcedureParameter.optional("access", StringType),
-                ProcedureParameter.optional("include_inherited", BooleanType),
                 ProcedureParameter.optional("max_results", IntegerType),
                 ProcedureParameter.optional("page_token", StringType)
             };
@@ -60,7 +55,6 @@ public class ListPermissionsProcedure extends BasePermissionProcedure {
             new StructType(
                     new StructField[] {
                         field("resource_type", StringType, false),
-                        field("scope", StringType, false),
                         field("database", StringType, true),
                         field("table", StringType, true),
                         field("function", StringType, true),
@@ -68,7 +62,6 @@ public class ListPermissionsProcedure extends BasePermissionProcedure {
                         field("access", StringType, false),
                         field("principal", StringType, false),
                         field("expire_time", StringType, true),
-                        field("inherited_from_json", StringType, true),
                         field("next_page_token", StringType, true)
                     });
 
@@ -90,22 +83,17 @@ public class ListPermissionsProcedure extends BasePermissionProcedure {
     public InternalRow[] call(InternalRow args) {
         ResourceType resourceType =
                 enumValue(args.getString(0), ResourceType.class, PARAMETERS[0].name());
-        Integer maxResults = args.isNullAt(9) ? null : args.getInt(9);
+        Integer maxResults = args.isNullAt(7) ? null : args.getInt(7);
         ListPermissionsRequest request =
                 new ListPermissionsRequest(
                         resourceType,
-                        optionalEnum(
-                                args.isNullAt(1) ? null : args.getString(1),
-                                PermissionScope.class,
-                                PARAMETERS[1].name()),
+                        args.isNullAt(1) ? null : emptyToNull(args.getString(1)),
                         args.isNullAt(2) ? null : emptyToNull(args.getString(2)),
                         args.isNullAt(3) ? null : emptyToNull(args.getString(3)),
                         args.isNullAt(4) ? null : emptyToNull(args.getString(4)),
                         args.isNullAt(5) ? null : emptyToNull(args.getString(5)),
                         args.isNullAt(6) ? null : emptyToNull(args.getString(6)),
-                        args.isNullAt(7) ? null : emptyToNull(args.getString(7)),
-                        !args.isNullAt(8) && args.getBoolean(8),
-                        args.isNullAt(10) ? null : emptyToNull(args.getString(10)),
+                        args.isNullAt(8) ? null : emptyToNull(args.getString(8)),
                         maxResults);
         PagedList<PermissionAssignment> page = permissionManagement().listPermissions(request);
         List<PermissionAssignment> assignments = page.getElements();
@@ -119,7 +107,6 @@ public class ListPermissionsProcedure extends BasePermissionProcedure {
             rows[i] =
                     newInternalRow(
                             string(assignment.getResource().getType().name()),
-                            string(assignment.getScope().name()),
                             string(assignment.getResource().getDatabase()),
                             string(assignment.getResource().getTable()),
                             string(assignment.getResource().getFunction()),
@@ -127,7 +114,6 @@ public class ListPermissionsProcedure extends BasePermissionProcedure {
                             string(assignment.getAccess()),
                             string(assignment.getPrincipal()),
                             string(assignment.getExpireTime()),
-                            json(assignment.getInheritedFrom()),
                             string(page.getNextPageToken()));
         }
         return rows;
@@ -140,10 +126,6 @@ public class ListPermissionsProcedure extends BasePermissionProcedure {
 
     private static UTF8String string(String value) {
         return value == null ? null : UTF8String.fromString(value);
-    }
-
-    private static UTF8String json(Object value) {
-        return value == null ? null : string(JsonSerdeUtil.toFlatJson(value));
     }
 
     public static ProcedureBuilder builder() {

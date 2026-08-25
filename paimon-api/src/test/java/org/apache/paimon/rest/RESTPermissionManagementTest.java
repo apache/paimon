@@ -24,7 +24,6 @@ import org.apache.paimon.management.PermissionAssignment;
 import org.apache.paimon.management.PermissionIdentity;
 import org.apache.paimon.management.PermissionManagement;
 import org.apache.paimon.management.PermissionResource;
-import org.apache.paimon.management.PermissionScope;
 import org.apache.paimon.management.ResourceType;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
@@ -80,7 +79,7 @@ public class RESTPermissionManagementTest {
                                 200,
                                 "{\"permissions\":[{\"resource\":{\"type\":\"TABLE\","
                                         + "\"database\":\"sales\",\"table\":\"orders\"},"
-                                        + "\"scope\":\"SELF\",\"access\":\"SELECT\","
+                                        + "\"access\":\"SELECT\","
                                         + "\"principal\":\"analyst\"}],"
                                         + "\"nextPageToken\":\"next\"}");
                     } else if ((BASE_PATH + "/grant").equals(path)) {
@@ -122,14 +121,12 @@ public class RESTPermissionManagementTest {
                 management.listPermissions(
                         new ListPermissionsRequest(
                                 ResourceType.TABLE,
-                                PermissionScope.SELF,
                                 "sales",
                                 "orders",
                                 null,
                                 null,
                                 "analyst",
                                 null,
-                                true,
                                 "start",
                                 25));
 
@@ -139,10 +136,8 @@ public class RESTPermissionManagementTest {
         assertThat(queryParameters(listQuery.get()))
                 .containsEntry("principal", "analyst")
                 .containsEntry("resourceType", "TABLE")
-                .containsEntry("scope", "SELF")
                 .containsEntry("database", "sales")
                 .containsEntry("table", "orders")
-                .containsEntry("includeInherited", "true")
                 .containsEntry("maxResults", "25")
                 .containsEntry("pageToken", "start");
         assertThat(authorization.get()).isEqualTo("Bearer secret");
@@ -160,7 +155,6 @@ public class RESTPermissionManagementTest {
         assertThat(grantResource.get("database")).isEqualTo("sales");
         assertThat(grantResource.get("table")).isEqualTo("orders");
         assertThat(grant.get("principal")).isEqualTo("analyst");
-        assertThat(grant.get("scope")).isEqualTo("SELF");
         assertThat(grant.containsKey("columns")).isFalse();
         assertThat(grant.containsKey("policy")).isFalse();
         assertThat(grant.containsKey("grantOption")).isFalse();
@@ -172,7 +166,6 @@ public class RESTPermissionManagementTest {
         assertThat(revokeResource.get("database")).isEqualTo("sales");
         assertThat(revokeResource.get("table")).isEqualTo("orders");
         assertThat(revoke.get("principal")).isEqualTo("analyst");
-        assertThat(revoke.get("scope")).isEqualTo("SELF");
         assertThat(revoke.containsKey("expireTime")).isFalse();
         assertThat(revoke.containsKey("grantOption")).isFalse();
     }
@@ -197,10 +190,8 @@ public class RESTPermissionManagementTest {
     private static PermissionAssignment assignment(String principal) {
         return new PermissionAssignment(
                 new PermissionResource(ResourceType.TABLE, "sales", "orders", null, null),
-                PermissionScope.SELF,
                 "SELECT",
                 principal,
-                null,
                 null);
     }
 

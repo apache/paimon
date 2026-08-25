@@ -39,11 +39,13 @@ public class PolicyKeyTest {
         PolicyKey first =
                 new PolicyKey(
                         "table-id",
-                        DataPolicy.columnMask(resource, new ColumnMask("mask", "c", null), "a:b"));
+                        DataPolicy.columnMask(
+                                resource, new ColumnMask("c", "{\"name\":\"NULL\"}"), "a:b"));
         PolicyKey second =
                 new PolicyKey(
                         "table-id",
-                        DataPolicy.columnMask(resource, new ColumnMask("mask", "b:c", null), "a"));
+                        DataPolicy.columnMask(
+                                resource, new ColumnMask("b:c", "{\"name\":\"NULL\"}"), "a"));
 
         TreeSet<PolicyKey> sorted = new TreeSet<>();
         sorted.add(first);

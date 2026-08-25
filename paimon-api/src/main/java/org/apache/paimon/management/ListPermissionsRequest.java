@@ -32,31 +32,22 @@ public class ListPermissionsRequest {
     public static final int MAX_PAGE_SIZE = 1000;
 
     private final PermissionResource resource;
-    @Nullable private final PermissionScope scope;
     @Nullable private final String principal;
     @Nullable private final String access;
-    private final boolean includeInherited;
     @Nullable private final String pageToken;
     @Nullable private final Integer maxResults;
 
     public ListPermissionsRequest(
             ResourceType resourceType,
-            @Nullable PermissionScope scope,
             @Nullable String database,
             @Nullable String table,
             @Nullable String function,
             @Nullable String view,
             @Nullable String principal,
             @Nullable String access,
-            boolean includeInherited,
             @Nullable String pageToken,
             @Nullable Integer maxResults) {
         this.resource = exactResource(resourceType, database, table, function, view);
-        if (scope == PermissionScope.DESCENDANTS) {
-            checkArgument(
-                    resourceType == ResourceType.CATALOG || resourceType == ResourceType.DATABASE,
-                    "DESCENDANTS scope applies only to CATALOG or DATABASE assignments.");
-        }
         if (!isBlank(principal)) {
             PermissionAssignment.validatePrincipal(principal);
         }
@@ -65,26 +56,14 @@ public class ListPermissionsRequest {
                 maxResults == null || maxResults <= MAX_PAGE_SIZE,
                 "maxResults must be at most %s.",
                 MAX_PAGE_SIZE);
-        this.scope = scope;
         this.principal = isBlank(principal) ? null : principal;
-        this.access =
-                isBlank(access)
-                        ? null
-                        : scope == null
-                                ? PermissionAccess.canonicalize(resource, access)
-                                : PermissionAccess.canonicalize(resource, scope, access);
-        this.includeInherited = includeInherited;
+        this.access = isBlank(access) ? null : PermissionAccess.canonicalize(resource, access);
         this.pageToken = isBlank(pageToken) ? null : pageToken;
         this.maxResults = maxResults;
     }
 
     public ResourceType getResourceType() {
         return resource.getType();
-    }
-
-    @Nullable
-    public PermissionScope getScope() {
-        return scope;
     }
 
     @Nullable
@@ -117,10 +96,6 @@ public class ListPermissionsRequest {
         return access;
     }
 
-    public boolean includeInherited() {
-        return includeInherited;
-    }
-
     @Nullable
     public String getPageToken() {
         return pageToken;
@@ -138,14 +113,12 @@ public class ListPermissionsRequest {
     public ListPermissionsRequest withPageToken(@Nullable String newPageToken) {
         return new ListPermissionsRequest(
                 resource.getType(),
-                scope,
                 resource.getDatabase(),
                 resource.getTable(),
                 resource.getFunction(),
                 resource.getView(),
                 principal,
                 access,
-                includeInherited,
                 newPageToken,
                 maxResults);
     }

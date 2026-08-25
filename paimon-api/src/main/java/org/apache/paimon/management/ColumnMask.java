@@ -25,50 +25,40 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGet
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
-import javax.annotation.Nullable;
-
 import java.beans.ConstructorProperties;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import java.nio.charset.StandardCharsets;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Function, protected column, and positional arguments for a column-mask policy. */
+/** Protected column and serialized Paimon transform for a column-mask policy. */
 @Experimental
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ColumnMask {
 
-    private static final String FIELD_FUNCTION_NAME = "functionName";
-    private static final String FIELD_ON_COLUMN = "onColumn";
-    private static final String FIELD_FUNCTION_ARGUMENTS = "functionArguments";
+    public static final int MAX_TRANSFORM_BYTES = 60 * 1024;
 
-    @JsonProperty(FIELD_FUNCTION_NAME)
-    private final String functionName;
+    private static final String FIELD_ON_COLUMN = "onColumn";
+    private static final String FIELD_TRANSFORM = "transform";
 
     @JsonProperty(FIELD_ON_COLUMN)
     private final String onColumn;
 
-    @JsonProperty(FIELD_FUNCTION_ARGUMENTS)
-    private final List<PolicyArgument> functionArguments;
+    @JsonProperty(FIELD_TRANSFORM)
+    private final String transform;
 
     @JsonCreator
-    @ConstructorProperties({FIELD_FUNCTION_NAME, FIELD_ON_COLUMN, FIELD_FUNCTION_ARGUMENTS})
+    @ConstructorProperties({FIELD_ON_COLUMN, FIELD_TRANSFORM})
     public ColumnMask(
-            @JsonProperty(FIELD_FUNCTION_NAME) String functionName,
             @JsonProperty(FIELD_ON_COLUMN) String onColumn,
-            @Nullable @JsonProperty(FIELD_FUNCTION_ARGUMENTS)
-                    List<PolicyArgument> functionArguments) {
-        checkArgument(!isBlank(functionName), "functionName cannot be empty.");
+            @JsonProperty(FIELD_TRANSFORM) String transform) {
         checkArgument(!isBlank(onColumn), "onColumn cannot be empty.");
-        this.functionName = functionName;
+        checkArgument(!isBlank(transform), "transform cannot be empty.");
+        checkArgument(
+                transform.getBytes(StandardCharsets.UTF_8).length <= MAX_TRANSFORM_BYTES,
+                "transform must not exceed %s UTF-8 bytes.",
+                MAX_TRANSFORM_BYTES);
         this.onColumn = onColumn;
-        this.functionArguments = immutable(functionArguments);
-    }
-
-    @JsonGetter(FIELD_FUNCTION_NAME)
-    public String getFunctionName() {
-        return functionName;
+        this.transform = transform;
     }
 
     @JsonGetter(FIELD_ON_COLUMN)
@@ -76,19 +66,12 @@ public class ColumnMask {
         return onColumn;
     }
 
-    @JsonGetter(FIELD_FUNCTION_ARGUMENTS)
-    public List<PolicyArgument> getFunctionArguments() {
-        return functionArguments;
+    @JsonGetter(FIELD_TRANSFORM)
+    public String getTransform() {
+        return transform;
     }
 
-    private static List<PolicyArgument> immutable(@Nullable List<PolicyArgument> arguments) {
-        List<PolicyArgument> result =
-                arguments == null ? Collections.emptyList() : new ArrayList<>(arguments);
-        checkArgument(!result.contains(null), "functionArguments cannot contain null arguments.");
-        return Collections.unmodifiableList(result);
-    }
-
-    private static boolean isBlank(@Nullable String value) {
+    private static boolean isBlank(String value) {
         return value == null || value.trim().isEmpty();
     }
 }

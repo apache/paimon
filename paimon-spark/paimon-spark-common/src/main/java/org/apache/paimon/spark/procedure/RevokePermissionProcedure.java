@@ -41,8 +41,7 @@ public class RevokePermissionProcedure extends BasePermissionProcedure {
                 ProcedureParameter.optional("database", StringType),
                 ProcedureParameter.optional("table", StringType),
                 ProcedureParameter.optional("function", StringType),
-                ProcedureParameter.optional("view", StringType),
-                ProcedureParameter.optional("scope", StringType)
+                ProcedureParameter.optional("view", StringType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -77,8 +76,7 @@ public class RevokePermissionProcedure extends BasePermissionProcedure {
                         args.isNullAt(3) ? null : args.getString(3),
                         args.isNullAt(4) ? null : args.getString(4),
                         args.isNullAt(5) ? null : args.getString(5),
-                        args.isNullAt(6) ? null : args.getString(6),
-                        args.isNullAt(7) ? null : args.getString(7));
+                        args.isNullAt(6) ? null : args.getString(6));
 
         permissionManagement().revokePermission(identity);
         return new InternalRow[] {newInternalRow(true)};

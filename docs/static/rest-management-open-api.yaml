@@ -17,16 +17,16 @@
 openapi: 3.1.1
 info:
   title: Paimon REST Management API
-  version: 0.4.0
+  version: "1.0"
   description: |
     Experimental control-plane extension for permissions, table row filters, and table column
     masks in one Paimon REST Catalog prefix. A data policy restricts an already-authorized read;
     it never grants SELECT by itself. Each policy is attached to one principal: a principal has at
     most one row filter per table and at most one mask per table column. Policy creation and
     replacement are accepted only when the target table exists, has `query-auth.enabled=true`, and
-    the referenced principal, function, and columns are valid. Principal lifecycle, function
-    implementation, audit, and persistence remain server responsibilities. This contract may evolve
-    incompatibly while experimental.
+    the referenced principal, serialized Paimon predicate or transform, and columns are valid.
+    Principal lifecycle, audit, and persistence remain server responsibilities. This contract may
+    evolve incompatibly while experimental.
   license:
     name: Apache 2.0
     url: https://www.apache.org/licenses/LICENSE-2.0.html
@@ -43,23 +43,18 @@ paths:
       summary: List permission assignments on an exact resource
       operationId: listPermissions
       description: |
-        Direct assignments are returned by default. With `includeInherited=true`, the request
-        still names one exact target and the server also returns effective views of ancestor
-        `DESCENDANTS` assignments. An effective view uses the target in `resource`, `SELF` in
-        `scope`, and the source attachment in `inheritedFrom`. Effective views must exclude expired
-        assignments. Direct expired assignments may remain visible until server cleanup. Following
-        the catalog pagination contract, an empty page terminates pagination and therefore must not
+        Returns direct assignments attached to the requested exact resource. Expired assignments
+        may remain visible until server cleanup, but must not authorize access. Following the
+        catalog pagination contract, an empty page terminates pagination and therefore must not
         carry a continuation token.
       parameters:
         - $ref: '#/components/parameters/ResourceTypeQuery'
-        - $ref: '#/components/parameters/ScopeQuery'
         - $ref: '#/components/parameters/DatabaseQuery'
         - $ref: '#/components/parameters/TableQuery'
         - $ref: '#/components/parameters/FunctionQuery'
         - $ref: '#/components/parameters/ViewQuery'
         - $ref: '#/components/parameters/PrincipalQuery'
         - $ref: '#/components/parameters/AccessQuery'
-        - $ref: '#/components/parameters/IncludeInherited'
         - $ref: '#/components/parameters/PageToken'
         - $ref: '#/components/parameters/MaxResults'
       responses:
@@ -91,9 +86,9 @@ paths:
       summary: Grant or replace a permission assignment
       operationId: grantPermission
       description: |
-        Creates an assignment or replaces the assignment with the same `resource`, `scope`,
-        `access`, and `principal`. The referenced resource and principal must exist. Servers bind
-        assignments to the resource lifecycle described by `PermissionResource`.
+        Creates an assignment or replaces the assignment with the same `resource`, `access`, and
+        `principal`. The referenced resource and principal must exist. Servers bind assignments to
+        the resource lifecycle described by `PermissionResource`.
       requestBody:
         required: true
         content:
@@ -161,7 +156,7 @@ paths:
       summary: List policies attached directly to a table
       operationId: listTablePolicies
       description: |
-        Policies have no ancestor scope in this contract. Following the catalog pagination
+        Policies are attached directly to the requested table. Following the catalog pagination
         contract, an empty page terminates pagination and therefore must not carry a continuation
         token.
       parameters:
@@ -198,7 +193,8 @@ paths:
       description: |
         Fails with 409 when the same principal already has a row filter or a mask on the same
         column, or when the table has not enabled query authorization. The principal, policy
-        function, protected column, and column arguments are validated before persistence.
+        predicate or transform, protected column, and referenced fields are validated before
+        persistence.
       requestBody:
         $ref: '#/components/requestBodies/PolicyRequest'
       responses:
@@ -312,11 +308,6 @@ components:
       required: true
       schema:
         $ref: '#/components/schemas/ResourceType'
-    ScopeQuery:
-      name: scope
-      in: query
-      schema:
-        $ref: '#/components/schemas/PermissionScope'
     DatabaseQuery:
       name: database
       in: query
@@ -352,12 +343,6 @@ components:
       in: query
       schema:
         $ref: '#/components/schemas/PermissionAccess'
-    IncludeInherited:
-      name: includeInherited
-      in: query
-      schema:
-        type: boolean
-        default: false
     PolicyColumnQuery:
       name: column
       in: query
@@ -394,7 +379,7 @@ components:
 
   responses:
     BadRequest:
-      description: Invalid request shape, resource identity, function, signature, or column.
+      description: Invalid request shape, resource identity, predicate, transform, or column.
       content:
         application/json:
           schema:
@@ -412,7 +397,7 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
     NotFound:
-      description: Referenced resource, principal, policy, or function does not exist.
+      description: Referenced resource, principal, or policy does not exist.
       content:
         application/json:
           schema:
@@ -458,9 +443,6 @@ components:
     ResourceType:
       type: string
       enum: [CATALOG, DATABASE, TABLE, FUNCTION, VIEW]
-    PermissionScope:
-      type: string
-      enum: [SELF, DESCENDANTS]
     PermissionAccess:
       description: |
         Canonical access value. The REST wire format uses upper case. Values are either a built-in
@@ -502,7 +484,7 @@ components:
         bind stored direct assignments to a stable internal resource identity. Renaming a database,
         table, function, or view retains its direct assignments and responses use the new locator.
         Dropping a resource removes its direct assignments, and recreating the same locator must not
-        inherit them. A child rename does not affect a CATALOG or DATABASE `DESCENDANTS` assignment.
+        inherit them.
       oneOf:
         - $ref: '#/components/schemas/CatalogResource'
         - $ref: '#/components/schemas/DatabaseResource'
@@ -576,12 +558,10 @@ components:
     PermissionAssignment:
       type: object
       additionalProperties: false
-      required: [resource, scope, access, principal]
+      required: [resource, access, principal]
       properties:
         resource:
           $ref: '#/components/schemas/PermissionResource'
-        scope:
-          $ref: '#/components/schemas/PermissionScope'
         access:
           $ref: '#/components/schemas/PermissionAccess'
         principal:
@@ -591,11 +571,8 @@ components:
           format: date-time
           description: |
             Exclusive authorization upper bound evaluated using the server clock. At
-            `now >= expireTime` this assignment must not authorize access, including through an
-            inherited effective view. A direct expired record may remain listable until cleanup.
-            The value must have at most millisecond precision.
-        inheritedFrom:
-          $ref: '#/components/schemas/PermissionResource'
+            `now >= expireTime` this assignment must not authorize access. An expired record may
+            remain listable until cleanup. The value must have at most millisecond precision.
     GrantPermissionRequest:
       type: object
       additionalProperties: false
@@ -603,9 +580,6 @@ components:
       properties:
         resource:
           $ref: '#/components/schemas/PermissionResource'
-        scope:
-          $ref: '#/components/schemas/PermissionScope'
-          default: SELF
         access:
           $ref: '#/components/schemas/PermissionAccess'
         principal:
@@ -624,9 +598,6 @@ components:
       properties:
         resource:
           $ref: '#/components/schemas/PermissionResource'
-        scope:
-          $ref: '#/components/schemas/PermissionScope'
-          default: SELF
         access:
           $ref: '#/components/schemas/PermissionAccess'
         principal:
@@ -643,55 +614,40 @@ components:
         nextPageToken:
           type: string
 
-    ColumnPolicyArgument:
-      type: object
-      additionalProperties: false
-      required: [column]
-      properties:
-        column:
-          type: string
-          minLength: 1
-    ConstantPolicyArgument:
-      type: object
-      additionalProperties: false
-      required: [constant]
-      properties:
-        constant:
-          type: string
-          description: Literal string argument. The empty string is valid.
-    PolicyArgument:
-      oneOf:
-        - $ref: '#/components/schemas/ColumnPolicyArgument'
-        - $ref: '#/components/schemas/ConstantPolicyArgument'
     RowFilter:
       type: object
       additionalProperties: false
-      required: [functionName]
+      required: [predicate]
       properties:
-        functionName:
+        predicate:
           type: string
           minLength: 1
-        functionArguments:
-          type: array
-          default: []
-          items:
-            $ref: '#/components/schemas/PolicyArgument'
+          x-maxUtf8Bytes: 61440
+          contentMediaType: application/json
+          description: |
+            JSON serialization of one Paimon `Predicate`, using the same representation as one
+            entry in `AuthTableQueryResponse.filter`. The UTF-8 representation must not exceed
+            60 KiB. The server must deserialize, validate against the target table schema, and
+            canonicalize it when the policy is created or replaced.
     ColumnMask:
       type: object
       additionalProperties: false
-      required: [functionName, onColumn]
+      required: [onColumn, transform]
       properties:
-        functionName:
-          type: string
-          minLength: 1
         onColumn:
           type: string
           minLength: 1
-        functionArguments:
-          type: array
-          default: []
-          items:
-            $ref: '#/components/schemas/PolicyArgument'
+        transform:
+          type: string
+          minLength: 1
+          x-maxUtf8Bytes: 61440
+          contentMediaType: application/json
+          description: |
+            JSON serialization of one Paimon `Transform`, using the same representation as the
+            value for `onColumn` in `AuthTableQueryResponse.columnMasking`. The UTF-8
+            representation must not exceed 60 KiB. The server must deserialize it, validate all
+            field references and the output type against the target table schema, and canonicalize
+            it when the policy is created or replaced.
     RowFilterPolicyRequest:
       type: object
       additionalProperties: false
@@ -780,7 +736,7 @@ components:
       description: |
         A policy applies when its principal is effective for the caller. All applicable row filters
         must be combined with logical AND. More than one applicable column mask for the same column
-        must fail closed. An unresolved function, invalid signature, or policy compilation failure
+        must fail closed. An invalid, unsupported, or schema-incompatible predicate or transform
         must also fail closed rather than omit a restriction.
       oneOf:
         - $ref: '#/components/schemas/RowFilterDataPolicy'

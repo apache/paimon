@@ -23,7 +23,6 @@ import org.apache.paimon.management.ColumnMask;
 import org.apache.paimon.management.DataPolicy;
 import org.apache.paimon.management.ListPoliciesRequest;
 import org.apache.paimon.management.PermissionResource;
-import org.apache.paimon.management.PolicyArgument;
 import org.apache.paimon.management.PolicyIdentity;
 import org.apache.paimon.management.PolicyManagement;
 import org.apache.paimon.management.PolicyType;
@@ -42,7 +41,6 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
-import java.util.Collections;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -146,7 +144,6 @@ public class RESTPolicyManagementTest {
         assertThat(createBody.get()).contains("\"principal\":\"analyst\"");
         assertThat(createBody.get()).doesNotContain("\"resource\"");
         assertThat(updateBody.get()).contains("\"columnMask\"");
-        assertThat(updateBody.get()).doesNotContain("\"scope\"");
         assertThat(deleteBody.get())
                 .contains("\"type\":\"COLUMN_MASKING\"")
                 .contains("\"column\":\"email\"");
@@ -175,9 +172,9 @@ public class RESTPolicyManagementTest {
         return DataPolicy.columnMask(
                 tableResource(),
                 new ColumnMask(
-                        "security.mask_email",
                         "email",
-                        Collections.singletonList(PolicyArgument.column("region"))),
+                        "{\"name\":\"FIELD_REF\",\"fieldRef\":{\"index\":0,"
+                                + "\"name\":\"region\",\"type\":\"STRING\"}}"),
                 "analyst");
     }
 

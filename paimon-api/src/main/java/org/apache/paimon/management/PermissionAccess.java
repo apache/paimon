@@ -85,38 +85,15 @@ public final class PermissionAccess {
                         canonical));
     }
 
-    public static String canonicalize(
-            PermissionResource resource, PermissionScope scope, String access) {
-        String canonical = canonicalize(access);
-        validateScope(resource.getType(), scope);
-        if (EXTENSION_ACCESS.matcher(canonical).matches()) {
-            return canonical;
-        }
-
-        checkArgument(
-                appliesTo(resource.getType(), scope, canonical),
-                "Access '%s' is not valid for %s with %s scope. Use a built-in access or a namespaced extension such as vendor.example/SOME_ACCESS.",
-                canonical,
-                resource.getType(),
-                scope);
-        return canonical;
-    }
-
-    /** Validates an access filter when the query may return either scope. */
     public static String canonicalize(PermissionResource resource, String access) {
         String canonical = canonicalize(access);
         if (EXTENSION_ACCESS.matcher(canonical).matches()) {
             return canonical;
         }
-        boolean applicable = appliesTo(resource.getType(), PermissionScope.SELF, canonical);
-        if (!applicable
-                && (resource.getType() == ResourceType.CATALOG
-                        || resource.getType() == ResourceType.DATABASE)) {
-            applicable = appliesTo(resource.getType(), PermissionScope.DESCENDANTS, canonical);
-        }
+
         checkArgument(
-                applicable,
-                "Access '%s' is not valid for assignments on %s.",
+                BUILT_INS.get(resource.getType()).contains(canonical),
+                "Access '%s' is not valid for %s. Use a built-in access or a namespaced extension such as vendor.example/SOME_ACCESS.",
                 canonical,
                 resource.getType());
         return canonical;
@@ -124,27 +101,6 @@ public final class PermissionAccess {
 
     public static Set<String> builtIns(ResourceType type) {
         return BUILT_INS.get(type);
-    }
-
-    private static boolean appliesTo(ResourceType type, PermissionScope scope, String access) {
-        if (scope == PermissionScope.SELF) {
-            return BUILT_INS.get(type).contains(access);
-        }
-        validateScope(type, scope);
-        if (type == ResourceType.CATALOG && BUILT_INS.get(ResourceType.DATABASE).contains(access)) {
-            return true;
-        }
-        return BUILT_INS.get(ResourceType.TABLE).contains(access)
-                || BUILT_INS.get(ResourceType.VIEW).contains(access)
-                || BUILT_INS.get(ResourceType.FUNCTION).contains(access);
-    }
-
-    private static void validateScope(ResourceType type, PermissionScope scope) {
-        checkArgument(
-                scope != PermissionScope.DESCENDANTS
-                        || type == ResourceType.CATALOG
-                        || type == ResourceType.DATABASE,
-                "DESCENDANTS scope is supported only for CATALOG and DATABASE resources.");
     }
 
     private static Map<ResourceType, Set<String>> builtIns() {

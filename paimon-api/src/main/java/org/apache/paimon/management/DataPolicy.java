@@ -38,8 +38,7 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  *
  * <p>A principal has at most one row filter per table and at most one mask per table column. When
  * policies are enforced, applicable row filters are combined with logical AND and multiple
- * effective masks for one column fail closed. Resolution, signature, and compilation failures also
- * fail closed.
+ * effective masks for one column fail closed. Invalid predicates or transforms also fail closed.
  */
 @Experimental
 @JsonIgnoreProperties(ignoreUnknown = true)

@@ -24,7 +24,6 @@ import org.apache.paimon.management.DataPolicy;
 import org.apache.paimon.management.ListPoliciesRequest;
 import org.apache.paimon.management.PolicyType;
 import org.apache.paimon.management.RowFilter;
-import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
@@ -59,9 +58,9 @@ public class ListPoliciesProcedure extends BasePolicyProcedure {
                         field("table", StringType, false),
                         field("policy_type", StringType, false),
                         field("principal", StringType, false),
-                        field("function_name", StringType, false),
+                        field("predicate_json", StringType, true),
                         field("on_column", StringType, true),
-                        field("function_arguments_json", StringType, false),
+                        field("transform_json", StringType, true),
                         field("next_page_token", StringType, true)
                     });
 
@@ -108,15 +107,9 @@ public class ListPoliciesProcedure extends BasePolicyProcedure {
                             string(policy.getResource().getTable()),
                             string(policy.type().name()),
                             string(policy.getPrincipal()),
-                            string(
-                                    rowFilter == null
-                                            ? columnMask.getFunctionName()
-                                            : rowFilter.getFunctionName()),
+                            string(rowFilter == null ? null : rowFilter.getPredicate()),
                             string(columnMask == null ? null : columnMask.getOnColumn()),
-                            json(
-                                    rowFilter == null
-                                            ? columnMask.getFunctionArguments()
-                                            : rowFilter.getFunctionArguments()),
+                            string(columnMask == null ? null : columnMask.getTransform()),
                             string(page.getNextPageToken()));
         }
         return rows;
@@ -129,10 +122,6 @@ public class ListPoliciesProcedure extends BasePolicyProcedure {
 
     private static UTF8String string(String value) {
         return value == null ? null : UTF8String.fromString(value);
-    }
-
-    private static UTF8String json(Object value) {
-        return string(JsonSerdeUtil.toFlatJson(value));
     }
 
     public static ProcedureBuilder builder() {

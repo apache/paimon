@@ -29,33 +29,22 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 public class PermissionIdentity {
 
     private final PermissionResource resource;
-    private final PermissionScope scope;
     private final String access;
     private final String principal;
 
-    public PermissionIdentity(
-            PermissionResource resource, PermissionScope scope, String access, String principal) {
+    public PermissionIdentity(PermissionResource resource, String access, String principal) {
         this.resource = checkNotNull(resource, "resource cannot be null");
-        this.scope = checkNotNull(scope, "scope cannot be null");
-        this.access = PermissionAccess.canonicalize(resource, scope, access);
+        this.access = PermissionAccess.canonicalize(resource, access);
         this.principal = PermissionAssignment.validatePrincipal(principal);
     }
 
     public static PermissionIdentity fromAssignment(PermissionAssignment assignment) {
-        PermissionResource inheritedFrom = assignment.getInheritedFrom();
         return new PermissionIdentity(
-                inheritedFrom == null ? assignment.getResource() : inheritedFrom,
-                inheritedFrom == null ? assignment.getScope() : PermissionScope.DESCENDANTS,
-                assignment.getAccess(),
-                assignment.getPrincipal());
+                assignment.getResource(), assignment.getAccess(), assignment.getPrincipal());
     }
 
     public PermissionResource getResource() {
         return resource;
-    }
-
-    public PermissionScope getScope() {
-        return scope;
     }
 
     public String getAccess() {
@@ -76,13 +65,12 @@ public class PermissionIdentity {
         }
         PermissionIdentity that = (PermissionIdentity) o;
         return resource.equals(that.resource)
-                && scope == that.scope
                 && access.equals(that.access)
                 && principal.equals(that.principal);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(resource, scope, access, principal);
+        return Objects.hash(resource, access, principal);
     }
 }
