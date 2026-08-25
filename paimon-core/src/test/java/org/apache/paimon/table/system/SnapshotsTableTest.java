@@ -123,6 +123,24 @@ public class SnapshotsTableTest extends TableTestBase {
     }
 
     @Test
+    public void testReadSnapshotsWithMultipleInFilters() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(snapshotsTable.rowType());
+        Predicate predicate =
+                PredicateBuilder.and(
+                        builder.in(0, Arrays.asList(1L, 2L)), builder.in(0, Arrays.asList(2L, 3L)));
+
+        ReadBuilder readBuilder = snapshotsTable.newReadBuilder().withFilter(predicate);
+        List<InternalRow> result = new ArrayList<>();
+        InternalRowSerializer serializer = new InternalRowSerializer(snapshotsTable.rowType());
+        readBuilder
+                .newRead()
+                .createReader(readBuilder.newScan().plan())
+                .forEachRemaining(row -> result.add(serializer.copy(row)));
+
+        assertThat(result).extracting(row -> row.getLong(0)).containsExactly(2L);
+    }
+
+    @Test
     public void testReadSnapshotsWithInAndRangeFilter() throws Exception {
         PredicateBuilder builder = new PredicateBuilder(snapshotsTable.rowType());
         List<Predicate> predicates =

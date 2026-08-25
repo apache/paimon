@@ -212,6 +212,7 @@ public class SnapshotsTable implements ReadonlyTable {
         private Optional<Long> optionalFilterSnapshotIdMax = Optional.empty();
         private Optional<Long> optionalFilterSnapshotIdMin = Optional.empty();
         private final List<Long> snapshotIds = new ArrayList<>();
+        private boolean hasInFilter;
         private boolean emptyRange;
 
         public SnapshotsRead(FileIO fileIO) {
@@ -229,19 +230,26 @@ public class SnapshotsTable implements ReadonlyTable {
                 if (child instanceof CompoundPredicate
                         && ((CompoundPredicate) child).function() instanceof Or) {
                     InPredicateVisitor.extractInElements(child, leafName)
-                            .ifPresent(
-                                    leafs ->
-                                            leafs.forEach(
-                                                    leaf ->
-                                                            snapshotIds.add(
-                                                                    Long.parseLong(
-                                                                            leaf.toString()))));
+                            .ifPresent(this::mergeSnapshotIds);
                 } else {
                     handleLeafPredicate(child, leafName);
                 }
             }
 
             return this;
+        }
+
+        private void mergeSnapshotIds(List<Object> ids) {
+            List<Long> parsedIds = new ArrayList<>();
+            for (Object id : ids) {
+                parsedIds.add(Long.parseLong(id.toString()));
+            }
+            if (hasInFilter) {
+                snapshotIds.retainAll(parsedIds);
+            } else {
+                snapshotIds.addAll(parsedIds);
+                hasInFilter = true;
+            }
         }
 
         public void handleLeafPredicate(Predicate predicate, String leafName) {

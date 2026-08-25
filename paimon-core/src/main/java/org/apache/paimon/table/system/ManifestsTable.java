@@ -193,6 +193,7 @@ public class ManifestsTable implements ReadonlyTable {
         private @Nullable Long schemaIdMin = null;
         private @Nullable Long schemaIdMax = null;
         private final List<Long> schemaIds = new ArrayList<>();
+        private boolean hasInFilter;
         private boolean emptyRange;
 
         public ManifestsRead(FileStoreTable dataTable) {
@@ -209,19 +210,26 @@ public class ManifestsTable implements ReadonlyTable {
                 if (child instanceof CompoundPredicate
                         && ((CompoundPredicate) child).function() instanceof Or) {
                     InPredicateVisitor.extractInElements(child, LEAF_NAME)
-                            .ifPresent(
-                                    leafs ->
-                                            leafs.forEach(
-                                                    leaf ->
-                                                            schemaIds.add(
-                                                                    Long.parseLong(
-                                                                            leaf.toString()))));
+                            .ifPresent(this::mergeSchemaIds);
                 } else {
                     handleLeafPredicate(child, LEAF_NAME);
                 }
             }
 
             return this;
+        }
+
+        private void mergeSchemaIds(List<Object> ids) {
+            List<Long> parsedIds = new ArrayList<>();
+            for (Object id : ids) {
+                parsedIds.add(Long.parseLong(id.toString()));
+            }
+            if (hasInFilter) {
+                schemaIds.retainAll(parsedIds);
+            } else {
+                schemaIds.addAll(parsedIds);
+                hasInFilter = true;
+            }
         }
 
         private void handleLeafPredicate(Predicate predicate, String leafName) {

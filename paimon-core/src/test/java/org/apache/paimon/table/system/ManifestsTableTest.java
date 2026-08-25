@@ -275,6 +275,27 @@ public class ManifestsTableTest extends TableTestBase {
     }
 
     @Test
+    public void testFilterBySchemaIdWithMultipleInFilters() throws Exception {
+        catalog.alterTable(
+                identifier("T"),
+                Collections.singletonList(SchemaChange.addColumn("col2", DataTypes.INT())),
+                false);
+        table = catalog.getTable(identifier("T"));
+        write(table, GenericRow.of(3, 3, 1, 1));
+        manifestsTable = (ManifestsTable) catalog.getTable(identifier("T$manifests"));
+
+        PredicateBuilder builder = new PredicateBuilder(ManifestsTable.TABLE_TYPE);
+        Predicate predicate =
+                PredicateBuilder.and(
+                        builder.in(4, Arrays.asList(0L, 1L)), builder.in(4, Arrays.asList(1L, 2L)));
+
+        List<InternalRow> result = readWithFilter(manifestsTable, predicate);
+
+        assertThat(result).isNotEmpty();
+        assertThat(result).allMatch(row -> row.getLong(4) == 1L);
+    }
+
+    @Test
     public void testFilterBySchemaIdInAndRange() throws Exception {
         PredicateBuilder builder = new PredicateBuilder(ManifestsTable.TABLE_TYPE);
         List<Predicate> predicates =

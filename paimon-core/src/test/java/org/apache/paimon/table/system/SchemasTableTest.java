@@ -106,6 +106,30 @@ public class SchemasTableTest extends TableTestBase {
     }
 
     @Test
+    public void testReadSchemasWithMultipleInFilters() throws Exception {
+        catalog.alterTable(
+                identifier("T"),
+                Collections.singletonList(SchemaChange.addColumn("col2", DataTypes.INT())),
+                false);
+        schemasTable = (SchemasTable) catalog.getTable(identifier("T$schemas"));
+
+        PredicateBuilder builder = new PredicateBuilder(schemasTable.rowType());
+        Predicate predicate =
+                PredicateBuilder.and(
+                        builder.in(0, Arrays.asList(0L, 1L)), builder.in(0, Arrays.asList(1L, 2L)));
+
+        ReadBuilder readBuilder = schemasTable.newReadBuilder().withFilter(predicate);
+        List<InternalRow> result = new ArrayList<>();
+        InternalRowSerializer serializer = new InternalRowSerializer(schemasTable.rowType());
+        readBuilder
+                .newRead()
+                .createReader(readBuilder.newScan().plan())
+                .forEachRemaining(row -> result.add(serializer.copy(row)));
+
+        assertThat(result).extracting(row -> row.getLong(0)).containsExactly(1L);
+    }
+
+    @Test
     public void testReadSchemasWithInAndRangeFilter() throws Exception {
         PredicateBuilder builder = new PredicateBuilder(schemasTable.rowType());
         List<Predicate> predicates =
