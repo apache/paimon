@@ -77,6 +77,25 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
             RowType readRowType,
             int blobIndex)
             throws IOException {
+        this(
+                files,
+                readerFactory,
+                readerWrapper,
+                enclosingRange(files),
+                rowRanges,
+                readRowType,
+                blobIndex);
+    }
+
+    BlobFallbackRecordReader(
+            List<DataFileMeta> files,
+            BlobFileReaderFactory readerFactory,
+            ReaderWrapper readerWrapper,
+            Range logicalRange,
+            List<Range> rowRanges,
+            RowType readRowType,
+            int blobIndex)
+            throws IOException {
         this.fieldCount = readRowType.getFieldCount();
         this.rowIdIndex = readRowType.getFieldIndex(SpecialFields.ROW_ID.name());
         this.seqNumIndex = readRowType.getFieldIndex(SpecialFields.SEQUENCE_NUMBER.name());
@@ -85,15 +104,27 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
                 InternalRow.createFieldGetter(readRowType.getTypeAt(blobIndex), blobIndex);
 
         checkArgument(!files.isEmpty(), "Blob bunch should not be empty.");
-        long firstRowId = Long.MAX_VALUE;
-        long lastRowId = Long.MIN_VALUE;
+        long firstRowId = logicalRange.from;
+        long lastRowId = logicalRange.to;
 
         // sort group readers in descending order
         Map<Long, List<DataFileMeta>> sequenceGroups = new TreeMap<>(reverseOrder());
         for (DataFileMeta file : files) {
             Range fileRange = file.nonNullRowIdRange();
-            firstRowId = Math.min(firstRowId, fileRange.from);
-            lastRowId = Math.max(lastRowId, fileRange.to);
+            if (rowRanges == null) {
+                checkArgument(
+                        fileRange.from >= firstRowId && fileRange.to <= lastRowId,
+                        "Blob file range %s should be within logical range %s.",
+                        fileRange,
+                        logicalRange);
+            } else {
+                // A pushed range may select one normal-file range from a spanning Blob file.
+                checkArgument(
+                        fileRange.hasIntersection(logicalRange),
+                        "Blob file range %s should intersect logical range %s.",
+                        fileRange,
+                        logicalRange);
+            }
 
             sequenceGroups
                     .computeIfAbsent(file.maxSequenceNumber(), ignored -> new ArrayList<>())
@@ -130,6 +161,18 @@ public class BlobFallbackRecordReader implements RecordReader<InternalRow> {
                                     firstRowId,
                                     lastRowId)));
         }
+    }
+
+    private static Range enclosingRange(List<DataFileMeta> files) {
+        checkArgument(!files.isEmpty(), "Blob bunch should not be empty.");
+        long firstRowId = Long.MAX_VALUE;
+        long lastRowId = Long.MIN_VALUE;
+        for (DataFileMeta file : files) {
+            Range range = file.nonNullRowIdRange();
+            firstRowId = Math.min(firstRowId, range.from);
+            lastRowId = Math.max(lastRowId, range.to);
+        }
+        return new Range(firstRowId, lastRowId);
     }
 
     @Nullable

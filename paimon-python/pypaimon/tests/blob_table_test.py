@@ -1779,6 +1779,89 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         self.assertEqual(by_id[0], b'updated-0')
         self.assertEqual(by_id[9], b'blob-9')
 
+    def test_update_new_blob_column_writes_full_normal_range(self):
+        from pypaimon import Schema
+        from pypaimon.read.reader.format_blob_reader import FormatBlobReader
+        from pypaimon.schema.data_types import AtomicType
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        table_name = 'test_db.blob_update_new_column'
+        normal_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+        ])
+        schema = Schema.from_pyarrow_schema(normal_schema, options={
+            'row-tracking.enabled': 'true',
+            'data-evolution.enabled': 'true',
+        })
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'name': ['a', 'b', 'c'],
+        }, schema=normal_schema))
+        write_builder.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+        self.catalog.alter_table(
+            table_name,
+            [SchemaChange.add_column('blob_data', AtomicType('BLOB'))],
+            False,
+        )
+        table = self.catalog.get_table(table_name)
+        row_id_builder = table.new_read_builder().with_projection(
+            ['id', '_ROW_ID'])
+        row_id_result = row_id_builder.new_read().to_arrow(
+            row_id_builder.new_scan().plan().splits()).sort_by('id')
+        first_row_id = row_id_result.column('_ROW_ID')[0].as_py()
+
+        update_builder = table.new_batch_write_builder()
+        table_update = update_builder.new_update().with_update_type(
+            ['blob_data'])
+        update_data = pa.Table.from_pydict({
+            '_ROW_ID': pa.array([first_row_id], type=pa.int64()),
+            'blob_data': pa.array([b'updated-blob'], type=pa.large_binary()),
+        })
+        update_messages = table_update.update_by_arrow_with_row_id(update_data)
+        update_blob_files = [
+            file
+            for message in update_messages
+            for file in message.new_files
+            if file.file_name.endswith('.blob')
+        ]
+        self.assertEqual(len(update_blob_files), 1)
+        self.assertEqual(update_blob_files[0].first_row_id, first_row_id)
+        self.assertEqual(update_blob_files[0].row_count, 3)
+
+        blob_reader = FormatBlobReader(
+            file_io=table.file_io,
+            file_path=update_blob_files[0].file_path,
+            read_fields=['blob_data'],
+            full_fields=[table.field_dict['blob_data']],
+            push_down_predicate=None,
+            blob_as_descriptor=False,
+        )
+        blob_lengths = list(blob_reader.blob_lengths)
+        blob_reader.close()
+        self.assertEqual(blob_lengths.count(BlobFormatWriter.NULL_LENGTH), 2)
+        self.assertNotIn(BlobFormatWriter.PLACE_HOLDER_LENGTH, blob_lengths)
+
+        update_builder.new_commit().commit(update_messages)
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits()).sort_by('id')
+        self.assertEqual(
+            result.select(['id', 'blob_data']).to_pylist(),
+            [
+                {'id': 1, 'blob_data': b'updated-blob'},
+                {'id': 2, 'blob_data': None},
+                {'id': 3, 'blob_data': None},
+            ],
+        )
+
     def test_blob_update_all_rows_full_span(self):
         from pypaimon import Schema
 

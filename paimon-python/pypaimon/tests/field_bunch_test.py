@@ -28,11 +28,13 @@ class _BlobFile:
             file_name: str,
             first_row_id: int,
             row_count: int,
-            write_cols=None):
+            write_cols=None,
+            max_sequence_number: int = 0):
         self.file_name = file_name
         self.first_row_id = first_row_id
         self.row_count = row_count
         self.write_cols = write_cols or ["blob_col"]
+        self.max_sequence_number = max_sequence_number
 
     def row_id_range(self) -> Range:
         return Range(
@@ -58,6 +60,8 @@ class BlobBunchTest(unittest.TestCase):
             bunch.finish()
             self.assertEqual(1, mocked_merge.call_count)
             self.assertEqual(1000, bunch.row_count())
+            self.assertEqual(Range(0, 999), bunch.logical_range())
+            self.assertTrue(bunch.sequential_read_optimize())
             self.assertEqual(1, mocked_merge.call_count)
 
     def test_finish_preserves_overlapping_versions(self):
@@ -123,6 +127,28 @@ class BlobBunchTest(unittest.TestCase):
         bunch.add(_BlobFile("too-large.blob", 0, 11))
 
         with self.assertRaisesRegex(ValueError, "row count exceed"):
+            bunch.finish()
+
+    def test_finish_uses_normal_range_for_partial_blob_coverage(self):
+        bunch = BlobBunch(
+            expected_row_count=10,
+            expected_row_range=Range(100, 109),
+        )
+        bunch.add(_BlobFile("partial.blob", 103, 5))
+
+        bunch.finish()
+
+        self.assertEqual(10, bunch.row_count())
+        self.assertEqual(Range(100, 109), bunch.logical_range())
+
+    def test_finish_rejects_range_outside_normal_file(self):
+        bunch = BlobBunch(
+            expected_row_count=10,
+            expected_row_range=Range(100, 109),
+        )
+        bunch.add(_BlobFile("outside.blob", 99, 2))
+
+        with self.assertRaisesRegex(ValueError, "within normal file range"):
             bunch.finish()
 
 

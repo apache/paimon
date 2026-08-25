@@ -314,6 +314,50 @@ public class BlobFallbackRecordReaderTest {
     }
 
     @Test
+    public void testBlobFallbackRecordReaderFillsLogicalRangeGapsWithNull() throws Exception {
+        DataFileMeta file = blobFile("partial-file", 2, 2, 1);
+
+        ReadResult rows =
+                ReadResult.read(
+                        new BlobFallbackRecordReader(
+                                Collections.singletonList(file),
+                                blobFile ->
+                                        oneRowPerBatchReader(blobFile, fileRows(blobFile, null)),
+                                (reader, range) -> reader,
+                                new Range(0, 5),
+                                null,
+                                READ_ROW_TYPE,
+                                BLOB_INDEX));
+
+        assertThat(rows.rowIds).containsExactly(2L, 3L);
+        assertThat(rows.nullBlobRowIds).containsExactly(0L, 1L, 4L, 5L);
+        assertThat(rows.nullBlobSequenceNumbers).containsOnly(-1L);
+    }
+
+    @Test
+    public void testBlobFallbackRecordReaderClipsSpanningFileToLogicalRange() throws Exception {
+        DataFileMeta file = blobFile("spanning-file", 5, 10, 1);
+        List<Range> rowRanges = Collections.singletonList(new Range(5, 9));
+
+        ReadResult rows =
+                ReadResult.read(
+                        new BlobFallbackRecordReader(
+                                Collections.singletonList(file),
+                                blobFile ->
+                                        oneRowPerBatchReader(
+                                                blobFile, fileRows(blobFile, rowRanges)),
+                                (reader, range) -> reader,
+                                new Range(5, 9),
+                                rowRanges,
+                                READ_ROW_TYPE,
+                                BLOB_INDEX));
+
+        assertThat(rows.rowIds).containsExactly(5L, 6L, 7L, 8L, 9L);
+        assertThat(rows.sequenceNumbers).containsOnly(1L);
+        assertThat(rows.nullBlobRowIds).isEmpty();
+    }
+
+    @Test
     public void testBlobFallbackRecordReaderReturnsNullIfAllRowsArePlaceholders() throws Exception {
         DataFileMeta newFile = blobFile("new-placeholder-file", 0, 1, 2);
         DataFileMeta oldFile = blobFile("old-placeholder-file", 0, 1, 1);
