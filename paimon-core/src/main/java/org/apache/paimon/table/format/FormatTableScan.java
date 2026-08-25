@@ -53,6 +53,7 @@ import javax.annotation.Nullable;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -101,6 +102,9 @@ public class FormatTableScan implements InnerTableScan {
 
     @Override
     public List<PartitionEntry> listPartitionEntries() {
+        if (partitionFilter == PartitionPredicate.ALWAYS_FALSE) {
+            return Collections.emptyList();
+        }
         return splitEnumerator.listPartitionEntries(partitionFilter);
     }
 
@@ -232,6 +236,11 @@ public class FormatTableScan implements InnerTableScan {
 
         private synchronized SplitEnumerator.ScanPlan scanPlan() {
             if (scanPlan != null) {
+                return scanPlan;
+            }
+            if (partitionFilter == PartitionPredicate.ALWAYS_FALSE) {
+                scanPlan =
+                        new SplitEnumerator.ScanPlan(Collections.emptyList(), OptionalLong.of(0L));
                 return scanPlan;
             }
             try {

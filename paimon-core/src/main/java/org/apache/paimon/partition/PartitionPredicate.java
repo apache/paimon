@@ -127,6 +127,10 @@ public interface PartitionPredicate extends Serializable {
 
     PartitionPredicate ALWAYS_FALSE =
             new PartitionPredicate() {
+                private Object readResolve() {
+                    return ALWAYS_FALSE;
+                }
+
                 @Override
                 public boolean test(BinaryRow part) {
                     return false;
