@@ -236,6 +236,7 @@ public class FileStoreITCase extends AbstractTestBase {
         assumeTrue(isBatch);
 
         FileStoreTable table = buildFileStoreTable(new int[0], new int[0]);
+        // Use equal row counts with skewed payload sizes to verify byte-aware assignment.
         writeSingleRecordFile(table, 1, repeat("a", 8), 1);
         writeSingleRecordFile(table, 2, repeat("b", 8), 2);
         writeSingleRecordFile(table, 3, repeat("c", 32 * 1024), 3);
