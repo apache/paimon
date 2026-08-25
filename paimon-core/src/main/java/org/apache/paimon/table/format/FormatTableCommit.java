@@ -49,8 +49,10 @@ import javax.annotation.Nullable;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.lang.reflect.Method;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Deque;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -74,9 +76,15 @@ public class FormatTableCommit implements BatchTableCommit {
 
     private static final int MAX_CLEANUP_THREAD_NUM = 64;
 
+    private static final int MAX_PUBLISH_THREAD_NUM = 64;
+
     private static final ExecutorService CLEANUP_EXECUTOR =
             ThreadPoolUtils.createCachedThreadPool(
                     MAX_CLEANUP_THREAD_NUM, "FORMAT-TABLE-COMMIT-CLEANUP-THREAD-POOL");
+
+    private static final ExecutorService PUBLISH_EXECUTOR =
+            ThreadPoolUtils.createCachedThreadPool(
+                    MAX_PUBLISH_THREAD_NUM, "FORMAT-TABLE-COMMIT-PUBLISH-THREAD-POOL");
 
     private String location;
     private final boolean formatTablePartitionOnlyValueInPath;
@@ -91,6 +99,8 @@ public class FormatTableCommit implements BatchTableCommit {
     private final boolean dynamicPartitionOverwrite;
     private final int cleanupThreadNum;
     private final ExecutorService cleanupExecutor;
+    private final int publishThreadNum;
+    private final ExecutorService publishExecutor;
 
     public FormatTableCommit(
             String location,
@@ -119,7 +129,9 @@ public class FormatTableCommit implements BatchTableCommit {
                 partitionManager,
                 dynamicPartitionOverwrite,
                 1,
-                CLEANUP_EXECUTOR);
+                1,
+                CLEANUP_EXECUTOR,
+                PUBLISH_EXECUTOR);
     }
 
     FormatTableCommit(
@@ -150,7 +162,43 @@ public class FormatTableCommit implements BatchTableCommit {
                 partitionManager,
                 dynamicPartitionOverwrite,
                 cleanupThreadNum,
-                CLEANUP_EXECUTOR);
+                1,
+                CLEANUP_EXECUTOR,
+                PUBLISH_EXECUTOR);
+    }
+
+    FormatTableCommit(
+            String location,
+            List<String> partitionKeys,
+            FileIO fileIO,
+            boolean formatTablePartitionOnlyValueInPath,
+            String defaultPartName,
+            boolean overwrite,
+            Identifier tableIdentifier,
+            @Nullable Map<String, String> staticPartitions,
+            @Nullable String syncHiveUri,
+            CatalogContext catalogContext,
+            @Nullable FormatTablePartitionManager partitionManager,
+            boolean dynamicPartitionOverwrite,
+            int cleanupThreadNum,
+            int publishThreadNum) {
+        this(
+                location,
+                partitionKeys,
+                fileIO,
+                formatTablePartitionOnlyValueInPath,
+                defaultPartName,
+                overwrite,
+                tableIdentifier,
+                staticPartitions,
+                syncHiveUri,
+                catalogContext,
+                partitionManager,
+                dynamicPartitionOverwrite,
+                cleanupThreadNum,
+                publishThreadNum,
+                CLEANUP_EXECUTOR,
+                PUBLISH_EXECUTOR);
     }
 
     FormatTableCommit(
@@ -168,11 +216,88 @@ public class FormatTableCommit implements BatchTableCommit {
             boolean dynamicPartitionOverwrite,
             int cleanupThreadNum,
             ExecutorService cleanupExecutor) {
+        this(
+                location,
+                partitionKeys,
+                fileIO,
+                formatTablePartitionOnlyValueInPath,
+                defaultPartName,
+                overwrite,
+                tableIdentifier,
+                staticPartitions,
+                syncHiveUri,
+                catalogContext,
+                partitionManager,
+                dynamicPartitionOverwrite,
+                cleanupThreadNum,
+                1,
+                cleanupExecutor,
+                PUBLISH_EXECUTOR);
+    }
+
+    FormatTableCommit(
+            String location,
+            List<String> partitionKeys,
+            FileIO fileIO,
+            boolean formatTablePartitionOnlyValueInPath,
+            String defaultPartName,
+            boolean overwrite,
+            Identifier tableIdentifier,
+            @Nullable Map<String, String> staticPartitions,
+            @Nullable String syncHiveUri,
+            CatalogContext catalogContext,
+            @Nullable FormatTablePartitionManager partitionManager,
+            boolean dynamicPartitionOverwrite,
+            int cleanupThreadNum,
+            int publishThreadNum,
+            ExecutorService publishExecutor) {
+        this(
+                location,
+                partitionKeys,
+                fileIO,
+                formatTablePartitionOnlyValueInPath,
+                defaultPartName,
+                overwrite,
+                tableIdentifier,
+                staticPartitions,
+                syncHiveUri,
+                catalogContext,
+                partitionManager,
+                dynamicPartitionOverwrite,
+                cleanupThreadNum,
+                publishThreadNum,
+                CLEANUP_EXECUTOR,
+                publishExecutor);
+    }
+
+    private FormatTableCommit(
+            String location,
+            List<String> partitionKeys,
+            FileIO fileIO,
+            boolean formatTablePartitionOnlyValueInPath,
+            String defaultPartName,
+            boolean overwrite,
+            Identifier tableIdentifier,
+            @Nullable Map<String, String> staticPartitions,
+            @Nullable String syncHiveUri,
+            CatalogContext catalogContext,
+            @Nullable FormatTablePartitionManager partitionManager,
+            boolean dynamicPartitionOverwrite,
+            int cleanupThreadNum,
+            int publishThreadNum,
+            ExecutorService cleanupExecutor,
+            ExecutorService publishExecutor) {
         if (cleanupThreadNum < 1 || cleanupThreadNum > MAX_CLEANUP_THREAD_NUM) {
             throw new IllegalArgumentException(
                     String.format(
                             "Format Table cleanup thread number must be between 1 and %s, but was %s.",
                             MAX_CLEANUP_THREAD_NUM, cleanupThreadNum));
+        }
+        if (publishThreadNum < 1 || publishThreadNum > MAX_PUBLISH_THREAD_NUM) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Format Table publish thread number must be between 1 and %s, but was %s.",
+                            MAX_PUBLISH_THREAD_NUM, publishThreadNum));
         }
         this.location = location;
         this.fileIO = fileIO;
@@ -187,6 +312,8 @@ public class FormatTableCommit implements BatchTableCommit {
         this.dynamicPartitionOverwrite = dynamicPartitionOverwrite;
         this.cleanupThreadNum = cleanupThreadNum;
         this.cleanupExecutor = cleanupExecutor;
+        this.publishThreadNum = publishThreadNum;
+        this.publishExecutor = publishExecutor;
         if (syncHiveUri != null) {
             try {
                 Options options = new Options();
@@ -273,9 +400,9 @@ public class FormatTableCommit implements BatchTableCommit {
             boolean reportsStatistics = registersPartitions && partitionManager != null;
             Map<Map<String, String>, PartitionStatistics> statisticsByPartition =
                     new LinkedHashMap<>();
+            publishMessages(messages);
             for (TwoPhaseCommitMessage message : messages) {
                 TwoPhaseOutputStream.Committer committer = message.getCommitter();
-                committer.commit(this.fileIO);
                 if (registersPartitions) {
                     // Extracted once: registration and statistics must key on the same spec.
                     Map<String, String> spec =
@@ -351,6 +478,188 @@ public class FormatTableCommit implements BatchTableCommit {
             }
             throw new RuntimeException(failure);
         }
+    }
+
+    private void publishMessages(List<TwoPhaseCommitMessage> messages) throws Throwable {
+        if (publishThreadNum == 1 || messages.size() <= 1) {
+            for (TwoPhaseCommitMessage message : messages) {
+                message.getCommitter().commit(fileIO);
+            }
+            return;
+        }
+
+        Map<Path, Deque<IndexedPublishMessage>> messagesByPartition = new LinkedHashMap<>();
+        for (int index = 0; index < messages.size(); index++) {
+            TwoPhaseCommitMessage message = messages.get(index);
+            Path partition = message.getCommitter().targetPath().getParent();
+            messagesByPartition
+                    .computeIfAbsent(partition, ignored -> new ArrayDeque<>())
+                    .addLast(new IndexedPublishMessage(index, partition, message));
+        }
+
+        if (messagesByPartition.size() <= 1) {
+            for (TwoPhaseCommitMessage message : messages) {
+                message.getCommitter().commit(fileIO);
+            }
+            return;
+        }
+
+        // Force lazy filesystem and security binding on the caller before any worker can use it.
+        fileIO.exists(new Path(location));
+        ClassLoader contextClassLoader = Thread.currentThread().getContextClassLoader();
+        CompletionService<PublishResult> completions =
+                new ExecutorCompletionService<>(publishExecutor);
+        PublishSubmissionState submissionState = new PublishSubmissionState();
+        Deque<Path> readyPartitions = new ArrayDeque<>(messagesByPartition.keySet());
+        Map<Integer, Throwable> publishFailures = new TreeMap<>();
+        List<Throwable> coordinatorFailures = new ArrayList<>();
+        InterruptedException interruption = null;
+        int inFlight = 0;
+
+        while ((!submissionState.isStopped() && !readyPartitions.isEmpty()) || inFlight > 0) {
+            while (!submissionState.isStopped()
+                    && !readyPartitions.isEmpty()
+                    && inFlight < publishThreadNum) {
+                Path partition = readyPartitions.removeFirst();
+                IndexedPublishMessage indexedMessage =
+                        messagesByPartition.get(partition).removeFirst();
+                try {
+                    boolean submitted =
+                            submissionState.submitIfRunning(
+                                    () ->
+                                            completions.submit(
+                                                    () ->
+                                                            publishMessage(
+                                                                    indexedMessage,
+                                                                    contextClassLoader,
+                                                                    submissionState)));
+                    if (!submitted) {
+                        break;
+                    }
+                    inFlight++;
+                } catch (Throwable failure) {
+                    submissionState.stop();
+                    publishFailures.put(indexedMessage.index, failure);
+                }
+            }
+
+            if (inFlight == 0) {
+                break;
+            }
+
+            Future<PublishResult> completed = null;
+            while (completed == null) {
+                try {
+                    completed = completions.take();
+                } catch (InterruptedException e) {
+                    submissionState.stop();
+                    if (interruption == null) {
+                        interruption = e;
+                    } else {
+                        interruption.addSuppressed(e);
+                    }
+                }
+            }
+            inFlight--;
+
+            PublishResult result = null;
+            while (result == null) {
+                try {
+                    result = completed.get();
+                } catch (InterruptedException e) {
+                    submissionState.stop();
+                    if (interruption == null) {
+                        interruption = e;
+                    } else {
+                        interruption.addSuppressed(e);
+                    }
+                } catch (ExecutionException e) {
+                    submissionState.stop();
+                    coordinatorFailures.add(e.getCause() == null ? e : e.getCause());
+                    break;
+                } catch (Throwable failure) {
+                    submissionState.stop();
+                    coordinatorFailures.add(failure);
+                    break;
+                }
+            }
+
+            if (Thread.currentThread().isInterrupted()) {
+                submissionState.stop();
+                Thread.interrupted();
+                InterruptedException pendingInterruption =
+                        new InterruptedException(
+                                "Interrupted while publishing format table files.");
+                if (interruption == null) {
+                    interruption = pendingInterruption;
+                } else {
+                    interruption.addSuppressed(pendingInterruption);
+                }
+            }
+
+            if (result != null) {
+                if (result.failure != null) {
+                    submissionState.stop();
+                    publishFailures.put(result.index, result.failure);
+                } else if (!submissionState.isStopped()
+                        && !messagesByPartition.get(result.partition).isEmpty()) {
+                    readyPartitions.addLast(result.partition);
+                }
+            }
+        }
+
+        Throwable primary = aggregateFailures(publishFailures.values());
+        for (Throwable failure : coordinatorFailures) {
+            if (primary == null) {
+                primary = failure;
+            } else if (primary != failure) {
+                primary.addSuppressed(failure);
+            }
+        }
+        if (interruption != null) {
+            if (primary == null) {
+                primary = interruption;
+            } else if (primary != interruption) {
+                primary.addSuppressed(interruption);
+            }
+            Thread.currentThread().interrupt();
+        }
+        if (primary != null) {
+            throw primary;
+        }
+    }
+
+    private PublishResult publishMessage(
+            IndexedPublishMessage indexedMessage,
+            ClassLoader contextClassLoader,
+            PublishSubmissionState submissionState) {
+        Thread currentThread = Thread.currentThread();
+        ClassLoader originalClassLoader = null;
+        boolean originalClassLoaderCaptured = false;
+        Throwable failure = null;
+        try {
+            originalClassLoader = currentThread.getContextClassLoader();
+            originalClassLoaderCaptured = true;
+            currentThread.setContextClassLoader(contextClassLoader);
+            indexedMessage.message.getCommitter().commit(fileIO);
+        } catch (Throwable publishFailure) {
+            failure = publishFailure;
+            submissionState.stop();
+        } finally {
+            if (originalClassLoaderCaptured) {
+                try {
+                    currentThread.setContextClassLoader(originalClassLoader);
+                } catch (Throwable restoreFailure) {
+                    if (failure == null) {
+                        failure = restoreFailure;
+                    } else if (failure != restoreFailure) {
+                        failure.addSuppressed(restoreFailure);
+                    }
+                    submissionState.stop();
+                }
+            }
+        }
+        return new PublishResult(indexedMessage.index, indexedMessage.partition, failure);
     }
 
     /**
@@ -529,8 +838,9 @@ public class FormatTableCommit implements BatchTableCommit {
 
     @Override
     public void abort(List<CommitMessage> commitMessages) {
-        try {
-            for (CommitMessage commitMessage : commitMessages) {
+        Throwable primary = null;
+        for (CommitMessage commitMessage : commitMessages) {
+            try {
                 if (commitMessage instanceof TwoPhaseCommitMessage) {
                     TwoPhaseCommitMessage twoPhaseCommitMessage =
                             (TwoPhaseCommitMessage) commitMessage;
@@ -540,9 +850,19 @@ public class FormatTableCommit implements BatchTableCommit {
                             "Unsupported commit message type: "
                                     + commitMessage.getClass().getName());
                 }
+            } catch (Throwable failure) {
+                if (primary == null) {
+                    primary = failure;
+                } else if (primary != failure) {
+                    primary.addSuppressed(failure);
+                }
             }
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+        }
+        if (primary instanceof Error) {
+            throw (Error) primary;
+        }
+        if (primary != null) {
+            throw new RuntimeException(primary);
         }
     }
 
@@ -878,6 +1198,56 @@ public class FormatTableCommit implements BatchTableCommit {
                 nextFile = 0;
             }
             return currentFiles.get(nextFile++);
+        }
+    }
+
+    private static final class IndexedPublishMessage {
+
+        private final int index;
+        private final Path partition;
+        private final TwoPhaseCommitMessage message;
+
+        private IndexedPublishMessage(int index, Path partition, TwoPhaseCommitMessage message) {
+            this.index = index;
+            this.partition = partition;
+            this.message = message;
+        }
+    }
+
+    private static final class PublishResult {
+
+        private final int index;
+        private final Path partition;
+        @Nullable private final Throwable failure;
+
+        private PublishResult(int index, Path partition, @Nullable Throwable failure) {
+            this.index = index;
+            this.partition = partition;
+            this.failure = failure;
+        }
+    }
+
+    private static final class PublishSubmissionState {
+
+        private volatile boolean stopped;
+
+        private synchronized boolean submitIfRunning(Runnable submission) {
+            if (stopped) {
+                return false;
+            }
+            submission.run();
+            return true;
+        }
+
+        private void stop() {
+            stopped = true;
+            synchronized (this) {
+                // Wait for any accepted submission to leave the monitor.
+            }
+        }
+
+        private boolean isStopped() {
+            return stopped;
         }
     }
 

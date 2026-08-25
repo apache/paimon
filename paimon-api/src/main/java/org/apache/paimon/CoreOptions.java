@@ -2664,6 +2664,16 @@ public class CoreOptions implements Serializable {
                                     + "catalog-managed partitions. Supported values are 1 through "
                                     + "64. Other Format Tables use serial cleanup.");
 
+    public static final ConfigOption<Integer> FORMAT_TABLE_COMMIT_PUBLISH_THREAD_NUM =
+            key("format-table.commit.publish-thread-num")
+                    .intType()
+                    .defaultValue(64)
+                    .withDescription(
+                            "The maximum number of concurrent file publications during commits "
+                                    + "for an internal partitioned Format Table with catalog-managed "
+                                    + "partitions. Supported values are 1 through 64. Other Format "
+                                    + "Tables publish serially.");
+
     @Immutable
     public static final ConfigOption<String> BLOB_FIELD =
             key("blob-field")
@@ -3318,6 +3328,16 @@ public class CoreOptions implements Serializable {
                 threadNum >= 1 && threadNum <= 64,
                 "Option %s must be between 1 and 64, but was %s.",
                 FORMAT_TABLE_COMMIT_CLEANUP_THREAD_NUM.key(),
+                threadNum);
+        return threadNum;
+    }
+
+    public int formatTableCommitPublishThreadNum() {
+        int threadNum = options.get(FORMAT_TABLE_COMMIT_PUBLISH_THREAD_NUM);
+        checkArgument(
+                threadNum >= 1 && threadNum <= 64,
+                "Option %s must be between 1 and 64, but was %s.",
+                FORMAT_TABLE_COMMIT_PUBLISH_THREAD_NUM.key(),
                 threadNum);
         return threadNum;
     }

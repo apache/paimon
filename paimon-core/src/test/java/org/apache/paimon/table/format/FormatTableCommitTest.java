@@ -29,6 +29,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.format.FormatTableCommitTestUtils.PartialBarrierDeleteFileIO;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.types.DataTypes;
@@ -63,6 +64,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
+import static org.apache.paimon.table.format.FormatTableCommitTestUtils.awaitFailure;
+import static org.apache.paimon.table.format.FormatTableCommitTestUtils.failureTree;
+import static org.apache.paimon.table.format.FormatTableCommitTestUtils.observeContextClassLoaders;
+import static org.apache.paimon.table.format.FormatTableCommitTestUtils.rootCause;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.entry;
@@ -1671,59 +1676,6 @@ class FormatTableCommitTest {
         }
     }
 
-    private static List<ClassLoader> observeContextClassLoaders(
-            ExecutorService executor, int workerCount) throws Exception {
-        CountDownLatch workersStarted = new CountDownLatch(workerCount);
-        CountDownLatch releaseWorkers = new CountDownLatch(1);
-        ConcurrentLinkedQueue<ClassLoader> classLoaders = new ConcurrentLinkedQueue<>();
-        List<Future<?>> futures = new ArrayList<>();
-        for (int i = 0; i < workerCount; i++) {
-            futures.add(
-                    executor.submit(
-                            () -> {
-                                classLoaders.add(Thread.currentThread().getContextClassLoader());
-                                workersStarted.countDown();
-                                try {
-                                    if (!releaseWorkers.await(10, TimeUnit.SECONDS)) {
-                                        throw new AssertionError(
-                                                "Timed out observing cleanup executor workers");
-                                    }
-                                } catch (InterruptedException e) {
-                                    Thread.currentThread().interrupt();
-                                    throw new AssertionError(
-                                            "Interrupted while observing cleanup executor workers",
-                                            e);
-                                }
-                            }));
-        }
-        try {
-            assertThat(workersStarted.await(10, TimeUnit.SECONDS)).isTrue();
-        } finally {
-            releaseWorkers.countDown();
-        }
-        for (Future<?> future : futures) {
-            future.get(10, TimeUnit.SECONDS);
-        }
-        return new ArrayList<>(classLoaders);
-    }
-
-    private static ExecutionException awaitFailure(Future<?> future) throws Exception {
-        try {
-            future.get(10, TimeUnit.SECONDS);
-            throw new AssertionError("Expected cleanup commit to fail");
-        } catch (ExecutionException expected) {
-            return expected;
-        }
-    }
-
-    private static Throwable rootCause(Throwable throwable) {
-        Throwable root = throwable;
-        while (root.getCause() != null) {
-            root = root.getCause();
-        }
-        return root;
-    }
-
     private static List<Throwable> causeChain(Throwable throwable) {
         List<Throwable> chain = new ArrayList<>();
         Throwable current = throwable;
@@ -1732,23 +1684,6 @@ class FormatTableCommitTest {
             current = current.getCause();
         }
         return chain;
-    }
-
-    private static List<Throwable> failureTree(Throwable throwable) {
-        List<Throwable> failures = new ArrayList<>();
-        collectFailures(throwable, failures);
-        return failures;
-    }
-
-    private static void collectFailures(Throwable throwable, List<Throwable> failures) {
-        if (throwable == null) {
-            return;
-        }
-        failures.add(throwable);
-        for (Throwable suppressed : throwable.getSuppressed()) {
-            collectFailures(suppressed, failures);
-        }
-        collectFailures(throwable.getCause(), failures);
     }
 
     private static final class SubmissionTrackingExecutor extends AbstractExecutorService {
@@ -1996,57 +1931,6 @@ class FormatTableCommitTest {
 
         private int maxConcurrentDeletes() {
             return maxConcurrentDeletes.get();
-        }
-    }
-
-    private static class PartialBarrierDeleteFileIO extends SortedLocalFileIO {
-
-        private static final long serialVersionUID = 1L;
-
-        private final CountDownLatch bothDeletesStarted = new CountDownLatch(2);
-        private final CountDownLatch releaseFirstDelete = new CountDownLatch(1);
-        private final CountDownLatch releaseSecondDelete = new CountDownLatch(1);
-        private final CountDownLatch firstDeleteReturned = new CountDownLatch(1);
-        private final AtomicInteger activeDeletes = new AtomicInteger();
-
-        @Override
-        public boolean delete(Path path, boolean recursive) throws IOException {
-            activeDeletes.incrementAndGet();
-            bothDeletesStarted.countDown();
-            await(bothDeletesStarted, "both barrier delete calls");
-            try {
-                if ("data-000.csv".equals(path.getName())) {
-                    await(releaseFirstDelete, "first barrier delete release");
-                    return super.delete(path, recursive);
-                }
-                await(releaseSecondDelete, "second barrier delete release");
-                return super.delete(path, recursive);
-            } finally {
-                activeDeletes.decrementAndGet();
-                if ("data-000.csv".equals(path.getName())) {
-                    firstDeleteReturned.countDown();
-                }
-            }
-        }
-
-        private boolean awaitBothDeletesStarted() throws InterruptedException {
-            return bothDeletesStarted.await(10, TimeUnit.SECONDS);
-        }
-
-        private void releaseFirstDelete() {
-            releaseFirstDelete.countDown();
-        }
-
-        private void releaseSecondDelete() {
-            releaseSecondDelete.countDown();
-        }
-
-        private boolean awaitFirstDeleteReturned() throws InterruptedException {
-            return firstDeleteReturned.await(10, TimeUnit.SECONDS);
-        }
-
-        private int activeDeletes() {
-            return activeDeletes.get();
         }
     }
 
