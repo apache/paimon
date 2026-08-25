@@ -97,4 +97,77 @@ under the License.
             <scope>test</scope>
         </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>shade-paimon</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <artifactSet>
+                                <includes combine.children="append">
+                                    <!-- Mosaic -->
+                                    <include>org.apache.paimon:mosaic</include>
+
+                                    <!-- Arrow -->
+                                    <include>org.apache.paimon:paimon-arrow</include>
+                                    <include>org.apache.arrow:arrow-vector</include>
+                                    <include>org.apache.arrow:arrow-format</include>
+                                    <include>org.apache.arrow:arrow-c-data</include>
+                                    <include>org.apache.arrow:arrow-memory-core</include>
+                                    <include>org.apache.arrow:arrow-memory-unsafe</include>
+                                    <include>com.fasterxml.jackson.core:jackson-core</include>
+                                    <include>com.fasterxml.jackson.core:jackson-annotations</include>
+                                    <include>com.fasterxml.jackson.core:jackson-databind</include>
+                                    <include>com.fasterxml.jackson.datatype:jackson-datatype-jsr310</include>
+                                    <include>commons-codec:commons-codec</include>
+                                    <include>com.google.flatbuffers:flatbuffers-java</include>
+                                    <include>org.eclipse.collections:eclipse-collections</include>
+                                    <include>org.eclipse.collections:eclipse-collections-api</include>
+                                </includes>
+                            </artifactSet>
+                            <relocations>
+                                <relocation>
+                                    <pattern>org.apache.paimon.arrow</pattern>
+                                    <shadedPattern>org.apache.paimon.format.mosaic.shade.org.apache.paimon.arrow</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.apache.arrow</pattern>
+                                    <shadedPattern>org.apache.paimon.format.mosaic.shade.org.apache.arrow</shadedPattern>
+                                    <excludes>
+                                        <!-- Arrow C Data JNI resolves these classes by name. -->
+                                        <exclude>org.apache.arrow.c.*</exclude>
+                                        <exclude>org.apache.arrow.c.jni.*</exclude>
+                                    </excludes>
+                                </relocation>
+                                <relocation>
+                                    <pattern>com.fasterxml.jackson</pattern>
+                                    <shadedPattern>org.apache.paimon.format.mosaic.shade.com.fasterxml.jackson</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.apache.commons.codec</pattern>
+                                    <shadedPattern>org.apache.paimon.format.mosaic.shade.org.apache.commons.codec</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>com.google.flatbuffers</pattern>
+                                    <shadedPattern>org.apache.paimon.format.mosaic.shade.com.google.flatbuffers</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.eclipse.collections</pattern>
+                                    <shadedPattern>org.apache.paimon.format.mosaic.shade.org.eclipse.collections</shadedPattern>
+                                </relocation>
+                            </relocations>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
 </project>
