@@ -382,6 +382,10 @@ function validateManagementOpenApi() {
       contract.spec.info.description.toLowerCase().includes('experimental'),
     'The management contract must be versioned 1.0 and marked experimental',
   );
+  contract.checkSpec(
+    !Object.prototype.hasOwnProperty.call(contract.spec, 'security'),
+    'The management contract must not require one deployment-specific authentication scheme',
+  );
 
   const assignmentFields = ['resource', 'access', 'principal', 'columns', 'expireTime'];
   contract.requireProperties('PermissionAssignment', assignmentFields);

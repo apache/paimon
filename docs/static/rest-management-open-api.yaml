@@ -26,6 +26,8 @@ info:
     most one row filter per table and at most one mask per table column. Policy creation and
     replacement are accepted only when the target table exists, has `query-auth.enabled=true`, and
     the referenced principal, serialized Paimon predicate or transform, and columns are valid.
+    Authentication follows the REST Catalog deployment configuration and is not fixed by this
+    extension.
     Principal lifecycle, audit, and persistence remain server responsibilities. This contract may
     evolve incompatibly while experimental.
   license:
@@ -33,8 +35,6 @@ info:
     url: https://www.apache.org/licenses/LICENSE-2.0.html
 servers:
   - url: http://localhost:8080
-security:
-  - BearerAuth: []
 paths:
   /v1/{prefix}/permissions:
     parameters:
