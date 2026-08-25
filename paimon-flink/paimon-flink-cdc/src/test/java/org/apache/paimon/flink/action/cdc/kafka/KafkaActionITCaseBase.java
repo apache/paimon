@@ -26,6 +26,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessin
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -33,6 +34,7 @@ import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
+import org.apache.kafka.common.errors.TimeoutException;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.AfterAll;
@@ -59,6 +61,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 
@@ -73,6 +76,9 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
     private static final String INTER_CONTAINER_SCHEMA_REGISTRY_ALIAS = "schemaregistry";
     private static final Network NETWORK = Network.newNetwork();
     private static final int ZK_TIMEOUT_MILLIS = 30000;
+    private static final int ADMIN_REQUEST_TIMEOUT_MILLIS = 60000;
+    private static final int DELETE_TOPICS_MAX_ATTEMPTS = 3;
+    private static final long DELETE_TOPICS_RETRY_BACKOFF_MILLIS = 1000L;
 
     protected static KafkaProducer<String, String> kafkaProducer;
     private static KafkaConsumer<String, String> kafkaConsumer;
@@ -140,7 +146,10 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
         kafkaConsumer = new KafkaConsumer<>(consumerProperties);
 
         // create AdminClient
-        adminClient = AdminClient.create(getStandardProps());
+        Properties adminProperties = getStandardProps();
+        adminProperties.put(
+                AdminClientConfig.REQUEST_TIMEOUT_MS_CONFIG, ADMIN_REQUEST_TIMEOUT_MILLIS);
+        adminClient = AdminClient.create(adminProperties);
     }
 
     @AfterAll
@@ -159,7 +168,42 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
     }
 
     private void deleteTopics() throws ExecutionException, InterruptedException {
-        adminClient.deleteTopics(adminClient.listTopics().names().get()).all().get();
+        retryOnTimeout(
+                () -> {
+                    Set<String> topics = adminClient.listTopics().names().get();
+                    if (!topics.isEmpty()) {
+                        adminClient.deleteTopics(topics).all().get();
+                    }
+                },
+                DELETE_TOPICS_MAX_ATTEMPTS,
+                DELETE_TOPICS_RETRY_BACKOFF_MILLIS);
+    }
+
+    static void retryOnTimeout(
+            KafkaCleanupOperation operation, int maxAttempts, long retryBackoffMillis)
+            throws ExecutionException, InterruptedException {
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                operation.run();
+                return;
+            } catch (ExecutionException e) {
+                if (!(e.getCause() instanceof TimeoutException) || attempt == maxAttempts) {
+                    throw e;
+                }
+
+                LOG.warn(
+                        "Timed out cleaning Kafka topics on attempt {}/{}. Retrying.",
+                        attempt,
+                        maxAttempts,
+                        e);
+                Thread.sleep(retryBackoffMillis * attempt);
+            }
+        }
+    }
+
+    @FunctionalInterface
+    interface KafkaCleanupOperation {
+        void run() throws ExecutionException, InterruptedException;
     }
 
     public static Properties getStandardProps() {
