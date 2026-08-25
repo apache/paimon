@@ -866,8 +866,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     || retryCount >= options.commitMaxRetries()) {
                 String message =
                         String.format(
-                                "Commit failed after %s millis with %s retries, there maybe exist commit conflicts between multiple jobs.",
-                                options.commitTimeout(), retryCount);
+                                "Commit failed for table %s after %s millis with %s retries, there maybe exist commit conflicts between multiple jobs.",
+                                tableName, options.commitTimeout(), retryCount);
                 throw new RuntimeException(message, retryResult.exception);
             }
 
@@ -1249,9 +1249,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     baseManifestList, mergeBeforeManifests, mergeAfterManifests);
             throw new RuntimeException(
                     String.format(
-                            "Exception occurs when preparing snapshot #%d by user %s "
+                            "Exception occurs when preparing snapshot #%d for table %s by user %s "
                                     + "with hash %s and kind %s. Clean up.",
-                            newSnapshotId, commitUser, identifier, commitKind.name()),
+                            newSnapshotId, tableName, commitUser, identifier, commitKind.name()),
                     e);
         }
 
@@ -1265,17 +1265,23 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             success = commitSnapshotImpl(latestSnapshot, newSnapshot, deltaStatistics);
         } catch (Exception e) {
             // commit exception, not sure about the situation and should not clean up the files
-            LOG.warn("Retry commit for exception.", e);
+            LOG.warn(
+                    "Retry commit for exception when committing snapshot #{} for table {} by user {}.",
+                    newSnapshotId,
+                    tableName,
+                    commitUser,
+                    e);
             return RetryCommitResult.forCommitFail(latestSnapshot, baseDataFiles, e, null);
         }
 
         if (!success) {
             long commitTime = (System.currentTimeMillis() - startMillis) / 1000;
             LOG.warn(
-                    "Atomic commit failed for snapshot #{} by user {} "
+                    "Atomic commit failed for snapshot #{} for table {} by user {} "
                             + "with identifier {} and kind {} after {} seconds. "
                             + "Skip clean up and try again.",
                     newSnapshotId,
+                    tableName,
                     commitUser,
                     identifier,
                     commitKind.name(),
@@ -1569,8 +1575,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     || retryCount >= options.commitMaxRetries()) {
                 throw new RuntimeException(
                         String.format(
-                                "Commit failed after %s millis with %s retries, there maybe exist commit conflicts between multiple jobs.",
-                                options.commitTimeout(), retryCount));
+                                "Commit failed for table %s after %s millis with %s retries, there maybe exist commit conflicts between multiple jobs.",
+                                tableName, options.commitTimeout(), retryCount));
             }
 
             retryWaiter.retryWait(retryCount);
@@ -1656,10 +1662,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             // we cannot clean up because we can't determine the success
             throw new RuntimeException(
                     String.format(
-                            "Exception occurs when committing snapshot #%d by user %s "
+                            "Exception occurs when committing snapshot #%d for table %s by user %s "
                                     + "with identifier %s and kind %s. "
                                     + "Cannot clean up because we can't determine the success.",
                             newSnapshot.id(),
+                            tableName,
                             newSnapshot.commitUser(),
                             newSnapshot.commitIdentifier(),
                             newSnapshot.commitKind().name()),

@@ -293,6 +293,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                                                         + commitUser
                                                         + " and identifier "
                                                         + committable.identifier()
+                                                        + " for table "
+                                                        + table.name()
                                                         + ". This is unexpected."));
         long snapshotId = snapshot.id();
         createMetadata(

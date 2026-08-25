@@ -110,7 +110,9 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
 
             this.restCatalog = initRestCatalog(restConfigs, hadoopConf);
         } catch (Exception e) {
-            throw new RuntimeException("Fail to initialize iceberg rest catalog.", e);
+            throw new RuntimeException(
+                    "Fail to initialize iceberg rest catalog for table: " + icebergTableIdentifier,
+                    e);
         }
     }
 
@@ -130,7 +132,8 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
         try {
             commitMetadataImpl(newIcebergMetadata, baseIcebergMetadata);
         } catch (Exception e) {
-            throw new RuntimeException(e);
+            throw new RuntimeException(
+                    "Fail to commit iceberg metadata for table: " + icebergTableIdentifier, e);
         }
     }
 
@@ -223,7 +226,9 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                     .operations()
                     .commit(((BaseTable) icebergTable).operations().current(), updatedForCommit);
         } catch (Exception e) {
-            throw new RuntimeException("Fail to commit metadata to rest catalog.", e);
+            throw new RuntimeException(
+                    "Fail to commit metadata to rest catalog for table: " + icebergTableIdentifier,
+                    e);
         }
     }
 
@@ -415,7 +420,8 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
             dropTable();
             return createTable(newMetadata);
         } catch (Exception e) {
-            throw new RuntimeException("Fail to recreate iceberg table.", e);
+            throw new RuntimeException(
+                    "Fail to recreate iceberg table: " + icebergTableIdentifier, e);
         }
     }
 

@@ -128,7 +128,15 @@ public class IcebergHiveMetadataCommitter implements IcebergMetadataCommitter {
         try {
             commitMetadataImpl(newMetadataPath, baseMetadataPath);
         } catch (Exception e) {
-            throw new RuntimeException(e);
+            throw new RuntimeException(
+                    "Fail to commit iceberg metadata to hive metastore for table: "
+                            + icebergDatabases
+                            + "."
+                            + icebergTableName
+                            + " (paimon table: "
+                            + table.name()
+                            + ")",
+                    e);
         }
     }
 
