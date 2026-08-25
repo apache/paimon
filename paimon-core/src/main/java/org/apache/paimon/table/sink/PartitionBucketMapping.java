@@ -32,7 +32,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * A mapping that resolves the number of buckets for each partition in a table.
+ * A serializable mapping that resolves the number of buckets for each partition in a table.
  *
  * <p>Different partitions may have different bucket counts (e.g., after a rescale operation). This
  * class maintains a per-partition bucket count mapping and falls back to a default bucket count for
