@@ -26,10 +26,14 @@ import org.apache.paimon.options.Options;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.net.URI;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
 
 import static org.apache.paimon.options.CatalogOptions.RESOLVING_FILE_IO_ENABLED;
 
@@ -95,6 +99,30 @@ public class ResolvingFileIO implements FileIO {
     }
 
     @Override
+    public Optional<BatchFileDeleter> batchFileDeleter(Path path) throws IOException {
+        Optional<BatchFileDeleter> capability = wrap(() -> fileIO(path).batchFileDeleter(path));
+        if (!capability.isPresent()) {
+            return Optional.empty();
+        }
+
+        URI provider = path.toUri();
+        BatchFileDeleter delegate = capability.get();
+        return Optional.of(
+                new BatchFileDeleter() {
+                    @Override
+                    public int maxBatchSize() {
+                        return wrapUnchecked(delegate::maxBatchSize);
+                    }
+
+                    @Override
+                    public BatchDeleteResult delete(List<Path> files) throws IOException {
+                        validateProvider(files, provider);
+                        return wrap(() -> delegate.delete(files));
+                    }
+                });
+    }
+
+    @Override
     public boolean delete(Path path, boolean recursive) throws IOException {
         return wrap(() -> fileIO(path).delete(path, recursive));
     }
@@ -146,6 +174,30 @@ public class ResolvingFileIO implements FileIO {
             return func.apply();
         } finally {
             Thread.currentThread().setContextClassLoader(cl);
+        }
+    }
+
+    private <T> T wrapUnchecked(Supplier<T> supplier) {
+        ClassLoader cl = Thread.currentThread().getContextClassLoader();
+        try {
+            Thread.currentThread().setContextClassLoader(ResolvingFileIO.class.getClassLoader());
+            return supplier.get();
+        } finally {
+            Thread.currentThread().setContextClassLoader(cl);
+        }
+    }
+
+    private static void validateProvider(List<Path> files, URI provider) {
+        if (files == null) {
+            throw new IllegalArgumentException("Batch delete files must not be null.");
+        }
+        for (Path file : files) {
+            if (file == null
+                    || !Objects.equals(provider.getScheme(), file.toUri().getScheme())
+                    || !Objects.equals(provider.getAuthority(), file.toUri().getAuthority())) {
+                throw new IllegalArgumentException(
+                        "Batch delete files must use the capability provider's scheme and authority.");
+            }
         }
     }
 

@@ -20,6 +20,8 @@ package org.apache.paimon.oss;
 
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.fs.BatchDeleteResult;
+import org.apache.paimon.fs.BatchFileDeleter;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.HadoopOptionsProvider;
 import org.apache.paimon.fs.Path;
@@ -37,8 +39,11 @@ import com.aliyun.oss.common.comm.ServiceClient;
 import com.aliyun.oss.internal.OSSHeaders;
 import com.aliyun.oss.internal.OSSMultipartOperation;
 import com.aliyun.oss.internal.OSSObjectOperation;
+import com.aliyun.oss.internal.OSSUtils;
 import com.aliyun.oss.model.CopyObjectRequest;
 import com.aliyun.oss.model.CopyObjectResult;
+import com.aliyun.oss.model.DeleteObjectsRequest;
+import com.aliyun.oss.model.DeleteObjectsResult;
 import com.aliyun.oss.model.InitiateMultipartUploadRequest;
 import com.aliyun.oss.model.InitiateMultipartUploadResult;
 import com.aliyun.oss.model.ObjectMetadata;
@@ -57,9 +62,14 @@ import java.io.UncheckedIOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
@@ -72,6 +82,8 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
     private static final long serialVersionUID = 2L;
 
     private static final Logger LOG = LoggerFactory.getLogger(OSSFileIO.class);
+
+    private static final int MAX_BATCH_DELETE_SIZE = 1000;
 
     /**
      * In order to simplify, we make paimon oss configuration keys same with hadoop oss module. So,
@@ -136,6 +148,22 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
     @Override
     public boolean isObjectStore() {
         return true;
+    }
+
+    @Override
+    public Optional<BatchFileDeleter> batchFileDeleter(Path path) {
+        return Optional.of(
+                new BatchFileDeleter() {
+                    @Override
+                    public int maxBatchSize() {
+                        return MAX_BATCH_DELETE_SIZE;
+                    }
+
+                    @Override
+                    public BatchDeleteResult delete(List<Path> files) throws IOException {
+                        return deleteBatch(files);
+                    }
+                });
     }
 
     @Override
@@ -283,6 +311,85 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
 
     OSSClient ossClient(Path path) throws Exception {
         return getOssClient((AliyunOSSFileSystem) getFileSystem(path(path)));
+    }
+
+    private BatchDeleteResult deleteBatch(List<Path> files) throws IOException {
+        ValidatedBatch batch = validateBatch(files);
+        DeleteObjectsRequest request =
+                new DeleteObjectsRequest(batch.bucket).withKeys(batch.keys).withQuiet(false);
+
+        DeleteObjectsResult response;
+        try {
+            response = ossClient(batch.files.get(0)).deleteObjects(request);
+        } catch (Exception e) {
+            throw new IOException("Failed to delete OSS object batch.", e);
+        }
+
+        validateResponse(batch.keys, response);
+        return new BatchDeleteResult(batch.files);
+    }
+
+    private static ValidatedBatch validateBatch(List<Path> files) {
+        checkArgument(files != null, "Batch delete files must not be null.");
+        checkArgument(
+                !files.isEmpty() && files.size() <= MAX_BATCH_DELETE_SIZE,
+                "Batch delete requires between 1 and %s files, but got %s.",
+                MAX_BATCH_DELETE_SIZE,
+                files.size());
+
+        List<Path> validatedFiles = new ArrayList<>(files.size());
+        List<String> keys = new ArrayList<>(files.size());
+        Set<Path> uniqueFiles = new HashSet<>();
+        Set<String> uniqueKeys = new HashSet<>();
+        String bucket = null;
+        for (Path file : files) {
+            checkArgument(file != null, "Batch delete file must not be null.");
+            URI uri = file.toUri();
+            checkArgument("oss".equals(uri.getScheme()), "Batch delete only supports OSS paths.");
+            String host = uri.getHost();
+            checkArgument(
+                    host != null && host.equals(uri.getAuthority()),
+                    "Batch delete OSS authority must contain only a bucket.");
+            OSSUtils.ensureBucketNameValid(host);
+            if (bucket == null) {
+                bucket = host;
+            } else {
+                checkArgument(
+                        bucket.equals(host), "Batch delete files must use the same OSS bucket.");
+            }
+
+            String path = uri.getPath();
+            checkArgument(
+                    path != null && path.length() > 1,
+                    "Batch delete OSS object key must not be empty.");
+            String key = path.substring(1);
+            checkArgument(uniqueFiles.add(file), "Batch delete files must not contain duplicates.");
+            checkArgument(
+                    uniqueKeys.add(key), "Batch delete object keys must not contain duplicates.");
+            validatedFiles.add(file);
+            keys.add(key);
+        }
+        return new ValidatedBatch(bucket, validatedFiles, keys);
+    }
+
+    private static void validateResponse(List<String> requestedKeys, DeleteObjectsResult response)
+            throws IOException {
+        if (response == null || response.getDeletedObjects() == null) {
+            throw new IOException("OSS batch delete returned no acknowledgement.");
+        }
+
+        List<String> deletedObjects = response.getDeletedObjects();
+        if (deletedObjects.size() != requestedKeys.size()) {
+            throw new IOException("OSS batch delete returned an incomplete acknowledgement.");
+        }
+
+        Set<String> requested = new HashSet<>(requestedKeys);
+        Set<String> acknowledged = new HashSet<>();
+        for (String key : deletedObjects) {
+            if (key == null || !requested.contains(key) || !acknowledged.add(key)) {
+                throw new IOException("OSS batch delete returned an invalid acknowledgement.");
+            }
+        }
     }
 
     @Override
@@ -563,6 +670,19 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
         @Override
         public int hashCode() {
             return Objects.hash(options, scheme, authority);
+        }
+    }
+
+    private static class ValidatedBatch {
+
+        private final String bucket;
+        private final List<Path> files;
+        private final List<String> keys;
+
+        private ValidatedBatch(String bucket, List<Path> files, List<String> keys) {
+            this.bucket = bucket;
+            this.files = files;
+            this.keys = keys;
         }
     }
 }
