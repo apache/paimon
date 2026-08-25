@@ -61,7 +61,7 @@ when it is false, it will read the full amount of data into memory.
 
 ### Batch Streaming
 
-To avoid per-row Python conversion, make the streaming dataset yield batches:
+For batch-oriented training, make the streaming dataset yield batches directly:
 
 ```python
 dataset = table_read.to_torch(
