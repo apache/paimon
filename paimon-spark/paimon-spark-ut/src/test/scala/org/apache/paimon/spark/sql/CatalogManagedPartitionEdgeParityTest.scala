@@ -211,6 +211,114 @@ class CatalogManagedPartitionEdgeParityTest extends PaimonSparkTestWithRestCatal
     }
   }
 
+  private val unnameableValues = Seq("empty" -> "", "blank" -> "   ")
+
+  Seq("STRING" -> "string", "CHAR(8)" -> "char", "VARCHAR(8)" -> "varchar").foreach {
+    case (partitionType, typeSuffix) =>
+      unnameableValues.foreach {
+        case (valueLabel, value) =>
+          test(
+            s"ADD PARTITION rejects an $valueLabel $partitionType value without changing state") {
+            val tableName = s"edge_reject_${valueLabel}_$typeSuffix"
+            withTable(tableName) {
+              createTable(tableName, partitionType)
+
+              val error = intercept[Exception] {
+                sql(s"ALTER TABLE ${qualified(tableName)} " +
+                  s"ADD PARTITION (dt = '$value', hour = '00')").collect()
+              }
+
+              assert(
+                error.getMessage.contains(
+                  "ADD PARTITION does not support an empty or whitespace-only string"))
+              assert(error.getMessage.contains("partition column dt"))
+              assert(registered(tableName).isEmpty)
+              assert(!directoryExists(tableName, s"dt=$defaultPartitionName/hour=00"))
+            }
+          }
+      }
+  }
+
+  test("ADD PARTITION names the offending column, wherever it sits in the spec") {
+    val tableName = "edge_empty_second_column"
+    withTable(tableName) {
+      createTable(tableName)
+
+      val error = intercept[Exception] {
+        sql(
+          s"ALTER TABLE ${qualified(tableName)} " +
+            "ADD PARTITION (dt = '20260101', hour = '')").collect()
+      }
+
+      assert(error.getMessage.contains("partition column hour"))
+      assert(registered(tableName).isEmpty)
+      assert(!directoryExists(tableName, s"dt=20260101/hour=$defaultPartitionName"))
+    }
+  }
+
+  test("one bad spec fails an ADD PARTITION batch before any of it is applied") {
+    val tableName = "edge_empty_batch"
+    withTable(tableName) {
+      createTable(tableName)
+
+      val error = intercept[Exception] {
+        sql(
+          s"ALTER TABLE ${qualified(tableName)} ADD " +
+            "PARTITION (dt = '20260101', hour = '00') PARTITION (dt = '', hour = '01')").collect()
+      }
+
+      assert(
+        error.getMessage.contains(
+          "ADD PARTITION does not support an empty or whitespace-only string"))
+      assert(registered(tableName).isEmpty)
+      assert(!directoryExists(tableName, "dt=20260101/hour=00"))
+    }
+  }
+
+  test("DROP PARTITION rejects an empty string instead of dropping the default partition") {
+    val tableName = "edge_empty_drop"
+    withTable(tableName) {
+      createTable(tableName)
+      sql(s"INSERT INTO ${qualified(tableName)} VALUES (1, 'a', '', '00')")
+
+      val error = intercept[Exception] {
+        sql(
+          s"ALTER TABLE ${qualified(tableName)} " +
+            "DROP PARTITION (dt = '', hour = '00')").collect()
+      }
+
+      assert(
+        error.getMessage.contains(
+          "DROP PARTITION does not support an empty or whitespace-only string"))
+      assert(registered(tableName) == Set(s"$defaultPartitionName/00"))
+      assert(directoryExists(tableName, s"dt=$defaultPartitionName/hour=00"))
+      checkAnswer(
+        sql(s"SELECT id, payload, dt, hour FROM ${qualified(tableName)}"),
+        Seq(Row(1, "a", null, "00")))
+    }
+  }
+
+  test("TRUNCATE PARTITION rejects an empty string instead of emptying the default partition") {
+    val tableName = "edge_empty_truncate"
+    withTable(tableName) {
+      createTable(tableName)
+      sql(s"INSERT INTO ${qualified(tableName)} VALUES (1, 'a', '', '00')")
+
+      val error = intercept[Exception] {
+        sql(
+          s"TRUNCATE TABLE ${qualified(tableName)} " +
+            "PARTITION (dt = '', hour = '00')").collect()
+      }
+
+      assert(
+        error.getMessage.contains(
+          "TRUNCATE PARTITION does not support an empty or whitespace-only string"))
+      checkAnswer(
+        sql(s"SELECT id, payload, dt, hour FROM ${qualified(tableName)}"),
+        Seq(Row(1, "a", null, "00")))
+    }
+  }
+
   test("an empty string partition value uses the default partition encoding") {
     val tableName = "edge_empty_string"
     withTable(tableName) {
@@ -267,8 +375,10 @@ class CatalogManagedPartitionEdgeParityTest extends PaimonSparkTestWithRestCatal
 
   private def qualified(tableName: String): String = s"paimon.$dbName0.$tableName"
 
-  private def createTable(tableName: String): Unit =
-    sql(s"""CREATE TABLE $tableName (id INT, payload STRING, dt STRING, hour STRING)
+  private def createTable(tableName: String): Unit = createTable(tableName, "STRING")
+
+  private def createTable(tableName: String, partitionType: String): Unit =
+    sql(s"""CREATE TABLE $tableName (id INT, payload STRING, dt $partitionType, hour STRING)
            |USING CSV
            |PARTITIONED BY (dt, hour)
            |TBLPROPERTIES (
