@@ -122,7 +122,7 @@ class DataVectorWriter(DataWriter):
             # _write_batch keeps normal and vector pending rows in lockstep
             # and closes both writers when the shared row limit is reached.
             while offset < data.num_rows:
-                capacity = self.target_file_row_num - self._current_row_count()
+                capacity = self.target_file_row_num - self.pending_row_count
                 if capacity <= 0:
                     self._close_current_writers()
                     capacity = self.target_file_row_num
@@ -202,7 +202,12 @@ class DataVectorWriter(DataWriter):
             return False
         return self._normal_buffer.nbytes > self.target_file_size
 
-    def _current_row_count(self) -> int:
+    @property
+    def pending_row_count(self) -> int:
+        # Overrides the base property, which reads a buffer this writer never
+        # fills. Normal and vector rows are kept in lockstep, so either half
+        # answers for the pair; the vector writer is asked only when the table
+        # has no normal columns at all.
         if not self._normal_buffer.is_empty:
             return self._normal_buffer.num_rows
         if self.vector_writer is not None:

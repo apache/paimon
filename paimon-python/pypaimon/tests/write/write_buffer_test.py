@@ -375,8 +375,9 @@ class DeferredFoldWritePathTest(unittest.TestCase):
         self.assertEqual(len(writer.written_chunks), 3)
 
     def test_pending_row_count_does_not_fold(self):
-        # ``DataVectorWriter._current_row_count`` reads this on every write;
-        # folding there would reintroduce the quadratic through the side door.
+        # The composite writers read this on every write to size the next
+        # slice; folding here would bring the quadratic back through the side
+        # door.
         writer = _Harness()
         with _count_folds() as folds:
             for i in range(30):
@@ -745,6 +746,7 @@ class VectorNormalBufferTest(unittest.TestCase):
             self.record_count = 0
             self.vector_writer = None
             self._normal_buffer = WriteBuffer(self._merge_data)
+            self._buffer = WriteBuffer(self._merge_data)
 
     def test_should_roll_normal_does_not_fold(self):
         writer = self._VectorHarness()
@@ -768,11 +770,31 @@ class VectorNormalBufferTest(unittest.TestCase):
         # accumulated size rather than at some arbitrary later point.
         self.assertLessEqual(writer._normal_buffer.num_rows, 30)
 
-    def test_current_row_count_prefers_the_normal_buffer(self):
+    def test_pending_row_count_reports_the_normal_buffer(self):
+        # The inherited property reads the base ``_buffer``, which this writer
+        # never fills, so it has to be overridden or it always answers zero.
         writer = self._VectorHarness()
-        self.assertEqual(writer._current_row_count(), 0)
+        self.assertEqual(writer.pending_row_count, 0)
         writer._normal_buffer.append(_table(0, 7))
-        self.assertEqual(writer._current_row_count(), 7)
+        self.assertEqual(writer.pending_row_count, 7)
+        self.assertTrue(writer._buffer.is_empty)
+
+    def test_pending_row_count_falls_back_to_the_vector_writer(self):
+        # A table whose columns are all vectors buffers nothing normal, so the
+        # count has to come from the sidecar instead of reading as zero.
+        writer = self._VectorHarness()
+        writer.vector_writer = _StubSidecarWriter(0, 'vector-0')
+        writer.vector_writer.pending_row_count = 4
+        self.assertEqual(writer.pending_row_count, 4)
+        writer._normal_buffer.append(_table(0, 7))
+        self.assertEqual(writer.pending_row_count, 7)
+
+    def test_dedicated_writer_pending_row_count_reports_the_normal_buffer(self):
+        writer = CompositeFlushResumeTest._DedicatedHarness({})
+        self.assertEqual(writer.pending_row_count, 0)
+        writer._normal_buffer.append(_table(0, 3))
+        self.assertEqual(writer.pending_row_count, 3)
+        self.assertTrue(writer._buffer.is_empty)
 
 
 if __name__ == '__main__':

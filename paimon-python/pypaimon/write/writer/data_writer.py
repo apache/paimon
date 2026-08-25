@@ -111,7 +111,12 @@ class DataWriter(ABC):
 
     @property
     def pending_row_count(self) -> int:
-        """Number of buffered rows not yet written to a file."""
+        """Rows held for the file being written, not yet in a finished file.
+
+        The composite writers override this: they keep their normal rows in
+        ``_normal_buffer`` and hand the rest to their sub-writers, so the base
+        ``_buffer`` stays empty for them.
+        """
         return self._buffer.num_rows
 
     def _require_finished_flush(self):

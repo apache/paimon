@@ -214,7 +214,7 @@ class DedicatedFormatWriter(DataWriter):
             # _write_batch keeps normal/blob/vector pending rows in lockstep
             # and closes all writers when the shared row limit is reached.
             while offset < data.num_rows:
-                capacity = self.target_file_row_num - self._current_row_count()
+                capacity = self.target_file_row_num - self.pending_row_count
                 if capacity <= 0:
                     self._close_current_writers()
                     capacity = self.target_file_row_num
@@ -485,7 +485,12 @@ class DedicatedFormatWriter(DataWriter):
         # Check if normal data exceeds target size
         return self._normal_buffer.nbytes > self.target_file_size
 
-    def _current_row_count(self) -> int:
+    @property
+    def pending_row_count(self) -> int:
+        # Overrides the base property, which reads a buffer this writer never
+        # fills. Normal, blob and vector rows are kept in lockstep, so any half
+        # answers for all of them; the sidecars are asked only when the table
+        # has no normal columns at all.
         if not self._normal_buffer.is_empty:
             return self._normal_buffer.num_rows
         for blob_writer in self.blob_writers.values():
