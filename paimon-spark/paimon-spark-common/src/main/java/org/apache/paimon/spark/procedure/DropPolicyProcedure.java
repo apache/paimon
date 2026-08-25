@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.management.PolicyIdentity;
+import org.apache.paimon.management.PolicyType;
 
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
@@ -30,14 +31,16 @@ import org.apache.spark.sql.types.StructType;
 import static org.apache.spark.sql.types.DataTypes.BooleanType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
-/** Drops a named row-filter or column-masking policy. */
+/** Drops one principal's row-filter or column-masking policy. */
 public class DropPolicyProcedure extends BasePolicyProcedure {
 
     private static final ProcedureParameter[] PARAMETERS =
             new ProcedureParameter[] {
                 ProcedureParameter.required("database", StringType),
                 ProcedureParameter.required("table", StringType),
-                ProcedureParameter.required("name", StringType),
+                ProcedureParameter.required("policy_type", StringType),
+                ProcedureParameter.required("principal", StringType),
+                ProcedureParameter.optional("column", StringType),
                 ProcedureParameter.optional("if_exists", BooleanType)
             };
 
@@ -64,8 +67,13 @@ public class DropPolicyProcedure extends BasePolicyProcedure {
     @Override
     public InternalRow[] call(InternalRow args) {
         PolicyIdentity identity =
-                policyIdentity(args.getString(0), args.getString(1), args.getString(2));
-        policyManagement().dropPolicy(identity, !args.isNullAt(3) && args.getBoolean(3));
+                policyIdentity(
+                        args.getString(0),
+                        args.getString(1),
+                        enumValue(args.getString(2), PolicyType.class, PARAMETERS[2].name()),
+                        args.getString(3),
+                        args.isNullAt(4) ? null : args.getString(4));
+        policyManagement().dropPolicy(identity, !args.isNullAt(5) && args.getBoolean(5));
         return new InternalRow[] {newInternalRow(true)};
     }
 

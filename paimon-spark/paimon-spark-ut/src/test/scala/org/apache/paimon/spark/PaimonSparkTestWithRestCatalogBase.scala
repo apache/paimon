@@ -18,7 +18,6 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.management.{PrincipalRef, PrincipalType}
 import org.apache.paimon.options.CatalogOptions
 import org.apache.paimon.rest.{RESTCatalogFactory, RESTCatalogInternalOptions, RESTCatalogServer}
 import org.apache.paimon.rest.auth.{AuthProviderEnum, BearTokenAuthProvider}
@@ -53,9 +52,9 @@ class PaimonSparkTestWithRestCatalogBase extends PaimonSparkTestBase {
     serverUrl = restCatalogServer.getUrl
     super.beforeAll()
     Seq("analyst", "first", "second", "reader", "function_reader").foreach(
-      id => restCatalogServer.registerManagementPrincipal(new PrincipalRef(PrincipalType.ROLE, id)))
-    restCatalogServer.registerManagementPrincipal(new PrincipalRef(PrincipalType.GROUP, "analysts"))
-    restCatalogServer.registerManagementPrincipal(new PrincipalRef(PrincipalType.USER, "admin"))
+      restCatalogServer.registerManagementPrincipal)
+    restCatalogServer.registerManagementPrincipal("analysts")
+    restCatalogServer.registerManagementPrincipal("admin")
     spark.sql("CREATE DATABASE IF NOT EXISTS paimon.sales")
     spark.sql("""CREATE TABLE IF NOT EXISTS paimon.sales.orders (
                 |  id INT,

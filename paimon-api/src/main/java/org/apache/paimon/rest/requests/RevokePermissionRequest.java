@@ -22,7 +22,6 @@ import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.management.PermissionIdentity;
 import org.apache.paimon.management.PermissionResource;
 import org.apache.paimon.management.PermissionScope;
-import org.apache.paimon.management.PrincipalRef;
 import org.apache.paimon.rest.RESTRequest;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -56,7 +55,7 @@ public class RevokePermissionRequest implements RESTRequest {
             @JsonProperty(FIELD_RESOURCE) PermissionResource resource,
             @Nullable @JsonProperty(FIELD_SCOPE) String scope,
             @JsonProperty(FIELD_ACCESS) String access,
-            @JsonProperty(FIELD_PRINCIPAL) PrincipalRef principal) {
+            @JsonProperty(FIELD_PRINCIPAL) String principal) {
         this.identity =
                 new PermissionIdentity(
                         resource,
@@ -81,7 +80,7 @@ public class RevokePermissionRequest implements RESTRequest {
     }
 
     @JsonGetter(FIELD_PRINCIPAL)
-    public PrincipalRef getPrincipal() {
+    public String getPrincipal() {
         return identity.getPrincipal();
     }
 

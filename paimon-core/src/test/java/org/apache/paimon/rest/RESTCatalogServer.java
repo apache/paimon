@@ -45,8 +45,7 @@ import org.apache.paimon.management.DataPolicy;
 import org.apache.paimon.management.ListPermissionsRequest;
 import org.apache.paimon.management.PermissionAssignment;
 import org.apache.paimon.management.PermissionResource;
-import org.apache.paimon.management.PrincipalRef;
-import org.apache.paimon.management.PrincipalType;
+import org.apache.paimon.management.PolicyIdentity;
 import org.apache.paimon.management.ResourceType;
 import org.apache.paimon.management.RowFilter;
 import org.apache.paimon.operation.Lock;
@@ -72,6 +71,7 @@ import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateTagRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
+import org.apache.paimon.rest.requests.DropPolicyRequest;
 import org.apache.paimon.rest.requests.GrantPermissionRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByFilterRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByNamesRequest;
@@ -92,7 +92,6 @@ import org.apache.paimon.rest.responses.DropPartitionsResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
-import org.apache.paimon.rest.responses.GetPolicyResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableSnapshotResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
@@ -225,8 +224,8 @@ public class RESTCatalogServer {
     private final Map<PolicyKey, DataPolicy> policyStore = new ConcurrentHashMap<>();
     private final Map<String, Object> tablePolicyLocks = new ConcurrentHashMap<>();
     private final TableLifecycleLocks tableLifecycleLocks = new TableLifecycleLocks();
-    private final Set<PrincipalRef> managementPrincipals = new HashSet<>();
-    private final Set<PrincipalRef> queryPrincipals = new HashSet<>();
+    private final Set<String> managementPrincipals = new HashSet<>();
+    private final Set<String> queryPrincipals = new HashSet<>();
     private final Map<String, BiFunction<TableSchema, RowFilter, Predicate>>
             rowFilterPolicyFunctions = new HashMap<>();
     private final Map<String, BiFunction<TableSchema, ColumnMask, Transform>>
@@ -379,11 +378,11 @@ public class RESTCatalogServer {
         }
     }
 
-    public void registerManagementPrincipal(PrincipalRef principal) {
+    public void registerManagementPrincipal(String principal) {
         managementPrincipals.add(principal);
     }
 
-    public void setQueryPrincipals(Set<PrincipalRef> principals) {
+    public void setQueryPrincipals(Set<String> principals) {
         queryPrincipals.clear();
         queryPrincipals.addAll(principals);
     }
@@ -1159,10 +1158,7 @@ public class RESTCatalogServer {
     }
 
     private boolean appliesToQueryPrincipal(DataPolicy policy) {
-        boolean selected = policy.getToPrincipals().stream().anyMatch(queryPrincipals::contains);
-        boolean excluded =
-                policy.getExceptPrincipals().stream().anyMatch(queryPrincipals::contains);
-        return selected && !excluded;
+        return queryPrincipals.contains(policy.getPrincipal());
     }
 
     private MockResponse commitTableHandle(Identifier identifier, String data) throws Exception {
@@ -3365,15 +3361,12 @@ public class RESTCatalogServer {
         if (resourceError != null || !parameters.containsKey("principal")) {
             return resourceError;
         }
-        return validatePrincipal(
-                new PrincipalRef(
-                        PrincipalType.fromString(parameters.get("principalType")),
-                        parameters.get("principal")));
+        return validatePrincipal(parameters.get("principal"));
     }
 
     @Nullable
     private MockResponse validateResourceAndPrincipal(
-            PermissionResource resource, PrincipalRef principal) {
+            PermissionResource resource, String principal) {
         MockResponse resourceError = validateResource(resource);
         return resourceError == null ? validatePrincipal(principal) : resourceError;
     }
@@ -3434,13 +3427,13 @@ public class RESTCatalogServer {
     }
 
     @Nullable
-    private MockResponse validatePrincipal(PrincipalRef principal) {
+    private MockResponse validatePrincipal(String principal) {
         return managementPrincipals.contains(principal)
                 ? null
                 : mockResponse(
                         new ErrorResponse(
                                 "PRINCIPAL",
-                                principal.getId(),
+                                principal,
                                 "Permission principal does not exist.",
                                 404),
                         404);
@@ -3508,13 +3501,9 @@ public class RESTCatalogServer {
             return resourceError;
         }
         String tableUuid = tableUuid(path.resource);
-        if ("GET".equals(method) && path.name == null) {
+        if ("GET".equals(method)) {
             if (parameters.containsKey("principal")) {
-                MockResponse principalError =
-                        validatePrincipal(
-                                new PrincipalRef(
-                                        PrincipalType.fromString(parameters.get("principalType")),
-                                        parameters.get("principal")));
+                MockResponse principalError = validatePrincipal(parameters.get("principal"));
                 if (principalError != null) {
                     return principalError;
                 }
@@ -3524,7 +3513,9 @@ public class RESTCatalogServer {
                             .filter(entry -> entry.getKey().tableUuid.equals(tableUuid))
                             .map(entry -> withResource(entry.getValue(), path.resource))
                             .filter(policy -> matchesPolicy(policy, parameters))
-                            .sorted(Comparator.comparing(DataPolicy::getName))
+                            .sorted(
+                                    Comparator.comparing(
+                                            policy -> new PolicyKey(tableUuid, policy)))
                             .collect(Collectors.toList());
             int start =
                     parameters.containsKey(PAGE_TOKEN)
@@ -3538,21 +3529,9 @@ public class RESTCatalogServer {
                     200);
         }
 
-        if ("GET".equals(method) && path.name != null) {
-            DataPolicy policy = findPolicy(path.resource, path.name);
-            return policy == null
-                    ? mockResponse(
-                            new ErrorResponse(
-                                    ErrorResponse.RESOURCE_TYPE_POLICY,
-                                    path.name,
-                                    "Policy does not exist.",
-                                    404),
-                            404)
-                    : mockResponse(new GetPolicyResponse(policy), 200);
-        }
-
-        if ("POST".equals(method) && path.name == null) {
+        if ("POST".equals(method)) {
             DataPolicy policy = RESTApi.fromJson(data, PolicyRequest.class).policy(path.resource);
+            PolicyIdentity identity = PolicyIdentity.fromPolicy(policy);
             synchronized (policyLock(tableUuid)) {
                 MockResponse targetError = validatePolicyTableVersion(path.resource, tableUuid);
                 if (targetError != null) {
@@ -3562,12 +3541,12 @@ public class RESTCatalogServer {
                 if (validation != null) {
                     return validation;
                 }
-                PolicyKey key = new PolicyKey(tableUuid, policy.getName());
+                PolicyKey key = new PolicyKey(tableUuid, policy);
                 if (policyStore.putIfAbsent(key, policy) != null) {
                     return mockResponse(
                             new ErrorResponse(
                                     ErrorResponse.RESOURCE_TYPE_POLICY,
-                                    policy.getName(),
+                                    identity.resourceName(),
                                     "Policy already exists.",
                                     409),
                             409);
@@ -3576,11 +3555,8 @@ public class RESTCatalogServer {
             return new MockResponse().setResponseCode(200);
         }
 
-        if ("PUT".equals(method) && path.name != null) {
+        if ("PUT".equals(method)) {
             DataPolicy policy = RESTApi.fromJson(data, PolicyRequest.class).policy(path.resource);
-            checkArgument(
-                    path.name.equals(policy.getName()),
-                    "Policy name in the path and request body must match.");
             synchronized (policyLock(tableUuid)) {
                 MockResponse targetError = validatePolicyTableVersion(path.resource, tableUuid);
                 if (targetError != null) {
@@ -3590,25 +3566,27 @@ public class RESTCatalogServer {
                 if (validation != null) {
                     return validation;
                 }
-                policyStore.put(new PolicyKey(tableUuid, path.name), policy);
+                policyStore.put(new PolicyKey(tableUuid, policy), policy);
             }
             return new MockResponse().setResponseCode(200);
         }
 
-        if ("DELETE".equals(method) && path.name != null) {
+        if ("DELETE".equals(method)) {
+            PolicyIdentity identity =
+                    RESTApi.fromJson(data, DropPolicyRequest.class).identity(path.resource);
             DataPolicy existing;
             synchronized (policyLock(tableUuid)) {
                 MockResponse targetError = validatePolicyTableVersion(path.resource, tableUuid);
                 if (targetError != null) {
                     return targetError;
                 }
-                existing = policyStore.remove(new PolicyKey(tableUuid, path.name));
+                existing = policyStore.remove(new PolicyKey(tableUuid, identity));
             }
             if (existing == null) {
                 return mockResponse(
                         new ErrorResponse(
                                 ErrorResponse.RESOURCE_TYPE_POLICY,
-                                path.name,
+                                identity.resourceName(),
                                 "Policy does not exist.",
                                 404),
                         404);
@@ -3634,17 +3612,9 @@ public class RESTCatalogServer {
                             409),
                     409);
         }
-        for (PrincipalRef principal : policy.getToPrincipals()) {
-            MockResponse principalError = validatePrincipal(principal);
-            if (principalError != null) {
-                return principalError;
-            }
-        }
-        for (PrincipalRef principal : policy.getExceptPrincipals()) {
-            MockResponse principalError = validatePrincipal(principal);
-            if (principalError != null) {
-                return principalError;
-            }
+        MockResponse principalError = validatePrincipal(policy.getPrincipal());
+        if (principalError != null) {
+            return principalError;
         }
 
         RowFilter rowFilter = policy.getRowFilter();
@@ -3699,12 +3669,6 @@ public class RESTCatalogServer {
         return null;
     }
 
-    @Nullable
-    private DataPolicy findPolicy(PermissionResource resource, String name) {
-        DataPolicy policy = policyStore.get(new PolicyKey(tableUuid(resource), name));
-        return policy == null ? null : withResource(policy, resource);
-    }
-
     private String tableUuid(PermissionResource resource) {
         return tableMetadataStore
                 .get(Identifier.create(resource.getDatabase(), resource.getTable()).getFullName())
@@ -3736,20 +3700,8 @@ public class RESTCatalogServer {
 
     private static DataPolicy withResource(DataPolicy policy, PermissionResource resource) {
         return policy.getRowFilter() == null
-                ? DataPolicy.columnMask(
-                        resource,
-                        policy.getName(),
-                        policy.getColumnMask(),
-                        policy.getToPrincipals(),
-                        policy.getExceptPrincipals(),
-                        policy.getComment())
-                : DataPolicy.rowFilter(
-                        resource,
-                        policy.getName(),
-                        policy.getRowFilter(),
-                        policy.getToPrincipals(),
-                        policy.getExceptPrincipals(),
-                        policy.getComment());
+                ? DataPolicy.columnMask(resource, policy.getColumnMask(), policy.getPrincipal())
+                : DataPolicy.rowFilter(resource, policy.getRowFilter(), policy.getPrincipal());
     }
 
     private Predicate compileRowFilter(TableSchema schema, RowFilter rowFilter) {
@@ -3825,38 +3777,35 @@ public class RESTCatalogServer {
     }
 
     private static boolean matchesPolicy(DataPolicy policy, Map<String, String> parameters) {
-        if (!matches(parameters, "name", policy.getName())
-                || !matches(parameters, "type", policy.type().name())) {
+        if (!matches(parameters, "type", policy.type().name())) {
             return false;
         }
-        if (!parameters.containsKey("principal")) {
-            return true;
+        if (parameters.containsKey("column")) {
+            ColumnMask columnMask = policy.getColumnMask();
+            if (columnMask == null
+                    || !Objects.equals(parameters.get("column"), columnMask.getOnColumn())) {
+                return false;
+            }
         }
-        PrincipalRef principal =
-                new PrincipalRef(
-                        PrincipalType.fromString(parameters.get("principalType")),
-                        parameters.get("principal"));
-        return policy.getToPrincipals().contains(principal)
-                && !policy.getExceptPrincipals().contains(principal);
+        return !parameters.containsKey("principal")
+                || policy.getPrincipal().equals(parameters.get("principal"));
     }
 
     private PolicyPath policyPath(String resourcePath) {
         String catalogBase = StringUtils.substringBeforeLast(permissionUri, "/");
         checkArgument(resourcePath.startsWith(catalogBase + "/"), "Not a catalog policy path.");
         String[] parts = resourcePath.substring(catalogBase.length() + 1).split("/");
-        if (parts.length >= 5
+        if (parts.length == 5
                 && "databases".equals(parts[0])
                 && "tables".equals(parts[2])
                 && "policies".equals(parts[4])) {
-            checkArgument(parts.length <= 6, "Invalid table policy path.");
             return new PolicyPath(
                     new PermissionResource(
                             ResourceType.TABLE,
                             RESTUtil.decodeString(parts[1]),
                             RESTUtil.decodeString(parts[3]),
                             null,
-                            null),
-                    parts.length == 6 ? RESTUtil.decodeString(parts[5]) : null);
+                            null));
         }
         throw new IllegalArgumentException("Not a policy path.");
     }
@@ -3864,11 +3813,9 @@ public class RESTCatalogServer {
     private static class PolicyPath {
 
         private final PermissionResource resource;
-        @Nullable private final String name;
 
-        private PolicyPath(PermissionResource resource, @Nullable String name) {
+        private PolicyPath(PermissionResource resource) {
             this.resource = resource;
-            this.name = name;
         }
     }
 

@@ -19,7 +19,6 @@
 package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.management.PermissionIdentity;
-import org.apache.paimon.management.PrincipalType;
 import org.apache.paimon.management.ResourceType;
 
 import org.apache.spark.sql.catalyst.InternalRow;
@@ -38,7 +37,6 @@ public class RevokePermissionProcedure extends BasePermissionProcedure {
             new ProcedureParameter[] {
                 ProcedureParameter.required("resource_type", StringType),
                 ProcedureParameter.required("access", StringType),
-                ProcedureParameter.required("principal_type", StringType),
                 ProcedureParameter.required("principal", StringType),
                 ProcedureParameter.optional("database", StringType),
                 ProcedureParameter.optional("table", StringType),
@@ -75,13 +73,12 @@ public class RevokePermissionProcedure extends BasePermissionProcedure {
                 identity(
                         resourceType,
                         args.getString(1),
-                        enumValue(args.getString(2), PrincipalType.class, PARAMETERS[2].name()),
-                        args.getString(3),
+                        args.getString(2),
+                        args.isNullAt(3) ? null : args.getString(3),
                         args.isNullAt(4) ? null : args.getString(4),
                         args.isNullAt(5) ? null : args.getString(5),
                         args.isNullAt(6) ? null : args.getString(6),
-                        args.isNullAt(7) ? null : args.getString(7),
-                        args.isNullAt(8) ? null : args.getString(8));
+                        args.isNullAt(7) ? null : args.getString(7));
 
         permissionManagement().revokePermission(identity);
         return new InternalRow[] {newInternalRow(true)};

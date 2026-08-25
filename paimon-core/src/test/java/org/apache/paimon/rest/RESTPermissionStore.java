@@ -66,8 +66,7 @@ final class RESTPermissionStore {
             Map<String, String> parameters,
             boolean includeInherited) {
         PermissionResource resource = assignment.getResource();
-        return matches(parameters, "principal", assignment.getPrincipal().getId())
-                && matches(parameters, "principalType", assignment.getPrincipal().getType().name())
+        return matches(parameters, "principal", assignment.getPrincipal())
                 && matches(parameters, "access", assignment.getAccess())
                 && (includeInherited
                         || (matches(parameters, "resourceType", resource.getType().name())
@@ -144,9 +143,7 @@ final class RESTPermissionStore {
                 + '\0'
                 + assignment.getAccess()
                 + '\0'
-                + assignment.getPrincipal().getType().name()
-                + '\0'
-                + assignment.getPrincipal().getId();
+                + assignment.getPrincipal();
     }
 
     private static String value(String value) {

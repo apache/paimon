@@ -30,35 +30,35 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 public class ListPoliciesRequest {
 
     private final PermissionResource resource;
-    @Nullable private final String name;
     @Nullable private final PolicyType type;
-    @Nullable private final PrincipalType principalType;
     @Nullable private final String principal;
+    @Nullable private final String column;
     @Nullable private final String pageToken;
     @Nullable private final Integer maxResults;
 
     public ListPoliciesRequest(
             PermissionResource resource,
-            @Nullable String name,
             @Nullable PolicyType type,
-            @Nullable PrincipalType principalType,
             @Nullable String principal,
+            @Nullable String column,
             @Nullable String pageToken,
             @Nullable Integer maxResults) {
         this.resource = checkNotNull(resource, "resource cannot be null");
         resource.validatePolicyAttachment();
-        checkArgument(
-                (principalType == null) == isBlank(principal),
-                "principalType and principal must be specified together.");
+        if (!isBlank(principal)) {
+            PermissionAssignment.validatePrincipal(principal);
+        }
         checkArgument(maxResults == null || maxResults > 0, "maxResults must be greater than 0.");
         checkArgument(
                 maxResults == null || maxResults <= ListPermissionsRequest.MAX_PAGE_SIZE,
                 "maxResults must be at most %s.",
                 ListPermissionsRequest.MAX_PAGE_SIZE);
-        this.name = isBlank(name) ? null : name;
         this.type = type;
-        this.principalType = principalType;
         this.principal = isBlank(principal) ? null : principal;
+        checkArgument(
+                isBlank(column) || type == PolicyType.COLUMN_MASKING,
+                "column filter requires type COLUMN_MASKING.");
+        this.column = isBlank(column) ? null : column;
         this.pageToken = isBlank(pageToken) ? null : pageToken;
         this.maxResults = maxResults;
     }
@@ -68,23 +68,18 @@ public class ListPoliciesRequest {
     }
 
     @Nullable
-    public String getName() {
-        return name;
-    }
-
-    @Nullable
     public PolicyType getType() {
         return type;
     }
 
     @Nullable
-    public PrincipalType getPrincipalType() {
-        return principalType;
+    public String getPrincipal() {
+        return principal;
     }
 
     @Nullable
-    public String getPrincipal() {
-        return principal;
+    public String getColumn() {
+        return column;
     }
 
     @Nullable
@@ -98,8 +93,7 @@ public class ListPoliciesRequest {
     }
 
     public ListPoliciesRequest withPageToken(@Nullable String newPageToken) {
-        return new ListPoliciesRequest(
-                resource, name, type, principalType, principal, newPageToken, maxResults);
+        return new ListPoliciesRequest(resource, type, principal, column, newPageToken, maxResults);
     }
 
     private static boolean isBlank(@Nullable String value) {

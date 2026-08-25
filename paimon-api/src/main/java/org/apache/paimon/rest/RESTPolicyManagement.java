@@ -43,11 +43,6 @@ public class RESTPolicyManagement implements PolicyManagement {
     }
 
     @Override
-    public DataPolicy getPolicy(PolicyIdentity identity) {
-        return api.getPolicy(identity).getPolicy();
-    }
-
-    @Override
     public void createPolicy(DataPolicy policy) {
         api.createPolicy(policy);
     }

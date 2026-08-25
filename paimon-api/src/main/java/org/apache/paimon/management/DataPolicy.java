@@ -29,33 +29,29 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 import javax.annotation.Nullable;
 
 import java.beans.ConstructorProperties;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Objects;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
-/** Named row-filter or column-mask policy attached to one table. */
+/**
+ * Principal-scoped row-filter or column-mask policy attached to one table.
+ *
+ * <p>A principal has at most one row filter per table and at most one mask per table column. When
+ * policies are enforced, applicable row filters are combined with logical AND and multiple
+ * effective masks for one column fail closed. Resolution, signature, and compilation failures also
+ * fail closed.
+ */
 @Experimental
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class DataPolicy {
 
     private static final String FIELD_RESOURCE = "resource";
-    private static final String FIELD_NAME = "name";
     private static final String FIELD_ROW_FILTER = "rowFilter";
     private static final String FIELD_COLUMN_MASK = "columnMask";
-    private static final String FIELD_TO_PRINCIPALS = "toPrincipals";
-    private static final String FIELD_EXCEPT_PRINCIPALS = "exceptPrincipals";
-    private static final String FIELD_COMMENT = "comment";
+    private static final String FIELD_PRINCIPAL = "principal";
 
     @JsonProperty(FIELD_RESOURCE)
     private final PermissionResource resource;
-
-    @JsonProperty(FIELD_NAME)
-    private final String name;
 
     @Nullable
     @JsonProperty(FIELD_ROW_FILTER)
@@ -67,95 +63,39 @@ public class DataPolicy {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private final ColumnMask columnMask;
 
-    @JsonProperty(FIELD_TO_PRINCIPALS)
-    private final List<PrincipalRef> toPrincipals;
-
-    @JsonProperty(FIELD_EXCEPT_PRINCIPALS)
-    private final List<PrincipalRef> exceptPrincipals;
-
-    @Nullable
-    @JsonProperty(FIELD_COMMENT)
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    private final String comment;
+    @JsonProperty(FIELD_PRINCIPAL)
+    private final String principal;
 
     @JsonCreator
-    @ConstructorProperties({
-        FIELD_RESOURCE,
-        FIELD_NAME,
-        FIELD_ROW_FILTER,
-        FIELD_COLUMN_MASK,
-        FIELD_TO_PRINCIPALS,
-        FIELD_EXCEPT_PRINCIPALS,
-        FIELD_COMMENT
-    })
+    @ConstructorProperties({FIELD_RESOURCE, FIELD_ROW_FILTER, FIELD_COLUMN_MASK, FIELD_PRINCIPAL})
     public DataPolicy(
             @JsonProperty(FIELD_RESOURCE) PermissionResource resource,
-            @JsonProperty(FIELD_NAME) String name,
             @Nullable @JsonProperty(FIELD_ROW_FILTER) RowFilter rowFilter,
             @Nullable @JsonProperty(FIELD_COLUMN_MASK) ColumnMask columnMask,
-            @JsonProperty(FIELD_TO_PRINCIPALS) List<PrincipalRef> toPrincipals,
-            @Nullable @JsonProperty(FIELD_EXCEPT_PRINCIPALS) List<PrincipalRef> exceptPrincipals,
-            @Nullable @JsonProperty(FIELD_COMMENT) String comment) {
+            @JsonProperty(FIELD_PRINCIPAL) String principal) {
         this.resource = checkNotNull(resource, "resource cannot be null");
         resource.validatePolicyAttachment();
-        checkArgument(!isBlank(name), "policy name cannot be empty.");
-        this.name = name;
         checkArgument(
                 (rowFilter == null) != (columnMask == null),
                 "A policy must contain exactly one of rowFilter and columnMask.");
         this.rowFilter = rowFilter;
         this.columnMask = columnMask;
-        checkArgument(
-                toPrincipals != null && !toPrincipals.isEmpty(),
-                "toPrincipals must contain at least one principal.");
-        checkArgument(
-                toPrincipals.stream().noneMatch(Objects::isNull),
-                "toPrincipals cannot contain null principals.");
-        checkArgument(
-                new HashSet<>(toPrincipals).size() == toPrincipals.size(),
-                "toPrincipals cannot contain duplicate principals.");
-        this.toPrincipals = immutable(toPrincipals);
-        List<PrincipalRef> exclusions = immutable(exceptPrincipals);
-        checkArgument(
-                exclusions.stream().noneMatch(Objects::isNull),
-                "exceptPrincipals cannot contain null principals.");
-        checkArgument(
-                new HashSet<>(exclusions).size() == exclusions.size(),
-                "exceptPrincipals cannot contain duplicate principals.");
-        this.exceptPrincipals = exclusions;
-        this.comment = isBlank(comment) ? null : comment;
+        this.principal = PermissionAssignment.validatePrincipal(principal);
     }
 
     public static DataPolicy rowFilter(
-            PermissionResource resource,
-            String name,
-            RowFilter rowFilter,
-            List<PrincipalRef> toPrincipals,
-            @Nullable List<PrincipalRef> exceptPrincipals,
-            @Nullable String comment) {
-        return new DataPolicy(
-                resource, name, rowFilter, null, toPrincipals, exceptPrincipals, comment);
+            PermissionResource resource, RowFilter rowFilter, String principal) {
+        return new DataPolicy(resource, rowFilter, null, principal);
     }
 
     public static DataPolicy columnMask(
-            PermissionResource resource,
-            String name,
-            ColumnMask columnMask,
-            List<PrincipalRef> toPrincipals,
-            @Nullable List<PrincipalRef> exceptPrincipals,
-            @Nullable String comment) {
-        return new DataPolicy(
-                resource, name, null, columnMask, toPrincipals, exceptPrincipals, comment);
+            PermissionResource resource, ColumnMask columnMask, String principal) {
+        return new DataPolicy(resource, null, columnMask, principal);
     }
 
     @JsonGetter(FIELD_RESOURCE)
     public PermissionResource getResource() {
         return resource;
-    }
-
-    @JsonGetter(FIELD_NAME)
-    public String getName() {
-        return name;
     }
 
     @Nullable
@@ -174,29 +114,8 @@ public class DataPolicy {
         return rowFilter == null ? PolicyType.COLUMN_MASKING : PolicyType.ROW_FILTER;
     }
 
-    @JsonGetter(FIELD_TO_PRINCIPALS)
-    public List<PrincipalRef> getToPrincipals() {
-        return toPrincipals;
-    }
-
-    @JsonGetter(FIELD_EXCEPT_PRINCIPALS)
-    public List<PrincipalRef> getExceptPrincipals() {
-        return exceptPrincipals;
-    }
-
-    @Nullable
-    @JsonGetter(FIELD_COMMENT)
-    public String getComment() {
-        return comment;
-    }
-
-    private static <T> List<T> immutable(@Nullable List<T> values) {
-        return values == null
-                ? Collections.emptyList()
-                : Collections.unmodifiableList(new ArrayList<>(values));
-    }
-
-    private static boolean isBlank(@Nullable String value) {
-        return value == null || value.trim().isEmpty();
+    @JsonGetter(FIELD_PRINCIPAL)
+    public String getPrincipal() {
+        return principal;
     }
 }

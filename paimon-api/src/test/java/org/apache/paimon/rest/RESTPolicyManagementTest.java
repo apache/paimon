@@ -27,8 +27,6 @@ import org.apache.paimon.management.PolicyArgument;
 import org.apache.paimon.management.PolicyIdentity;
 import org.apache.paimon.management.PolicyManagement;
 import org.apache.paimon.management.PolicyType;
-import org.apache.paimon.management.PrincipalRef;
-import org.apache.paimon.management.PrincipalType;
 import org.apache.paimon.management.ResourceType;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
@@ -60,13 +58,13 @@ public class RESTPolicyManagementTest {
 
     private static final String COLLECTION_PATH =
             "/v1/catalog+id/databases/sales/tables/orders/policies";
-    private static final String POLICY_PATH = COLLECTION_PATH + "/mask+email";
 
     private HttpServer server;
     private PolicyManagement management;
     private final AtomicReference<String> listQuery = new AtomicReference<>();
     private final AtomicReference<String> createBody = new AtomicReference<>();
     private final AtomicReference<String> updateBody = new AtomicReference<>();
+    private final AtomicReference<String> deleteBody = new AtomicReference<>();
     private final AtomicReference<String> deleteError = new AtomicReference<>();
     private final AtomicInteger deleteCalls = new AtomicInteger();
 
@@ -84,12 +82,11 @@ public class RESTPolicyManagementTest {
                     } else if (COLLECTION_PATH.equals(path) && "POST".equals(method)) {
                         createBody.set(readBody(exchange));
                         respond(exchange, 200, null);
-                    } else if (POLICY_PATH.equals(path) && "GET".equals(method)) {
-                        respond(exchange, 200, "{\"policy\":" + policyJson() + "}");
-                    } else if (POLICY_PATH.equals(path) && "PUT".equals(method)) {
+                    } else if (COLLECTION_PATH.equals(path) && "PUT".equals(method)) {
                         updateBody.set(readBody(exchange));
                         respond(exchange, 200, null);
-                    } else if (POLICY_PATH.equals(path) && "DELETE".equals(method)) {
+                    } else if (COLLECTION_PATH.equals(path) && "DELETE".equals(method)) {
+                        deleteBody.set(readBody(exchange));
                         deleteCalls.incrementAndGet();
                         if (deleteError.get() == null) {
                             respond(exchange, 200, null);
@@ -118,31 +115,25 @@ public class RESTPolicyManagementTest {
     }
 
     @Test
-    void testListAndGetUseResourceNestedPaths() {
+    void testListUsesResourceNestedPathAndIdentityFilters() {
         PagedList<DataPolicy> policies =
                 management.listPolicies(
                         new ListPoliciesRequest(
                                 tableResource(),
-                                "mask email",
                                 PolicyType.COLUMN_MASKING,
-                                PrincipalType.ROLE,
                                 "analyst",
+                                "email",
                                 "start",
                                 25));
 
         assertThat(policies.getElements()).hasSize(1);
         assertThat(policies.getNextPageToken()).isEqualTo("next");
         assertThat(listQuery.get())
-                .contains("name=mask%20email")
                 .contains("type=COLUMN_MASKING")
-                .contains("principalType=ROLE")
                 .contains("principal=analyst")
+                .contains("column=email")
                 .contains("maxResults=25")
                 .contains("pageToken=start");
-
-        DataPolicy policy = management.getPolicy(new PolicyIdentity(tableResource(), "mask email"));
-        assertThat(policy.getName()).isEqualTo("mask email");
-        assertThat(policy.getColumnMask().getOnColumn()).isEqualTo("email");
     }
 
     @Test
@@ -152,10 +143,13 @@ public class RESTPolicyManagementTest {
         management.createOrReplacePolicy(policy);
         management.dropPolicy(PolicyIdentity.fromPolicy(policy), false);
 
-        assertThat(createBody.get()).contains("\"name\":\"mask email\"");
+        assertThat(createBody.get()).contains("\"principal\":\"analyst\"");
         assertThat(createBody.get()).doesNotContain("\"resource\"");
         assertThat(updateBody.get()).contains("\"columnMask\"");
         assertThat(updateBody.get()).doesNotContain("\"scope\"");
+        assertThat(deleteBody.get())
+                .contains("\"type\":\"COLUMN_MASKING\"")
+                .contains("\"column\":\"email\"");
         assertThat(deleteCalls).hasValue(1);
     }
 
@@ -163,7 +157,8 @@ public class RESTPolicyManagementTest {
     void testDropIfExistsOnlyIgnoresMissingPolicy() {
         PolicyIdentity identity = PolicyIdentity.fromPolicy(policy());
         deleteError.set(
-                "{\"resourceType\":\"POLICY\",\"resourceName\":\"mask email\","
+                "{\"resourceType\":\"POLICY\",\"resourceName\":"
+                        + "\"COLUMN_MASKING:analyst:email\","
                         + "\"message\":\"missing\",\"code\":404}");
 
         management.dropPolicy(identity, true);
@@ -179,14 +174,11 @@ public class RESTPolicyManagementTest {
     private static DataPolicy policy() {
         return DataPolicy.columnMask(
                 tableResource(),
-                "mask email",
                 new ColumnMask(
                         "security.mask_email",
                         "email",
                         Collections.singletonList(PolicyArgument.column("region"))),
-                Collections.singletonList(new PrincipalRef(PrincipalType.ROLE, "analyst")),
-                Collections.emptyList(),
-                "Mask customer email");
+                "analyst");
     }
 
     private static PermissionResource tableResource() {

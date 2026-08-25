@@ -22,7 +22,6 @@ import org.apache.paimon.PagedList;
 import org.apache.paimon.management.ListPermissionsRequest;
 import org.apache.paimon.management.PermissionAssignment;
 import org.apache.paimon.management.PermissionScope;
-import org.apache.paimon.management.PrincipalType;
 import org.apache.paimon.management.ResourceType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
@@ -50,7 +49,6 @@ public class ListPermissionsProcedure extends BasePermissionProcedure {
                 ProcedureParameter.optional("table", StringType),
                 ProcedureParameter.optional("function", StringType),
                 ProcedureParameter.optional("view", StringType),
-                ProcedureParameter.optional("principal_type", StringType),
                 ProcedureParameter.optional("principal", StringType),
                 ProcedureParameter.optional("access", StringType),
                 ProcedureParameter.optional("include_inherited", BooleanType),
@@ -68,7 +66,6 @@ public class ListPermissionsProcedure extends BasePermissionProcedure {
                         field("function", StringType, true),
                         field("view", StringType, true),
                         field("access", StringType, false),
-                        field("principal_type", StringType, false),
                         field("principal", StringType, false),
                         field("expire_time", StringType, true),
                         field("inherited_from_json", StringType, true),
@@ -93,7 +90,7 @@ public class ListPermissionsProcedure extends BasePermissionProcedure {
     public InternalRow[] call(InternalRow args) {
         ResourceType resourceType =
                 enumValue(args.getString(0), ResourceType.class, PARAMETERS[0].name());
-        Integer maxResults = args.isNullAt(10) ? null : args.getInt(10);
+        Integer maxResults = args.isNullAt(9) ? null : args.getInt(9);
         ListPermissionsRequest request =
                 new ListPermissionsRequest(
                         resourceType,
@@ -105,14 +102,10 @@ public class ListPermissionsProcedure extends BasePermissionProcedure {
                         args.isNullAt(3) ? null : emptyToNull(args.getString(3)),
                         args.isNullAt(4) ? null : emptyToNull(args.getString(4)),
                         args.isNullAt(5) ? null : emptyToNull(args.getString(5)),
-                        optionalEnum(
-                                args.isNullAt(6) ? null : args.getString(6),
-                                PrincipalType.class,
-                                PARAMETERS[6].name()),
+                        args.isNullAt(6) ? null : emptyToNull(args.getString(6)),
                         args.isNullAt(7) ? null : emptyToNull(args.getString(7)),
-                        args.isNullAt(8) ? null : emptyToNull(args.getString(8)),
-                        !args.isNullAt(9) && args.getBoolean(9),
-                        args.isNullAt(11) ? null : emptyToNull(args.getString(11)),
+                        !args.isNullAt(8) && args.getBoolean(8),
+                        args.isNullAt(10) ? null : emptyToNull(args.getString(10)),
                         maxResults);
         PagedList<PermissionAssignment> page = permissionManagement().listPermissions(request);
         List<PermissionAssignment> assignments = page.getElements();
@@ -132,8 +125,7 @@ public class ListPermissionsProcedure extends BasePermissionProcedure {
                             string(assignment.getResource().getFunction()),
                             string(assignment.getResource().getView()),
                             string(assignment.getAccess()),
-                            string(assignment.getPrincipal().getType().name()),
-                            string(assignment.getPrincipal().getId()),
+                            string(assignment.getPrincipal()),
                             string(assignment.getExpireTime()),
                             json(assignment.getInheritedFrom()),
                             string(page.getNextPageToken()));

@@ -23,7 +23,6 @@ import org.apache.paimon.management.ColumnMask;
 import org.apache.paimon.management.DataPolicy;
 import org.apache.paimon.management.ListPoliciesRequest;
 import org.apache.paimon.management.PolicyType;
-import org.apache.paimon.management.PrincipalType;
 import org.apache.paimon.management.RowFilter;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
@@ -46,10 +45,9 @@ public class ListPoliciesProcedure extends BasePolicyProcedure {
             new ProcedureParameter[] {
                 ProcedureParameter.required("database", StringType),
                 ProcedureParameter.required("table", StringType),
-                ProcedureParameter.optional("name", StringType),
                 ProcedureParameter.optional("policy_type", StringType),
-                ProcedureParameter.optional("principal_type", StringType),
                 ProcedureParameter.optional("principal", StringType),
+                ProcedureParameter.optional("column", StringType),
                 ProcedureParameter.optional("max_results", IntegerType),
                 ProcedureParameter.optional("page_token", StringType)
             };
@@ -59,14 +57,11 @@ public class ListPoliciesProcedure extends BasePolicyProcedure {
                     new StructField[] {
                         field("database", StringType, false),
                         field("table", StringType, false),
-                        field("name", StringType, false),
                         field("policy_type", StringType, false),
+                        field("principal", StringType, false),
                         field("function_name", StringType, false),
                         field("on_column", StringType, true),
                         field("function_arguments_json", StringType, false),
-                        field("to_principals_json", StringType, false),
-                        field("except_principals_json", StringType, false),
-                        field("comment", StringType, true),
                         field("next_page_token", StringType, true)
                     });
 
@@ -89,18 +84,14 @@ public class ListPoliciesProcedure extends BasePolicyProcedure {
         ListPoliciesRequest request =
                 new ListPoliciesRequest(
                         tableResource(args.getString(0), args.getString(1)),
-                        args.isNullAt(2) ? null : args.getString(2),
                         optionalEnum(
-                                args.isNullAt(3) ? null : args.getString(3),
+                                args.isNullAt(2) ? null : args.getString(2),
                                 PolicyType.class,
-                                PARAMETERS[3].name()),
-                        optionalEnum(
-                                args.isNullAt(4) ? null : args.getString(4),
-                                PrincipalType.class,
-                                PARAMETERS[4].name()),
-                        args.isNullAt(5) ? null : args.getString(5),
-                        args.isNullAt(7) ? null : args.getString(7),
-                        args.isNullAt(6) ? null : args.getInt(6));
+                                PARAMETERS[2].name()),
+                        args.isNullAt(3) ? null : args.getString(3),
+                        args.isNullAt(4) ? null : args.getString(4),
+                        args.isNullAt(6) ? null : args.getString(6),
+                        args.isNullAt(5) ? null : args.getInt(5));
         PagedList<DataPolicy> page = policyManagement().listPolicies(request);
         List<DataPolicy> policies = page.getElements();
         if (policies == null || policies.isEmpty()) {
@@ -115,8 +106,8 @@ public class ListPoliciesProcedure extends BasePolicyProcedure {
                     newInternalRow(
                             string(policy.getResource().getDatabase()),
                             string(policy.getResource().getTable()),
-                            string(policy.getName()),
                             string(policy.type().name()),
+                            string(policy.getPrincipal()),
                             string(
                                     rowFilter == null
                                             ? columnMask.getFunctionName()
@@ -126,9 +117,6 @@ public class ListPoliciesProcedure extends BasePolicyProcedure {
                                     rowFilter == null
                                             ? columnMask.getFunctionArguments()
                                             : rowFilter.getFunctionArguments()),
-                            json(policy.getToPrincipals()),
-                            json(policy.getExceptPrincipals()),
-                            string(policy.getComment()),
                             string(page.getNextPageToken()));
         }
         return rows;

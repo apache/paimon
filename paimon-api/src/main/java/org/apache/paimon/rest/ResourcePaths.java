@@ -86,12 +86,6 @@ public class ResourcePaths {
         return SLASH.join(table(resource.getDatabase(), resource.getTable()), POLICIES);
     }
 
-    /** Named policy nested below its attachment resource. */
-    @Experimental
-    public String policy(PermissionResource resource, String policyName) {
-        return SLASH.join(policies(resource), encodeString(policyName));
-    }
-
     public String databases() {
         return SLASH.join(V1, prefix, DATABASES);
     }

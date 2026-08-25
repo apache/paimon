@@ -25,8 +25,6 @@ import org.apache.paimon.management.PermissionIdentity;
 import org.apache.paimon.management.PermissionManagement;
 import org.apache.paimon.management.PermissionResource;
 import org.apache.paimon.management.PermissionScope;
-import org.apache.paimon.management.PrincipalRef;
-import org.apache.paimon.management.PrincipalType;
 import org.apache.paimon.management.ResourceType;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
@@ -83,7 +81,7 @@ public class RESTPermissionManagementTest {
                                 "{\"permissions\":[{\"resource\":{\"type\":\"TABLE\","
                                         + "\"database\":\"sales\",\"table\":\"orders\"},"
                                         + "\"scope\":\"SELF\",\"access\":\"SELECT\","
-                                        + "\"principal\":{\"type\":\"ROLE\",\"id\":\"analyst\"}}],"
+                                        + "\"principal\":\"analyst\"}],"
                                         + "\"nextPageToken\":\"next\"}");
                     } else if ((BASE_PATH + "/grant").equals(path)) {
                         String body = readBody(exchange);
@@ -129,7 +127,6 @@ public class RESTPermissionManagementTest {
                                 "orders",
                                 null,
                                 null,
-                                PrincipalType.ROLE,
                                 "analyst",
                                 null,
                                 true,
@@ -137,10 +134,9 @@ public class RESTPermissionManagementTest {
                                 25));
 
         assertThat(page.getElements()).hasSize(1);
-        assertThat(page.getElements().get(0).getPrincipal().getId()).isEqualTo("analyst");
+        assertThat(page.getElements().get(0).getPrincipal()).isEqualTo("analyst");
         assertThat(page.getNextPageToken()).isEqualTo("next");
         assertThat(queryParameters(listQuery.get()))
-                .containsEntry("principalType", "ROLE")
                 .containsEntry("principal", "analyst")
                 .containsEntry("resourceType", "TABLE")
                 .containsEntry("scope", "SELF")
@@ -163,9 +159,7 @@ public class RESTPermissionManagementTest {
         assertThat(grantResource.get("type")).isEqualTo("TABLE");
         assertThat(grantResource.get("database")).isEqualTo("sales");
         assertThat(grantResource.get("table")).isEqualTo("orders");
-        Map<?, ?> grantPrincipal = (Map<?, ?>) grant.get("principal");
-        assertThat(grantPrincipal.get("type")).isEqualTo("ROLE");
-        assertThat(grantPrincipal.get("id")).isEqualTo("analyst");
+        assertThat(grant.get("principal")).isEqualTo("analyst");
         assertThat(grant.get("scope")).isEqualTo("SELF");
         assertThat(grant.containsKey("columns")).isFalse();
         assertThat(grant.containsKey("policy")).isFalse();
@@ -177,9 +171,7 @@ public class RESTPermissionManagementTest {
         assertThat(revokeResource.get("type")).isEqualTo("TABLE");
         assertThat(revokeResource.get("database")).isEqualTo("sales");
         assertThat(revokeResource.get("table")).isEqualTo("orders");
-        Map<?, ?> revokePrincipal = (Map<?, ?>) revoke.get("principal");
-        assertThat(revokePrincipal.get("type")).isEqualTo("ROLE");
-        assertThat(revokePrincipal.get("id")).isEqualTo("analyst");
+        assertThat(revoke.get("principal")).isEqualTo("analyst");
         assertThat(revoke.get("scope")).isEqualTo("SELF");
         assertThat(revoke.containsKey("expireTime")).isFalse();
         assertThat(revoke.containsKey("grantOption")).isFalse();
@@ -207,7 +199,7 @@ public class RESTPermissionManagementTest {
                 new PermissionResource(ResourceType.TABLE, "sales", "orders", null, null),
                 PermissionScope.SELF,
                 "SELECT",
-                new PrincipalRef(PrincipalType.ROLE, principal),
+                principal,
                 null,
                 null);
     }

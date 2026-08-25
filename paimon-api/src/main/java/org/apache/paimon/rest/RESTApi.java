@@ -54,6 +54,7 @@ import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateTagRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
+import org.apache.paimon.rest.requests.DropPolicyRequest;
 import org.apache.paimon.rest.requests.ForwardBranchRequest;
 import org.apache.paimon.rest.requests.GrantPermissionRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByFilterRequest;
@@ -76,7 +77,6 @@ import org.apache.paimon.rest.responses.DropPartitionsResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
-import org.apache.paimon.rest.responses.GetPolicyResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableSnapshotResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
@@ -858,9 +858,6 @@ public class RESTApi {
         putQueryParameter(queryParams, "table", request.getTable());
         putQueryParameter(queryParams, "function", request.getFunction());
         putQueryParameter(queryParams, "view", request.getView());
-        if (request.getPrincipalType() != null) {
-            putQueryParameter(queryParams, "principalType", request.getPrincipalType().name());
-        }
         putQueryParameter(queryParams, "principal", request.getPrincipal());
         putQueryParameter(queryParams, "access", request.getAccess());
         if (request.includeInherited()) {
@@ -899,14 +896,11 @@ public class RESTApi {
     @Experimental
     public ListPoliciesResponse listPolicies(ListPoliciesRequest request) {
         Map<String, String> queryParams = Maps.newHashMap();
-        putQueryParameter(queryParams, "name", request.getName());
         if (request.getType() != null) {
             putQueryParameter(queryParams, "type", request.getType().name());
         }
-        if (request.getPrincipalType() != null) {
-            putQueryParameter(queryParams, "principalType", request.getPrincipalType().name());
-        }
         putQueryParameter(queryParams, "principal", request.getPrincipal());
+        putQueryParameter(queryParams, "column", request.getColumn());
         if (request.getMaxResults() != null) {
             queryParams.put(MAX_RESULTS, request.getMaxResults().toString());
         }
@@ -918,16 +912,7 @@ public class RESTApi {
                 restAuthFunction);
     }
 
-    /** Gets a named policy from its exact attachment resource. */
-    @Experimental
-    public GetPolicyResponse getPolicy(PolicyIdentity identity) {
-        return client.get(
-                resourcePaths.policy(identity.getResource(), identity.getName()),
-                GetPolicyResponse.class,
-                restAuthFunction);
-    }
-
-    /** Creates a named policy on its attachment resource. */
+    /** Creates a principal policy on its attachment resource. */
     @Experimental
     public void createPolicy(DataPolicy policy) {
         client.post(
@@ -936,26 +921,26 @@ public class RESTApi {
                 restAuthFunction);
     }
 
-    /** Creates or fully replaces a named policy without changing its identity. */
+    /** Creates or fully replaces a principal policy without changing its identity. */
     @Experimental
     public void createOrReplacePolicy(DataPolicy policy) {
         client.put(
-                resourcePaths.policy(policy.getResource(), policy.getName()),
+                resourcePaths.policies(policy.getResource()),
                 new PolicyRequest(policy),
                 restAuthFunction);
     }
 
-    /** Drops a named policy from its exact attachment resource. */
+    /** Drops a principal policy from its exact attachment resource. */
     @Experimental
     public void dropPolicy(PolicyIdentity identity, boolean ignoreIfNotExists) {
         try {
             client.delete(
-                    resourcePaths.policy(identity.getResource(), identity.getName()),
+                    resourcePaths.policies(identity.getResource()),
+                    new DropPolicyRequest(identity),
                     restAuthFunction);
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists
-                    || !ErrorResponse.RESOURCE_TYPE_POLICY.equals(e.resourceType())
-                    || !identity.getName().equals(e.resourceName())) {
+                    || !ErrorResponse.RESOURCE_TYPE_POLICY.equals(e.resourceType())) {
                 throw e;
             }
         }

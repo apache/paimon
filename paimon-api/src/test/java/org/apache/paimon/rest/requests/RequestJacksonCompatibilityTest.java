@@ -169,6 +169,7 @@ public class RequestJacksonCompatibilityTest {
                             CreatePartitionsRequest.class,
                             CreateTableRequest.class,
                             CreateViewRequest.class,
+                            DropPolicyRequest.class,
                             GrantPermissionRequest.class,
                             PolicyRequest.class,
                             RegisterTableRequest.class,

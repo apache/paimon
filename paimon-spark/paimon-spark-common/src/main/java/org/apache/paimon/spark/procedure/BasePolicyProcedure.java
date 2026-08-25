@@ -24,8 +24,6 @@ import org.apache.paimon.management.PermissionResource;
 import org.apache.paimon.management.PolicyArgument;
 import org.apache.paimon.management.PolicyIdentity;
 import org.apache.paimon.management.PolicyType;
-import org.apache.paimon.management.PrincipalRef;
-import org.apache.paimon.management.PrincipalType;
 import org.apache.paimon.management.ResourceType;
 import org.apache.paimon.management.RowFilter;
 
@@ -50,10 +48,6 @@ abstract class BasePolicyProcedure extends BasePermissionProcedure {
         super(tableCatalog);
     }
 
-    protected static org.apache.spark.sql.types.DataType principalArrayType() {
-        return DataTypes.createArrayType(StringType);
-    }
-
     protected static org.apache.spark.sql.types.DataType functionArgumentArrayType() {
         return DataTypes.createArrayType(StringType);
     }
@@ -61,63 +55,33 @@ abstract class BasePolicyProcedure extends BasePermissionProcedure {
     protected static DataPolicy policy(
             String database,
             String table,
-            String name,
             PolicyType policyType,
+            String principal,
             String functionName,
-            ArrayData toPrincipals,
-            @Nullable ArrayData exceptPrincipals,
             @Nullable String onColumn,
-            @Nullable ArrayData functionArguments,
-            @Nullable String comment) {
+            @Nullable ArrayData functionArguments) {
         PermissionResource resource = tableResource(database, table);
-        List<PrincipalRef> targets = principals(toPrincipals, "to_principals", true);
-        List<PrincipalRef> exceptions = principals(exceptPrincipals, "except_principals", false);
         List<PolicyArgument> arguments = arguments(functionArguments);
         if (policyType == PolicyType.ROW_FILTER) {
             checkArgument(isBlank(onColumn), "ROW_FILTER policy cannot specify on_column.");
             return DataPolicy.rowFilter(
-                    resource,
-                    name,
-                    new RowFilter(functionName, arguments),
-                    targets,
-                    exceptions,
-                    emptyToNull(comment));
+                    resource, new RowFilter(functionName, arguments), principal);
         }
         return DataPolicy.columnMask(
-                resource,
-                name,
-                new ColumnMask(functionName, onColumn, arguments),
-                targets,
-                exceptions,
-                emptyToNull(comment));
+                resource, new ColumnMask(functionName, onColumn, arguments), principal);
     }
 
-    protected static PolicyIdentity policyIdentity(String database, String table, String name) {
-        return new PolicyIdentity(tableResource(database, table), name);
+    protected static PolicyIdentity policyIdentity(
+            String database,
+            String table,
+            PolicyType type,
+            String principal,
+            @Nullable String column) {
+        return new PolicyIdentity(tableResource(database, table), type, principal, column);
     }
 
     protected static PermissionResource tableResource(String database, String table) {
         return resource(ResourceType.TABLE, database, table, null, null);
-    }
-
-    private static List<PrincipalRef> principals(
-            @Nullable ArrayData data, String argument, boolean required) {
-        if (data == null) {
-            checkArgument(!required, "%s is required.", argument);
-            return Collections.emptyList();
-        }
-        checkArgument(data.numElements() > 0 || !required, "%s cannot be empty.", argument);
-        List<PrincipalRef> principals = new ArrayList<>(data.numElements());
-        for (int i = 0; i < data.numElements(); i++) {
-            checkArgument(!data.isNullAt(i), "%s cannot contain null.", argument);
-            String encoded = data.getUTF8String(i).toString();
-            String[] principal = split(encoded, argument, "TYPE:id", false);
-            principals.add(
-                    new PrincipalRef(
-                            enumValue(principal[0], PrincipalType.class, argument + ".type"),
-                            principal[1]));
-        }
-        return principals;
     }
 
     private static List<PolicyArgument> arguments(@Nullable ArrayData data) {

@@ -35,10 +35,19 @@ import java.time.format.DateTimeParseException;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
-/** Direct permission assignment or a resource-inherited view of one. */
+/**
+ * Direct permission assignment or a resource-inherited view of one.
+ *
+ * <p>{@code expireTime}, when present, is an exclusive authorization upper bound evaluated against
+ * the server clock. At or after that instant, the assignment must not authorize access or produce
+ * an effective inherited view, although a direct expired record may remain listable until cleanup.
+ */
 @Experimental
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class PermissionAssignment {
+
+    /** Maximum principal identifier length in the portable REST management contract. */
+    public static final int MAX_PRINCIPAL_LENGTH = 128;
 
     private static final String FIELD_RESOURCE = "resource";
     private static final String FIELD_SCOPE = "scope";
@@ -57,7 +66,7 @@ public class PermissionAssignment {
     private final String access;
 
     @JsonProperty(FIELD_PRINCIPAL)
-    private final PrincipalRef principal;
+    private final String principal;
 
     @Nullable
     @JsonProperty(FIELD_EXPIRE_TIME)
@@ -82,7 +91,7 @@ public class PermissionAssignment {
             @JsonProperty(FIELD_RESOURCE) PermissionResource resource,
             @Nullable @JsonProperty(FIELD_SCOPE) String scope,
             @JsonProperty(FIELD_ACCESS) String access,
-            @JsonProperty(FIELD_PRINCIPAL) PrincipalRef principal,
+            @JsonProperty(FIELD_PRINCIPAL) String principal,
             @Nullable @JsonProperty(FIELD_EXPIRE_TIME) String expireTime,
             @Nullable @JsonProperty(FIELD_INHERITED_FROM) PermissionResource inheritedFrom) {
         this(
@@ -98,16 +107,19 @@ public class PermissionAssignment {
             PermissionResource resource,
             PermissionScope scope,
             String access,
-            PrincipalRef principal,
+            String principal,
             @Nullable String expireTime,
             @Nullable PermissionResource inheritedFrom) {
         this.resource = checkNotNull(resource, "resource cannot be null");
         this.scope = checkNotNull(scope, "scope cannot be null");
         this.access = PermissionAccess.canonicalize(resource, scope, access);
-        this.principal = checkNotNull(principal, "principal cannot be null");
+        this.principal = validatePrincipal(principal);
         if (expireTime != null) {
             try {
-                Instant.parse(expireTime);
+                Instant instant = Instant.parse(expireTime);
+                checkArgument(
+                        instant.getNano() % 1_000_000 == 0,
+                        "expireTime must have at most millisecond precision.");
             } catch (DateTimeParseException e) {
                 throw new IllegalArgumentException(
                         "expireTime must be an ISO-8601 UTC instant.", e);
@@ -136,10 +148,21 @@ public class PermissionAssignment {
     }
 
     @JsonGetter(FIELD_PRINCIPAL)
-    public PrincipalRef getPrincipal() {
+    public String getPrincipal() {
         return principal;
     }
 
+    static String validatePrincipal(String principal) {
+        checkArgument(
+                principal != null && !principal.trim().isEmpty(), "principal cannot be empty.");
+        checkArgument(
+                principal.length() <= MAX_PRINCIPAL_LENGTH,
+                "principal must contain at most %s characters.",
+                MAX_PRINCIPAL_LENGTH);
+        return principal;
+    }
+
+    /** Returns the exclusive authorization upper bound, or null for no expiry. */
     @Nullable
     @JsonGetter(FIELD_EXPIRE_TIME)
     public String getExpireTime() {

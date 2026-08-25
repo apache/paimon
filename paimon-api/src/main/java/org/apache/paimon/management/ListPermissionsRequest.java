@@ -33,7 +33,6 @@ public class ListPermissionsRequest {
 
     private final PermissionResource resource;
     @Nullable private final PermissionScope scope;
-    @Nullable private final PrincipalType principalType;
     @Nullable private final String principal;
     @Nullable private final String access;
     private final boolean includeInherited;
@@ -47,7 +46,6 @@ public class ListPermissionsRequest {
             @Nullable String table,
             @Nullable String function,
             @Nullable String view,
-            @Nullable PrincipalType principalType,
             @Nullable String principal,
             @Nullable String access,
             boolean includeInherited,
@@ -59,16 +57,15 @@ public class ListPermissionsRequest {
                     resourceType == ResourceType.CATALOG || resourceType == ResourceType.DATABASE,
                     "DESCENDANTS scope applies only to CATALOG or DATABASE assignments.");
         }
-        checkArgument(
-                (principalType == null) == isBlank(principal),
-                "principalType and principal must be specified together.");
+        if (!isBlank(principal)) {
+            PermissionAssignment.validatePrincipal(principal);
+        }
         checkArgument(maxResults == null || maxResults > 0, "maxResults must be greater than 0.");
         checkArgument(
                 maxResults == null || maxResults <= MAX_PAGE_SIZE,
                 "maxResults must be at most %s.",
                 MAX_PAGE_SIZE);
         this.scope = scope;
-        this.principalType = principalType;
         this.principal = isBlank(principal) ? null : principal;
         this.access =
                 isBlank(access)
@@ -111,11 +108,6 @@ public class ListPermissionsRequest {
     }
 
     @Nullable
-    public PrincipalType getPrincipalType() {
-        return principalType;
-    }
-
-    @Nullable
     public String getPrincipal() {
         return principal;
     }
@@ -151,7 +143,6 @@ public class ListPermissionsRequest {
                 resource.getTable(),
                 resource.getFunction(),
                 resource.getView(),
-                principalType,
                 principal,
                 access,
                 includeInherited,

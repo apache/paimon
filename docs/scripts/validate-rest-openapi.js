@@ -312,7 +312,6 @@ function validateManagementOpenApi() {
     'revokePermission',
     'listTablePolicies',
     'createTablePolicy',
-    'getTablePolicy',
     'createOrReplaceTablePolicy',
     'dropTablePolicy',
   ];
@@ -321,7 +320,6 @@ function validateManagementOpenApi() {
     '/v1/{prefix}/permissions/grant',
     '/v1/{prefix}/permissions/revoke',
     '/v1/{prefix}/databases/{database}/tables/{table}/policies',
-    '/v1/{prefix}/databases/{database}/tables/{table}/policies/{policyName}',
   ];
 
   resourcePaths.forEach((resourcePath) =>
@@ -333,6 +331,7 @@ function validateManagementOpenApi() {
   [
     '/v1/{prefix}/policies',
     '/v1/{prefix}/databases/{database}/policies',
+    '/v1/{prefix}/databases/{database}/tables/{table}/policies/{policyName}',
   ].forEach((resourcePath) =>
     contract.checkSpec(
       !contract.spec.paths[resourcePath],
@@ -341,21 +340,46 @@ function validateManagementOpenApi() {
   );
   operationIds.forEach(contract.requireOperation);
   ['listPermissions', 'grantPermission', 'revokePermission'].forEach((operationId) =>
-    contract.requireResponses(operationId, ['200', '400', '401', '403', '404', '500']),
+    contract.requireResponses(operationId, [
+      '200',
+      '400',
+      '401',
+      '403',
+      '404',
+      '429',
+      '500',
+      '503',
+    ]),
   );
   ['listTablePolicies', 'createTablePolicy', 'createOrReplaceTablePolicy'].forEach((operationId) =>
-    contract.requireResponses(operationId, ['200', '400', '401', '403', '404', '500']),
+    contract.requireResponses(operationId, [
+      '200',
+      '400',
+      '401',
+      '403',
+      '404',
+      '429',
+      '500',
+      '503',
+    ]),
   );
-  ['getTablePolicy', 'dropTablePolicy'].forEach((operationId) =>
-    contract.requireResponses(operationId, ['200', '401', '403', '404', '500']),
-  );
+  contract.requireResponses('dropTablePolicy', [
+    '200',
+    '400',
+    '401',
+    '403',
+    '404',
+    '429',
+    '500',
+    '503',
+  ]);
   ['createTablePolicy', 'createOrReplaceTablePolicy'].forEach((operationId) =>
     contract.requireResponses(operationId, ['409']),
   );
   contract.checkSpec(
-    contract.spec.info.version === '0.3.0' &&
+    contract.spec.info.version === '0.4.0' &&
       contract.spec.info.description.toLowerCase().includes('experimental'),
-    'The management contract must be versioned 0.3.0 and marked experimental',
+    'The management contract must be versioned 0.4.0 and marked experimental',
   );
 
   const assignmentFields = [
@@ -428,12 +452,132 @@ function validateManagementOpenApi() {
   );
   contract.requireRequiredProperties('ListPermissionsResponse', ['permissions']);
 
-  contract.requireProperties('PrincipalRef', ['type', 'id']);
-  contract.requireRequiredProperties('PrincipalRef', ['type', 'id']);
+  const principal = contract.schema('Principal');
+  contract.checkSpec(
+    principal.type === 'string' && principal.minLength === 1 && principal.maxLength === 128,
+    'Principal must be a non-empty string that fits the 128-character persistence identity',
+  );
+  contract.checkSpec(
+    !contract.spec.components.schemas.PrincipalRef &&
+      !contract.spec.components.schemas.PrincipalType &&
+      !contract.spec.components.parameters.PrincipalTypeQuery,
+    'Principal must not expose a separate reference object or type',
+  );
+  ['PermissionAssignment', 'GrantPermissionRequest', 'RevokePermissionRequest'].forEach(
+    (schemaName) =>
+      contract.checkSpec(
+        contract.requireProperties(schemaName, ['principal']).principal.$ref ===
+          '#/components/schemas/Principal',
+        `Schema ${schemaName}.principal must reference Principal`,
+      ),
+  );
+  contract.checkSpec(
+    contract.spec.components.parameters.PrincipalQuery.schema.$ref ===
+      '#/components/schemas/Principal',
+    'PrincipalQuery must reference Principal',
+  );
   requireExactEnum(contract, 'ResourceType', ['CATALOG', 'DATABASE', 'TABLE', 'FUNCTION', 'VIEW']);
   requireExactEnum(contract, 'PermissionScope', ['SELF', 'DESCENDANTS']);
-  requireExactEnum(contract, 'PrincipalType', ['USER', 'GROUP', 'ROLE', 'SERVICE']);
   requireExactEnum(contract, 'PolicyType', ['ROW_FILTER', 'COLUMN_MASKING']);
+
+  const accessAlternatives = contract.schema('PermissionAccess').oneOf || [];
+  const builtInAccess = accessAlternatives.find((alternative) => alternative.enum);
+  const extensionAccess = accessAlternatives.find((alternative) => alternative.pattern);
+  const expectedAccesses = [
+    'USE_CATALOG',
+    'CREATE_DATABASE',
+    'USE_DATABASE',
+    'CREATE_TABLE',
+    'CREATE_VIEW',
+    'CREATE_FUNCTION',
+    'SELECT',
+    'INSERT',
+    'UPDATE',
+    'DELETE',
+    'ALTER',
+    'DROP',
+    'EXECUTE',
+    'MANAGE_PERMISSIONS',
+  ];
+  contract.checkSpec(
+    builtInAccess &&
+      builtInAccess.enum.length === expectedAccesses.length &&
+      expectedAccesses.every((access) => builtInAccess.enum.includes(access)),
+    'PermissionAccess must define the complete built-in access enum',
+  );
+  const extensionPattern = extensionAccess && new RegExp(extensionAccess.pattern);
+  contract.checkSpec(
+    extensionPattern &&
+      extensionPattern.test('VENDOR.EXAMPLE/SOME_ACCESS') &&
+      !extensionPattern.test('UNKNOWN') &&
+      !extensionPattern.test('vendor.example/SOME_ACCESS'),
+    'PermissionAccess must accept only canonical upper-case namespaced extensions',
+  );
+  contract.checkSpec(
+    accessAlternatives.every((alternative) => alternative.maxLength === 32),
+    'Every PermissionAccess alternative must fit the 32-character persistence field',
+  );
+  ['PermissionAssignment', 'GrantPermissionRequest', 'RevokePermissionRequest'].forEach(
+    (schemaName) =>
+      contract.checkSpec(
+        contract.requireProperties(schemaName, ['access']).access.$ref ===
+          '#/components/schemas/PermissionAccess',
+        `Schema ${schemaName}.access must reference PermissionAccess`,
+      ),
+  );
+  contract.checkSpec(
+    contract.spec.components.parameters.AccessQuery.schema.$ref ===
+      '#/components/schemas/PermissionAccess',
+    'AccessQuery must reference PermissionAccess',
+  );
+  ['DatabaseQuery', 'TableQuery', 'FunctionQuery', 'ViewQuery'].forEach((parameterName) => {
+    const locatorQuery = contract.spec.components.parameters[parameterName];
+    contract.checkSpec(
+      locatorQuery.schema.type === 'string' && locatorQuery.schema.minLength === 1,
+      `${parameterName} must be a non-empty string`,
+    );
+  });
+
+  ['TooManyRequests', 'ServiceUnavailable'].forEach((responseName) => {
+    const response = contract.spec.components.responses[responseName];
+    contract.checkSpec(response, `Missing reusable response: ${responseName}`);
+    contract.checkSpec(
+      response.headers['Retry-After'].$ref === '#/components/headers/RetryAfter',
+      `Response ${responseName} must expose the optional Retry-After header`,
+    );
+  });
+  contract.checkSpec(
+    contract.spec.components.headers.RetryAfter.schema.type === 'string',
+    'RetryAfter must allow HTTP delta-seconds or an HTTP date as a string',
+  );
+
+  const assignmentExpiry = contract.requireProperties('PermissionAssignment', ['expireTime'])
+    .expireTime.description.toLowerCase();
+  const grantExpiry = contract.requireProperties('GrantPermissionRequest', ['expireTime'])
+    .expireTime.description.toLowerCase();
+  [assignmentExpiry, grantExpiry].forEach((description) => {
+    contract.checkSpec(
+      description.includes('exclusive') &&
+        description.includes('server clock') &&
+        description.includes('millisecond') &&
+        description.includes('must not authorize'),
+      'expireTime must define exclusive millisecond server-clock authorization semantics',
+    );
+  });
+  const resourceDescription = contract.schema('PermissionResource').description.toLowerCase();
+  ['stable internal resource identity', 'renaming', 'dropping', 'recreating'].forEach((phrase) =>
+    contract.checkSpec(
+      resourceDescription.includes(phrase),
+      `PermissionResource lifecycle is missing: ${phrase}`,
+    ),
+  );
+  const policyDescription = contract.schema('DataPolicy').description.toLowerCase();
+  ['logical and', 'same column', 'fail closed'].forEach((phrase) =>
+    contract.checkSpec(
+      policyDescription.includes(phrase),
+      `DataPolicy composition is missing: ${phrase}`,
+    ),
+  );
 
   contract.requireSchemaReference('PolicyRequest', 'oneOf', 'RowFilterPolicyRequest');
   contract.requireSchemaReference('PolicyRequest', 'oneOf', 'ColumnMaskPolicyRequest');
@@ -441,36 +585,45 @@ function validateManagementOpenApi() {
   contract.requireSchemaReference('DataPolicy', 'oneOf', 'ColumnMaskDataPolicy');
   contract.requireProperties('RowFilter', ['functionName', 'functionArguments']);
   contract.requireProperties('ColumnMask', ['functionName', 'onColumn', 'functionArguments']);
-  contract.requireRequiredProperties('RowFilter', ['functionName', 'functionArguments']);
-  contract.requireRequiredProperties('ColumnMask', [
-    'functionName',
-    'onColumn',
-    'functionArguments',
-  ]);
+  contract.requireRequiredProperties('RowFilter', ['functionName']);
+  contract.requireRequiredProperties('ColumnMask', ['functionName', 'onColumn']);
+  ['RowFilter', 'ColumnMask'].forEach((schemaName) => {
+    const schema = contract.schema(schemaName);
+    contract.checkSpec(
+      !(schema.required || []).includes('functionArguments') &&
+        schema.properties.functionArguments.default.length === 0,
+      `${schemaName}.functionArguments must be optional and default to an empty array`,
+    );
+  });
   ['RowFilterPolicyRequest', 'ColumnMaskPolicyRequest'].forEach((schemaName) => {
-    const properties = contract.requireProperties(schemaName, [
-      'name',
-      'toPrincipals',
-      'exceptPrincipals',
-      'comment',
-    ]);
-    ['toPrincipals', 'exceptPrincipals'].forEach((field) =>
-      contract.checkSpec(
-        properties[field].items.$ref === '#/components/schemas/PrincipalRef',
-        `${schemaName}.${field} must contain PrincipalRef values`,
-      ),
+    const properties = contract.requireProperties(schemaName, ['principal']);
+    contract.checkSpec(
+      properties.principal.$ref === '#/components/schemas/Principal',
+      `${schemaName}.principal must reference Principal`,
     );
     contract.checkSpec(
-      !properties.scope && !properties.type && !properties.resource,
-      `${schemaName} must not expose policy scope, type, or path resource`,
+      !properties.scope &&
+        !properties.type &&
+        !properties.resource &&
+        !properties.name &&
+        !properties.toPrincipals &&
+        !properties.exceptPrincipals,
+      `${schemaName} must expose only one principal and no path identity`,
     );
-    contract.checkSpec(
-      !(contract.schema(schemaName).required || []).includes('exceptPrincipals'),
-      `${schemaName}.exceptPrincipals must be optional`,
-    );
+    contract.requireRequiredProperties(schemaName, ['principal']);
   });
   contract.requireProperties('RowFilterPolicyRequest', ['rowFilter']);
   contract.requireProperties('ColumnMaskPolicyRequest', ['columnMask']);
+  contract.requireRequiredProperties('RowFilterPolicyRequest', ['rowFilter']);
+  contract.requireRequiredProperties('ColumnMaskPolicyRequest', ['columnMask']);
+  contract.requireSchemaReference('DropPolicyRequest', 'oneOf', 'RowFilterPolicyIdentity');
+  contract.requireSchemaReference('DropPolicyRequest', 'oneOf', 'ColumnMaskPolicyIdentity');
+  contract.requireRequiredProperties('RowFilterPolicyIdentity', ['type', 'principal']);
+  contract.requireRequiredProperties('ColumnMaskPolicyIdentity', [
+    'type',
+    'principal',
+    'column',
+  ]);
   contract.checkSpec(
     Array.isArray(contract.schema('PolicyArgument').oneOf) &&
       contract.schema('PolicyArgument').oneOf.length === 2,
@@ -497,7 +650,17 @@ function validateManagementOpenApi() {
     policyList.policies.items.$ref === '#/components/schemas/DataPolicy',
     'ListPoliciesResponse.policies must contain DataPolicy values',
   );
-  contract.requireProperties('GetPolicyResponse', ['policy']);
+  ['RowFilterDataPolicy', 'ColumnMaskDataPolicy'].forEach((schemaName) => {
+    const properties = contract.requireProperties(schemaName, ['resource', 'principal']);
+    contract.checkSpec(
+      properties.principal.$ref === '#/components/schemas/Principal',
+      `${schemaName}.principal must reference Principal`,
+    );
+    contract.checkSpec(
+      !properties.name && !properties.toPrincipals && !properties.exceptPrincipals,
+      `${schemaName} must use a single principal identity`,
+    );
+  });
   contract.requireProperties('ErrorResponse', [
     'message',
     'resourceType',
@@ -518,7 +681,6 @@ function validateManagementOpenApi() {
     'TableQuery',
     'FunctionQuery',
     'ViewQuery',
-    'PrincipalTypeQuery',
     'PrincipalQuery',
     'AccessQuery',
     'IncludeInherited',
@@ -543,11 +705,22 @@ function validateManagementOpenApi() {
     !policyParameters.includes('IncludeInherited'),
     'Table policies must not expose includeInherited',
   );
+  ['PolicyTypeQuery', 'PrincipalQuery', 'PolicyColumnQuery', 'PageToken', 'MaxResults'].forEach(
+    (name) =>
+      contract.checkSpec(
+        policyParameters.includes(name),
+        `Operation listTablePolicies is missing query parameter: ${name}`,
+      ),
+  );
   contract.checkSpec(
-    contract.spec.paths[
-      '/v1/{prefix}/databases/{database}/tables/{table}/policies/{policyName}'
-    ].put,
-    'Full policy replacement must use PUT',
+    !policyParameters.includes('PolicyNameQuery'),
+    'Principal-scoped policies must not expose a policy-name filter',
+  );
+  const tablePoliciesPath =
+    contract.spec.paths['/v1/{prefix}/databases/{database}/tables/{table}/policies'];
+  contract.checkSpec(
+    tablePoliciesPath.put && tablePoliciesPath.delete,
+    'Full policy replacement and deletion must use the table policy collection identity',
   );
 
   contract.checkSpec(

@@ -31,23 +31,21 @@ public class PermissionIdentity {
     private final PermissionResource resource;
     private final PermissionScope scope;
     private final String access;
-    private final PrincipalRef principal;
+    private final String principal;
 
     public PermissionIdentity(
-            PermissionResource resource,
-            PermissionScope scope,
-            String access,
-            PrincipalRef principal) {
+            PermissionResource resource, PermissionScope scope, String access, String principal) {
         this.resource = checkNotNull(resource, "resource cannot be null");
         this.scope = checkNotNull(scope, "scope cannot be null");
         this.access = PermissionAccess.canonicalize(resource, scope, access);
-        this.principal = checkNotNull(principal, "principal cannot be null");
+        this.principal = PermissionAssignment.validatePrincipal(principal);
     }
 
     public static PermissionIdentity fromAssignment(PermissionAssignment assignment) {
+        PermissionResource inheritedFrom = assignment.getInheritedFrom();
         return new PermissionIdentity(
-                assignment.getResource(),
-                assignment.getScope(),
+                inheritedFrom == null ? assignment.getResource() : inheritedFrom,
+                inheritedFrom == null ? assignment.getScope() : PermissionScope.DESCENDANTS,
                 assignment.getAccess(),
                 assignment.getPrincipal());
     }
@@ -64,7 +62,7 @@ public class PermissionIdentity {
         return access;
     }
 
-    public PrincipalRef getPrincipal() {
+    public String getPrincipal() {
         return principal;
     }
 

@@ -31,9 +31,17 @@ import java.util.regex.Pattern;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Built-in access names and validation for permission assignments. */
+/**
+ * Built-in access names and validation for permission assignments.
+ *
+ * <p>Java callers may use any letter case. Values are canonicalized to the upper-case REST wire
+ * representation; server extensions must use the namespaced {@code NAMESPACE/ACCESS} form.
+ */
 @Experimental
 public final class PermissionAccess {
+
+    /** Maximum wire length supported by the portable permission storage contract. */
+    public static final int MAX_LENGTH = 32;
 
     public static final String USE_CATALOG = "USE_CATALOG";
     public static final String CREATE_DATABASE = "CREATE_DATABASE";
@@ -58,7 +66,15 @@ public final class PermissionAccess {
 
     public static String canonicalize(String access) {
         checkArgument(access != null && !access.trim().isEmpty(), "access cannot be empty.");
+        checkArgument(
+                access.length() <= MAX_LENGTH,
+                "access must contain at most %s characters.",
+                MAX_LENGTH);
         String canonical = access.toUpperCase(Locale.ROOT);
+        checkArgument(
+                canonical.length() <= MAX_LENGTH,
+                "access must contain at most %s characters after canonicalization.",
+                MAX_LENGTH);
         if (EXTENSION_ACCESS.matcher(canonical).matches()
                 || BUILT_INS.values().stream().anyMatch(values -> values.contains(canonical))) {
             return canonical;
@@ -72,6 +88,7 @@ public final class PermissionAccess {
     public static String canonicalize(
             PermissionResource resource, PermissionScope scope, String access) {
         String canonical = canonicalize(access);
+        validateScope(resource.getType(), scope);
         if (EXTENSION_ACCESS.matcher(canonical).matches()) {
             return canonical;
         }
@@ -113,15 +130,21 @@ public final class PermissionAccess {
         if (scope == PermissionScope.SELF) {
             return BUILT_INS.get(type).contains(access);
         }
-        checkArgument(
-                type == ResourceType.CATALOG || type == ResourceType.DATABASE,
-                "DESCENDANTS scope is supported only for CATALOG and DATABASE resources.");
+        validateScope(type, scope);
         if (type == ResourceType.CATALOG && BUILT_INS.get(ResourceType.DATABASE).contains(access)) {
             return true;
         }
         return BUILT_INS.get(ResourceType.TABLE).contains(access)
                 || BUILT_INS.get(ResourceType.VIEW).contains(access)
                 || BUILT_INS.get(ResourceType.FUNCTION).contains(access);
+    }
+
+    private static void validateScope(ResourceType type, PermissionScope scope) {
+        checkArgument(
+                scope != PermissionScope.DESCENDANTS
+                        || type == ResourceType.CATALOG
+                        || type == ResourceType.DATABASE,
+                "DESCENDANTS scope is supported only for CATALOG and DATABASE resources.");
     }
 
     private static Map<ResourceType, Set<String>> builtIns() {

@@ -37,14 +37,11 @@ abstract class CreateOrReplacePolicyBaseProcedure extends BasePolicyProcedure {
             new ProcedureParameter[] {
                 ProcedureParameter.required("database", StringType),
                 ProcedureParameter.required("table", StringType),
-                ProcedureParameter.required("name", StringType),
                 ProcedureParameter.required("policy_type", StringType),
+                ProcedureParameter.required("principal", StringType),
                 ProcedureParameter.required("function_name", StringType),
-                ProcedureParameter.required("to_principals", principalArrayType()),
-                ProcedureParameter.optional("except_principals", principalArrayType()),
                 ProcedureParameter.optional("on_column", StringType),
-                ProcedureParameter.optional("function_arguments", functionArgumentArrayType()),
-                ProcedureParameter.optional("comment", StringType)
+                ProcedureParameter.optional("function_arguments", functionArgumentArrayType())
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -73,14 +70,11 @@ abstract class CreateOrReplacePolicyBaseProcedure extends BasePolicyProcedure {
                 policy(
                         args.getString(0),
                         args.getString(1),
-                        args.getString(2),
-                        enumValue(args.getString(3), PolicyType.class, PARAMETERS[3].name()),
+                        enumValue(args.getString(2), PolicyType.class, PARAMETERS[2].name()),
+                        args.getString(3),
                         args.getString(4),
-                        args.getArray(5),
-                        args.isNullAt(6) ? null : args.getArray(6),
-                        args.isNullAt(7) ? null : args.getString(7),
-                        args.isNullAt(8) ? null : args.getArray(8),
-                        args.isNullAt(9) ? null : args.getString(9));
+                        args.isNullAt(5) ? null : args.getString(5),
+                        args.isNullAt(6) ? null : args.getArray(6));
         writePolicy(policy);
         return new InternalRow[] {newInternalRow(true)};
     }

@@ -21,8 +21,6 @@ package org.apache.paimon.rest;
 import org.apache.paimon.management.PermissionAssignment;
 import org.apache.paimon.management.PermissionResource;
 import org.apache.paimon.management.PermissionScope;
-import org.apache.paimon.management.PrincipalRef;
-import org.apache.paimon.management.PrincipalType;
 import org.apache.paimon.management.ResourceType;
 
 import org.junit.jupiter.api.Test;
@@ -38,7 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Tests atomic replacement and effective-view filtering in {@link RESTPermissionStore}. */
 class RESTPermissionStoreTest {
 
-    private static final PrincipalRef ANALYST = new PrincipalRef(PrincipalType.ROLE, "analyst");
+    private static final String ANALYST = "analyst";
 
     @Test
     void testConcurrentGrantReplacesTheSameIdentity() {

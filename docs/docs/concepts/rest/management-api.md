@@ -22,7 +22,7 @@ limitations under the License.
 
 The REST Management API is an experimental OpenAPI 3.1 control-plane extension for object
 privileges, row filters, and column masks in a Paimon REST Catalog. Its current contract version is
-`0.3.0` and may evolve incompatibly while the design is being validated.
+`0.4.0` and may evolve incompatibly while the design is being validated.
 
 `RESTCatalog` exposes `permissionManagement()` and `policyManagement()` directly. These methods are
 intentionally not part of the generic `Catalog` interface. A non-REST catalog therefore reports an
@@ -41,9 +41,8 @@ POST /v1/{prefix}/permissions/revoke
 
 GET    /v1/{prefix}/databases/{database}/tables/{table}/policies
 POST   /v1/{prefix}/databases/{database}/tables/{table}/policies
-GET    /v1/{prefix}/databases/{database}/tables/{table}/policies/{policyName}
-PUT    /v1/{prefix}/databases/{database}/tables/{table}/policies/{policyName}
-DELETE /v1/{prefix}/databases/{database}/tables/{table}/policies/{policyName}
+PUT    /v1/{prefix}/databases/{database}/tables/{table}/policies
+DELETE /v1/{prefix}/databases/{database}/tables/{table}/policies
 ```
 
 Policies are currently attached only to tables. The path is the attachment identity, so policy
@@ -87,8 +86,12 @@ Permission resources are structured objects:
 `SELF` applies only to the referenced resource and is the default. `DESCENDANTS` applies below a
 `CATALOG` or `DATABASE`; it is invalid on `TABLE`, `FUNCTION`, and `VIEW` resources.
 
-Principals are `{type, id}` pairs. Supported types are `USER`, `GROUP`, `ROLE`, and `SERVICE`.
-Principal ids are opaque stable identifiers in the server namespace.
+Principals are opaque, canonical strings that are globally unique in the server namespace. Their
+format is server-defined and may encode a user, group, role, or service identity, for example
+`role:analyst` or an external identity-provider ARN. Principal type and membership resolution are
+server responsibilities. Access values are limited to 32 characters and principals to 128
+characters. An implementation may resolve wire locators and principals to different stable
+persistence identifiers; those internal ids are not exposed by this API.
 
 Built-in accesses are resource-specific:
 
@@ -100,18 +103,33 @@ Built-in accesses are resource-specific:
 | `VIEW` | `SELECT`, `ALTER`, `DROP`, `MANAGE_PERMISSIONS` |
 | `FUNCTION` | `EXECUTE`, `ALTER`, `DROP`, `MANAGE_PERMISSIONS` |
 
-Inputs are case-insensitive and responses use upper case. Implementations may add namespaced
-accesses such as `vendor.example/SOME_ACCESS`; unknown unnamespaced accesses are rejected.
+Java and Spark helpers accept access names case-insensitively and normalize them before sending.
+The REST wire format uses upper case. Implementations may add namespaced accesses such as
+`VENDOR.EXAMPLE/SOME_ACCESS`; unknown unnamespaced accesses are rejected.
 
 An assignment identity is `resource`, `scope`, `access`, and `principal`. Granting the same identity
 replaces its expiry. Revocation is idempotent. `includeInherited` only expands resource ancestry;
 resolving group membership and role inheritance remains a server responsibility.
 
+`expireTime`, when present, is an exclusive upper bound evaluated against the REST server clock.
+At `now >= expireTime`, the assignment must not authorize access. Expired direct assignments may
+remain visible in listings until server cleanup, but `includeInherited=true` must not materialize an
+expired assignment as an effective inherited view. Timestamps must not be more precise than
+milliseconds.
+
+Resource objects in this API are wire locators, not persistence identities. Servers must bind direct
+assignments to a stable internal resource identity: renaming a database, table, function, or view
+retains its assignments and subsequent responses use the new locator; dropping it removes its direct
+assignments; recreating the same locator does not restore them. A child rename does not change a
+`DESCENDANTS` assignment attached to its catalog or database ancestor.
+
 ## Data policy model
 
-A data policy is a named entity attached directly to one table. Its principal selectors use
-`TO` and `EXCEPT` semantics: it applies when the caller matches at least one `toPrincipals`
-entry and no `exceptPrincipals` entry. `EXCEPT` wins when both match.
+A data policy is attached directly to one table and one principal. It applies whenever that
+principal is effective for the caller after the server resolves group and role membership. A
+principal can have at most one row filter on a table and at most one column mask on each table
+column. A row-filter identity is `(table, ROW_FILTER, principal)`; a column-mask identity is
+`(table, COLUMN_MASKING, principal, onColumn)`.
 
 Each policy contains exactly one typed definition:
 
@@ -120,9 +138,9 @@ Each policy contains exactly one typed definition:
 | `rowFilter` | `functionName`, ordered `functionArguments` | A boolean predicate applied to every scan. |
 | `columnMask` | `functionName`, `onColumn`, ordered `functionArguments` | A value compatible with the protected column. |
 
-The common fields are `name`, non-empty `toPrincipals`, optional `exceptPrincipals`, and an
-optional `comment`. A function argument is exactly one of `{"column":"region"}` or
-`{"constant":"APAC"}`. Constants are strings and may be empty; column names may not be empty.
+The common field is one `principal`. A function argument is exactly one of
+`{"column":"region"}` or `{"constant":"APAC"}`. Constants are strings and may be empty;
+column names may not be empty. `functionArguments` is optional and defaults to an empty list.
 
 For a row filter, the arguments are passed positionally and the function must return boolean. For a
 column mask, `onColumn` is the protected input and `functionArguments` contains additional
@@ -133,7 +151,7 @@ Policy create and create-or-replace must be rejected unless all of these conditi
 
 1. The target database and table exist.
 2. The table has `query-auth.enabled=true`; otherwise a stored policy could be silently bypassed.
-3. Every `TO` and `EXCEPT` principal exists.
+3. The referenced principal exists.
 4. The policy function exists, has a compatible signature, and can be compiled by the server.
 5. `onColumn` and every column argument exist in the target table.
 
@@ -141,11 +159,13 @@ These invariants continue to apply for the whole table lifecycle. Servers must b
 stable table identity, preserve that binding across table renames, and remove the policies when the
 table is dropped. A table with policies must reject changes that disable `query-auth.enabled` or
 remove or rename a protected or argument column, unless the policy update and schema change are
-performed atomically.
+performed atomically. If an implementation persists all masks for one principal in one document,
+creating, replacing, or dropping one column mask must atomically preserve masks for other columns.
 
-At authorization time, an unresolved function, invalid signature, or ambiguous set of masks must
-fail closed rather than omit a restriction. Multiple row filters may be combined with `AND`.
-Servers must define deterministic conflict handling when more than one mask targets the same column.
+At authorization time, all applicable row filters must be combined with logical `AND`. More than
+one applicable column mask targeting the same column must fail closed. An unresolved function,
+invalid signature, or policy compilation failure must also fail closed rather than omit a
+restriction.
 
 This experimental contract deliberately does not define governed tags, catalog/database policy
 inheritance, or tag-driven matching. Those features need explicit match conditions and conflict
@@ -166,16 +186,14 @@ Grant catalog access or a privilege inherited by catalog descendants:
 CALL paimon.sys.grant_permission(
   resource_type => 'CATALOG',
   access => 'USE_CATALOG',
-  principal_type => 'ROLE',
-  principal => 'catalog_user'
+  principal => 'role:catalog_user'
 );
 
 CALL paimon.sys.grant_permission(
   resource_type => 'CATALOG',
   scope => 'DESCENDANTS',
   access => 'SELECT',
-  principal_type => 'GROUP',
-  principal => 'analysts'
+  principal => 'group:analysts'
 );
 ```
 
@@ -186,8 +204,7 @@ CALL paimon.sys.grant_permission(
   resource_type => 'DATABASE',
   database => 'sales',
   access => 'CREATE_TABLE',
-  principal_type => 'ROLE',
-  principal => 'data_engineer'
+  principal => 'role:data_engineer'
 );
 
 CALL paimon.sys.grant_permission(
@@ -195,8 +212,7 @@ CALL paimon.sys.grant_permission(
   database => 'sales',
   scope => 'DESCENDANTS',
   access => 'SELECT',
-  principal_type => 'ROLE',
-  principal => 'sales_reader',
+  principal => 'role:sales_reader',
   expire_time => '2027-01-01T00:00:00Z'
 );
 ```
@@ -209,8 +225,7 @@ CALL paimon.sys.grant_permission(
   database => 'sales',
   table => 'orders',
   access => 'SELECT',
-  principal_type => 'USER',
-  principal => 'alice'
+  principal => 'user:alice'
 );
 
 CALL paimon.sys.grant_permission(
@@ -218,8 +233,7 @@ CALL paimon.sys.grant_permission(
   database => 'sales',
   function => 'calculate_tax',
   access => 'EXECUTE',
-  principal_type => 'ROLE',
-  principal => 'analyst'
+  principal => 'role:analyst'
 );
 
 CALL paimon.sys.grant_permission(
@@ -227,8 +241,7 @@ CALL paimon.sys.grant_permission(
   database => 'sales',
   view => 'daily_orders',
   access => 'SELECT',
-  principal_type => 'SERVICE',
-  principal => 'reporting_job'
+  principal => 'service:reporting_job'
 );
 ```
 
@@ -252,8 +265,7 @@ CALL paimon.sys.list_permissions(
   resource_type => 'TABLE',
   database => 'sales',
   table => 'orders',
-  principal_type => 'ROLE',
-  principal => 'analyst',
+  principal => 'role:analyst',
   access => 'SELECT'
 );
 ```
@@ -292,8 +304,7 @@ CALL paimon.sys.revoke_permission(
   database => 'sales',
   scope => 'DESCENDANTS',
   access => 'SELECT',
-  principal_type => 'ROLE',
-  principal => 'sales_reader'
+  principal => 'role:sales_reader'
 );
 ```
 
@@ -308,9 +319,9 @@ ALTER TABLE paimon.sales.orders
 SET TBLPROPERTIES ('query-auth.enabled' = 'true');
 ```
 
-`create_policy` accepts principal selectors as `array<string>` entries encoded as `TYPE:id`.
-Function arguments use `column:value` or `constant:value`. Only the first colon is a delimiter, so
-a principal id or constant may contain later colons. `constant:` represents a valid empty string.
+`create_policy` accepts the canonical `principal` directly. Function arguments use `column:value`
+or `constant:value`. Only the first colon is a delimiter, so a constant may contain later colons.
+`constant:` represents a valid empty string.
 
 This example asks the server to resolve
 `security.filter_region(region, 'APAC')` as a boolean predicate:
@@ -319,18 +330,16 @@ This example asks the server to resolve
 CALL paimon.sys.create_policy(
   database => 'sales',
   table => 'orders',
-  name => 'orders_region_filter',
   policy_type => 'ROW_FILTER',
+  principal => 'group:analysts',
   function_name => 'security.filter_region',
-  function_arguments => array('column:region', 'constant:APAC'),
-  to_principals => array('GROUP:analysts', 'ROLE:reporting'),
-  except_principals => array('USER:alice'),
-  comment => 'Restrict regional order visibility'
+  function_arguments => array('column:region', 'constant:APAC')
 );
 ```
 
-The call fails if the name already exists. Use `create_or_replace_policy` when upsert semantics are
-intended.
+The call fails if that principal already has a row filter on the table. Use
+`create_or_replace_policy` when upsert semantics are intended. Create another policy for a second
+principal with a separate call.
 
 ### Create column-masking policies
 
@@ -341,13 +350,11 @@ can be supplied positionally:
 CALL paimon.sys.create_policy(
   database => 'sales',
   table => 'customers',
-  name => 'mask_phone_by_region',
   policy_type => 'COLUMN_MASKING',
+  principal => 'role:support',
   function_name => 'security.mask_phone',
   on_column => 'phone_number',
-  function_arguments => array('column:region', 'constant:partial'),
-  to_principals => array('ROLE:support'),
-  except_principals => array('ROLE:privacy_admin')
+  function_arguments => array('column:region', 'constant:partial')
 );
 ```
 
@@ -358,12 +365,11 @@ written explicitly:
 CALL paimon.sys.create_policy(
   database => 'sales',
   table => 'customers',
-  name => 'mask_email',
   policy_type => 'COLUMN_MASKING',
+  principal => 'group:support',
   function_name => 'security.mask_email',
   on_column => 'email',
-  function_arguments => array('constant:'),
-  to_principals => array('GROUP:support')
+  function_arguments => array('constant:')
 );
 ```
 
@@ -371,19 +377,18 @@ CALL paimon.sys.create_policy(
 
 ### Create or fully replace a policy
 
-`create_or_replace_policy` maps to HTTP `PUT`. It creates an absent policy or fully replaces an
-existing policy with the same table and name; omitted optional values are cleared.
+`create_or_replace_policy` maps to HTTP `PUT`. It creates an absent policy or fully replaces the
+policy with the same table, policy type, principal, and, for a mask, protected column. Omitted
+optional values are cleared.
 
 ```sql
 CALL paimon.sys.create_or_replace_policy(
   database => 'sales',
   table => 'orders',
-  name => 'orders_region_filter',
   policy_type => 'ROW_FILTER',
+  principal => 'group:analysts',
   function_name => 'security.filter_region_v2',
-  function_arguments => array('column:region'),
-  to_principals => array('GROUP:analysts'),
-  comment => 'Use the second version of the filter'
+  function_arguments => array('column:region')
 );
 ```
 
@@ -401,23 +406,21 @@ CALL paimon.sys.list_policies(
 );
 ```
 
-Filter by name, policy type, or principal. `principal_type` and `principal` must be supplied
-together:
+Filter by policy type or principal. A `column` filter is valid only with
+`policy_type => 'COLUMN_MASKING'`:
 
 ```sql
 CALL paimon.sys.list_policies(
   database => 'sales',
   table => 'orders',
   policy_type => 'ROW_FILTER',
-  principal_type => 'GROUP',
-  principal => 'analysts'
+  principal => 'group:analysts'
 );
 ```
 
-The output columns are `database`, `table`, `name`, `policy_type`, `function_name`,
-`on_column`, `function_arguments_json`, `to_principals_json`, `except_principals_json`,
-`comment`, and `next_page_token`. Pass an opaque continuation token back unchanged with the same
-filters:
+The output columns are `database`, `table`, `policy_type`, `principal`, `function_name`,
+`on_column`, `function_arguments_json`, and `next_page_token`. Pass an opaque continuation token
+back unchanged with the same filters:
 
 ```sql
 CALL paimon.sys.list_policies(
@@ -440,7 +443,8 @@ Drop an existing policy:
 CALL paimon.sys.drop_policy(
   database => 'sales',
   table => 'orders',
-  name => 'orders_region_filter'
+  policy_type => 'ROW_FILTER',
+  principal => 'group:analysts'
 );
 ```
 
@@ -450,7 +454,8 @@ By default an absent policy is an error. Set `if_exists => true` for an idempote
 CALL paimon.sys.drop_policy(
   database => 'sales',
   table => 'orders',
-  name => 'orders_region_filter',
+  policy_type => 'ROW_FILTER',
+  principal => 'group:analysts',
   if_exists => true
 );
 ```

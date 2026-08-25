@@ -65,7 +65,7 @@ public class ResourcePathsTest {
         assertThrows(IllegalArgumentException.class, () -> paths.policies(catalog));
         assertThrows(IllegalArgumentException.class, () -> paths.policies(database));
         assertEquals(
-                "/v1/catalog%2Fid/databases/sales+db/tables/orders%2Fall/policies/mask+email",
-                paths.policy(table, "mask email"));
+                "/v1/catalog%2Fid/databases/sales+db/tables/orders%2Fall/policies",
+                paths.policies(table));
     }
 }

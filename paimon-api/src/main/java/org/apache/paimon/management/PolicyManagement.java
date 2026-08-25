@@ -27,8 +27,6 @@ public interface PolicyManagement {
 
     PagedList<DataPolicy> listPolicies(ListPoliciesRequest request);
 
-    DataPolicy getPolicy(PolicyIdentity identity);
-
     void createPolicy(DataPolicy policy);
 
     void createOrReplacePolicy(DataPolicy policy);

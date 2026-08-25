@@ -19,15 +19,13 @@
 package org.apache.paimon.rest.requests;
 
 import org.apache.paimon.annotation.Experimental;
-import org.apache.paimon.management.ColumnMask;
-import org.apache.paimon.management.DataPolicy;
 import org.apache.paimon.management.PermissionResource;
-import org.apache.paimon.management.RowFilter;
+import org.apache.paimon.management.PolicyIdentity;
+import org.apache.paimon.management.PolicyType;
 import org.apache.paimon.rest.RESTRequest;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonInclude;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
@@ -36,63 +34,52 @@ import javax.annotation.Nullable;
 
 import java.beans.ConstructorProperties;
 
-/**
- * Create or replace payload for a principal policy whose table is identified by the request path.
- */
+/** Request for dropping one principal's row filter or column mask. */
 @Experimental
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class PolicyRequest implements RESTRequest {
+public class DropPolicyRequest implements RESTRequest {
 
-    private static final String FIELD_ROW_FILTER = "rowFilter";
-    private static final String FIELD_COLUMN_MASK = "columnMask";
+    private static final String FIELD_TYPE = "type";
     private static final String FIELD_PRINCIPAL = "principal";
+    private static final String FIELD_COLUMN = "column";
 
-    @Nullable private final RowFilter rowFilter;
-    @Nullable private final ColumnMask columnMask;
+    private final PolicyType type;
     private final String principal;
+    @Nullable private final String column;
 
-    public PolicyRequest(DataPolicy policy) {
-        this(policy.getRowFilter(), policy.getColumnMask(), policy.getPrincipal());
+    public DropPolicyRequest(PolicyIdentity identity) {
+        this(identity.getType(), identity.getPrincipal(), identity.getColumn());
     }
 
     @JsonCreator
-    @ConstructorProperties({FIELD_ROW_FILTER, FIELD_COLUMN_MASK, FIELD_PRINCIPAL})
-    public PolicyRequest(
-            @Nullable @JsonProperty(FIELD_ROW_FILTER) RowFilter rowFilter,
-            @Nullable @JsonProperty(FIELD_COLUMN_MASK) ColumnMask columnMask,
-            @JsonProperty(FIELD_PRINCIPAL) String principal) {
-        this.rowFilter = rowFilter;
-        this.columnMask = columnMask;
+    @ConstructorProperties({FIELD_TYPE, FIELD_PRINCIPAL, FIELD_COLUMN})
+    public DropPolicyRequest(
+            @JsonProperty(FIELD_TYPE) PolicyType type,
+            @JsonProperty(FIELD_PRINCIPAL) String principal,
+            @Nullable @JsonProperty(FIELD_COLUMN) String column) {
+        this.type = type;
         this.principal = principal;
+        this.column = column;
     }
 
-    public DataPolicy policy(PermissionResource resource) {
-        return new DataPolicy(resource, rowFilter, columnMask, principal);
+    public PolicyIdentity identity(PermissionResource resource) {
+        return new PolicyIdentity(resource, type, principal, column);
     }
 
-    /** Creating a principal policy cannot be replayed after an ambiguous server response. */
-    @JsonIgnore
-    @Override
-    public boolean isRetrySafe() {
-        return false;
-    }
-
-    @Nullable
-    @JsonGetter(FIELD_ROW_FILTER)
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    public RowFilter getRowFilter() {
-        return rowFilter;
-    }
-
-    @Nullable
-    @JsonGetter(FIELD_COLUMN_MASK)
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    public ColumnMask getColumnMask() {
-        return columnMask;
+    @JsonGetter(FIELD_TYPE)
+    public PolicyType getType() {
+        return type;
     }
 
     @JsonGetter(FIELD_PRINCIPAL)
     public String getPrincipal() {
         return principal;
+    }
+
+    @Nullable
+    @JsonGetter(FIELD_COLUMN)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public String getColumn() {
+        return column;
     }
 }

@@ -26,8 +26,6 @@ import org.apache.paimon.management.PermissionManagement;
 import org.apache.paimon.management.PermissionResource;
 import org.apache.paimon.management.PermissionScope;
 import org.apache.paimon.management.PolicyManagement;
-import org.apache.paimon.management.PrincipalRef;
-import org.apache.paimon.management.PrincipalType;
 import org.apache.paimon.management.ResourceType;
 import org.apache.paimon.rest.RESTCatalog;
 import org.apache.paimon.spark.catalog.WithPaimonCatalog;
@@ -73,7 +71,6 @@ abstract class BasePermissionProcedure extends BaseProcedure {
     protected static PermissionAssignment assignment(
             ResourceType resourceType,
             String access,
-            PrincipalType principalType,
             String principal,
             @Nullable String database,
             @Nullable String table,
@@ -85,7 +82,7 @@ abstract class BasePermissionProcedure extends BaseProcedure {
                 resource(resourceType, database, table, function, view),
                 scope(scope),
                 access,
-                new PrincipalRef(principalType, principal),
+                principal,
                 emptyToNull(expireTime),
                 null);
     }
@@ -93,7 +90,6 @@ abstract class BasePermissionProcedure extends BaseProcedure {
     protected static PermissionIdentity identity(
             ResourceType resourceType,
             String access,
-            PrincipalType principalType,
             String principal,
             @Nullable String database,
             @Nullable String table,
@@ -104,7 +100,7 @@ abstract class BasePermissionProcedure extends BaseProcedure {
                 resource(resourceType, database, table, function, view),
                 scope(scope),
                 access,
-                new PrincipalRef(principalType, principal));
+                principal);
     }
 
     protected static PermissionResource resource(
