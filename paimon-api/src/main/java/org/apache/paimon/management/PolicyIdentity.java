@@ -20,21 +20,32 @@ package org.apache.paimon.management;
 
 import org.apache.paimon.annotation.Experimental;
 
-import javax.annotation.Nullable;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
-import java.util.Locale;
-
-/** Resource types supported by permission management. */
+/** Resource-scoped identity of a named data policy. */
 @Experimental
-public enum ResourceType {
-    CATALOG,
-    DATABASE,
-    TABLE,
-    VIEW,
-    FUNCTION;
+public class PolicyIdentity {
 
-    @Nullable
-    public static ResourceType fromString(@Nullable String value) {
-        return value == null ? null : valueOf(value.toUpperCase(Locale.ROOT));
+    private final PermissionResource resource;
+    private final String name;
+
+    public PolicyIdentity(PermissionResource resource, String name) {
+        this.resource = checkNotNull(resource, "resource cannot be null");
+        resource.validatePolicyAttachment();
+        checkArgument(name != null && !name.trim().isEmpty(), "policy name cannot be empty.");
+        this.name = name;
+    }
+
+    public static PolicyIdentity fromPolicy(DataPolicy policy) {
+        return new PolicyIdentity(policy.getResource(), policy.getName());
+    }
+
+    public PermissionResource getResource() {
+        return resource;
+    }
+
+    public String getName() {
+        return name;
     }
 }

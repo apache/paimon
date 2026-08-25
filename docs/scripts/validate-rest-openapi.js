@@ -115,7 +115,9 @@ function validateCommon(fileName) {
 
   function validatePathParameters(resourcePath, pathItem, operation) {
     const templateNames = Array.from(resourcePath.matchAll(/\{([^}]+)\}/g), (match) => match[1]);
-    const parameters = [...(pathItem.parameters || []), ...(operation.parameters || [])];
+    const parameters = [...(pathItem.parameters || []), ...(operation.parameters || [])].map(
+      (parameter) => (parameter.$ref ? resolveLocalRef(parameter.$ref) : parameter),
+    );
     const pathParameters = parameters.filter((parameter) => parameter.in === 'path');
     templateNames.forEach((name) => {
       const parameter = pathParameters.find((candidate) => candidate.name === name);
@@ -304,128 +306,261 @@ function validateCatalogOpenApi() {
 
 function validateManagementOpenApi() {
   const contract = validateCommon('rest-management-open-api.yaml');
-  const operationIds = ['listPermissions', 'grantPermission', 'revokePermission'];
+  const operationIds = [
+    'listPermissions',
+    'grantPermission',
+    'revokePermission',
+    'listTablePolicies',
+    'createTablePolicy',
+    'getTablePolicy',
+    'createOrReplaceTablePolicy',
+    'dropTablePolicy',
+  ];
+  const resourcePaths = [
+    '/v1/{prefix}/permissions',
+    '/v1/{prefix}/permissions/grant',
+    '/v1/{prefix}/permissions/revoke',
+    '/v1/{prefix}/databases/{database}/tables/{table}/policies',
+    '/v1/{prefix}/databases/{database}/tables/{table}/policies/{policyName}',
+  ];
+
+  resourcePaths.forEach((resourcePath) =>
+    contract.checkSpec(
+      contract.spec.paths[resourcePath],
+      `Missing management path: ${resourcePath}`,
+    ),
+  );
+  [
+    '/v1/{prefix}/policies',
+    '/v1/{prefix}/databases/{database}/policies',
+  ].forEach((resourcePath) =>
+    contract.checkSpec(
+      !contract.spec.paths[resourcePath],
+      `Policies must not be attachable outside tables: ${resourcePath}`,
+    ),
+  );
   operationIds.forEach(contract.requireOperation);
-  operationIds.forEach((operationId) =>
+  ['listPermissions', 'grantPermission', 'revokePermission'].forEach((operationId) =>
     contract.requireResponses(operationId, ['200', '400', '401', '403', '404', '500']),
   );
+  ['listTablePolicies', 'createTablePolicy', 'createOrReplaceTablePolicy'].forEach((operationId) =>
+    contract.requireResponses(operationId, ['200', '400', '401', '403', '404', '500']),
+  );
+  ['getTablePolicy', 'dropTablePolicy'].forEach((operationId) =>
+    contract.requireResponses(operationId, ['200', '401', '403', '404', '500']),
+  );
+  ['createTablePolicy', 'createOrReplaceTablePolicy'].forEach((operationId) =>
+    contract.requireResponses(operationId, ['409']),
+  );
+  contract.checkSpec(
+    contract.spec.info.version === '0.3.0' &&
+      contract.spec.info.description.toLowerCase().includes('experimental'),
+    'The management contract must be versioned 0.3.0 and marked experimental',
+  );
 
-  const permissionFields = [
-    'resourceType',
-    'catalog',
-    'database',
-    'table',
-    'function',
-    'view',
-    'columns',
-    'rowFilter',
-    'columnMasking',
+  const assignmentFields = [
+    'resource',
+    'scope',
     'access',
     'principal',
     'expireTime',
+    'inheritedFrom',
   ];
-  contract.requireProperties('Permission', permissionFields);
-  contract.requireRequiredProperties('Permission', ['resourceType', 'access', 'principal']);
-
-  const grantProperties = contract.requireProperties('GrantPermissionRequest', permissionFields);
+  contract.requireProperties('PermissionAssignment', assignmentFields);
+  contract.requireRequiredProperties('PermissionAssignment', [
+    'resource',
+    'scope',
+    'access',
+    'principal',
+  ]);
+  const grantProperties = contract.requireProperties('GrantPermissionRequest', [
+    'resource',
+    'scope',
+    'access',
+    'principal',
+    'expireTime',
+  ]);
   contract.requireRequiredProperties('GrantPermissionRequest', [
-    'resourceType',
+    'resource',
     'access',
     'principal',
   ]);
   contract.checkSpec(
-    !grantProperties.permission,
-    'Schema GrantPermissionRequest must use the flat permission shape',
+    grantProperties.scope.default === 'SELF',
+    'GrantPermissionRequest.scope must default to SELF',
   );
-
-  const revokeFields = [
-    'resourceType',
-    'catalog',
-    'database',
-    'table',
-    'function',
-    'view',
-    'columns',
-    'access',
-    'principal',
-  ];
-  const revokeProperties = contract.requireProperties('RevokePermissionRequest', revokeFields);
-  contract.requireRequiredProperties('RevokePermissionRequest', [
-    'resourceType',
+  ['inheritedFrom', 'columns', 'policy', 'grantOption'].forEach((field) =>
+    contract.checkSpec(
+      !grantProperties[field],
+      `Schema GrantPermissionRequest must omit field: ${field}`,
+    ),
+  );
+  const revokeProperties = contract.requireProperties('RevokePermissionRequest', [
+    'resource',
+    'scope',
     'access',
     'principal',
   ]);
-  ['rowFilter', 'columnMasking', 'expireTime'].forEach((field) =>
+  contract.requireRequiredProperties('RevokePermissionRequest', [
+    'resource',
+    'access',
+    'principal',
+  ]);
+  contract.checkSpec(
+    revokeProperties.scope.default === 'SELF',
+    'RevokePermissionRequest.scope must default to SELF',
+  );
+  ['expireTime', 'inheritedFrom', 'columns', 'policy', 'grantOption'].forEach((field) =>
     contract.checkSpec(
       !revokeProperties[field],
-      `Schema RevokePermissionRequest must omit grant-only field: ${field}`,
+      `Schema RevokePermissionRequest must omit field: ${field}`,
     ),
   );
 
-  const listProperties = contract.requireProperties('ListPermissionsResponse', [
+  const permissionList = contract.requireProperties('ListPermissionsResponse', [
     'permissions',
     'nextPageToken',
   ]);
+  contract.checkSpec(
+    permissionList.permissions.type === 'array' &&
+      permissionList.permissions.items.$ref === '#/components/schemas/PermissionAssignment',
+    'ListPermissionsResponse.permissions must contain PermissionAssignment values',
+  );
   contract.requireRequiredProperties('ListPermissionsResponse', ['permissions']);
-  contract.checkSpec(
-    listProperties.permissions.type === 'array' &&
-      listProperties.permissions.items.$ref === '#/components/schemas/Permission',
-    'Schema ListPermissionsResponse.permissions must be an array of Permission',
-  );
 
-  const columnSelection = contract.requireProperties('ColumnSelection', [
-    'columnNames',
-    'excludedColumnNames',
+  contract.requireProperties('PrincipalRef', ['type', 'id']);
+  contract.requireRequiredProperties('PrincipalRef', ['type', 'id']);
+  requireExactEnum(contract, 'ResourceType', ['CATALOG', 'DATABASE', 'TABLE', 'FUNCTION', 'VIEW']);
+  requireExactEnum(contract, 'PermissionScope', ['SELF', 'DESCENDANTS']);
+  requireExactEnum(contract, 'PrincipalType', ['USER', 'GROUP', 'ROLE', 'SERVICE']);
+  requireExactEnum(contract, 'PolicyType', ['ROW_FILTER', 'COLUMN_MASKING']);
+
+  contract.requireSchemaReference('PolicyRequest', 'oneOf', 'RowFilterPolicyRequest');
+  contract.requireSchemaReference('PolicyRequest', 'oneOf', 'ColumnMaskPolicyRequest');
+  contract.requireSchemaReference('DataPolicy', 'oneOf', 'RowFilterDataPolicy');
+  contract.requireSchemaReference('DataPolicy', 'oneOf', 'ColumnMaskDataPolicy');
+  contract.requireProperties('RowFilter', ['functionName', 'functionArguments']);
+  contract.requireProperties('ColumnMask', ['functionName', 'onColumn', 'functionArguments']);
+  contract.requireRequiredProperties('RowFilter', ['functionName', 'functionArguments']);
+  contract.requireRequiredProperties('ColumnMask', [
+    'functionName',
+    'onColumn',
+    'functionArguments',
   ]);
-  contract.checkSpec(
-    columnSelection.columnNames.uniqueItems === true &&
-      columnSelection.excludedColumnNames.uniqueItems === true,
-    'Schema ColumnSelection values must be unique',
-  );
-  contract.checkSpec(
-    Array.isArray(contract.schema('ColumnSelection').oneOf) &&
-      contract.schema('ColumnSelection').oneOf.length === 2,
-    'Schema ColumnSelection must require exactly one selection mode',
-  );
-
-  contract.requireProperties('RowFilter', ['expression', 'predicate']);
-  contract.requireProperties('ColumnMask', ['expression', 'transform']);
-  contract.checkSpec(
-    contract.schema('ExpireTime').type === 'string',
-    'Schema ExpireTime must use the ISO-8601 string representation',
-  );
-
-  requireExactEnum(contract, 'ResourceType', [
-    'CATALOG',
-    'CATALOG_ALL',
-    'DATABASE',
-    'DATABASE_ALL',
-    'TABLE',
-    'FUNCTION',
-    'VIEW',
-    'COLUMN',
-    'ROW_FILTER',
-    'COLUMN_MASKING',
-  ]);
-
-  const listParameters = contract
-    .requireOperation('listPermissions')
-    .parameters.filter((parameter) => parameter.in === 'query');
-  ['resourceType', 'database', 'table', 'function', 'view', 'principal', 'pageToken', 'maxResults'].forEach(
-    (name) =>
+  ['RowFilterPolicyRequest', 'ColumnMaskPolicyRequest'].forEach((schemaName) => {
+    const properties = contract.requireProperties(schemaName, [
+      'name',
+      'toPrincipals',
+      'exceptPrincipals',
+      'comment',
+    ]);
+    ['toPrincipals', 'exceptPrincipals'].forEach((field) =>
       contract.checkSpec(
-        listParameters.some((parameter) => parameter.name === name),
-        `Operation listPermissions is missing query parameter: ${name}`,
+        properties[field].items.$ref === '#/components/schemas/PrincipalRef',
+        `${schemaName}.${field} must contain PrincipalRef values`,
       ),
+    );
+    contract.checkSpec(
+      !properties.scope && !properties.type && !properties.resource,
+      `${schemaName} must not expose policy scope, type, or path resource`,
+    );
+    contract.checkSpec(
+      !(contract.schema(schemaName).required || []).includes('exceptPrincipals'),
+      `${schemaName}.exceptPrincipals must be optional`,
+    );
+  });
+  contract.requireProperties('RowFilterPolicyRequest', ['rowFilter']);
+  contract.requireProperties('ColumnMaskPolicyRequest', ['columnMask']);
+  contract.checkSpec(
+    Array.isArray(contract.schema('PolicyArgument').oneOf) &&
+      contract.schema('PolicyArgument').oneOf.length === 2,
+    'PolicyArgument must contain exactly one column or constant',
   );
   contract.checkSpec(
-    listParameters.find((parameter) => parameter.name === 'resourceType').required === true,
+    !contract.schema('ConstantPolicyArgument').properties.constant.minLength,
+    'ConstantPolicyArgument.constant must allow the empty string',
+  );
+  const tablePolicyResource = contract.requireProperties('TablePolicyResource', [
+    'type',
+    'database',
+    'table',
+  ]);
+  contract.checkSpec(
+    tablePolicyResource.type.const === 'TABLE',
+    'Data policies must use a TABLE attachment resource',
+  );
+  const policyList = contract.requireProperties('ListPoliciesResponse', [
+    'policies',
+    'nextPageToken',
+  ]);
+  contract.checkSpec(
+    policyList.policies.items.$ref === '#/components/schemas/DataPolicy',
+    'ListPoliciesResponse.policies must contain DataPolicy values',
+  );
+  contract.requireProperties('GetPolicyResponse', ['policy']);
+  contract.requireProperties('ErrorResponse', [
+    'message',
+    'resourceType',
+    'resourceName',
+    'code',
+  ]);
+  contract.requireRequiredProperties('ErrorResponse', ['message', 'code']);
+
+  const permissionParameters = contract
+    .requireOperation('listPermissions')
+    .parameters.map((parameter) =>
+      parameter.$ref ? parameter.$ref.split('/').pop() : parameter.name,
+    );
+  [
+    'ResourceTypeQuery',
+    'ScopeQuery',
+    'DatabaseQuery',
+    'TableQuery',
+    'FunctionQuery',
+    'ViewQuery',
+    'PrincipalTypeQuery',
+    'PrincipalQuery',
+    'AccessQuery',
+    'IncludeInherited',
+    'PageToken',
+    'MaxResults',
+  ].forEach((name) =>
+    contract.checkSpec(
+      permissionParameters.includes(name),
+      `Operation listPermissions is missing query parameter: ${name}`,
+    ),
+  );
+  contract.checkSpec(
+    contract.spec.components.parameters.ResourceTypeQuery.required === true,
     'Operation listPermissions must require resourceType',
+  );
+  const policyParameters = contract
+    .requireOperation('listTablePolicies')
+    .parameters.map((parameter) =>
+      parameter.$ref ? parameter.$ref.split('/').pop() : parameter.name,
+    );
+  contract.checkSpec(
+    !policyParameters.includes('IncludeInherited'),
+    'Table policies must not expose includeInherited',
+  );
+  contract.checkSpec(
+    contract.spec.paths[
+      '/v1/{prefix}/databases/{database}/tables/{table}/policies/{policyName}'
+    ].put,
+    'Full policy replacement must use PUT',
   );
 
   contract.checkSpec(
     contract.operations.size === operationIds.length,
-    'The initial management contract must stay limited to list, grant, and revoke',
+    `The management contract must define exactly ${operationIds.length} operations`,
+  );
+  resourcePaths.forEach((resourcePath) =>
+    contract.checkSpec(
+      contract.spec.paths[resourcePath].parameters.some(
+        (parameter) => parameter.$ref === '#/components/parameters/Prefix',
+      ),
+      `Path ${resourcePath} must reuse components.parameters.Prefix`,
+    ),
   );
   return contract.operations.size;
 }

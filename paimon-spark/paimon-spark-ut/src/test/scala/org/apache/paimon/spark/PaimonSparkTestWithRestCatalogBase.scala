@@ -18,8 +18,9 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.management.{PrincipalRef, PrincipalType}
 import org.apache.paimon.options.CatalogOptions
-import org.apache.paimon.rest.{RESTCatalogFactory, RESTCatalogInternalOptions, RESTCatalogOptions, RESTCatalogServer}
+import org.apache.paimon.rest.{RESTCatalogFactory, RESTCatalogInternalOptions, RESTCatalogServer}
 import org.apache.paimon.rest.auth.{AuthProviderEnum, BearTokenAuthProvider}
 import org.apache.paimon.rest.responses.ConfigResponse
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap
@@ -30,7 +31,7 @@ import java.util.UUID
 
 class PaimonSparkTestWithRestCatalogBase extends PaimonSparkTestBase {
 
-  private var restCatalogServer: RESTCatalogServer = _
+  protected var restCatalogServer: RESTCatalogServer = _
   private var serverUrl: String = _
   protected var warehouse: String = _
   private val initToken = "init_token"
@@ -42,8 +43,6 @@ class PaimonSparkTestWithRestCatalogBase extends PaimonSparkTestBase {
         RESTCatalogInternalOptions.PREFIX.key,
         "paimon",
         CatalogOptions.WAREHOUSE.key,
-        warehouse,
-        RESTCatalogOptions.MANAGEMENT_CATALOG.key,
         warehouse),
       ImmutableMap.of()
     )
@@ -53,6 +52,17 @@ class PaimonSparkTestWithRestCatalogBase extends PaimonSparkTestBase {
     restCatalogServer.start()
     serverUrl = restCatalogServer.getUrl
     super.beforeAll()
+    Seq("analyst", "first", "second", "reader", "function_reader").foreach(
+      id => restCatalogServer.registerManagementPrincipal(new PrincipalRef(PrincipalType.ROLE, id)))
+    restCatalogServer.registerManagementPrincipal(new PrincipalRef(PrincipalType.GROUP, "analysts"))
+    restCatalogServer.registerManagementPrincipal(new PrincipalRef(PrincipalType.USER, "admin"))
+    spark.sql("CREATE DATABASE IF NOT EXISTS paimon.sales")
+    spark.sql("""CREATE TABLE IF NOT EXISTS paimon.sales.orders (
+                |  id INT,
+                |  region STRING,
+                |  email STRING)
+                |TBLPROPERTIES ('query-auth.enabled' = 'true')
+                |""".stripMargin)
   }
 
   override protected def afterAll(): Unit = {

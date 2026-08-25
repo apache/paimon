@@ -21,13 +21,17 @@ package org.apache.paimon.management;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.annotation.Experimental;
 
-/** Control-plane contract for managing permissions on catalog resources. */
+/** Control-plane contract for row-filter and column-masking policies. */
 @Experimental
-public interface PermissionManagement {
+public interface PolicyManagement {
 
-    PagedList<PermissionAssignment> listPermissions(ListPermissionsRequest request);
+    PagedList<DataPolicy> listPolicies(ListPoliciesRequest request);
 
-    void grantPermission(PermissionAssignment assignment);
+    DataPolicy getPolicy(PolicyIdentity identity);
 
-    void revokePermission(PermissionIdentity identity);
+    void createPolicy(DataPolicy policy);
+
+    void createOrReplacePolicy(DataPolicy policy);
+
+    void dropPolicy(PolicyIdentity identity, boolean ignoreIfNotExists);
 }

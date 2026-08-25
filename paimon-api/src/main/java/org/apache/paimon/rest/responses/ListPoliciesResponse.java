@@ -19,7 +19,7 @@
 package org.apache.paimon.rest.responses;
 
 import org.apache.paimon.annotation.Experimental;
-import org.apache.paimon.management.PermissionAssignment;
+import org.apache.paimon.management.DataPolicy;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
@@ -32,45 +32,41 @@ import javax.annotation.Nullable;
 import java.beans.ConstructorProperties;
 import java.util.List;
 
-/** Response for listing permissions. */
+/** Response for listing data policies. */
 @Experimental
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class ListPermissionsResponse implements PagedResponse<PermissionAssignment> {
+public class ListPoliciesResponse implements PagedResponse<DataPolicy> {
 
-    private static final String FIELD_PERMISSIONS = "permissions";
+    private static final String FIELD_POLICIES = "policies";
     private static final String FIELD_NEXT_PAGE_TOKEN = "nextPageToken";
 
-    @JsonProperty(FIELD_PERMISSIONS)
-    private final List<PermissionAssignment> permissions;
-
-    @Nullable
-    @JsonProperty(FIELD_NEXT_PAGE_TOKEN)
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    private final String nextPageToken;
+    private final List<DataPolicy> policies;
+    @Nullable private final String nextPageToken;
 
     @JsonCreator
-    @ConstructorProperties({FIELD_PERMISSIONS, FIELD_NEXT_PAGE_TOKEN})
-    public ListPermissionsResponse(
-            @JsonProperty(FIELD_PERMISSIONS) List<PermissionAssignment> permissions,
+    @ConstructorProperties({FIELD_POLICIES, FIELD_NEXT_PAGE_TOKEN})
+    public ListPoliciesResponse(
+            @JsonProperty(FIELD_POLICIES) List<DataPolicy> policies,
             @Nullable @JsonProperty(FIELD_NEXT_PAGE_TOKEN) String nextPageToken) {
-        this.permissions = permissions;
+        this.policies = policies;
         this.nextPageToken = nextPageToken;
     }
 
-    @JsonGetter(FIELD_PERMISSIONS)
-    public List<PermissionAssignment> getPermissions() {
-        return permissions;
+    @JsonGetter(FIELD_POLICIES)
+    public List<DataPolicy> getPolicies() {
+        return policies;
     }
 
     @Override
     @Nullable
     @JsonGetter(FIELD_NEXT_PAGE_TOKEN)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public String getNextPageToken() {
         return nextPageToken;
     }
 
     @Override
-    public List<PermissionAssignment> data() {
-        return permissions;
+    public List<DataPolicy> data() {
+        return policies;
     }
 }

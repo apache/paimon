@@ -18,71 +18,115 @@
 
 package org.apache.paimon.management;
 
+import org.apache.paimon.annotation.Experimental;
+
 import javax.annotation.Nullable;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
-/** Resource filters and pagination for listing explicitly granted permissions. */
+/** Exact resource, principal, and pagination filters for listing permission assignments. */
+@Experimental
 public class ListPermissionsRequest {
 
-    private final ResourceType resourceType;
-    @Nullable private final String database;
-    @Nullable private final String table;
-    @Nullable private final String function;
-    @Nullable private final String view;
+    public static final int MAX_PAGE_SIZE = 1000;
+
+    private final PermissionResource resource;
+    @Nullable private final PermissionScope scope;
+    @Nullable private final PrincipalType principalType;
     @Nullable private final String principal;
+    @Nullable private final String access;
+    private final boolean includeInherited;
     @Nullable private final String pageToken;
     @Nullable private final Integer maxResults;
 
     public ListPermissionsRequest(
             ResourceType resourceType,
+            @Nullable PermissionScope scope,
             @Nullable String database,
             @Nullable String table,
             @Nullable String function,
             @Nullable String view,
+            @Nullable PrincipalType principalType,
             @Nullable String principal,
+            @Nullable String access,
+            boolean includeInherited,
             @Nullable String pageToken,
             @Nullable Integer maxResults) {
+        this.resource = exactResource(resourceType, database, table, function, view);
+        if (scope == PermissionScope.DESCENDANTS) {
+            checkArgument(
+                    resourceType == ResourceType.CATALOG || resourceType == ResourceType.DATABASE,
+                    "DESCENDANTS scope applies only to CATALOG or DATABASE assignments.");
+        }
         checkArgument(
-                !isBlank(database) || (isBlank(table) && isBlank(function) && isBlank(view)),
-                "database is required when table, function, or view is specified.");
-        this.resourceType = resourceType;
-        this.database = database;
-        this.table = table;
-        this.function = function;
-        this.view = view;
-        this.principal = principal;
-        this.pageToken = pageToken;
+                (principalType == null) == isBlank(principal),
+                "principalType and principal must be specified together.");
+        checkArgument(maxResults == null || maxResults > 0, "maxResults must be greater than 0.");
+        checkArgument(
+                maxResults == null || maxResults <= MAX_PAGE_SIZE,
+                "maxResults must be at most %s.",
+                MAX_PAGE_SIZE);
+        this.scope = scope;
+        this.principalType = principalType;
+        this.principal = isBlank(principal) ? null : principal;
+        this.access =
+                isBlank(access)
+                        ? null
+                        : scope == null
+                                ? PermissionAccess.canonicalize(resource, access)
+                                : PermissionAccess.canonicalize(resource, scope, access);
+        this.includeInherited = includeInherited;
+        this.pageToken = isBlank(pageToken) ? null : pageToken;
         this.maxResults = maxResults;
     }
 
     public ResourceType getResourceType() {
-        return resourceType;
+        return resource.getType();
+    }
+
+    @Nullable
+    public PermissionScope getScope() {
+        return scope;
     }
 
     @Nullable
     public String getDatabase() {
-        return database;
+        return resource.getDatabase();
     }
 
     @Nullable
     public String getTable() {
-        return table;
+        return resource.getTable();
     }
 
     @Nullable
     public String getFunction() {
-        return function;
+        return resource.getFunction();
     }
 
     @Nullable
     public String getView() {
-        return view;
+        return resource.getView();
+    }
+
+    @Nullable
+    public PrincipalType getPrincipalType() {
+        return principalType;
     }
 
     @Nullable
     public String getPrincipal() {
         return principal;
+    }
+
+    @Nullable
+    public String getAccess() {
+        return access;
+    }
+
+    public boolean includeInherited() {
+        return includeInherited;
     }
 
     @Nullable
@@ -93,6 +137,41 @@ public class ListPermissionsRequest {
     @Nullable
     public Integer getMaxResults() {
         return maxResults;
+    }
+
+    public PermissionResource resource() {
+        return resource;
+    }
+
+    public ListPermissionsRequest withPageToken(@Nullable String newPageToken) {
+        return new ListPermissionsRequest(
+                resource.getType(),
+                scope,
+                resource.getDatabase(),
+                resource.getTable(),
+                resource.getFunction(),
+                resource.getView(),
+                principalType,
+                principal,
+                access,
+                includeInherited,
+                newPageToken,
+                maxResults);
+    }
+
+    private static PermissionResource exactResource(
+            ResourceType resourceType,
+            @Nullable String database,
+            @Nullable String table,
+            @Nullable String function,
+            @Nullable String view) {
+        checkNotNull(resourceType, "resourceType cannot be null");
+        try {
+            return new PermissionResource(resourceType, database, table, function, view);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(
+                    "Permission listing requires an exact target resource: " + e.getMessage(), e);
+        }
     }
 
     private static boolean isBlank(@Nullable String value) {

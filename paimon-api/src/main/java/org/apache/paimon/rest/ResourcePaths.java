@@ -18,6 +18,8 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.management.PermissionResource;
 import org.apache.paimon.options.Options;
 
 import org.apache.paimon.shade.guava30.com.google.common.base.Joiner;
@@ -42,26 +44,14 @@ public class ResourcePaths {
     protected static final String REGISTER = "register";
     protected static final String FUNCTIONS = "functions";
     protected static final String FUNCTION_DETAILS = "function-details";
-    protected static final String CATALOGS = "catalogs";
     protected static final String PERMISSIONS = "permissions";
+    protected static final String POLICIES = "policies";
     protected static final String ID = "id";
 
     private static final Joiner SLASH = Joiner.on("/").skipNulls();
 
     public static String config() {
         return String.format("%s/config", V1);
-    }
-
-    public static String permissions(String catalog) {
-        return SLASH.join(V1, CATALOGS, encodeString(catalog), PERMISSIONS);
-    }
-
-    public static String grantPermission(String catalog) {
-        return SLASH.join(permissions(catalog), "grant");
-    }
-
-    public static String revokePermission(String catalog) {
-        return SLASH.join(permissions(catalog), "revoke");
     }
 
     public static ResourcePaths forCatalogProperties(Options options) {
@@ -72,6 +62,34 @@ public class ResourcePaths {
 
     public ResourcePaths(String prefix) {
         this.prefix = encodeString(prefix);
+    }
+
+    @Experimental
+    public String permissions() {
+        return SLASH.join(V1, prefix, PERMISSIONS);
+    }
+
+    @Experimental
+    public String grantPermission() {
+        return SLASH.join(permissions(), "grant");
+    }
+
+    @Experimental
+    public String revokePermission() {
+        return SLASH.join(permissions(), "revoke");
+    }
+
+    /** Policy collection nested below its attachment resource. */
+    @Experimental
+    public String policies(PermissionResource resource) {
+        resource.validatePolicyAttachment();
+        return SLASH.join(table(resource.getDatabase(), resource.getTable()), POLICIES);
+    }
+
+    /** Named policy nested below its attachment resource. */
+    @Experimental
+    public String policy(PermissionResource resource, String policyName) {
+        return SLASH.join(policies(resource), encodeString(policyName));
     }
 
     public String databases() {

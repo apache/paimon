@@ -20,12 +20,16 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.PagedList;
 import org.apache.paimon.management.ListPermissionsRequest;
-import org.apache.paimon.management.Permission;
+import org.apache.paimon.management.PermissionAssignment;
+import org.apache.paimon.management.PermissionIdentity;
 import org.apache.paimon.management.PermissionManagement;
+import org.apache.paimon.management.PermissionResource;
+import org.apache.paimon.management.PermissionScope;
+import org.apache.paimon.management.PrincipalRef;
+import org.apache.paimon.management.PrincipalType;
 import org.apache.paimon.management.ResourceType;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
-import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -40,6 +44,7 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.apache.paimon.rest.RESTCatalogInternalOptions.PREFIX;
@@ -52,7 +57,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** Behavioral tests for REST permission management. */
 public class RESTPermissionManagementTest {
 
-    private static final String BASE_PATH = "/v1/catalogs/catalog+name/permissions";
+    private static final String BASE_PATH = "/v1/catalog+id/permissions";
 
     private HttpServer server;
     private PermissionManagement management;
@@ -60,12 +65,13 @@ public class RESTPermissionManagementTest {
     private final AtomicReference<String> revokeBody = new AtomicReference<>();
     private final AtomicReference<String> authorization = new AtomicReference<>();
     private final AtomicReference<String> listQuery = new AtomicReference<>();
+    private final AtomicInteger revokeCalls = new AtomicInteger();
 
     @BeforeEach
     void setUp() throws Exception {
         server = HttpServer.create(new InetSocketAddress(0), 0);
         server.createContext(
-                "/v1/catalogs/",
+                "/v1/",
                 exchange -> {
                     authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
                     String path = exchange.getRequestURI().getRawPath();
@@ -74,10 +80,10 @@ public class RESTPermissionManagementTest {
                         respond(
                                 exchange,
                                 200,
-                                "{\"permissions\":[{\"resourceType\":\"TABLE\","
-                                        + "\"database\":\"sales\",\"table\":\"orders\","
-                                        + "\"access\":\"SELECT\","
-                                        + "\"principal\":\"role:analyst\"}],"
+                                "{\"permissions\":[{\"resource\":{\"type\":\"TABLE\","
+                                        + "\"database\":\"sales\",\"table\":\"orders\"},"
+                                        + "\"scope\":\"SELF\",\"access\":\"SELECT\","
+                                        + "\"principal\":{\"type\":\"ROLE\",\"id\":\"analyst\"}}],"
                                         + "\"nextPageToken\":\"next\"}");
                     } else if ((BASE_PATH + "/grant").equals(path)) {
                         String body = readBody(exchange);
@@ -88,18 +94,9 @@ public class RESTPermissionManagementTest {
                             respond(exchange, 200, null);
                         }
                     } else if ((BASE_PATH + "/revoke").equals(path)) {
-                        String body = readBody(exchange);
-                        revokeBody.set(body);
-                        if (body.contains("missing")) {
-                            respond(
-                                    exchange,
-                                    404,
-                                    "{\"message\":\"permission does not exist\","
-                                            + "\"resourceType\":\"PERMISSION\","
-                                            + "\"resourceName\":\"missing\",\"code\":404}");
-                        } else {
-                            respond(exchange, 200, null);
-                        }
+                        revokeBody.set(readBody(exchange));
+                        revokeCalls.incrementAndGet();
+                        respond(exchange, 200, null);
                     } else {
                         respond(exchange, 404, "{\"message\":\"missing\",\"code\":404}");
                     }
@@ -110,8 +107,8 @@ public class RESTPermissionManagementTest {
         options.set(URI, "http://127.0.0.1:" + server.getAddress().getPort());
         options.set(TOKEN_PROVIDER, "bear");
         options.set(TOKEN, "secret");
-        options.set(PREFIX, "unused");
-        management = new RESTPermissionManagement(new RESTApi(options, false), "catalog name");
+        options.set(PREFIX, "catalog id");
+        management = new RESTPermissionManagement(new RESTApi(options, false));
     }
 
     @AfterEach
@@ -122,82 +119,96 @@ public class RESTPermissionManagementTest {
     }
 
     @Test
-    void testListUsesEncodedCatalogAndCompleteFilters() throws Exception {
-        PagedList<Permission> page =
+    void testListUsesEncodedPrefixAndCompleteFilters() throws Exception {
+        PagedList<PermissionAssignment> page =
                 management.listPermissions(
                         new ListPermissionsRequest(
                                 ResourceType.TABLE,
+                                PermissionScope.SELF,
                                 "sales",
                                 "orders",
                                 null,
                                 null,
-                                "role:analyst",
+                                PrincipalType.ROLE,
+                                "analyst",
+                                null,
+                                true,
                                 "start",
                                 25));
 
         assertThat(page.getElements()).hasSize(1);
-        assertThat(page.getElements().get(0).getPrincipal()).isEqualTo("role:analyst");
+        assertThat(page.getElements().get(0).getPrincipal().getId()).isEqualTo("analyst");
         assertThat(page.getNextPageToken()).isEqualTo("next");
         assertThat(queryParameters(listQuery.get()))
-                .containsEntry("principal", "role:analyst")
+                .containsEntry("principalType", "ROLE")
+                .containsEntry("principal", "analyst")
                 .containsEntry("resourceType", "TABLE")
+                .containsEntry("scope", "SELF")
                 .containsEntry("database", "sales")
                 .containsEntry("table", "orders")
+                .containsEntry("includeInherited", "true")
                 .containsEntry("maxResults", "25")
                 .containsEntry("pageToken", "start");
         assertThat(authorization.get()).isEqualTo("Bearer secret");
     }
 
     @Test
-    void testGrantAndRevokeUseFlatWireShapes() throws Exception {
-        Permission permission = permission("role:analyst");
-        management.grantPermission(permission);
-        management.revokePermission(permission);
+    void testGrantAndRevokeUseStructuredWireShapes() throws Exception {
+        PermissionAssignment assignment = assignment("analyst");
+        management.grantPermission(assignment);
+        management.revokePermission(PermissionIdentity.fromAssignment(assignment));
 
         Map<?, ?> grant = RESTApi.fromJson(grantBody.get(), Map.class);
-        assertThat(grant.get("resourceType")).isEqualTo("TABLE");
-        assertThat(grant.get("database")).isEqualTo("sales");
-        assertThat(grant.get("table")).isEqualTo("orders");
-        assertThat(grant.get("access")).isEqualTo("SELECT");
-        assertThat(grant.get("principal")).isEqualTo("role:analyst");
-        assertThat(grant.containsKey("permission")).isFalse();
+        Map<?, ?> grantResource = (Map<?, ?>) grant.get("resource");
+        assertThat(grantResource.get("type")).isEqualTo("TABLE");
+        assertThat(grantResource.get("database")).isEqualTo("sales");
+        assertThat(grantResource.get("table")).isEqualTo("orders");
+        Map<?, ?> grantPrincipal = (Map<?, ?>) grant.get("principal");
+        assertThat(grantPrincipal.get("type")).isEqualTo("ROLE");
+        assertThat(grantPrincipal.get("id")).isEqualTo("analyst");
+        assertThat(grant.get("scope")).isEqualTo("SELF");
+        assertThat(grant.containsKey("columns")).isFalse();
+        assertThat(grant.containsKey("policy")).isFalse();
+        assertThat(grant.containsKey("grantOption")).isFalse();
+        assertThat(grant.containsKey("catalog")).isFalse();
 
         Map<?, ?> revoke = RESTApi.fromJson(revokeBody.get(), Map.class);
-        assertThat(revoke.get("resourceType")).isEqualTo("TABLE");
-        assertThat(revoke.get("database")).isEqualTo("sales");
-        assertThat(revoke.get("table")).isEqualTo("orders");
-        assertThat(revoke.get("access")).isEqualTo("SELECT");
-        assertThat(revoke.get("principal")).isEqualTo("role:analyst");
+        Map<?, ?> revokeResource = (Map<?, ?>) revoke.get("resource");
+        assertThat(revokeResource.get("type")).isEqualTo("TABLE");
+        assertThat(revokeResource.get("database")).isEqualTo("sales");
+        assertThat(revokeResource.get("table")).isEqualTo("orders");
+        Map<?, ?> revokePrincipal = (Map<?, ?>) revoke.get("principal");
+        assertThat(revokePrincipal.get("type")).isEqualTo("ROLE");
+        assertThat(revokePrincipal.get("id")).isEqualTo("analyst");
+        assertThat(revoke.get("scope")).isEqualTo("SELF");
         assertThat(revoke.containsKey("expireTime")).isFalse();
+        assertThat(revoke.containsKey("grantOption")).isFalse();
     }
 
     @Test
     void testForbiddenGrantPreservesRESTErrorTranslation() {
-        assertThatThrownBy(() -> management.grantPermission(permission("denied")))
+        assertThatThrownBy(() -> management.grantPermission(assignment("denied")))
                 .isInstanceOf(ForbiddenException.class)
                 .hasMessageContaining("forbidden");
     }
 
     @Test
-    void testMissingRevokeIsNotSilentlyIdempotent() {
-        assertThatThrownBy(() -> management.revokePermission(permission("missing")))
-                .isInstanceOf(NoSuchResourceException.class)
-                .hasMessageContaining("permission does not exist");
+    void testRepeatedRevokeIsIdempotent() {
+        PermissionAssignment assignment = assignment("missing");
+        PermissionIdentity identity = PermissionIdentity.fromAssignment(assignment);
+        management.revokePermission(identity);
+        management.revokePermission(identity);
+
+        assertThat(revokeCalls).hasValue(2);
     }
 
-    private static Permission permission(String principal) {
-        return new Permission(
-                ResourceType.TABLE,
-                null,
-                "sales",
-                "orders",
-                null,
-                null,
-                null,
-                null,
-                null,
+    private static PermissionAssignment assignment(String principal) {
+        return new PermissionAssignment(
+                new PermissionResource(ResourceType.TABLE, "sales", "orders", null, null),
+                PermissionScope.SELF,
                 "SELECT",
-                principal,
+                new PrincipalRef(PrincipalType.ROLE, principal),
+                null,
                 null);
     }
 
@@ -226,7 +237,7 @@ public class RESTPermissionManagementTest {
             try (OutputStream output = exchange.getResponseBody()) {
                 output.write(bytes);
             }
+            exchange.close();
         }
-        exchange.close();
     }
 }

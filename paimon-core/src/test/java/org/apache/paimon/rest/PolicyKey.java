@@ -16,18 +16,35 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.management;
+package org.apache.paimon.rest;
 
-import org.apache.paimon.PagedList;
-import org.apache.paimon.annotation.Experimental;
+import java.util.Objects;
 
-/** Control-plane contract for managing permissions on catalog resources. */
-@Experimental
-public interface PermissionManagement {
+/** Stable identity of a policy stored by the REST catalog test server. */
+final class PolicyKey {
 
-    PagedList<PermissionAssignment> listPermissions(ListPermissionsRequest request);
+    final String tableUuid;
+    final String name;
 
-    void grantPermission(PermissionAssignment assignment);
+    PolicyKey(String tableUuid, String name) {
+        this.tableUuid = tableUuid;
+        this.name = name;
+    }
 
-    void revokePermission(PermissionIdentity identity);
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof PolicyKey)) {
+            return false;
+        }
+        PolicyKey that = (PolicyKey) o;
+        return tableUuid.equals(that.tableUuid) && name.equals(that.name);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(tableUuid, name);
+    }
 }

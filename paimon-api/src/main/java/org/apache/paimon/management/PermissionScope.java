@@ -18,16 +18,20 @@
 
 package org.apache.paimon.management;
 
-import org.apache.paimon.PagedList;
 import org.apache.paimon.annotation.Experimental;
 
-/** Control-plane contract for managing permissions on catalog resources. */
+import javax.annotation.Nullable;
+
+import java.util.Locale;
+
+/** Scope of a permission assignment. */
 @Experimental
-public interface PermissionManagement {
+public enum PermissionScope {
+    SELF,
+    DESCENDANTS;
 
-    PagedList<PermissionAssignment> listPermissions(ListPermissionsRequest request);
-
-    void grantPermission(PermissionAssignment assignment);
-
-    void revokePermission(PermissionIdentity identity);
+    @Nullable
+    public static PermissionScope fromString(@Nullable String value) {
+        return value == null ? null : valueOf(value.toUpperCase(Locale.ROOT));
+    }
 }

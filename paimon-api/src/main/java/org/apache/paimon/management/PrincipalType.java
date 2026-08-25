@@ -18,16 +18,22 @@
 
 package org.apache.paimon.management;
 
-import org.apache.paimon.PagedList;
 import org.apache.paimon.annotation.Experimental;
 
-/** Control-plane contract for managing permissions on catalog resources. */
+import javax.annotation.Nullable;
+
+import java.util.Locale;
+
+/** Principal types supported by permission management. */
 @Experimental
-public interface PermissionManagement {
+public enum PrincipalType {
+    USER,
+    GROUP,
+    ROLE,
+    SERVICE;
 
-    PagedList<PermissionAssignment> listPermissions(ListPermissionsRequest request);
-
-    void grantPermission(PermissionAssignment assignment);
-
-    void revokePermission(PermissionIdentity identity);
+    @Nullable
+    public static PrincipalType fromString(@Nullable String value) {
+        return value == null ? null : valueOf(value.toUpperCase(Locale.ROOT));
+    }
 }

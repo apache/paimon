@@ -170,6 +170,7 @@ public class RequestJacksonCompatibilityTest {
                             CreateTableRequest.class,
                             CreateViewRequest.class,
                             GrantPermissionRequest.class,
+                            PolicyRequest.class,
                             RegisterTableRequest.class,
                             RenameTableRequest.class,
                             ReplaceTableRequest.class,

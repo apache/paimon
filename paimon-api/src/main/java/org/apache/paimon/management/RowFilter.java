@@ -18,51 +18,65 @@
 
 package org.apache.paimon.management;
 
+import org.apache.paimon.annotation.Experimental;
+
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonInclude;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import javax.annotation.Nullable;
 
 import java.beans.ConstructorProperties;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
-/** Row-filter expression and its optional server-compiled predicate. */
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
+/** Function and positional arguments for a row-filter policy. */
+@Experimental
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class RowFilter {
 
-    private static final String FIELD_EXPRESSION = "expression";
-    private static final String FIELD_PREDICATE = "predicate";
+    private static final String FIELD_FUNCTION_NAME = "functionName";
+    private static final String FIELD_FUNCTION_ARGUMENTS = "functionArguments";
 
-    @Nullable
-    @JsonProperty(FIELD_EXPRESSION)
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    private final String expression;
+    @JsonProperty(FIELD_FUNCTION_NAME)
+    private final String functionName;
 
-    @Nullable
-    @JsonProperty(FIELD_PREDICATE)
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    private final String predicate;
+    @JsonProperty(FIELD_FUNCTION_ARGUMENTS)
+    private final List<PolicyArgument> functionArguments;
 
     @JsonCreator
-    @ConstructorProperties({FIELD_EXPRESSION, FIELD_PREDICATE})
+    @ConstructorProperties({FIELD_FUNCTION_NAME, FIELD_FUNCTION_ARGUMENTS})
     public RowFilter(
-            @Nullable @JsonProperty(FIELD_EXPRESSION) String expression,
-            @Nullable @JsonProperty(FIELD_PREDICATE) String predicate) {
-        this.expression = expression;
-        this.predicate = predicate;
+            @JsonProperty(FIELD_FUNCTION_NAME) String functionName,
+            @Nullable @JsonProperty(FIELD_FUNCTION_ARGUMENTS)
+                    List<PolicyArgument> functionArguments) {
+        checkArgument(!isBlank(functionName), "functionName cannot be empty.");
+        this.functionName = functionName;
+        this.functionArguments = immutable(functionArguments);
     }
 
-    @Nullable
-    @JsonGetter(FIELD_EXPRESSION)
-    public String getExpression() {
-        return expression;
+    @JsonGetter(FIELD_FUNCTION_NAME)
+    public String getFunctionName() {
+        return functionName;
     }
 
-    @Nullable
-    @JsonGetter(FIELD_PREDICATE)
-    public String getPredicate() {
-        return predicate;
+    @JsonGetter(FIELD_FUNCTION_ARGUMENTS)
+    public List<PolicyArgument> getFunctionArguments() {
+        return functionArguments;
+    }
+
+    private static List<PolicyArgument> immutable(@Nullable List<PolicyArgument> arguments) {
+        List<PolicyArgument> result =
+                arguments == null ? Collections.emptyList() : new ArrayList<>(arguments);
+        checkArgument(!result.contains(null), "functionArguments cannot contain null arguments.");
+        return Collections.unmodifiableList(result);
+    }
+
+    private static boolean isBlank(@Nullable String value) {
+        return value == null || value.trim().isEmpty();
     }
 }

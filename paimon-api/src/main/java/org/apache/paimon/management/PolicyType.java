@@ -18,16 +18,20 @@
 
 package org.apache.paimon.management;
 
-import org.apache.paimon.PagedList;
 import org.apache.paimon.annotation.Experimental;
 
-/** Control-plane contract for managing permissions on catalog resources. */
+import javax.annotation.Nullable;
+
+import java.util.Locale;
+
+/** Fine-grained data policy types. */
 @Experimental
-public interface PermissionManagement {
+public enum PolicyType {
+    ROW_FILTER,
+    COLUMN_MASKING;
 
-    PagedList<PermissionAssignment> listPermissions(ListPermissionsRequest request);
-
-    void grantPermission(PermissionAssignment assignment);
-
-    void revokePermission(PermissionIdentity identity);
+    @Nullable
+    public static PolicyType fromString(@Nullable String value) {
+        return value == null ? null : valueOf(value.toUpperCase(Locale.ROOT));
+    }
 }

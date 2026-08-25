@@ -18,9 +18,7 @@
 
 package org.apache.paimon.spark.procedure;
 
-import org.apache.paimon.management.PermissionIdentity;
-import org.apache.paimon.management.PrincipalType;
-import org.apache.paimon.management.ResourceType;
+import org.apache.paimon.management.PolicyIdentity;
 
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
@@ -29,22 +27,18 @@ import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 
+import static org.apache.spark.sql.types.DataTypes.BooleanType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
-/** Revokes a permission by its resource identity. */
-public class RevokePermissionProcedure extends BasePermissionProcedure {
+/** Drops a named row-filter or column-masking policy. */
+public class DropPolicyProcedure extends BasePolicyProcedure {
 
     private static final ProcedureParameter[] PARAMETERS =
             new ProcedureParameter[] {
-                ProcedureParameter.required("resource_type", StringType),
-                ProcedureParameter.required("access", StringType),
-                ProcedureParameter.required("principal_type", StringType),
-                ProcedureParameter.required("principal", StringType),
-                ProcedureParameter.optional("database", StringType),
-                ProcedureParameter.optional("table", StringType),
-                ProcedureParameter.optional("function", StringType),
-                ProcedureParameter.optional("view", StringType),
-                ProcedureParameter.optional("scope", StringType)
+                ProcedureParameter.required("database", StringType),
+                ProcedureParameter.required("table", StringType),
+                ProcedureParameter.required("name", StringType),
+                ProcedureParameter.optional("if_exists", BooleanType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -53,7 +47,7 @@ public class RevokePermissionProcedure extends BasePermissionProcedure {
                         new StructField("result", DataTypes.BooleanType, false, Metadata.empty())
                     });
 
-    private RevokePermissionProcedure(TableCatalog tableCatalog) {
+    private DropPolicyProcedure(TableCatalog tableCatalog) {
         super(tableCatalog);
     }
 
@@ -69,35 +63,23 @@ public class RevokePermissionProcedure extends BasePermissionProcedure {
 
     @Override
     public InternalRow[] call(InternalRow args) {
-        ResourceType resourceType =
-                enumValue(args.getString(0), ResourceType.class, PARAMETERS[0].name());
-        PermissionIdentity identity =
-                identity(
-                        resourceType,
-                        args.getString(1),
-                        enumValue(args.getString(2), PrincipalType.class, PARAMETERS[2].name()),
-                        args.getString(3),
-                        args.isNullAt(4) ? null : args.getString(4),
-                        args.isNullAt(5) ? null : args.getString(5),
-                        args.isNullAt(6) ? null : args.getString(6),
-                        args.isNullAt(7) ? null : args.getString(7),
-                        args.isNullAt(8) ? null : args.getString(8));
-
-        permissionManagement().revokePermission(identity);
+        PolicyIdentity identity =
+                policyIdentity(args.getString(0), args.getString(1), args.getString(2));
+        policyManagement().dropPolicy(identity, !args.isNullAt(3) && args.getBoolean(3));
         return new InternalRow[] {newInternalRow(true)};
     }
 
     public static ProcedureBuilder builder() {
-        return new Builder<RevokePermissionProcedure>() {
+        return new Builder<DropPolicyProcedure>() {
             @Override
-            protected RevokePermissionProcedure doBuild() {
-                return new RevokePermissionProcedure(tableCatalog());
+            protected DropPolicyProcedure doBuild() {
+                return new DropPolicyProcedure(tableCatalog());
             }
         };
     }
 
     @Override
     public String description() {
-        return "RevokePermissionProcedure";
+        return "DropPolicyProcedure";
     }
 }

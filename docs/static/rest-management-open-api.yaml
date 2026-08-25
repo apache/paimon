@@ -17,10 +17,14 @@
 openapi: 3.1.1
 info:
   title: Paimon REST Management API
-  version: 1.0.0
+  version: 0.3.0
   description: |
-    Control-plane API for listing, granting, and revoking permissions. Permission payloads use a
-    flat resource-oriented model, and the resource paths belong to the Paimon REST Management API.
+    Experimental control-plane extension for permissions, table row filters, and table column
+    masks in one Paimon REST Catalog prefix. A data policy restricts an already-authorized read;
+    it never grants SELECT by itself. Policy creation and replacement are accepted only when the
+    target table exists, has `query-auth.enabled=true`, and all referenced principals, functions,
+    and columns are valid. Principal lifecycle, function implementation, audit, and persistence
+    remain server responsibilities. This contract may evolve incompatibly while experimental.
   license:
     name: Apache 2.0
     url: https://www.apache.org/licenses/LICENSE-2.0.html
@@ -29,84 +33,60 @@ servers:
 security:
   - BearerAuth: []
 paths:
-  /v1/catalogs/{catalog}/permissions:
+  /v1/{prefix}/permissions:
+    parameters:
+      - $ref: '#/components/parameters/Prefix'
     get:
       tags: [permission]
-      summary: List Permissions
+      summary: List permission assignments on an exact resource
       operationId: listPermissions
       description: |
-        Lists explicitly granted permissions. Filtering CATALOG also returns CATALOG_ALL;
-        DATABASE also returns DATABASE_ALL; TABLE also returns COLUMN, ROW_FILTER, and
-        COLUMN_MASKING permissions.
+        Direct assignments are returned by default. With `includeInherited=true`, the request
+        still names one exact target and the server also returns effective views of ancestor
+        `DESCENDANTS` assignments. An effective view uses the target in `resource`, `SELF` in
+        `scope`, and the source attachment in `inheritedFrom`. Following the catalog pagination
+        contract, an empty page terminates pagination and therefore must not carry a continuation
+        token.
       parameters:
-        - name: catalog
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: resourceType
-          in: query
-          required: true
-          schema:
-            $ref: '#/components/schemas/ResourceType'
-        - name: database
-          in: query
-          schema:
-            type: string
-        - name: table
-          in: query
-          schema:
-            type: string
-        - name: function
-          in: query
-          schema:
-            type: string
-        - name: view
-          in: query
-          schema:
-            type: string
-        - name: principal
-          in: query
-          schema:
-            type: string
-        - name: pageToken
-          in: query
-          schema:
-            type: string
-        - name: maxResults
-          in: query
-          schema:
-            type: integer
-            format: int32
-            minimum: 1
+        - $ref: '#/components/parameters/ResourceTypeQuery'
+        - $ref: '#/components/parameters/ScopeQuery'
+        - $ref: '#/components/parameters/DatabaseQuery'
+        - $ref: '#/components/parameters/TableQuery'
+        - $ref: '#/components/parameters/FunctionQuery'
+        - $ref: '#/components/parameters/ViewQuery'
+        - $ref: '#/components/parameters/PrincipalTypeQuery'
+        - $ref: '#/components/parameters/PrincipalQuery'
+        - $ref: '#/components/parameters/AccessQuery'
+        - $ref: '#/components/parameters/IncludeInherited'
+        - $ref: '#/components/parameters/PageToken'
+        - $ref: '#/components/parameters/MaxResults'
       responses:
-        "200":
-          description: Permission list.
+        '200':
+          description: Permission assignments in stable pagination order.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ListPermissionsResponse'
-        "400":
-          $ref: '#/components/responses/BadRequestErrorResponse'
-        "401":
-          $ref: '#/components/responses/UnauthorizedErrorResponse'
-        "403":
-          $ref: '#/components/responses/ForbiddenErrorResponse'
-        "404":
-          $ref: '#/components/responses/ResourceNotExistErrorResponse'
-        "500":
-          $ref: '#/components/responses/ServerErrorResponse'
-  /v1/catalogs/{catalog}/permissions/grant:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /v1/{prefix}/permissions/grant:
+    parameters:
+      - $ref: '#/components/parameters/Prefix'
     post:
       tags: [permission]
-      summary: Grant Permission
+      summary: Grant or replace a permission assignment
       operationId: grantPermission
-      parameters:
-        - name: catalog
-          in: path
-          required: true
-          schema:
-            type: string
+      description: |
+        Creates an assignment or replaces the assignment with the same `resource`, `scope`,
+        `access`, and `principal`. The referenced resource and principal must exist.
       requestBody:
         required: true
         content:
@@ -114,30 +94,28 @@ paths:
             schema:
               $ref: '#/components/schemas/GrantPermissionRequest'
       responses:
-        "200":
-          description: Permission granted.
-        "400":
-          $ref: '#/components/responses/BadRequestErrorResponse'
-        "401":
-          $ref: '#/components/responses/UnauthorizedErrorResponse'
-        "403":
-          $ref: '#/components/responses/ForbiddenErrorResponse'
-        "404":
-          $ref: '#/components/responses/ResourceNotExistErrorResponse'
-        "500":
-          $ref: '#/components/responses/ServerErrorResponse'
-  /v1/catalogs/{catalog}/permissions/revoke:
+        '200':
+          description: Permission assignment created or replaced.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /v1/{prefix}/permissions/revoke:
+    parameters:
+      - $ref: '#/components/parameters/Prefix'
     post:
       tags: [permission]
-      summary: Revoke Permission
+      summary: Idempotently revoke a permission assignment
       operationId: revokePermission
-      description: Revokes the matching permission. A missing permission may return HTTP 404.
-      parameters:
-        - name: catalog
-          in: path
-          required: true
-          schema:
-            type: string
+      description: |
+        Makes the assignment absent. A 404 identifies a missing resource or principal, not an
+        already-absent assignment.
       requestBody:
         required: true
         content:
@@ -145,217 +123,661 @@ paths:
             schema:
               $ref: '#/components/schemas/RevokePermissionRequest'
       responses:
-        "200":
-          description: Permission revoked.
-        "400":
-          $ref: '#/components/responses/BadRequestErrorResponse'
-        "401":
-          $ref: '#/components/responses/UnauthorizedErrorResponse'
-        "403":
-          $ref: '#/components/responses/ForbiddenErrorResponse'
-        "404":
-          $ref: '#/components/responses/ResourceNotExistErrorResponse'
-        "500":
-          $ref: '#/components/responses/ServerErrorResponse'
+        '200':
+          description: Permission assignment is absent.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /v1/{prefix}/databases/{database}/tables/{table}/policies:
+    parameters:
+      - $ref: '#/components/parameters/Prefix'
+      - $ref: '#/components/parameters/Database'
+      - $ref: '#/components/parameters/Table'
+    get:
+      tags: [policy]
+      summary: List policies attached directly to a table
+      operationId: listTablePolicies
+      description: |
+        Policies have no ancestor scope in this contract. Following the catalog pagination
+        contract, an empty page terminates pagination and therefore must not carry a continuation
+        token.
+      parameters:
+        - $ref: '#/components/parameters/PolicyNameQuery'
+        - $ref: '#/components/parameters/PolicyTypeQuery'
+        - $ref: '#/components/parameters/PrincipalTypeQuery'
+        - $ref: '#/components/parameters/PrincipalQuery'
+        - $ref: '#/components/parameters/PageToken'
+        - $ref: '#/components/parameters/MaxResults'
+      responses:
+        '200':
+          description: Table policies in stable pagination order.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListPoliciesResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    post:
+      tags: [policy]
+      summary: Create a table policy
+      operationId: createTablePolicy
+      description: |
+        Fails with 409 when the policy name already exists or the table has not enabled query
+        authorization. Referenced principals, the policy function, protected column, and column
+        arguments are validated before persistence.
+      requestBody:
+        $ref: '#/components/requestBodies/PolicyRequest'
+      responses:
+        '200':
+          description: Policy created.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /v1/{prefix}/databases/{database}/tables/{table}/policies/{policyName}:
+    parameters:
+      - $ref: '#/components/parameters/Prefix'
+      - $ref: '#/components/parameters/Database'
+      - $ref: '#/components/parameters/Table'
+      - $ref: '#/components/parameters/PolicyName'
+    get:
+      tags: [policy]
+      summary: Get a table policy
+      operationId: getTablePolicy
+      responses:
+        '200':
+          description: Named table policy.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetPolicyResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    put:
+      tags: [policy]
+      summary: Create or fully replace a table policy
+      operationId: createOrReplaceTablePolicy
+      description: |
+        Upserts the named policy and replaces every mutable field. The table attachment and policy
+        name are immutable and the body name must equal `policyName`. The same validation and
+        `query-auth.enabled=true` requirement as create applies.
+      requestBody:
+        $ref: '#/components/requestBodies/PolicyRequest'
+      responses:
+        '200':
+          description: Policy created or fully replaced.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    delete:
+      tags: [policy]
+      summary: Drop a table policy
+      operationId: dropTablePolicy
+      description: Returns 404 when the policy is absent; clients may expose idempotency explicitly.
+      responses:
+        '200':
+          description: Policy dropped.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
 components:
   securitySchemes:
     BearerAuth:
       type: http
       scheme: bearer
   parameters:
-    Catalog:
-      name: catalog
+    Prefix:
+      name: prefix
+      in: path
+      required: true
+      description: Opaque REST catalog prefix returned by the catalog config endpoint.
+      schema:
+        type: string
+        minLength: 1
+    Database:
+      name: database
       in: path
       required: true
       schema:
         type: string
-      description: Remote catalog identifier.
+        minLength: 1
+    Table:
+      name: table
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    PolicyName:
+      name: policyName
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    ResourceTypeQuery:
+      name: resourceType
+      in: query
+      required: true
+      schema:
+        $ref: '#/components/schemas/ResourceType'
+    ScopeQuery:
+      name: scope
+      in: query
+      schema:
+        $ref: '#/components/schemas/PermissionScope'
+    DatabaseQuery:
+      name: database
+      in: query
+      schema:
+        type: string
+    TableQuery:
+      name: table
+      in: query
+      schema:
+        type: string
+    FunctionQuery:
+      name: function
+      in: query
+      schema:
+        type: string
+    ViewQuery:
+      name: view
+      in: query
+      schema:
+        type: string
+    PrincipalTypeQuery:
+      name: principalType
+      in: query
+      description: Must be supplied together with `principal`.
+      schema:
+        $ref: '#/components/schemas/PrincipalType'
+    PrincipalQuery:
+      name: principal
+      in: query
+      description: Must be supplied together with `principalType`.
+      schema:
+        type: string
+        minLength: 1
+    AccessQuery:
+      name: access
+      in: query
+      schema:
+        type: string
+        minLength: 1
+    IncludeInherited:
+      name: includeInherited
+      in: query
+      schema:
+        type: boolean
+        default: false
+    PolicyNameQuery:
+      name: name
+      in: query
+      schema:
+        type: string
+    PolicyTypeQuery:
+      name: type
+      in: query
+      schema:
+        $ref: '#/components/schemas/PolicyType'
+    PageToken:
+      name: pageToken
+      in: query
+      description: Opaque continuation token returned by the preceding response.
+      schema:
+        type: string
+    MaxResults:
+      name: maxResults
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1000
+
+  requestBodies:
+    PolicyRequest:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/PolicyRequest'
+
   responses:
-    BadRequestErrorResponse:
-      description: The permission or list filter is invalid.
+    BadRequest:
+      description: Invalid request shape, resource identity, function, signature, or column.
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
-    UnauthorizedErrorResponse:
-      description: Authentication is required or has failed.
+    Unauthorized:
+      description: Missing or invalid authentication.
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
-    ForbiddenErrorResponse:
-      description: The authenticated caller may not manage the requested permission.
+    Forbidden:
+      description: Caller cannot manage the target resource.
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
-    ResourceNotExistErrorResponse:
-      description: The catalog, resource, principal, or permission does not exist.
+    NotFound:
+      description: Referenced resource, principal, policy, or function does not exist.
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
-    ServerErrorResponse:
-      description: The server failed to process the request.
+    Conflict:
+      description: Existing policy conflict or query authorization is not enabled.
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+    ServerError:
+      description: Unexpected server error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
   schemas:
+    ResourceType:
+      type: string
+      enum: [CATALOG, DATABASE, TABLE, FUNCTION, VIEW]
+    PermissionScope:
+      type: string
+      enum: [SELF, DESCENDANTS]
+    PrincipalType:
+      type: string
+      enum: [USER, GROUP, ROLE, SERVICE]
+    PolicyType:
+      type: string
+      enum: [ROW_FILTER, COLUMN_MASKING]
+    PrincipalRef:
+      type: object
+      additionalProperties: false
+      required: [type, id]
+      properties:
+        type:
+          $ref: '#/components/schemas/PrincipalType'
+        id:
+          type: string
+          minLength: 1
+    PermissionResource:
+      description: Exact catalog-scoped resource identity; fields not selected by type are invalid.
+      oneOf:
+        - $ref: '#/components/schemas/CatalogResource'
+        - $ref: '#/components/schemas/DatabaseResource'
+        - $ref: '#/components/schemas/TableResource'
+        - $ref: '#/components/schemas/FunctionResource'
+        - $ref: '#/components/schemas/ViewResource'
+      discriminator:
+        propertyName: type
+        mapping:
+          CATALOG: '#/components/schemas/CatalogResource'
+          DATABASE: '#/components/schemas/DatabaseResource'
+          TABLE: '#/components/schemas/TableResource'
+          FUNCTION: '#/components/schemas/FunctionResource'
+          VIEW: '#/components/schemas/ViewResource'
+    CatalogResource:
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type:
+          const: CATALOG
+    DatabaseResource:
+      type: object
+      additionalProperties: false
+      required: [type, database]
+      properties:
+        type:
+          const: DATABASE
+        database:
+          type: string
+          minLength: 1
+    TableResource:
+      type: object
+      additionalProperties: false
+      required: [type, database, table]
+      properties:
+        type:
+          const: TABLE
+        database:
+          type: string
+          minLength: 1
+        table:
+          type: string
+          minLength: 1
+    FunctionResource:
+      type: object
+      additionalProperties: false
+      required: [type, database, function]
+      properties:
+        type:
+          const: FUNCTION
+        database:
+          type: string
+          minLength: 1
+        function:
+          type: string
+          minLength: 1
+    ViewResource:
+      type: object
+      additionalProperties: false
+      required: [type, database, view]
+      properties:
+        type:
+          const: VIEW
+        database:
+          type: string
+          minLength: 1
+        view:
+          type: string
+          minLength: 1
+    PermissionAssignment:
+      type: object
+      additionalProperties: false
+      required: [resource, scope, access, principal]
+      properties:
+        resource:
+          $ref: '#/components/schemas/PermissionResource'
+        scope:
+          $ref: '#/components/schemas/PermissionScope'
+        access:
+          type: string
+          minLength: 1
+        principal:
+          $ref: '#/components/schemas/PrincipalRef'
+        expireTime:
+          type: string
+          format: date-time
+        inheritedFrom:
+          $ref: '#/components/schemas/PermissionResource'
     GrantPermissionRequest:
       type: object
-      required: [resourceType, access, principal]
+      additionalProperties: false
+      required: [resource, access, principal]
       properties:
-        resourceType:
-          $ref: '#/components/schemas/ResourceType'
-        catalog:
-          type: string
-        database:
-          type: string
-        table:
-          type: string
-        function:
-          type: string
-        view:
-          type: string
-        columns:
-          $ref: '#/components/schemas/ColumnSelection'
-        rowFilter:
-          $ref: '#/components/schemas/RowFilter'
-        columnMasking:
-          $ref: '#/components/schemas/ColumnMasking'
+        resource:
+          $ref: '#/components/schemas/PermissionResource'
+        scope:
+          $ref: '#/components/schemas/PermissionScope'
+          default: SELF
         access:
           type: string
+          minLength: 1
         principal:
-          type: string
+          $ref: '#/components/schemas/PrincipalRef'
         expireTime:
-          $ref: '#/components/schemas/ExpireTime'
+          type: string
+          format: date-time
     RevokePermissionRequest:
       type: object
-      required: [resourceType, access, principal]
+      additionalProperties: false
+      required: [resource, access, principal]
       properties:
-        resourceType:
-          $ref: '#/components/schemas/ResourceType'
-        catalog:
-          type: string
-        database:
-          type: string
-        table:
-          type: string
-        function:
-          type: string
-        view:
-          type: string
-        columns:
-          $ref: '#/components/schemas/ColumnSelection'
+        resource:
+          $ref: '#/components/schemas/PermissionResource'
+        scope:
+          $ref: '#/components/schemas/PermissionScope'
+          default: SELF
         access:
           type: string
+          minLength: 1
         principal:
-          type: string
+          $ref: '#/components/schemas/PrincipalRef'
     ListPermissionsResponse:
       type: object
+      additionalProperties: false
       required: [permissions]
       properties:
         permissions:
           type: array
           items:
-            $ref: '#/components/schemas/Permission'
+            $ref: '#/components/schemas/PermissionAssignment'
         nextPageToken:
           type: string
-    Permission:
+
+    ColumnPolicyArgument:
       type: object
-      required: [resourceType, access, principal]
+      additionalProperties: false
+      required: [column]
       properties:
-        resourceType:
-          $ref: '#/components/schemas/ResourceType'
-        catalog:
+        column:
           type: string
-        database:
-          type: string
-        table:
-          type: string
-        function:
-          type: string
-        view:
-          type: string
-        columns:
-          $ref: '#/components/schemas/ColumnSelection'
-        rowFilter:
-          $ref: '#/components/schemas/RowFilter'
-        columnMasking:
-          $ref: '#/components/schemas/ColumnMasking'
-        access:
-          type: string
-          description: Permission access such as SELECT, INSERT, UPDATE, DELETE, ALTER, or ALL.
-        principal:
-          type: string
-          description: Principal identifier understood by the server.
-        expireTime:
-          $ref: '#/components/schemas/ExpireTime'
-    ResourceType:
-      type: string
-      enum:
-        - CATALOG
-        - CATALOG_ALL
-        - DATABASE
-        - DATABASE_ALL
-        - TABLE
-        - FUNCTION
-        - VIEW
-        - COLUMN
-        - ROW_FILTER
-        - COLUMN_MASKING
-    ColumnSelection:
+          minLength: 1
+    ConstantPolicyArgument:
       type: object
+      additionalProperties: false
+      required: [constant]
       properties:
-        columnNames:
-          type: array
-          uniqueItems: true
-          items:
-            type: string
-        excludedColumnNames:
-          type: array
-          uniqueItems: true
-          items:
-            type: string
+        constant:
+          type: string
+          description: Literal string argument. The empty string is valid.
+    PolicyArgument:
       oneOf:
-        - required: [columnNames]
-        - required: [excludedColumnNames]
+        - $ref: '#/components/schemas/ColumnPolicyArgument'
+        - $ref: '#/components/schemas/ConstantPolicyArgument'
     RowFilter:
       type: object
+      additionalProperties: false
+      required: [functionName, functionArguments]
       properties:
-        expression:
+        functionName:
           type: string
-        predicate:
-          type: string
-      description: Grant requests provide expression; list responses may also include predicate.
+          minLength: 1
+        functionArguments:
+          type: array
+          items:
+            $ref: '#/components/schemas/PolicyArgument'
     ColumnMask:
       type: object
+      additionalProperties: false
+      required: [functionName, onColumn, functionArguments]
       properties:
-        expression:
+        functionName:
           type: string
-        transform:
+          minLength: 1
+        onColumn:
           type: string
-      description: Grant requests provide expression; list responses may also include transform.
-    ColumnMasking:
+          minLength: 1
+        functionArguments:
+          type: array
+          items:
+            $ref: '#/components/schemas/PolicyArgument'
+    RowFilterPolicyRequest:
       type: object
-      additionalProperties:
-        $ref: '#/components/schemas/ColumnMask'
-    ExpireTime:
-      type: string
-      description: Expiration time in ISO-8601 UTC form, for example 2025-12-31T23:59:59Z.
-      examples:
-        - 2025-12-31T23:59:59Z
+      additionalProperties: false
+      required: [name, rowFilter, toPrincipals]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        rowFilter:
+          $ref: '#/components/schemas/RowFilter'
+        toPrincipals:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/PrincipalRef'
+        exceptPrincipals:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/PrincipalRef'
+        comment:
+          type: string
+    ColumnMaskPolicyRequest:
+      type: object
+      additionalProperties: false
+      required: [name, columnMask, toPrincipals]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        columnMask:
+          $ref: '#/components/schemas/ColumnMask'
+        toPrincipals:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/PrincipalRef'
+        exceptPrincipals:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/PrincipalRef'
+        comment:
+          type: string
+    PolicyRequest:
+      description: Exactly one typed policy definition is allowed.
+      oneOf:
+        - $ref: '#/components/schemas/RowFilterPolicyRequest'
+        - $ref: '#/components/schemas/ColumnMaskPolicyRequest'
+    TablePolicyResource:
+      type: object
+      additionalProperties: false
+      required: [type, database, table]
+      properties:
+        type:
+          const: TABLE
+        database:
+          type: string
+          minLength: 1
+        table:
+          type: string
+          minLength: 1
+    RowFilterDataPolicy:
+      type: object
+      additionalProperties: false
+      required: [resource, name, rowFilter, toPrincipals, exceptPrincipals]
+      properties:
+        resource:
+          $ref: '#/components/schemas/TablePolicyResource'
+        name:
+          type: string
+          minLength: 1
+        rowFilter:
+          $ref: '#/components/schemas/RowFilter'
+        toPrincipals:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/PrincipalRef'
+        exceptPrincipals:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/PrincipalRef'
+        comment:
+          type: string
+    ColumnMaskDataPolicy:
+      type: object
+      additionalProperties: false
+      required: [resource, name, columnMask, toPrincipals, exceptPrincipals]
+      properties:
+        resource:
+          $ref: '#/components/schemas/TablePolicyResource'
+        name:
+          type: string
+          minLength: 1
+        columnMask:
+          $ref: '#/components/schemas/ColumnMask'
+        toPrincipals:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/PrincipalRef'
+        exceptPrincipals:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/PrincipalRef'
+        comment:
+          type: string
+    DataPolicy:
+      oneOf:
+        - $ref: '#/components/schemas/RowFilterDataPolicy'
+        - $ref: '#/components/schemas/ColumnMaskDataPolicy'
+    ListPoliciesResponse:
+      type: object
+      additionalProperties: false
+      required: [policies]
+      properties:
+        policies:
+          type: array
+          items:
+            $ref: '#/components/schemas/DataPolicy'
+        nextPageToken:
+          type: string
+    GetPolicyResponse:
+      type: object
+      additionalProperties: false
+      required: [policy]
+      properties:
+        policy:
+          $ref: '#/components/schemas/DataPolicy'
     ErrorResponse:
       type: object
+      additionalProperties: true
       required: [message, code]
       properties:
-        message:
-          type: string
         resourceType:
           type: string
         resourceName:
           type: string
+        message:
+          type: string
         code:
           type: integer
-          format: int32

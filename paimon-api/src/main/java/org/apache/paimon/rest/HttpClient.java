@@ -32,6 +32,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessin
 import org.apache.hc.client5.http.classic.methods.HttpDelete;
 import org.apache.hc.client5.http.classic.methods.HttpGet;
 import org.apache.hc.client5.http.classic.methods.HttpPost;
+import org.apache.hc.client5.http.classic.methods.HttpPut;
 import org.apache.hc.client5.http.classic.methods.HttpUriRequestBase;
 import org.apache.hc.core5.http.ClassicHttpResponse;
 import org.apache.hc.core5.http.ContentType;
@@ -111,6 +112,19 @@ public class HttpClient implements RESTClient {
                 body != null && !body.isRetrySafe()
                         ? ExponentialHttpRequestRetryStrategy.retryUnsafeContext()
                         : null);
+    }
+
+    @Override
+    public <T extends RESTResponse> T put(
+            String path, RESTRequest body, RESTAuthFunction restAuthFunction) {
+        HttpPut httpPut = HttpClientUtils.newHttpPut(getRequestUrl(path, null));
+        String encodedBody = RESTUtil.encodedBody(body);
+        if (encodedBody != null) {
+            httpPut.setEntity(new StringEntity(encodedBody, ContentType.APPLICATION_JSON));
+        }
+        Header[] authHeaders = getHeaders(path, "PUT", encodedBody, restAuthFunction);
+        httpPut.setHeaders(authHeaders);
+        return exec(httpPut, null);
     }
 
     @Override

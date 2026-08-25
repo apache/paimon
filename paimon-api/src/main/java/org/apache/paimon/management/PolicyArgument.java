@@ -18,6 +18,8 @@
 
 package org.apache.paimon.management;
 
+import org.apache.paimon.annotation.Experimental;
+
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -27,43 +29,62 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 import javax.annotation.Nullable;
 
 import java.beans.ConstructorProperties;
-import java.util.List;
 
-/** Included or excluded columns attached to a column permission. */
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
+/** Positional column or constant argument passed to a data policy function. */
+@Experimental
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class ColumnSelection {
+public class PolicyArgument {
 
-    private static final String FIELD_COLUMN_NAMES = "columnNames";
-    private static final String FIELD_EXCLUDED_COLUMN_NAMES = "excludedColumnNames";
-
-    @Nullable
-    @JsonProperty(FIELD_COLUMN_NAMES)
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    private final List<String> columnNames;
+    private static final String FIELD_COLUMN = "column";
+    private static final String FIELD_CONSTANT = "constant";
 
     @Nullable
-    @JsonProperty(FIELD_EXCLUDED_COLUMN_NAMES)
+    @JsonProperty(FIELD_COLUMN)
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    private final List<String> excludedColumnNames;
+    private final String column;
+
+    @Nullable
+    @JsonProperty(FIELD_CONSTANT)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private final String constant;
 
     @JsonCreator
-    @ConstructorProperties({FIELD_COLUMN_NAMES, FIELD_EXCLUDED_COLUMN_NAMES})
-    public ColumnSelection(
-            @Nullable @JsonProperty(FIELD_COLUMN_NAMES) List<String> columnNames,
-            @Nullable @JsonProperty(FIELD_EXCLUDED_COLUMN_NAMES) List<String> excludedColumnNames) {
-        this.columnNames = columnNames;
-        this.excludedColumnNames = excludedColumnNames;
+    @ConstructorProperties({FIELD_COLUMN, FIELD_CONSTANT})
+    public PolicyArgument(
+            @Nullable @JsonProperty(FIELD_COLUMN) String column,
+            @Nullable @JsonProperty(FIELD_CONSTANT) String constant) {
+        boolean hasColumn = !isBlank(column);
+        boolean hasConstant = constant != null;
+        checkArgument(
+                hasColumn != hasConstant,
+                "A policy argument must contain exactly one of column and constant.");
+        this.column = hasColumn ? column : null;
+        this.constant = hasConstant ? constant : null;
+    }
+
+    public static PolicyArgument column(String column) {
+        return new PolicyArgument(column, null);
+    }
+
+    public static PolicyArgument constant(String constant) {
+        return new PolicyArgument(null, constant);
     }
 
     @Nullable
-    @JsonGetter(FIELD_COLUMN_NAMES)
-    public List<String> getColumnNames() {
-        return columnNames;
+    @JsonGetter(FIELD_COLUMN)
+    public String getColumn() {
+        return column;
     }
 
     @Nullable
-    @JsonGetter(FIELD_EXCLUDED_COLUMN_NAMES)
-    public List<String> getExcludedColumnNames() {
-        return excludedColumnNames;
+    @JsonGetter(FIELD_CONSTANT)
+    public String getConstant() {
+        return constant;
+    }
+
+    private static boolean isBlank(@Nullable String value) {
+        return value == null || value.trim().isEmpty();
     }
 }

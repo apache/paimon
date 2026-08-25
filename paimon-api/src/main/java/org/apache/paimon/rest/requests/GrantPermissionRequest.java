@@ -18,11 +18,11 @@
 
 package org.apache.paimon.rest.requests;
 
-import org.apache.paimon.management.ColumnMask;
-import org.apache.paimon.management.ColumnSelection;
-import org.apache.paimon.management.Permission;
-import org.apache.paimon.management.ResourceType;
-import org.apache.paimon.management.RowFilter;
+import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.management.PermissionAssignment;
+import org.apache.paimon.management.PermissionResource;
+import org.apache.paimon.management.PermissionScope;
+import org.apache.paimon.management.PrincipalRef;
 import org.apache.paimon.rest.RESTRequest;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -34,154 +34,81 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 import javax.annotation.Nullable;
 
 import java.beans.ConstructorProperties;
-import java.util.Map;
 
-/** Flat request for granting a permission. */
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
+/** Request for granting or replacing a permission assignment. */
+@Experimental
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class GrantPermissionRequest implements RESTRequest {
 
-    private static final String FIELD_RESOURCE_TYPE = "resourceType";
-    private static final String FIELD_CATALOG = "catalog";
-    private static final String FIELD_DATABASE = "database";
-    private static final String FIELD_TABLE = "table";
-    private static final String FIELD_FUNCTION = "function";
-    private static final String FIELD_VIEW = "view";
-    private static final String FIELD_COLUMNS = "columns";
-    private static final String FIELD_ROW_FILTER = "rowFilter";
-    private static final String FIELD_COLUMN_MASKING = "columnMasking";
+    private static final String FIELD_RESOURCE = "resource";
+    private static final String FIELD_SCOPE = "scope";
     private static final String FIELD_ACCESS = "access";
     private static final String FIELD_PRINCIPAL = "principal";
     private static final String FIELD_EXPIRE_TIME = "expireTime";
 
-    private final Permission permission;
+    private final PermissionAssignment assignment;
 
-    public GrantPermissionRequest(Permission permission) {
-        this.permission = permission;
+    public GrantPermissionRequest(PermissionAssignment assignment) {
+        checkArgument(
+                assignment.getInheritedFrom() == null,
+                "An inherited permission view cannot be granted directly.");
+        this.assignment = assignment;
     }
 
     @JsonCreator
     @ConstructorProperties({
-        FIELD_RESOURCE_TYPE,
-        FIELD_CATALOG,
-        FIELD_DATABASE,
-        FIELD_TABLE,
-        FIELD_FUNCTION,
-        FIELD_VIEW,
-        FIELD_COLUMNS,
-        FIELD_ROW_FILTER,
-        FIELD_COLUMN_MASKING,
+        FIELD_RESOURCE,
+        FIELD_SCOPE,
         FIELD_ACCESS,
         FIELD_PRINCIPAL,
         FIELD_EXPIRE_TIME
     })
     public GrantPermissionRequest(
-            @JsonProperty(FIELD_RESOURCE_TYPE) ResourceType resourceType,
-            @Nullable @JsonProperty(FIELD_CATALOG) String catalog,
-            @Nullable @JsonProperty(FIELD_DATABASE) String database,
-            @Nullable @JsonProperty(FIELD_TABLE) String table,
-            @Nullable @JsonProperty(FIELD_FUNCTION) String function,
-            @Nullable @JsonProperty(FIELD_VIEW) String view,
-            @Nullable @JsonProperty(FIELD_COLUMNS) ColumnSelection columns,
-            @Nullable @JsonProperty(FIELD_ROW_FILTER) RowFilter rowFilter,
-            @Nullable @JsonProperty(FIELD_COLUMN_MASKING) Map<String, ColumnMask> columnMasking,
+            @JsonProperty(FIELD_RESOURCE) PermissionResource resource,
+            @Nullable @JsonProperty(FIELD_SCOPE) String scope,
             @JsonProperty(FIELD_ACCESS) String access,
-            @JsonProperty(FIELD_PRINCIPAL) String principal,
+            @JsonProperty(FIELD_PRINCIPAL) PrincipalRef principal,
             @Nullable @JsonProperty(FIELD_EXPIRE_TIME) String expireTime) {
-        this.permission =
-                new Permission(
-                        resourceType,
-                        catalog,
-                        database,
-                        table,
-                        function,
-                        view,
-                        columns,
-                        rowFilter,
-                        columnMasking,
+        this.assignment =
+                new PermissionAssignment(
+                        resource,
+                        scope == null ? PermissionScope.SELF : PermissionScope.fromString(scope),
                         access,
                         principal,
-                        expireTime);
+                        expireTime,
+                        null);
     }
 
-    public Permission permission() {
-        return permission;
+    public PermissionAssignment assignment() {
+        return assignment;
     }
 
-    @JsonGetter(FIELD_RESOURCE_TYPE)
-    public ResourceType getResourceType() {
-        return permission.getResourceType();
+    @JsonGetter(FIELD_RESOURCE)
+    public PermissionResource getResource() {
+        return assignment.getResource();
     }
 
-    @Nullable
-    @JsonGetter(FIELD_CATALOG)
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    public String getCatalog() {
-        return permission.getCatalog();
-    }
-
-    @Nullable
-    @JsonGetter(FIELD_DATABASE)
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    public String getDatabase() {
-        return permission.getDatabase();
-    }
-
-    @Nullable
-    @JsonGetter(FIELD_TABLE)
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    public String getTable() {
-        return permission.getTable();
-    }
-
-    @Nullable
-    @JsonGetter(FIELD_FUNCTION)
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    public String getFunction() {
-        return permission.getFunction();
-    }
-
-    @Nullable
-    @JsonGetter(FIELD_VIEW)
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    public String getView() {
-        return permission.getView();
-    }
-
-    @Nullable
-    @JsonGetter(FIELD_COLUMNS)
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    public ColumnSelection getColumns() {
-        return permission.getColumns();
-    }
-
-    @Nullable
-    @JsonGetter(FIELD_ROW_FILTER)
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    public RowFilter getRowFilter() {
-        return permission.getRowFilter();
-    }
-
-    @Nullable
-    @JsonGetter(FIELD_COLUMN_MASKING)
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    public Map<String, ColumnMask> getColumnMasking() {
-        return permission.getColumnMasking();
+    @JsonGetter(FIELD_SCOPE)
+    public PermissionScope getScope() {
+        return assignment.getScope();
     }
 
     @JsonGetter(FIELD_ACCESS)
     public String getAccess() {
-        return permission.getAccess();
+        return assignment.getAccess();
     }
 
     @JsonGetter(FIELD_PRINCIPAL)
-    public String getPrincipal() {
-        return permission.getPrincipal();
+    public PrincipalRef getPrincipal() {
+        return assignment.getPrincipal();
     }
 
     @Nullable
     @JsonGetter(FIELD_EXPIRE_TIME)
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public String getExpireTime() {
-        return permission.getExpireTime();
+        return assignment.getExpireTime();
     }
 }

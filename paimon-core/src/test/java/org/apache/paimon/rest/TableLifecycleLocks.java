@@ -16,18 +16,23 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.management;
+package org.apache.paimon.rest;
 
-import org.apache.paimon.PagedList;
-import org.apache.paimon.annotation.Experimental;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
-/** Control-plane contract for managing permissions on catalog resources. */
-@Experimental
-public interface PermissionManagement {
+/** Stable, deadlock-ordered locks for table-name lifecycle operations in the test server. */
+final class TableLifecycleLocks {
 
-    PagedList<PermissionAssignment> listPermissions(ListPermissionsRequest request);
+    private final Map<String, Object> locks = new ConcurrentHashMap<>();
 
-    void grantPermission(PermissionAssignment assignment);
+    Object lock(String tableName) {
+        return locks.computeIfAbsent(tableName, ignored -> new Object());
+    }
 
-    void revokePermission(PermissionIdentity identity);
+    Object[] ordered(String left, String right) {
+        return left.compareTo(right) <= 0
+                ? new Object[] {lock(left), lock(right)}
+                : new Object[] {lock(right), lock(left)};
+    }
 }

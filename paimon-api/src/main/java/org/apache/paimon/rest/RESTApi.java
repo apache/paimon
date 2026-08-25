@@ -20,13 +20,18 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.consumer.ConsumerInfo;
 import org.apache.paimon.function.FunctionChange;
+import org.apache.paimon.management.DataPolicy;
 import org.apache.paimon.management.ListPermissionsRequest;
-import org.apache.paimon.management.Permission;
+import org.apache.paimon.management.ListPoliciesRequest;
+import org.apache.paimon.management.PermissionAssignment;
+import org.apache.paimon.management.PermissionIdentity;
+import org.apache.paimon.management.PolicyIdentity;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -54,6 +59,7 @@ import org.apache.paimon.rest.requests.GrantPermissionRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByFilterRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByNamesRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
+import org.apache.paimon.rest.requests.PolicyRequest;
 import org.apache.paimon.rest.requests.RegisterTableRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.requests.ReplaceTableRequest;
@@ -70,6 +76,7 @@ import org.apache.paimon.rest.responses.DropPartitionsResponse;
 import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
+import org.apache.paimon.rest.responses.GetPolicyResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableSnapshotResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
@@ -84,6 +91,7 @@ import org.apache.paimon.rest.responses.ListFunctionsGloballyResponse;
 import org.apache.paimon.rest.responses.ListFunctionsResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListPermissionsResponse;
+import org.apache.paimon.rest.responses.ListPoliciesResponse;
 import org.apache.paimon.rest.responses.ListSnapshotsResponse;
 import org.apache.paimon.rest.responses.ListTableDetailsResponse;
 import org.apache.paimon.rest.responses.ListTablesGloballyResponse;
@@ -838,40 +846,119 @@ public class RESTApi {
                 restAuthFunction);
     }
 
-    /** Lists explicitly granted permissions for a catalog. */
-    public ListPermissionsResponse listPermissions(String catalog, ListPermissionsRequest request) {
+    /** Lists permissions on an exact resource in the configured REST catalog. */
+    @Experimental
+    public ListPermissionsResponse listPermissions(ListPermissionsRequest request) {
         Map<String, String> queryParams = Maps.newHashMap();
         putQueryParameter(queryParams, "resourceType", request.getResourceType().name());
+        if (request.getScope() != null) {
+            putQueryParameter(queryParams, "scope", request.getScope().name());
+        }
         putQueryParameter(queryParams, "database", request.getDatabase());
         putQueryParameter(queryParams, "table", request.getTable());
         putQueryParameter(queryParams, "function", request.getFunction());
         putQueryParameter(queryParams, "view", request.getView());
+        if (request.getPrincipalType() != null) {
+            putQueryParameter(queryParams, "principalType", request.getPrincipalType().name());
+        }
         putQueryParameter(queryParams, "principal", request.getPrincipal());
-        if (request.getMaxResults() != null && request.getMaxResults() > 0) {
+        putQueryParameter(queryParams, "access", request.getAccess());
+        if (request.includeInherited()) {
+            queryParams.put("includeInherited", "true");
+        }
+        if (request.getMaxResults() != null) {
             queryParams.put(MAX_RESULTS, request.getMaxResults().toString());
         }
         putQueryParameter(queryParams, PAGE_TOKEN, request.getPageToken());
         return client.get(
-                ResourcePaths.permissions(catalog),
+                resourcePaths.permissions(),
                 queryParams,
                 ListPermissionsResponse.class,
                 restAuthFunction);
     }
 
-    /** Grants a permission for a catalog. */
-    public void grantPermission(String catalog, Permission permission) {
+    /** Grants a permission for the configured REST catalog. */
+    @Experimental
+    public void grantPermission(PermissionAssignment assignment) {
         client.post(
-                ResourcePaths.grantPermission(catalog),
-                new GrantPermissionRequest(permission),
+                resourcePaths.grantPermission(),
+                new GrantPermissionRequest(assignment),
                 restAuthFunction);
     }
 
-    /** Revokes a permission for a catalog. */
-    public void revokePermission(String catalog, Permission permission) {
+    /** Revokes a permission for the configured REST catalog. */
+    @Experimental
+    public void revokePermission(PermissionIdentity identity) {
         client.post(
-                ResourcePaths.revokePermission(catalog),
-                new RevokePermissionRequest(permission),
+                resourcePaths.revokePermission(),
+                new RevokePermissionRequest(identity),
                 restAuthFunction);
+    }
+
+    /** Lists policies attached to an exact table resource. */
+    @Experimental
+    public ListPoliciesResponse listPolicies(ListPoliciesRequest request) {
+        Map<String, String> queryParams = Maps.newHashMap();
+        putQueryParameter(queryParams, "name", request.getName());
+        if (request.getType() != null) {
+            putQueryParameter(queryParams, "type", request.getType().name());
+        }
+        if (request.getPrincipalType() != null) {
+            putQueryParameter(queryParams, "principalType", request.getPrincipalType().name());
+        }
+        putQueryParameter(queryParams, "principal", request.getPrincipal());
+        if (request.getMaxResults() != null) {
+            queryParams.put(MAX_RESULTS, request.getMaxResults().toString());
+        }
+        putQueryParameter(queryParams, PAGE_TOKEN, request.getPageToken());
+        return client.get(
+                resourcePaths.policies(request.getResource()),
+                queryParams,
+                ListPoliciesResponse.class,
+                restAuthFunction);
+    }
+
+    /** Gets a named policy from its exact attachment resource. */
+    @Experimental
+    public GetPolicyResponse getPolicy(PolicyIdentity identity) {
+        return client.get(
+                resourcePaths.policy(identity.getResource(), identity.getName()),
+                GetPolicyResponse.class,
+                restAuthFunction);
+    }
+
+    /** Creates a named policy on its attachment resource. */
+    @Experimental
+    public void createPolicy(DataPolicy policy) {
+        client.post(
+                resourcePaths.policies(policy.getResource()),
+                new PolicyRequest(policy),
+                restAuthFunction);
+    }
+
+    /** Creates or fully replaces a named policy without changing its identity. */
+    @Experimental
+    public void createOrReplacePolicy(DataPolicy policy) {
+        client.put(
+                resourcePaths.policy(policy.getResource(), policy.getName()),
+                new PolicyRequest(policy),
+                restAuthFunction);
+    }
+
+    /** Drops a named policy from its exact attachment resource. */
+    @Experimental
+    public void dropPolicy(PolicyIdentity identity, boolean ignoreIfNotExists) {
+        try {
+            client.delete(
+                    resourcePaths.policy(identity.getResource(), identity.getName()),
+                    restAuthFunction);
+        } catch (NoSuchResourceException e) {
+            if (!ignoreIfNotExists
+                    || !ErrorResponse.RESOURCE_TYPE_POLICY.equals(e.resourceType())
+                    || !identity.getName().equals(e.resourceName())) {
+                throw e;
+            }
+        }
     }
 
     /**

@@ -42,13 +42,6 @@ public class RESTCatalogOptions {
                     .noDefaultValue()
                     .withDescription("REST Catalog auth token provider.");
 
-    public static final ConfigOption<String> MANAGEMENT_CATALOG =
-            ConfigOptions.key("management.catalog")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "Remote catalog identifier used by optional REST management APIs.");
-
     public static final ConfigOption<String> DLF_REGION =
             ConfigOptions.key("dlf.region")
                     .stringType()

@@ -29,18 +29,22 @@ import org.apache.paimon.spark.procedure.CopyFilesProcedure;
 import org.apache.paimon.spark.procedure.CreateBranchProcedure;
 import org.apache.paimon.spark.procedure.CreateFunctionProcedure;
 import org.apache.paimon.spark.procedure.CreateGlobalIndexProcedure;
+import org.apache.paimon.spark.procedure.CreateOrReplacePolicyProcedure;
+import org.apache.paimon.spark.procedure.CreatePolicyProcedure;
 import org.apache.paimon.spark.procedure.CreateTagFromTimestampProcedure;
 import org.apache.paimon.spark.procedure.CreateTagProcedure;
 import org.apache.paimon.spark.procedure.DeleteBranchProcedure;
 import org.apache.paimon.spark.procedure.DeleteTagProcedure;
 import org.apache.paimon.spark.procedure.DropFunctionProcedure;
 import org.apache.paimon.spark.procedure.DropGlobalIndexProcedure;
+import org.apache.paimon.spark.procedure.DropPolicyProcedure;
 import org.apache.paimon.spark.procedure.ExpirePartitionsProcedure;
 import org.apache.paimon.spark.procedure.ExpireSnapshotsProcedure;
 import org.apache.paimon.spark.procedure.ExpireTagsProcedure;
 import org.apache.paimon.spark.procedure.FastForwardProcedure;
 import org.apache.paimon.spark.procedure.GrantPermissionProcedure;
 import org.apache.paimon.spark.procedure.ListPermissionsProcedure;
+import org.apache.paimon.spark.procedure.ListPoliciesProcedure;
 import org.apache.paimon.spark.procedure.MarkPartitionDoneProcedure;
 import org.apache.paimon.spark.procedure.MaterializeDeletionVectorsProcedure;
 import org.apache.paimon.spark.procedure.MergeBranchProcedure;
@@ -140,6 +144,10 @@ public class SparkProcedures {
         procedureBuilders.put("grant_permission", GrantPermissionProcedure::builder);
         procedureBuilders.put("revoke_permission", RevokePermissionProcedure::builder);
         procedureBuilders.put("list_permissions", ListPermissionsProcedure::builder);
+        procedureBuilders.put("create_policy", CreatePolicyProcedure::builder);
+        procedureBuilders.put("create_or_replace_policy", CreateOrReplacePolicyProcedure::builder);
+        procedureBuilders.put("drop_policy", DropPolicyProcedure::builder);
+        procedureBuilders.put("list_policies", ListPoliciesProcedure::builder);
         return procedureBuilders.build();
     }
 }

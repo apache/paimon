@@ -20,287 +20,442 @@ See the License for the specific language governing permissions and
 limitations under the License.
 -->
 
-The OpenAPI 3.1 document below defines the language-neutral control-plane contract for listing,
-granting, and revoking permissions on Paimon catalog resources.
+The REST Management API is an experimental OpenAPI 3.1 control-plane extension for object
+privileges, row filters, and column masks in a Paimon REST Catalog. Its current contract version is
+`0.3.0` and may evolve incompatibly while the design is being validated.
 
-The permission payload uses a flat resource-oriented model. User and role lifecycle,
-authentication, policy persistence, and authorization decisions remain responsibilities of the
-REST Catalog server implementation.
+`RESTCatalog` exposes `permissionManagement()` and `policyManagement()` directly. These methods are
+intentionally not part of the generic `Catalog` interface. A non-REST catalog therefore reports an
+unsupported-operation error when a management procedure is called.
 
-## Client configuration
+## Catalog addressing
 
-Permission management is provided directly by `RESTCatalog`; it is not part of the generic
-`Catalog` interface. Configure the remote catalog identifier used in the management endpoint with
-`management.catalog`. The value identifies the `{catalog}` path parameter and is independent of an
-engine's local catalog alias.
+All management endpoints use the opaque `prefix` returned by the REST Catalog config endpoint. It
+is not a catalog name in a payload and is independent of the local engine alias such as `paimon` in
+`CALL paimon.sys...`.
 
-For Spark, this can be supplied by the REST server's config response or configured directly:
+```
+GET  /v1/{prefix}/permissions
+POST /v1/{prefix}/permissions/grant
+POST /v1/{prefix}/permissions/revoke
 
-```properties
-spark.sql.catalog.paimon.management.catalog=my_remote_catalog
+GET    /v1/{prefix}/databases/{database}/tables/{table}/policies
+POST   /v1/{prefix}/databases/{database}/tables/{table}/policies
+GET    /v1/{prefix}/databases/{database}/tables/{table}/policies/{policyName}
+PUT    /v1/{prefix}/databases/{database}/tables/{table}/policies/{policyName}
+DELETE /v1/{prefix}/databases/{database}/tables/{table}/policies/{policyName}
 ```
 
-Non-REST catalog implementations fail these operations with an explicit unsupported error.
+Policies are currently attached only to tables. The path is the attachment identity, so policy
+request bodies do not repeat a catalog, database, table, resource type, or scope. Catalog- and
+database-level matching can be added later with explicit matching semantics instead of implied
+path inheritance.
 
-## Spark SQL
+The complete wire contract is available in
+[`rest-management-open-api.yaml`](/rest-management-open-api.yaml).
 
-Spark exposes the management contract through procedures. Custom `GRANT` and `REVOKE` grammar is
-not required, so the SQL layer remains a thin adapter over the same Java and REST contracts.
+## Privileges and policies are independent
 
-The examples below assume that the Spark catalog is named `paimon`. Replace it with the local
-catalog name from `spark.sql.catalog.<catalog-name>`. Procedure arguments are named so optional
-resource fields can be omitted. `resource_type` and `access` are case-insensitive and are sent to
-the server in upper case; `principal` is an opaque, non-empty identifier understood by the server.
+A permission grants one access on one resource to one principal. A data policy restricts rows or
+columns visible through an already-authorized read. Creating a policy never grants `SELECT`, and
+revoking `SELECT` does not delete policies.
 
-### Resource types
+This separation also defines the expected query path:
 
-The resource type determines which locator arguments are required and which arguments must be
-omitted.
+1. The server evaluates object privileges.
+2. The server resolves all row-filter and column-masking policies applicable to the caller.
+3. The existing REST Catalog table authorization endpoint returns the compiled Paimon predicate
+   and column transforms to the engine.
+4. The engine applies those restrictions when planning the scan.
 
-| Resource type | Required locator | Meaning |
+Management payloads store function references and arguments, not executable SQL text or compiled
+Paimon expressions. Function lookup, signature checking, policy conflict detection, and expression
+compilation are server responsibilities.
+
+## Permission model
+
+Permission resources are structured objects:
+
+| Resource type | Required locator | Example |
 | --- | --- | --- |
-| `CATALOG` | none | A permission on the catalog itself. |
-| `CATALOG_ALL` | none | A catalog permission inherited by descendant resources. |
-| `DATABASE` | `database` | A permission on one database. |
-| `DATABASE_ALL` | `database` | A database permission inherited by descendant resources. |
-| `TABLE` | `database`, `table` | A permission on one table. |
-| `FUNCTION` | `database`, `function` | A permission on one function. |
-| `VIEW` | `database`, `view` | A permission on one view. |
-| `COLUMN` | `database`, `table` | A `SELECT` permission on selected table columns. |
-| `ROW_FILTER` | `database`, `table` | A row-filter policy granted separately from table access. |
-| `COLUMN_MASKING` | `database`, `table` | Column-masking policies granted separately from table access. |
+| `CATALOG` | none | `{"type":"CATALOG"}` |
+| `DATABASE` | `database` | `{"type":"DATABASE","database":"sales"}` |
+| `TABLE` | `database`, `table` | `{"type":"TABLE","database":"sales","table":"orders"}` |
+| `FUNCTION` | `database`, `function` | `{"type":"FUNCTION","database":"sales","function":"calculate_tax"}` |
+| `VIEW` | `database`, `view` | `{"type":"VIEW","database":"sales","view":"daily_orders"}` |
+
+`SELF` applies only to the referenced resource and is the default. `DESCENDANTS` applies below a
+`CATALOG` or `DATABASE`; it is invalid on `TABLE`, `FUNCTION`, and `VIEW` resources.
+
+Principals are `{type, id}` pairs. Supported types are `USER`, `GROUP`, `ROLE`, and `SERVICE`.
+Principal ids are opaque stable identifiers in the server namespace.
+
+Built-in accesses are resource-specific:
+
+| Resource | `SELF` accesses |
+| --- | --- |
+| `CATALOG` | `USE_CATALOG`, `CREATE_DATABASE`, `MANAGE_PERMISSIONS` |
+| `DATABASE` | `USE_DATABASE`, `CREATE_TABLE`, `CREATE_VIEW`, `CREATE_FUNCTION`, `ALTER`, `DROP`, `MANAGE_PERMISSIONS` |
+| `TABLE` | `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `ALTER`, `DROP`, `MANAGE_PERMISSIONS` |
+| `VIEW` | `SELECT`, `ALTER`, `DROP`, `MANAGE_PERMISSIONS` |
+| `FUNCTION` | `EXECUTE`, `ALTER`, `DROP`, `MANAGE_PERMISSIONS` |
+
+Inputs are case-insensitive and responses use upper case. Implementations may add namespaced
+accesses such as `vendor.example/SOME_ACCESS`; unknown unnamespaced accesses are rejected.
+
+An assignment identity is `resource`, `scope`, `access`, and `principal`. Granting the same identity
+replaces its expiry. Revocation is idempotent. `includeInherited` only expands resource ancestry;
+resolving group membership and role inheritance remains a server responsibility.
+
+## Data policy model
+
+A data policy is a named entity attached directly to one table. Its principal selectors use
+`TO` and `EXCEPT` semantics: it applies when the caller matches at least one `toPrincipals`
+entry and no `exceptPrincipals` entry. `EXCEPT` wins when both match.
+
+Each policy contains exactly one typed definition:
+
+| Definition | Required fields | Result |
+| --- | --- | --- |
+| `rowFilter` | `functionName`, ordered `functionArguments` | A boolean predicate applied to every scan. |
+| `columnMask` | `functionName`, `onColumn`, ordered `functionArguments` | A value compatible with the protected column. |
+
+The common fields are `name`, non-empty `toPrincipals`, optional `exceptPrincipals`, and an
+optional `comment`. A function argument is exactly one of `{"column":"region"}` or
+`{"constant":"APAC"}`. Constants are strings and may be empty; column names may not be empty.
+
+For a row filter, the arguments are passed positionally and the function must return boolean. For a
+column mask, `onColumn` is the protected input and `functionArguments` contains additional
+positional arguments. The REST server resolves the named function and compiles it into the existing
+Paimon predicate or column transform returned by table query authorization.
+
+Policy create and create-or-replace must be rejected unless all of these conditions hold:
+
+1. The target database and table exist.
+2. The table has `query-auth.enabled=true`; otherwise a stored policy could be silently bypassed.
+3. Every `TO` and `EXCEPT` principal exists.
+4. The policy function exists, has a compatible signature, and can be compiled by the server.
+5. `onColumn` and every column argument exist in the target table.
+
+These invariants continue to apply for the whole table lifecycle. Servers must bind policies to a
+stable table identity, preserve that binding across table renames, and remove the policies when the
+table is dropped. A table with policies must reject changes that disable `query-auth.enabled` or
+remove or rename a protected or argument column, unless the policy update and schema change are
+performed atomically.
+
+At authorization time, an unresolved function, invalid signature, or ambiguous set of masks must
+fail closed rather than omit a restriction. Multiple row filters may be combined with `AND`.
+Servers must define deterministic conflict handling when more than one mask targets the same column.
+
+This experimental contract deliberately does not define governed tags, catalog/database policy
+inheritance, or tag-driven matching. Those features need explicit match conditions and conflict
+rules before being added.
+
+## Spark SQL procedures
+
+The following examples assume a Spark catalog named `paimon`. Replace it with the catalog name in
+`spark.sql.catalog.<catalog-name>`.
 
 ### Grant permissions
 
-`grant_permission` creates or replaces a grant with the same permission identity and returns one
-row with `result = true` when the server accepts the request.
+`grant_permission` returns one row with `result = true` when the server accepts the assignment.
 
-| Argument | Required | Description |
-| --- | --- | --- |
-| `resource_type` | yes | One of the resource types listed above. |
-| `access` | yes | Access name such as `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `ALTER`, or `ALL`. The server defines the supported access names, except for the policy-specific values below. |
-| `principal` | yes | Principal identifier, for example `user:alice` or `role:analyst`. |
-| `database` | conditional | Required for database-, table-, function-, view-, and policy-scoped resources. |
-| `table` | conditional | Required for `TABLE`, `COLUMN`, `ROW_FILTER`, and `COLUMN_MASKING`. |
-| `function` | conditional | Required only for `FUNCTION`. |
-| `view` | conditional | Required only for `VIEW`. |
-| `column_names` | conditional | Non-empty `array<string>` of included columns for `COLUMN`. Mutually exclusive with `excluded_column_names`. |
-| `excluded_column_names` | conditional | Non-empty `array<string>` granting all columns except the listed columns for `COLUMN`. |
-| `row_filter` | conditional | Required only for `ROW_FILTER`; `access` must also be `ROW_FILTER`. |
-| `column_masking` | conditional | Non-empty `map<string, string>` from column name to masking expression for `COLUMN_MASKING`; `access` must also be `COLUMN_MASKING`. |
-| `expire_time` | no | ISO-8601 UTC expiration time. It is not supported for `ROW_FILTER` or `COLUMN_MASKING`. |
-
-Grant catalog, database, table, function, and view permissions by selecting the matching locator:
+Grant catalog access or a privilege inherited by catalog descendants:
 
 ```sql
--- SELECT on all resources below the catalog.
 CALL paimon.sys.grant_permission(
-  resource_type => 'CATALOG_ALL',
-  access => 'SELECT',
-  principal => 'role:analyst'
+  resource_type => 'CATALOG',
+  access => 'USE_CATALOG',
+  principal_type => 'ROLE',
+  principal => 'catalog_user'
 );
 
--- ALL access on one database until the specified time.
+CALL paimon.sys.grant_permission(
+  resource_type => 'CATALOG',
+  scope => 'DESCENDANTS',
+  access => 'SELECT',
+  principal_type => 'GROUP',
+  principal => 'analysts'
+);
+```
+
+Grant database privileges on the database itself or all objects below it:
+
+```sql
 CALL paimon.sys.grant_permission(
   resource_type => 'DATABASE',
-  access => 'ALL',
-  principal => 'role:data_engineer',
   database => 'sales',
-  expire_time => '2027-01-01T00:00:00Z'
+  access => 'CREATE_TABLE',
+  principal_type => 'ROLE',
+  principal => 'data_engineer'
 );
 
--- SELECT on one table.
+CALL paimon.sys.grant_permission(
+  resource_type => 'DATABASE',
+  database => 'sales',
+  scope => 'DESCENDANTS',
+  access => 'SELECT',
+  principal_type => 'ROLE',
+  principal => 'sales_reader',
+  expire_time => '2027-01-01T00:00:00Z'
+);
+```
+
+Grant table, function, and view access with the matching locator:
+
+```sql
 CALL paimon.sys.grant_permission(
   resource_type => 'TABLE',
-  access => 'SELECT',
-  principal => 'user:alice',
   database => 'sales',
-  table => 'orders'
+  table => 'orders',
+  access => 'SELECT',
+  principal_type => 'USER',
+  principal => 'alice'
 );
 
--- ALL access on one function.
 CALL paimon.sys.grant_permission(
   resource_type => 'FUNCTION',
-  access => 'ALL',
-  principal => 'role:analyst',
   database => 'sales',
-  function => 'calculate_tax'
+  function => 'calculate_tax',
+  access => 'EXECUTE',
+  principal_type => 'ROLE',
+  principal => 'analyst'
 );
 
--- SELECT on one view.
 CALL paimon.sys.grant_permission(
   resource_type => 'VIEW',
+  database => 'sales',
+  view => 'daily_orders',
   access => 'SELECT',
-  principal => 'role:analyst',
-  database => 'sales',
-  view => 'daily_orders'
-);
-```
-
-A `COLUMN` grant must use `SELECT` access and specify exactly one of `column_names` and
-`excluded_column_names`:
-
-```sql
--- Grant access only to the selected columns.
-CALL paimon.sys.grant_permission(
-  resource_type => 'COLUMN',
-  access => 'SELECT',
-  principal => 'role:analyst',
-  database => 'sales',
-  table => 'orders',
-  column_names => array('id', 'amount'),
-  expire_time => '2027-01-01T00:00:00Z'
-);
-
--- Grant access to every column except sensitive columns.
-CALL paimon.sys.grant_permission(
-  resource_type => 'COLUMN',
-  access => 'SELECT',
-  principal => 'role:support',
-  database => 'sales',
-  table => 'customers',
-  excluded_column_names => array('id_card_number', 'phone_number')
-);
-```
-
-Grant row filtering and column masking as independent table-scoped permissions. The REST server
-interprets each expression and may return its compiled predicate or transform when the grant is
-listed. Policy grants do not accept `expire_time`.
-
-```sql
--- Restrict visible rows.
-CALL paimon.sys.grant_permission(
-  resource_type => 'ROW_FILTER',
-  access => 'ROW_FILTER',
-  principal => 'role:analyst',
-  database => 'sales',
-  table => 'orders',
-  row_filter => 'region = ''cn'''
-);
-
--- Apply a different masking expression to each named column.
-CALL paimon.sys.grant_permission(
-  resource_type => 'COLUMN_MASKING',
-  access => 'COLUMN_MASKING',
-  principal => 'role:support',
-  database => 'sales',
-  table => 'customers',
-  column_masking => map(
-    'email', 'UPPER(email)',
-    'phone_number', 'NULL'
-  )
+  principal_type => 'SERVICE',
+  principal => 'reporting_job'
 );
 ```
 
 ### List permissions
 
-`list_permissions` returns explicitly granted permissions and supports exact-match resource and
-principal filters. `resource_type` is required. `database` is required whenever `table`,
-`function`, or `view` is specified.
+`list_permissions` always addresses one exact resource. Omit optional filters to list every direct
+assignment on it:
 
-| Argument | Required | Description |
-| --- | --- | --- |
-| `resource_type` | yes | Resource type to list. The related-type expansion described below also applies. |
-| `database` | no | Exact database filter. |
-| `table` | no | Exact table filter; requires `database`. |
-| `function` | no | Exact function filter; requires `database`. |
-| `view` | no | Exact view filter; requires `database`. |
-| `principal` | no | Exact principal filter. |
-| `max_results` | no | Positive maximum number of results requested from the server. |
-| `page_token` | no | Opaque token returned by a previous call. |
+```sql
+CALL paimon.sys.list_permissions(
+  resource_type => 'TABLE',
+  database => 'sales',
+  table => 'orders'
+);
+```
 
-For example, list all grants that affect a table for a principal:
+Filter by principal, scope, or access:
 
 ```sql
 CALL paimon.sys.list_permissions(
   resource_type => 'TABLE',
   database => 'sales',
   table => 'orders',
-  principal => 'role:analyst'
+  principal_type => 'ROLE',
+  principal => 'analyst',
+  access => 'SELECT'
 );
 ```
 
-Listing `CATALOG` also includes `CATALOG_ALL`, listing `DATABASE` includes `DATABASE_ALL`, and
-listing `TABLE` includes `COLUMN`, `ROW_FILTER`, and `COLUMN_MASKING` rows. This makes a table query
-useful for inspecting both ordinary access and policies affecting that table.
-
-Use `max_results` and the returned `next_page_token` to page through a larger result. The token is
-server-defined and must be passed back unchanged:
+Include catalog and database descendant assignments effective on a table:
 
 ```sql
--- First page.
 CALL paimon.sys.list_permissions(
-  resource_type => 'CATALOG',
-  max_results => 100
-);
-
--- Next page. Copy the token from the first page.
-CALL paimon.sys.list_permissions(
-  resource_type => 'CATALOG',
-  max_results => 100,
-  page_token => '<opaque next_page_token>'
+  resource_type => 'TABLE',
+  database => 'sales',
+  table => 'orders',
+  include_inherited => true
 );
 ```
 
-The procedure returns the following columns:
+The `inherited_from_json` output identifies the direct assignment source. `next_page_token` is
+opaque; pass it back unchanged with the same filters:
 
-| Column | Description |
-| --- | --- |
-| `resource_type` | Actual resource type of the grant. |
-| `catalog` | Catalog carried in the returned permission payload, if provided by the server. |
-| `database` | Database locator. |
-| `table` | Table locator. |
-| `function` | Function locator. |
-| `view` | View locator. |
-| `columns_json` | Included or excluded column selection as JSON. |
-| `row_filter_json` | Row-filter expression and optional compiled predicate as JSON. |
-| `column_masking_json` | Column-to-mask mapping as JSON. |
-| `access` | Granted access. |
-| `principal` | Granted principal. |
-| `expire_time` | Grant expiration time, if any. |
-| `next_page_token` | Token for the next page. It is repeated on every row and is null on the final page. |
+```sql
+CALL paimon.sys.list_permissions(
+  resource_type => 'TABLE',
+  database => 'sales',
+  table => 'orders',
+  max_results => 50,
+  page_token => 'opaque-token-from-previous-row'
+);
+```
 
 ### Revoke permissions
 
-`revoke_permission` identifies a grant by `resource_type`, its resource locator, `access`, and
-`principal`. Column selection, row-filter, column-masking, and expiration payloads are deliberately
-omitted. It returns one row with `result = true` when the server accepts the request.
+Supply the same four identity fields used by the grant. `expire_time` is not part of identity.
 
 ```sql
--- Revoke a table permission.
 CALL paimon.sys.revoke_permission(
-  resource_type => 'TABLE',
+  resource_type => 'DATABASE',
+  database => 'sales',
+  scope => 'DESCENDANTS',
   access => 'SELECT',
-  principal => 'user:alice',
-  database => 'sales',
-  table => 'orders'
-);
-
--- Revoke a column permission, regardless of its included or excluded columns.
-CALL paimon.sys.revoke_permission(
-  resource_type => 'COLUMN',
-  access => 'SELECT',
-  principal => 'role:analyst',
-  database => 'sales',
-  table => 'orders'
-);
-
--- Revoke a function permission.
-CALL paimon.sys.revoke_permission(
-  resource_type => 'FUNCTION',
-  access => 'ALL',
-  principal => 'role:analyst',
-  database => 'sales',
-  function => 'calculate_tax'
+  principal_type => 'ROLE',
+  principal => 'sales_reader'
 );
 ```
 
-Revoking a permission which does not exist may return HTTP 404. Resource arguments are validated
-before a request is sent: conflicting locators are rejected, table-level resources require both
-`database` and `table`, and function and view resources require their matching locator.
+Repeating the same call succeeds even when the assignment is already absent.
 
-## OpenAPI contract
+### Create row-filter policies
 
-<body>
-    <iframe src="/docs/master/rest-management-open-api.yaml" width="100%" height="800px" />
-</body>
+Before attaching any policy, enable table query authorization:
+
+```sql
+ALTER TABLE paimon.sales.orders
+SET TBLPROPERTIES ('query-auth.enabled' = 'true');
+```
+
+`create_policy` accepts principal selectors as `array<string>` entries encoded as `TYPE:id`.
+Function arguments use `column:value` or `constant:value`. Only the first colon is a delimiter, so
+a principal id or constant may contain later colons. `constant:` represents a valid empty string.
+
+This example asks the server to resolve
+`security.filter_region(region, 'APAC')` as a boolean predicate:
+
+```sql
+CALL paimon.sys.create_policy(
+  database => 'sales',
+  table => 'orders',
+  name => 'orders_region_filter',
+  policy_type => 'ROW_FILTER',
+  function_name => 'security.filter_region',
+  function_arguments => array('column:region', 'constant:APAC'),
+  to_principals => array('GROUP:analysts', 'ROLE:reporting'),
+  except_principals => array('USER:alice'),
+  comment => 'Restrict regional order visibility'
+);
+```
+
+The call fails if the name already exists. Use `create_or_replace_policy` when upsert semantics are
+intended.
+
+### Create column-masking policies
+
+For column masking, `on_column` identifies the protected column. Additional columns or constants
+can be supplied positionally:
+
+```sql
+CALL paimon.sys.create_policy(
+  database => 'sales',
+  table => 'customers',
+  name => 'mask_phone_by_region',
+  policy_type => 'COLUMN_MASKING',
+  function_name => 'security.mask_phone',
+  on_column => 'phone_number',
+  function_arguments => array('column:region', 'constant:partial'),
+  to_principals => array('ROLE:support'),
+  except_principals => array('ROLE:privacy_admin')
+);
+```
+
+A mask with no additional arguments may omit `function_arguments`. An empty-string argument is
+written explicitly:
+
+```sql
+CALL paimon.sys.create_policy(
+  database => 'sales',
+  table => 'customers',
+  name => 'mask_email',
+  policy_type => 'COLUMN_MASKING',
+  function_name => 'security.mask_email',
+  on_column => 'email',
+  function_arguments => array('constant:'),
+  to_principals => array('GROUP:support')
+);
+```
+
+`on_column` is required for `COLUMN_MASKING` and rejected for `ROW_FILTER`.
+
+### Create or fully replace a policy
+
+`create_or_replace_policy` maps to HTTP `PUT`. It creates an absent policy or fully replaces an
+existing policy with the same table and name; omitted optional values are cleared.
+
+```sql
+CALL paimon.sys.create_or_replace_policy(
+  database => 'sales',
+  table => 'orders',
+  name => 'orders_region_filter',
+  policy_type => 'ROW_FILTER',
+  function_name => 'security.filter_region_v2',
+  function_arguments => array('column:region'),
+  to_principals => array('GROUP:analysts'),
+  comment => 'Use the second version of the filter'
+);
+```
+
+This is deliberately separate from `create_policy`: callers must opt in to replacement instead of
+passing a generic `replace` flag.
+
+### List policies
+
+List every policy directly attached to one table:
+
+```sql
+CALL paimon.sys.list_policies(
+  database => 'sales',
+  table => 'orders'
+);
+```
+
+Filter by name, policy type, or principal. `principal_type` and `principal` must be supplied
+together:
+
+```sql
+CALL paimon.sys.list_policies(
+  database => 'sales',
+  table => 'orders',
+  policy_type => 'ROW_FILTER',
+  principal_type => 'GROUP',
+  principal => 'analysts'
+);
+```
+
+The output columns are `database`, `table`, `name`, `policy_type`, `function_name`,
+`on_column`, `function_arguments_json`, `to_principals_json`, `except_principals_json`,
+`comment`, and `next_page_token`. Pass an opaque continuation token back unchanged with the same
+filters:
+
+```sql
+CALL paimon.sys.list_policies(
+  database => 'sales',
+  table => 'orders',
+  max_results => 50,
+  page_token => 'opaque-token-from-previous-row'
+);
+```
+
+Management listing follows the existing Paimon pagination contract: an empty page terminates
+pagination and therefore has no continuation token. Each Spark procedure returns exactly the page
+selected by `page_token`; pass a non-null `next_page_token` back unchanged to retrieve the next page.
+
+### Drop policies
+
+Drop an existing policy:
+
+```sql
+CALL paimon.sys.drop_policy(
+  database => 'sales',
+  table => 'orders',
+  name => 'orders_region_filter'
+);
+```
+
+By default an absent policy is an error. Set `if_exists => true` for an idempotent operation:
+
+```sql
+CALL paimon.sys.drop_policy(
+  database => 'sales',
+  table => 'orders',
+  name => 'orders_region_filter',
+  if_exists => true
+);
+```
+
+Creating, replacing, dropping, or inspecting permissions and policies requires the server to
+authorize the caller for `MANAGE_PERMISSIONS` on the relevant resource. Authentication, principal
+membership, policy persistence, function resolution, and audit logging remain REST server
+concerns.

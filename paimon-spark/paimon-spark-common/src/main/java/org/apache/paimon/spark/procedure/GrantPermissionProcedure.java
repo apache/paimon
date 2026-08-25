@@ -18,12 +18,12 @@
 
 package org.apache.paimon.spark.procedure;
 
-import org.apache.paimon.management.Permission;
+import org.apache.paimon.management.PermissionAssignment;
+import org.apache.paimon.management.PrincipalType;
 import org.apache.paimon.management.ResourceType;
 
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
-import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
@@ -37,24 +37,24 @@ public class GrantPermissionProcedure extends BasePermissionProcedure {
             new ProcedureParameter[] {
                 ProcedureParameter.required("resource_type", StringType),
                 ProcedureParameter.required("access", StringType),
+                ProcedureParameter.required("principal_type", StringType),
                 ProcedureParameter.required("principal", StringType),
                 ProcedureParameter.optional("database", StringType),
                 ProcedureParameter.optional("table", StringType),
                 ProcedureParameter.optional("function", StringType),
                 ProcedureParameter.optional("view", StringType),
-                ProcedureParameter.optional("column_names", DataTypes.createArrayType(StringType)),
-                ProcedureParameter.optional(
-                        "excluded_column_names", DataTypes.createArrayType(StringType)),
-                ProcedureParameter.optional("row_filter", StringType),
-                ProcedureParameter.optional(
-                        "column_masking", DataTypes.createMapType(StringType, StringType)),
+                ProcedureParameter.optional("scope", StringType),
                 ProcedureParameter.optional("expire_time", StringType)
             };
 
     private static final StructType OUTPUT_TYPE =
             new StructType(
                     new StructField[] {
-                        new StructField("result", DataTypes.BooleanType, false, Metadata.empty())
+                        new StructField(
+                                "result",
+                                org.apache.spark.sql.types.DataTypes.BooleanType,
+                                false,
+                                Metadata.empty())
                     });
 
     private GrantPermissionProcedure(TableCatalog tableCatalog) {
@@ -75,22 +75,20 @@ public class GrantPermissionProcedure extends BasePermissionProcedure {
     public InternalRow[] call(InternalRow args) {
         ResourceType resourceType =
                 enumValue(args.getString(0), ResourceType.class, PARAMETERS[0].name());
-        Permission permission =
-                permission(
+        PermissionAssignment assignment =
+                assignment(
                         resourceType,
                         args.getString(1),
-                        args.getString(2),
-                        args.isNullAt(3) ? null : args.getString(3),
+                        enumValue(args.getString(2), PrincipalType.class, PARAMETERS[2].name()),
+                        args.getString(3),
                         args.isNullAt(4) ? null : args.getString(4),
                         args.isNullAt(5) ? null : args.getString(5),
                         args.isNullAt(6) ? null : args.getString(6),
-                        args.isNullAt(7) ? null : args.getArray(7),
-                        args.isNullAt(8) ? null : args.getArray(8),
-                        args.isNullAt(9) ? null : args.getString(9),
-                        args.isNullAt(10) ? null : args.getMap(10),
-                        args.isNullAt(11) ? null : args.getString(11));
+                        args.isNullAt(7) ? null : args.getString(7),
+                        args.isNullAt(8) ? null : args.getString(8),
+                        args.isNullAt(9) ? null : args.getString(9));
 
-        permissionManagement().grantPermission(permission);
+        permissionManagement().grantPermission(assignment);
         return new InternalRow[] {newInternalRow(true)};
     }
 
