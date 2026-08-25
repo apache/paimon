@@ -26,7 +26,9 @@ import org.apache.paimon.rest.requests.RevokePermissionRequest;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -49,6 +51,12 @@ public class PermissionManagementJsonTest {
                     + "\"principal\":\"analyst\","
                     + "\"expireTime\":\"2027-01-01T00:00:00Z\"}";
 
+    private static final String COLUMN_ASSIGNMENT_JSON =
+            "{\"resource\":{\"type\":\"COLUMN\",\"database\":\"sales\","
+                    + "\"table\":\"orders\"},\"access\":\"select\","
+                    + "\"principal\":\"analyst\",\"columns\":{"
+                    + "\"columnNames\":[\"id\",\"region\"]}}";
+
     @Test
     void testAssignmentDeserializesWithShadedAndExternalJackson() throws Exception {
         assertAssignment(RESTApi.fromJson(ASSIGNMENT_JSON, PermissionAssignment.class));
@@ -68,6 +76,35 @@ public class PermissionManagementJsonTest {
     }
 
     @Test
+    void testColumnAssignmentRoundTripsWithShadedAndExternalJackson() throws Exception {
+        PermissionAssignment shaded =
+                RESTApi.fromJson(COLUMN_ASSIGNMENT_JSON, PermissionAssignment.class);
+        PermissionAssignment external =
+                new com.fasterxml.jackson.databind.ObjectMapper()
+                        .readValue(COLUMN_ASSIGNMENT_JSON, PermissionAssignment.class);
+
+        for (PermissionAssignment assignment : Arrays.asList(shaded, external)) {
+            assertThat(assignment.getResource().getType()).isEqualTo(ResourceType.COLUMN);
+            assertThat(assignment.getAccess()).isEqualTo("SELECT");
+            assertThat(assignment.getColumns().getColumnNames()).containsExactly("id", "region");
+            assertThat(assignment.getColumns().getExcludedColumnNames()).isNull();
+        }
+
+        Map<?, ?> wire = RESTApi.fromJson(RESTApi.toJson(shaded), Map.class);
+        assertThat(((Map<?, ?>) wire.get("columns")).get("columnNames"))
+                .isEqualTo(Arrays.asList("id", "region"));
+        Map<?, ?> externalWire =
+                new com.fasterxml.jackson.databind.ObjectMapper()
+                        .readValue(
+                                new com.fasterxml.jackson.databind.ObjectMapper()
+                                        .writeValueAsString(external),
+                                Map.class);
+        Map<?, ?> externalColumns = (Map<?, ?>) externalWire.get("columns");
+        assertThat(externalColumns.get("columnNames")).isEqualTo(Arrays.asList("id", "region"));
+        assertThat(externalColumns.get("excludedColumnNames")).isNull();
+    }
+
+    @Test
     void testGrantAndRevokeUsePrivilegeOnlyWireShapes() throws Exception {
         PermissionAssignment assignment =
                 RESTApi.fromJson(ASSIGNMENT_JSON, PermissionAssignment.class);
@@ -83,7 +120,9 @@ public class PermissionManagementJsonTest {
                 RESTApi.fromJson(
                         RESTApi.toJson(
                                 new RevokePermissionRequest(
-                                        PermissionIdentity.fromAssignment(assignment))),
+                                        assignment.getResource(),
+                                        assignment.getAccess(),
+                                        assignment.getPrincipal())),
                         Map.class);
         assertThat(revoke.get("access")).isEqualTo("SELECT");
         assertThat(revoke.containsKey("columns")).isFalse();
@@ -150,30 +189,131 @@ public class PermissionManagementJsonTest {
                                         .writeValueAsString(policy),
                                 Map.class);
         assertThat(external.containsKey("type")).isFalse();
-        assertThat(((Map<?, ?>) external.get("columnMask")).keySet())
+        assertThat(new ArrayList<Object>(((Map<?, ?>) external.get("columnMask")).keySet()))
                 .containsExactlyInAnyOrder("onColumn", "transform");
     }
 
     @Test
     void testAccessAndPolicyValidation() {
+        assertThat(
+                        new PermissionAssignment(
+                                        catalogResource(), "createdatabase", "analyst", null)
+                                .getAccess())
+                .isEqualTo("CREATEDATABASE");
+        assertThat(
+                        new PermissionAssignment(databaseResource(), "createview", "analyst", null)
+                                .getAccess())
+                .isEqualTo("CREATEVIEW");
+        assertThat(
+                        new PermissionAssignment(functionResource(), "select", "analyst", null)
+                                .getAccess())
+                .isEqualTo("SELECT");
+        assertThat(PermissionAccess.builtIns(ResourceType.CATALOG))
+                .containsExactlyInAnyOrder("ALL", "ALTER", "DROP", "GRANT", "CREATEDATABASE");
+        assertThat(PermissionAccess.builtIns(ResourceType.DATABASE))
+                .containsExactlyInAnyOrder(
+                        "ALL",
+                        "DESCRIBE",
+                        "ALTER",
+                        "DROP",
+                        "GRANT",
+                        "CREATETABLE",
+                        "CREATEVIEW",
+                        "CREATEFUNCTION",
+                        "LIST");
+        assertThat(PermissionAccess.builtIns(ResourceType.TABLE))
+                .containsExactlyInAnyOrder("ALL", "ALTER", "DROP", "SELECT", "UPDATE", "GRANT");
+        assertThat(PermissionAccess.builtIns(ResourceType.VIEW))
+                .containsExactlyInAnyOrder("ALL", "ALTER", "DROP", "SELECT", "GRANT");
+        assertThat(PermissionAccess.builtIns(ResourceType.FUNCTION))
+                .containsExactlyInAnyOrder("ALL", "ALTER", "DROP", "SELECT", "GRANT");
+        assertThat(PermissionAccess.builtIns(ResourceType.COLUMN)).containsExactly("SELECT");
+
+        PermissionColumns included = new PermissionColumns(Arrays.asList("id", "region"), null);
+        assertThat(
+                        new PermissionAssignment(
+                                        columnResource(), "select", "analyst", included, null)
+                                .getColumns())
+                .isEqualTo(included);
+
         assertThatThrownBy(
                         () ->
                                 new PermissionAssignment(
                                         catalogResource(), "SELECT", "analyst", null))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("not valid");
+                .hasMessageContaining("not valid for CATALOG");
         assertThatThrownBy(
-                        () -> new PermissionAssignment(catalogResource(), "ALL", "analyst", null))
+                        () ->
+                                new PermissionAssignment(
+                                        databaseResource(), "SELECT", "analyst", null))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Unknown access");
-        assertThat(
-                        new PermissionAssignment(
-                                        tableResource(),
-                                        "vendor.example/read_sensitive",
-                                        "analyst",
-                                        null)
-                                .getAccess())
-                .isEqualTo("VENDOR.EXAMPLE/READ_SENSITIVE");
+                .hasMessageContaining("not valid for DATABASE");
+        assertThatThrownBy(
+                        () ->
+                                new PermissionAssignment(
+                                        tableResource(), "CREATEVIEW", "analyst", null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("not valid for TABLE");
+        assertThatThrownBy(
+                        () ->
+                                new PermissionAssignment(
+                                        functionResource(), "UPDATE", "analyst", null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("not valid for FUNCTION");
+        assertThatThrownBy(
+                        () ->
+                                new PermissionAssignment(
+                                        columnResource(), "UPDATE", "analyst", included, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("not valid for COLUMN");
+        assertThatThrownBy(
+                        () ->
+                                new PermissionAssignment(
+                                        columnResource(), "SELECT", "analyst", null, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("columns is required");
+        assertThatThrownBy(
+                        () ->
+                                new PermissionAssignment(
+                                        tableResource(), "SELECT", "analyst", included, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("only valid for COLUMN");
+        assertThatThrownBy(
+                        () ->
+                                new PermissionColumns(
+                                        Collections.singletonList("id"),
+                                        Collections.singletonList("region")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("exactly one");
+        assertThatThrownBy(() -> new PermissionColumns(Collections.emptyList(), null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("cannot be empty");
+        assertThatThrownBy(() -> new PermissionColumns(Arrays.asList("id", "id"), null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("duplicate");
+        assertThatThrownBy(() -> new PermissionColumns(Collections.singletonList(" "), null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("empty");
+        for (String access :
+                Arrays.asList(
+                        "USE_CATALOG",
+                        "CREATE_DATABASE",
+                        "USE_DATABASE",
+                        "CREATE_TABLE",
+                        "CREATE_VIEW",
+                        "CREATE_FUNCTION",
+                        "INSERT",
+                        "DELETE",
+                        "EXECUTE",
+                        "MANAGE_PERMISSIONS",
+                        "vendor.example/read_sensitive")) {
+            assertThatThrownBy(
+                            () ->
+                                    new PermissionAssignment(
+                                            tableResource(), access, "analyst", null))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("Unknown access");
+        }
         assertThatThrownBy(
                         () ->
                                 new PermissionAssignment(
@@ -234,6 +374,17 @@ public class PermissionManagementJsonTest {
     }
 
     @Test
+    void testPermissionColumnsDefensivelyCopiesItsRange() {
+        java.util.List<String> source = new ArrayList<>(Arrays.asList("id", "region"));
+        PermissionColumns columns = new PermissionColumns(source, null);
+
+        source.clear();
+        assertThat(columns.getColumnNames()).containsExactly("id", "region");
+        assertThatThrownBy(() -> columns.getColumnNames().add("email"))
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
     void testPermissionListRequiresExactResourceAndBoundsPageSize() {
         assertThatThrownBy(
                         () ->
@@ -264,18 +415,18 @@ public class PermissionManagementJsonTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("at most 1000");
 
-        ListPermissionsRequest catalogAccess =
+        ListPermissionsRequest databaseAccess =
                 new ListPermissionsRequest(
-                        ResourceType.CATALOG,
+                        ResourceType.DATABASE,
+                        "sales",
                         null,
                         null,
                         null,
                         null,
-                        null,
-                        "use_catalog",
+                        "createview",
                         null,
                         25);
-        assertThat(catalogAccess.getAccess()).isEqualTo("USE_CATALOG");
+        assertThat(databaseAccess.getAccess()).isEqualTo("CREATEVIEW");
         assertThatThrownBy(
                         () ->
                                 new ListPermissionsRequest(
@@ -285,7 +436,7 @@ public class PermissionManagementJsonTest {
                                         null,
                                         null,
                                         null,
-                                        "USE_CATALOG",
+                                        "SELECT",
                                         null,
                                         25))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -306,24 +457,16 @@ public class PermissionManagementJsonTest {
     }
 
     @Test
-    void testPolicyIdentityAndDropRequestRoundTrip() throws Exception {
-        PolicyIdentity identity =
-                new PolicyIdentity(tableResource(), PolicyType.COLUMN_MASKING, "analyst", "email");
-        DropPolicyRequest request = new DropPolicyRequest(identity);
+    void testDropPolicyRequestRoundTrip() throws Exception {
+        DropPolicyRequest request =
+                new DropPolicyRequest(PolicyType.COLUMN_MASKING, "analyst", "email");
         DropPolicyRequest roundTrip =
                 RESTApi.fromJson(RESTApi.toJson(request), DropPolicyRequest.class);
 
-        assertThat(roundTrip.identity(tableResource()).getType())
-                .isEqualTo(PolicyType.COLUMN_MASKING);
-        assertThat(roundTrip.identity(tableResource()).getPrincipal()).isEqualTo("analyst");
-        assertThat(roundTrip.identity(tableResource()).getColumn()).isEqualTo("email");
-        assertThatThrownBy(
-                        () ->
-                                new PolicyIdentity(
-                                        tableResource(),
-                                        PolicyType.COLUMN_MASKING,
-                                        "analyst",
-                                        null))
+        assertThat(roundTrip.getType()).isEqualTo(PolicyType.COLUMN_MASKING);
+        assertThat(roundTrip.getPrincipal()).isEqualTo("analyst");
+        assertThat(roundTrip.getColumn()).isEqualTo("email");
+        assertThatThrownBy(() -> new DropPolicyRequest(PolicyType.COLUMN_MASKING, "analyst", null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("column is required");
     }
@@ -341,8 +484,20 @@ public class PermissionManagementJsonTest {
         return new PermissionResource(ResourceType.CATALOG, null, null, null, null);
     }
 
+    private static PermissionResource databaseResource() {
+        return new PermissionResource(ResourceType.DATABASE, "sales", null, null, null);
+    }
+
     private static PermissionResource tableResource() {
         return new PermissionResource(ResourceType.TABLE, "sales", "orders", null, null);
+    }
+
+    private static PermissionResource columnResource() {
+        return new PermissionResource(ResourceType.COLUMN, "sales", "orders", null, null);
+    }
+
+    private static PermissionResource functionResource() {
+        return new PermissionResource(ResourceType.FUNCTION, "sales", null, "calculate_tax", null);
     }
 
     private static String repeat(char value, int length) {

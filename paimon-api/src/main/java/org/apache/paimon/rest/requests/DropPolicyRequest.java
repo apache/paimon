@@ -19,8 +19,7 @@
 package org.apache.paimon.rest.requests;
 
 import org.apache.paimon.annotation.Experimental;
-import org.apache.paimon.management.PermissionResource;
-import org.apache.paimon.management.PolicyIdentity;
+import org.apache.paimon.management.PermissionAssignment;
 import org.apache.paimon.management.PolicyType;
 import org.apache.paimon.rest.RESTRequest;
 
@@ -33,6 +32,9 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 import javax.annotation.Nullable;
 
 import java.beans.ConstructorProperties;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Request for dropping one principal's row filter or column mask. */
 @Experimental
@@ -47,23 +49,21 @@ public class DropPolicyRequest implements RESTRequest {
     private final String principal;
     @Nullable private final String column;
 
-    public DropPolicyRequest(PolicyIdentity identity) {
-        this(identity.getType(), identity.getPrincipal(), identity.getColumn());
-    }
-
     @JsonCreator
     @ConstructorProperties({FIELD_TYPE, FIELD_PRINCIPAL, FIELD_COLUMN})
     public DropPolicyRequest(
             @JsonProperty(FIELD_TYPE) PolicyType type,
             @JsonProperty(FIELD_PRINCIPAL) String principal,
             @Nullable @JsonProperty(FIELD_COLUMN) String column) {
-        this.type = type;
-        this.principal = principal;
-        this.column = column;
-    }
-
-    public PolicyIdentity identity(PermissionResource resource) {
-        return new PolicyIdentity(resource, type, principal, column);
+        this.type = checkNotNull(type, "policy type cannot be null");
+        this.principal = validatePrincipal(principal);
+        if (type == PolicyType.ROW_FILTER) {
+            checkArgument(isBlank(column), "ROW_FILTER identity cannot contain a column.");
+            this.column = null;
+        } else {
+            checkArgument(!isBlank(column), "column is required for COLUMN_MASKING identity.");
+            this.column = column;
+        }
     }
 
     @JsonGetter(FIELD_TYPE)
@@ -81,5 +81,19 @@ public class DropPolicyRequest implements RESTRequest {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public String getColumn() {
         return column;
+    }
+
+    private static String validatePrincipal(String principal) {
+        checkArgument(
+                principal != null && !principal.trim().isEmpty(), "principal cannot be empty.");
+        checkArgument(
+                principal.length() <= PermissionAssignment.MAX_PRINCIPAL_LENGTH,
+                "principal must contain at most %s characters.",
+                PermissionAssignment.MAX_PRINCIPAL_LENGTH);
+        return principal;
+    }
+
+    private static boolean isBlank(@Nullable String value) {
+        return value == null || value.trim().isEmpty();
     }
 }

@@ -21,7 +21,6 @@ package org.apache.paimon.spark.procedure;
 import org.apache.paimon.management.ColumnMask;
 import org.apache.paimon.management.DataPolicy;
 import org.apache.paimon.management.PermissionResource;
-import org.apache.paimon.management.PolicyIdentity;
 import org.apache.paimon.management.PolicyType;
 import org.apache.paimon.management.ResourceType;
 import org.apache.paimon.management.RowFilter;
@@ -55,15 +54,6 @@ abstract class BasePolicyProcedure extends BasePermissionProcedure {
         }
         checkArgument(isBlank(predicate), "COLUMN_MASKING policy cannot specify predicate.");
         return DataPolicy.columnMask(resource, new ColumnMask(onColumn, transform), principal);
-    }
-
-    protected static PolicyIdentity policyIdentity(
-            String database,
-            String table,
-            PolicyType type,
-            String principal,
-            @Nullable String column) {
-        return new PolicyIdentity(tableResource(database, table), type, principal, column);
     }
 
     protected static PermissionResource tableResource(String database, String table) {

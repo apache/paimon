@@ -19,7 +19,6 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.management.DataPolicy;
-import org.apache.paimon.management.PolicyIdentity;
 import org.apache.paimon.management.PolicyType;
 
 import javax.annotation.Nullable;
@@ -42,12 +41,7 @@ final class PolicyKey implements Comparable<PolicyKey> {
                 policy.getColumnMask() == null ? null : policy.getColumnMask().getOnColumn());
     }
 
-    PolicyKey(String tableUuid, PolicyIdentity identity) {
-        this(tableUuid, identity.getType(), identity.getPrincipal(), identity.getColumn());
-    }
-
-    private PolicyKey(
-            String tableUuid, PolicyType type, String principal, @Nullable String column) {
+    PolicyKey(String tableUuid, PolicyType type, String principal, @Nullable String column) {
         this.tableUuid = tableUuid;
         this.type = type;
         this.principal = principal;

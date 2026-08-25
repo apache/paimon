@@ -29,5 +29,5 @@ public interface PermissionManagement {
 
     void grantPermission(PermissionAssignment assignment);
 
-    void revokePermission(PermissionIdentity identity);
+    void revokePermission(PermissionResource resource, String access, String principal);
 }

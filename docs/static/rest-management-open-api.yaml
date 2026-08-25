@@ -19,8 +19,9 @@ info:
   title: Paimon REST Management API
   version: "1.0"
   description: |
-    Experimental control-plane extension for permissions, table row filters, and table column
-    masks in one Paimon REST Catalog prefix. A data policy restricts an already-authorized read;
+    Experimental control-plane extension for object and column permissions, table row filters, and
+    table column masks in one Paimon REST Catalog prefix. A data policy restricts an
+    already-authorized read;
     it never grants SELECT by itself. Each policy is attached to one principal: a principal has at
     most one row filter per table and at most one mask per table column. Policy creation and
     replacement are accepted only when the target table exists, has `query-auth.enabled=true`, and
@@ -87,8 +88,9 @@ paths:
       operationId: grantPermission
       description: |
         Creates an assignment or replaces the assignment with the same `resource`, `access`, and
-        `principal`. The referenced resource and principal must exist. Servers bind assignments to
-        the resource lifecycle described by `PermissionResource`.
+        `principal`. For a `COLUMN` assignment this replaces the whole included or excluded column
+        range. The referenced resource, principal, and columns must exist. Servers bind assignments
+        to the resource lifecycle described by `PermissionResource`.
       requestBody:
         required: true
         content:
@@ -106,6 +108,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -442,32 +446,28 @@ components:
   schemas:
     ResourceType:
       type: string
-      enum: [CATALOG, DATABASE, TABLE, FUNCTION, VIEW]
+      enum: [CATALOG, DATABASE, TABLE, COLUMN, FUNCTION, VIEW]
     PermissionAccess:
       description: |
-        Canonical access value. The REST wire format uses upper case. Values are either a built-in
-        access or a namespaced server extension.
-      oneOf:
-        - type: string
-          maxLength: 32
-          enum:
-            - USE_CATALOG
-            - CREATE_DATABASE
-            - USE_DATABASE
-            - CREATE_TABLE
-            - CREATE_VIEW
-            - CREATE_FUNCTION
-            - SELECT
-            - INSERT
-            - UPDATE
-            - DELETE
-            - ALTER
-            - DROP
-            - EXECUTE
-            - MANAGE_PERMISSIONS
-        - type: string
-          maxLength: 32
-          pattern: '^[A-Z0-9][A-Z0-9._-]*/[A-Z0-9][A-Z0-9._-]*$'
+        Canonical data access value. The REST wire format uses upper case and creation accesses
+        follow their persisted names without underscores. UPDATE covers table writes, including
+        inserts and deletes. SELECT also covers function use. GRANT allows granting and revoking
+        assignments on the resource. The server validates applicability to the resource type.
+      type: string
+      maxLength: 32
+      enum:
+        - ALL
+        - CREATEDATABASE
+        - DESCRIBE
+        - ALTER
+        - DROP
+        - CREATETABLE
+        - CREATEFUNCTION
+        - CREATEVIEW
+        - LIST
+        - SELECT
+        - UPDATE
+        - GRANT
     PolicyType:
       type: string
       enum: [ROW_FILTER, COLUMN_MASKING]
@@ -489,6 +489,7 @@ components:
         - $ref: '#/components/schemas/CatalogResource'
         - $ref: '#/components/schemas/DatabaseResource'
         - $ref: '#/components/schemas/TableResource'
+        - $ref: '#/components/schemas/ColumnResource'
         - $ref: '#/components/schemas/FunctionResource'
         - $ref: '#/components/schemas/ViewResource'
       discriminator:
@@ -497,6 +498,7 @@ components:
           CATALOG: '#/components/schemas/CatalogResource'
           DATABASE: '#/components/schemas/DatabaseResource'
           TABLE: '#/components/schemas/TableResource'
+          COLUMN: '#/components/schemas/ColumnResource'
           FUNCTION: '#/components/schemas/FunctionResource'
           VIEW: '#/components/schemas/ViewResource'
     CatalogResource:
@@ -523,6 +525,22 @@ components:
       properties:
         type:
           const: TABLE
+        database:
+          type: string
+          minLength: 1
+        table:
+          type: string
+          minLength: 1
+    ColumnResource:
+      type: object
+      additionalProperties: false
+      description: |
+        Column permission target. The resource identity is the containing table; the mutable column
+        range is carried by `PermissionAssignment.columns` and is not part of the identity.
+      required: [type, database, table]
+      properties:
+        type:
+          const: COLUMN
         database:
           type: string
           minLength: 1
@@ -558,6 +576,10 @@ components:
     PermissionAssignment:
       type: object
       additionalProperties: false
+      description: |
+        Direct assignment identity is `resource`, `access`, and `principal`. `columns` is required
+        only for a COLUMN assignment and is replaced as one value when the same identity is granted
+        again.
       required: [resource, access, principal]
       properties:
         resource:
@@ -566,6 +588,8 @@ components:
           $ref: '#/components/schemas/PermissionAccess'
         principal:
           $ref: '#/components/schemas/Principal'
+        columns:
+          $ref: '#/components/schemas/PermissionColumns'
         expireTime:
           type: string
           format: date-time
@@ -573,6 +597,8 @@ components:
             Exclusive authorization upper bound evaluated using the server clock. At
             `now >= expireTime` this assignment must not authorize access. An expired record may
             remain listable until cleanup. The value must have at most millisecond precision.
+      allOf:
+        - $ref: '#/components/schemas/ColumnAssignmentConstraint'
     GrantPermissionRequest:
       type: object
       additionalProperties: false
@@ -584,6 +610,8 @@ components:
           $ref: '#/components/schemas/PermissionAccess'
         principal:
           $ref: '#/components/schemas/Principal'
+        columns:
+          $ref: '#/components/schemas/PermissionColumns'
         expireTime:
           type: string
           format: date-time
@@ -591,6 +619,51 @@ components:
             Exclusive authorization upper bound evaluated using the server clock. At
             `now >= expireTime` the assignment must not authorize access. The value must have at
             most millisecond precision.
+      allOf:
+        - $ref: '#/components/schemas/ColumnAssignmentConstraint'
+    PermissionColumns:
+      type: object
+      additionalProperties: false
+      description: |
+        Exactly one non-empty list of top-level table column names. `columnNames` is an allowlist;
+        `excludedColumnNames` grants every current table column except the listed denylist. Column
+        names must exist when granted. An allowlist denies columns added later, while a denylist
+        allows columns added later. All applicable column ranges are intersected, and selecting any
+        column outside the effective range fails the query. The target table must enforce query
+        authorization before the grant becomes visible.
+      properties:
+        columnNames:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+        excludedColumnNames:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+      oneOf:
+        - required: [columnNames]
+        - required: [excludedColumnNames]
+    ColumnAssignmentConstraint:
+      if:
+        properties:
+          resource:
+            type: object
+            required: [type]
+            properties:
+              type:
+                const: COLUMN
+        required: [resource]
+      then:
+        required: [columns]
+      else:
+        not:
+          required: [columns]
     RevokePermissionRequest:
       type: object
       additionalProperties: false

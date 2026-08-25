@@ -21,9 +21,11 @@ package org.apache.paimon.spark.procedure;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.management.ListPermissionsRequest;
 import org.apache.paimon.management.PermissionAssignment;
+import org.apache.paimon.management.PermissionColumns;
 import org.apache.paimon.management.ResourceType;
 
 import org.apache.spark.sql.catalyst.InternalRow;
+import org.apache.spark.sql.catalyst.util.GenericArrayData;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
@@ -34,6 +36,7 @@ import java.util.List;
 
 import static org.apache.spark.sql.types.DataTypes.IntegerType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
+import static org.apache.spark.sql.types.DataTypes.createArrayType;
 
 /** Lists direct permissions on an exact target. */
 public class ListPermissionsProcedure extends BasePermissionProcedure {
@@ -61,6 +64,8 @@ public class ListPermissionsProcedure extends BasePermissionProcedure {
                         field("view", StringType, true),
                         field("access", StringType, false),
                         field("principal", StringType, false),
+                        field("column_names", createArrayType(StringType), true),
+                        field("excluded_column_names", createArrayType(StringType), true),
                         field("expire_time", StringType, true),
                         field("next_page_token", StringType, true)
                     });
@@ -104,6 +109,7 @@ public class ListPermissionsProcedure extends BasePermissionProcedure {
         InternalRow[] rows = new InternalRow[assignments.size()];
         for (int i = 0; i < assignments.size(); i++) {
             PermissionAssignment assignment = assignments.get(i);
+            PermissionColumns columns = assignment.getColumns();
             rows[i] =
                     newInternalRow(
                             string(assignment.getResource().getType().name()),
@@ -113,6 +119,8 @@ public class ListPermissionsProcedure extends BasePermissionProcedure {
                             string(assignment.getResource().getView()),
                             string(assignment.getAccess()),
                             string(assignment.getPrincipal()),
+                            stringArray(columns == null ? null : columns.getColumnNames()),
+                            stringArray(columns == null ? null : columns.getExcludedColumnNames()),
                             string(assignment.getExpireTime()),
                             string(page.getNextPageToken()));
         }
@@ -126,6 +134,14 @@ public class ListPermissionsProcedure extends BasePermissionProcedure {
 
     private static UTF8String string(String value) {
         return value == null ? null : UTF8String.fromString(value);
+    }
+
+    private static GenericArrayData stringArray(List<String> values) {
+        if (values == null) {
+            return null;
+        }
+        return new GenericArrayData(
+                values.stream().map(ListPermissionsProcedure::string).toArray());
     }
 
     public static ProcedureBuilder builder() {

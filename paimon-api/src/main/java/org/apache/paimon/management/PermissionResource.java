@@ -169,11 +169,13 @@ public class PermissionResource {
                         "DATABASE resource cannot contain table, function, or view.");
                 break;
             case TABLE:
-                checkArgument(!isBlank(database), "database is required for TABLE resource.");
-                checkArgument(!isBlank(table), "table is required for TABLE resource.");
+            case COLUMN:
+                checkArgument(!isBlank(database), "database is required for %s resource.", type);
+                checkArgument(!isBlank(table), "table is required for %s resource.", type);
                 checkArgument(
                         isBlank(function) && isBlank(view),
-                        "TABLE resource cannot contain function or view.");
+                        "%s resource cannot contain function or view.",
+                        type);
                 break;
             case FUNCTION:
                 checkArgument(!isBlank(database), "database is required for FUNCTION resource.");

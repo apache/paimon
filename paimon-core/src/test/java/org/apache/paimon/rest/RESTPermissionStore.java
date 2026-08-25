@@ -19,27 +19,26 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.management.PermissionAssignment;
-import org.apache.paimon.management.PermissionIdentity;
 import org.apache.paimon.management.PermissionResource;
 
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /** Atomic permission assignment store for the REST catalog test server. */
 final class RESTPermissionStore {
 
-    private final Map<PermissionIdentity, PermissionAssignment> assignments =
-            new ConcurrentHashMap<>();
+    private final Map<PermissionKey, PermissionAssignment> assignments = new ConcurrentHashMap<>();
 
     void put(PermissionAssignment assignment) {
-        assignments.put(PermissionIdentity.fromAssignment(assignment), assignment);
+        assignments.put(PermissionKey.fromAssignment(assignment), assignment);
     }
 
-    void remove(PermissionIdentity identity) {
-        assignments.remove(identity);
+    void remove(PermissionResource resource, String access, String principal) {
+        assignments.remove(new PermissionKey(resource, access, principal));
     }
 
     List<PermissionAssignment> list(PermissionResource target, Map<String, String> parameters) {
@@ -74,5 +73,42 @@ final class RESTPermissionStore {
 
     private static String value(String value) {
         return value == null ? "" : value;
+    }
+
+    private static class PermissionKey {
+
+        private final PermissionResource resource;
+        private final String access;
+        private final String principal;
+
+        private PermissionKey(PermissionResource resource, String access, String principal) {
+            this.resource = resource;
+            this.access = access;
+            this.principal = principal;
+        }
+
+        private static PermissionKey fromAssignment(PermissionAssignment assignment) {
+            return new PermissionKey(
+                    assignment.getResource(), assignment.getAccess(), assignment.getPrincipal());
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof PermissionKey)) {
+                return false;
+            }
+            PermissionKey that = (PermissionKey) o;
+            return resource.equals(that.resource)
+                    && access.equals(that.access)
+                    && principal.equals(that.principal);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(resource, access, principal);
+        }
     }
 }

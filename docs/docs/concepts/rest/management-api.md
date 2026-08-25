@@ -80,6 +80,7 @@ Permission resources are structured objects:
 | `CATALOG` | none | `{"type":"CATALOG"}` |
 | `DATABASE` | `database` | `{"type":"DATABASE","database":"sales"}` |
 | `TABLE` | `database`, `table` | `{"type":"TABLE","database":"sales","table":"orders"}` |
+| `COLUMN` | `database`, `table` | `{"type":"COLUMN","database":"sales","table":"orders"}` |
 | `FUNCTION` | `database`, `function` | `{"type":"FUNCTION","database":"sales","function":"calculate_tax"}` |
 | `VIEW` | `database`, `view` | `{"type":"VIEW","database":"sales","view":"daily_orders"}` |
 
@@ -90,24 +91,83 @@ server responsibilities. Access values are limited to 32 characters and principa
 characters. An implementation may resolve wire locators and principals to different stable
 persistence identifiers; those internal ids are not exposed by this API.
 
-Built-in accesses are resource-specific:
+The built-in accesses use a common data-authorization vocabulary. Creation accesses intentionally
+use their persisted names without underscores:
+
+| Access | Meaning |
+| --- | --- |
+| `ALL` | All accesses applicable to the resource. |
+| `CREATEDATABASE` | Create a database in a catalog. |
+| `DESCRIBE` | Read database metadata or select the current database. |
+| `ALTER` | Modify resource metadata. |
+| `DROP` | Drop the resource. |
+| `CREATETABLE` | Create a table in a database. |
+| `CREATEFUNCTION` | Create a function in a database. |
+| `CREATEVIEW` | Create a view in a database. |
+| `LIST` | List resources in a database. |
+| `SELECT` | Read table or view data, or use a function. |
+| `UPDATE` | Write table data, including insert, update, and delete operations. |
+| `GRANT` | Grant or revoke assignments on the resource. |
+
+Java and Spark helpers accept access names case-insensitively and normalize them before sending.
+The REST wire format uses upper case. Built-in accesses are resource-specific:
 
 | Resource | Accesses |
 | --- | --- |
-| `CATALOG` | `USE_CATALOG`, `CREATE_DATABASE`, `MANAGE_PERMISSIONS` |
-| `DATABASE` | `USE_DATABASE`, `CREATE_TABLE`, `CREATE_VIEW`, `CREATE_FUNCTION`, `ALTER`, `DROP`, `MANAGE_PERMISSIONS` |
-| `TABLE` | `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `ALTER`, `DROP`, `MANAGE_PERMISSIONS` |
-| `VIEW` | `SELECT`, `ALTER`, `DROP`, `MANAGE_PERMISSIONS` |
-| `FUNCTION` | `EXECUTE`, `ALTER`, `DROP`, `MANAGE_PERMISSIONS` |
-
-Java and Spark helpers accept access names case-insensitively and normalize them before sending.
-The REST wire format uses upper case. Implementations may add namespaced accesses such as
-`VENDOR.EXAMPLE/SOME_ACCESS`; unknown unnamespaced accesses are rejected.
+| `CATALOG` | `ALL`, `ALTER`, `DROP`, `GRANT`, `CREATEDATABASE` |
+| `DATABASE` | `ALL`, `DESCRIBE`, `ALTER`, `DROP`, `GRANT`, `CREATETABLE`, `CREATEVIEW`, `CREATEFUNCTION`, `LIST` |
+| `TABLE` | `ALL`, `SELECT`, `UPDATE`, `ALTER`, `DROP`, `GRANT` |
+| `COLUMN` | `SELECT` |
+| `VIEW` | `ALL`, `SELECT`, `ALTER`, `DROP`, `GRANT` |
+| `FUNCTION` | `ALL`, `SELECT`, `ALTER`, `DROP`, `GRANT` |
 
 An assignment identity is `resource`, `access`, and `principal`. Granting the same identity replaces
 its expiry, and revocation is idempotent. Assignments apply only to the exact referenced resource;
 resource inheritance is not part of this experimental contract. Resolving group membership and role
 inheritance remains a server responsibility.
+
+### Column permissions
+
+A column permission uses a `COLUMN` resource whose locator is the containing table, `SELECT`
+access, and one `columns` object. Exactly one non-empty list is allowed:
+
+- `columnNames` is an allowlist. Only the named top-level columns are readable.
+- `excludedColumnNames` is a denylist. Every current top-level column except the named columns is
+  readable.
+
+For example, this assignment allows only `order_id` and `region`:
+
+```json
+{
+  "resource": {
+    "type": "COLUMN",
+    "database": "sales",
+    "table": "orders"
+  },
+  "access": "SELECT",
+  "principal": "role:analyst",
+  "columns": {
+    "columnNames": ["order_id", "region"]
+  }
+}
+```
+
+The assignment identity remains `(resource, access, principal)`; `columns` is not part of the
+identity. Granting the same identity replaces the entire previous allowlist or denylist rather than
+merging individual names. Revocation therefore omits `columns` and removes the whole column
+assignment.
+
+All named columns must exist when granted, and the table must enforce query authorization. A server
+may enable `query-auth.enabled` atomically with the grant; otherwise it must reject the grant. Column
+names refer only to top-level fields. For every effective caller principal, applicable column ranges
+are intersected. If any applicable range rejects a selected column, the query fails rather than
+silently dropping that column.
+
+Schema evolution keeps the assignment attached to the stable table identity. Renaming a referenced
+column updates its stored name. Dropping a referenced column removes it from the range; if that
+would leave the stored list empty, the assignment is removed. An allowlist denies columns added
+later, while a denylist allows them, so allowlists are safer when new columns may contain sensitive
+data.
 
 `expireTime`, when present, is an exclusive upper bound evaluated against the REST server clock.
 At `now >= expireTime`, the assignment must not authorize access. Expired direct assignments may
@@ -174,23 +234,23 @@ The following examples assume a Spark catalog named `paimon`. Replace it with th
 
 `grant_permission` returns one row with `result = true` when the server accepts the assignment.
 
-Grant catalog access:
+Grant permission to create databases in the catalog:
 
 ```sql
 CALL paimon.sys.grant_permission(
   resource_type => 'CATALOG',
-  access => 'USE_CATALOG',
+  access => 'CREATEDATABASE',
   principal => 'role:catalog_user'
 );
 ```
 
-Grant a database privilege with an optional expiration time:
+Grant permission to create views in a database with an optional expiration time:
 
 ```sql
 CALL paimon.sys.grant_permission(
   resource_type => 'DATABASE',
   database => 'sales',
-  access => 'CREATE_TABLE',
+  access => 'CREATEVIEW',
   principal => 'role:data_engineer',
   expire_time => '2027-01-01T00:00:00Z'
 );
@@ -211,7 +271,7 @@ CALL paimon.sys.grant_permission(
   resource_type => 'FUNCTION',
   database => 'sales',
   function => 'calculate_tax',
-  access => 'EXECUTE',
+  access => 'SELECT',
   principal => 'role:analyst'
 );
 
@@ -221,6 +281,37 @@ CALL paimon.sys.grant_permission(
   view => 'daily_orders',
   access => 'SELECT',
   principal => 'service:reporting_job'
+);
+```
+
+Grant access to selected columns. This requires table query authorization; named arguments are
+recommended because the two column range modes are mutually exclusive:
+
+```sql
+ALTER TABLE paimon.sales.orders
+SET TBLPROPERTIES ('query-auth.enabled' = 'true');
+
+CALL paimon.sys.grant_permission(
+  resource_type => 'COLUMN',
+  database => 'sales',
+  table => 'orders',
+  access => 'SELECT',
+  principal => 'role:analyst',
+  column_names => array('order_id', 'region')
+);
+```
+
+Use `excluded_column_names` for a denylist. Repeating the grant replaces the preceding allowlist in
+one operation:
+
+```sql
+CALL paimon.sys.grant_permission(
+  resource_type => 'COLUMN',
+  database => 'sales',
+  table => 'orders',
+  access => 'SELECT',
+  principal => 'role:analyst',
+  excluded_column_names => array('email', 'phone_number')
 );
 ```
 
@@ -242,6 +333,20 @@ Filter by principal or access:
 ```sql
 CALL paimon.sys.list_permissions(
   resource_type => 'TABLE',
+  database => 'sales',
+  table => 'orders',
+  principal => 'role:analyst',
+  access => 'SELECT'
+);
+```
+
+List the column range attached to a principal. The result exposes `column_names` and
+`excluded_column_names` as `ARRAY<STRING>` columns, with exactly one populated for a `COLUMN`
+assignment:
+
+```sql
+CALL paimon.sys.list_permissions(
+  resource_type => 'COLUMN',
   database => 'sales',
   table => 'orders',
   principal => 'role:analyst',
@@ -276,6 +381,18 @@ CALL paimon.sys.revoke_permission(
 ```
 
 Repeating the same call succeeds even when the assignment is already absent.
+
+Column revocation uses the containing table identity and removes the complete range:
+
+```sql
+CALL paimon.sys.revoke_permission(
+  resource_type => 'COLUMN',
+  database => 'sales',
+  table => 'orders',
+  access => 'SELECT',
+  principal => 'role:analyst'
+);
+```
 
 ### Create row-filter policies
 
@@ -426,5 +543,5 @@ CALL paimon.sys.drop_policy(
 ```
 
 Creating, replacing, dropping, or inspecting permissions and policies requires the server to
-authorize the caller for `MANAGE_PERMISSIONS` on the relevant resource. Authentication, principal
+authorize the caller for `GRANT` on the relevant resource. Authentication, principal
 membership, policy persistence, schema validation, and audit logging remain REST server concerns.

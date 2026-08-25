@@ -38,6 +38,10 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 /**
  * Direct permission assignment on one exact resource.
  *
+ * <p>A {@link ResourceType#COLUMN COLUMN} assignment carries one {@link PermissionColumns} value.
+ * The column range is mutable assignment content rather than identity: granting the same resource,
+ * access, and principal replaces the complete range.
+ *
  * <p>{@code expireTime}, when present, is an exclusive authorization upper bound evaluated against
  * the server clock. At or after that instant, the assignment must not authorize access, although an
  * expired record may remain listable until cleanup.
@@ -52,6 +56,7 @@ public class PermissionAssignment {
     private static final String FIELD_RESOURCE = "resource";
     private static final String FIELD_ACCESS = "access";
     private static final String FIELD_PRINCIPAL = "principal";
+    private static final String FIELD_COLUMNS = "columns";
     private static final String FIELD_EXPIRE_TIME = "expireTime";
 
     @JsonProperty(FIELD_RESOURCE)
@@ -64,20 +69,38 @@ public class PermissionAssignment {
     private final String principal;
 
     @Nullable
+    @JsonProperty(FIELD_COLUMNS)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private final PermissionColumns columns;
+
+    @Nullable
     @JsonProperty(FIELD_EXPIRE_TIME)
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private final String expireTime;
 
     @JsonCreator
-    @ConstructorProperties({FIELD_RESOURCE, FIELD_ACCESS, FIELD_PRINCIPAL, FIELD_EXPIRE_TIME})
+    @ConstructorProperties({
+        FIELD_RESOURCE,
+        FIELD_ACCESS,
+        FIELD_PRINCIPAL,
+        FIELD_COLUMNS,
+        FIELD_EXPIRE_TIME
+    })
     public PermissionAssignment(
             @JsonProperty(FIELD_RESOURCE) PermissionResource resource,
             @JsonProperty(FIELD_ACCESS) String access,
             @JsonProperty(FIELD_PRINCIPAL) String principal,
+            @Nullable @JsonProperty(FIELD_COLUMNS) PermissionColumns columns,
             @Nullable @JsonProperty(FIELD_EXPIRE_TIME) String expireTime) {
         this.resource = checkNotNull(resource, "resource cannot be null");
         this.access = PermissionAccess.canonicalize(resource, access);
         this.principal = validatePrincipal(principal);
+        checkArgument(
+                resource.getType() == ResourceType.COLUMN ? columns != null : columns == null,
+                resource.getType() == ResourceType.COLUMN
+                        ? "columns is required for COLUMN resource."
+                        : "columns is only valid for COLUMN resource.");
+        this.columns = columns;
         if (expireTime != null) {
             try {
                 Instant instant = Instant.parse(expireTime);
@@ -90,6 +113,14 @@ public class PermissionAssignment {
             }
         }
         this.expireTime = expireTime;
+    }
+
+    public PermissionAssignment(
+            PermissionResource resource,
+            String access,
+            String principal,
+            @Nullable String expireTime) {
+        this(resource, access, principal, null, expireTime);
     }
 
     @JsonGetter(FIELD_RESOURCE)
@@ -107,7 +138,8 @@ public class PermissionAssignment {
         return principal;
     }
 
-    static String validatePrincipal(String principal) {
+    /** Validates and returns an opaque principal identifier. */
+    public static String validatePrincipal(String principal) {
         checkArgument(
                 principal != null && !principal.trim().isEmpty(), "principal cannot be empty.");
         checkArgument(
@@ -115,6 +147,13 @@ public class PermissionAssignment {
                 "principal must contain at most %s characters.",
                 MAX_PRINCIPAL_LENGTH);
         return principal;
+    }
+
+    /** Returns the selected or excluded column range for a COLUMN assignment. */
+    @Nullable
+    @JsonGetter(FIELD_COLUMNS)
+    public PermissionColumns getColumns() {
+        return columns;
     }
 
     /** Returns the exclusive authorization upper bound, or null for no expiry. */

@@ -45,7 +45,6 @@ import org.apache.paimon.management.DataPolicy;
 import org.apache.paimon.management.ListPermissionsRequest;
 import org.apache.paimon.management.PermissionAssignment;
 import org.apache.paimon.management.PermissionResource;
-import org.apache.paimon.management.PolicyIdentity;
 import org.apache.paimon.management.ResourceType;
 import org.apache.paimon.management.RowFilter;
 import org.apache.paimon.operation.Lock;
@@ -1078,6 +1077,10 @@ public class RESTCatalogServer {
                             throw new Catalog.TableNoPermissionException(identifier);
                         }
                     });
+        }
+        if (!RESTColumnPermissionSupport.canSelect(
+                permissionStore, queryPrincipals, identifier, metadata, requestBody.select())) {
+            throw new Catalog.TableNoPermissionException(identifier);
         }
         List<Predicate> rowFilters =
                 new ArrayList<>(
@@ -3317,24 +3320,27 @@ public class RESTCatalogServer {
             if (validation != null) {
                 return validation;
             }
+            validation = validateColumnAssignment(assignment);
+            if (validation != null) {
+                return validation;
+            }
             permissionStore.put(assignment);
             return new MockResponse().setResponseCode(200);
         }
 
         if ("POST".equals(method) && (permissionUri + "/revoke").equals(resourcePath)) {
             RevokePermissionRequest request = RESTApi.fromJson(data, RevokePermissionRequest.class);
-            MockResponse authorization =
-                    validateManagementPermission(request.identity().getResource());
+            MockResponse authorization = validateManagementPermission(request.getResource());
             if (authorization != null) {
                 return authorization;
             }
             MockResponse validation =
-                    validateResourceAndPrincipal(
-                            request.identity().getResource(), request.identity().getPrincipal());
+                    validateResourceAndPrincipal(request.getResource(), request.getPrincipal());
             if (validation != null) {
                 return validation;
             }
-            permissionStore.remove(request.identity());
+            permissionStore.remove(
+                    request.getResource(), request.getAccess(), request.getPrincipal());
             return new MockResponse().setResponseCode(200);
         }
 
@@ -3359,6 +3365,24 @@ public class RESTCatalogServer {
     }
 
     @Nullable
+    private MockResponse validateColumnAssignment(PermissionAssignment assignment) {
+        if (assignment.getResource().getType() != ResourceType.COLUMN) {
+            return null;
+        }
+        PermissionResource resource = assignment.getResource();
+        Identifier identifier = Identifier.create(resource.getDatabase(), resource.getTable());
+        TableMetadata metadata = tableMetadataStore.get(identifier.getFullName());
+        RESTColumnPermissionSupport.ValidationError error =
+                RESTColumnPermissionSupport.validate(assignment, metadata);
+        return error == null
+                ? null
+                : mockResponse(
+                        new ErrorResponse(
+                                error.resourceType, error.resourceName, error.message, error.code),
+                        error.code);
+    }
+
+    @Nullable
     private MockResponse validateResource(PermissionResource resource) {
         boolean exists;
         switch (resource.getType()) {
@@ -3369,6 +3393,7 @@ public class RESTCatalogServer {
                 exists = databaseStore.containsKey(resource.getDatabase());
                 break;
             case TABLE:
+            case COLUMN:
                 exists =
                         tableMetadataStore.containsKey(
                                 Identifier.create(resource.getDatabase(), resource.getTable())
@@ -3433,6 +3458,7 @@ public class RESTCatalogServer {
             case DATABASE:
                 return resource.getDatabase();
             case TABLE:
+            case COLUMN:
                 return resource.getDatabase() + "." + resource.getTable();
             case FUNCTION:
                 return resource.getDatabase() + "." + resource.getFunction();
@@ -3518,7 +3544,7 @@ public class RESTCatalogServer {
 
         if ("POST".equals(method)) {
             DataPolicy policy = RESTApi.fromJson(data, PolicyRequest.class).policy(path.resource);
-            PolicyIdentity identity = PolicyIdentity.fromPolicy(policy);
+            String resourceName = policyResourceName(policy);
             synchronized (policyLock(tableUuid)) {
                 MockResponse targetError = validatePolicyTableVersion(path.resource, tableUuid);
                 if (targetError != null) {
@@ -3534,7 +3560,7 @@ public class RESTCatalogServer {
                     return mockResponse(
                             new ErrorResponse(
                                     ErrorResponse.RESOURCE_TYPE_POLICY,
-                                    identity.resourceName(),
+                                    resourceName,
                                     "Policy already exists.",
                                     409),
                             409);
@@ -3561,21 +3587,26 @@ public class RESTCatalogServer {
         }
 
         if ("DELETE".equals(method)) {
-            PolicyIdentity identity =
-                    RESTApi.fromJson(data, DropPolicyRequest.class).identity(path.resource);
+            DropPolicyRequest request = RESTApi.fromJson(data, DropPolicyRequest.class);
             DataPolicy existing;
             synchronized (policyLock(tableUuid)) {
                 MockResponse targetError = validatePolicyTableVersion(path.resource, tableUuid);
                 if (targetError != null) {
                     return targetError;
                 }
-                existing = policyStore.remove(new PolicyKey(tableUuid, identity));
+                existing =
+                        policyStore.remove(
+                                new PolicyKey(
+                                        tableUuid,
+                                        request.getType(),
+                                        request.getPrincipal(),
+                                        request.getColumn()));
             }
             if (existing == null) {
                 return mockResponse(
                         new ErrorResponse(
                                 ErrorResponse.RESOURCE_TYPE_POLICY,
-                                identity.resourceName(),
+                                policyResourceName(request),
                                 "Policy does not exist.",
                                 404),
                         404);
@@ -3626,12 +3657,27 @@ public class RESTCatalogServer {
             return mockResponse(
                     new ErrorResponse(
                             ErrorResponse.RESOURCE_TYPE_POLICY,
-                            PolicyIdentity.fromPolicy(policy).resourceName(),
+                            policyResourceName(policy),
                             e.getMessage(),
                             400),
                     400);
         }
         return null;
+    }
+
+    private static String policyResourceName(DataPolicy policy) {
+        ColumnMask columnMask = policy.getColumnMask();
+        return policy.type().name()
+                + ":"
+                + policy.getPrincipal()
+                + (columnMask == null ? "" : ":" + columnMask.getOnColumn());
+    }
+
+    private static String policyResourceName(DropPolicyRequest request) {
+        return request.getType().name()
+                + ":"
+                + request.getPrincipal()
+                + (request.getColumn() == null ? "" : ":" + request.getColumn());
     }
 
     private String tableUuid(PermissionResource resource) {

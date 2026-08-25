@@ -73,6 +73,8 @@ class PermissionProcedureTest extends PaimonSparkTestWithRestCatalogBase {
       "view",
       "access",
       "principal",
+      "column_names",
+      "excluded_column_names",
       "expire_time",
       "next_page_token")
     val assignments = listed.collect()
@@ -83,8 +85,10 @@ class PermissionProcedureTest extends PaimonSparkTestWithRestCatalogBase {
     assertThat(assignment.getString(2)).isEqualTo("orders")
     assertThat(assignment.getString(5)).isEqualTo("SELECT")
     assertThat(assignment.getString(6)).isEqualTo("analyst")
-    assertThat(assignment.getString(7)).isEqualTo("2028-01-01T00:00:00Z")
+    assertThat(assignment.isNullAt(7)).isTrue
     assertThat(assignment.isNullAt(8)).isTrue
+    assertThat(assignment.getString(9)).isEqualTo("2028-01-01T00:00:00Z")
+    assertThat(assignment.isNullAt(10)).isTrue
 
     val revoke = """CALL sys.revoke_permission(
                    |  resource_type => 'TABLE',
@@ -114,7 +118,7 @@ class PermissionProcedureTest extends PaimonSparkTestWithRestCatalogBase {
       .sql("CALL sys.list_permissions(resource_type => 'CATALOG', max_results => 1)")
       .head()
     assertThat(first.getString(6)).isEqualTo("first")
-    assertThat(first.getString(8)).isEqualTo("1")
+    assertThat(first.getString(10)).isEqualTo("1")
 
     val second = spark
       .sql(
@@ -122,7 +126,116 @@ class PermissionProcedureTest extends PaimonSparkTestWithRestCatalogBase {
       )
       .head()
     assertThat(second.getString(6)).isEqualTo("second")
-    assertThat(second.isNullAt(8)).isTrue
+    assertThat(second.isNullAt(10)).isTrue
+  }
+
+  test("grant, replace, list and enforce column permissions") {
+    restCatalogServer.setQueryPrincipals(Collections.singleton("analyst"))
+
+    checkAnswer(
+      spark.sql("""CALL sys.grant_permission(
+                  |  resource_type => 'COLUMN',
+                  |  access => 'SELECT',
+                  |  principal => 'analyst',
+                  |  database => 'sales',
+                  |  table => 'orders',
+                  |  column_names => array('id', 'region'))
+                  |""".stripMargin),
+      Row(true)
+    )
+
+    val included = spark.sql("""CALL sys.list_permissions(
+                               |  resource_type => 'COLUMN',
+                               |  database => 'sales',
+                               |  table => 'orders',
+                               |  principal => 'analyst')
+                               |""".stripMargin)
+    assertThat(included.columns).containsExactly(
+      "resource_type",
+      "database",
+      "table",
+      "function",
+      "view",
+      "access",
+      "principal",
+      "column_names",
+      "excluded_column_names",
+      "expire_time",
+      "next_page_token")
+    assertThat(included.head().getSeq[String](7)).isEqualTo(Seq("id", "region"))
+    assertThat(included.head().isNullAt(8)).isTrue
+
+    checkAnswer(spark.sql("SELECT id, region FROM paimon.sales.orders"), Nil)
+    val deniedEmail = intercept[Exception] {
+      spark.sql("SELECT email FROM paimon.sales.orders").collect()
+    }
+    assertThat(deniedEmail.getMessage).contains("permission")
+
+    checkAnswer(
+      spark.sql("""CALL sys.grant_permission(
+                  |  resource_type => 'COLUMN',
+                  |  access => 'SELECT',
+                  |  principal => 'analyst',
+                  |  database => 'sales',
+                  |  table => 'orders',
+                  |  excluded_column_names => array('region'))
+                  |""".stripMargin),
+      Row(true)
+    )
+    checkAnswer(spark.sql("SELECT id, email FROM paimon.sales.orders"), Nil)
+    val deniedRegion = intercept[Exception] {
+      spark.sql("SELECT region FROM paimon.sales.orders").collect()
+    }
+    assertThat(deniedRegion.getMessage).contains("permission")
+
+    restCatalogServer.registerManagementPrincipal("limited")
+    restCatalogServer.setQueryPrincipals(new java.util.HashSet(Arrays.asList("analyst", "limited")))
+    checkAnswer(
+      spark.sql("""CALL sys.grant_permission(
+                  |  resource_type => 'COLUMN', access => 'SELECT',
+                  |  principal => 'limited', database => 'sales', table => 'orders',
+                  |  column_names => array('id', 'region'))
+                  |""".stripMargin),
+      Row(true)
+    )
+    checkAnswer(spark.sql("SELECT id FROM paimon.sales.orders"), Nil)
+    val deniedByIntersection = intercept[Exception] {
+      spark.sql("SELECT email FROM paimon.sales.orders").collect()
+    }
+    assertThat(deniedByIntersection.getMessage).contains("permission")
+
+    checkAnswer(
+      spark.sql("""CALL sys.revoke_permission(
+                  |  resource_type => 'COLUMN', access => 'SELECT',
+                  |  principal => 'analyst', database => 'sales', table => 'orders')
+                  |""".stripMargin),
+      Row(true)
+    )
+  }
+
+  test("column permission validates query authorization and referenced columns") {
+    spark.sql("CREATE TABLE paimon.sales.disabled_columns (id INT)")
+    val disabled = intercept[Exception] {
+      spark
+        .sql("""CALL sys.grant_permission(
+               |  resource_type => 'COLUMN', access => 'SELECT',
+               |  principal => 'analyst', database => 'sales', table => 'disabled_columns',
+               |  column_names => array('id'))
+               |""".stripMargin)
+        .collect()
+    }
+    assertThat(disabled.getMessage).contains("query-auth.enabled=true")
+
+    val missing = intercept[Exception] {
+      spark
+        .sql("""CALL sys.grant_permission(
+               |  resource_type => 'COLUMN', access => 'SELECT',
+               |  principal => 'analyst', database => 'sales', table => 'orders',
+               |  excluded_column_names => array('missing'))
+               |""".stripMargin)
+        .collect()
+    }
+    assertThat(missing.getMessage).contains("Permission column does not exist")
   }
 
   test("create, replace, apply and idempotently drop table data policies") {
@@ -469,7 +582,7 @@ class PermissionProcedureTest extends PaimonSparkTestWithRestCatalogBase {
     checkAnswer(
       spark.sql(s"""CALL sys.grant_permission(
                    |  resource_type => 'CATALOG',
-                   |  access => 'USE_CATALOG',
+                   |  access => 'CREATEDATABASE',
                    |  principal => '$principal')
                    |""".stripMargin),
       Row(true)
@@ -516,7 +629,7 @@ class PermissionProcedureUnsupportedCatalogTest extends PaimonSparkTestBase {
       spark
         .sql("""CALL sys.grant_permission(
                |  resource_type => 'CATALOG',
-               |  access => 'USE_CATALOG',
+               |  access => 'CREATEDATABASE',
                |  principal => 'admin')
                |""".stripMargin)
         .collect()

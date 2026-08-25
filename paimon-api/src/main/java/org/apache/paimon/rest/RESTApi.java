@@ -30,8 +30,8 @@ import org.apache.paimon.management.DataPolicy;
 import org.apache.paimon.management.ListPermissionsRequest;
 import org.apache.paimon.management.ListPoliciesRequest;
 import org.apache.paimon.management.PermissionAssignment;
-import org.apache.paimon.management.PermissionIdentity;
-import org.apache.paimon.management.PolicyIdentity;
+import org.apache.paimon.management.PermissionResource;
+import org.apache.paimon.management.PolicyType;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -131,6 +131,7 @@ import static org.apache.paimon.rest.RESTFunctionValidator.isValidFunctionName;
 import static org.apache.paimon.rest.RESTUtil.extractPrefixMap;
 import static org.apache.paimon.rest.auth.AuthProviderFactory.createAuthProvider;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
  * REST API for REST Catalog.
@@ -879,10 +880,10 @@ public class RESTApi {
 
     /** Revokes a permission for the configured REST catalog. */
     @Experimental
-    public void revokePermission(PermissionIdentity identity) {
+    public void revokePermission(PermissionResource resource, String access, String principal) {
         client.post(
                 resourcePaths.revokePermission(),
-                new RevokePermissionRequest(identity),
+                new RevokePermissionRequest(resource, access, principal),
                 restAuthFunction);
     }
 
@@ -926,11 +927,17 @@ public class RESTApi {
 
     /** Drops a principal policy from its exact attachment resource. */
     @Experimental
-    public void dropPolicy(PolicyIdentity identity, boolean ignoreIfNotExists) {
+    public void dropPolicy(
+            PermissionResource resource,
+            PolicyType type,
+            String principal,
+            @Nullable String column,
+            boolean ignoreIfNotExists) {
+        checkNotNull(resource, "resource cannot be null").validatePolicyAttachment();
         try {
             client.delete(
-                    resourcePaths.policies(identity.getResource()),
-                    new DropPolicyRequest(identity),
+                    resourcePaths.policies(resource),
+                    new DropPolicyRequest(type, principal, column),
                     restAuthFunction);
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists

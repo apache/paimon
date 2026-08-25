@@ -351,6 +351,7 @@ function validateManagementOpenApi() {
       '503',
     ]),
   );
+  contract.requireResponses('grantPermission', ['409']);
   ['listTablePolicies', 'createTablePolicy', 'createOrReplaceTablePolicy'].forEach((operationId) =>
     contract.requireResponses(operationId, [
       '200',
@@ -382,13 +383,14 @@ function validateManagementOpenApi() {
     'The management contract must be versioned 1.0 and marked experimental',
   );
 
-  const assignmentFields = ['resource', 'access', 'principal', 'expireTime'];
+  const assignmentFields = ['resource', 'access', 'principal', 'columns', 'expireTime'];
   contract.requireProperties('PermissionAssignment', assignmentFields);
   contract.requireRequiredProperties('PermissionAssignment', ['resource', 'access', 'principal']);
   const grantProperties = contract.requireProperties('GrantPermissionRequest', [
     'resource',
     'access',
     'principal',
+    'columns',
     'expireTime',
   ]);
   contract.requireRequiredProperties('GrantPermissionRequest', [
@@ -396,7 +398,7 @@ function validateManagementOpenApi() {
     'access',
     'principal',
   ]);
-  ['columns', 'policy', 'grantOption'].forEach((field) =>
+  ['policy', 'grantOption'].forEach((field) =>
     contract.checkSpec(
       !grantProperties[field],
       `Schema GrantPermissionRequest must omit field: ${field}`,
@@ -454,45 +456,40 @@ function validateManagementOpenApi() {
       '#/components/schemas/Principal',
     'PrincipalQuery must reference Principal',
   );
-  requireExactEnum(contract, 'ResourceType', ['CATALOG', 'DATABASE', 'TABLE', 'FUNCTION', 'VIEW']);
+  requireExactEnum(contract, 'ResourceType', [
+    'CATALOG',
+    'DATABASE',
+    'TABLE',
+    'COLUMN',
+    'FUNCTION',
+    'VIEW',
+  ]);
   requireExactEnum(contract, 'PolicyType', ['ROW_FILTER', 'COLUMN_MASKING']);
 
-  const accessAlternatives = contract.schema('PermissionAccess').oneOf || [];
-  const builtInAccess = accessAlternatives.find((alternative) => alternative.enum);
-  const extensionAccess = accessAlternatives.find((alternative) => alternative.pattern);
+  const permissionAccess = contract.schema('PermissionAccess');
   const expectedAccesses = [
-    'USE_CATALOG',
-    'CREATE_DATABASE',
-    'USE_DATABASE',
-    'CREATE_TABLE',
-    'CREATE_VIEW',
-    'CREATE_FUNCTION',
-    'SELECT',
-    'INSERT',
-    'UPDATE',
-    'DELETE',
+    'ALL',
+    'CREATEDATABASE',
+    'DESCRIBE',
     'ALTER',
     'DROP',
-    'EXECUTE',
-    'MANAGE_PERMISSIONS',
+    'CREATETABLE',
+    'CREATEFUNCTION',
+    'CREATEVIEW',
+    'LIST',
+    'SELECT',
+    'UPDATE',
+    'GRANT',
   ];
   contract.checkSpec(
-    builtInAccess &&
-      builtInAccess.enum.length === expectedAccesses.length &&
-      expectedAccesses.every((access) => builtInAccess.enum.includes(access)),
-    'PermissionAccess must define the complete built-in access enum',
-  );
-  const extensionPattern = extensionAccess && new RegExp(extensionAccess.pattern);
-  contract.checkSpec(
-    extensionPattern &&
-      extensionPattern.test('VENDOR.EXAMPLE/SOME_ACCESS') &&
-      !extensionPattern.test('UNKNOWN') &&
-      !extensionPattern.test('vendor.example/SOME_ACCESS'),
-    'PermissionAccess must accept only canonical upper-case namespaced extensions',
+    permissionAccess.type === 'string' &&
+      permissionAccess.enum.length === expectedAccesses.length &&
+      expectedAccesses.every((access) => permissionAccess.enum.includes(access)),
+    'PermissionAccess must define the complete data access enum',
   );
   contract.checkSpec(
-    accessAlternatives.every((alternative) => alternative.maxLength === 32),
-    'Every PermissionAccess alternative must fit the 32-character persistence field',
+    permissionAccess.maxLength === 32,
+    'PermissionAccess must fit the 32-character persistence field',
   );
   ['PermissionAssignment', 'GrantPermissionRequest', 'RevokePermissionRequest'].forEach(
     (schemaName) =>
@@ -507,6 +504,62 @@ function validateManagementOpenApi() {
       '#/components/schemas/PermissionAccess',
     'AccessQuery must reference PermissionAccess',
   );
+  contract.requireSchemaReference('PermissionResource', 'oneOf', 'ColumnResource');
+  const columnResource = contract.requireProperties('ColumnResource', [
+    'type',
+    'database',
+    'table',
+  ]);
+  contract.requireRequiredProperties('ColumnResource', ['type', 'database', 'table']);
+  contract.checkSpec(
+    columnResource.type.const === 'COLUMN',
+    'ColumnResource must use the COLUMN discriminator',
+  );
+  const permissionColumns = contract.requireProperties('PermissionColumns', [
+    'columnNames',
+    'excludedColumnNames',
+  ]);
+  const permissionColumnsDescription = contract
+    .schema('PermissionColumns')
+    .description.toLowerCase()
+    .replace(/\s+/g, ' ');
+  ['intersected', 'fails the query', 'query authorization'].forEach((phrase) =>
+    contract.checkSpec(
+      permissionColumnsDescription.includes(phrase),
+      `PermissionColumns semantics are missing: ${phrase}`,
+    ),
+  );
+  ['columnNames', 'excludedColumnNames'].forEach((field) => {
+    const definition = permissionColumns[field];
+    contract.checkSpec(
+      definition.type === 'array' &&
+        definition.minItems === 1 &&
+        definition.uniqueItems === true &&
+        definition.items.type === 'string' &&
+        definition.items.minLength === 1,
+      `PermissionColumns.${field} must be a non-empty unique string array`,
+    );
+  });
+  const columnAlternatives = contract.schema('PermissionColumns').oneOf || [];
+  ['columnNames', 'excludedColumnNames'].forEach((field) =>
+    contract.checkSpec(
+      columnAlternatives.some(
+        (alternative) =>
+          alternative.required &&
+          alternative.required.length === 1 &&
+          alternative.required[0] === field,
+      ),
+      `PermissionColumns must define the ${field} alternative`,
+    ),
+  );
+  ['PermissionAssignment', 'GrantPermissionRequest'].forEach((schemaName) => {
+    const properties = contract.requireProperties(schemaName, ['columns']);
+    contract.checkSpec(
+      properties.columns.$ref === '#/components/schemas/PermissionColumns',
+      `${schemaName}.columns must reference PermissionColumns`,
+    );
+    contract.requireSchemaReference(schemaName, 'allOf', 'ColumnAssignmentConstraint');
+  });
   ['DatabaseQuery', 'TableQuery', 'FunctionQuery', 'ViewQuery'].forEach((parameterName) => {
     const locatorQuery = contract.spec.components.parameters[parameterName];
     contract.checkSpec(

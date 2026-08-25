@@ -21,7 +21,7 @@ package org.apache.paimon.spark.procedure;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.DelegateCatalog;
 import org.apache.paimon.management.PermissionAssignment;
-import org.apache.paimon.management.PermissionIdentity;
+import org.apache.paimon.management.PermissionColumns;
 import org.apache.paimon.management.PermissionManagement;
 import org.apache.paimon.management.PermissionResource;
 import org.apache.paimon.management.PolicyManagement;
@@ -75,24 +75,14 @@ abstract class BasePermissionProcedure extends BaseProcedure {
             @Nullable String table,
             @Nullable String function,
             @Nullable String view,
+            @Nullable PermissionColumns columns,
             @Nullable String expireTime) {
         return new PermissionAssignment(
                 resource(resourceType, database, table, function, view),
                 access,
                 principal,
+                columns,
                 emptyToNull(expireTime));
-    }
-
-    protected static PermissionIdentity identity(
-            ResourceType resourceType,
-            String access,
-            String principal,
-            @Nullable String database,
-            @Nullable String table,
-            @Nullable String function,
-            @Nullable String view) {
-        return new PermissionIdentity(
-                resource(resourceType, database, table, function, view), access, principal);
     }
 
     protected static PermissionResource resource(

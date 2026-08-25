@@ -21,7 +21,7 @@ package org.apache.paimon.rest;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.management.ListPermissionsRequest;
 import org.apache.paimon.management.PermissionAssignment;
-import org.apache.paimon.management.PermissionIdentity;
+import org.apache.paimon.management.PermissionColumns;
 import org.apache.paimon.management.PermissionManagement;
 import org.apache.paimon.management.PermissionResource;
 import org.apache.paimon.management.ResourceType;
@@ -39,6 +39,7 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -147,7 +148,7 @@ public class RESTPermissionManagementTest {
     void testGrantAndRevokeUseStructuredWireShapes() throws Exception {
         PermissionAssignment assignment = assignment("analyst");
         management.grantPermission(assignment);
-        management.revokePermission(PermissionIdentity.fromAssignment(assignment));
+        management.revokePermission(assignment.getResource(), "select", assignment.getPrincipal());
 
         Map<?, ?> grant = RESTApi.fromJson(grantBody.get(), Map.class);
         Map<?, ?> grantResource = (Map<?, ?>) grant.get("resource");
@@ -165,6 +166,7 @@ public class RESTPermissionManagementTest {
         assertThat(revokeResource.get("type")).isEqualTo("TABLE");
         assertThat(revokeResource.get("database")).isEqualTo("sales");
         assertThat(revokeResource.get("table")).isEqualTo("orders");
+        assertThat(revoke.get("access")).isEqualTo("SELECT");
         assertThat(revoke.get("principal")).isEqualTo("analyst");
         assertThat(revoke.containsKey("expireTime")).isFalse();
         assertThat(revoke.containsKey("grantOption")).isFalse();
@@ -178,11 +180,34 @@ public class RESTPermissionManagementTest {
     }
 
     @Test
+    void testColumnGrantCarriesRangeButRevokeUsesOnlyIdentity() throws Exception {
+        PermissionAssignment assignment =
+                new PermissionAssignment(
+                        new PermissionResource(ResourceType.COLUMN, "sales", "orders", null, null),
+                        "SELECT",
+                        "analyst",
+                        new PermissionColumns(Arrays.asList("id", "region"), null),
+                        null);
+
+        management.grantPermission(assignment);
+        Map<?, ?> grant = RESTApi.fromJson(grantBody.get(), Map.class);
+        assertThat(((Map<?, ?>) grant.get("columns")).get("columnNames"))
+                .isEqualTo(Arrays.asList("id", "region"));
+
+        management.revokePermission(
+                assignment.getResource(), assignment.getAccess(), assignment.getPrincipal());
+        Map<?, ?> revoke = RESTApi.fromJson(revokeBody.get(), Map.class);
+        assertThat(((Map<?, ?>) revoke.get("resource")).get("type")).isEqualTo("COLUMN");
+        assertThat(revoke.containsKey("columns")).isFalse();
+    }
+
+    @Test
     void testRepeatedRevokeIsIdempotent() {
         PermissionAssignment assignment = assignment("missing");
-        PermissionIdentity identity = PermissionIdentity.fromAssignment(assignment);
-        management.revokePermission(identity);
-        management.revokePermission(identity);
+        management.revokePermission(
+                assignment.getResource(), assignment.getAccess(), assignment.getPrincipal());
+        management.revokePermission(
+                assignment.getResource(), assignment.getAccess(), assignment.getPrincipal());
 
         assertThat(revokeCalls).hasValue(2);
     }

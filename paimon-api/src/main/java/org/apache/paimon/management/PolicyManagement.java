@@ -21,6 +21,8 @@ package org.apache.paimon.management;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.annotation.Experimental;
 
+import javax.annotation.Nullable;
+
 /** Control-plane contract for row-filter and column-masking policies. */
 @Experimental
 public interface PolicyManagement {
@@ -31,5 +33,10 @@ public interface PolicyManagement {
 
     void createOrReplacePolicy(DataPolicy policy);
 
-    void dropPolicy(PolicyIdentity identity, boolean ignoreIfNotExists);
+    void dropPolicy(
+            PermissionResource resource,
+            PolicyType type,
+            String principal,
+            @Nullable String column,
+            boolean ignoreIfNotExists);
 }

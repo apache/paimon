@@ -27,39 +27,30 @@ import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Pattern;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
-/**
- * Built-in access names and validation for permission assignments.
- *
- * <p>Java callers may use any letter case. Values are canonicalized to the upper-case REST wire
- * representation; server extensions must use the namespaced {@code NAMESPACE/ACCESS} form.
- */
+/** Built-in access names and validation for permission assignments. */
 @Experimental
 public final class PermissionAccess {
 
     /** Maximum wire length supported by the portable permission storage contract. */
     public static final int MAX_LENGTH = 32;
 
-    public static final String USE_CATALOG = "USE_CATALOG";
-    public static final String CREATE_DATABASE = "CREATE_DATABASE";
-    public static final String USE_DATABASE = "USE_DATABASE";
-    public static final String CREATE_TABLE = "CREATE_TABLE";
-    public static final String CREATE_VIEW = "CREATE_VIEW";
-    public static final String CREATE_FUNCTION = "CREATE_FUNCTION";
-    public static final String SELECT = "SELECT";
-    public static final String INSERT = "INSERT";
-    public static final String UPDATE = "UPDATE";
-    public static final String DELETE = "DELETE";
+    public static final String ALL = "ALL";
+    public static final String CREATEDATABASE = "CREATEDATABASE";
+    public static final String DESCRIBE = "DESCRIBE";
     public static final String ALTER = "ALTER";
     public static final String DROP = "DROP";
-    public static final String EXECUTE = "EXECUTE";
-    public static final String MANAGE_PERMISSIONS = "MANAGE_PERMISSIONS";
+    public static final String CREATETABLE = "CREATETABLE";
+    public static final String CREATEFUNCTION = "CREATEFUNCTION";
+    public static final String CREATEVIEW = "CREATEVIEW";
+    public static final String LIST = "LIST";
+    public static final String SELECT = "SELECT";
+    public static final String UPDATE = "UPDATE";
+    public static final String GRANT = "GRANT";
 
-    private static final Pattern EXTENSION_ACCESS =
-            Pattern.compile("[A-Z0-9][A-Z0-9._-]*/[A-Z0-9][A-Z0-9._-]*");
     private static final Map<ResourceType, Set<String>> BUILT_INS = builtIns();
 
     private PermissionAccess() {}
@@ -75,53 +66,46 @@ public final class PermissionAccess {
                 canonical.length() <= MAX_LENGTH,
                 "access must contain at most %s characters after canonicalization.",
                 MAX_LENGTH);
-        if (EXTENSION_ACCESS.matcher(canonical).matches()
-                || BUILT_INS.values().stream().anyMatch(values -> values.contains(canonical))) {
+        if (BUILT_INS.values().stream().anyMatch(values -> values.contains(canonical))) {
             return canonical;
         }
-        throw new IllegalArgumentException(
-                String.format(
-                        "Unknown access '%s'. Use a built-in access or a namespaced extension such as vendor.example/SOME_ACCESS.",
-                        canonical));
+        throw new IllegalArgumentException(String.format("Unknown access '%s'.", canonical));
     }
 
     public static String canonicalize(PermissionResource resource, String access) {
+        checkNotNull(resource, "resource cannot be null");
         String canonical = canonicalize(access);
-        if (EXTENSION_ACCESS.matcher(canonical).matches()) {
-            return canonical;
-        }
-
         checkArgument(
                 BUILT_INS.get(resource.getType()).contains(canonical),
-                "Access '%s' is not valid for %s. Use a built-in access or a namespaced extension such as vendor.example/SOME_ACCESS.",
+                "Access '%s' is not valid for %s.",
                 canonical,
                 resource.getType());
         return canonical;
     }
 
     public static Set<String> builtIns(ResourceType type) {
-        return BUILT_INS.get(type);
+        return BUILT_INS.get(checkNotNull(type, "resource type cannot be null"));
     }
 
     private static Map<ResourceType, Set<String>> builtIns() {
         Map<ResourceType, Set<String>> accesses = new EnumMap<>(ResourceType.class);
-        accesses.put(
-                ResourceType.CATALOG, values(USE_CATALOG, CREATE_DATABASE, MANAGE_PERMISSIONS));
+        accesses.put(ResourceType.CATALOG, values(ALL, ALTER, DROP, GRANT, CREATEDATABASE));
         accesses.put(
                 ResourceType.DATABASE,
                 values(
-                        USE_DATABASE,
-                        CREATE_TABLE,
-                        CREATE_VIEW,
-                        CREATE_FUNCTION,
+                        ALL,
+                        DESCRIBE,
                         ALTER,
                         DROP,
-                        MANAGE_PERMISSIONS));
-        accesses.put(
-                ResourceType.TABLE,
-                values(SELECT, INSERT, UPDATE, DELETE, ALTER, DROP, MANAGE_PERMISSIONS));
-        accesses.put(ResourceType.VIEW, values(SELECT, ALTER, DROP, MANAGE_PERMISSIONS));
-        accesses.put(ResourceType.FUNCTION, values(EXECUTE, ALTER, DROP, MANAGE_PERMISSIONS));
+                        GRANT,
+                        CREATETABLE,
+                        CREATEVIEW,
+                        CREATEFUNCTION,
+                        LIST));
+        accesses.put(ResourceType.TABLE, values(ALL, SELECT, UPDATE, ALTER, DROP, GRANT));
+        accesses.put(ResourceType.COLUMN, values(SELECT));
+        accesses.put(ResourceType.VIEW, values(ALL, SELECT, ALTER, DROP, GRANT));
+        accesses.put(ResourceType.FUNCTION, values(ALL, SELECT, ALTER, DROP, GRANT));
         return Collections.unmodifiableMap(accesses);
     }
 

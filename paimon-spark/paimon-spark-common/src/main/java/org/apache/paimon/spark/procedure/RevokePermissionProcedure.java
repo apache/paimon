@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark.procedure;
 
-import org.apache.paimon.management.PermissionIdentity;
+import org.apache.paimon.management.PermissionResource;
 import org.apache.paimon.management.ResourceType;
 
 import org.apache.spark.sql.catalyst.InternalRow;
@@ -68,17 +68,15 @@ public class RevokePermissionProcedure extends BasePermissionProcedure {
     public InternalRow[] call(InternalRow args) {
         ResourceType resourceType =
                 enumValue(args.getString(0), ResourceType.class, PARAMETERS[0].name());
-        PermissionIdentity identity =
-                identity(
+        PermissionResource resource =
+                resource(
                         resourceType,
-                        args.getString(1),
-                        args.getString(2),
                         args.isNullAt(3) ? null : args.getString(3),
                         args.isNullAt(4) ? null : args.getString(4),
                         args.isNullAt(5) ? null : args.getString(5),
                         args.isNullAt(6) ? null : args.getString(6));
 
-        permissionManagement().revokePermission(identity);
+        permissionManagement().revokePermission(resource, args.getString(1), args.getString(2));
         return new InternalRow[] {newInternalRow(true)};
     }
 

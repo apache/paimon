@@ -23,7 +23,6 @@ import org.apache.paimon.management.ColumnMask;
 import org.apache.paimon.management.DataPolicy;
 import org.apache.paimon.management.ListPoliciesRequest;
 import org.apache.paimon.management.PermissionResource;
-import org.apache.paimon.management.PolicyIdentity;
 import org.apache.paimon.management.PolicyManagement;
 import org.apache.paimon.management.PolicyType;
 import org.apache.paimon.management.ResourceType;
@@ -139,7 +138,12 @@ public class RESTPolicyManagementTest {
         DataPolicy policy = policy();
         management.createPolicy(policy);
         management.createOrReplacePolicy(policy);
-        management.dropPolicy(PolicyIdentity.fromPolicy(policy), false);
+        management.dropPolicy(
+                policy.getResource(),
+                policy.type(),
+                policy.getPrincipal(),
+                policy.getColumnMask().getOnColumn(),
+                false);
 
         assertThat(createBody.get()).contains("\"principal\":\"analyst\"");
         assertThat(createBody.get()).doesNotContain("\"resource\"");
@@ -152,18 +156,30 @@ public class RESTPolicyManagementTest {
 
     @Test
     void testDropIfExistsOnlyIgnoresMissingPolicy() {
-        PolicyIdentity identity = PolicyIdentity.fromPolicy(policy());
+        DataPolicy policy = policy();
         deleteError.set(
                 "{\"resourceType\":\"POLICY\",\"resourceName\":"
                         + "\"COLUMN_MASKING:analyst:email\","
                         + "\"message\":\"missing\",\"code\":404}");
 
-        management.dropPolicy(identity, true);
+        management.dropPolicy(
+                policy.getResource(),
+                policy.type(),
+                policy.getPrincipal(),
+                policy.getColumnMask().getOnColumn(),
+                true);
 
         deleteError.set(
                 "{\"resourceType\":\"TABLE\",\"resourceName\":\"orders\","
                         + "\"message\":\"missing table\",\"code\":404}");
-        assertThatThrownBy(() -> management.dropPolicy(identity, true))
+        assertThatThrownBy(
+                        () ->
+                                management.dropPolicy(
+                                        policy.getResource(),
+                                        policy.type(),
+                                        policy.getPrincipal(),
+                                        policy.getColumnMask().getOnColumn(),
+                                        true))
                 .isInstanceOf(NoSuchResourceException.class)
                 .hasMessageContaining("missing table");
     }

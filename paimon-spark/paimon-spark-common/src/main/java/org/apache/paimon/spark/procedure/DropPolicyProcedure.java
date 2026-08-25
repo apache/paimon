@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark.procedure;
 
-import org.apache.paimon.management.PolicyIdentity;
+import org.apache.paimon.management.PermissionResource;
 import org.apache.paimon.management.PolicyType;
 
 import org.apache.spark.sql.catalyst.InternalRow;
@@ -66,14 +66,15 @@ public class DropPolicyProcedure extends BasePolicyProcedure {
 
     @Override
     public InternalRow[] call(InternalRow args) {
-        PolicyIdentity identity =
-                policyIdentity(
-                        args.getString(0),
-                        args.getString(1),
-                        enumValue(args.getString(2), PolicyType.class, PARAMETERS[2].name()),
+        PermissionResource resource = tableResource(args.getString(0), args.getString(1));
+        PolicyType type = enumValue(args.getString(2), PolicyType.class, PARAMETERS[2].name());
+        policyManagement()
+                .dropPolicy(
+                        resource,
+                        type,
                         args.getString(3),
-                        args.isNullAt(4) ? null : args.getString(4));
-        policyManagement().dropPolicy(identity, !args.isNullAt(5) && args.getBoolean(5));
+                        args.isNullAt(4) ? null : args.getString(4),
+                        !args.isNullAt(5) && args.getBoolean(5));
         return new InternalRow[] {newInternalRow(true)};
     }
 

@@ -22,9 +22,12 @@ import org.apache.paimon.PagedList;
 import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.management.DataPolicy;
 import org.apache.paimon.management.ListPoliciesRequest;
-import org.apache.paimon.management.PolicyIdentity;
+import org.apache.paimon.management.PermissionResource;
 import org.apache.paimon.management.PolicyManagement;
+import org.apache.paimon.management.PolicyType;
 import org.apache.paimon.rest.responses.ListPoliciesResponse;
+
+import javax.annotation.Nullable;
 
 /** REST implementation of data policy management for a configured catalog prefix. */
 @Experimental
@@ -53,7 +56,12 @@ public class RESTPolicyManagement implements PolicyManagement {
     }
 
     @Override
-    public void dropPolicy(PolicyIdentity identity, boolean ignoreIfNotExists) {
-        api.dropPolicy(identity, ignoreIfNotExists);
+    public void dropPolicy(
+            PermissionResource resource,
+            PolicyType type,
+            String principal,
+            @Nullable String column,
+            boolean ignoreIfNotExists) {
+        api.dropPolicy(resource, type, principal, column, ignoreIfNotExists);
     }
 }

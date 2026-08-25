@@ -19,15 +19,24 @@
 package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.management.PermissionAssignment;
+import org.apache.paimon.management.PermissionColumns;
 import org.apache.paimon.management.ResourceType;
 
 import org.apache.spark.sql.catalyst.InternalRow;
+import org.apache.spark.sql.catalyst.util.ArrayData;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
+import org.apache.spark.unsafe.types.UTF8String;
+
+import javax.annotation.Nullable;
+
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.apache.spark.sql.types.DataTypes.StringType;
+import static org.apache.spark.sql.types.DataTypes.createArrayType;
 
 /** Grants a permission through a REST catalog. */
 public class GrantPermissionProcedure extends BasePermissionProcedure {
@@ -41,7 +50,9 @@ public class GrantPermissionProcedure extends BasePermissionProcedure {
                 ProcedureParameter.optional("table", StringType),
                 ProcedureParameter.optional("function", StringType),
                 ProcedureParameter.optional("view", StringType),
-                ProcedureParameter.optional("expire_time", StringType)
+                ProcedureParameter.optional("expire_time", StringType),
+                ProcedureParameter.optional("column_names", createArrayType(StringType)),
+                ProcedureParameter.optional("excluded_column_names", createArrayType(StringType))
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -81,10 +92,35 @@ public class GrantPermissionProcedure extends BasePermissionProcedure {
                         args.isNullAt(4) ? null : args.getString(4),
                         args.isNullAt(5) ? null : args.getString(5),
                         args.isNullAt(6) ? null : args.getString(6),
+                        columns(args, 8, 9),
                         args.isNullAt(7) ? null : args.getString(7));
 
         permissionManagement().grantPermission(assignment);
         return new InternalRow[] {newInternalRow(true)};
+    }
+
+    @Nullable
+    private static PermissionColumns columns(
+            InternalRow args, int columnNamesPos, int excludedColumnNamesPos) {
+        List<String> columnNames = stringArray(args, columnNamesPos);
+        List<String> excludedColumnNames = stringArray(args, excludedColumnNamesPos);
+        return columnNames == null && excludedColumnNames == null
+                ? null
+                : new PermissionColumns(columnNames, excludedColumnNames);
+    }
+
+    @Nullable
+    private static List<String> stringArray(InternalRow args, int position) {
+        if (args.isNullAt(position)) {
+            return null;
+        }
+        ArrayData array = args.getArray(position);
+        List<String> values = new ArrayList<>(array.numElements());
+        for (int i = 0; i < array.numElements(); i++) {
+            UTF8String value = array.isNullAt(i) ? null : array.getUTF8String(i);
+            values.add(value == null ? null : value.toString());
+        }
+        return values;
     }
 
     public static ProcedureBuilder builder() {

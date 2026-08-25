@@ -30,6 +30,7 @@ public enum ResourceType {
     CATALOG,
     DATABASE,
     TABLE,
+    COLUMN,
     VIEW,
     FUNCTION;
 

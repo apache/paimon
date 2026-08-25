@@ -19,7 +19,7 @@
 package org.apache.paimon.rest.requests;
 
 import org.apache.paimon.annotation.Experimental;
-import org.apache.paimon.management.PermissionIdentity;
+import org.apache.paimon.management.PermissionAccess;
 import org.apache.paimon.management.PermissionResource;
 import org.apache.paimon.rest.RESTRequest;
 
@@ -39,11 +39,9 @@ public class RevokePermissionRequest implements RESTRequest {
     private static final String FIELD_ACCESS = "access";
     private static final String FIELD_PRINCIPAL = "principal";
 
-    private final PermissionIdentity identity;
-
-    public RevokePermissionRequest(PermissionIdentity identity) {
-        this.identity = identity;
-    }
+    private final PermissionResource resource;
+    private final String access;
+    private final String principal;
 
     @JsonCreator
     @ConstructorProperties({FIELD_RESOURCE, FIELD_ACCESS, FIELD_PRINCIPAL})
@@ -51,25 +49,24 @@ public class RevokePermissionRequest implements RESTRequest {
             @JsonProperty(FIELD_RESOURCE) PermissionResource resource,
             @JsonProperty(FIELD_ACCESS) String access,
             @JsonProperty(FIELD_PRINCIPAL) String principal) {
-        this.identity = new PermissionIdentity(resource, access, principal);
+        this.resource = resource;
+        this.access = PermissionAccess.canonicalize(resource, access);
+        this.principal =
+                org.apache.paimon.management.PermissionAssignment.validatePrincipal(principal);
     }
 
     @JsonGetter(FIELD_RESOURCE)
     public PermissionResource getResource() {
-        return identity.getResource();
+        return resource;
     }
 
     @JsonGetter(FIELD_ACCESS)
     public String getAccess() {
-        return identity.getAccess();
+        return access;
     }
 
     @JsonGetter(FIELD_PRINCIPAL)
     public String getPrincipal() {
-        return identity.getPrincipal();
-    }
-
-    public PermissionIdentity identity() {
-        return identity;
+        return principal;
     }
 }

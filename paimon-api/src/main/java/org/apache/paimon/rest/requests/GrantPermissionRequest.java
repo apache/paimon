@@ -20,6 +20,7 @@ package org.apache.paimon.rest.requests;
 
 import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.management.PermissionAssignment;
+import org.apache.paimon.management.PermissionColumns;
 import org.apache.paimon.management.PermissionResource;
 import org.apache.paimon.rest.RESTRequest;
 
@@ -41,6 +42,7 @@ public class GrantPermissionRequest implements RESTRequest {
     private static final String FIELD_RESOURCE = "resource";
     private static final String FIELD_ACCESS = "access";
     private static final String FIELD_PRINCIPAL = "principal";
+    private static final String FIELD_COLUMNS = "columns";
     private static final String FIELD_EXPIRE_TIME = "expireTime";
 
     private final PermissionAssignment assignment;
@@ -50,13 +52,21 @@ public class GrantPermissionRequest implements RESTRequest {
     }
 
     @JsonCreator
-    @ConstructorProperties({FIELD_RESOURCE, FIELD_ACCESS, FIELD_PRINCIPAL, FIELD_EXPIRE_TIME})
+    @ConstructorProperties({
+        FIELD_RESOURCE,
+        FIELD_ACCESS,
+        FIELD_PRINCIPAL,
+        FIELD_COLUMNS,
+        FIELD_EXPIRE_TIME
+    })
     public GrantPermissionRequest(
             @JsonProperty(FIELD_RESOURCE) PermissionResource resource,
             @JsonProperty(FIELD_ACCESS) String access,
             @JsonProperty(FIELD_PRINCIPAL) String principal,
+            @Nullable @JsonProperty(FIELD_COLUMNS) PermissionColumns columns,
             @Nullable @JsonProperty(FIELD_EXPIRE_TIME) String expireTime) {
-        this.assignment = new PermissionAssignment(resource, access, principal, expireTime);
+        this.assignment =
+                new PermissionAssignment(resource, access, principal, columns, expireTime);
     }
 
     public PermissionAssignment assignment() {
@@ -76,6 +86,13 @@ public class GrantPermissionRequest implements RESTRequest {
     @JsonGetter(FIELD_PRINCIPAL)
     public String getPrincipal() {
         return assignment.getPrincipal();
+    }
+
+    @Nullable
+    @JsonGetter(FIELD_COLUMNS)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public PermissionColumns getColumns() {
+        return assignment.getColumns();
     }
 
     @Nullable

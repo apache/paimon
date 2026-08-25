@@ -22,8 +22,8 @@ import org.apache.paimon.PagedList;
 import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.management.ListPermissionsRequest;
 import org.apache.paimon.management.PermissionAssignment;
-import org.apache.paimon.management.PermissionIdentity;
 import org.apache.paimon.management.PermissionManagement;
+import org.apache.paimon.management.PermissionResource;
 import org.apache.paimon.rest.responses.ListPermissionsResponse;
 
 /** REST implementation of permission management, bound to the configured REST catalog prefix. */
@@ -48,7 +48,7 @@ public class RESTPermissionManagement implements PermissionManagement {
     }
 
     @Override
-    public void revokePermission(PermissionIdentity identity) {
-        api.revokePermission(identity);
+    public void revokePermission(PermissionResource resource, String access, String principal) {
+        api.revokePermission(resource, access, principal);
     }
 }
