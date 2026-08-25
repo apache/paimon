@@ -92,6 +92,13 @@ public class SparkConnectorOptions {
                                     + "dynamic partition columns. If false, the query output follows "
                                     + "the table schema order.");
 
+    public static final ConfigOption<Boolean> MERGE_CODEGEN_ENABLED =
+            key("write.merge.codegen.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to enable whole-stage code generation for merge row processing.");
+
     public static final ConfigOption<Integer> DATA_EVOLUTION_UPDATE_CONFLICT_RETRY_MAX_ATTEMPTS =
             key("write.data-evolution.update-conflict-retry.max-attempts")
                     .intType()
