@@ -218,6 +218,18 @@ public interface FileIO extends Serializable, Closeable {
     boolean exists(Path path) throws IOException;
 
     /**
+     * Returns a strict batch-delete capability for the provider serving the given path.
+     *
+     * <p>An empty result is the only signal that callers may use individual deletes instead. The
+     * default performs no storage access and preserves compatibility with existing providers.
+     *
+     * @since 2.1
+     */
+    default Optional<BatchFileDeleter> batchFileDeleter(Path path) throws IOException {
+        return Optional.empty();
+    }
+
+    /**
      * Delete a file.
      *
      * @param path the path to delete
