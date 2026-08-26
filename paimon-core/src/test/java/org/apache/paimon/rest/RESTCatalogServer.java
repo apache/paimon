@@ -1610,6 +1610,7 @@ public class RESTCatalogServer {
                     return mockResponse(response, 200);
                 case "DELETE":
                     catalog.dropDatabase(databaseName, false, true);
+                    removeDatabaseTableState(databaseName);
                     databaseStore.remove(databaseName);
                     return new MockResponse().setResponseCode(200);
                 case "POST":
@@ -1652,6 +1653,31 @@ public class RESTCatalogServer {
             }
         }
         return new MockResponse().setResponseCode(404);
+    }
+
+    private void removeDatabaseTableState(String databaseName) {
+        List<String> tableNames =
+                tableMetadataStore.keySet().stream()
+                        .filter(
+                                tableName ->
+                                        databaseName.equals(
+                                                Identifier.fromString(tableName).getDatabaseName()))
+                        .collect(Collectors.toList());
+        for (String tableName : tableNames) {
+            synchronized (tableLifecycleLocks.lock(tableName)) {
+                TableMetadata metadata = tableMetadataStore.get(tableName);
+                if (metadata == null) {
+                    continue;
+                }
+                synchronized (policyLock(metadata.uuid())) {
+                    if (tableMetadataStore.remove(tableName, metadata)) {
+                        removePolicies(metadata.uuid());
+                        tableLatestSnapshotStore.remove(tableName);
+                        tablePartitionsStore.remove(tableName);
+                    }
+                }
+            }
+        }
     }
 
     private MockResponse tablesHandle(
