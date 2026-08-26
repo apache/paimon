@@ -92,6 +92,10 @@ class AbstractDataTableReadTest {
         assertThat(read.appliedReadType().getFieldNames())
                 .containsExactly("profile", "protected", "seed");
         assertThat(read.appliedReadType().getTypeAt(0)).isEqualTo(prunedProfile);
+
+        read.createAuthedReader(new TableQueryAuthResult(null, Collections.emptyMap()));
+
+        assertThat(read.appliedReadType()).isEqualTo(requestedType);
     }
 
     private static class TestingDataTableRead extends AbstractDataTableRead {

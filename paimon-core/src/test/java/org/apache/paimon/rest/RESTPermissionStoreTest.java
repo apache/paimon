@@ -19,6 +19,7 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.management.PermissionAssignment;
 import org.apache.paimon.management.PermissionColumns;
 import org.apache.paimon.management.PermissionResource;
@@ -158,6 +159,34 @@ class RESTPermissionStoreTest {
                 .extracting(PermissionAssignment::getColumns)
                 .extracting(PermissionColumns::getExcludedColumnNames)
                 .isEqualTo(Arrays.asList("email"));
+    }
+
+    @Test
+    void testColumnSelectionUsesExactTopLevelNamesContainingDots() {
+        RESTPermissionStore store = new RESTPermissionStore();
+        store.put(
+                new PermissionAssignment(
+                        columnResource(),
+                        "SELECT",
+                        ANALYST,
+                        new PermissionColumns(Collections.singletonList("public"), null),
+                        null));
+        TableMetadata metadata =
+                new TableMetadata(
+                        tableSchema(
+                                new DataField(0, "public", DataTypes.STRING()),
+                                new DataField(1, "public.secret", DataTypes.STRING())),
+                        false,
+                        "uuid");
+
+        assertThat(
+                        RESTColumnPermissionSupport.canSelect(
+                                store,
+                                Collections.singleton(ANALYST),
+                                Identifier.create("sales", "orders"),
+                                metadata,
+                                Collections.singletonList("public.secret")))
+                .isFalse();
     }
 
     @Test

@@ -123,6 +123,10 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
 
     protected final RecordReader<InternalRow> createDataReader(
             Split split, @Nullable TableQueryAuthResult authResult) throws IOException {
+        // A TableRead can be reused for multiple splits. Authentication may have expanded the
+        // physical projection for the previous split, so always restore the logical projection
+        // before applying the current split's authorization dependencies.
+        applyReadType(currentReadType());
         RecordReader<InternalRow> reader;
         if (authResult == null) {
             reader = reader(split);

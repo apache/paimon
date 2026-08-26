@@ -74,9 +74,7 @@ final class RESTColumnPermissionSupport {
         List<String> selected =
                 selectedColumns == null ? metadata.schema().fieldNames() : selectedColumns;
         for (String column : selected) {
-            int nestedSeparator = column.indexOf('.');
-            String topLevel = nestedSeparator < 0 ? column : column.substring(0, nestedSeparator);
-            if (!included.contains(topLevel)) {
+            if (!included.contains(column)) {
                 return false;
             }
         }
