@@ -401,7 +401,8 @@ class PaimonMicroBatchStreamITCase extends PaimonSparkTestBase {
         try {
           restartedQuery.processAllAvailable()
           checkAnswer(spark.sql("SELECT * FROM T2"), Seq(Row(20, "v_20")))
-        } finally {≠≠
+        } finally {
+          ≠≠
           restartedQuery.stop()
         }
     }
@@ -416,11 +417,11 @@ class PaimonMicroBatchStreamITCase extends PaimonSparkTestBase {
   private def createTableWithoutSnapshot(tableName: String = "T"): FileStoreTable = {
     spark.sql(s"DROP TABLE IF EXISTS $tableName")
     spark.sql(s"""CREATE TABLE $tableName (a INT, b STRING)
-                |TBLPROPERTIES (
-                |  'bucket' = '2',
-                |  'bucket-key' = 'a',
-                |  'file.format' = 'parquet'
-                |)""".stripMargin)
+                 |TBLPROPERTIES (
+                 |  'bucket' = '2',
+                 |  'bucket-key' = 'a',
+                 |  'file.format' = 'parquet'
+                 |)""".stripMargin)
     loadTable(tableName)
   }
 
