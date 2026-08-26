@@ -77,7 +77,7 @@ public class PartitionValuePredicateVisitor implements PredicateReplaceVisitor {
             if (input instanceof FieldRef) {
                 FieldRef ref = (FieldRef) input;
                 int partIdx = tableToPartitionMapping[ref.index()];
-                remappedInputs.add(new FieldRef(partIdx, ref.name(), ref.type()));
+                remappedInputs.add(ref.withIndex(partIdx));
             } else {
                 remappedInputs.add(input);
             }

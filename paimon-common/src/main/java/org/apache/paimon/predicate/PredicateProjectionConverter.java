@@ -92,7 +92,7 @@ public class PredicateProjectionConverter implements PredicateVisitor<Optional<P
                 FieldRef fieldRef = (FieldRef) input;
                 Integer mappedIndex = reversed.get(fieldRef.index());
                 if (mappedIndex != null) {
-                    newInputs.add(new FieldRef(mappedIndex, fieldRef.name(), fieldRef.type()));
+                    newInputs.add(fieldRef.withIndex(mappedIndex));
                 } else {
                     return Optional.empty();
                 }
