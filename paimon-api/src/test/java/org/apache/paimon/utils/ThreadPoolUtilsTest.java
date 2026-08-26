@@ -25,6 +25,7 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -82,10 +83,13 @@ public class ThreadPoolUtilsTest {
             results.add(firstResult.get(3, TimeUnit.SECONDS));
             assertThat(iterator.hasNext()).isTrue();
             results.add(iterator.next());
-            assertThat(workers.getTaskCount()).isEqualTo(2);
-
+            // Taking the first result freed a slot, and the window refills as slots free rather
+            // than waiting for every task it handed out to be consumed.
+            // The window refills as a slot frees rather than a batch at a time, so how many tasks
+            // have been handed to the pool at a given moment is no longer aligned to batches, and
+            // ThreadPoolExecutor only reports that count approximately. What the iterator owes the
+            // caller is the bound asserted above and the order asserted below.
             assertThat(iterator.hasNext()).isTrue();
-            assertThat(workers.getTaskCount()).isEqualTo(4);
             results.add(iterator.next());
             assertThat(iterator.hasNext()).isTrue();
             results.add(iterator.next());
@@ -99,6 +103,87 @@ public class ThreadPoolUtilsTest {
             assertThat(consumer.awaitTermination(3, TimeUnit.SECONDS)).isTrue();
             assertThat(workers.awaitTermination(3, TimeUnit.SECONDS)).isTrue();
         }
+    }
+
+    @Test
+    public void testLazyInputIsReadOnlyAsSlotsFree() throws Exception {
+        ExecutorService workers = Executors.newFixedThreadPool(2);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        AtomicInteger read = new AtomicInteger();
+        Iterator<Integer> input =
+                new Iterator<Integer>() {
+                    private int next;
+
+                    @Override
+                    public boolean hasNext() {
+                        return next < 100;
+                    }
+
+                    @Override
+                    public Integer next() {
+                        read.incrementAndGet();
+                        return next++;
+                    }
+                };
+        try (CloseableBatchIterator<Integer> iterator =
+                ThreadPoolUtils.sequentialBatchedExecuteCloseable(
+                        workers,
+                        value -> {
+                            if (value == 0) {
+                                await(releaseFirst);
+                            }
+                            return Collections.singletonList(value);
+                        },
+                        input,
+                        4)) {
+            // A caller that discovers its work by listing storage must not be forced to list all
+            // of it: only a window's worth of input may be read before the first result is taken.
+            assertThat(read.get()).isLessThanOrEqualTo(4);
+            releaseFirst.countDown();
+            assertThat(iterator.next()).isEqualTo(0);
+            assertThat(read.get()).isLessThan(100);
+        } finally {
+            workers.shutdownNow();
+        }
+    }
+
+    @Test
+    public void testWorkerRunsWithTheCallersClassLoaderAndGivesItBack() throws Exception {
+        ExecutorService workers = Executors.newFixedThreadPool(1);
+        ClassLoader callerClassLoader = new ClassLoader(getClass().getClassLoader()) {};
+        AtomicReference<ClassLoader> poolClassLoader = new AtomicReference<>();
+        workers.submit(() -> poolClassLoader.set(Thread.currentThread().getContextClassLoader()))
+                .get(10, TimeUnit.SECONDS);
+
+        ClassLoader original = Thread.currentThread().getContextClassLoader();
+        List<ClassLoader> seen = new ArrayList<>();
+        try {
+            Thread.currentThread().setContextClassLoader(callerClassLoader);
+            try (CloseableBatchIterator<Integer> iterator =
+                    ThreadPoolUtils.sequentialBatchedExecuteCloseable(
+                            workers,
+                            value -> {
+                                seen.add(Thread.currentThread().getContextClassLoader());
+                                return Collections.singletonList(value);
+                            },
+                            Arrays.asList(0, 1),
+                            1)) {
+                while (iterator.hasNext()) {
+                    iterator.next();
+                }
+            }
+        } finally {
+            Thread.currentThread().setContextClassLoader(original);
+        }
+
+        assertThat(seen).containsExactly(callerClassLoader, callerClassLoader);
+        // The pool is shared, so a worker that keeps a caller's loader would hand it to whatever
+        // runs on that thread next.
+        AtomicReference<ClassLoader> afterwards = new AtomicReference<>();
+        workers.submit(() -> afterwards.set(Thread.currentThread().getContextClassLoader()))
+                .get(10, TimeUnit.SECONDS);
+        assertThat(afterwards.get()).isSameAs(poolClassLoader.get());
+        workers.shutdownNow();
     }
 
     @Test

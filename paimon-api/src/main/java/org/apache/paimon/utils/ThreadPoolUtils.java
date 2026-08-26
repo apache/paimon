@@ -134,7 +134,7 @@ public class ThreadPoolUtils {
     }
 
     /**
-     * Parallel processes one bounded batch at a time and returns results in input order.
+     * Parallel processes a bounded number of inputs at a time and returns results in input order.
      *
      * <p>The caller must close the iterator to cancel unstarted tasks and wait for running tasks.
      */
@@ -143,10 +143,53 @@ public class ThreadPoolUtils {
             Function<U, List<T>> processor,
             List<U> input,
             int queueSize) {
+        return sequentialBatchedExecuteCloseable(executor, processor, input.iterator(), queueSize);
+    }
+
+    /**
+     * Parallel processes a lazily supplied input, keeping at most {@code queueSize} tasks in flight
+     * and returning results in input order. The input is read only as slots free, so a caller that
+     * discovers its work by listing storage does not have to list all of it up front.
+     *
+     * <p>The caller must close the iterator to stop reading input, cancel unstarted tasks and wait
+     * for running tasks. An input that fails to produce its next element reports that by throwing
+     * an unchecked exception, as a processor does.
+     */
+    public static <T, U> CloseableBatchIterator<T> sequentialBatchedExecuteCloseable(
+            ExecutorService executor,
+            Function<U, List<T>> processor,
+            Iterator<U> input,
+            int queueSize) {
+        return newSequentialBatchIterator(executor, processor, input, queueSize, true);
+    }
+
+    /**
+     * As {@link #sequentialBatchedExecuteCloseable}, but closing waits for a task that has already
+     * started instead of interrupting it.
+     *
+     * <p>Use this when a task changes stored state. Interrupting a delete or a write halfway leaves
+     * the caller unable to say whether it took effect, so a caller that has to know the outcome of
+     * everything it handed out cannot let close cancel work that is already running.
+     */
+    public static <T, U> CloseableBatchIterator<T> sequentialBatchedExecuteNonCancellable(
+            ExecutorService executor,
+            Function<U, List<T>> processor,
+            Iterator<U> input,
+            int queueSize) {
+        return newSequentialBatchIterator(executor, processor, input, queueSize, false);
+    }
+
+    private static <T, U> CloseableBatchIterator<T> newSequentialBatchIterator(
+            ExecutorService executor,
+            Function<U, List<T>> processor,
+            Iterator<U> input,
+            int queueSize,
+            boolean cancelRunningOnClose) {
         if (queueSize <= 0) {
             throw new NegativeArraySizeException("queue size should not be negative");
         }
-        return new SequentialBatchIterator<>(executor, processor, input, queueSize);
+        return new SequentialBatchIterator<>(
+                executor, processor, input, queueSize, cancelRunningOnClose);
     }
 
     public static <U> void randomlyOnlyExecute(
@@ -224,7 +267,9 @@ public class ThreadPoolUtils {
 
         private final ExecutorService executor;
         private final Function<U, List<T>> processor;
-        private final Queue<List<U>> batches;
+        private final Iterator<U> input;
+        private final int queueSize;
+        private final boolean cancelRunningOnClose;
         private final Queue<BatchTask<T, U>> activeTasks = new ArrayDeque<>();
 
         private Iterator<T> activeResults = Collections.<T>emptyList().iterator();
@@ -234,11 +279,14 @@ public class ThreadPoolUtils {
         private SequentialBatchIterator(
                 ExecutorService executor,
                 Function<U, List<T>> processor,
-                List<U> input,
-                int queueSize) {
+                Iterator<U> input,
+                int queueSize,
+                boolean cancelRunningOnClose) {
             this.executor = executor;
             this.processor = processor;
-            this.batches = new ArrayDeque<>(Lists.partition(input, queueSize));
+            this.input = input;
+            this.queueSize = queueSize;
+            this.cancelRunningOnClose = cancelRunningOnClose;
         }
 
         @Override
@@ -263,30 +311,31 @@ public class ThreadPoolUtils {
             while (next == null) {
                 if (activeResults.hasNext()) {
                     next = activeResults.next();
-                } else if (!activeTasks.isEmpty()) {
-                    BatchTask<T, U> task = activeTasks.peek();
-                    try {
-                        List<T> results = task.result();
-                        activeTasks.poll();
-                        activeResults = results.iterator();
-                    } catch (RuntimeException | Error failure) {
-                        if (task.failureReported()) {
-                            activeTasks.poll();
-                        }
-                        throw failure;
-                    }
-                } else if (batches.isEmpty()) {
+                    continue;
+                }
+                fillWindow();
+                if (activeTasks.isEmpty()) {
                     return;
-                } else {
-                    submitBatch(batches.poll());
+                }
+                BatchTask<T, U> task = activeTasks.peek();
+                try {
+                    List<T> results = task.result();
+                    activeTasks.poll();
+                    activeResults = results.iterator();
+                } catch (RuntimeException | Error failure) {
+                    if (task.failureReported()) {
+                        activeTasks.poll();
+                    }
+                    throw failure;
                 }
             }
         }
 
-        private void submitBatch(List<U> batch) {
+        /** Hands out work until the window is full or the input is exhausted. */
+        private void fillWindow() {
             ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
-            for (U input : batch) {
-                BatchTask<T, U> task = new BatchTask<>(processor, input, classLoader);
+            while (activeTasks.size() < queueSize && input.hasNext()) {
+                BatchTask<T, U> task = new BatchTask<>(processor, input.next(), classLoader);
                 executor.execute(task);
                 activeTasks.add(task);
             }
@@ -298,13 +347,16 @@ public class ThreadPoolUtils {
                 return;
             }
             closed = true;
-            batches.clear();
 
             Throwable failure = null;
             boolean interrupted = Thread.interrupted();
             for (BatchTask<T, U> task : activeTasks) {
                 try {
-                    task.cancel();
+                    if (cancelRunningOnClose) {
+                        task.cancel();
+                    } else {
+                        task.cancelIfUnstarted();
+                    }
                 } catch (Throwable cleanupFailure) {
                     failure = firstOrSuppressed(cleanupFailure, failure);
                 }
@@ -372,12 +424,16 @@ public class ThreadPoolUtils {
                 runner = Thread.currentThread();
             }
 
+            Thread currentThread = Thread.currentThread();
+            ClassLoader originalClassLoader = currentThread.getContextClassLoader();
             try {
-                Thread.currentThread().setContextClassLoader(classLoader);
+                currentThread.setContextClassLoader(classLoader);
                 result = processor.apply(input);
             } catch (RuntimeException | Error taskFailure) {
                 failure = taskFailure;
             } finally {
+                currentThread.setContextClassLoader(originalClassLoader);
+                Thread.interrupted();
                 synchronized (this) {
                     runner = null;
                     state = FINISHED;
@@ -387,12 +443,22 @@ public class ThreadPoolUtils {
         }
 
         private synchronized void cancel() {
+            if (cancelIfUnstarted()) {
+                return;
+            }
+            if (state == RUNNING) {
+                runner.interrupt();
+            }
+        }
+
+        /** Gives up on a task only while it can still be given up on without interrupting it. */
+        private synchronized boolean cancelIfUnstarted() {
             if (state == CREATED) {
                 state = CANCELLED;
                 completion.countDown();
-            } else if (state == RUNNING) {
-                runner.interrupt();
+                return true;
             }
+            return false;
         }
 
         private List<T> result() {
