@@ -674,7 +674,8 @@ class FormatTableCommitStatisticsTest {
                 null,
                 null,
                 partitionManager,
-                dynamicPartitionOverwrite);
+                dynamicPartitionOverwrite,
+                /* cleanupThreadNum */ 1);
     }
 
     /** An overwrite that names no partition: INSERT OVERWRITE without a PARTITION clause. */

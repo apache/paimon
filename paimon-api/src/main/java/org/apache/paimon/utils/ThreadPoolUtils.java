@@ -134,7 +134,7 @@ public class ThreadPoolUtils {
     }
 
     /**
-     * Parallel processes one bounded batch at a time and returns results in input order.
+     * Processes a bounded number of inputs in parallel and returns results in input order.
      *
      * <p>The caller must close the iterator to cancel unstarted tasks and wait for running tasks.
      */
@@ -143,10 +143,36 @@ public class ThreadPoolUtils {
             Function<U, List<T>> processor,
             List<U> input,
             int queueSize) {
+        return newSequentialBatchIterator(executor, processor, input.iterator(), queueSize, true);
+    }
+
+    /**
+     * As {@link #sequentialBatchedExecuteCloseable}, but closing waits for a task that has already
+     * started instead of interrupting it.
+     *
+     * <p>Use this when a task changes stored state. Interrupting a delete or a write halfway leaves
+     * the caller unable to say whether it took effect, so a caller that has to know the outcome of
+     * everything it handed out cannot let close cancel work that is already running.
+     */
+    public static <T, U> CloseableBatchIterator<T> sequentialBatchedExecuteAwaitRunningTasksOnClose(
+            ExecutorService executor,
+            Function<U, List<T>> processor,
+            Iterator<U> input,
+            int queueSize) {
+        return newSequentialBatchIterator(executor, processor, input, queueSize, false);
+    }
+
+    private static <T, U> CloseableBatchIterator<T> newSequentialBatchIterator(
+            ExecutorService executor,
+            Function<U, List<T>> processor,
+            Iterator<U> input,
+            int queueSize,
+            boolean cancelRunningOnClose) {
         if (queueSize <= 0) {
             throw new NegativeArraySizeException("queue size should not be negative");
         }
-        return new SequentialBatchIterator<>(executor, processor, input, queueSize);
+        return new SequentialBatchIterator<>(
+                executor, processor, input, queueSize, cancelRunningOnClose);
     }
 
     public static <U> void randomlyOnlyExecute(
@@ -224,21 +250,28 @@ public class ThreadPoolUtils {
 
         private final ExecutorService executor;
         private final Function<U, List<T>> processor;
-        private final Queue<List<U>> batches;
+        private final Iterator<U> input;
+        private final int queueSize;
+        private final boolean cancelRunningOnClose;
         private final Queue<BatchTask<T, U>> activeTasks = new ArrayDeque<>();
+        private final Object submissionLock = new Object();
 
         private Iterator<T> activeResults = Collections.<T>emptyList().iterator();
         private T next;
         private boolean closed;
+        private boolean submissionStopped;
 
         private SequentialBatchIterator(
                 ExecutorService executor,
                 Function<U, List<T>> processor,
-                List<U> input,
-                int queueSize) {
+                Iterator<U> input,
+                int queueSize,
+                boolean cancelRunningOnClose) {
             this.executor = executor;
             this.processor = processor;
-            this.batches = new ArrayDeque<>(Lists.partition(input, queueSize));
+            this.input = input;
+            this.queueSize = queueSize;
+            this.cancelRunningOnClose = cancelRunningOnClose;
         }
 
         @Override
@@ -263,32 +296,46 @@ public class ThreadPoolUtils {
             while (next == null) {
                 if (activeResults.hasNext()) {
                     next = activeResults.next();
-                } else if (!activeTasks.isEmpty()) {
-                    BatchTask<T, U> task = activeTasks.peek();
-                    try {
-                        List<T> results = task.result();
-                        activeTasks.poll();
-                        activeResults = results.iterator();
-                    } catch (RuntimeException | Error failure) {
-                        if (task.failureReported()) {
-                            activeTasks.poll();
-                        }
-                        throw failure;
-                    }
-                } else if (batches.isEmpty()) {
+                    continue;
+                }
+                fillWindow();
+                if (activeTasks.isEmpty()) {
                     return;
-                } else {
-                    submitBatch(batches.poll());
+                }
+                BatchTask<T, U> task = activeTasks.peek();
+                try {
+                    List<T> results = task.result();
+                    activeTasks.poll();
+                    activeResults = results.iterator();
+                } catch (RuntimeException | Error failure) {
+                    if (task.failureReported()) {
+                        activeTasks.poll();
+                    }
+                    throw failure;
                 }
             }
         }
 
-        private void submitBatch(List<U> batch) {
+        /** Does not consume more input than the active-task window can hold. */
+        private void fillWindow() {
             ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
-            for (U input : batch) {
-                BatchTask<T, U> task = new BatchTask<>(processor, input, classLoader);
-                executor.execute(task);
-                activeTasks.add(task);
+            while (activeTasks.size() < queueSize) {
+                synchronized (submissionLock) {
+                    if (submissionStopped || !input.hasNext()) {
+                        return;
+                    }
+                    BatchTask<T, U> task =
+                            new BatchTask<>(
+                                    processor, input.next(), classLoader, this::stopSubmission);
+                    executor.execute(task);
+                    activeTasks.add(task);
+                }
+            }
+        }
+
+        private void stopSubmission() {
+            synchronized (submissionLock) {
+                submissionStopped = true;
             }
         }
 
@@ -298,15 +345,23 @@ public class ThreadPoolUtils {
                 return;
             }
             closed = true;
-            batches.clear();
 
             Throwable failure = null;
             boolean interrupted = Thread.interrupted();
             for (BatchTask<T, U> task : activeTasks) {
                 try {
-                    task.cancel();
+                    task.cancelIfUnstarted();
                 } catch (Throwable cleanupFailure) {
                     failure = firstOrSuppressed(cleanupFailure, failure);
+                }
+            }
+            if (cancelRunningOnClose) {
+                for (BatchTask<T, U> task : activeTasks) {
+                    try {
+                        task.interruptIfRunning();
+                    } catch (Throwable cleanupFailure) {
+                        failure = firstOrSuppressed(cleanupFailure, failure);
+                    }
                 }
             }
             for (BatchTask<T, U> task : activeTasks) {
@@ -346,6 +401,7 @@ public class ThreadPoolUtils {
         private final Function<U, List<T>> processor;
         private final U input;
         private final ClassLoader classLoader;
+        private final Runnable stopSubmission;
         private final CountDownLatch completion = new CountDownLatch(1);
 
         private int state = CREATED;
@@ -354,10 +410,15 @@ public class ThreadPoolUtils {
         private Throwable failure;
         private volatile boolean failureReported;
 
-        private BatchTask(Function<U, List<T>> processor, U input, ClassLoader classLoader) {
+        private BatchTask(
+                Function<U, List<T>> processor,
+                U input,
+                ClassLoader classLoader,
+                Runnable stopSubmission) {
             this.processor = processor;
             this.input = input;
             this.classLoader = classLoader;
+            this.stopSubmission = stopSubmission;
         }
 
         @Override
@@ -372,12 +433,23 @@ public class ThreadPoolUtils {
                 runner = Thread.currentThread();
             }
 
+            Thread currentThread = Thread.currentThread();
+            boolean interruptedOnEntry = currentThread.isInterrupted();
+            ClassLoader originalClassLoader = currentThread.getContextClassLoader();
             try {
-                Thread.currentThread().setContextClassLoader(classLoader);
+                currentThread.setContextClassLoader(classLoader);
                 result = processor.apply(input);
             } catch (RuntimeException | Error taskFailure) {
                 failure = taskFailure;
+                stopSubmission.run();
             } finally {
+                currentThread.setContextClassLoader(originalClassLoader);
+                // Reset the flag to its entry state so a cancelled task cannot leak an interrupt
+                // to a reused worker and a direct executor cannot clear its caller's interrupt.
+                Thread.interrupted();
+                if (interruptedOnEntry) {
+                    currentThread.interrupt();
+                }
                 synchronized (this) {
                     runner = null;
                     state = FINISHED;
@@ -386,21 +458,27 @@ public class ThreadPoolUtils {
             }
         }
 
-        private synchronized void cancel() {
-            if (state == CREATED) {
-                state = CANCELLED;
-                completion.countDown();
-            } else if (state == RUNNING) {
+        private synchronized void interruptIfRunning() {
+            if (state == RUNNING) {
                 runner.interrupt();
             }
         }
 
+        private synchronized void cancelIfUnstarted() {
+            if (state == CREATED) {
+                state = CANCELLED;
+                completion.countDown();
+            }
+        }
+
         private List<T> result() {
-            try {
-                completion.await();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new RuntimeException(e);
+            if (completion.getCount() != 0) {
+                try {
+                    completion.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException(e);
+                }
             }
             if (failure != null) {
                 failureReported = true;
