@@ -178,7 +178,7 @@ data.
 `expireTime`, when present, is an exclusive upper bound evaluated against the REST server clock.
 At `now >= expireTime`, the assignment must not authorize access. Expired direct assignments may
 remain visible in listings until server cleanup. Timestamps must not be more precise than
-milliseconds.
+milliseconds; the wire value uses UTC `Z` and contains at most three fractional digits.
 
 Resource objects in this API are wire locators, not persistence identities. Servers must bind direct
 assignments to a stable internal resource identity: renaming a database, table, function, or view

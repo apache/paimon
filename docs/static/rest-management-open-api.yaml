@@ -574,6 +574,14 @@ components:
         view:
           type: string
           minLength: 1
+    ExpireTime:
+      type: string
+      format: date-time
+      pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$'
+      description: |
+        Exclusive authorization upper bound evaluated using the server clock. At
+        `now >= expireTime` the assignment must not authorize access. An expired record may remain
+        listable until cleanup. The value must use UTC `Z` and have at most millisecond precision.
     PermissionAssignment:
       type: object
       additionalProperties: false
@@ -593,12 +601,7 @@ components:
         columns:
           $ref: '#/components/schemas/PermissionColumns'
         expireTime:
-          type: string
-          format: date-time
-          description: |
-            Exclusive authorization upper bound evaluated using the server clock. At
-            `now >= expireTime` this assignment must not authorize access. An expired record may
-            remain listable until cleanup. The value must have at most millisecond precision.
+          $ref: '#/components/schemas/ExpireTime'
       allOf:
         - $ref: '#/components/schemas/ColumnAssignmentConstraint'
     GrantPermissionRequest:
@@ -615,12 +618,7 @@ components:
         columns:
           $ref: '#/components/schemas/PermissionColumns'
         expireTime:
-          type: string
-          format: date-time
-          description: |
-            Exclusive authorization upper bound evaluated using the server clock. At
-            `now >= expireTime` the assignment must not authorize access. The value must have at
-            most millisecond precision.
+          $ref: '#/components/schemas/ExpireTime'
       allOf:
         - $ref: '#/components/schemas/ColumnAssignmentConstraint'
     PermissionColumns:

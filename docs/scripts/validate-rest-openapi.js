@@ -602,19 +602,36 @@ function validateManagementOpenApi() {
     'RetryAfter must allow HTTP delta-seconds or an HTTP date as a string',
   );
 
-  const assignmentExpiry = contract.requireProperties('PermissionAssignment', ['expireTime'])
-    .expireTime.description.toLowerCase();
-  const grantExpiry = contract.requireProperties('GrantPermissionRequest', ['expireTime'])
-    .expireTime.description.toLowerCase();
-  [assignmentExpiry, grantExpiry].forEach((description) => {
+  const expireTime = contract.schema('ExpireTime');
+  contract.checkSpec(
+    expireTime.type === 'string' &&
+      expireTime.format === 'date-time' &&
+      expireTime.pattern === '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,3})?Z$',
+    'ExpireTime must use UTC Z with at most three fractional digits',
+  );
+  ['PermissionAssignment', 'GrantPermissionRequest'].forEach((schemaName) => {
+    const expiry = contract.requireProperties(schemaName, ['expireTime']).expireTime;
     contract.checkSpec(
-      description.includes('exclusive') &&
-        description.includes('server clock') &&
-        description.includes('millisecond') &&
-        description.includes('must not authorize'),
-      'expireTime must define exclusive millisecond server-clock authorization semantics',
+      expiry.$ref === '#/components/schemas/ExpireTime',
+      `${schemaName}.expireTime must reference the shared ExpireTime schema`,
     );
   });
+  const expireTimePattern = new RegExp(expireTime.pattern);
+  ['2027-01-01T00:00:00Z', '2027-01-01T00:00:00.1Z', '2027-01-01T00:00:00.123Z'].forEach(
+    (value) =>
+      contract.checkSpec(expireTimePattern.test(value), `ExpireTime must accept ${value}`),
+  );
+  ['2027-01-01T00:00:00.123456Z', '2027-01-01T00:00:00+00:00'].forEach((value) =>
+    contract.checkSpec(!expireTimePattern.test(value), `ExpireTime must reject ${value}`),
+  );
+  const expiryDescription = expireTime.description.toLowerCase();
+  contract.checkSpec(
+    expiryDescription.includes('exclusive') &&
+      expiryDescription.includes('server clock') &&
+      expiryDescription.includes('millisecond') &&
+      expiryDescription.includes('must not authorize'),
+    'expireTime must define exclusive millisecond server-clock authorization semantics',
+  );
   const resourceDescription = contract.schema('PermissionResource').description.toLowerCase();
   ['stable internal resource identity', 'renaming', 'dropping', 'recreating'].forEach((phrase) =>
     contract.checkSpec(
