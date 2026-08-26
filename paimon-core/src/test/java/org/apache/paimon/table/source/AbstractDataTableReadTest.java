@@ -45,6 +45,24 @@ import static org.mockito.Mockito.mock;
 class AbstractDataTableReadTest {
 
     @Test
+    void testNoProjectionResetWithoutExplicitReadType() throws IOException {
+        TableSchema schema =
+                new TableSchema(
+                        1,
+                        Collections.singletonList(new DataField(0, "value", DataTypes.STRING())),
+                        0,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyMap(),
+                        null);
+        TestingDataTableRead read = new TestingDataTableRead(schema);
+
+        read.createReader(mock(Split.class));
+
+        assertThat(read.appliedReadType()).isNull();
+    }
+
+    @Test
     void testMaskDependenciesPreserveNestedProjectionAndSkipUnselectedMasks() throws IOException {
         RowType fullProfile =
                 new RowType(
