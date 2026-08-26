@@ -18,6 +18,7 @@
 
 package org.apache.paimon.rest;
 
+import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.options.Options;
 
 import org.apache.paimon.shade.guava30.com.google.common.base.Joiner;
@@ -42,6 +43,7 @@ public class ResourcePaths {
     protected static final String REGISTER = "register";
     protected static final String FUNCTIONS = "functions";
     protected static final String FUNCTION_DETAILS = "function-details";
+    protected static final String PERMISSIONS = "permissions";
     protected static final String ID = "id";
 
     private static final Joiner SLASH = Joiner.on("/").skipNulls();
@@ -58,6 +60,21 @@ public class ResourcePaths {
 
     public ResourcePaths(String prefix) {
         this.prefix = encodeString(prefix);
+    }
+
+    @Experimental
+    public String permissions() {
+        return SLASH.join(V1, prefix, PERMISSIONS);
+    }
+
+    @Experimental
+    public String grantPermission() {
+        return SLASH.join(permissions(), "grant");
+    }
+
+    @Experimental
+    public String revokePermission() {
+        return SLASH.join(permissions(), "revoke");
     }
 
     public String databases() {

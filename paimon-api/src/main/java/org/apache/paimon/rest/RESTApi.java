@@ -20,11 +20,15 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.consumer.ConsumerInfo;
 import org.apache.paimon.function.FunctionChange;
+import org.apache.paimon.management.ListPermissionsRequest;
+import org.apache.paimon.management.PermissionAssignment;
+import org.apache.paimon.management.PermissionResource;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -48,6 +52,7 @@ import org.apache.paimon.rest.requests.CreateTagRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
 import org.apache.paimon.rest.requests.ForwardBranchRequest;
+import org.apache.paimon.rest.requests.GrantPermissionRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByFilterRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByNamesRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
@@ -55,6 +60,7 @@ import org.apache.paimon.rest.requests.RegisterTableRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.requests.ReplaceTableRequest;
 import org.apache.paimon.rest.requests.ResetConsumerRequest;
+import org.apache.paimon.rest.requests.RevokePermissionRequest;
 import org.apache.paimon.rest.requests.RollbackSchemaRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
@@ -79,6 +85,7 @@ import org.apache.paimon.rest.responses.ListFunctionDetailsResponse;
 import org.apache.paimon.rest.responses.ListFunctionsGloballyResponse;
 import org.apache.paimon.rest.responses.ListFunctionsResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
+import org.apache.paimon.rest.responses.ListPermissionsResponse;
 import org.apache.paimon.rest.responses.ListSnapshotsResponse;
 import org.apache.paimon.rest.responses.ListTableDetailsResponse;
 import org.apache.paimon.rest.responses.ListTablesGloballyResponse;
@@ -830,6 +837,46 @@ public class RESTApi {
                 resourcePaths.authTable(identifier.getDatabaseName(), identifier.getObjectName()),
                 request,
                 AuthTableQueryResponse.class,
+                restAuthFunction);
+    }
+
+    /** Lists permissions on an exact resource in the configured REST catalog. */
+    @Experimental
+    public ListPermissionsResponse listPermissions(ListPermissionsRequest request) {
+        Map<String, String> queryParams = Maps.newHashMap();
+        putQueryParameter(queryParams, "resourceType", request.getResourceType().name());
+        putQueryParameter(queryParams, "database", request.getDatabase());
+        putQueryParameter(queryParams, "table", request.getTable());
+        putQueryParameter(queryParams, "function", request.getFunction());
+        putQueryParameter(queryParams, "view", request.getView());
+        putQueryParameter(queryParams, "principal", request.getPrincipal());
+        putQueryParameter(queryParams, "access", request.getAccess());
+        if (request.getMaxResults() != null) {
+            queryParams.put(MAX_RESULTS, request.getMaxResults().toString());
+        }
+        putQueryParameter(queryParams, PAGE_TOKEN, request.getPageToken());
+        return client.get(
+                resourcePaths.permissions(),
+                queryParams,
+                ListPermissionsResponse.class,
+                restAuthFunction);
+    }
+
+    /** Grants a permission for the configured REST catalog. */
+    @Experimental
+    public void grantPermission(PermissionAssignment assignment) {
+        client.post(
+                resourcePaths.grantPermission(),
+                new GrantPermissionRequest(assignment),
+                restAuthFunction);
+    }
+
+    /** Revokes a permission for the configured REST catalog. */
+    @Experimental
+    public void revokePermission(PermissionResource resource, String access, String principal) {
+        client.post(
+                resourcePaths.revokePermission(),
+                new RevokePermissionRequest(resource, access, principal),
                 restAuthFunction);
     }
 
@@ -1726,5 +1773,12 @@ public class RESTApi {
     @VisibleForTesting
     RESTAuthFunction authFunction() {
         return restAuthFunction;
+    }
+
+    private static void putQueryParameter(
+            Map<String, String> queryParams, String name, @Nullable String value) {
+        if (StringUtils.isNotEmpty(value)) {
+            queryParams.put(name, value);
+        }
     }
 }
