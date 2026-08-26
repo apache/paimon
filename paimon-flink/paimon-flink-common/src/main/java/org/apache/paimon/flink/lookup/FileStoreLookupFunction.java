@@ -27,6 +27,7 @@ import org.apache.paimon.flink.FlinkConnectorOptions.LookupCacheMode;
 import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.FlinkRowDataWithBlob;
 import org.apache.paimon.flink.FlinkRowWrapper;
+import org.apache.paimon.flink.ProjectedRowData;
 import org.apache.paimon.flink.lookup.partitioner.ShuffleStrategy;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.flink.utils.RuntimeContextUtils;
@@ -94,6 +95,9 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     private final FileStoreTable table;
     @Nullable private final PartitionLoader partitionLoader;
     private final List<String> projectFields;
+    /** Projects rows with internal lookup fields back to the fields requested by Flink. */
+    @Nullable private final int[] outputProjection;
+
     private final List<String> joinKeys;
     @Nullable private final Predicate predicate;
     @Nullable private final RefreshBlacklist refreshBlacklist;
@@ -143,10 +147,11 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                         .mapToObj(i -> rowType.getFieldNames().get(projection[i]))
                         .collect(Collectors.toList());
 
-        this.projectFields =
+        List<String> outputFields =
                 Arrays.stream(projection)
                         .mapToObj(i -> rowType.getFieldNames().get(i))
                         .collect(Collectors.toList());
+        this.projectFields = new ArrayList<>(outputFields);
 
         // add primary keys
         for (String field : table.primaryKeys()) {
@@ -158,6 +163,10 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         if (partitionLoader != null) {
             partitionLoader.addPartitionKeysTo(joinKeys, projectFields);
         }
+        this.outputProjection =
+                outputFields.equals(projectFields)
+                        ? null
+                        : outputFields.stream().mapToInt(projectFields::indexOf).toArray();
         RowType projectedType = rowType.project(projectFields);
         this.projectFieldsGetters =
                 IntStream.range(0, projectedType.getFieldCount())
@@ -359,10 +368,14 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         List<RowData> rows = new ArrayList<>();
         List<InternalRow> lookupResults = lookupTable.get(key);
         for (InternalRow matchedRow : lookupResults) {
-            rows.add(
+            RowData rowData =
                     blobFields.isEmpty()
                             ? new FlinkRowData(matchedRow)
-                            : new FlinkRowDataWithBlob(matchedRow, blobFields, blobAsDescriptor));
+                            : new FlinkRowDataWithBlob(matchedRow, blobFields, blobAsDescriptor);
+            rows.add(
+                    outputProjection == null
+                            ? rowData
+                            : ProjectedRowData.from(outputProjection).replaceRow(rowData));
         }
 
         if (LOG.isDebugEnabled()) {
