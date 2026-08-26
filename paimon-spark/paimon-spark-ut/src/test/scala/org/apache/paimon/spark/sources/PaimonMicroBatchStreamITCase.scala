@@ -402,7 +402,6 @@ class PaimonMicroBatchStreamITCase extends PaimonSparkTestBase {
           restartedQuery.processAllAvailable()
           checkAnswer(spark.sql("SELECT * FROM T2"), Seq(Row(20, "v_20")))
         } finally {
-          ≠≠
           restartedQuery.stop()
         }
     }
