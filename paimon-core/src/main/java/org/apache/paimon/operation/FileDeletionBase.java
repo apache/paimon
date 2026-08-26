@@ -123,10 +123,6 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         return fileExecutor;
     }
 
-    public int fileOperationParallelism() {
-        return fileOperationParallelism;
-    }
-
     /**
      * Clean data files that will not be used anymore in the snapshot.
      *
