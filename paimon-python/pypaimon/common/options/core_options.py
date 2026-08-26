@@ -1018,12 +1018,9 @@ class CoreOptions:
         .int_type()
         .no_default_value()
         .with_description(
-            "Parallelism for reading splits within a single TableRead call. "
-            "When unset (the default), reads auto-scale to "
-            "min(number of splits, CPU count). Set to 1 to force serial "
-            "reads, or to a specific value >= 1 to cap the thread pool that "
-            "reads splits concurrently and assembles the result in input "
-            "order. Has no effect when fewer than 2 splits are passed.")
+            "Maximum split-read parallelism. Unset reads auto-scale; "
+            "1 forces serial. Streaming batch reads also consider input size "
+            "and storage locality. Has no effect with fewer than 2 splits.")
     )
 
     ADD_COLUMN_BEFORE_PARTITION: ConfigOption[bool] = (
