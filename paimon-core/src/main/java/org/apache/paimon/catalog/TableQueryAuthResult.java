@@ -48,6 +48,8 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /** Auth result for table query, including row level filter and optional column masking rules. */
 public class TableQueryAuthResult implements Serializable {
 
@@ -89,13 +91,10 @@ public class TableQueryAuthResult implements Serializable {
         if (filter != null && !filter.isEmpty()) {
             List<Predicate> predicates = new ArrayList<>();
             for (String json : filter) {
-                if (StringUtils.isEmpty(json)) {
-                    continue;
-                }
+                checkArgument(!StringUtils.isEmpty(json), "Row filter cannot be empty.");
                 Predicate predicate = JsonSerdeUtil.fromJson(json, Predicate.class);
-                if (predicate != null) {
-                    predicates.add(predicate);
-                }
+                checkArgument(predicate != null, "Row filter cannot be JSON null.");
+                predicates.add(predicate);
             }
             if (predicates.size() == 1) {
                 rowFilter = predicates.get(0);
@@ -122,13 +121,10 @@ public class TableQueryAuthResult implements Serializable {
             for (Map.Entry<String, String> e : columnMasking.entrySet()) {
                 String column = e.getKey();
                 String json = e.getValue();
-                if (StringUtils.isEmpty(column) || StringUtils.isEmpty(json)) {
-                    continue;
-                }
+                checkArgument(!StringUtils.isEmpty(column), "Column mask target cannot be empty.");
+                checkArgument(!StringUtils.isEmpty(json), "Column mask transform cannot be empty.");
                 Transform transform = JsonSerdeUtil.fromJson(json, Transform.class);
-                if (transform == null) {
-                    continue;
-                }
+                checkArgument(transform != null, "Column mask transform cannot be JSON null.");
                 result.put(column, transform);
             }
         }
@@ -137,7 +133,15 @@ public class TableQueryAuthResult implements Serializable {
 
     public RecordReader<InternalRow> doAuth(
             RecordReader<InternalRow> reader, RowType outputRowType) {
-        Predicate rowFilter = extractPredicate();
+        return doAuth(reader, outputRowType, extractPredicate(), extractColumnMasking());
+    }
+
+    /** Applies already decoded query-authorization definitions to a physical read projection. */
+    public RecordReader<InternalRow> doAuth(
+            RecordReader<InternalRow> reader,
+            RowType outputRowType,
+            @Nullable Predicate rowFilter,
+            Map<String, Transform> selectedColumnMasking) {
         if (rowFilter != null) {
             Predicate remappedFilter = remapPredicate(rowFilter, outputRowType);
             if (remappedFilter != null) {
@@ -145,10 +149,9 @@ public class TableQueryAuthResult implements Serializable {
             }
         }
 
-        Map<String, Transform> columnMasking = extractColumnMasking();
-        if (columnMasking != null && !columnMasking.isEmpty()) {
+        if (!selectedColumnMasking.isEmpty()) {
             Map<Integer, Transform> remappedMasking =
-                    transformRemapping(outputRowType, columnMasking);
+                    transformRemapping(outputRowType, selectedColumnMasking);
             if (!remappedMasking.isEmpty()) {
                 reader = reader.transform(row -> transform(outputRowType, remappedMasking, row));
             }
@@ -184,14 +187,15 @@ public class TableQueryAuthResult implements Serializable {
         for (Map.Entry<String, Transform> e : masking.entrySet()) {
             String targetColumn = e.getKey();
             Transform transform = e.getValue();
-            if (targetColumn == null || transform == null) {
-                continue;
-            }
+            checkArgument(targetColumn != null, "Column mask target cannot be null.");
+            checkArgument(transform != null, "Column mask transform cannot be null.");
 
             int targetIndex = outputRowType.getFieldIndex(targetColumn);
-            if (targetIndex < 0) {
-                continue;
-            }
+            checkArgument(
+                    targetIndex >= 0,
+                    "Column mask target '%s' is not present in output row type %s.",
+                    targetColumn,
+                    outputRowType);
 
             List<Object> newInputs = new ArrayList<>();
             for (Object input : transform.inputs()) {
@@ -234,7 +238,7 @@ public class TableQueryAuthResult implements Serializable {
                     String fieldName = ref.name();
                     int newIndex = outputRowType.getFieldIndex(fieldName);
                     if (newIndex < 0) {
-                        throw new RuntimeException(
+                        throw new IllegalArgumentException(
                                 String.format(
                                         "Unable to read data without column %s when row filter enabled.",
                                         fieldName));
@@ -250,15 +254,20 @@ public class TableQueryAuthResult implements Serializable {
 
         @Override
         public Predicate visit(CompoundPredicate predicate) {
+            checkArgument(
+                    predicate.function() != null, "Compound row filter function cannot be null.");
+            checkArgument(
+                    predicate.children() != null, "Compound row filter children cannot be null.");
             List<Predicate> remappedChildren = new ArrayList<>();
             for (Predicate child : predicate.children()) {
+                checkArgument(child != null, "Compound row filter child cannot be null.");
                 Predicate remapped = child.visit(this);
                 if (remapped != null) {
                     remappedChildren.add(remapped);
                 }
             }
             if (remappedChildren.isEmpty()) {
-                return null;
+                throw new IllegalArgumentException("Compound row filter must contain a predicate.");
             }
             if (remappedChildren.size() == 1) {
                 return remappedChildren.get(0);

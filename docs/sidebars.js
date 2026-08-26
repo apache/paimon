@@ -31,7 +31,8 @@ const sidebars = {
           "concepts/rest/dlf",
           "concepts/rest/tables",
           "concepts/rest/pvfs",
-          "concepts/rest/rest-api"
+          "concepts/rest/rest-api",
+          "concepts/rest/management-api"
         ]
       },
       {

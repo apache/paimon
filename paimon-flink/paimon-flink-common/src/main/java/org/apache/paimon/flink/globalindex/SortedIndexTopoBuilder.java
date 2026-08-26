@@ -66,10 +66,14 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 
+import org.apache.flink.api.common.functions.Partitioner;
 import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
+import org.apache.flink.streaming.api.transformations.PartitionTransformation;
+import org.apache.flink.streaming.api.transformations.StreamExchangeMode;
+import org.apache.flink.streaming.runtime.partitioner.CustomPartitionerWrapper;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
 
@@ -96,6 +100,8 @@ public class SortedIndexTopoBuilder {
 
     private static final String BUILD_TASK_ID_FIELD = "_SORTED_INDEX_BUILD_TASK_ID";
     private static final int BUILD_TASK_ID_FIELD_ID = -1;
+    static final Partitioner<Integer> BUILD_TASK_PARTITIONER =
+            (taskId, numPartitions) -> Math.floorMod(taskId, numPartitions);
     private static final HashSet<String> SUPPORTED_INDEX_TYPES =
             new HashSet<>(Arrays.asList("btree", "bitmap", "multivalue"));
 
@@ -384,7 +390,12 @@ public class SortedIndexTopoBuilder {
             RowType readType,
             int parallelism) {
         if (!identity) {
-            return input.keyBy((KeySelector<InternalRow, Integer>) row -> row.getInt(taskIdPos))
+            // Only co-location by build task is required here. Using keyBy in batch mode makes
+            // Flink insert another managed-memory sorter before Paimon's heap-and-spill sorter.
+            // Materialize the repartition result so batch scheduling can reuse slots between the
+            // reader and sorter stages. A pipelined exchange can deadlock when maxSlot is smaller
+            // than their combined parallelism.
+            return partitionByBuildTask(input, taskIdPos)
                     .transform(
                             "Sort Normalized Index Keys",
                             InternalTypeInfo.fromRowType(readType),
@@ -422,6 +433,17 @@ public class SortedIndexTopoBuilder {
                 .sort()
                 .map(FlinkRowWrapper::new, InternalTypeInfo.fromRowType(readType))
                 .setParallelism(parallelism);
+    }
+
+    static DataStream<InternalRow> partitionByBuildTask(
+            DataStream<InternalRow> input, int taskIdPos) {
+        KeySelector<InternalRow, Integer> keySelector = row -> row.getInt(taskIdPos);
+        return new DataStream<>(
+                input.getExecutionEnvironment(),
+                new PartitionTransformation<>(
+                        input.getTransformation(),
+                        new CustomPartitionerWrapper<>(BUILD_TASK_PARTITIONER, keySelector),
+                        StreamExchangeMode.BATCH));
     }
 
     static int calculateParallelism(

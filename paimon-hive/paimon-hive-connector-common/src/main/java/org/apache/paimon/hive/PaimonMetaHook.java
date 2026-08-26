@@ -33,7 +33,6 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.HiveMetaHook;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.MetaException;
@@ -83,7 +82,7 @@ public class PaimonMetaHook implements HiveMetaHook {
         String location = LocationKeyExtractor.getPaimonLocation(conf, table);
         Identifier identifier = Identifier.create(table.getDbName(), table.getTableName());
         if (location == null) {
-            String warehouse = conf.get(HiveConf.ConfVars.METASTOREWAREHOUSE.varname);
+            String warehouse = conf.get("hive.metastore.warehouse.dir");
             org.apache.hadoop.fs.Path hadoopPath =
                     getDnsPath(new org.apache.hadoop.fs.Path(warehouse), conf);
             warehouse = hadoopPath.toString();

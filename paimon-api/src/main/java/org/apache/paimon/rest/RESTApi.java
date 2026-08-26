@@ -20,11 +20,18 @@ package org.apache.paimon.rest;
 
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.consumer.ConsumerInfo;
 import org.apache.paimon.function.FunctionChange;
+import org.apache.paimon.management.DataPolicy;
+import org.apache.paimon.management.ListPermissionsRequest;
+import org.apache.paimon.management.ListPoliciesRequest;
+import org.apache.paimon.management.PermissionAssignment;
+import org.apache.paimon.management.PermissionResource;
+import org.apache.paimon.management.PolicyType;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -47,14 +54,18 @@ import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateTagRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
+import org.apache.paimon.rest.requests.DropPolicyRequest;
 import org.apache.paimon.rest.requests.ForwardBranchRequest;
+import org.apache.paimon.rest.requests.GrantPermissionRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByFilterRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByNamesRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
+import org.apache.paimon.rest.requests.PolicyRequest;
 import org.apache.paimon.rest.requests.RegisterTableRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.requests.ReplaceTableRequest;
 import org.apache.paimon.rest.requests.ResetConsumerRequest;
+import org.apache.paimon.rest.requests.RevokePermissionRequest;
 import org.apache.paimon.rest.requests.RollbackSchemaRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
@@ -79,6 +90,8 @@ import org.apache.paimon.rest.responses.ListFunctionDetailsResponse;
 import org.apache.paimon.rest.responses.ListFunctionsGloballyResponse;
 import org.apache.paimon.rest.responses.ListFunctionsResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
+import org.apache.paimon.rest.responses.ListPermissionsResponse;
+import org.apache.paimon.rest.responses.ListPoliciesResponse;
 import org.apache.paimon.rest.responses.ListSnapshotsResponse;
 import org.apache.paimon.rest.responses.ListTableDetailsResponse;
 import org.apache.paimon.rest.responses.ListTablesGloballyResponse;
@@ -118,6 +131,7 @@ import static org.apache.paimon.rest.RESTFunctionValidator.isValidFunctionName;
 import static org.apache.paimon.rest.RESTUtil.extractPrefixMap;
 import static org.apache.paimon.rest.auth.AuthProviderFactory.createAuthProvider;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
  * REST API for REST Catalog.
@@ -831,6 +845,97 @@ public class RESTApi {
                 request,
                 AuthTableQueryResponse.class,
                 restAuthFunction);
+    }
+
+    /** Lists permissions on an exact resource in the configured REST catalog. */
+    @Experimental
+    public ListPermissionsResponse listPermissions(ListPermissionsRequest request) {
+        Map<String, String> queryParams = Maps.newHashMap();
+        putQueryParameter(queryParams, "resourceType", request.getResourceType().name());
+        putQueryParameter(queryParams, "database", request.getDatabase());
+        putQueryParameter(queryParams, "table", request.getTable());
+        putQueryParameter(queryParams, "function", request.getFunction());
+        putQueryParameter(queryParams, "view", request.getView());
+        putQueryParameter(queryParams, "principal", request.getPrincipal());
+        putQueryParameter(queryParams, "access", request.getAccess());
+        if (request.getMaxResults() != null) {
+            queryParams.put(MAX_RESULTS, request.getMaxResults().toString());
+        }
+        putQueryParameter(queryParams, PAGE_TOKEN, request.getPageToken());
+        return client.get(
+                resourcePaths.permissions(),
+                queryParams,
+                ListPermissionsResponse.class,
+                restAuthFunction);
+    }
+
+    /** Grants a permission for the configured REST catalog. */
+    @Experimental
+    public void grantPermission(PermissionAssignment assignment) {
+        client.post(
+                resourcePaths.grantPermission(),
+                new GrantPermissionRequest(assignment),
+                restAuthFunction);
+    }
+
+    /** Revokes a permission for the configured REST catalog. */
+    @Experimental
+    public void revokePermission(PermissionResource resource, String access, String principal) {
+        client.post(
+                resourcePaths.revokePermission(),
+                new RevokePermissionRequest(resource, access, principal),
+                restAuthFunction);
+    }
+
+    /** Lists policies attached to an exact table resource. */
+    @Experimental
+    public ListPoliciesResponse listPolicies(ListPoliciesRequest request) {
+        Map<String, String> queryParams = Maps.newHashMap();
+        if (request.getType() != null) {
+            putQueryParameter(queryParams, "type", request.getType().name());
+        }
+        putQueryParameter(queryParams, "principal", request.getPrincipal());
+        putQueryParameter(queryParams, "column", request.getColumn());
+        if (request.getMaxResults() != null) {
+            queryParams.put(MAX_RESULTS, request.getMaxResults().toString());
+        }
+        putQueryParameter(queryParams, PAGE_TOKEN, request.getPageToken());
+        return client.get(
+                resourcePaths.policies(request.getResource()),
+                queryParams,
+                ListPoliciesResponse.class,
+                restAuthFunction);
+    }
+
+    /** Creates a principal policy on its attachment resource. */
+    @Experimental
+    public void createPolicy(DataPolicy policy) {
+        client.post(
+                resourcePaths.policies(policy.getResource()),
+                new PolicyRequest(policy),
+                restAuthFunction);
+    }
+
+    /** Drops a principal policy from its exact attachment resource. */
+    @Experimental
+    public void dropPolicy(
+            PermissionResource resource,
+            PolicyType type,
+            String principal,
+            @Nullable String column,
+            boolean ignoreIfNotExists) {
+        checkNotNull(resource, "resource cannot be null").validatePolicyAttachment();
+        try {
+            client.post(
+                    resourcePaths.dropPolicy(resource),
+                    new DropPolicyRequest(type, principal, column),
+                    restAuthFunction);
+        } catch (NoSuchResourceException e) {
+            if (!ignoreIfNotExists
+                    || !ErrorResponse.RESOURCE_TYPE_POLICY.equals(e.resourceType())) {
+                throw e;
+            }
+        }
     }
 
     /**
@@ -1726,5 +1831,12 @@ public class RESTApi {
     @VisibleForTesting
     RESTAuthFunction authFunction() {
         return restAuthFunction;
+    }
+
+    private static void putQueryParameter(
+            Map<String, String> queryParams, String name, @Nullable String value) {
+        if (StringUtils.isNotEmpty(value)) {
+            queryParams.put(name, value);
+        }
     }
 }

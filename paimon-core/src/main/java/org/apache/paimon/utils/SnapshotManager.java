@@ -185,7 +185,20 @@ public class SnapshotManager implements Serializable {
 
     public @Nullable Snapshot latestSnapshotFromFileSystem() {
         Long snapshotId = latestSnapshotIdFromFileSystem();
-        return snapshotId == null ? null : snapshot(snapshotId);
+        while (snapshotId != null) {
+            try {
+                return tryGetSnapshot(snapshotId);
+            } catch (FileNotFoundException e) {
+                Long newSnapshotId = latestSnapshotIdFromFileSystem();
+                if (snapshotId.equals(newSnapshotId)) {
+                    // Retry once to preserve the existing exception when the latest snapshot is
+                    // genuinely missing instead of being concurrently expired.
+                    return snapshot(snapshotId);
+                }
+                snapshotId = newSnapshotId;
+            }
+        }
+        return null;
     }
 
     public @Nullable Long latestSnapshotId() {
