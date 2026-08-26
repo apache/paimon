@@ -25,8 +25,6 @@ import org.apache.paimon.options.Options;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
-import java.util.Optional;
-import java.util.function.Supplier;
 
 /**
  * A {@link FileIO} for plugin jar. {@link FileIO} is serializable, so plugin FileIO should be
@@ -82,25 +80,11 @@ public abstract class PluginFileIO implements FileIO, HadoopOptionsProvider {
     }
 
     @Override
-    public Optional<BatchFileDeleter> batchFileDeleter(Path path) throws IOException {
-        Optional<BatchFileDeleter> capability = wrap(() -> fileIO(path).batchFileDeleter(path));
-        if (!capability.isPresent()) {
-            return Optional.empty();
+    public boolean deleteFilesInBatch(List<Path> files) throws IOException {
+        if (files.isEmpty()) {
+            return true;
         }
-
-        BatchFileDeleter delegate = capability.get();
-        return Optional.of(
-                new BatchFileDeleter() {
-                    @Override
-                    public int maxBatchSize() {
-                        return wrapUnchecked(delegate::maxBatchSize);
-                    }
-
-                    @Override
-                    public BatchDeleteResult delete(List<Path> files) throws IOException {
-                        return wrap(() -> delegate.delete(files));
-                    }
-                });
+        return wrap(() -> fileIO(files.get(0)).deleteFilesInBatch(files));
     }
 
     @Override
@@ -152,16 +136,6 @@ public abstract class PluginFileIO implements FileIO, HadoopOptionsProvider {
         try {
             Thread.currentThread().setContextClassLoader(pluginClassLoader());
             return func.apply();
-        } finally {
-            Thread.currentThread().setContextClassLoader(cl);
-        }
-    }
-
-    private <T> T wrapUnchecked(Supplier<T> supplier) {
-        ClassLoader cl = Thread.currentThread().getContextClassLoader();
-        try {
-            Thread.currentThread().setContextClassLoader(pluginClassLoader());
-            return supplier.get();
         } finally {
             Thread.currentThread().setContextClassLoader(cl);
         }

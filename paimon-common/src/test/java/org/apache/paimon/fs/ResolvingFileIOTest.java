@@ -29,6 +29,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -36,6 +37,7 @@ import java.util.concurrent.Future;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -183,5 +185,15 @@ public class ResolvingFileIOTest {
         verify(delegate).tryToWriteAtomic(target, "content");
         // the interface default would have written a temp file and renamed it instead
         verify(delegate, never()).rename(any(), any());
+    }
+
+    @Test
+    public void testBatchDeleteRejectsMixedProviders() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                        resolvingFileIO.deleteFilesInBatch(
+                                Arrays.asList(
+                                        new Path("file:///table/a"), new Path("hdfs:///table/b"))));
     }
 }

@@ -20,7 +20,6 @@ package org.apache.paimon.fs.cache;
 
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BlobDescriptor;
-import org.apache.paimon.fs.BatchFileDeleter;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -39,9 +38,9 @@ import java.io.Serializable;
 import java.time.Duration;
 import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -168,8 +167,8 @@ public class CachingFileIO implements FileIO {
     }
 
     @Override
-    public Optional<BatchFileDeleter> batchFileDeleter(Path path) throws IOException {
-        return delegate.batchFileDeleter(path);
+    public boolean deleteFilesInBatch(List<Path> files) throws IOException {
+        return delegate.deleteFilesInBatch(files);
     }
 
     @Override
