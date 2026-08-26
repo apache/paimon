@@ -118,11 +118,17 @@ class PermissionProcedureTest extends PaimonSparkTestWithRestCatalogBase {
       .sql("CALL sys.list_permissions(resource_type => 'CATALOG', max_results => 1)")
       .head()
     assertThat(first.getString(6)).isEqualTo("first")
-    assertThat(first.getString(10)).isEqualTo("1")
+    val pageToken = first.getString(10)
+    assertThat(pageToken).isNotEmpty.isNotEqualTo("1")
+
+    spark.sql(
+      "CALL sys.revoke_permission(resource_type => 'CATALOG', " +
+        "access => 'CREATEDATABASE', principal => 'first')")
 
     val second = spark
       .sql(
-        "CALL sys.list_permissions(resource_type => 'CATALOG', max_results => 1, page_token => '1')"
+        "CALL sys.list_permissions(resource_type => 'CATALOG', max_results => 1, " +
+          s"page_token => ${sqlLiteral(pageToken)})"
       )
       .head()
     assertThat(second.getString(6)).isEqualTo("second")
@@ -276,6 +282,91 @@ class PermissionProcedureTest extends PaimonSparkTestWithRestCatalogBase {
         .collect()
     }
     assertThat(missing.getMessage).contains("Permission column does not exist")
+  }
+
+  test("column permissions follow table and schema lifecycle") {
+    restCatalogServer.setQueryPrincipals(Collections.singleton("analyst"))
+    spark.sql("""CREATE TABLE paimon.sales.column_lifecycle (
+                |  id INT,
+                |  secret STRING)
+                |TBLPROPERTIES ('query-auth.enabled' = 'true')
+                |""".stripMargin)
+    spark.sql("INSERT INTO paimon.sales.column_lifecycle VALUES (1, 's1')")
+    checkAnswer(
+      spark.sql("""CALL sys.grant_permission(
+                  |  resource_type => 'COLUMN', access => 'SELECT', principal => 'analyst',
+                  |  database => 'sales', table => 'column_lifecycle',
+                  |  excluded_column_names => array('secret'))
+                  |""".stripMargin),
+      Row(true)
+    )
+
+    spark.sql(
+      "ALTER TABLE paimon.sales.column_lifecycle RENAME TO paimon.sales.renamed_column_lifecycle")
+    var assignment = spark
+      .sql(
+        "CALL sys.list_permissions(resource_type => 'COLUMN', database => 'sales', " +
+          "table => 'renamed_column_lifecycle', principal => 'analyst')")
+      .head()
+    assertThat(assignment.getString(2)).isEqualTo("renamed_column_lifecycle")
+    assertThat(assignment.getSeq[String](8)).isEqualTo(Seq("secret"))
+
+    val disableAuth = intercept[Exception] {
+      spark
+        .sql("ALTER TABLE paimon.sales.renamed_column_lifecycle " +
+          "SET TBLPROPERTIES ('query-auth.enabled' = 'false')")
+        .collect()
+    }
+    assertThat(disableAuth.getMessage).contains("Cannot disable query-auth.enabled")
+
+    spark.sql(
+      "ALTER TABLE paimon.sales.renamed_column_lifecycle " +
+        "RENAME COLUMN secret TO private_secret")
+    assignment = spark
+      .sql(
+        "CALL sys.list_permissions(resource_type => 'COLUMN', database => 'sales', " +
+          "table => 'renamed_column_lifecycle', principal => 'analyst')")
+      .head()
+    assertThat(assignment.getSeq[String](8)).isEqualTo(Seq("private_secret"))
+    val denied = intercept[Exception] {
+      spark.sql("SELECT private_secret FROM paimon.sales.renamed_column_lifecycle").collect()
+    }
+    assertThat(denied.getMessage).contains("permission")
+
+    spark.sql("""CALL sys.grant_permission(
+                |  resource_type => 'COLUMN', access => 'SELECT', principal => 'analyst',
+                |  database => 'sales', table => 'renamed_column_lifecycle',
+                |  column_names => array('private_secret'))
+                |""".stripMargin)
+    val dropOnlyAllowedColumn = intercept[Exception] {
+      spark
+        .sql("ALTER TABLE paimon.sales.renamed_column_lifecycle DROP COLUMN private_secret")
+        .collect()
+    }
+    assertThat(dropOnlyAllowedColumn.getMessage).contains("Cannot drop every allowed column")
+
+    spark.sql("""CALL sys.grant_permission(
+                |  resource_type => 'COLUMN', access => 'SELECT', principal => 'analyst',
+                |  database => 'sales', table => 'renamed_column_lifecycle',
+                |  excluded_column_names => array('private_secret'))
+                |""".stripMargin)
+    spark.sql("ALTER TABLE paimon.sales.renamed_column_lifecycle DROP COLUMN private_secret")
+    checkAnswer(
+      spark.sql(
+        "CALL sys.list_permissions(resource_type => 'COLUMN', database => 'sales', " +
+          "table => 'renamed_column_lifecycle', principal => 'analyst')"),
+      Nil
+    )
+
+    grantTablePermission("renamed_column_lifecycle", "analyst")
+    spark.sql("DROP TABLE paimon.sales.renamed_column_lifecycle")
+    spark.sql("CREATE TABLE paimon.sales.renamed_column_lifecycle (id INT)")
+    checkAnswer(
+      spark.sql(
+        "CALL sys.list_permissions(resource_type => 'TABLE', database => 'sales', " +
+          "table => 'renamed_column_lifecycle', principal => 'analyst')"),
+      Nil
+    )
   }
 
   test("create, reject duplicates, apply and idempotently drop table data policies") {
@@ -506,12 +597,17 @@ class PermissionProcedureTest extends PaimonSparkTestWithRestCatalogBase {
         .sql("CALL sys.list_policies(database => 'sales', table => 'orders', max_results => 1)")
         .head()
       assertThat(first.getString(3)).isEqualTo("first")
-      assertThat(first.getString(7)).isEqualTo("1")
+      val pageToken = first.getString(7)
+      assertThat(pageToken).isNotEmpty.isNotEqualTo("1")
+
+      spark.sql(
+        "CALL sys.drop_policy(database => 'sales', table => 'orders', " +
+          "policy_type => 'ROW_FILTER', principal => 'first', if_exists => true)")
 
       val second = spark
         .sql(
           "CALL sys.list_policies(database => 'sales', table => 'orders', " +
-            "max_results => 1, page_token => '1')")
+            s"max_results => 1, page_token => ${sqlLiteral(pageToken)})")
         .head()
       assertThat(second.getString(3)).isEqualTo("second")
       assertThat(second.isNullAt(7)).isTrue
@@ -626,6 +722,16 @@ class PermissionProcedureTest extends PaimonSparkTestWithRestCatalogBase {
                    |  resource_type => 'CATALOG',
                    |  access => 'CREATEDATABASE',
                    |  principal => '$principal')
+                   |""".stripMargin),
+      Row(true)
+    )
+  }
+
+  private def grantTablePermission(table: String, principal: String): Unit = {
+    checkAnswer(
+      spark.sql(s"""CALL sys.grant_permission(
+                   |  resource_type => 'TABLE', access => 'SELECT', principal => '$principal',
+                   |  database => 'sales', table => '$table')
                    |""".stripMargin),
       Row(true)
     )
