@@ -50,6 +50,7 @@ import org.apache.parquet.schema.Types;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY;
 import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.INT32;
 import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.INT64;
@@ -63,6 +64,8 @@ public class ParquetSchemaConverter {
     public static final String MAP_KEY_NAME = "key";
     public static final String MAP_VALUE_NAME = "value";
     public static final String LIST_ELEMENT_NAME = "element";
+    private static final String LIST_WRAPPER_NAME = "list";
+    private static final String LEGACY_LIST_ARRAY_NAME = "array";
 
     /**
      * Whether {@code type} is an unsigned integer. Such a column stores a signed value whose bits
@@ -490,20 +493,107 @@ public class ParquetSchemaConverter {
         return new DataField(parquetType.getId().intValue(), parquetType.getName(), paimonDataType);
     }
 
-    public static Type parquetListElementType(GroupType listType) {
-        int level = listType.getType(0) instanceof GroupType ? 3 : 2;
-        if (level == 3) {
-            // Level 3 representation of list type.
-            // List type should only have one middle group type, which is repeated, and one element
-            // type, which is optional.
-            return listType.getType(0).asGroupType().getType(0);
-        } else if (level == 2) {
-            // Level 2 representation of list type
-            return listType.getType(0);
-        } else {
-            throw new UnsupportedOperationException(
-                    "Parquet list type only have two level representation and three level representation.");
+    /** Returns true if the given group is annotated as a Parquet LIST logical type. */
+    public static boolean isList(GroupType listType) {
+        return listType.getLogicalTypeAnnotation()
+                instanceof LogicalTypeAnnotation.ListLogicalTypeAnnotation;
+    }
+
+    /**
+     * Returns true if the given group is a three-level Parquet list.
+     *
+     * <p>In a three-level list the immediate repeated child is a wrapper group whose single
+     * non-repeated child is the actual element type. This covers the canonical layout ({@code list
+     * -> element}) as well as legacy wrappers such as Hive's {@code bag} layout.
+     *
+     * <p>This corresponds to the Parquet spec's backward-compatibility <b>Rule 5</b>: a repeated
+     * group that contains exactly one non-repeated child is a wrapper, unless it matches one of
+     * Rules 1-4.
+     *
+     * <p>The compatibility encodings that are <em>not</em> three-level are:
+     *
+     * <ul>
+     *   <li><b>Rule 1</b>: the repeated field is a primitive and is itself the element type.
+     *   <li><b>Rule 2</b>: the repeated field is a group with multiple fields and is itself the
+     *       element type.
+     *   <li><b>Rule 3</b>: the repeated field is a group whose single child is also repeated; the
+     *       group itself is the element type.
+     *   <li><b>Rule 4</b>: the repeated field is a group named {@code "array"} or {@code
+     *       "<list>_tuple"} with a single child; the group itself is the element type.
+     * </ul>
+     *
+     * <p>See the Parquet spec: <a
+     * href="https://github.com/apache/parquet-format/blob/master/LogicalTypes.md#backward-compatibility-rules">LogicalTypes#Backward-compatibility-rules</a>
+     */
+    public static boolean isThreeLevelList(GroupType listType) {
+        if (!isList(listType)) {
+            return false;
         }
+
+        // A list must have exactly one repeated child (the middle level).
+        if (listType.getFieldCount() != 1) {
+            return false;
+        }
+        Type middle = listType.getType(0);
+        if (middle.isPrimitive() || middle.getRepetition() != Type.Repetition.REPEATED) {
+            return false;
+        }
+        GroupType repeatedGroup = middle.asGroupType();
+
+        // Rule 5: the repeated group is a wrapper containing exactly one non-repeated child.
+        if (repeatedGroup.getFieldCount() != 1
+                || repeatedGroup.getType(0).getRepetition() == Type.Repetition.REPEATED) {
+            return false;
+        }
+
+        // Rule 4: legacy "array" and "<list>_tuple" encodings are not wrappers; the repeated
+        // group itself is the element type.
+        return !LEGACY_LIST_ARRAY_NAME.equals(repeatedGroup.getName())
+                && !(listType.getName() + "_tuple").equals(repeatedGroup.getName());
+    }
+
+    /**
+     * Returns true if the given group follows the canonical three-level Parquet list layout ({@code
+     * list -> element}).
+     *
+     * <p>The canonical layout is described in the Parquet spec: <a
+     * href="https://github.com/apache/parquet-format/blob/master/LogicalTypes.md#lists">LogicalTypes#Lists</a>
+     */
+    public static boolean isCanonicalList(Type type) {
+        if (type.isPrimitive()) {
+            return false;
+        }
+
+        GroupType listGroup = type.asGroupType();
+        if (!isThreeLevelList(listGroup)) {
+            return false;
+        }
+
+        Type middle = listGroup.getType(0);
+        Type element = middle.asGroupType().getType(0);
+        return LIST_WRAPPER_NAME.equals(middle.getName())
+                && LIST_ELEMENT_NAME.equals(element.getName());
+    }
+
+    /**
+     * Returns the element type of the given LIST-annotated group according to the Parquet spec's
+     * backward-compatibility rules for lists.
+     *
+     * <p>For a three-level list (Rule 5) the returned type is the single child of the repeated
+     * wrapper. For Rules 1-4 the repeated field itself is returned because it is the element type.
+     */
+    public static Type parquetListElementType(GroupType listType) {
+        checkArgument(
+                listType.getLogicalTypeAnnotation()
+                        instanceof LogicalTypeAnnotation.ListLogicalTypeAnnotation,
+                "Expected LIST-annotated group but got: %s",
+                listType);
+
+        if (isThreeLevelList(listType)) {
+            return listType.getType(0).asGroupType().getType(0);
+        }
+
+        return listType.getType(0);
     }
 
     public static Pair<Type, Type> parquetMapKeyValueType(GroupType mapType) {

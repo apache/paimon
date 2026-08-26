@@ -77,6 +77,7 @@ import java.util.function.IntFunction;
 
 import static org.apache.paimon.data.columnar.ColumnVectorUtils.createParquetWritableColumnVector;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.PAIMON_SCHEMA;
+import static org.apache.paimon.format.parquet.ParquetSchemaConverter.isThreeLevelList;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.parquetListElementType;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.parquetMapKeyValueType;
 import static org.apache.paimon.format.parquet.reader.ParquetReaderUtil.buildFieldsList;
@@ -346,11 +347,10 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 // There are two representations for array type in parquet.
                 // See link:
                 // https://impala.apache.org/docs/build/html/topics/impala_parquet_array_resolution.html.
-                int level = arrayGroup.getType(0) instanceof GroupType ? 3 : 2;
                 Type elementType =
                         clipParquetType(elementReadType, parquetListElementType(arrayGroup));
 
-                if (level == 3) {
+                if (isThreeLevelList(arrayGroup)) {
                     // In case that the name in middle level is not "list".
                     Type groupMiddle =
                             new GroupType(
