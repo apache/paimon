@@ -25,6 +25,10 @@ import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExe
 
 import org.junit.jupiter.api.Test;
 
+import javax.security.auth.Subject;
+
+import java.security.AccessController;
+import java.security.PrivilegedAction;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -264,6 +268,53 @@ public class ThreadPoolUtilsTest {
         } finally {
             Thread.interrupted();
             workers.shutdownNow();
+        }
+    }
+
+    @Test
+    public void testWorkerRunsWithTheSubmittingSubject() throws Exception {
+        ExecutorService workers =
+                ThreadPoolUtils.createCachedThreadPool(1, "subject-propagation-test");
+        Subject firstSubject = new Subject();
+        Subject secondSubject = new Subject();
+        List<Subject> seenSubjects = new ArrayList<>();
+        List<Thread> seenWorkers = new ArrayList<>();
+
+        try {
+            for (Subject subject : Arrays.asList(firstSubject, secondSubject)) {
+                seenSubjects.add(
+                        Subject.doAs(
+                                subject,
+                                (PrivilegedAction<Subject>)
+                                        () -> {
+                                            try (CloseableBatchIterator<Subject> iterator =
+                                                    ThreadPoolUtils
+                                                            .sequentialBatchedExecuteCloseable(
+                                                                    workers,
+                                                                    ignored -> {
+                                                                        seenWorkers.add(
+                                                                                Thread
+                                                                                        .currentThread());
+                                                                        return Collections
+                                                                                .singletonList(
+                                                                                        Subject
+                                                                                                .getSubject(
+                                                                                                        AccessController
+                                                                                                                .getContext()));
+                                                                    },
+                                                                    Collections.singletonList(0),
+                                                                    1)) {
+                                                return iterator.next();
+                                            }
+                                        }));
+            }
+
+            assertThat(seenWorkers.get(1)).isSameAs(seenWorkers.get(0));
+            assertThat(seenSubjects.get(0)).isSameAs(firstSubject);
+            assertThat(seenSubjects.get(1)).isSameAs(secondSubject);
+        } finally {
+            workers.shutdownNow();
+            assertThat(workers.awaitTermination(3, TimeUnit.SECONDS)).isTrue();
         }
     }
 

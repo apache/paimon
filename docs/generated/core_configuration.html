@@ -753,6 +753,12 @@ under the License.
             <td>The maximum number of concurrent deletions of old data files during overwrite commits for an internal Format Table with catalog-managed partitions. Supported values are 1 through 64. Other Format Tables use serial cleanup. This limit uses a separate thread pool and is independent of file-operation.thread-num, so the total file-operation concurrency in one process may be the sum of both limits.</td>
         </tr>
         <tr>
+            <td><h5>format-table.commit.publish-thread-num</h5></td>
+            <td style="word-wrap: break-word;">64</td>
+            <td>Integer</td>
+            <td>The maximum number of concurrent file publications during commits for a partitioned Format Table with catalog-managed partitions. Supported values are 1 through 64. Other Format Tables publish serially.</td>
+        </tr>
+        <tr>
             <td><h5>format-table.file.compression</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>

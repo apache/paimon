@@ -65,6 +65,7 @@ import static org.apache.paimon.shade.guava30.com.google.common.base.Throwables.
 import static org.apache.paimon.shade.guava30.com.google.common.base.Throwables.getRootCause;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.assertj.core.api.Assertions.entry;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -156,6 +157,52 @@ class FormatTableCommitTest {
         verify(committer).discard(fileIO);
         verify(partitionManager, never())
                 .createPartitions(anyList(), eq(true), any(), anyBoolean());
+    }
+
+    @Test
+    void testAbortAttemptsEveryRollbackAndReportsDeleteFailure() throws Exception {
+        Path tablePath = new Path(tempDir.toUri());
+        Path refusedPath = new Path(tablePath, "part=p/data-refused.csv");
+        Path removablePath = new Path(tablePath, "part=p/data-removable.csv");
+        SelectiveRefusingDeleteFileIO fileIO = new SelectiveRefusingDeleteFileIO(refusedPath);
+        fileIO.writeFile(refusedPath, "published", false);
+        fileIO.writeFile(removablePath, "published", false);
+
+        TwoPhaseOutputStream.Committer first = mock(TwoPhaseOutputStream.Committer.class);
+        when(first.targetPath()).thenReturn(refusedPath);
+        doThrow(new IOException("discard failed")).when(first).discard(fileIO);
+        TwoPhaseOutputStream.Committer second = mock(TwoPhaseOutputStream.Committer.class);
+        when(second.targetPath()).thenReturn(removablePath);
+        List<CommitMessage> messages =
+                Arrays.asList(new TwoPhaseCommitMessage(first), new TwoPhaseCommitMessage(second));
+        FormatTableCommit commit =
+                new FormatTableCommit(
+                        tablePath.toString(),
+                        Collections.singletonList("part"),
+                        fileIO,
+                        false,
+                        PARTITION_DEFAULT_NAME.defaultValue(),
+                        false,
+                        Identifier.create("rollback_db", "rollback_table"),
+                        null,
+                        null,
+                        null,
+                        null,
+                        /* dynamicPartitionOverwrite */ true,
+                        /* cleanupThreadNum */ 1);
+
+        Throwable failure = catchThrowable(() -> commit.abort(messages));
+
+        assertThat(failure).isInstanceOf(RuntimeException.class);
+        assertThat(failureTree(failure))
+                .extracting(Throwable::getMessage)
+                .contains(
+                        "discard failed",
+                        "Failed to delete published Format Table file " + refusedPath);
+        verify(first).discard(fileIO);
+        verify(second).discard(fileIO);
+        assertThat(fileIO.exists(refusedPath)).isTrue();
+        assertThat(fileIO.exists(removablePath)).isFalse();
     }
 
     @Test
@@ -711,6 +758,243 @@ class FormatTableCommitTest {
     }
 
     @Test
+    void testCatalogManagedBuilderPublishesSamePartitionConcurrentlyAndWaitsForBarrier()
+            throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        Path partitionPath = new Path(tablePath, "part=p");
+        FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
+        CountDownLatch firstTwoStarted = new CountDownLatch(2);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        CountDownLatch releaseSecond = new CountDownLatch(1);
+        CountDownLatch thirdFinished = new CountDownLatch(1);
+        AtomicInteger activePublishes = new AtomicInteger();
+        AtomicInteger maxConcurrentPublishes = new AtomicInteger();
+        List<TwoPhaseOutputStream.Committer> committers = new ArrayList<>();
+        List<CommitMessage> messages = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            int index = i;
+            TwoPhaseOutputStream.Committer committer = mock(TwoPhaseOutputStream.Committer.class);
+            when(committer.targetPath()).thenReturn(new Path(partitionPath, "data-" + i + ".csv"));
+            doAnswer(
+                            invocation -> {
+                                int active = activePublishes.incrementAndGet();
+                                maxConcurrentPublishes.updateAndGet(
+                                        previous -> Math.max(previous, active));
+                                try {
+                                    if (index == 0) {
+                                        firstTwoStarted.countDown();
+                                        if (!releaseFirst.await(10, TimeUnit.SECONDS)) {
+                                            throw new IOException(
+                                                    "Timed out waiting to release first publication");
+                                        }
+                                    } else if (index == 1) {
+                                        firstTwoStarted.countDown();
+                                        if (!releaseSecond.await(10, TimeUnit.SECONDS)) {
+                                            throw new IOException(
+                                                    "Timed out waiting to release second publication");
+                                        }
+                                    }
+                                    return null;
+                                } catch (InterruptedException e) {
+                                    Thread.currentThread().interrupt();
+                                    throw new IOException("File publication was interrupted", e);
+                                } finally {
+                                    activePublishes.decrementAndGet();
+                                    if (index == 2) {
+                                        thirdFinished.countDown();
+                                    }
+                                }
+                            })
+                    .when(committer)
+                    .commit(fileIO);
+            committers.add(committer);
+            messages.add(new TwoPhaseCommitMessage(committer));
+        }
+        FormatTableCommit commit =
+                (FormatTableCommit)
+                        formatTable(
+                                        tablePath,
+                                        fileIO,
+                                        partitionManager,
+                                        Collections.singletonMap(
+                                                CoreOptions.FORMAT_TABLE_COMMIT_PUBLISH_THREAD_NUM
+                                                        .key(),
+                                                "2"))
+                                .newBatchWriteBuilder()
+                                .newCommit();
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        Future<?> result = executor.submit(() -> commit.commit(messages));
+        try {
+            assertThat(firstTwoStarted.await(3, TimeUnit.SECONDS)).isTrue();
+            assertThat(activePublishes).hasValue(2);
+
+            releaseFirst.countDown();
+            assertThat(thirdFinished.await(3, TimeUnit.SECONDS)).isTrue();
+            assertThat(activePublishes).hasValue(1);
+            verify(partitionManager, never())
+                    .createPartitions(anyList(), eq(true), any(), anyBoolean());
+            for (TwoPhaseOutputStream.Committer committer : committers) {
+                verify(committer, never()).clean(fileIO);
+            }
+
+            releaseSecond.countDown();
+            result.get(10, TimeUnit.SECONDS);
+
+            assertThat(maxConcurrentPublishes).hasValue(2);
+            for (TwoPhaseOutputStream.Committer committer : committers) {
+                verify(committer).clean(fileIO);
+            }
+            verify(partitionManager).createPartitions(anyList(), eq(true), any(), eq(false));
+        } finally {
+            releaseFirst.countDown();
+            releaseSecond.countDown();
+            if (!result.isDone()) {
+                result.get(10, TimeUnit.SECONDS);
+            }
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void testPublishFailureDrainsRunningWorkBeforeAbort() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        Path partitionPath = new Path(tablePath, "part=p");
+        FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
+        CountDownLatch secondStarted = new CountDownLatch(1);
+        CountDownLatch releaseSecond = new CountDownLatch(1);
+        AtomicInteger activePublishes = new AtomicInteger();
+        ConcurrentLinkedQueue<Integer> activePublishesAtDiscard = new ConcurrentLinkedQueue<>();
+        List<TwoPhaseOutputStream.Committer> committers = new ArrayList<>();
+        List<Path> targetPaths = new ArrayList<>();
+        List<CommitMessage> messages = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            TwoPhaseOutputStream.Committer committer = mock(TwoPhaseOutputStream.Committer.class);
+            Path targetPath = new Path(partitionPath, "data-" + i + ".csv");
+            when(committer.targetPath()).thenReturn(targetPath);
+            doAnswer(
+                            invocation -> {
+                                activePublishesAtDiscard.add(activePublishes.get());
+                                return null;
+                            })
+                    .when(committer)
+                    .discard(fileIO);
+            committers.add(committer);
+            targetPaths.add(targetPath);
+            messages.add(new TwoPhaseCommitMessage(committer));
+        }
+        doAnswer(
+                        invocation -> {
+                            activePublishes.incrementAndGet();
+                            try {
+                                if (!secondStarted.await(10, TimeUnit.SECONDS)) {
+                                    throw new IOException("The second publication did not start");
+                                }
+                                fileIO.writeFile(targetPaths.get(0), "published", false);
+                                throw new IOException("publish failed");
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                throw new IOException("File publication was interrupted", e);
+                            } finally {
+                                activePublishes.decrementAndGet();
+                            }
+                        })
+                .when(committers.get(0))
+                .commit(fileIO);
+        doAnswer(
+                        invocation -> {
+                            activePublishes.incrementAndGet();
+                            secondStarted.countDown();
+                            try {
+                                if (!releaseSecond.await(10, TimeUnit.SECONDS)) {
+                                    throw new IOException(
+                                            "Timed out waiting to release publication");
+                                }
+                                fileIO.writeFile(targetPaths.get(1), "published", false);
+                                return null;
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                throw new IOException("File publication was interrupted", e);
+                            } finally {
+                                activePublishes.decrementAndGet();
+                            }
+                        })
+                .when(committers.get(1))
+                .commit(fileIO);
+        FormatTableCommit commit =
+                (FormatTableCommit)
+                        formatTable(
+                                        tablePath,
+                                        fileIO,
+                                        partitionManager,
+                                        Collections.singletonMap(
+                                                CoreOptions.FORMAT_TABLE_COMMIT_PUBLISH_THREAD_NUM
+                                                        .key(),
+                                                "2"))
+                                .newBatchWriteBuilder()
+                                .newCommit();
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        Future<?> result = executor.submit(() -> commit.commit(messages));
+        try {
+            assertThat(secondStarted.await(10, TimeUnit.SECONDS)).isTrue();
+            assertThatThrownBy(() -> result.get(300, TimeUnit.MILLISECONDS))
+                    .isInstanceOf(TimeoutException.class);
+            for (TwoPhaseOutputStream.Committer committer : committers) {
+                verify(committer, never()).discard(fileIO);
+            }
+
+            releaseSecond.countDown();
+            assertThat(getRootCause(awaitFailure(result))).hasMessage("publish failed");
+
+            verify(committers.get(2), never()).commit(fileIO);
+            assertThat(activePublishesAtDiscard).containsExactly(0, 0, 0);
+            for (TwoPhaseOutputStream.Committer committer : committers) {
+                verify(committer).discard(fileIO);
+            }
+            assertThat(fileIO.exists(targetPaths.get(0))).isFalse();
+            assertThat(fileIO.exists(targetPaths.get(1))).isFalse();
+        } finally {
+            releaseSecond.countDown();
+            if (!result.isDone()) {
+                try {
+                    result.get(10, TimeUnit.SECONDS);
+                } catch (ExecutionException ignored) {
+                    // The test expects the first publication to fail.
+                }
+            }
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void testPublishConcurrencyIsGatedToCatalogManagedPartitionedTables() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        Map<String, String> options =
+                Collections.singletonMap(
+                        CoreOptions.FORMAT_TABLE_COMMIT_PUBLISH_THREAD_NUM.key(), "64");
+
+        FormatTableCommit filesystemDiscovered =
+                (FormatTableCommit)
+                        formatTable(new Path(tablePath, "filesystem"), fileIO, null, options)
+                                .newBatchWriteBuilder()
+                                .newCommit();
+        assertPublishesOnCaller(
+                filesystemDiscovered, fileIO, new Path(tablePath, "filesystem/part=p"));
+
+        FormatTableCommit unpartitioned =
+                builderUnpartitionedOverwriteCommit(
+                        new Path(tablePath, "unpartitioned"),
+                        fileIO,
+                        mock(FormatTablePartitionManager.class),
+                        options);
+        assertPublishesOnCaller(unpartitioned, fileIO, new Path(tablePath, "unpartitioned"));
+    }
+
+    @Test
     void testCatalogManagedBuilderHonorsConfiguredSerialCleanup() throws Exception {
         SerialProbeFileIO fileIO = new SerialProbeFileIO();
         Path tablePath = new Path(tempDir.toUri());
@@ -885,7 +1169,7 @@ class FormatTableCommitTest {
             assertThat(getRootCause(awaitFailure(result)))
                     .hasMessage("delete failed at input position 0");
             assertThat(fileIO.attemptedFiles())
-                    .containsExactlyInAnyOrder("data-000.csv", "data-001.csv");
+                    .containsExactlyInAnyOrder("data-000.csv", "data-001.csv", "data-new.csv");
             assertThat(fileIO.successfulFiles()).containsExactly("data-001.csv");
             verify(committer, never()).commit(fileIO);
         } finally {
@@ -1485,10 +1769,33 @@ class FormatTableCommitTest {
         }
     }
 
+    private static void assertPublishesOnCaller(
+            FormatTableCommit commit, FileIO fileIO, Path parent) throws IOException {
+        Thread caller = Thread.currentThread();
+        ConcurrentLinkedQueue<Thread> publishThreads = new ConcurrentLinkedQueue<>();
+        List<CommitMessage> messages = new ArrayList<>();
+        for (int i = 0; i < 2; i++) {
+            TwoPhaseOutputStream.Committer committer = mock(TwoPhaseOutputStream.Committer.class);
+            when(committer.targetPath()).thenReturn(new Path(parent, "data-" + i + ".csv"));
+            doAnswer(
+                            invocation -> {
+                                publishThreads.add(Thread.currentThread());
+                                return null;
+                            })
+                    .when(committer)
+                    .commit(fileIO);
+            messages.add(new TwoPhaseCommitMessage(committer));
+        }
+
+        commit.commit(messages);
+
+        assertThat(publishThreads).containsExactly(caller, caller);
+    }
+
     private static ExecutionException awaitFailure(Future<?> future) throws Exception {
         try {
             future.get(10, TimeUnit.SECONDS);
-            throw new AssertionError("Expected cleanup commit to fail");
+            throw new AssertionError("Expected Format Table commit to fail");
         } catch (ExecutionException expected) {
             return expected;
         }
@@ -1509,6 +1816,22 @@ class FormatTableCommitTest {
             collectFailures(suppressed, failures);
         }
         collectFailures(throwable.getCause(), failures);
+    }
+
+    private static class SelectiveRefusingDeleteFileIO extends LocalFileIO {
+
+        private static final long serialVersionUID = 1L;
+
+        private final Path refusedPath;
+
+        private SelectiveRefusingDeleteFileIO(Path refusedPath) {
+            this.refusedPath = refusedPath;
+        }
+
+        @Override
+        public boolean delete(Path path, boolean recursive) throws IOException {
+            return path.equals(refusedPath) ? false : super.delete(path, recursive);
+        }
     }
 
     private static class ParallelDeleteFileIO extends LocalFileIO {
