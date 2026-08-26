@@ -167,6 +167,11 @@ class FileIOTest(unittest.TestCase):
                          "/tmp/path/to/file.txt")
         self.assertEqual(file_io.to_filesystem_path("file:///path/to/file.txt"),
                          "/path/to/file.txt")
+        self.assertEqual(
+            file_io.to_filesystem_path(
+                "file:///tmp/episode%20%E4%B8%AD%E6%96%87.h5"),
+            "/tmp/episode 中文.h5",
+        )
 
         # Test empty paths
         self.assertEqual(file_io.to_filesystem_path("file://"), ".")

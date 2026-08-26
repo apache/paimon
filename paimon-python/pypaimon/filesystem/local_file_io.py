@@ -22,7 +22,7 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import pyarrow
 import pyarrow.fs as pafs
@@ -61,13 +61,13 @@ class LocalFileIO(FileIO):
         
         if parsed.scheme == 'file' and parsed.netloc and parsed.netloc.endswith(':'):
             drive_letter = parsed.netloc.rstrip(':')
-            path_part = parsed.path.lstrip('/') if parsed.path else ''
+            path_part = unquote(parsed.path).lstrip('/') if parsed.path else ''
             if path_part:
                 return Path(f"{drive_letter}:/{path_part}")
             else:
                 return Path(f"{drive_letter}:")
         
-        local_path = parsed.path if parsed.scheme else path
+        local_path = unquote(parsed.path) if parsed.scheme else path
         
         if not local_path:
             return Path(".")

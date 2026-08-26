@@ -45,6 +45,10 @@ def _pyarrow_lt_7():
     return parse(pyarrow.__version__) < parse("7.0.0")
 
 
+class LegacyOssDirectoryListingError(RuntimeError):
+    """Raised when legacy PyArrow OSS cannot enumerate a directory."""
+
+
 class PyArrowFileIO(FileIO):
     def __init__(self, path: str, catalog_options: Options):
         self.properties = catalog_options
@@ -402,7 +406,7 @@ class PyArrowFileIO(FileIO):
 
     def list_status(self, path: str):
         if self._legacy_oss_mode():
-            raise RuntimeError(
+            raise LegacyOssDirectoryListingError(
                 "Listing OSS directories is not supported with PyArrow < 16 "
                 "(it parses the first key segment as a bucket). Upgrade to "
                 "pyarrow >= 16, or install pyjindosdk and set fs.oss.impl=jindo.")

@@ -233,6 +233,9 @@ setup(
         ],
     },
     extras_require={
+        'hdf5': [
+            'h5py>=3,<4; python_version>="3.8"',
+        ],
         'ray': [
             'ray>=2.10,<3; python_version>="3.8"',
         ],

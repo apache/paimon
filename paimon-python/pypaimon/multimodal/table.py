@@ -113,6 +113,21 @@ class MultimodalTable:
             table_commit.close()
         return self
 
+    def append_hdf5(self, paths, *, transform, source_options=None):
+        """Append HDF5 transforms with strict schema and one atomic commit.
+
+        Repeating a call appends the rows again. A commit exception has an
+        unknown result and is not safe to retry without checking table state.
+        Source filesystem options are isolated from the target warehouse.
+        """
+        from pypaimon.multimodal.hdf5 import append_hdf5
+        return append_hdf5(
+            self,
+            paths,
+            transform=transform,
+            source_options=source_options,
+        )
+
     def overwrite(self, data, partition: Optional[Mapping[str, object]] = None):
         arrow_table = _to_arrow_table(data, _target_schema(self.raw_table))
         overwrite_partition = dict(partition) if partition is not None else None

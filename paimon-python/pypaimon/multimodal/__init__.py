@@ -25,6 +25,10 @@ from pypaimon.multimodal.blob_store import (
     PutObjectResult,
 )
 from pypaimon.multimodal.connection import MultimodalConnection, connect
+from pypaimon.multimodal.hdf5 import (
+    Hdf5AppendResult,
+    Hdf5File,
+)
 from pypaimon.multimodal.table import (
     MultimodalTable,
     TextRoute,
@@ -41,6 +45,8 @@ from pypaimon.table.data_evolution_merge_into import (
 __all__ = [
     "BlobObject",
     "BlobStore",
+    "Hdf5AppendResult",
+    "Hdf5File",
     "MultimodalConnection",
     "MultimodalTable",
     "NoSuchKey",

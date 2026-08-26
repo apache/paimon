@@ -31,6 +31,81 @@ pip3 install dist/*.tar.gz
 
 The command will install the package and core dependencies to your local Python environment.
 
+# HDF5 to multimodal tables
+
+Install the optional HDF5 dependency and create the target multimodal table
+before appending local or remote HDF5 files as one or more Arrow batches:
+
+```commandline
+pip install 'pypaimon[hdf5,vortex]'
+```
+
+```python
+import pyarrow as pa
+import pypaimon.multimodal as pmm
+
+EMBEDDING_VECTOR_TYPE = pa.list_(pa.float32(), 3)
+IMAGE_BLOB_TYPE = pa.large_binary()
+
+schema = pa.schema([
+    pa.field("episode_id", pa.string(), nullable=False),
+    pa.field("frame_index", pa.int32(), nullable=False),
+    # Arrow fixed-size lists map to Paimon VECTOR columns.
+    pa.field("embedding", EMBEDDING_VECTOR_TYPE, nullable=False),
+    # Arrow binary and large-binary values map to Paimon BLOB columns.
+    pa.field("image", IMAGE_BLOB_TYPE),
+])
+
+
+def transform(h5, source):
+    episode_id = source.stem
+    for begin in range(0, len(h5["embedding"]), 128):
+        end = min(begin + 128, len(h5["embedding"]))
+        yield pa.RecordBatch.from_pydict({
+            "episode_id": [episode_id] * (end - begin),
+            "frame_index": list(range(begin, end)),
+            "embedding": h5["embedding"][begin:end].tolist(),
+            "image": [bytes(value) for value in h5["image"][begin:end]],
+        }, schema=schema)
+
+connection = pmm.connect(options={"warehouse": "/tmp/warehouse"})
+frames = connection.create_table(
+    "frames",
+    schema=schema,
+)
+result = frames.append_hdf5("/data/episodes", transform=transform)
+print(result.file_count, result.batch_count, result.row_count, result.snapshot_id)
+```
+
+`append_hdf5` accepts one `.h5`/`.hdf5` file, an iterable of paths, or
+directories that are searched recursively. Paths are resolved, duplicate
+files within the call are removed, and the remaining files are processed in
+sorted order. Every yielded batch must have exactly the target columns and be
+safely convertible to the table schema; missing or extra columns, nulls for
+non-nullable fields, incompatible types, and invalid fixed-size vector lengths
+fail the call.
+
+Remote `hdfs://`, `viewfs://`, `oss://`, `s3://`, and `gs://` sources use
+PyPaimon's FileIO abstraction. Pass source-only credentials and endpoints via
+`source_options={"fs.oss.endpoint": "...", ...}`; target warehouse FileIO
+settings are deliberately not reused. h5py reads the seekable FileIO stream
+directly without a local temporary download. Legacy OSS with PyArrow before 16
+supports explicit files but requires Jindo or a newer PyArrow for recursive
+directory discovery. In transforms, `source.local_path` returns a decoded
+`Path` for local sources (including spaces and Unicode) and `None` for remote
+sources.
+
+An empty path iterable or an existing directory without HDF5 files returns
+zero counts and `snapshot_id=None` without creating a writer or snapshot.
+Nonexistent paths, unsupported file suffixes, and discovered files whose
+transform produces no rows remain errors.
+
+All files in one call use one writer and one commit, so success creates one
+snapshot. The API is append-only: it does not add provenance columns, keep a
+source ledger, skip files, or detect drift. Repeating the same call appends the
+rows again. It is not retry-safe because an exception from the commit can have
+an unknown result; inspect table state before deciding whether to retry.
+
 # HDFS without a local Hadoop install
 
 `pypaimon` supports HDFS through a pure-protocol client based on
@@ -109,4 +184,3 @@ unsupported platform such as Windows), `pypaimon` automatically falls
 back to the `pyarrow` (`libhdfs`/JVM) path and logs a warning. Disable
 the fallback with `hdfs.client.fallback-to-pyarrow=false` if you want
 hard failures instead.
-

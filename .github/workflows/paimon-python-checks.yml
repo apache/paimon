@@ -137,6 +137,8 @@ jobs:
             else
               python -m pip install pyarrow==16.0.0 numpy==1.24.3 pandas==2.0.3 flake8==4.0.1
             fi
+            python -m pip install 'h5py>=3,<4'
+            python -c "import h5py; print('h5py', h5py.__version__)"
 
             if [[ "${{ matrix.python-version }}" == "3.11" ]]; then
               # Exercise the 0.4 API in one lane until its wheel is published.
