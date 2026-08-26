@@ -110,15 +110,18 @@ def _estimate_dataset_metadata(dataset, field: str) -> Optional[int]:
 
 
 def _can_modify_num_rows(operator) -> Optional[bool]:
+    is_map_batches = type(operator).__name__ == "MapBatches"
+    class_value = getattr(type(operator), "can_modify_num_rows", None)
+    # Ray <= 2.45 exposes a False property even though the UDF may change rows.
+    if is_map_batches and isinstance(class_value, property):
+        return None
+
     value = getattr(operator, "can_modify_num_rows", None)
     if not callable(value):
         return value if isinstance(value, bool) else None
 
-    # Ray 2.50/2.51 MapBatches reports False without a cardinality flag.
-    if (
-        type(operator).__name__ == "MapBatches"
-        and not hasattr(operator, "_udf_modifying_row_count")
-    ):
+    # Ray 2.50/2.51 exposes a False method without a cardinality flag.
+    if is_map_batches and not hasattr(operator, "_udf_modifying_row_count"):
         return None
     try:
         value = value()

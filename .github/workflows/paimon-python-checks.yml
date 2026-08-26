@@ -309,7 +309,7 @@ jobs:
             if [ "$ray_version" = "2.50.1" ]; then
               tests="$tests pypaimon/tests/ray_update_by_row_id_test.py::RayUpdateByRowIdTest::test_empty_dataset_after_transform_is_noop"
             fi
-            if [ "$ray_version" = "2.53.0" ]; then
+            if [ "$ray_version" = "2.44.0" ] || [ "$ray_version" = "2.53.0" ]; then
               tests="$tests pypaimon/tests/ray_partitioning_test.py::RayPartitioningTest::test_ray_metadata_respects_transform_cardinality"
             fi
             python -m pytest $tests -v --tb=short || {

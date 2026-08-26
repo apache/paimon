@@ -194,7 +194,7 @@ class RayPartitioningTest(unittest.TestCase):
             self.assertEqual(_estimate_dataset_num_rows(widened), 2)
             self.assertGreater(widened.materialize().size_bytes(), 1_000_000)
 
-    def test_old_map_batches_cardinality_is_unknown(self):
+    def test_legacy_map_batches_cardinality_is_unknown(self):
         dependency = types.SimpleNamespace(
             infer_metadata=mock.Mock(
                 return_value=types.SimpleNamespace(num_rows=2)
@@ -209,13 +209,16 @@ class RayPartitioningTest(unittest.TestCase):
             def infer_metadata():
                 return types.SimpleNamespace(num_rows=None)
 
-            @staticmethod
-            def can_modify_num_rows():
+            @property
+            def can_modify_num_rows(self):
                 return False
 
         dataset = types.SimpleNamespace(
             _logical_plan=types.SimpleNamespace(dag=MapBatches())
         )
+        self.assertIsNone(_estimate_dataset_num_rows(dataset))
+
+        MapBatches.can_modify_num_rows = staticmethod(lambda: False)
         self.assertIsNone(_estimate_dataset_num_rows(dataset))
 
     def test_sparse_row_ids_keep_shuffle_parallelism(self):
