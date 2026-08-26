@@ -104,12 +104,33 @@ class _BaseTorchIterDataset(IterableDataset):
             row_dict[field_name] = value
         return row_dict
 
+    def _limit_covers_all_splits(self) -> bool:
+        limit = self.table_read.limit
+        if limit is None:
+            return True
+        total_rows = 0
+        for split in self.splits:
+            row_count = getattr(split, "row_count", None)
+            if (
+                isinstance(row_count, bool)
+                or not isinstance(row_count, int)
+                or row_count < 0
+            ):
+                return False
+            total_rows += row_count
+            if total_rows > limit:
+                return False
+        return True
+
     def _worker_splits(self, worker_info) -> List[Split]:
         if worker_info is None:
             return self.splits
 
-        # DataLoader workers cannot share the global limit budget.
-        if self.table_read.limit is not None:
+        # DataLoader workers cannot share a limit budget that may truncate.
+        if (
+            self.table_read.limit is not None
+            and not self._limit_covers_all_splits()
+        ):
             return self.splits if worker_info.id == 0 else []
 
         worker_id = worker_info.id

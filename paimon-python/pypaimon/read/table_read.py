@@ -707,9 +707,13 @@ class TableRead:
                 raise ValueError("to_tensor_fn requires batch_format='torch'")
             if to_tensor_fn is not None and not callable(to_tensor_fn):
                 raise ValueError("to_tensor_fn must be callable")
-            if max(1, int(prefetch_concurrency)) > 1:
+            if (
+                isinstance(prefetch_concurrency, bool)
+                or not isinstance(prefetch_concurrency, int)
+                or prefetch_concurrency != 1
+            ):
                 raise ValueError(
-                    "batch formats do not support prefetch_concurrency > 1"
+                    "batch formats require prefetch_concurrency=1"
                 )
 
             from pypaimon.read.datasource.torch_dataset import (
