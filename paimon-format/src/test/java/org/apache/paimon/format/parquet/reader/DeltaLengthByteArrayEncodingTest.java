@@ -58,6 +58,22 @@ public class DeltaLengthByteArrayEncodingTest {
     }
 
     @Test
+    public void testReadOnePageAcrossVectorBatches() throws Exception {
+        String[] values = {"a", "bbbb", "ccccc"};
+        writeData(writer, values);
+        reader.initFromPage(values.length, writer.getBytes().toInputStream());
+        HeapBytesVector vector = new HeapBytesVector(values.length);
+
+        reader.readBinary(1, vector, 0);
+        assertArrayEquals(values[0].getBytes(), vector.getBytes(0).getBytes());
+
+        vector.reset();
+        reader.readBinary(2, vector, 0);
+        assertArrayEquals(values[1].getBytes(), vector.getBytes(0).getBytes());
+        assertArrayEquals(values[2].getBytes(), vector.getBytes(1).getBytes());
+    }
+
+    @Test
     public void testRandomStrings() throws Exception {
         String[] values = Utils.getRandomStringSamples(1000, 32);
         writeData(writer, values);
