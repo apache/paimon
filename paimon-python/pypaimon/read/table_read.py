@@ -667,7 +667,8 @@ class TableRead:
         Args:
             splits: Splits to read.
             streaming: Whether to stream data.
-            prefetch_concurrency: Reader threads per DataLoader worker.
+            prefetch_concurrency: Reader threads per DataLoader worker in row
+                format.
             batch_format: ``"row"``, ``"pyarrow"``, or ``"torch"``. Batch
                 formats require streaming.
             batch_size: Rows per batch; ``None`` preserves reader batches.
@@ -706,6 +707,10 @@ class TableRead:
                 raise ValueError("to_tensor_fn requires batch_format='torch'")
             if to_tensor_fn is not None and not callable(to_tensor_fn):
                 raise ValueError("to_tensor_fn must be callable")
+            if max(1, int(prefetch_concurrency)) > 1:
+                raise ValueError(
+                    "batch formats do not support prefetch_concurrency > 1"
+                )
 
             from pypaimon.read.datasource.torch_dataset import (
                 TorchBatchIterDataset,
@@ -715,7 +720,6 @@ class TableRead:
                 splits,
                 batch_format=batch_format,
                 batch_size=batch_size,
-                prefetch_concurrency=prefetch_concurrency,
                 to_tensor_fn=to_tensor_fn,
             )
 

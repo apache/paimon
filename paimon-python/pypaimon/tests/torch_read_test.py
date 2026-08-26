@@ -203,7 +203,6 @@ class TorchReadTest(unittest.TestCase):
         dataset = read_builder.new_read().to_torch(
             splits,
             streaming=True,
-            prefetch_concurrency=4,
             batch_format='torch',
             batch_size=3,
         )
@@ -221,7 +220,7 @@ class TorchReadTest(unittest.TestCase):
         ).sort().values.tolist()
         self.assertEqual(user_ids, list(range(1, 9)))
 
-    def test_torch_streaming_batches_respect_limit_with_prefetch(self):
+    def test_torch_streaming_batches_respect_limit(self):
         schema = Schema.from_pyarrow_schema(
             self.pa_schema, partition_keys=['user_id']
         )
@@ -238,7 +237,6 @@ class TorchReadTest(unittest.TestCase):
         dataset = read_builder.new_read().to_torch(
             splits,
             streaming=True,
-            prefetch_concurrency=4,
             batch_format='pyarrow',
             batch_size=3,
         )
@@ -395,6 +393,13 @@ class TorchReadTest(unittest.TestCase):
                 streaming=True,
                 batch_format='torch',
                 shuffle=True,
+            )
+        with self.assertRaisesRegex(ValueError, 'prefetch_concurrency'):
+            table_read.to_torch(
+                splits,
+                streaming=True,
+                batch_format='pyarrow',
+                prefetch_concurrency=2,
             )
 
     def test_blob_torch_read(self):

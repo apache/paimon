@@ -57,7 +57,8 @@ for batch_idx, batch_data in enumerate(dataloader):
 When the `streaming` parameter is true, it will iteratively read;
 when it is false, it will read the full amount of data into memory.
 
-**`prefetch_concurrency`** (default: 1): When streaming is true, number of threads used for parallel prefetch within each DataLoader worker. Set to a value greater than 1 to partition splits across threads and increase read throughput. Has no effect when streaming is false.
+**`prefetch_concurrency`** (default: 1): In streaming row mode, controls
+reader threads per DataLoader worker. It has no effect in non-streaming mode.
 
 ### Batch Streaming
 
@@ -85,7 +86,7 @@ Omit `batch_size` to preserve native reader batches. Otherwise, batches are
 combined or sliced to the requested size. Use `DataLoader(batch_size=None)` to
 disable a second batching step. Batch streaming does not support `shuffle=True`.
 Numeric tensors may share read-only Arrow buffers; clone them before in-place
-mutation.
+mutation. Batch formats currently require `prefetch_concurrency=1`.
 
 ## File Format Metadata Cache
 
