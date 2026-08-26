@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.HybridSearchRanker;
@@ -128,7 +129,7 @@ public class HybridSearchBuilderImpl implements HybridSearchBuilder {
 
     @Override
     public List<Route> routeBuilders() {
-        rejectUnderQueryAuth();
+        TableQueryAuthResult.rejectSearchUnderQueryAuth(table);
         validateSearch();
 
         Snapshot snapshot = null;
@@ -377,14 +378,5 @@ public class HybridSearchBuilderImpl implements HybridSearchBuilder {
             fullTextSearchBuilder.withPartitionFilter(partitionFilter);
         }
         return fullTextSearchBuilder;
-    }
-
-    private void rejectUnderQueryAuth() {
-        if (table instanceof FileStoreTable
-                && ((FileStoreTable) table).coreOptions().queryAuthEnabled()) {
-            throw new UnsupportedOperationException(
-                    "Search is not supported on a query-auth table: the index ranks raw values, "
-                            + "which a column mask invalidates.");
-        }
     }
 }

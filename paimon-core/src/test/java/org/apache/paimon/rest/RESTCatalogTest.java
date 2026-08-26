@@ -60,6 +60,7 @@ import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FieldTransform;
 import org.apache.paimon.predicate.GreaterOrEqual;
 import org.apache.paimon.predicate.GreaterThan;
+import org.apache.paimon.predicate.LeafFunction;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -103,6 +104,7 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowUtils;
@@ -3931,6 +3933,28 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         return catalog.getTable(identifier);
     }
 
+    private static LeafPredicate leaf(
+            int index, String name, DataType type, LeafFunction function, Object literal) {
+        return LeafPredicate.of(
+                new FieldTransform(new FieldRef(index, name, type)),
+                function,
+                Collections.singletonList(literal));
+    }
+
+    private void setColumnMask(Identifier identifier, String target, Transform transform) {
+        Map<String, Transform> masking = new HashMap<>();
+        masking.put(target, transform);
+        setColumnMasking(identifier, masking);
+    }
+
+    /** Masks {@code target} with the constant {@code ****}. */
+    private void maskConstant(Identifier identifier, String target) {
+        setColumnMask(
+                identifier,
+                target,
+                new ConcatTransform(Collections.singletonList(BinaryString.fromString("****"))));
+    }
+
     private static List<DataField> stringFields(String... names) {
         List<DataField> fields = new ArrayList<>();
         for (int i = 0; i < names.length; i++) {
@@ -3960,15 +3984,14 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     private void maskDisplayWithFullName(Identifier identifier) {
-        Map<String, Transform> columnMasking = new HashMap<>();
-        columnMasking.put(
+        setColumnMask(
+                identifier,
                 "display",
                 new ConcatWsTransform(
                         Arrays.asList(
                                 BinaryString.fromString("-"),
                                 new FieldRef(0, "first", DataTypes.STRING()),
                                 new FieldRef(1, "last", DataTypes.STRING()))));
-        setColumnMasking(identifier, columnMasking);
     }
 
     private static List<InternalRow> collectRows(RecordReader<InternalRow> reader, RowType rowType)
@@ -4053,10 +4076,12 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         writeStringRow(table, "john", "doe", "secret", "o1");
 
         LeafPredicate displayFilter =
-                LeafPredicate.of(
-                        new FieldTransform(new FieldRef(2, "display", DataTypes.STRING())),
+                leaf(
+                        2,
+                        "display",
+                        DataTypes.STRING(),
                         Equal.INSTANCE,
-                        Collections.singletonList(BinaryString.fromString("secret")));
+                        BinaryString.fromString("secret"));
         setRowFilter(identifier, Collections.singletonList(displayFilter));
         maskDisplayWithFullName(identifier);
 
@@ -4175,14 +4200,13 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThat(rows).hasSize(1);
         assertThat(rows.get(0).getRow(1, 1).getString(0).toString()).isEqualTo("BV");
 
-        Map<String, Transform> columnMasking = new HashMap<>();
-        columnMasking.put(
+        setColumnMask(
+                identifier,
                 "display",
                 new ConcatWsTransform(
                         Arrays.asList(
                                 BinaryString.fromString("-"),
                                 new FieldRef(4, "extra", DataTypes.STRING()))));
-        setColumnMasking(identifier, columnMasking);
 
         readBuilder = table.newReadBuilder().withReadType(prunedReadType);
         rows =
@@ -4205,23 +4229,18 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         Collections.emptyMap());
         writeStringRow(table, "john", "doe", "secret");
 
-        Map<String, Transform> staleTarget = new HashMap<>();
-        staleTarget.put(
-                "renamed_away",
-                new ConcatTransform(Collections.singletonList(BinaryString.fromString("****"))));
-        setColumnMasking(identifier, staleTarget);
+        maskConstant(identifier, "renamed_away");
         assertThatThrownBy(() -> readFully(table))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("does not exist in table schema");
 
-        Map<String, Transform> staleInput = new HashMap<>();
-        staleInput.put(
+        setColumnMask(
+                identifier,
                 "display",
                 new ConcatWsTransform(
                         Arrays.asList(
                                 BinaryString.fromString("-"),
                                 new FieldRef(0, "ghost", DataTypes.STRING()))));
-        setColumnMasking(identifier, staleInput);
         assertThatThrownBy(() -> readFully(table))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("does not exist in table schema");
@@ -4300,11 +4319,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
         RowType tableRowType = table.rowType();
         DataField sField = tableRowType.getField("s");
-        Map<String, Transform> masking = new HashMap<>();
-        masking.put(
-                "s",
-                new ConcatTransform(Collections.singletonList(BinaryString.fromString("****"))));
-        setColumnMasking(identifier, masking);
+        maskConstant(identifier, "s");
 
         RowType prunedS = ((RowType) sField.type()).project("b");
         RowType prunedReadType =
@@ -4338,11 +4353,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 identifier,
                 Collections.singletonList(SchemaChange.addColumn("extra", DataTypes.STRING())),
                 false);
-        Map<String, Transform> masking = new HashMap<>();
-        masking.put(
-                "extra",
-                new ConcatTransform(Collections.singletonList(BinaryString.fromString("****"))));
-        setColumnMasking(identifier, masking);
+        maskConstant(identifier, "extra");
 
         Table latest = catalog.getTable(identifier);
         ReadBuilder latestRead = latest.newReadBuilder();
@@ -4378,11 +4389,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 identifier,
                 Collections.singletonList(SchemaChange.renameColumn("secret", "masked_secret")),
                 false);
-        Map<String, Transform> masking = new HashMap<>();
-        masking.put(
-                "masked_secret",
-                new ConcatTransform(Collections.singletonList(BinaryString.fromString("****"))));
-        setColumnMasking(identifier, masking);
+        maskConstant(identifier, "masked_secret");
 
         Table latest = catalog.getTable(identifier);
         ReadBuilder latestRead = latest.newReadBuilder();
@@ -4412,11 +4419,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         Collections.singletonMap(CoreOptions.ROW_TRACKING_ENABLED.key(), "true"));
         writeStringRow(table, "d1", "o1");
 
-        Map<String, Transform> masking = new HashMap<>();
-        masking.put(
-                "_ROW_ID",
-                new ConcatTransform(Collections.singletonList(BinaryString.fromString("****"))));
-        setColumnMasking(identifier, masking);
+        maskConstant(identifier, "_ROW_ID");
 
         ReadBuilder readBuilder = table.newReadBuilder().withProjection(new int[] {0});
         List<InternalRow> rows =
@@ -4444,11 +4447,10 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 identifier,
                 Collections.singletonList(SchemaChange.addColumn("display", DataTypes.STRING())),
                 false);
-        Map<String, Transform> masking = new HashMap<>();
-        masking.put(
+        setColumnMask(
+                identifier,
                 "display",
                 new FieldTransform(new FieldRef(1, "renamed_input", DataTypes.STRING())));
-        setColumnMasking(identifier, masking);
 
         Table old =
                 catalog.getTable(identifier)
@@ -4502,11 +4504,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         identifier, stringFields("first", "secret"), Collections.emptyMap());
         writeStringRow(table, "john", "s1");
 
-        Map<String, Transform> masking = new HashMap<>();
-        masking.put(
-                "secret",
-                new ConcatTransform(Collections.singletonList(BinaryString.fromString("****"))));
-        setColumnMasking(identifier, masking);
+        maskConstant(identifier, "secret");
 
         StreamTableScan scan = table.newReadBuilder().newStreamScan();
         scan.plan();
@@ -4549,11 +4547,10 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
         RowType tableRowType = table.rowType();
         DataField sField = tableRowType.getField("s");
-        Map<String, Transform> masking = new HashMap<>();
-        masking.put(
+        setColumnMask(
+                identifier,
                 "display",
                 new CastTransform(new FieldRef(1, "s", sField.type()), DataTypes.STRING()));
-        setColumnMasking(identifier, masking);
 
         RowType prunedS = ((RowType) sField.type()).project("b");
         RowType prunedReadType =
@@ -4614,14 +4611,13 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
             builder.newCommit().commit(commitables);
         }
 
-        Map<String, Transform> masking = new HashMap<>();
-        masking.put(
+        setColumnMask(
+                identifier,
                 "f1",
                 new ConcatWsTransform(
                         Arrays.asList(
                                 BinaryString.fromString("-"),
                                 new FieldRef(2, "f2", DataTypes.STRING()))));
-        setColumnMasking(identifier, masking);
 
         ReadBuilder readBuilder = table.newReadBuilder().withProjection(new int[] {1});
         List<InternalRow> rows =
@@ -4661,14 +4657,13 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         write.close();
         commit.close();
 
-        Map<String, Transform> masking = new HashMap<>();
-        masking.put(
+        setColumnMask(
+                identifier,
                 "display",
                 new ConcatWsTransform(
                         Arrays.asList(
                                 BinaryString.fromString("-"),
                                 new FieldRef(1, "image", DataTypes.STRING()))));
-        setColumnMasking(identifier, masking);
 
         ReadBuilder readBuilder = table.newReadBuilder().withProjection(new int[] {0});
         assertThatThrownBy(
@@ -4696,18 +4691,13 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         Collections.singletonMap(
                                 CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(), "1 b"));
         for (int[] row : new int[][] {{100, 0}, {50, 1000}}) {
-            BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
-            BatchTableWrite write = writeBuilder.newWrite();
-            write.write(GenericRow.of(row[0], row[1]));
-            BatchTableCommit commit = writeBuilder.newCommit();
-            commit.commit(write.prepareCommit());
-            write.close();
-            commit.close();
+            commitRows(table, GenericRow.of(row[0], row[1]));
         }
 
-        Map<String, Transform> masking = new HashMap<>();
-        masking.put("display", new FieldTransform(new FieldRef(1, "source", DataTypes.INT())));
-        setColumnMasking(identifier, masking);
+        setColumnMask(
+                identifier,
+                "display",
+                new FieldTransform(new FieldRef(1, "source", DataTypes.INT())));
 
         TopN topN =
                 new TopN(new FieldRef(0, "display", DataTypes.INT()), DESCENDING, NULLS_LAST, 1);
@@ -4736,19 +4726,12 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         fields,
                         Collections.singletonMap(CoreOptions.ROW_TRACKING_ENABLED.key(), "true"));
 
-        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
-        BatchTableWrite write = writeBuilder.newWrite();
-        write.write(GenericRow.of(42L));
-        BatchTableCommit commit = writeBuilder.newCommit();
-        commit.commit(write.prepareCommit());
-        write.close();
-        commit.close();
+        commitRows(table, GenericRow.of(42L));
 
-        Map<String, Transform> masking = new HashMap<>();
-        masking.put(
+        setColumnMask(
+                identifier,
                 "display",
                 new FieldTransform(new FieldRef(0, "_ROW_ID", DataTypes.BIGINT().notNull())));
-        setColumnMasking(identifier, masking);
 
         RowType readType =
                 new RowType(
@@ -4809,23 +4792,12 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         Collections.singletonMap(
                                 CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(), "1 b"));
         for (int[] row : new int[][] {{1, 1000}, {900, 10}}) {
-            BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
-            BatchTableWrite write = writeBuilder.newWrite();
-            write.write(GenericRow.of(row[0], row[1]));
-            BatchTableCommit commit = writeBuilder.newCommit();
-            commit.commit(write.prepareCommit());
-            write.close();
-            commit.close();
+            commitRows(table, GenericRow.of(row[0], row[1]));
         }
-        Map<String, Transform> masking = new HashMap<>();
-        masking.put("amount", new FieldTransform(new FieldRef(1, "src", DataTypes.INT())));
-        setColumnMasking(identifier, masking);
+        setColumnMask(
+                identifier, "amount", new FieldTransform(new FieldRef(1, "src", DataTypes.INT())));
 
-        LeafPredicate amountFilter =
-                LeafPredicate.of(
-                        new FieldTransform(new FieldRef(0, "amount", DataTypes.INT())),
-                        GreaterThan.INSTANCE,
-                        Collections.singletonList(500));
+        LeafPredicate amountFilter = leaf(0, "amount", DataTypes.INT(), GreaterThan.INSTANCE, 500);
         ReadBuilder readBuilder =
                 table.newReadBuilder().withProjection(new int[] {0}).withFilter(amountFilter);
         TableRead read = readBuilder.newRead();
@@ -4854,23 +4826,12 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         Collections.singletonMap(
                                 CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(), "1 b"));
         for (int[] row : new int[][] {{1, 1000}, {900, 10}}) {
-            BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
-            BatchTableWrite write = writeBuilder.newWrite();
-            write.write(GenericRow.of(row[0], row[1]));
-            BatchTableCommit commit = writeBuilder.newCommit();
-            commit.commit(write.prepareCommit());
-            write.close();
-            commit.close();
+            commitRows(table, GenericRow.of(row[0], row[1]));
         }
-        Map<String, Transform> masking = new HashMap<>();
-        masking.put("amount", new FieldTransform(new FieldRef(1, "src", DataTypes.INT())));
-        setColumnMasking(identifier, masking);
+        setColumnMask(
+                identifier, "amount", new FieldTransform(new FieldRef(1, "src", DataTypes.INT())));
 
-        LeafPredicate amountFilter =
-                LeafPredicate.of(
-                        new FieldTransform(new FieldRef(0, "amount", DataTypes.INT())),
-                        GreaterThan.INSTANCE,
-                        Collections.singletonList(500));
+        LeafPredicate amountFilter = leaf(0, "amount", DataTypes.INT(), GreaterThan.INSTANCE, 500);
         ReadBuilder readBuilder =
                 table.newReadBuilder().withProjection(new int[] {0}).withFilter(amountFilter);
         StreamTableScan scan = readBuilder.newStreamScan();
@@ -4895,10 +4856,12 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         writeStringRow(table, "d1", "o1");
 
         LeafPredicate displayFilter =
-                LeafPredicate.of(
-                        new FieldTransform(new FieldRef(0, "display", DataTypes.STRING())),
+                leaf(
+                        0,
+                        "display",
+                        DataTypes.STRING(),
                         Equal.INSTANCE,
-                        Collections.singletonList(BinaryString.fromString("d1")));
+                        BinaryString.fromString("d1"));
         ReadBuilder readBuilder =
                 table.newReadBuilder().withProjection(new int[] {0}).withFilter(displayFilter);
         TableScan scan = readBuilder.newScan();
@@ -4909,11 +4872,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         table.rowType().project("display"));
         assertThat(plain).hasSize(1);
 
-        Map<String, Transform> masking = new HashMap<>();
-        masking.put(
-                "display",
-                new ConcatTransform(Collections.singletonList(BinaryString.fromString("****"))));
-        setColumnMasking(identifier, masking);
+        maskConstant(identifier, "display");
 
         assertThatThrownBy(scan::plan)
                 .isInstanceOf(IllegalStateException.class)
@@ -4946,10 +4905,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         writeStringRow(table, "b", "v2");
 
         LeafPredicate partitionFilter =
-                LeafPredicate.of(
-                        new FieldTransform(new FieldRef(0, "p", DataTypes.STRING())),
-                        Equal.INSTANCE,
-                        Collections.singletonList(BinaryString.fromString("a")));
+                leaf(0, "p", DataTypes.STRING(), Equal.INSTANCE, BinaryString.fromString("a"));
         assertThat(
                         table.newReadBuilder()
                                 .withFilter(partitionFilter)
@@ -4972,10 +4928,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         writeStringRows(table, new String[] {"a", "v1"}, new String[] {"b", "v2"});
 
         LeafPredicate onA =
-                LeafPredicate.of(
-                        new FieldTransform(new FieldRef(0, "p", DataTypes.STRING())),
-                        Equal.INSTANCE,
-                        Collections.singletonList(BinaryString.fromString("a")));
+                leaf(0, "p", DataTypes.STRING(), Equal.INSTANCE, BinaryString.fromString("a"));
         setRowFilter(identifier, Collections.singletonList(onA));
 
         List<PartitionEntry> entries =
@@ -4997,23 +4950,12 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         Collections.singletonMap(
                                 CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(), "1 b"));
         for (int[] row : new int[][] {{900, 10}, {1, 1000}}) {
-            BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
-            BatchTableWrite write = writeBuilder.newWrite();
-            write.write(GenericRow.of(row[0], row[1]));
-            BatchTableCommit commit = writeBuilder.newCommit();
-            commit.commit(write.prepareCommit());
-            write.close();
-            commit.close();
+            commitRows(table, GenericRow.of(row[0], row[1]));
         }
-        Map<String, Transform> masking = new HashMap<>();
-        masking.put("amount", new FieldTransform(new FieldRef(1, "src", DataTypes.INT())));
-        setColumnMasking(identifier, masking);
+        setColumnMask(
+                identifier, "amount", new FieldTransform(new FieldRef(1, "src", DataTypes.INT())));
 
-        LeafPredicate amountFilter =
-                LeafPredicate.of(
-                        new FieldTransform(new FieldRef(0, "amount", DataTypes.INT())),
-                        GreaterThan.INSTANCE,
-                        Collections.singletonList(500));
+        LeafPredicate amountFilter = leaf(0, "amount", DataTypes.INT(), GreaterThan.INSTANCE, 500);
         ReadBuilder readBuilder =
                 table.newReadBuilder()
                         .withProjection(new int[] {0})
@@ -5044,25 +4986,18 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         writeStringRow(table, "a", "va");
         writeStringRow(table, "b", "vb");
 
-        Map<String, Transform> masking = new HashMap<>();
-        masking.put("p", new FieldTransform(new FieldRef(1, "v", DataTypes.STRING())));
-        setColumnMasking(identifier, masking);
+        setColumnMask(
+                identifier, "p", new FieldTransform(new FieldRef(1, "v", DataTypes.STRING())));
 
         LeafPredicate maskedMatch =
-                LeafPredicate.of(
-                        new FieldTransform(new FieldRef(0, "p", DataTypes.STRING())),
-                        Equal.INSTANCE,
-                        Collections.singletonList(BinaryString.fromString("vb")));
+                leaf(0, "p", DataTypes.STRING(), Equal.INSTANCE, BinaryString.fromString("vb"));
         List<InternalRow> rows = readWithFilter(table, maskedMatch, "p", "v");
         assertThat(rows).hasSize(1);
         assertThat(rows.get(0).getString(0).toString()).isEqualTo("vb");
         assertThat(rows.get(0).getString(1).toString()).isEqualTo("vb");
 
         LeafPredicate rawMatch =
-                LeafPredicate.of(
-                        new FieldTransform(new FieldRef(0, "p", DataTypes.STRING())),
-                        Equal.INSTANCE,
-                        Collections.singletonList(BinaryString.fromString("a")));
+                leaf(0, "p", DataTypes.STRING(), Equal.INSTANCE, BinaryString.fromString("a"));
         assertThat(readWithFilter(table, rawMatch, "p", "v")).isEmpty();
 
         List<InternalRow> unprojected = readWithFilter(table, maskedMatch, "v");
@@ -5083,15 +5018,11 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         Collections.emptyMap());
         writeStringRow(table, "a", "va");
         writeStringRow(table, "b", "vb");
-        Map<String, Transform> masking = new HashMap<>();
-        masking.put("p", new FieldTransform(new FieldRef(1, "v", DataTypes.STRING())));
-        setColumnMasking(identifier, masking);
+        setColumnMask(
+                identifier, "p", new FieldTransform(new FieldRef(1, "v", DataTypes.STRING())));
 
         LeafPredicate maskedMatch =
-                LeafPredicate.of(
-                        new FieldTransform(new FieldRef(0, "p", DataTypes.STRING())),
-                        Equal.INSTANCE,
-                        Collections.singletonList(BinaryString.fromString("vb")));
+                leaf(0, "p", DataTypes.STRING(), Equal.INSTANCE, BinaryString.fromString("vb"));
         ReadBuilder readBuilder =
                 table.newReadBuilder()
                         .withProjection(new int[] {0, 1})
@@ -5118,24 +5049,12 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         Collections.emptyList(),
                         Collections.singletonList("id"),
                         Collections.singletonMap(CoreOptions.BUCKET.key(), "1"));
-        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
-        BatchTableWrite write = writeBuilder.newWrite();
-        write.write(GenericRow.of(1, 500));
-        write.write(GenericRow.of(2, 600));
-        BatchTableCommit commit = writeBuilder.newCommit();
-        commit.commit(write.prepareCommit());
-        write.close();
-        commit.close();
+        commitRows(table, GenericRow.of(1, 500), GenericRow.of(2, 600));
 
-        Map<String, Transform> masking = new HashMap<>();
-        masking.put("id", new FieldTransform(new FieldRef(1, "src", DataTypes.INT())));
-        setColumnMasking(identifier, masking);
+        setColumnMask(
+                identifier, "id", new FieldTransform(new FieldRef(1, "src", DataTypes.INT())));
 
-        LeafPredicate idFilter =
-                LeafPredicate.of(
-                        new FieldTransform(new FieldRef(0, "id", DataTypes.INT())),
-                        Equal.INSTANCE,
-                        Collections.singletonList(500));
+        LeafPredicate idFilter = leaf(0, "id", DataTypes.INT(), Equal.INSTANCE, 500);
         List<InternalRow> rows = readWithFilter(table, idFilter, "id", "src");
         assertThat(rows).hasSize(1);
         assertThat(rows.get(0).getInt(0)).isEqualTo(500);
@@ -5604,21 +5523,9 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     @Test
     void testColumnMaskingOrFilterWithUnprojectedOperand() throws Exception {
         Identifier identifier = Identifier.create("test_table_db", "auth_or_filter_unprojected");
-        catalog.createDatabase(identifier.getDatabaseName(), true);
-        List<DataField> fields = new ArrayList<>();
-        fields.add(new DataField(0, "a", DataTypes.STRING()));
-        fields.add(new DataField(1, "b", DataTypes.STRING()));
-        fields.add(new DataField(2, "c", DataTypes.STRING()));
-        catalog.createTable(
-                identifier,
-                new Schema(
-                        fields,
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        Collections.singletonMap(QUERY_AUTH_ENABLED.key(), "true"),
-                        ""),
-                true);
-        Table table = catalog.getTable(identifier);
+        Table table =
+                createMaskingAuthTable(
+                        identifier, stringFields("a", "b", "c"), Collections.emptyMap());
         commitRows(
                 table,
                 GenericRow.of(
@@ -5626,22 +5533,15 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         BinaryString.fromString("bee"),
                         BinaryString.fromString("cee")));
 
-        Map<String, Transform> masking = new HashMap<>();
-        masking.put(
+        setColumnMask(
+                identifier,
                 "a",
                 new ConcatTransform(Collections.singletonList(BinaryString.fromString("MASKED"))));
-        setColumnMasking(identifier, masking);
 
         Predicate onMasked =
-                LeafPredicate.of(
-                        new FieldTransform(new FieldRef(0, "a", DataTypes.STRING())),
-                        Equal.INSTANCE,
-                        Collections.singletonList(BinaryString.fromString("MASKED")));
+                leaf(0, "a", DataTypes.STRING(), Equal.INSTANCE, BinaryString.fromString("MASKED"));
         Predicate onPlain =
-                LeafPredicate.of(
-                        new FieldTransform(new FieldRef(1, "b", DataTypes.STRING())),
-                        Equal.INSTANCE,
-                        Collections.singletonList(BinaryString.fromString("bee")));
+                leaf(1, "b", DataTypes.STRING(), Equal.INSTANCE, BinaryString.fromString("bee"));
         Predicate disjunction = PredicateBuilder.or(onMasked, onPlain);
 
         ReadBuilder readBuilder =
@@ -5657,35 +5557,24 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     @Test
     void testColumnMaskingPartitionListingBeforePlan() throws Exception {
         Identifier identifier = Identifier.create("test_table_db", "auth_partition_listing");
-        catalog.createDatabase(identifier.getDatabaseName(), true);
-        List<DataField> fields = new ArrayList<>();
-        fields.add(new DataField(0, "pt", DataTypes.STRING()));
-        fields.add(new DataField(1, "a", DataTypes.STRING()));
-        catalog.createTable(
-                identifier,
-                new Schema(
-                        fields,
+        Table table =
+                createMaskingAuthTable(
+                        identifier,
+                        stringFields("pt", "a"),
                         Collections.singletonList("pt"),
                         Collections.emptyList(),
-                        Collections.singletonMap(QUERY_AUTH_ENABLED.key(), "true"),
-                        ""),
-                true);
-        Table table = catalog.getTable(identifier);
+                        Collections.emptyMap());
         commitRows(
                 table,
                 GenericRow.of(BinaryString.fromString("p1"), BinaryString.fromString("raw")));
 
-        Map<String, Transform> masking = new HashMap<>();
-        masking.put(
+        setColumnMask(
+                identifier,
                 "a",
                 new ConcatTransform(Collections.singletonList(BinaryString.fromString("MASKED"))));
-        setColumnMasking(identifier, masking);
 
         Predicate onMasked =
-                LeafPredicate.of(
-                        new FieldTransform(new FieldRef(1, "a", DataTypes.STRING())),
-                        Equal.INSTANCE,
-                        Collections.singletonList(BinaryString.fromString("MASKED")));
+                leaf(1, "a", DataTypes.STRING(), Equal.INSTANCE, BinaryString.fromString("MASKED"));
 
         InnerTableScan scan =
                 (InnerTableScan) table.newReadBuilder().withFilter(onMasked).newScan();
@@ -5696,30 +5585,15 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     @Test
     void testQueryAuthLimitDoesNotCutRowsBeforeFilter() throws Exception {
         Identifier identifier = Identifier.create("test_table_db", "auth_limit_with_filter");
-        catalog.createDatabase(identifier.getDatabaseName(), true);
-        List<DataField> fields = new ArrayList<>();
-        fields.add(new DataField(0, "a", DataTypes.STRING()));
-        fields.add(new DataField(1, "b", DataTypes.STRING()));
-        catalog.createTable(
-                identifier,
-                new Schema(
-                        fields,
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        Collections.singletonMap(QUERY_AUTH_ENABLED.key(), "true"),
-                        ""),
-                true);
-        Table table = catalog.getTable(identifier);
+        Table table =
+                createMaskingAuthTable(identifier, stringFields("a", "b"), Collections.emptyMap());
         commitRows(
                 table,
                 GenericRow.of(BinaryString.fromString("no"), BinaryString.fromString("r1")),
                 GenericRow.of(BinaryString.fromString("yes"), BinaryString.fromString("r2")));
 
         Predicate onA =
-                LeafPredicate.of(
-                        new FieldTransform(new FieldRef(0, "a", DataTypes.STRING())),
-                        Equal.INSTANCE,
-                        Collections.singletonList(BinaryString.fromString("yes")));
+                leaf(0, "a", DataTypes.STRING(), Equal.INSTANCE, BinaryString.fromString("yes"));
         ReadBuilder readBuilder = table.newReadBuilder().withFilter(onA).withLimit(1);
         List<String> out = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
@@ -5742,15 +5616,11 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         writeStringRow(table, "a", "va");
         writeStringRow(table, "b", "vb");
 
-        Map<String, Transform> masking = new HashMap<>();
-        masking.put("p", new FieldTransform(new FieldRef(1, "v", DataTypes.STRING())));
-        setColumnMasking(identifier, masking);
+        setColumnMask(
+                identifier, "p", new FieldTransform(new FieldRef(1, "v", DataTypes.STRING())));
 
         LeafPredicate maskedMatch =
-                LeafPredicate.of(
-                        new FieldTransform(new FieldRef(0, "p", DataTypes.STRING())),
-                        Equal.INSTANCE,
-                        Collections.singletonList(BinaryString.fromString("vb")));
+                leaf(0, "p", DataTypes.STRING(), Equal.INSTANCE, BinaryString.fromString("vb"));
 
         InnerTableScan partitionScan = (InnerTableScan) table.newReadBuilder().newScan();
         partitionScan.withPartitionFilter(maskedMatch);
@@ -5773,24 +5643,17 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         Collections.emptyMap());
         writeStringRows(table, new String[] {"x", "a", "v1"}, new String[] {"y", "b", "v2"});
 
-        Map<String, Transform> masking = new HashMap<>();
-        masking.put("p2", new FieldTransform(new FieldRef(2, "v", DataTypes.STRING())));
-        setColumnMasking(identifier, masking);
+        setColumnMask(
+                identifier, "p2", new FieldTransform(new FieldRef(2, "v", DataTypes.STRING())));
 
         LeafPredicate onP1 =
-                LeafPredicate.of(
-                        new FieldTransform(new FieldRef(0, "p1", DataTypes.STRING())),
-                        Equal.INSTANCE,
-                        Collections.singletonList(BinaryString.fromString("x")));
+                leaf(0, "p1", DataTypes.STRING(), Equal.INSTANCE, BinaryString.fromString("x"));
         InnerTableScan okScan = (InnerTableScan) table.newReadBuilder().newScan();
         okScan.withPartitionFilter(onP1);
         assertThat(okScan.plan().splits()).isNotEmpty();
 
         LeafPredicate onP2 =
-                LeafPredicate.of(
-                        new FieldTransform(new FieldRef(1, "p2", DataTypes.STRING())),
-                        Equal.INSTANCE,
-                        Collections.singletonList(BinaryString.fromString("v1")));
+                leaf(1, "p2", DataTypes.STRING(), Equal.INSTANCE, BinaryString.fromString("v1"));
         InnerTableScan badScan = (InnerTableScan) table.newReadBuilder().newScan();
         badScan.withPartitionFilter(onP2);
         assertThatThrownBy(badScan::plan)
@@ -5811,10 +5674,12 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         writeStringRows(table, new String[] {"a", "va"}, new String[] {"b", "vb"});
 
         LeafPredicate pAtLeastA =
-                LeafPredicate.of(
-                        new FieldTransform(new FieldRef(0, "p", DataTypes.STRING())),
+                leaf(
+                        0,
+                        "p",
+                        DataTypes.STRING(),
                         GreaterOrEqual.INSTANCE,
-                        Collections.singletonList(BinaryString.fromString("a")));
+                        BinaryString.fromString("a"));
         assertThat(readPartitionB(table, pAtLeastA)).containsExactly("b");
 
         Identifier plain = Identifier.create("test_table_db", "plain_part_filter_with_filter");
@@ -5849,20 +5714,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     @Test
     void testQueryAuthLimitAppliesWhenReaderExecutesFilter() throws Exception {
         Identifier identifier = Identifier.create("test_table_db", "auth_limit_execute_filter");
-        catalog.createDatabase(identifier.getDatabaseName(), true);
-        List<DataField> fields = new ArrayList<>();
-        fields.add(new DataField(0, "a", DataTypes.STRING()));
-        fields.add(new DataField(1, "b", DataTypes.STRING()));
-        catalog.createTable(
-                identifier,
-                new Schema(
-                        fields,
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        Collections.singletonMap(QUERY_AUTH_ENABLED.key(), "true"),
-                        ""),
-                true);
-        Table table = catalog.getTable(identifier);
+        Table table =
+                createMaskingAuthTable(identifier, stringFields("a", "b"), Collections.emptyMap());
         commitRows(
                 table,
                 GenericRow.of(BinaryString.fromString("yes"), BinaryString.fromString("r1")),
@@ -5870,10 +5723,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 GenericRow.of(BinaryString.fromString("yes"), BinaryString.fromString("r3")));
 
         Predicate onA =
-                LeafPredicate.of(
-                        new FieldTransform(new FieldRef(0, "a", DataTypes.STRING())),
-                        Equal.INSTANCE,
-                        Collections.singletonList(BinaryString.fromString("yes")));
+                leaf(0, "a", DataTypes.STRING(), Equal.INSTANCE, BinaryString.fromString("yes"));
         ReadBuilder readBuilder = table.newReadBuilder().withFilter(onA).withLimit(2);
         List<String> out = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
@@ -5898,20 +5748,13 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         Collections.emptyMap());
         writeStringRows(table, new String[] {"x", "a", "v1"});
 
-        Map<String, Transform> masking = new HashMap<>();
-        masking.put("p2", new FieldTransform(new FieldRef(2, "v", DataTypes.STRING())));
-        setColumnMasking(identifier, masking);
+        setColumnMask(
+                identifier, "p2", new FieldTransform(new FieldRef(2, "v", DataTypes.STRING())));
 
         LeafPredicate onMaskedP2 =
-                LeafPredicate.of(
-                        new FieldTransform(new FieldRef(1, "p2", DataTypes.STRING())),
-                        Equal.INSTANCE,
-                        Collections.singletonList(BinaryString.fromString("v1")));
+                leaf(1, "p2", DataTypes.STRING(), Equal.INSTANCE, BinaryString.fromString("v1"));
         LeafPredicate onPlainP1 =
-                LeafPredicate.of(
-                        new FieldTransform(new FieldRef(0, "p1", DataTypes.STRING())),
-                        Equal.INSTANCE,
-                        Collections.singletonList(BinaryString.fromString("x")));
+                leaf(0, "p1", DataTypes.STRING(), Equal.INSTANCE, BinaryString.fromString("x"));
 
         InnerTableScan scan = (InnerTableScan) table.newReadBuilder().newScan();
         scan.withPartitionFilter(onMaskedP2);
@@ -5926,11 +5769,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 createMaskingAuthTable(
                         identifier, stringFields("secret", "other"), Collections.emptyMap());
         writeStringRow(table, "TOPSECRET", "o1");
-        Map<String, Transform> masking = new HashMap<>();
-        masking.put(
-                "secret",
-                new ConcatTransform(Collections.singletonList(BinaryString.fromString("****"))));
-        setColumnMasking(identifier, masking);
+        maskConstant(identifier, "secret");
 
         for (String suffix : Arrays.asList("files", "file_key_ranges", "binlog", "statistics")) {
             Identifier sysId =

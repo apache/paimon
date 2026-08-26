@@ -55,8 +55,7 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
     // as read-level TopN already does (see ReadBuilderImpl)
     private final boolean queryAuthEnabled;
 
-    // the read type the subclass reads with; widened for auth when needed, and fixed
-    // once a reader exists (split reads cache their format readers)
+    // the auth-widened read type currently applied, or null when the plain read type is
     @Nullable private RowType appliedReadType;
 
     // blob-view columns that only resolve through the dedicated blob-view read path
@@ -114,7 +113,7 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
     @Override
     public final InnerTableRead withReadType(RowType readType) {
         this.readType = readType;
-        this.appliedReadType = readType;
+        this.appliedReadType = null;
         applyReadType(readType);
         return this;
     }
@@ -148,15 +147,17 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
 
     protected final RecordReader<InternalRow> createDataReader(
             Split split, @Nullable TableQueryAuthResult authResult) throws IOException {
-        // a TableRead is reused across splits; auth may have widened the projection for the
-        // previous one, so restore the requested type before deciding this split's widening
+        // A TableRead can be reused for multiple splits. Authentication may have expanded an
+        // explicitly configured physical projection for the previous split, so restore it before
+        // applying the current split's authorization dependencies. Without an explicit projection,
+        // the underlying reader must retain its own default read type.
         if (readType != null) {
             applyReadType(readType);
             appliedReadType = null;
         }
         RecordReader<InternalRow> reader;
         if (authResult == null) {
-            reader = backProject(readSplit(split));
+            reader = backProject(reader(split));
         } else {
             reader = authedReader(split, authResult);
         }
@@ -165,10 +166,6 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
         }
 
         return reader;
-    }
-
-    private RecordReader<InternalRow> readSplit(Split split) throws IOException {
-        return reader(split);
     }
 
     private RecordReader<InternalRow> authedReader(Split split, TableQueryAuthResult authResult)
@@ -185,45 +182,30 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
         }
         // the split read emits appliedReadType; rules are remapped against it by name
         RowType outputType = appliedReadType != null ? appliedReadType : currentReadType();
-        if (widened != null && !widened.equals(outputType)) {
-            // rules changed after the read schema was fixed: fail clearly if they no longer fit
-            List<String> outputFields = outputType.getFieldNames();
-            for (String field : widened.getFieldNames()) {
-                if (!outputFields.contains(field)) {
-                    throw new IllegalStateException(
-                            String.format(
-                                    "Query auth rules changed and now require column '%s', but the "
-                                            + "read schema is already fixed to %s. Recreate the "
-                                            + "reader to apply the new rules.",
-                                    field, outputFields));
-                }
-            }
-        }
         // masks apply only to columns readable from the query: the ones it projects plus the
         // ones the rules pulled in; a mask on anything else is inert
         Map<String, Transform> masking = authResult.extractColumnMasking();
-        Map<String, Transform> selectedMasking = Collections.emptyMap();
+        Map<String, Transform> selectedColumnMasking = Collections.emptyMap();
         if (!masking.isEmpty()) {
             Set<String> activeFields = new HashSet<>(readFields);
             activeFields.addAll(ruleFields);
-            selectedMasking = new HashMap<>();
+            selectedColumnMasking = new HashMap<>();
             for (Map.Entry<String, Transform> mask : masking.entrySet()) {
                 if (activeFields.contains(mask.getKey())) {
-                    selectedMasking.put(mask.getKey(), mask.getValue());
+                    selectedColumnMasking.put(mask.getKey(), mask.getValue());
                 }
             }
         }
         RecordReader<InternalRow> reader =
                 authResult.doAuth(
-                        readSplit(split),
+                        reader(split),
                         outputType,
                         authResult.extractPredicate(),
-                        selectedMasking);
+                        selectedColumnMasking);
         reader = filterMaskedConjuncts(reader, outputType, maskedFilterFields);
         return backProject(reader);
     }
 
-    /** The columns of the query filter that the current auth rules mask. */
     private Set<String> maskedFilterFields(Set<String> maskTargets) {
         if (predicate == null || maskTargets.isEmpty()) {
             return Collections.emptySet();
@@ -261,12 +243,9 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
         return reader.filter(filter::test);
     }
 
-    /**
-     * Project auth-widened rows back to the query's read type — on every split, since the widened
-     * read schema stays in effect even for splits without auth rules.
-     */
+    /** Project auth-widened rows back to the read type the query asked for. */
     private RecordReader<InternalRow> backProject(RecordReader<InternalRow> reader) {
-        if (appliedReadType == null || appliedReadType == readType) {
+        if (appliedReadType == null) {
             return reader;
         }
         ProjectedRow backRow =

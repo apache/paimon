@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.index.pk.PrimaryKeyIndexDefinition;
 import org.apache.paimon.index.pk.PrimaryKeyIndexDefinitions;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -72,7 +73,7 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
 
     @Override
     public FullTextScan newFullTextScan() {
-        rejectUnderQueryAuth();
+        TableQueryAuthResult.rejectSearchUnderQueryAuth(table);
         DataField textColumn = textColumn();
         Optional<PrimaryKeyIndexDefinition> definition = primaryKeyFullTextDefinition(textColumn);
         return definition.isPresent()
@@ -87,7 +88,7 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
 
     @Override
     public FullTextRead newFullTextRead() {
-        rejectUnderQueryAuth();
+        TableQueryAuthResult.rejectSearchUnderQueryAuth(table);
         checkArgument(limit > 0, "Limit must be positive, set via withLimit()");
         DataField textColumn = textColumn();
         Optional<PrimaryKeyIndexDefinition> definition = primaryKeyFullTextDefinition(textColumn);
@@ -129,13 +130,5 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
     FullTextSearchBuilderImpl withSnapshot(Snapshot snapshot) {
         this.pinnedSnapshot = snapshot;
         return this;
-    }
-
-    private void rejectUnderQueryAuth() {
-        if (table.coreOptions().queryAuthEnabled()) {
-            throw new UnsupportedOperationException(
-                    "Search is not supported on a query-auth table: the index ranks raw values, "
-                            + "which a column mask invalidates.");
-        }
     }
 }

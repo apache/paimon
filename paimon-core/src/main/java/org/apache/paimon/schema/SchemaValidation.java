@@ -156,18 +156,9 @@ public class SchemaValidation {
 
         validateOnlyContainPrimitiveType(schema.fields(), schema.primaryKeys(), "primary key");
         validateOnlyContainPrimitiveType(schema.fields(), schema.partitionKeys(), "partition");
-        // only a file-store table reads through the auth reader; reject here rather than only at
-        // create time, so ALTER cannot turn the option on for a table type that ignores it
-        TableType tableType = options.type();
-        if (options.queryAuthEnabled()
-                && tableType != TableType.TABLE
-                && tableType != TableType.MATERIALIZED_TABLE) {
-            throw new RuntimeException(
-                    String.format(
-                            "%s is not supported on a %s: its read does not apply row filters or "
-                                    + "column masks.",
-                            CoreOptions.QUERY_AUTH_ENABLED.key(), tableType));
-        }
+        // reject here rather than only at create time, so ALTER cannot turn the option on for a
+        // table type that ignores it
+        validateQueryAuthTableType(options.type(), options.queryAuthEnabled());
 
         if (options.primaryKeyNullable() && schema.primaryKeys().isEmpty()) {
             throw new IllegalArgumentException(
@@ -410,6 +401,20 @@ public class SchemaValidation {
         validatePkClusteringOverride(options);
 
         validateManifestSort(schema, options);
+    }
+
+    /**
+     * Only a file-store table reads through the auth reader; anywhere else the rules would be
+     * accepted and then silently not applied.
+     */
+    public static void validateQueryAuthTableType(TableType tableType, boolean queryAuthEnabled) {
+        checkArgument(
+                !queryAuthEnabled
+                        || tableType == TableType.TABLE
+                        || tableType == TableType.MATERIALIZED_TABLE,
+                "%s is not supported on a %s: its read does not apply row filters or column masks.",
+                CoreOptions.QUERY_AUTH_ENABLED.key(),
+                tableType);
     }
 
     public static void validateFallbackBranch(SchemaManager schemaManager, TableSchema schema) {

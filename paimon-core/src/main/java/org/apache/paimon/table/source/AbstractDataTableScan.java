@@ -124,8 +124,12 @@ abstract class AbstractDataTableScan implements DataTableScan {
         this.queryAuth = queryAuth;
     }
 
-    @Override
-    public final TableScan.Plan plan() {
+    /**
+     * Refreshes the auth state and pushes what can be pushed. Every path that reaches the files
+     * must run this, so it stays the one place the order of these steps is defined.
+     */
+    @Nullable
+    protected final TableQueryAuthResult applyAuthRules() {
         TableQueryAuthResult queryAuthResult = authQuery();
         // Always apply/clear the auth filter so removing auth leaves no stale partition pruning.
         applyAuthFilter(queryAuthResult == null ? null : queryAuthResult.extractPredicate());
@@ -134,7 +138,13 @@ abstract class AbstractDataTableScan implements DataTableScan {
                         ? Collections.emptySet()
                         : queryAuthResult.extractColumnMasking().keySet();
         rejectMaskedPartitionFilter();
-        ensureFilterPushdown(authMaskedFields);
+        ensureFilterPushdown();
+        return queryAuthResult;
+    }
+
+    @Override
+    public final TableScan.Plan plan() {
+        TableQueryAuthResult queryAuthResult = applyAuthRules();
         applyAuthReadType(queryAuthResult);
         Plan plan = planWithoutAuth();
         if (queryAuthResult != null) {
@@ -145,7 +155,7 @@ abstract class AbstractDataTableScan implements DataTableScan {
 
     protected abstract TableScan.Plan planWithoutAuth();
 
-    protected void applyAuthFilter(@Nullable Predicate authPredicate) {
+    private void applyAuthFilter(@Nullable Predicate authPredicate) {
         if (Objects.equals(authPredicate, appliedAuthPredicate)) {
             return;
         }
@@ -323,7 +333,7 @@ abstract class AbstractDataTableScan implements DataTableScan {
      * evaluation, so it can never be re-checked on the masked value. Fail closed. One routed
      * through withFilter is fine: that path defers it and evaluates it post-mask.
      */
-    protected void rejectMaskedPartitionFilter() {
+    private void rejectMaskedPartitionFilter() {
         if (partitionFilterFields.isEmpty() || authMaskedFields.isEmpty()) {
             return;
         }
@@ -344,11 +354,11 @@ abstract class AbstractDataTableScan implements DataTableScan {
      * Pushes the query filter once, minus the conjuncts on masked columns. Also called by partition
      * listing; a mask found later on an already-pushed column fails closed.
      */
-    protected final void ensureFilterPushdown(Set<String> maskedFields) {
+    private void ensureFilterPushdown() {
         if (userFilter == null) {
             return;
         }
-        Set<String> maskedInFilter = new HashSet<>(maskedFields);
+        Set<String> maskedInFilter = new HashSet<>(authMaskedFields);
         maskedInFilter.retainAll(PredicateVisitor.collectFieldNames(userFilter));
         if (!maskedInFilter.isEmpty()) {
             // masked conjuncts drop rows at read time only: keep limit/TopN pruning off
@@ -393,15 +403,13 @@ abstract class AbstractDataTableScan implements DataTableScan {
             }
         }
         // never narrow within this scan's lifetime: readers fix their schema on first use
-        if (appliedScanReadType != null) {
-            RowType widened =
-                    TableQueryAuthResult.appendMissingFields(
-                            appliedScanReadType,
-                            desired,
-                            new HashSet<>(appliedScanReadType.getFieldNames()));
-            if (widened != null) {
-                desired = widened;
-            }
+        RowType widenedToApplied =
+                TableQueryAuthResult.appendMissingFields(
+                        appliedScanReadType,
+                        desired,
+                        new HashSet<>(appliedScanReadType.getFieldNames()));
+        if (widenedToApplied != null) {
+            desired = widenedToApplied;
         }
         if (!desired.equals(appliedScanReadType)) {
             snapshotReader.withReadType(desired);

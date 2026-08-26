@@ -146,8 +146,7 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         readerFactoryBuilder.withReadValueType(adjustedReadType);
         mergeSorter.setProjectedValueType(adjustedReadType);
 
-        // Project away fields added for merging; reset any previous projection, as this
-        // method may be called again.
+        // reset rather than latch: this method may be called again
         outerReadType = adjustedReadType != readType ? readType : null;
 
         return this;

@@ -19,7 +19,6 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.SortValue;
@@ -42,7 +41,6 @@ import javax.annotation.Nullable;
 
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
@@ -156,14 +154,7 @@ public abstract class AbstractBatchTableScan extends AbstractDataTableScan {
         // partition listing bypasses plan(), so apply the rules here too: without the row filter
         // it would report partitions the caller cannot read, and pushing a filter on a masked
         // column against raw partition values would drop partitions the query matches
-        TableQueryAuthResult authResult = authQuery();
-        applyAuthFilter(authResult == null ? null : authResult.extractPredicate());
-        this.authMaskedFields =
-                authResult == null
-                        ? Collections.emptySet()
-                        : authResult.extractColumnMasking().keySet();
-        rejectMaskedPartitionFilter();
-        ensureFilterPushdown(authMaskedFields);
+        applyAuthRules();
         if (startingScanner == null) {
             startingScanner = createStartingScanner(false);
         }

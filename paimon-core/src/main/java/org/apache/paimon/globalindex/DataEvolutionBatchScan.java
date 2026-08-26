@@ -106,8 +106,6 @@ public class DataEvolutionBatchScan implements DataTableScan {
             // the wrapped scan defers the filter but strips only masked columns; row ids must
             // go here, since data-evolution statistics carry logical columns only
             Predicate residual = rowIdSafeResidualFilter(predicate);
-            // what is left out reaches the reader only, so the wrapped scan never learns a
-            // filter exists and would let limit/TopN prune ahead of it
             rowIdFilterDeferred = containsRowId(predicate);
             if (residual != null) {
                 batchScan.withFilter(residual);

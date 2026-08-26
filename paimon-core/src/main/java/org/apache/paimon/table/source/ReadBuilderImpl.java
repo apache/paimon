@@ -245,9 +245,8 @@ public class ReadBuilderImpl implements ReadBuilder {
             read.withReadType(readType);
         }
         if (queryAuthEnabled) {
-            // Skip TopN and, with a filter or a TopN present, the limit as well: the engine
-            // re-applies them. The reader does not evaluate the query filter on an auth-enabled
-            // table, so capping the rows here would cut away the rows that actually match.
+            // the reader does not evaluate the query filter on an auth-enabled table, so
+            // capping the rows here would cut away rows that actually match
             if (topN == null && limit != null) {
                 return new LimitTableRead(read, limit, filter != null);
             }

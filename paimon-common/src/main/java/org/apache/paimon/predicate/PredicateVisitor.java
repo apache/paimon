@@ -40,7 +40,6 @@ public interface PredicateVisitor<T> {
         return predicate.visit(new FieldNameCollector());
     }
 
-    /** Collects the field names a transform's inputs reference. */
     static Set<String> collectTransformFieldNames(Transform transform) {
         Set<String> fieldNames = new HashSet<>();
         for (Object input : transform.inputs()) {

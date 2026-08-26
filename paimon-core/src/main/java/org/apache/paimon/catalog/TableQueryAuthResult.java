@@ -29,7 +29,9 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.Split;
@@ -39,6 +41,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowUtils;
 import org.apache.paimon.utils.JsonSerdeUtil;
+import org.apache.paimon.utils.ListUtils;
 import org.apache.paimon.utils.StringUtils;
 
 import javax.annotation.Nullable;
@@ -88,9 +91,22 @@ public class TableQueryAuthResult implements Serializable {
         return columnMasking;
     }
 
-    /** Whether this result carries any effective row-filter or masking rule. */
     public boolean hasRules() {
         return extractPredicate() != null || !extractColumnMasking().isEmpty();
+    }
+
+    /**
+     * Rejects a search on a query-auth table. Called from the methods that produce a scan or a
+     * read, not from the builder constructors: the builders are serializable, and deserialization
+     * would skip a constructor check.
+     */
+    public static void rejectSearchUnderQueryAuth(@Nullable Table table) {
+        if (table instanceof FileStoreTable
+                && ((FileStoreTable) table).coreOptions().queryAuthEnabled()) {
+            throw new UnsupportedOperationException(
+                    "Search is not supported on a query-auth table: the index ranks raw values, "
+                            + "which a column mask invalidates.");
+        }
     }
 
     /**
@@ -124,6 +140,8 @@ public class TableQueryAuthResult implements Serializable {
         if (kept.isEmpty()) {
             return null;
         }
+        // and() folds an always-true/false leaf into a field-less constant, which would drop the
+        // field names the callers match against; a lone conjunct must come back untouched
         return kept.size() == 1 ? kept.get(0) : PredicateBuilder.and(kept);
     }
 
@@ -154,22 +172,17 @@ public class TableQueryAuthResult implements Serializable {
      */
     public Set<String> authFields(List<String> readFields, @Nullable Predicate filter) {
         Set<String> postMask = postMaskFilterFields(filter, extractColumnMasking().keySet());
-        List<String> visible = readFields;
-        if (!postMask.isEmpty()) {
-            visible = new ArrayList<>(readFields);
-            for (String field : postMask) {
-                if (!visible.contains(field)) {
-                    visible.add(field);
-                }
-            }
-        }
+        // requiredAuthFields de-duplicates, so a plain concatenation is enough here
+        List<String> visible =
+                postMask.isEmpty()
+                        ? readFields
+                        : ListUtils.union(readFields, new ArrayList<>(postMask));
         Set<String> ruleFields = requiredAuthFields(visible);
         // requiredAuthFields returns what the rules read, not the operands themselves
         ruleFields.addAll(postMask);
         return ruleFields;
     }
 
-    /** Appends the missing {@code ruleFields} of {@code tableType} to {@code readType}. */
     @Nullable
     public static RowType appendMissingFields(
             RowType tableType, RowType readType, Set<String> ruleFields) {
@@ -282,14 +295,15 @@ public class TableQueryAuthResult implements Serializable {
                 // consumed unmasked and its raw value published through this target. Masking
                 // the target of another mask is only self-consistent if composed, which the
                 // read does not do; refuse the pair rather than leak.
-                if (!input.equals(target) && masking.containsKey(input)) {
-                    throw new IllegalArgumentException(
-                            String.format(
-                                    "Column masking on '%s' reads column '%s', which is masked "
-                                            + "too. The mask would be computed from the raw value "
-                                            + "of '%s' and expose it through '%s'.",
-                                    target, input, input, target));
-                }
+                checkArgument(
+                        input.equals(target) || !masking.containsKey(input),
+                        "Column masking on '%s' reads column '%s', which is masked "
+                                + "too. The mask would be computed from the raw value "
+                                + "of '%s' and expose it through '%s'.",
+                        target,
+                        input,
+                        input,
+                        target);
             }
         }
         for (String operand : PredicateVisitor.collectFieldNames(extractPredicate())) {
@@ -327,17 +341,18 @@ public class TableQueryAuthResult implements Serializable {
         if (readType.containsField(field)) {
             // a dropped and re-added column keeps the name but gets a fresh id, so the same
             // name may be an unrelated column in the snapshot being read
-            if (readType.getField(field).id() != id) {
-                throw new IllegalArgumentException(
-                        String.format(
-                                "%s references column '%s' which the snapshot being read exposes "
-                                        + "as a different column of the same name (dropped and "
-                                        + "re-added since); refusing to read to avoid applying the "
-                                        + "rule to unrelated data.",
-                                rule, field));
-            }
+            checkArgument(
+                    readType.getField(field).id() == id,
+                    "%s references column '%s' which the snapshot being read exposes "
+                            + "as a different column of the same name (dropped and "
+                            + "re-added since); refusing to read to avoid applying the "
+                            + "rule to unrelated data.",
+                    rule,
+                    field);
             return;
         }
+        // not checkArgument: its arguments are evaluated eagerly, and getField(id) throws when
+        // the id is absent, which is the normal case here
         if (readType.containsField(id)) {
             throw new IllegalArgumentException(
                     String.format(
@@ -390,14 +405,14 @@ public class TableQueryAuthResult implements Serializable {
                             "%s references system column '%s' which the query does not project.",
                             rule, field));
         }
-        if (!tableType.containsField(field)) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "%s references column '%s' which does not exist in table schema %s. "
-                                    + "The rule may be stale after a column rename or drop; "
-                                    + "refusing to read.",
-                            rule, field, tableType.getFieldNames()));
-        }
+        checkArgument(
+                tableType.containsField(field),
+                "%s references column '%s' which does not exist in table schema %s. "
+                        + "The rule may be stale after a column rename or drop; "
+                        + "refusing to read.",
+                rule,
+                field,
+                tableType.getFieldNames());
     }
 
     /**

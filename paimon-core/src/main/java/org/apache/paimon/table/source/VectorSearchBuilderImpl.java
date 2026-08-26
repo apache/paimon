@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -164,10 +165,6 @@ public class VectorSearchBuilderImpl implements VectorSearchBuilder {
     }
 
     protected void rejectUnderQueryAuth() {
-        if (table.coreOptions().queryAuthEnabled()) {
-            throw new UnsupportedOperationException(
-                    "Search is not supported on a query-auth table: the index ranks raw values, "
-                            + "which a column mask invalidates.");
-        }
+        TableQueryAuthResult.rejectSearchUnderQueryAuth(table);
     }
 }
