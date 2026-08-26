@@ -1,0 +1,852 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+openapi: 3.1.1
+info:
+  title: Paimon REST Management API
+  version: "1.0"
+  description: |
+    Experimental control-plane extension for object and column permissions, table row filters, and
+    table column masks in one Paimon REST Catalog prefix. A data policy restricts an
+    already-authorized read;
+    it never grants SELECT by itself. Each policy is attached to one principal: a principal has at
+    most one row filter per table and at most one mask per table column. Policy creation is accepted
+    only when the target table exists, has `query-auth.enabled=true`, and the referenced principal,
+    serialized Paimon predicate or transform, and columns are valid.
+    Authentication follows the REST Catalog deployment configuration and is not fixed by this
+    extension.
+    Principal lifecycle, audit, and persistence remain server responsibilities. This contract may
+    evolve incompatibly while experimental.
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0.html
+servers:
+  - url: http://localhost:8080
+paths:
+  /v1/{prefix}/permissions:
+    parameters:
+      - $ref: '#/components/parameters/Prefix'
+    get:
+      tags: [permission]
+      summary: List direct permission assignments on a resource or scope
+      operationId: listPermissions
+      description: |
+        Returns direct assignments attached to the requested exact resource or explicit descendant
+        scope. This operation does not synthesize assignments effective through CATALOG_ALL or
+        DATABASE_ALL. Expired assignments may remain visible until server cleanup, but must not
+        authorize access. Following the catalog pagination contract, an empty page terminates
+        pagination and therefore must not carry a continuation token.
+      parameters:
+        - $ref: '#/components/parameters/ResourceTypeQuery'
+        - $ref: '#/components/parameters/DatabaseQuery'
+        - $ref: '#/components/parameters/TableQuery'
+        - $ref: '#/components/parameters/FunctionQuery'
+        - $ref: '#/components/parameters/ViewQuery'
+        - $ref: '#/components/parameters/PrincipalQuery'
+        - $ref: '#/components/parameters/AccessQuery'
+        - $ref: '#/components/parameters/PageToken'
+        - $ref: '#/components/parameters/MaxResults'
+      responses:
+        '200':
+          description: Permission assignments in stable pagination order.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListPermissionsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/{prefix}/permissions/grant:
+    parameters:
+      - $ref: '#/components/parameters/Prefix'
+    post:
+      tags: [permission]
+      summary: Grant or replace a permission assignment
+      operationId: grantPermission
+      description: |
+        Creates an assignment or replaces the assignment with the same `resource`, `access`, and
+        `principal`. For a `COLUMN` assignment this replaces the whole included or excluded column
+        range. The referenced resource, principal, and columns must exist. Servers bind assignments
+        to the resource lifecycle described by `PermissionResource`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GrantPermissionRequest'
+      responses:
+        '200':
+          description: Permission assignment created or replaced.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/{prefix}/permissions/revoke:
+    parameters:
+      - $ref: '#/components/parameters/Prefix'
+    post:
+      tags: [permission]
+      summary: Idempotently revoke a permission assignment
+      operationId: revokePermission
+      description: |
+        Makes the assignment absent. A 404 identifies a missing resource or principal, not an
+        already-absent assignment.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevokePermissionRequest'
+      responses:
+        '200':
+          description: Permission assignment is absent.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/{prefix}/databases/{database}/tables/{table}/policies:
+    parameters:
+      - $ref: '#/components/parameters/Prefix'
+      - $ref: '#/components/parameters/Database'
+      - $ref: '#/components/parameters/Table'
+    get:
+      tags: [policy]
+      summary: List policies attached directly to a table
+      operationId: listTablePolicies
+      description: |
+        Policies are attached directly to the requested table. Following the catalog pagination
+        contract, an empty page terminates pagination and therefore must not carry a continuation
+        token.
+      parameters:
+        - $ref: '#/components/parameters/PolicyTypeQuery'
+        - $ref: '#/components/parameters/PrincipalQuery'
+        - $ref: '#/components/parameters/PolicyColumnQuery'
+        - $ref: '#/components/parameters/PageToken'
+        - $ref: '#/components/parameters/MaxResults'
+      responses:
+        '200':
+          description: Table policies in stable pagination order.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListPoliciesResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      tags: [policy]
+      summary: Create a table policy
+      operationId: createTablePolicy
+      description: |
+        Fails with 409 when the same principal already has a row filter or a mask on the same
+        column, or when the table has not enabled query authorization. The principal, policy
+        predicate or transform, protected column, and referenced fields are validated before
+        persistence.
+      requestBody:
+        $ref: '#/components/requestBodies/PolicyRequest'
+      responses:
+        '200':
+          description: Policy created.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/{prefix}/databases/{database}/tables/{table}/policies/drop:
+    parameters:
+      - $ref: '#/components/parameters/Prefix'
+      - $ref: '#/components/parameters/Database'
+      - $ref: '#/components/parameters/Table'
+    post:
+      tags: [policy]
+      summary: Drop a table policy
+      operationId: dropTablePolicy
+      description: Returns 404 when the policy is absent; clients may expose idempotency explicitly.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DropPolicyRequest'
+      responses:
+        '200':
+          description: Policy dropped.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/ServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    Prefix:
+      name: prefix
+      in: path
+      required: true
+      description: Opaque REST catalog prefix returned by the catalog config endpoint.
+      schema:
+        type: string
+        minLength: 1
+    Database:
+      name: database
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    Table:
+      name: table
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    ResourceTypeQuery:
+      name: resourceType
+      in: query
+      required: true
+      schema:
+        $ref: '#/components/schemas/ResourceType'
+    DatabaseQuery:
+      name: database
+      in: query
+      schema:
+        type: string
+        minLength: 1
+    TableQuery:
+      name: table
+      in: query
+      schema:
+        type: string
+        minLength: 1
+    FunctionQuery:
+      name: function
+      in: query
+      schema:
+        type: string
+        minLength: 1
+    ViewQuery:
+      name: view
+      in: query
+      schema:
+        type: string
+        minLength: 1
+    PrincipalQuery:
+      name: principal
+      in: query
+      description: Exact opaque principal identifier.
+      schema:
+        $ref: '#/components/schemas/Principal'
+    AccessQuery:
+      name: access
+      in: query
+      schema:
+        $ref: '#/components/schemas/PermissionAccess'
+    PolicyColumnQuery:
+      name: column
+      in: query
+      description: Valid only together with `type=COLUMN_MASKING`.
+      schema:
+        type: string
+        minLength: 1
+    PolicyTypeQuery:
+      name: type
+      in: query
+      schema:
+        $ref: '#/components/schemas/PolicyType'
+    PageToken:
+      name: pageToken
+      in: query
+      description: Opaque continuation token returned by the preceding response.
+      schema:
+        type: string
+    MaxResults:
+      name: maxResults
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1000
+
+  requestBodies:
+    PolicyRequest:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/PolicyRequest'
+
+  responses:
+    BadRequest:
+      description: Invalid request shape, resource identity, predicate, transform, or column.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: Missing or invalid authentication.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: Caller cannot manage the target resource.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Referenced resource, principal, or policy does not exist.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: Existing policy conflict or query authorization is not enabled.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    TooManyRequests:
+      description: Request rate limit exceeded; retry only according to server guidance.
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    ServerError:
+      description: Unexpected server error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    ServiceUnavailable:
+      description: Management service is temporarily unavailable.
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  headers:
+    RetryAfter:
+      description: Delay before retrying, as HTTP delta-seconds or an HTTP date.
+      schema:
+        type: string
+
+  schemas:
+    ResourceType:
+      type: string
+      enum: [CATALOG, CATALOG_ALL, DATABASE, DATABASE_ALL, TABLE, COLUMN, FUNCTION, VIEW]
+    PermissionAccess:
+      description: |
+        Canonical data access value. The REST wire format uses upper case and creation accesses
+        follow their persisted names without underscores. UPDATE covers table writes, including
+        inserts and deletes. SELECT also covers function use. GRANT allows granting and revoking
+        assignments on the resource. The server validates applicability to the resource type.
+      type: string
+      maxLength: 32
+      enum:
+        - ALL
+        - CREATEDATABASE
+        - DESCRIBE
+        - ALTER
+        - DROP
+        - CREATETABLE
+        - CREATEFUNCTION
+        - CREATEVIEW
+        - LIST
+        - SELECT
+        - UPDATE
+        - GRANT
+    PolicyType:
+      type: string
+      enum: [ROW_FILTER, COLUMN_MASKING]
+    Principal:
+      type: string
+      minLength: 1
+      maxLength: 128
+      description: |
+        Opaque, canonical, globally unique identifier in the server principal namespace. Type and
+        membership resolution are server responsibilities.
+    PermissionResource:
+      description: |
+        Exact catalog-scoped wire locator or explicit descendant scope; fields not selected by type
+        are invalid. CATALOG_ALL covers descendants of the configured catalog, while DATABASE_ALL
+        covers descendants of the named database. Servers must bind stored direct assignments to a
+        stable internal resource identity. Renaming a database, table, function, or view retains its
+        direct assignments and responses use the new locator. Dropping a resource removes its direct
+        assignments, and recreating the same locator must not inherit them.
+      oneOf:
+        - $ref: '#/components/schemas/CatalogResource'
+        - $ref: '#/components/schemas/CatalogAllResource'
+        - $ref: '#/components/schemas/DatabaseResource'
+        - $ref: '#/components/schemas/DatabaseAllResource'
+        - $ref: '#/components/schemas/TableResource'
+        - $ref: '#/components/schemas/ColumnResource'
+        - $ref: '#/components/schemas/FunctionResource'
+        - $ref: '#/components/schemas/ViewResource'
+      discriminator:
+        propertyName: type
+        mapping:
+          CATALOG: '#/components/schemas/CatalogResource'
+          CATALOG_ALL: '#/components/schemas/CatalogAllResource'
+          DATABASE: '#/components/schemas/DatabaseResource'
+          DATABASE_ALL: '#/components/schemas/DatabaseAllResource'
+          TABLE: '#/components/schemas/TableResource'
+          COLUMN: '#/components/schemas/ColumnResource'
+          FUNCTION: '#/components/schemas/FunctionResource'
+          VIEW: '#/components/schemas/ViewResource'
+    CatalogResource:
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type:
+          type: string
+          const: CATALOG
+    CatalogAllResource:
+      type: object
+      additionalProperties: false
+      description: Explicit scope covering database, table, view, and function descendants.
+      required: [type]
+      properties:
+        type:
+          type: string
+          const: CATALOG_ALL
+    DatabaseResource:
+      type: object
+      additionalProperties: false
+      required: [type, database]
+      properties:
+        type:
+          type: string
+          const: DATABASE
+        database:
+          type: string
+          minLength: 1
+    DatabaseAllResource:
+      type: object
+      additionalProperties: false
+      description: Explicit scope covering table, view, and function descendants of one database.
+      required: [type, database]
+      properties:
+        type:
+          type: string
+          const: DATABASE_ALL
+        database:
+          type: string
+          minLength: 1
+    TableResource:
+      type: object
+      additionalProperties: false
+      required: [type, database, table]
+      properties:
+        type:
+          type: string
+          const: TABLE
+        database:
+          type: string
+          minLength: 1
+        table:
+          type: string
+          minLength: 1
+    ColumnResource:
+      type: object
+      additionalProperties: false
+      description: |
+        Column permission target. The resource identity is the containing table; the mutable column
+        range is carried by `PermissionAssignment.columns` and is not part of the identity.
+      required: [type, database, table]
+      properties:
+        type:
+          type: string
+          const: COLUMN
+        database:
+          type: string
+          minLength: 1
+        table:
+          type: string
+          minLength: 1
+    FunctionResource:
+      type: object
+      additionalProperties: false
+      required: [type, database, function]
+      properties:
+        type:
+          type: string
+          const: FUNCTION
+        database:
+          type: string
+          minLength: 1
+        function:
+          type: string
+          minLength: 1
+    ViewResource:
+      type: object
+      additionalProperties: false
+      required: [type, database, view]
+      properties:
+        type:
+          type: string
+          const: VIEW
+        database:
+          type: string
+          minLength: 1
+        view:
+          type: string
+          minLength: 1
+    ExpireTime:
+      type: string
+      format: date-time
+      pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$'
+      description: |
+        Exclusive authorization upper bound evaluated using the server clock. At
+        `now >= expireTime` the assignment must not authorize access. An expired record may remain
+        listable until cleanup. The value must use UTC `Z` and have at most millisecond precision.
+    PermissionAssignment:
+      type: object
+      additionalProperties: false
+      description: |
+        Direct assignment identity is `resource`, `access`, and `principal`. CATALOG_ALL and
+        DATABASE_ALL are explicit descendant scopes rather than computed effective assignments.
+        `columns` is required only for a COLUMN assignment and is replaced as one value when the
+        same identity is granted again.
+      required: [resource, access, principal]
+      properties:
+        resource:
+          $ref: '#/components/schemas/PermissionResource'
+        access:
+          $ref: '#/components/schemas/PermissionAccess'
+        principal:
+          $ref: '#/components/schemas/Principal'
+        columns:
+          $ref: '#/components/schemas/PermissionColumns'
+        expireTime:
+          $ref: '#/components/schemas/ExpireTime'
+      allOf:
+        - $ref: '#/components/schemas/ColumnAssignmentConstraint'
+    GrantPermissionRequest:
+      type: object
+      additionalProperties: false
+      required: [resource, access, principal]
+      properties:
+        resource:
+          $ref: '#/components/schemas/PermissionResource'
+        access:
+          $ref: '#/components/schemas/PermissionAccess'
+        principal:
+          $ref: '#/components/schemas/Principal'
+        columns:
+          $ref: '#/components/schemas/PermissionColumns'
+        expireTime:
+          $ref: '#/components/schemas/ExpireTime'
+      allOf:
+        - $ref: '#/components/schemas/ColumnAssignmentConstraint'
+    PermissionColumns:
+      type: object
+      additionalProperties: false
+      description: |
+        Exactly one non-empty list of top-level table column names. `columnNames` is an allowlist;
+        `excludedColumnNames` grants every current table column except the listed denylist. Column
+        names must exist when granted. An allowlist denies columns added later, while a denylist
+        allows columns added later. All applicable column ranges are intersected, and selecting any
+        column outside the effective range fails the query. The target table must enforce query
+        authorization before the grant becomes visible.
+      properties:
+        columnNames:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+        excludedColumnNames:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+      oneOf:
+        - required: [columnNames]
+        - required: [excludedColumnNames]
+    ColumnAssignmentConstraint:
+      if:
+        properties:
+          resource:
+            type: object
+            required: [type]
+            properties:
+              type:
+                type: string
+                const: COLUMN
+        required: [resource]
+      then:
+        required: [columns]
+      else:
+        not:
+          required: [columns]
+    RevokePermissionRequest:
+      type: object
+      additionalProperties: false
+      required: [resource, access, principal]
+      properties:
+        resource:
+          $ref: '#/components/schemas/PermissionResource'
+        access:
+          $ref: '#/components/schemas/PermissionAccess'
+        principal:
+          $ref: '#/components/schemas/Principal'
+    ListPermissionsResponse:
+      type: object
+      additionalProperties: false
+      required: [permissions]
+      properties:
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/PermissionAssignment'
+        nextPageToken:
+          type: string
+
+    RowFilter:
+      type: object
+      additionalProperties: false
+      required: [predicate]
+      properties:
+        predicate:
+          type: string
+          minLength: 1
+          x-maxUtf8Bytes: 61440
+          contentMediaType: application/json
+          description: |
+            JSON serialization of one Paimon `Predicate`, using the same representation as one
+            entry in `AuthTableQueryResponse.filter`. The UTF-8 representation must not exceed
+            60 KiB. The server must deserialize, validate against the target table schema, and
+            canonicalize it when the policy is created.
+    ColumnMask:
+      type: object
+      additionalProperties: false
+      required: [onColumn, transform]
+      properties:
+        onColumn:
+          type: string
+          minLength: 1
+        transform:
+          type: string
+          minLength: 1
+          x-maxUtf8Bytes: 61440
+          contentMediaType: application/json
+          description: |
+            JSON serialization of one Paimon `Transform`, using the same representation as the
+            value for `onColumn` in `AuthTableQueryResponse.columnMasking`. The UTF-8
+            representation must not exceed 60 KiB. The server must deserialize it, validate all
+            field references and the output type against the target table schema, and canonicalize
+            it when the policy is created.
+    RowFilterPolicyRequest:
+      type: object
+      additionalProperties: false
+      required: [rowFilter, principal]
+      properties:
+        rowFilter:
+          $ref: '#/components/schemas/RowFilter'
+        principal:
+          $ref: '#/components/schemas/Principal'
+    ColumnMaskPolicyRequest:
+      type: object
+      additionalProperties: false
+      required: [columnMask, principal]
+      properties:
+        columnMask:
+          $ref: '#/components/schemas/ColumnMask'
+        principal:
+          $ref: '#/components/schemas/Principal'
+    PolicyRequest:
+      description: Exactly one typed policy definition for one principal is allowed.
+      oneOf:
+        - $ref: '#/components/schemas/RowFilterPolicyRequest'
+        - $ref: '#/components/schemas/ColumnMaskPolicyRequest'
+    RowFilterPolicyIdentity:
+      type: object
+      additionalProperties: false
+      required: [type, principal]
+      properties:
+        type:
+          type: string
+          const: ROW_FILTER
+        principal:
+          $ref: '#/components/schemas/Principal'
+    ColumnMaskPolicyIdentity:
+      type: object
+      additionalProperties: false
+      required: [type, principal, column]
+      properties:
+        type:
+          type: string
+          const: COLUMN_MASKING
+        principal:
+          $ref: '#/components/schemas/Principal'
+        column:
+          type: string
+          minLength: 1
+    DropPolicyRequest:
+      description: Exact principal policy identity on the table named by the request path.
+      oneOf:
+        - $ref: '#/components/schemas/RowFilterPolicyIdentity'
+        - $ref: '#/components/schemas/ColumnMaskPolicyIdentity'
+    TablePolicyResource:
+      type: object
+      additionalProperties: false
+      required: [type, database, table]
+      properties:
+        type:
+          type: string
+          const: TABLE
+        database:
+          type: string
+          minLength: 1
+        table:
+          type: string
+          minLength: 1
+    RowFilterDataPolicy:
+      type: object
+      additionalProperties: false
+      required: [resource, rowFilter, principal]
+      properties:
+        resource:
+          $ref: '#/components/schemas/TablePolicyResource'
+        rowFilter:
+          $ref: '#/components/schemas/RowFilter'
+        principal:
+          $ref: '#/components/schemas/Principal'
+    ColumnMaskDataPolicy:
+      type: object
+      additionalProperties: false
+      required: [resource, columnMask, principal]
+      properties:
+        resource:
+          $ref: '#/components/schemas/TablePolicyResource'
+        columnMask:
+          $ref: '#/components/schemas/ColumnMask'
+        principal:
+          $ref: '#/components/schemas/Principal'
+    DataPolicy:
+      description: |
+        A policy applies when its principal is effective for the caller. All applicable row filters
+        must be combined with logical AND. More than one applicable column mask for the same column
+        must fail closed. An invalid, unsupported, or schema-incompatible predicate or transform
+        must also fail closed rather than omit a restriction.
+      oneOf:
+        - $ref: '#/components/schemas/RowFilterDataPolicy'
+        - $ref: '#/components/schemas/ColumnMaskDataPolicy'
+    ListPoliciesResponse:
+      type: object
+      additionalProperties: false
+      required: [policies]
+      properties:
+        policies:
+          type: array
+          items:
+            $ref: '#/components/schemas/DataPolicy'
+        nextPageToken:
+          type: string
+    ErrorResponse:
+      type: object
+      additionalProperties: true
+      required: [message, code]
+      properties:
+        resourceType:
+          type: string
+        resourceName:
+          type: string
+        message:
+          type: string
+        code:
+          type: integer
