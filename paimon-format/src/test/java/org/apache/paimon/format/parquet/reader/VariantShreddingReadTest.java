@@ -436,6 +436,62 @@ public class VariantShreddingReadTest {
                 .isEqualTo("{\"x\":12,\"y\":13,\"z\":14}");
     }
 
+    @Test
+    public void testReadHeterogeneousVariantObjectTypedAsArray() throws Exception {
+        // The shredding schema defines "v.a" as an object, but the JSON value is an array.
+        // Reading $.a[0].x must fall back to the binary value column.
+        Options options = new Options();
+        options.set(
+                "parquet.variant.shreddingSchema",
+                "{\"type\":\"ROW\",\"fields\":[{\"name\":\"v\",\"type\":{\"type\":\"ROW\",\"fields\":[{\"name\":\"a\",\"type\":{\"type\":\"ROW\",\"fields\":[{\"name\":\"b\",\"type\":\"INT\"}]}}]}}]}");
+        ParquetFileFormat format =
+                new ParquetFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
+
+        RowType writeType = DataTypes.ROW(DataTypes.FIELD(0, "v", DataTypes.VARIANT()));
+        FormatWriterFactory factory = format.createWriterFactory(writeType);
+        writeRows(factory, GenericRow.of(GenericVariant.fromJson("{\"a\":[{\"x\":1}]}")));
+
+        RowType readType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                0,
+                                "v",
+                                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                                        .field(DataTypes.INT(), "$.a[0].x")
+                                        .build()));
+        List<InternalRow> result = readRows(format, readType);
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getRow(0, 1).getInt(0)).isEqualTo(1);
+    }
+
+    @Test
+    public void testReadHeterogeneousVariantListTypedAsObject() throws Exception {
+        // The shredding schema defines "v.a" as a list, but the JSON value is an object.
+        // Reading $.a.x must fall back to the binary value column.
+        Options options = new Options();
+        options.set(
+                "parquet.variant.shreddingSchema",
+                "{\"type\":\"ROW\",\"fields\":[{\"name\":\"v\",\"type\":{\"type\":\"ROW\",\"fields\":[{\"name\":\"a\",\"type\":{\"type\":\"ARRAY\",\"element\":\"INT\"}}]}}]}");
+        ParquetFileFormat format =
+                new ParquetFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
+
+        RowType writeType = DataTypes.ROW(DataTypes.FIELD(0, "v", DataTypes.VARIANT()));
+        FormatWriterFactory factory = format.createWriterFactory(writeType);
+        writeRows(factory, GenericRow.of(GenericVariant.fromJson("{\"a\":{\"x\":2}}")));
+
+        RowType readType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                0,
+                                "v",
+                                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                                        .field(DataTypes.INT(), "$.a.x")
+                                        .build()));
+        List<InternalRow> result = readRows(format, readType);
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getRow(0, 1).getInt(0)).isEqualTo(2);
+    }
+
     protected List<InternalRow> readRows(ParquetFileFormat format, RowType rowType)
             throws IOException {
         List<InternalRow> result = new ArrayList<>();

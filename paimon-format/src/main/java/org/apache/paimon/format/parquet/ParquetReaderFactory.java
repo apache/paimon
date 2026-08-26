@@ -283,9 +283,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
     /** Clips `parquetType` by `readType`. */
     private Type clipParquetType(DataType readType, Type parquetType) {
-        Type variantType =
-                VariantShreddingReadPlanFactory.clipParquetType(
-                        readType, parquetType, caseSensitive);
+        Type variantType = VariantShreddingReadPlanFactory.clipParquetType(readType, parquetType);
         if (variantType != null) {
             return variantType;
         }

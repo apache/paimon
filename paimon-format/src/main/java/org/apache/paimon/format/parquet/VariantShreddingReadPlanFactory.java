@@ -108,21 +108,19 @@ public class VariantShreddingReadPlanFactory implements ShreddingReadPlanFactory
 
     /** Clips a Variant Parquet field according to the logical Variant read type. */
     @Nullable
-    public static Type clipParquetType(
-            DataType logicalType, Type parquetType, boolean caseSensitive) {
+    public static Type clipParquetType(DataType logicalType, Type parquetType) {
         if (logicalType instanceof VariantType) {
             return parquetType;
         }
         if (VariantMetadataUtils.isVariantRowType(logicalType)) {
-            return clipVariantType((RowType) logicalType, parquetType.asGroupType(), caseSensitive);
+            return clipVariantType((RowType) logicalType, parquetType.asGroupType());
         }
         return null;
     }
 
     /** Clips a Variant Parquet field according to the logical Variant row read type. */
-    public static Type clipVariantType(
-            RowType variantRowType, GroupType parquetType, boolean caseSensitive) {
-        return VariantShreddingTypePruner.clip(variantRowType, parquetType, caseSensitive);
+    public static Type clipVariantType(RowType variantRowType, GroupType parquetType) {
+        return VariantShreddingTypePruner.clip(variantRowType, parquetType);
     }
 
     private static boolean containsVariantFields(DataType dataType) {
@@ -170,8 +168,7 @@ public class VariantShreddingReadPlanFactory implements ShreddingReadPlanFactory
                 || VariantMetadataUtils.isVariantRowType(logicalType)) {
             Type clippedType =
                     logicalType instanceof RowType
-                            ? clipVariantType(
-                                    (RowType) logicalType, fileType.asGroupType(), caseSensitive)
+                            ? clipVariantType((RowType) logicalType, fileType.asGroupType())
                             : fileType;
             return variantFileType(clippedType).copy(logicalType.isNullable());
         }

@@ -35,7 +35,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -48,16 +47,18 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * <p>It builds a trie from the requested object/array paths and recursively removes unneeded fields
  * from the {@code typed_value} (and list element) groups while preserving {@code value} fallbacks
  * when a requested path cannot be satisfied from typed columns.
+ *
+ * <p>Variant object keys are matched case-sensitively, independently of Parquet column-name
+ * resolution, because Variant path extraction downstream resolves keys exactly through {@code
+ * objectSchemaMap}.
  */
 public class VariantShreddingTypePruner {
     private static final String LIST_WRAPPER_NAME = "list";
     private static final String LIST_ELEMENT_NAME = "element";
 
-    private final boolean caseSensitive;
     @Nullable private final PathNode root;
 
-    VariantShreddingTypePruner(RowType variantRowType, boolean caseSensitive) {
-        this.caseSensitive = caseSensitive;
+    VariantShreddingTypePruner(RowType variantRowType) {
         this.root = buildPathTree(variantRowType);
     }
 
@@ -67,11 +68,10 @@ public class VariantShreddingTypePruner {
      *
      * @param variantRowType the logical Variant projection row type
      * @param parquetType the physical Parquet Variant type
-     * @param caseSensitive whether field name matching is case-sensitive
      * @return a clipped Parquet type
      */
-    public static Type clip(RowType variantRowType, GroupType parquetType, boolean caseSensitive) {
-        return new VariantShreddingTypePruner(variantRowType, caseSensitive).clip(parquetType);
+    public static Type clip(RowType variantRowType, GroupType parquetType) {
+        return new VariantShreddingTypePruner(variantRowType).clip(parquetType);
     }
 
     private Type clip(GroupType parquetType) {
@@ -110,9 +110,6 @@ public class VariantShreddingTypePruner {
                     node = node.arrayElement;
                 } else if (segment instanceof VariantPathSegment.ObjectExtraction) {
                     String key = ((VariantPathSegment.ObjectExtraction) segment).getKey();
-                    if (!caseSensitive) {
-                        key = key.toLowerCase(Locale.ROOT);
-                    }
                     node = node.getOrCreateChild(key);
                 } else {
                     return null;
@@ -141,7 +138,7 @@ public class VariantShreddingTypePruner {
         Type typedValue = group.getType(PaimonShreddingUtils.TYPED_VALUE_FIELD_NAME);
         if (isCanonicalList(typedValue) && node.arrayElement != null) {
             return clipListShreddingRow(group, node, newFields);
-        } else if (isObjectGroup(typedValue)) {
+        } else if (isObjectGroup(typedValue) && node.arrayElement == null) {
             return clipObjectShreddingRow(group, node, newFields);
         } else {
             return group;
@@ -155,22 +152,14 @@ public class VariantShreddingTypePruner {
         boolean needValue = false;
         List<Type> clippedTypedFields = new ArrayList<>();
         Set<String> requestedKeys = new HashSet<>(node.children.keySet());
-        Set<String> matchedKeys = new HashSet<>();
 
         for (Type field : typedValue.getFields()) {
             String fieldName = field.getName();
-            String lookup = caseSensitive ? fieldName : fieldName.toLowerCase(Locale.ROOT);
-            PathNode child = node.children.get(lookup);
+            PathNode child = node.children.get(fieldName);
             if (child == null) {
                 continue;
             }
-            if (!matchedKeys.add(lookup)) {
-                throw new RuntimeException(
-                        String.format(
-                                "Found duplicate field(s) \"%s\" in case-insensitive mode",
-                                lookup));
-            }
-            requestedKeys.remove(lookup);
+            requestedKeys.remove(fieldName);
 
             checkArgument(!field.isPrimitive());
             Type clippedChild = clipShreddingRow(field, child);

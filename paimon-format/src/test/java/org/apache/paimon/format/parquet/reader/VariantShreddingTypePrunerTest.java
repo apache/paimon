@@ -39,7 +39,6 @@ import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.INT32;
 import static org.apache.parquet.schema.Type.Repetition.OPTIONAL;
 import static org.apache.parquet.schema.Type.Repetition.REPEATED;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Unit tests for {@link VariantShreddingTypePruner}. */
 public class VariantShreddingTypePrunerTest {
@@ -54,7 +53,7 @@ public class VariantShreddingTypePrunerTest {
                         .build();
 
         GroupType parquetType = createParquetVariantType(nestedObjectShreddingSchema());
-        Type clipped = VariantShreddingTypePruner.clip(variantRowType, parquetType, true);
+        Type clipped = VariantShreddingTypePruner.clip(variantRowType, parquetType);
         RowType physicalV = toRowType(clipped);
 
         assertThat(physicalV.getFieldNames()).doesNotContain("value");
@@ -74,7 +73,7 @@ public class VariantShreddingTypePrunerTest {
                         .build();
 
         GroupType parquetType = createParquetVariantType(nestedObjectShreddingSchema());
-        Type clipped = VariantShreddingTypePruner.clip(variantRowType, parquetType, true);
+        Type clipped = VariantShreddingTypePruner.clip(variantRowType, parquetType);
         RowType physicalV = toRowType(clipped);
 
         assertThat(physicalV.getFieldNames()).contains("value");
@@ -90,7 +89,7 @@ public class VariantShreddingTypePrunerTest {
                         .build();
 
         GroupType parquetType = createParquetVariantType(nestedObjectShreddingSchema());
-        Type clipped = VariantShreddingTypePruner.clip(variantRowType, parquetType, true);
+        Type clipped = VariantShreddingTypePruner.clip(variantRowType, parquetType);
         RowType physicalV = toRowType(clipped);
 
         assertThat(physicalV.getFieldNames()).contains("value");
@@ -114,7 +113,7 @@ public class VariantShreddingTypePrunerTest {
                         .build();
 
         GroupType parquetType = createParquetVariantType(nestedObjectShreddingSchema());
-        Type clipped = VariantShreddingTypePruner.clip(variantRowType, parquetType, true);
+        Type clipped = VariantShreddingTypePruner.clip(variantRowType, parquetType);
         RowType physicalV = toRowType(clipped);
 
         assertThat(physicalV.getFieldNames()).doesNotContain("value");
@@ -123,26 +122,6 @@ public class VariantShreddingTypePrunerTest {
         RowType physicalA = getRowType(physicalTypedValue, "a");
         RowType physicalATypedValue = getRowType(physicalA, "typed_value");
         assertThat(physicalATypedValue.getFieldNames()).containsExactly("b", "c");
-    }
-
-    @Test
-    public void testObjectCaseInsensitiveMatchesField() {
-        RowType variantRowType =
-                VariantMetadataUtils.VariantRowTypeBuilder.builder()
-                        .field(DataTypes.INT(), "$.A.B")
-                        .build();
-
-        GroupType parquetType = createParquetVariantType(nestedObjectShreddingSchema());
-        Type clipped = VariantShreddingTypePruner.clip(variantRowType, parquetType, false);
-        RowType physicalV = toRowType(clipped);
-
-        assertThat(physicalV.getFieldNames()).doesNotContain("value");
-        RowType physicalTypedValue = getRowType(physicalV, "typed_value");
-        assertThat(physicalTypedValue.getFieldNames()).containsExactly("a");
-
-        RowType physicalA = getRowType(physicalTypedValue, "a");
-        RowType physicalATypedValue = getRowType(physicalA, "typed_value");
-        assertThat(physicalATypedValue.getFieldNames()).containsExactly("b");
     }
 
     private static RowType nestedObjectShreddingSchema() {
@@ -159,24 +138,22 @@ public class VariantShreddingTypePrunerTest {
     }
 
     @Test
-    public void testObjectCaseInsensitiveDuplicateThrows() {
+    public void testCaseSensitive() {
         RowType variantRowType =
                 VariantMetadataUtils.VariantRowTypeBuilder.builder()
                         .field(DataTypes.INT(), "$.a")
                         .build();
 
-        GroupType parquetType = createParquetVariantType(caseInsensitiveDuplicateShreddingSchema());
-        assertThatThrownBy(
-                        () -> VariantShreddingTypePruner.clip(variantRowType, parquetType, false))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("duplicate field");
-    }
-
-    private static RowType caseInsensitiveDuplicateShreddingSchema() {
-        return PaimonShreddingUtils.variantShreddingSchema(
-                DataTypes.ROW(
-                        DataTypes.FIELD(0, "a", DataTypes.INT()),
-                        DataTypes.FIELD(1, "A", DataTypes.INT())));
+        GroupType parquetType =
+                createParquetVariantType(
+                        PaimonShreddingUtils.variantShreddingSchema(
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(0, "a", DataTypes.INT()),
+                                        DataTypes.FIELD(1, "A", DataTypes.INT()))));
+        Type clipped = VariantShreddingTypePruner.clip(variantRowType, parquetType);
+        RowType physicalV = toRowType(clipped);
+        RowType physicalTypedValue = getRowType(physicalV, "typed_value");
+        assertThat(physicalTypedValue.getFieldNames()).containsExactly("a");
     }
 
     @Test
@@ -187,7 +164,7 @@ public class VariantShreddingTypePrunerTest {
                         .build();
 
         GroupType parquetType = createParquetVariantType(arrayShreddingSchema());
-        Type clipped = VariantShreddingTypePruner.clip(variantRowType, parquetType, true);
+        Type clipped = VariantShreddingTypePruner.clip(variantRowType, parquetType);
         RowType physicalV = toRowType(clipped);
 
         assertThat(physicalV.getFieldNames()).doesNotContain("value");
@@ -211,7 +188,7 @@ public class VariantShreddingTypePrunerTest {
                         .build();
 
         GroupType parquetType = createParquetVariantType(arrayShreddingSchema());
-        Type clipped = VariantShreddingTypePruner.clip(variantRowType, parquetType, true);
+        Type clipped = VariantShreddingTypePruner.clip(variantRowType, parquetType);
         RowType physicalV = toRowType(clipped);
 
         assertThat(physicalV.getFieldNames()).doesNotContain("value");
@@ -235,7 +212,7 @@ public class VariantShreddingTypePrunerTest {
                         .build();
 
         GroupType parquetType = createParquetVariantType(arrayShreddingSchema());
-        Type clipped = VariantShreddingTypePruner.clip(variantRowType, parquetType, true);
+        Type clipped = VariantShreddingTypePruner.clip(variantRowType, parquetType);
         RowType physicalV = toRowType(clipped);
 
         assertThat(physicalV.getFieldNames()).doesNotContain("value");
@@ -258,7 +235,7 @@ public class VariantShreddingTypePrunerTest {
                         .build();
 
         GroupType parquetType = createParquetVariantType(arrayShreddingSchema());
-        Type clipped = VariantShreddingTypePruner.clip(variantRowType, parquetType, true);
+        Type clipped = VariantShreddingTypePruner.clip(variantRowType, parquetType);
         RowType physicalV = toRowType(clipped);
 
         assertThat(physicalV.getFieldNames()).doesNotContain("value");
@@ -293,7 +270,7 @@ public class VariantShreddingTypePrunerTest {
                         .build();
 
         GroupType parquetType = createParquetVariantType(primitiveArrayShreddingSchema());
-        Type clipped = VariantShreddingTypePruner.clip(variantRowType, parquetType, true);
+        Type clipped = VariantShreddingTypePruner.clip(variantRowType, parquetType);
         RowType physicalV = toRowType(clipped);
 
         assertThat(physicalV.getFieldNames()).doesNotContain("value");
@@ -323,7 +300,7 @@ public class VariantShreddingTypePrunerTest {
                                         DataTypes.ROW(
                                                 DataTypes.FIELD(0, "x", DataTypes.INT()),
                                                 DataTypes.FIELD(1, "y", DataTypes.INT())))));
-        Type clipped = VariantShreddingTypePruner.clip(variantRowType, parquetType, true);
+        Type clipped = VariantShreddingTypePruner.clip(variantRowType, parquetType);
         RowType physicalV = toRowType(clipped);
 
         assertThat(physicalV.getFieldNames()).doesNotContain("value");
@@ -345,7 +322,7 @@ public class VariantShreddingTypePrunerTest {
                 createParquetVariantType(
                         PaimonShreddingUtils.variantShreddingSchema(
                                 DataTypes.ARRAY(DataTypes.VARIANT())));
-        Type clipped = VariantShreddingTypePruner.clip(variantRowType, parquetType, true);
+        Type clipped = VariantShreddingTypePruner.clip(variantRowType, parquetType);
         RowType physicalV = toRowType(clipped);
 
         assertThat(physicalV.getFieldNames()).contains("value");
@@ -366,7 +343,7 @@ public class VariantShreddingTypePrunerTest {
                 createParquetVariantType(
                         PaimonShreddingUtils.variantShreddingSchema(
                                 DataTypes.ARRAY(DataTypes.VARIANT())));
-        Type clipped = VariantShreddingTypePruner.clip(variantRowType, parquetType, true);
+        Type clipped = VariantShreddingTypePruner.clip(variantRowType, parquetType);
         RowType physicalV = toRowType(clipped);
 
         // The element has no typed_value column, so we cannot prune inside it.
@@ -391,7 +368,7 @@ public class VariantShreddingTypePrunerTest {
                         .build();
 
         GroupType parquetType = createTwoLevelArrayVariantType();
-        Type clipped = VariantShreddingTypePruner.clip(variantRowType, parquetType, true);
+        Type clipped = VariantShreddingTypePruner.clip(variantRowType, parquetType);
         GroupType actual =
                 clipped.asGroupType()
                         .getType("typed_value")
@@ -480,7 +457,7 @@ public class VariantShreddingTypePrunerTest {
                         .build();
 
         GroupType parquetType = createTwoLevelPrimitiveArrayVariantType();
-        Type clipped = VariantShreddingTypePruner.clip(variantRowType, parquetType, true);
+        Type clipped = VariantShreddingTypePruner.clip(variantRowType, parquetType);
         GroupType actual =
                 clipped.asGroupType()
                         .getType("typed_value")
