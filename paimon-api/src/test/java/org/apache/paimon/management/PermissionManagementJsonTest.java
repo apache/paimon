@@ -210,6 +210,19 @@ public class PermissionManagementJsonTest {
                 .isEqualTo("SELECT");
         assertThat(PermissionAccess.builtIns(ResourceType.CATALOG))
                 .containsExactlyInAnyOrder("ALL", "ALTER", "DROP", "GRANT", "CREATEDATABASE");
+        assertThat(PermissionAccess.builtIns(ResourceType.CATALOG_ALL))
+                .containsExactlyInAnyOrder(
+                        "ALL",
+                        "DESCRIBE",
+                        "ALTER",
+                        "DROP",
+                        "GRANT",
+                        "CREATETABLE",
+                        "CREATEVIEW",
+                        "CREATEFUNCTION",
+                        "LIST",
+                        "SELECT",
+                        "UPDATE");
         assertThat(PermissionAccess.builtIns(ResourceType.DATABASE))
                 .containsExactlyInAnyOrder(
                         "ALL",
@@ -221,6 +234,8 @@ public class PermissionManagementJsonTest {
                         "CREATEVIEW",
                         "CREATEFUNCTION",
                         "LIST");
+        assertThat(PermissionAccess.builtIns(ResourceType.DATABASE_ALL))
+                .containsExactlyInAnyOrder("ALL", "ALTER", "DROP", "SELECT", "UPDATE", "GRANT");
         assertThat(PermissionAccess.builtIns(ResourceType.TABLE))
                 .containsExactlyInAnyOrder("ALL", "ALTER", "DROP", "SELECT", "UPDATE", "GRANT");
         assertThat(PermissionAccess.builtIns(ResourceType.VIEW))
@@ -248,6 +263,18 @@ public class PermissionManagementJsonTest {
                                         databaseResource(), "SELECT", "analyst", null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("not valid for DATABASE");
+        assertThatThrownBy(
+                        () ->
+                                new PermissionAssignment(
+                                        catalogAllResource(), "CREATEDATABASE", "analyst", null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("not valid for CATALOG_ALL");
+        assertThatThrownBy(
+                        () ->
+                                new PermissionAssignment(
+                                        databaseAllResource(), "LIST", "analyst", null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("not valid for DATABASE_ALL");
         assertThatThrownBy(
                         () ->
                                 new PermissionAssignment(
@@ -475,17 +502,31 @@ public class PermissionManagementJsonTest {
     void testResourceCanonicalizesBlankIrrelevantLocators() throws Exception {
         PermissionResource catalog =
                 new PermissionResource(ResourceType.CATALOG, "", " ", null, null);
+        PermissionResource catalogAll =
+                new PermissionResource(ResourceType.CATALOG_ALL, "", " ", null, null);
 
         assertThat(catalog).isEqualTo(catalogResource());
         assertThat(RESTApi.toJson(catalog)).isEqualTo("{\"type\":\"CATALOG\"}");
+        assertThat(catalogAll).isEqualTo(catalogAllResource());
+        assertThat(RESTApi.toJson(catalogAll)).isEqualTo("{\"type\":\"CATALOG_ALL\"}");
+        assertThat(RESTApi.toJson(databaseAllResource()))
+                .isEqualTo("{\"type\":\"DATABASE_ALL\",\"database\":\"sales\"}");
     }
 
     private static PermissionResource catalogResource() {
         return new PermissionResource(ResourceType.CATALOG, null, null, null, null);
     }
 
+    private static PermissionResource catalogAllResource() {
+        return new PermissionResource(ResourceType.CATALOG_ALL, null, null, null, null);
+    }
+
     private static PermissionResource databaseResource() {
         return new PermissionResource(ResourceType.DATABASE, "sales", null, null, null);
+    }
+
+    private static PermissionResource databaseAllResource() {
+        return new PermissionResource(ResourceType.DATABASE_ALL, "sales", null, null, null);
     }
 
     private static PermissionResource tableResource() {

@@ -34,7 +34,7 @@ import java.util.Objects;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
-/** Structured reference to a resource inside the REST catalog prefix. */
+/** Structured reference to a resource or explicit descendant scope inside the REST catalog. */
 @Experimental
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class PermissionResource {
@@ -158,15 +158,19 @@ public class PermissionResource {
             @Nullable String view) {
         switch (type) {
             case CATALOG:
+            case CATALOG_ALL:
                 checkArgument(
                         isBlank(database) && isBlank(table) && isBlank(function) && isBlank(view),
-                        "CATALOG resource cannot contain object identifiers.");
+                        "%s resource cannot contain object identifiers.",
+                        type);
                 break;
             case DATABASE:
-                checkArgument(!isBlank(database), "database is required for DATABASE resource.");
+            case DATABASE_ALL:
+                checkArgument(!isBlank(database), "database is required for %s resource.", type);
                 checkArgument(
                         isBlank(table) && isBlank(function) && isBlank(view),
-                        "DATABASE resource cannot contain table, function, or view.");
+                        "%s resource cannot contain table, function, or view.",
+                        type);
                 break;
             case TABLE:
             case COLUMN:

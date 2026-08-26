@@ -3413,9 +3413,11 @@ public class RESTCatalogServer {
         boolean exists;
         switch (resource.getType()) {
             case CATALOG:
+            case CATALOG_ALL:
                 exists = true;
                 break;
             case DATABASE:
+            case DATABASE_ALL:
                 exists = databaseStore.containsKey(resource.getDatabase());
                 break;
             case TABLE:
@@ -3480,8 +3482,10 @@ public class RESTCatalogServer {
     private static String resourceName(PermissionResource resource) {
         switch (resource.getType()) {
             case CATALOG:
+            case CATALOG_ALL:
                 return "catalog";
             case DATABASE:
+            case DATABASE_ALL:
                 return resource.getDatabase();
             case TABLE:
             case COLUMN:

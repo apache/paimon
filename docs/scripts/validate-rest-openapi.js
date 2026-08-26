@@ -462,7 +462,9 @@ function validateManagementOpenApi() {
   );
   requireExactEnum(contract, 'ResourceType', [
     'CATALOG',
+    'CATALOG_ALL',
     'DATABASE',
+    'DATABASE_ALL',
     'TABLE',
     'COLUMN',
     'FUNCTION',
@@ -509,6 +511,23 @@ function validateManagementOpenApi() {
     'AccessQuery must reference PermissionAccess',
   );
   contract.requireSchemaReference('PermissionResource', 'oneOf', 'ColumnResource');
+  contract.requireSchemaReference('PermissionResource', 'oneOf', 'CatalogAllResource');
+  contract.requireSchemaReference('PermissionResource', 'oneOf', 'DatabaseAllResource');
+  const catalogAllResource = contract.requireProperties('CatalogAllResource', ['type']);
+  contract.requireRequiredProperties('CatalogAllResource', ['type']);
+  contract.checkSpec(
+    catalogAllResource.type.const === 'CATALOG_ALL',
+    'CatalogAllResource must use the CATALOG_ALL discriminator',
+  );
+  const databaseAllResource = contract.requireProperties('DatabaseAllResource', [
+    'type',
+    'database',
+  ]);
+  contract.requireRequiredProperties('DatabaseAllResource', ['type', 'database']);
+  contract.checkSpec(
+    databaseAllResource.type.const === 'DATABASE_ALL',
+    'DatabaseAllResource must use the DATABASE_ALL discriminator',
+  );
   const columnResource = contract.requireProperties('ColumnResource', [
     'type',
     'database',

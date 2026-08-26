@@ -91,6 +91,20 @@ public final class PermissionAccess {
         Map<ResourceType, Set<String>> accesses = new EnumMap<>(ResourceType.class);
         accesses.put(ResourceType.CATALOG, values(ALL, ALTER, DROP, GRANT, CREATEDATABASE));
         accesses.put(
+                ResourceType.CATALOG_ALL,
+                values(
+                        ALL,
+                        DESCRIBE,
+                        ALTER,
+                        DROP,
+                        GRANT,
+                        CREATETABLE,
+                        CREATEVIEW,
+                        CREATEFUNCTION,
+                        LIST,
+                        SELECT,
+                        UPDATE));
+        accesses.put(
                 ResourceType.DATABASE,
                 values(
                         ALL,
@@ -102,6 +116,7 @@ public final class PermissionAccess {
                         CREATEVIEW,
                         CREATEFUNCTION,
                         LIST));
+        accesses.put(ResourceType.DATABASE_ALL, values(ALL, SELECT, UPDATE, ALTER, DROP, GRANT));
         accesses.put(ResourceType.TABLE, values(ALL, SELECT, UPDATE, ALTER, DROP, GRANT));
         accesses.put(ResourceType.COLUMN, values(SELECT));
         accesses.put(ResourceType.VIEW, values(ALL, SELECT, ALTER, DROP, GRANT));

@@ -36,7 +36,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
- * Direct permission assignment on one exact resource.
+ * Direct permission assignment on one exact resource or explicit descendant scope.
  *
  * <p>A {@link ResourceType#COLUMN COLUMN} assignment carries one {@link PermissionColumns} value.
  * The column range is mutable assignment content rather than identity: granting the same resource,

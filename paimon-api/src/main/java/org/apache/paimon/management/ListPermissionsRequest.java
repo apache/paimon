@@ -25,7 +25,7 @@ import javax.annotation.Nullable;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
-/** Exact resource, principal, and pagination filters for listing permission assignments. */
+/** Exact resource or scope, principal, and pagination filters for permission assignments. */
 @Experimental
 public class ListPermissionsRequest {
 

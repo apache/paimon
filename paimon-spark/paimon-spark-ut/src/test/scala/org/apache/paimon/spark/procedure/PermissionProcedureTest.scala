@@ -129,6 +129,46 @@ class PermissionProcedureTest extends PaimonSparkTestWithRestCatalogBase {
     assertThat(second.isNullAt(10)).isTrue
   }
 
+  test("grant and list explicit descendant scopes") {
+    checkAnswer(
+      spark.sql("""CALL sys.grant_permission(
+                  |  resource_type => 'CATALOG_ALL',
+                  |  access => 'SELECT',
+                  |  principal => 'analyst')
+                  |""".stripMargin),
+      Row(true)
+    )
+    val catalogAll = spark
+      .sql(
+        "CALL sys.list_permissions(resource_type => 'CATALOG_ALL', principal => 'analyst')"
+      )
+      .head()
+    assertThat(catalogAll.getString(0)).isEqualTo("CATALOG_ALL")
+    assertThat(catalogAll.isNullAt(1)).isTrue
+    assertThat(catalogAll.getString(5)).isEqualTo("SELECT")
+
+    checkAnswer(
+      spark.sql("""CALL sys.grant_permission(
+                  |  resource_type => 'DATABASE_ALL',
+                  |  database => 'sales',
+                  |  access => 'UPDATE',
+                  |  principal => 'analyst')
+                  |""".stripMargin),
+      Row(true)
+    )
+    val databaseAll = spark
+      .sql("""CALL sys.list_permissions(
+             |  resource_type => 'DATABASE_ALL',
+             |  database => 'sales',
+             |  principal => 'analyst')
+             |""".stripMargin)
+      .head()
+    assertThat(databaseAll.getString(0)).isEqualTo("DATABASE_ALL")
+    assertThat(databaseAll.getString(1)).isEqualTo("sales")
+    assertThat(databaseAll.isNullAt(2)).isTrue
+    assertThat(databaseAll.getString(5)).isEqualTo("UPDATE")
+  }
+
   test("grant, replace, list and enforce column permissions") {
     restCatalogServer.setQueryPrincipals(Collections.singleton("analyst"))
 

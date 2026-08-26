@@ -24,11 +24,13 @@ import javax.annotation.Nullable;
 
 import java.util.Locale;
 
-/** Resource types supported by permission management. */
+/** Resource types and explicit descendant scopes supported by permission management. */
 @Experimental
 public enum ResourceType {
     CATALOG,
+    CATALOG_ALL,
     DATABASE,
+    DATABASE_ALL,
     TABLE,
     COLUMN,
     VIEW,

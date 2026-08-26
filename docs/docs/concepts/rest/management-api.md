@@ -78,7 +78,9 @@ Permission resources are structured objects:
 | Resource type | Required locator | Example |
 | --- | --- | --- |
 | `CATALOG` | none | `{"type":"CATALOG"}` |
+| `CATALOG_ALL` | none | `{"type":"CATALOG_ALL"}` |
 | `DATABASE` | `database` | `{"type":"DATABASE","database":"sales"}` |
+| `DATABASE_ALL` | `database` | `{"type":"DATABASE_ALL","database":"sales"}` |
 | `TABLE` | `database`, `table` | `{"type":"TABLE","database":"sales","table":"orders"}` |
 | `COLUMN` | `database`, `table` | `{"type":"COLUMN","database":"sales","table":"orders"}` |
 | `FUNCTION` | `database`, `function` | `{"type":"FUNCTION","database":"sales","function":"calculate_tax"}` |
@@ -115,16 +117,22 @@ The REST wire format uses upper case. Built-in accesses are resource-specific:
 | Resource | Accesses |
 | --- | --- |
 | `CATALOG` | `ALL`, `ALTER`, `DROP`, `GRANT`, `CREATEDATABASE` |
+| `CATALOG_ALL` | `ALL`, `DESCRIBE`, `ALTER`, `DROP`, `GRANT`, `CREATETABLE`, `CREATEVIEW`, `CREATEFUNCTION`, `LIST`, `SELECT`, `UPDATE` |
 | `DATABASE` | `ALL`, `DESCRIBE`, `ALTER`, `DROP`, `GRANT`, `CREATETABLE`, `CREATEVIEW`, `CREATEFUNCTION`, `LIST` |
+| `DATABASE_ALL` | `ALL`, `SELECT`, `UPDATE`, `ALTER`, `DROP`, `GRANT` |
 | `TABLE` | `ALL`, `SELECT`, `UPDATE`, `ALTER`, `DROP`, `GRANT` |
 | `COLUMN` | `SELECT` |
 | `VIEW` | `ALL`, `SELECT`, `ALTER`, `DROP`, `GRANT` |
 | `FUNCTION` | `ALL`, `SELECT`, `ALTER`, `DROP`, `GRANT` |
 
 An assignment identity is `resource`, `access`, and `principal`. Granting the same identity replaces
-its expiry, and revocation is idempotent. Assignments apply only to the exact referenced resource;
-resource inheritance is not part of this experimental contract. Resolving group membership and role
-inheritance remains a server responsibility.
+its expiry, and revocation is idempotent. `CATALOG`, `DATABASE`, `TABLE`, `COLUMN`, `VIEW`, and
+`FUNCTION` apply only to the exact referenced resource. `CATALOG_ALL` is an explicit scope over the
+configured catalog's database, table, view, and function descendants; `DATABASE_ALL` is an explicit
+scope over the named database's table, view, and function descendants. These scope assignments also
+apply to descendants created later. They remain direct assignments in listing responses; the server
+does not synthesize inherited assignments. Resolving group membership and role inheritance remains a
+server responsibility.
 
 ### Column permissions
 
@@ -244,6 +252,17 @@ CALL paimon.sys.grant_permission(
 );
 ```
 
+Grant read access to every applicable object currently or subsequently created in the catalog. This
+does not grant catalog-level operations such as `CREATEDATABASE`:
+
+```sql
+CALL paimon.sys.grant_permission(
+  resource_type => 'CATALOG_ALL',
+  access => 'SELECT',
+  principal => 'role:catalog_reader'
+);
+```
+
 Grant permission to create views in a database with an optional expiration time:
 
 ```sql
@@ -253,6 +272,18 @@ CALL paimon.sys.grant_permission(
   access => 'CREATEVIEW',
   principal => 'role:data_engineer',
   expire_time => '2027-01-01T00:00:00Z'
+);
+```
+
+Grant write access to every applicable table currently or subsequently created in one database.
+`DATABASE_ALL` requires `database` but does not accept a table, function, or view locator:
+
+```sql
+CALL paimon.sys.grant_permission(
+  resource_type => 'DATABASE_ALL',
+  database => 'sales',
+  access => 'UPDATE',
+  principal => 'role:sales_writer'
 );
 ```
 
@@ -317,8 +348,9 @@ CALL paimon.sys.grant_permission(
 
 ### List permissions
 
-`list_permissions` always addresses one exact resource. Omit optional filters to list every direct
-assignment on it:
+`list_permissions` always addresses one exact resource or explicit descendant scope. Omit optional
+filters to list every direct assignment on it; effective assignments inherited from a scope are not
+synthesized:
 
 ```sql
 CALL paimon.sys.list_permissions(
