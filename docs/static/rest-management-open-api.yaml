@@ -489,6 +489,7 @@ components:
       required: [type]
       properties:
         type:
+          type: string
           const: CATALOG
     CatalogAllResource:
       type: object
@@ -497,6 +498,7 @@ components:
       required: [type]
       properties:
         type:
+          type: string
           const: CATALOG_ALL
     DatabaseResource:
       type: object
@@ -504,6 +506,7 @@ components:
       required: [type, database]
       properties:
         type:
+          type: string
           const: DATABASE
         database:
           type: string
@@ -515,6 +518,7 @@ components:
       required: [type, database]
       properties:
         type:
+          type: string
           const: DATABASE_ALL
         database:
           type: string
@@ -525,6 +529,7 @@ components:
       required: [type, database, table]
       properties:
         type:
+          type: string
           const: TABLE
         database:
           type: string
@@ -541,6 +546,7 @@ components:
       required: [type, database, table]
       properties:
         type:
+          type: string
           const: COLUMN
         database:
           type: string
@@ -554,6 +560,7 @@ components:
       required: [type, database, function]
       properties:
         type:
+          type: string
           const: FUNCTION
         database:
           type: string
@@ -567,6 +574,7 @@ components:
       required: [type, database, view]
       properties:
         type:
+          type: string
           const: VIEW
         database:
           type: string
@@ -657,6 +665,7 @@ components:
             required: [type]
             properties:
               type:
+                type: string
                 const: COLUMN
         required: [resource]
       then:
@@ -750,6 +759,7 @@ components:
       required: [type, principal]
       properties:
         type:
+          type: string
           const: ROW_FILTER
         principal:
           $ref: '#/components/schemas/Principal'
@@ -759,6 +769,7 @@ components:
       required: [type, principal, column]
       properties:
         type:
+          type: string
           const: COLUMN_MASKING
         principal:
           $ref: '#/components/schemas/Principal'
@@ -776,6 +787,7 @@ components:
       required: [type, database, table]
       properties:
         type:
+          type: string
           const: TABLE
         database:
           type: string

@@ -469,6 +469,25 @@ function validateManagementOpenApi() {
     'VIEW',
   ]);
   requireExactEnum(contract, 'PolicyType', ['ROW_FILTER', 'COLUMN_MASKING']);
+  Object.entries({
+    CatalogResource: 'CATALOG',
+    CatalogAllResource: 'CATALOG_ALL',
+    DatabaseResource: 'DATABASE',
+    DatabaseAllResource: 'DATABASE_ALL',
+    TableResource: 'TABLE',
+    ColumnResource: 'COLUMN',
+    FunctionResource: 'FUNCTION',
+    ViewResource: 'VIEW',
+    RowFilterPolicyIdentity: 'ROW_FILTER',
+    ColumnMaskPolicyIdentity: 'COLUMN_MASKING',
+    TablePolicyResource: 'TABLE',
+  }).forEach(([schemaName, expectedType]) => {
+    const typeProperty = contract.requireProperties(schemaName, ['type']).type;
+    contract.checkSpec(
+      typeProperty.type === 'string' && typeProperty.const === expectedType,
+      `${schemaName}.type must be a typed string constant`,
+    );
+  });
 
   const permissionAccess = contract.schema('PermissionAccess');
   const expectedAccesses = [
