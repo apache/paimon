@@ -26,7 +26,6 @@ import org.apache.hc.client5.http.classic.methods.HttpDelete;
 import org.apache.hc.client5.http.classic.methods.HttpGet;
 import org.apache.hc.client5.http.classic.methods.HttpHead;
 import org.apache.hc.client5.http.classic.methods.HttpPost;
-import org.apache.hc.client5.http.classic.methods.HttpPut;
 import org.apache.hc.client5.http.config.RequestConfig;
 import org.apache.hc.client5.http.entity.DecompressingEntity;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
@@ -237,10 +236,6 @@ public class HttpClientUtils {
 
     public static HttpPost newHttpPost(String uri) {
         return newRequest(uri, HttpPost::new);
-    }
-
-    public static HttpPut newHttpPut(String uri) {
-        return newRequest(uri, HttpPut::new);
     }
 
     public static HttpDelete newHttpDelete(String uri) {

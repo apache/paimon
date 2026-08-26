@@ -24,7 +24,10 @@ import org.apache.paimon.management.DataPolicy;
 import org.apache.paimon.management.ListPoliciesRequest;
 import org.apache.paimon.management.PermissionResource;
 import org.apache.paimon.management.PolicyManagement;
+import org.apache.paimon.management.PolicyManagement.PolicyAlreadyExistException;
 import org.apache.paimon.management.PolicyType;
+import org.apache.paimon.rest.exceptions.AlreadyExistsException;
+import org.apache.paimon.rest.responses.ErrorResponse;
 import org.apache.paimon.rest.responses.ListPoliciesResponse;
 
 import javax.annotation.Nullable;
@@ -46,13 +49,15 @@ public class RESTPolicyManagement implements PolicyManagement {
     }
 
     @Override
-    public void createPolicy(DataPolicy policy) {
-        api.createPolicy(policy);
-    }
-
-    @Override
-    public void createOrReplacePolicy(DataPolicy policy) {
-        api.createOrReplacePolicy(policy);
+    public void createPolicy(DataPolicy policy) throws PolicyAlreadyExistException {
+        try {
+            api.createPolicy(policy);
+        } catch (AlreadyExistsException e) {
+            if (ErrorResponse.RESOURCE_TYPE_POLICY.equals(e.resourceType())) {
+                throw new PolicyAlreadyExistException(policy, e);
+            }
+            throw e;
+        }
     }
 
     @Override

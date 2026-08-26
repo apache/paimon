@@ -43,9 +43,6 @@ public interface RESTClient {
             Class<T> responseType,
             RESTAuthFunction restAuthFunction);
 
-    <T extends RESTResponse> T put(
-            String path, RESTRequest body, RESTAuthFunction restAuthFunction);
-
     <T extends RESTResponse> T delete(String path, RESTAuthFunction restAuthFunction);
 
     <T extends RESTResponse> T delete(

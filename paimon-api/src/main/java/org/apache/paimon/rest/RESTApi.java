@@ -916,15 +916,6 @@ public class RESTApi {
                 restAuthFunction);
     }
 
-    /** Creates or fully replaces a principal policy without changing its identity. */
-    @Experimental
-    public void createOrReplacePolicy(DataPolicy policy) {
-        client.put(
-                resourcePaths.policies(policy.getResource()),
-                new PolicyRequest(policy),
-                restAuthFunction);
-    }
-
     /** Drops a principal policy from its exact attachment resource. */
     @Experimental
     public void dropPolicy(

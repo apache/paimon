@@ -36,9 +36,7 @@ import javax.annotation.Nullable;
 
 import java.beans.ConstructorProperties;
 
-/**
- * Create or replace payload for a principal policy whose table is identified by the request path.
- */
+/** Create payload for a principal policy whose table is identified by the request path. */
 @Experimental
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class PolicyRequest implements RESTRequest {
