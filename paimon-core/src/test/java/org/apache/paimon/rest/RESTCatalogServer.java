@@ -40,11 +40,19 @@ import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.function.FunctionDefinition;
 import org.apache.paimon.function.FunctionImpl;
+import org.apache.paimon.management.ColumnMask;
+import org.apache.paimon.management.DataPolicy;
+import org.apache.paimon.management.ListPermissionsRequest;
+import org.apache.paimon.management.PermissionAssignment;
+import org.apache.paimon.management.PermissionResource;
+import org.apache.paimon.management.ResourceType;
+import org.apache.paimon.management.RowFilter;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.partition.PartitionUtils;
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.rest.auth.AuthProvider;
@@ -63,12 +71,16 @@ import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateTagRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.DropPartitionsRequest;
+import org.apache.paimon.rest.requests.DropPolicyRequest;
+import org.apache.paimon.rest.requests.GrantPermissionRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByFilterRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByNamesRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
+import org.apache.paimon.rest.requests.PolicyRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.requests.ReplaceTableRequest;
 import org.apache.paimon.rest.requests.ResetConsumerRequest;
+import org.apache.paimon.rest.requests.RevokePermissionRequest;
 import org.apache.paimon.rest.requests.RollbackSchemaRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
@@ -93,6 +105,8 @@ import org.apache.paimon.rest.responses.ListFunctionDetailsResponse;
 import org.apache.paimon.rest.responses.ListFunctionsGloballyResponse;
 import org.apache.paimon.rest.responses.ListFunctionsResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
+import org.apache.paimon.rest.responses.ListPermissionsResponse;
+import org.apache.paimon.rest.responses.ListPoliciesResponse;
 import org.apache.paimon.rest.responses.ListSnapshotsResponse;
 import org.apache.paimon.rest.responses.ListTableDetailsResponse;
 import org.apache.paimon.rest.responses.ListTablesGloballyResponse;
@@ -161,6 +175,7 @@ import java.util.Optional;
 import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -185,6 +200,7 @@ import static org.apache.paimon.rest.ResourcePaths.FUNCTION_DETAILS;
 import static org.apache.paimon.rest.ResourcePaths.TABLE_DETAILS;
 import static org.apache.paimon.rest.ResourcePaths.VIEWS;
 import static org.apache.paimon.rest.ResourcePaths.VIEW_DETAILS;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Mock REST server for testing. */
 public class RESTCatalogServer {
@@ -195,13 +211,22 @@ public class RESTCatalogServer {
     public static final String AUTHORIZATION_HEADER_KEY = "Authorization";
 
     private final String databaseUri;
+    private final String permissionUri;
 
     private final CatalogContext catalogContext;
     private final RESTFileSystemCatalog catalog;
     private final MockWebServer server;
 
     private final Map<String, Database> databaseStore = new HashMap<>();
-    private final Map<String, TableMetadata> tableMetadataStore = new HashMap<>();
+    private final Map<String, TableMetadata> tableMetadataStore = new ConcurrentHashMap<>();
+    private final RESTPermissionStore permissionStore = new RESTPermissionStore();
+    private final Map<PolicyKey, DataPolicy> policyStore = new ConcurrentHashMap<>();
+    private final Map<String, Object> tablePolicyLocks = new ConcurrentHashMap<>();
+    private final TableLifecycleLocks tableLifecycleLocks = new TableLifecycleLocks();
+    private final Set<String> managementPrincipals = new HashSet<>();
+    private final Set<String> queryPrincipals = new HashSet<>();
+    private final Set<PermissionResource> noManagementPermissionResources =
+            ConcurrentHashMap.newKeySet();
 
     private final List<ListPartitionsByFilterRequest> receivedListPartitionsByFilterRequests =
             new java.util.concurrent.CopyOnWriteArrayList<>();
@@ -238,6 +263,7 @@ public class RESTCatalogServer {
                 this.configResponse.getDefaults().get(RESTCatalogInternalOptions.PREFIX.key());
         this.resourcePaths = new ResourcePaths(prefix);
         this.databaseUri = resourcePaths.databases();
+        this.permissionUri = resourcePaths.permissions();
         Options conf = new Options();
         this.configResponse.getDefaults().forEach(conf::setString);
         conf.setString(WAREHOUSE.key(), dataPath);
@@ -332,11 +358,36 @@ public class RESTCatalogServer {
     }
 
     public void setRowFilterAuth(Identifier identifier, List<Predicate> rowFilters) {
-        rowFilterAuthHandler.put(identifier.getFullName(), rowFilters);
+        if (rowFilters == null) {
+            rowFilterAuthHandler.remove(identifier.getFullName());
+        } else {
+            rowFilterAuthHandler.put(identifier.getFullName(), rowFilters);
+        }
     }
 
     public void setColumnMaskingAuth(Identifier identifier, Map<String, Transform> columnMasking) {
-        columnMaskingAuthHandler.put(identifier.getFullName(), columnMasking);
+        if (columnMasking == null) {
+            columnMaskingAuthHandler.remove(identifier.getFullName());
+        } else {
+            columnMaskingAuthHandler.put(identifier.getFullName(), columnMasking);
+        }
+    }
+
+    public void registerManagementPrincipal(String principal) {
+        managementPrincipals.add(principal);
+    }
+
+    public void setQueryPrincipals(Set<String> principals) {
+        queryPrincipals.clear();
+        queryPrincipals.addAll(principals);
+    }
+
+    public void denyManagementPermission(PermissionResource resource) {
+        noManagementPermissionResources.add(resource);
+    }
+
+    public void allowManagementPermission(PermissionResource resource) {
+        noManagementPermissionResources.remove(resource);
     }
 
     public RESTToken getDataToken(Identifier identifier) {
@@ -384,6 +435,13 @@ public class RESTCatalogServer {
                                     .queryParameter(WAREHOUSE.key())
                                     .equals(warehouse)) {
                         return mockResponse(configResponse, 200);
+                    } else if (permissionUri.equals(resourcePath)
+                            || request.getPath().startsWith(permissionUri + "/")) {
+                        return permissionsApiHandler(
+                                request.getMethod(), resourcePath, data, parameters);
+                    } else if (isPolicyPath(resourcePath)) {
+                        return policiesApiHandler(
+                                request.getMethod(), resourcePath, data, parameters);
                     } else if (databaseUri.equals(request.getPath())
                             || request.getPath().contains(databaseUri + "?")) {
                         return databasesApiHandler(restAuthParameter.method(), data, parameters);
@@ -996,6 +1054,17 @@ public class RESTCatalogServer {
         if (metadata == null) {
             throw new Catalog.TableNotExistException(identifier);
         }
+        synchronized (policyLock(metadata.uuid())) {
+            TableMetadata current = tableMetadataStore.get(identifier.getFullName());
+            if (current == null || !current.uuid().equals(metadata.uuid())) {
+                throw new Catalog.TableNotExistException(identifier);
+            }
+            return authTable(identifier, requestBody, current);
+        }
+    }
+
+    private MockResponse authTable(
+            Identifier identifier, AuthTableQueryRequest requestBody, TableMetadata metadata) {
         List<String> columnAuth = columnAuthHandler.get(identifier.getFullName());
         if (columnAuth != null) {
             List<String> select = requestBody.select();
@@ -1009,20 +1078,61 @@ public class RESTCatalogServer {
                         }
                     });
         }
-        List<Predicate> rowFilters = rowFilterAuthHandler.get(identifier.getFullName());
+        if (!RESTColumnPermissionSupport.canSelect(
+                permissionStore, queryPrincipals, identifier, metadata, requestBody.select())) {
+            throw new Catalog.TableNoPermissionException(identifier);
+        }
+        List<Predicate> rowFilters =
+                new ArrayList<>(
+                        rowFilterAuthHandler.getOrDefault(
+                                identifier.getFullName(), Collections.emptyList()));
         Map<String, Transform> columnMasking =
-                columnMaskingAuthHandler.get(identifier.getFullName());
+                new HashMap<>(
+                        columnMaskingAuthHandler.getOrDefault(
+                                identifier.getFullName(), Collections.emptyMap()));
+        for (Map.Entry<PolicyKey, DataPolicy> entry : policyStore.entrySet()) {
+            if (!entry.getKey().tableUuid.equals(metadata.uuid())
+                    || !appliesToQueryPrincipal(entry.getValue())) {
+                continue;
+            }
+            DataPolicy policy = entry.getValue();
+            RowFilter rowFilter = policy.getRowFilter();
+            if (rowFilter != null) {
+                Predicate predicate;
+                try {
+                    predicate = parseRowFilter(metadata.schema(), rowFilter);
+                } catch (RuntimeException e) {
+                    throw new Catalog.TableNoPermissionException(identifier);
+                }
+                if (predicate == null) {
+                    throw new Catalog.TableNoPermissionException(identifier);
+                }
+                rowFilters.add(predicate);
+                continue;
+            }
+            ColumnMask columnMask = policy.getColumnMask();
+            Transform transform;
+            try {
+                transform = parseColumnMask(metadata.schema(), columnMask);
+            } catch (RuntimeException e) {
+                throw new Catalog.TableNoPermissionException(identifier);
+            }
+            if (transform == null || columnMasking.containsKey(columnMask.getOnColumn())) {
+                throw new Catalog.TableNoPermissionException(identifier);
+            }
+            columnMasking.put(columnMask.getOnColumn(), transform);
+        }
 
         // Convert Predicate list to JSON string list
         List<String> filterJsonList = null;
-        if (rowFilters != null) {
+        if (!rowFilters.isEmpty()) {
             filterJsonList =
                     rowFilters.stream().map(JsonSerdeUtil::toFlatJson).collect(Collectors.toList());
         }
 
         // Convert Transform map to JSON string map
         Map<String, String> columnMaskingJsonMap = null;
-        if (columnMasking != null) {
+        if (!columnMasking.isEmpty()) {
             columnMaskingJsonMap =
                     columnMasking.entrySet().stream()
                             .collect(
@@ -1037,6 +1147,10 @@ public class RESTCatalogServer {
             response = new AuthTableQueryResponse(Collections.emptyList(), ImmutableMap.of());
         }
         return mockResponse(response, 200);
+    }
+
+    private boolean appliesToQueryPrincipal(DataPolicy policy) {
+        return queryPrincipals.contains(policy.getPrincipal());
     }
 
     private MockResponse commitTableHandle(Identifier identifier, String data) throws Exception {
@@ -1496,6 +1610,7 @@ public class RESTCatalogServer {
                     return mockResponse(response, 200);
                 case "DELETE":
                     catalog.dropDatabase(databaseName, false, true);
+                    removeDatabaseTableState(databaseName);
                     databaseStore.remove(databaseName);
                     return new MockResponse().setResponseCode(200);
                 case "POST":
@@ -1540,6 +1655,31 @@ public class RESTCatalogServer {
         return new MockResponse().setResponseCode(404);
     }
 
+    private void removeDatabaseTableState(String databaseName) {
+        List<String> tableNames =
+                tableMetadataStore.keySet().stream()
+                        .filter(
+                                tableName ->
+                                        databaseName.equals(
+                                                Identifier.fromString(tableName).getDatabaseName()))
+                        .collect(Collectors.toList());
+        for (String tableName : tableNames) {
+            synchronized (tableLifecycleLocks.lock(tableName)) {
+                TableMetadata metadata = tableMetadataStore.get(tableName);
+                if (metadata == null) {
+                    continue;
+                }
+                synchronized (policyLock(metadata.uuid())) {
+                    if (tableMetadataStore.remove(tableName, metadata)) {
+                        removePolicies(metadata.uuid());
+                        tableLatestSnapshotStore.remove(tableName);
+                        tablePartitionsStore.remove(tableName);
+                    }
+                }
+            }
+        }
+    }
+
     private MockResponse tablesHandle(
             String method, String data, String databaseName, Map<String, String> parameters)
             throws Exception {
@@ -1552,25 +1692,29 @@ public class RESTCatalogServer {
                     CreateTableRequest requestBody =
                             RESTApi.fromJson(data, CreateTableRequest.class);
                     Identifier identifier = requestBody.getIdentifier();
-                    Schema schema = requestBody.getSchema();
-                    TableMetadata tableMetadata;
-                    if (isObjectTable(schema)) {
-                        tableMetadata = createObjectTable(identifier, schema);
-                    } else {
-                        catalog.createTable(identifier, schema, false);
-                        boolean isExternal =
-                                schema.options() != null
-                                        && schema.options().containsKey(PATH.key());
-                        tableMetadata =
-                                createTableMetadata(
-                                        requestBody.getIdentifier(),
-                                        0L,
-                                        requestBody.getSchema(),
-                                        UUID.randomUUID().toString(),
-                                        isExternal);
+                    synchronized (tableLifecycleLocks.lock(identifier.getFullName())) {
+                        if (tableMetadataStore.containsKey(identifier.getFullName())) {
+                            throw new Catalog.TableAlreadyExistException(identifier);
+                        }
+                        Schema schema = requestBody.getSchema();
+                        TableMetadata tableMetadata;
+                        if (isObjectTable(schema)) {
+                            tableMetadata = createObjectTable(identifier, schema);
+                        } else {
+                            catalog.createTable(identifier, schema, false);
+                            boolean isExternal =
+                                    schema.options() != null
+                                            && schema.options().containsKey(PATH.key());
+                            tableMetadata =
+                                    createTableMetadata(
+                                            requestBody.getIdentifier(),
+                                            0L,
+                                            requestBody.getSchema(),
+                                            UUID.randomUUID().toString(),
+                                            isExternal);
+                        }
+                        tableMetadataStore.put(identifier.getFullName(), tableMetadata);
                     }
-                    tableMetadataStore.put(
-                            requestBody.getIdentifier().getFullName(), tableMetadata);
                     return new MockResponse().setResponseCode(200);
                 default:
                     return new MockResponse().setResponseCode(404);
@@ -1815,20 +1959,29 @@ public class RESTCatalogServer {
                 alterTableImpl(identifier, requestBody.getChanges());
                 return new MockResponse().setResponseCode(200);
             case "DELETE":
-                if (!tableMetadataStore.containsKey(identifier.getFullName())) {
-                    return new MockResponse().setResponseCode(404);
-                }
-                tableMetadata = tableMetadataStore.get(identifier.getFullName());
-                if (!tableMetadata.isExternal()) {
-                    try {
-                        catalog.dropTable(identifier, false);
-                    } catch (Exception e) {
-                        System.out.println(e.getMessage());
+                synchronized (tableLifecycleLocks.lock(identifier.getFullName())) {
+                    tableMetadata = tableMetadataStore.get(identifier.getFullName());
+                    if (tableMetadata == null) {
+                        return new MockResponse().setResponseCode(404);
+                    }
+                    synchronized (policyLock(tableMetadata.uuid())) {
+                        TableMetadata current = tableMetadataStore.get(identifier.getFullName());
+                        if (current == null || !current.uuid().equals(tableMetadata.uuid())) {
+                            return new MockResponse().setResponseCode(404);
+                        }
+                        if (!current.isExternal()) {
+                            try {
+                                catalog.dropTable(identifier, false);
+                            } catch (Exception e) {
+                                System.out.println(e.getMessage());
+                            }
+                        }
+                        removePolicies(current.uuid());
+                        tableMetadataStore.remove(identifier.getFullName(), current);
+                        tableLatestSnapshotStore.remove(identifier.getFullName());
+                        tablePartitionsStore.remove(identifier.getFullName());
                     }
                 }
-                tableMetadataStore.remove(identifier.getFullName());
-                tableLatestSnapshotStore.remove(identifier.getFullName());
-                tablePartitionsStore.remove(identifier.getFullName());
                 return new MockResponse().setResponseCode(200);
             default:
                 return new MockResponse().setResponseCode(404);
@@ -1838,32 +1991,49 @@ public class RESTCatalogServer {
     private MockResponse replaceTableHandle(Identifier identifier, String data) throws Exception {
         ReplaceTableRequest requestBody = RESTApi.fromJson(data, ReplaceTableRequest.class);
         Schema newSchema = requestBody.getSchema();
-        if (!tableMetadataStore.containsKey(identifier.getFullName())) {
+        TableMetadata tableMetadata = tableMetadataStore.get(identifier.getFullName());
+        if (tableMetadata == null) {
             throw new Catalog.TableNotExistException(identifier);
         }
-        TableMetadata tableMetadata = tableMetadataStore.get(identifier.getFullName());
-        if (isFormatTable(tableMetadata.schema().toSchema()) || isFormatTable(newSchema)) {
-            throw new UnsupportedOperationException("replaceTable does not support format tables.");
+        synchronized (policyLock(tableMetadata.uuid())) {
+            TableMetadata current = tableMetadataStore.get(identifier.getFullName());
+            if (current == null || !current.uuid().equals(tableMetadata.uuid())) {
+                throw new Catalog.TableNotExistException(identifier);
+            }
+            TableSchema replacementSchema =
+                    createTableMetadata(
+                                    identifier,
+                                    current.schema().id() + 1,
+                                    newSchema,
+                                    current.uuid(),
+                                    current.isExternal())
+                            .schema();
+            validatePoliciesForSchema(identifier, current.uuid(), replacementSchema);
+            if (isFormatTable(current.schema().toSchema()) || isFormatTable(newSchema)) {
+                throw new UnsupportedOperationException(
+                        "replaceTable does not support format tables.");
+            }
+            catalog.replaceTable(identifier, newSchema, false);
+            TableSchema replacedSchema = catalog.loadTableSchema(identifier);
+            TableMetadata newTableMetadata =
+                    createTableMetadata(
+                            identifier,
+                            replacedSchema.id(),
+                            replacedSchema.toSchema(),
+                            current.uuid(),
+                            current.isExternal());
+            tableMetadataStore.put(identifier.getFullName(), newTableMetadata);
+            FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+            Snapshot truncateSnapshot = table.snapshotManager().latestSnapshot();
+            if (truncateSnapshot != null) {
+                tableLatestSnapshotStore.put(
+                        identifier.getFullName(),
+                        new TableSnapshot(truncateSnapshot, 0L, 0L, 0L, 0L));
+            } else {
+                tableLatestSnapshotStore.remove(identifier.getFullName());
+            }
+            tablePartitionsStore.remove(identifier.getFullName());
         }
-        catalog.replaceTable(identifier, newSchema, false);
-        TableSchema replacedSchema = catalog.loadTableSchema(identifier);
-        TableMetadata newTableMetadata =
-                createTableMetadata(
-                        identifier,
-                        replacedSchema.id(),
-                        replacedSchema.toSchema(),
-                        tableMetadata.uuid(),
-                        tableMetadata.isExternal());
-        tableMetadataStore.put(identifier.getFullName(), newTableMetadata);
-        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
-        Snapshot truncateSnapshot = table.snapshotManager().latestSnapshot();
-        if (truncateSnapshot != null) {
-            tableLatestSnapshotStore.put(
-                    identifier.getFullName(), new TableSnapshot(truncateSnapshot, 0L, 0L, 0L, 0L));
-        } else {
-            tableLatestSnapshotStore.remove(identifier.getFullName());
-        }
-        tablePartitionsStore.remove(identifier.getFullName());
         return new MockResponse().setResponseCode(200);
     }
 
@@ -1873,18 +2043,37 @@ public class RESTCatalogServer {
         Identifier toTable = requestBody.getDestination();
         if (noPermissionTables.contains(fromTable.getFullName())) {
             throw new Catalog.TableNoPermissionException(fromTable);
-        } else if (tableMetadataStore.containsKey(fromTable.getFullName())) {
-            TableMetadata tableMetadata = tableMetadataStore.get(fromTable.getFullName());
-            if (!isFormatTable(tableMetadata.schema().toSchema()) && !tableMetadata.isExternal()) {
-                catalog.renameTable(requestBody.getSource(), requestBody.getDestination(), false);
+        }
+        Object[] locks =
+                tableLifecycleLocks.ordered(fromTable.getFullName(), toTable.getFullName());
+        synchronized (locks[0]) {
+            synchronized (locks[1]) {
+                TableMetadata observed = tableMetadataStore.get(fromTable.getFullName());
+                if (observed == null) {
+                    throw new Catalog.TableNotExistException(fromTable);
+                }
+                synchronized (policyLock(observed.uuid())) {
+                    TableMetadata current = tableMetadataStore.get(fromTable.getFullName());
+                    if (current == null || !current.uuid().equals(observed.uuid())) {
+                        throw new Catalog.TableNotExistException(fromTable);
+                    }
+                    if (tableMetadataStore.containsKey(toTable.getFullName())) {
+                        throw new Catalog.TableAlreadyExistException(toTable);
+                    }
+                    if (!isFormatTable(current.schema().toSchema()) && !current.isExternal()) {
+                        catalog.renameTable(fromTable, toTable, false);
+                    }
+                    TableMetadata renamedMetadata =
+                            createTableMetadata(
+                                    toTable,
+                                    current.schema().id(),
+                                    current.schema().toSchema(),
+                                    current.uuid(),
+                                    current.isExternal());
+                    tableMetadataStore.remove(fromTable.getFullName(), current);
+                    tableMetadataStore.put(toTable.getFullName(), renamedMetadata);
+                }
             }
-            if (tableMetadataStore.containsKey(toTable.getFullName())) {
-                throw new Catalog.TableAlreadyExistException(toTable);
-            }
-            tableMetadataStore.remove(fromTable.getFullName());
-            tableMetadataStore.put(toTable.getFullName(), tableMetadata);
-        } else {
-            throw new Catalog.TableNotExistException(fromTable);
         }
         return new MockResponse().setResponseCode(200);
     }
@@ -2804,45 +2993,52 @@ public class RESTCatalogServer {
     protected void alterTableImpl(Identifier identifier, List<SchemaChange> changes)
             throws Catalog.TableNotExistException, Catalog.ColumnAlreadyExistException,
                     Catalog.ColumnNotExistException {
-        if (tableMetadataStore.containsKey(identifier.getFullName())) {
-            TableMetadata tableMetadata = tableMetadataStore.get(identifier.getFullName());
-            try {
-                TableSchema schema = tableMetadata.schema();
-                if (isFormatTable(schema.toSchema())) {
-                    TableSchema newSchema =
+        TableMetadata tableMetadata = tableMetadataStore.get(identifier.getFullName());
+        if (tableMetadata != null) {
+            synchronized (policyLock(tableMetadata.uuid())) {
+                TableMetadata current = tableMetadataStore.get(identifier.getFullName());
+                if (current == null || !current.uuid().equals(tableMetadata.uuid())) {
+                    throw new Catalog.TableNotExistException(identifier);
+                }
+                try {
+                    TableSchema schema = current.schema();
+                    TableSchema candidateSchema =
                             SchemaManager.generateTableSchema(
                                     schema,
                                     changes,
                                     new LazyField<>(() -> false),
                                     new LazyField<>(() -> identifier));
+                    validatePoliciesForSchema(identifier, current.uuid(), candidateSchema);
+                    if (isFormatTable(schema.toSchema())) {
+                        TableMetadata newTableMetadata =
+                                createTableMetadata(
+                                        identifier,
+                                        candidateSchema.id(),
+                                        candidateSchema.toSchema(),
+                                        current.uuid(),
+                                        current.isExternal());
+                        tableMetadataStore.put(identifier.getFullName(), newTableMetadata);
+                        return;
+                    }
+                    catalog.alterTable(identifier, changes, false);
+                    FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+                    TableSchema newSchema = table.schema();
                     TableMetadata newTableMetadata =
                             createTableMetadata(
                                     identifier,
                                     newSchema.id(),
                                     newSchema.toSchema(),
-                                    tableMetadata.uuid(),
-                                    tableMetadata.isExternal());
+                                    current.uuid(),
+                                    current.isExternal());
                     tableMetadataStore.put(identifier.getFullName(), newTableMetadata);
-                    return;
+                } catch (Catalog.TableNotExistException
+                        | Catalog.ColumnAlreadyExistException
+                        | Catalog.ColumnNotExistException
+                        | RuntimeException e) {
+                    throw e;
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
                 }
-                catalog.alterTable(identifier, changes, false);
-                FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
-                TableSchema newSchema = table.schema();
-                TableMetadata newTableMetadata =
-                        createTableMetadata(
-                                identifier,
-                                newSchema.id(),
-                                newSchema.toSchema(),
-                                tableMetadata.uuid(),
-                                tableMetadata.isExternal());
-                tableMetadataStore.put(identifier.getFullName(), newTableMetadata);
-            } catch (Catalog.TableNotExistException
-                    | Catalog.ColumnAlreadyExistException
-                    | Catalog.ColumnNotExistException
-                    | RuntimeException e) {
-                throw e;
-            } catch (Exception e) {
-                throw new RuntimeException(e);
             }
         }
     }
@@ -3111,6 +3307,574 @@ public class RESTCatalogServer {
             maxResults = Math.min(maxResults, DEFAULT_MAX_RESULTS);
         }
         return maxResults;
+    }
+
+    private MockResponse permissionsApiHandler(
+            String method, String resourcePath, String data, Map<String, String> parameters)
+            throws JsonProcessingException {
+        if ("GET".equals(method) && permissionUri.equals(resourcePath)) {
+            PermissionResource target = permissionResource(parameters);
+            MockResponse authorization = validateManagementPermission(target);
+            if (authorization != null) {
+                return authorization;
+            }
+            MockResponse validation = validateResourceAndPrincipal(target, parameters);
+            if (validation != null) {
+                return validation;
+            }
+            List<PermissionAssignment> filtered = permissionStore.list(target, parameters);
+            int start =
+                    parameters.containsKey(PAGE_TOKEN)
+                            ? Integer.parseInt(parameters.get(PAGE_TOKEN))
+                            : 0;
+            int end = Math.min(start + getPermissionMaxResults(parameters), filtered.size());
+            List<PermissionAssignment> page = new ArrayList<>(filtered.subList(start, end));
+            String nextPageToken = end < filtered.size() ? String.valueOf(end) : null;
+            return mockResponse(new ListPermissionsResponse(page, nextPageToken), 200);
+        }
+
+        if ("POST".equals(method) && (permissionUri + "/grant").equals(resourcePath)) {
+            PermissionAssignment assignment =
+                    RESTApi.fromJson(data, GrantPermissionRequest.class).assignment();
+            MockResponse authorization = validateManagementPermission(assignment.getResource());
+            if (authorization != null) {
+                return authorization;
+            }
+            MockResponse validation =
+                    validateResourceAndPrincipal(
+                            assignment.getResource(), assignment.getPrincipal());
+            if (validation != null) {
+                return validation;
+            }
+            validation = validateColumnAssignment(assignment);
+            if (validation != null) {
+                return validation;
+            }
+            permissionStore.put(assignment);
+            return new MockResponse().setResponseCode(200);
+        }
+
+        if ("POST".equals(method) && (permissionUri + "/revoke").equals(resourcePath)) {
+            RevokePermissionRequest request = RESTApi.fromJson(data, RevokePermissionRequest.class);
+            MockResponse authorization = validateManagementPermission(request.getResource());
+            if (authorization != null) {
+                return authorization;
+            }
+            MockResponse validation =
+                    validateResourceAndPrincipal(request.getResource(), request.getPrincipal());
+            if (validation != null) {
+                return validation;
+            }
+            permissionStore.remove(
+                    request.getResource(), request.getAccess(), request.getPrincipal());
+            return new MockResponse().setResponseCode(200);
+        }
+
+        return new MockResponse().setResponseCode(404);
+    }
+
+    @Nullable
+    private MockResponse validateResourceAndPrincipal(
+            PermissionResource resource, Map<String, String> parameters) {
+        MockResponse resourceError = validateResource(resource);
+        if (resourceError != null || !parameters.containsKey("principal")) {
+            return resourceError;
+        }
+        return validatePrincipal(parameters.get("principal"));
+    }
+
+    @Nullable
+    private MockResponse validateResourceAndPrincipal(
+            PermissionResource resource, String principal) {
+        MockResponse resourceError = validateResource(resource);
+        return resourceError == null ? validatePrincipal(principal) : resourceError;
+    }
+
+    @Nullable
+    private MockResponse validateColumnAssignment(PermissionAssignment assignment) {
+        if (assignment.getResource().getType() != ResourceType.COLUMN) {
+            return null;
+        }
+        PermissionResource resource = assignment.getResource();
+        Identifier identifier = Identifier.create(resource.getDatabase(), resource.getTable());
+        TableMetadata metadata = tableMetadataStore.get(identifier.getFullName());
+        RESTColumnPermissionSupport.ValidationError error =
+                RESTColumnPermissionSupport.validate(assignment, metadata);
+        return error == null
+                ? null
+                : mockResponse(
+                        new ErrorResponse(
+                                error.resourceType, error.resourceName, error.message, error.code),
+                        error.code);
+    }
+
+    @Nullable
+    private MockResponse validateResource(PermissionResource resource) {
+        boolean exists;
+        switch (resource.getType()) {
+            case CATALOG:
+            case CATALOG_ALL:
+                exists = true;
+                break;
+            case DATABASE:
+            case DATABASE_ALL:
+                exists = databaseStore.containsKey(resource.getDatabase());
+                break;
+            case TABLE:
+            case COLUMN:
+                exists =
+                        tableMetadataStore.containsKey(
+                                Identifier.create(resource.getDatabase(), resource.getTable())
+                                        .getFullName());
+                break;
+            case FUNCTION:
+                exists =
+                        functionStore.containsKey(
+                                Identifier.create(resource.getDatabase(), resource.getFunction())
+                                        .getFullName());
+                break;
+            case VIEW:
+                exists =
+                        viewStore.containsKey(
+                                Identifier.create(resource.getDatabase(), resource.getView())
+                                        .getFullName());
+                break;
+            default:
+                exists = false;
+        }
+        return exists
+                ? null
+                : mockResponse(
+                        new ErrorResponse(
+                                resource.getType().name(),
+                                resourceName(resource),
+                                "Permission resource does not exist.",
+                                404),
+                        404);
+    }
+
+    @Nullable
+    private MockResponse validateManagementPermission(PermissionResource resource) {
+        return noManagementPermissionResources.contains(resource)
+                ? mockResponse(
+                        new ErrorResponse(
+                                resource.getType().name(),
+                                resourceName(resource),
+                                "The caller cannot manage permissions on this resource.",
+                                403),
+                        403)
+                : null;
+    }
+
+    @Nullable
+    private MockResponse validatePrincipal(String principal) {
+        return managementPrincipals.contains(principal)
+                ? null
+                : mockResponse(
+                        new ErrorResponse(
+                                "PRINCIPAL",
+                                principal,
+                                "Permission principal does not exist.",
+                                404),
+                        404);
+    }
+
+    private static String resourceName(PermissionResource resource) {
+        switch (resource.getType()) {
+            case CATALOG:
+            case CATALOG_ALL:
+                return "catalog";
+            case DATABASE:
+            case DATABASE_ALL:
+                return resource.getDatabase();
+            case TABLE:
+            case COLUMN:
+                return resource.getDatabase() + "." + resource.getTable();
+            case FUNCTION:
+                return resource.getDatabase() + "." + resource.getFunction();
+            case VIEW:
+                return resource.getDatabase() + "." + resource.getView();
+            default:
+                return resource.getType().name();
+        }
+    }
+
+    private static int getPermissionMaxResults(Map<String, String> parameters) {
+        String strMaxResults = parameters.get(MAX_RESULTS);
+        if (strMaxResults == null) {
+            return DEFAULT_MAX_RESULTS;
+        }
+        int maxResults = Integer.parseInt(strMaxResults);
+        return Math.max(1, Math.min(maxResults, ListPermissionsRequest.MAX_PAGE_SIZE));
+    }
+
+    private static boolean matches(
+            Map<String, String> parameters, String key, @Nullable String value) {
+        return !parameters.containsKey(key) || Objects.equals(parameters.get(key), value);
+    }
+
+    private static PermissionResource permissionResource(Map<String, String> parameters) {
+        return new PermissionResource(
+                ResourceType.fromString(parameters.get("resourceType")),
+                parameters.get("database"),
+                parameters.get("table"),
+                parameters.get("function"),
+                parameters.get("view"));
+    }
+
+    private boolean isPolicyPath(String resourcePath) {
+        try {
+            policyPath(resourcePath);
+            return true;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    private MockResponse policiesApiHandler(
+            String method, String resourcePath, String data, Map<String, String> parameters)
+            throws JsonProcessingException {
+        PolicyPath path = policyPath(resourcePath);
+        MockResponse authorization = validateManagementPermission(path.resource);
+        if (authorization != null) {
+            return authorization;
+        }
+        MockResponse resourceError = validateResource(path.resource);
+        if (resourceError != null) {
+            return resourceError;
+        }
+        String tableUuid = tableUuid(path.resource);
+        if ("GET".equals(method)) {
+            if (parameters.containsKey("principal")) {
+                MockResponse principalError = validatePrincipal(parameters.get("principal"));
+                if (principalError != null) {
+                    return principalError;
+                }
+            }
+            List<DataPolicy> filtered =
+                    policyStore.entrySet().stream()
+                            .filter(entry -> entry.getKey().tableUuid.equals(tableUuid))
+                            .map(entry -> withResource(entry.getValue(), path.resource))
+                            .filter(policy -> matchesPolicy(policy, parameters))
+                            .sorted(
+                                    Comparator.comparing(
+                                            policy -> new PolicyKey(tableUuid, policy)))
+                            .collect(Collectors.toList());
+            int start =
+                    parameters.containsKey(PAGE_TOKEN)
+                            ? Integer.parseInt(parameters.get(PAGE_TOKEN))
+                            : 0;
+            int end = Math.min(start + getPermissionMaxResults(parameters), filtered.size());
+            String nextPageToken = end < filtered.size() ? String.valueOf(end) : null;
+            return mockResponse(
+                    new ListPoliciesResponse(
+                            new ArrayList<>(filtered.subList(start, end)), nextPageToken),
+                    200);
+        }
+
+        if ("POST".equals(method) && !path.drop) {
+            DataPolicy policy = RESTApi.fromJson(data, PolicyRequest.class).policy(path.resource);
+            String resourceName = policyResourceName(policy);
+            synchronized (policyLock(tableUuid)) {
+                MockResponse targetError = validatePolicyTableVersion(path.resource, tableUuid);
+                if (targetError != null) {
+                    return targetError;
+                }
+                MockResponse validation = validatePolicy(policy);
+                if (validation != null) {
+                    return validation;
+                }
+                policy = canonicalizePolicy(policy);
+                PolicyKey key = new PolicyKey(tableUuid, policy);
+                if (policyStore.putIfAbsent(key, policy) != null) {
+                    return mockResponse(
+                            new ErrorResponse(
+                                    ErrorResponse.RESOURCE_TYPE_POLICY,
+                                    resourceName,
+                                    "Policy already exists.",
+                                    409),
+                            409);
+                }
+            }
+            return new MockResponse().setResponseCode(200);
+        }
+
+        if ("POST".equals(method) && path.drop) {
+            DropPolicyRequest request = RESTApi.fromJson(data, DropPolicyRequest.class);
+            DataPolicy existing;
+            synchronized (policyLock(tableUuid)) {
+                MockResponse targetError = validatePolicyTableVersion(path.resource, tableUuid);
+                if (targetError != null) {
+                    return targetError;
+                }
+                existing =
+                        policyStore.remove(
+                                new PolicyKey(
+                                        tableUuid,
+                                        request.getType(),
+                                        request.getPrincipal(),
+                                        request.getColumn()));
+            }
+            if (existing == null) {
+                return mockResponse(
+                        new ErrorResponse(
+                                ErrorResponse.RESOURCE_TYPE_POLICY,
+                                policyResourceName(request),
+                                "Policy does not exist.",
+                                404),
+                        404);
+            }
+            return new MockResponse().setResponseCode(200);
+        }
+
+        return new MockResponse().setResponseCode(404);
+    }
+
+    @Nullable
+    private MockResponse validatePolicy(DataPolicy policy) {
+        Identifier identifier =
+                Identifier.create(
+                        policy.getResource().getDatabase(), policy.getResource().getTable());
+        TableMetadata metadata = tableMetadataStore.get(identifier.getFullName());
+        if (!CoreOptions.fromMap(metadata.schema().options()).queryAuthEnabled()) {
+            return mockResponse(
+                    new ErrorResponse(
+                            ErrorResponse.RESOURCE_TYPE_TABLE,
+                            identifier.getFullName(),
+                            "Data policies require the target table option query-auth.enabled=true.",
+                            409),
+                    409);
+        }
+        MockResponse principalError = validatePrincipal(policy.getPrincipal());
+        if (principalError != null) {
+            return principalError;
+        }
+
+        RowFilter rowFilter = policy.getRowFilter();
+        try {
+            Set<String> columns = new HashSet<>(metadata.schema().fieldNames());
+            ColumnMask columnMask = policy.getColumnMask();
+            if (columnMask != null) {
+                checkArgument(
+                        columns.contains(columnMask.getOnColumn()),
+                        "Policy column %s does not exist in table %s.",
+                        columnMask.getOnColumn(),
+                        identifier.getFullName());
+            }
+            if (rowFilter == null) {
+                parseColumnMask(metadata.schema(), columnMask);
+            } else {
+                parseRowFilter(metadata.schema(), rowFilter);
+            }
+        } catch (RuntimeException e) {
+            return mockResponse(
+                    new ErrorResponse(
+                            ErrorResponse.RESOURCE_TYPE_POLICY,
+                            policyResourceName(policy),
+                            e.getMessage(),
+                            400),
+                    400);
+        }
+        return null;
+    }
+
+    private static String policyResourceName(DataPolicy policy) {
+        ColumnMask columnMask = policy.getColumnMask();
+        return policy.type().name()
+                + ":"
+                + policy.getPrincipal()
+                + (columnMask == null ? "" : ":" + columnMask.getOnColumn());
+    }
+
+    private static String policyResourceName(DropPolicyRequest request) {
+        return request.getType().name()
+                + ":"
+                + request.getPrincipal()
+                + (request.getColumn() == null ? "" : ":" + request.getColumn());
+    }
+
+    private String tableUuid(PermissionResource resource) {
+        return tableMetadataStore
+                .get(Identifier.create(resource.getDatabase(), resource.getTable()).getFullName())
+                .uuid();
+    }
+
+    private Object policyLock(String tableUuid) {
+        return tablePolicyLocks.computeIfAbsent(tableUuid, ignored -> new Object());
+    }
+
+    @Nullable
+    private MockResponse validatePolicyTableVersion(
+            PermissionResource resource, String expectedTableUuid) {
+        MockResponse resourceError = validateResource(resource);
+        if (resourceError != null) {
+            return resourceError;
+        }
+        String currentTableUuid = tableUuid(resource);
+        return expectedTableUuid.equals(currentTableUuid)
+                ? null
+                : mockResponse(
+                        new ErrorResponse(
+                                ErrorResponse.RESOURCE_TYPE_TABLE,
+                                resourceName(resource),
+                                "Table changed while managing its policies.",
+                                409),
+                        409);
+    }
+
+    private static DataPolicy withResource(DataPolicy policy, PermissionResource resource) {
+        return policy.getRowFilter() == null
+                ? DataPolicy.columnMask(resource, policy.getColumnMask(), policy.getPrincipal())
+                : DataPolicy.rowFilter(resource, policy.getRowFilter(), policy.getPrincipal());
+    }
+
+    private DataPolicy canonicalizePolicy(DataPolicy policy) {
+        Identifier identifier =
+                Identifier.create(
+                        policy.getResource().getDatabase(), policy.getResource().getTable());
+        TableSchema schema = tableMetadataStore.get(identifier.getFullName()).schema();
+        if (policy.getRowFilter() != null) {
+            String predicate =
+                    JsonSerdeUtil.toFlatJson(parseRowFilter(schema, policy.getRowFilter()));
+            return DataPolicy.rowFilter(
+                    policy.getResource(), new RowFilter(predicate), policy.getPrincipal());
+        }
+        ColumnMask columnMask = policy.getColumnMask();
+        String transform = JsonSerdeUtil.toFlatJson(parseColumnMask(schema, columnMask));
+        return DataPolicy.columnMask(
+                policy.getResource(),
+                new ColumnMask(columnMask.getOnColumn(), transform),
+                policy.getPrincipal());
+    }
+
+    private static Predicate parseRowFilter(TableSchema schema, RowFilter rowFilter) {
+        Predicate predicate = JsonSerdeUtil.fromJson(rowFilter.getPredicate(), Predicate.class);
+        checkArgument(predicate != null, "Row filter predicate cannot be JSON null.");
+        Predicate remapped =
+                TableQueryAuthResult.remapPredicate(predicate, schema.logicalRowType());
+        checkArgument(remapped != null, "Row filter predicate cannot be empty.");
+        return remapped;
+    }
+
+    private static Transform parseColumnMask(TableSchema schema, ColumnMask columnMask) {
+        Transform transform = JsonSerdeUtil.fromJson(columnMask.getTransform(), Transform.class);
+        checkArgument(transform != null, "Column mask transform cannot be JSON null.");
+        RowType rowType = schema.logicalRowType();
+        List<Object> remappedInputs = new ArrayList<>();
+        for (Object input : transform.inputs()) {
+            if (input instanceof FieldRef) {
+                FieldRef ref = (FieldRef) input;
+                int index = rowType.getFieldIndex(ref.name());
+                checkArgument(
+                        index >= 0,
+                        "Column masking refers to field '%s' which is not present in table schema.",
+                        ref.name());
+                remappedInputs.add(new FieldRef(index, ref.name(), rowType.getTypeAt(index)));
+            } else {
+                remappedInputs.add(input);
+            }
+        }
+        Transform remapped = transform.copyWithNewInputs(remappedInputs);
+        int targetIndex = rowType.getFieldIndex(columnMask.getOnColumn());
+        checkArgument(
+                targetIndex >= 0,
+                "Policy column %s does not exist in table schema.",
+                columnMask.getOnColumn());
+        checkArgument(
+                rowType.getTypeAt(targetIndex).equals(remapped.outputType()),
+                "Column mask output type %s does not match target column %s type %s.",
+                remapped.outputType(),
+                columnMask.getOnColumn(),
+                rowType.getTypeAt(targetIndex));
+        return remapped;
+    }
+
+    private void removePolicies(@Nullable String tableUuid) {
+        if (tableUuid != null) {
+            policyStore.keySet().removeIf(key -> key.tableUuid.equals(tableUuid));
+        }
+    }
+
+    private void validatePoliciesForSchema(
+            Identifier identifier, @Nullable String tableUuid, TableSchema schema) {
+        if (tableUuid == null) {
+            return;
+        }
+        List<DataPolicy> policies =
+                policyStore.entrySet().stream()
+                        .filter(entry -> entry.getKey().tableUuid.equals(tableUuid))
+                        .map(Map.Entry::getValue)
+                        .collect(Collectors.toList());
+        if (policies.isEmpty()) {
+            return;
+        }
+        checkArgument(
+                CoreOptions.fromMap(schema.options()).queryAuthEnabled(),
+                "Cannot disable query-auth.enabled while table %s has data policies.",
+                identifier.getFullName());
+
+        Set<String> columns = new HashSet<>(schema.fieldNames());
+        for (DataPolicy policy : policies) {
+            ColumnMask columnMask = policy.getColumnMask();
+            if (columnMask != null) {
+                checkArgument(
+                        columns.contains(columnMask.getOnColumn()),
+                        "Cannot remove or rename policy column %s from table %s.",
+                        columnMask.getOnColumn(),
+                        identifier.getFullName());
+            }
+            if (policy.getRowFilter() == null) {
+                parseColumnMask(schema, columnMask);
+            } else {
+                parseRowFilter(schema, policy.getRowFilter());
+            }
+        }
+    }
+
+    private static boolean matchesPolicy(DataPolicy policy, Map<String, String> parameters) {
+        if (!matches(parameters, "type", policy.type().name())) {
+            return false;
+        }
+        if (parameters.containsKey("column")) {
+            ColumnMask columnMask = policy.getColumnMask();
+            if (columnMask == null
+                    || !Objects.equals(parameters.get("column"), columnMask.getOnColumn())) {
+                return false;
+            }
+        }
+        return !parameters.containsKey("principal")
+                || policy.getPrincipal().equals(parameters.get("principal"));
+    }
+
+    private PolicyPath policyPath(String resourcePath) {
+        String catalogBase = StringUtils.substringBeforeLast(permissionUri, "/");
+        checkArgument(resourcePath.startsWith(catalogBase + "/"), "Not a catalog policy path.");
+        String[] parts = resourcePath.substring(catalogBase.length() + 1).split("/");
+        if ((parts.length == 5 || (parts.length == 6 && "drop".equals(parts[5])))
+                && "databases".equals(parts[0])
+                && "tables".equals(parts[2])
+                && "policies".equals(parts[4])) {
+            return new PolicyPath(
+                    new PermissionResource(
+                            ResourceType.TABLE,
+                            RESTUtil.decodeString(parts[1]),
+                            RESTUtil.decodeString(parts[3]),
+                            null,
+                            null),
+                    parts.length == 6);
+        }
+        throw new IllegalArgumentException("Not a policy path.");
+    }
+
+    private static class PolicyPath {
+
+        private final PermissionResource resource;
+        private final boolean drop;
+
+        private PolicyPath(PermissionResource resource, boolean drop) {
+            this.resource = resource;
+            this.drop = drop;
+        }
     }
 
     private <T> String getNextPageTokenForEntities(List<T> entities, Integer maxResults) {
