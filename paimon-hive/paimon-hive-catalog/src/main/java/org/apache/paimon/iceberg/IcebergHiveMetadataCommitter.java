@@ -92,10 +92,10 @@ public class IcebergHiveMetadataCommitter implements IcebergMetadataCommitter {
 
         table.options().forEach(hiveConf::set);
         if (uri != null) {
-            hiveConf.set(HiveConf.ConfVars.METASTOREURIS.varname, uri);
+            hiveConf.set("hive.metastore.uris", uri);
         }
 
-        if (hiveConf.get(HiveConf.ConfVars.METASTOREURIS.varname) == null) {
+        if (hiveConf.get("hive.metastore.uris") == null) {
             LOG.error(
                     "Can't find hive metastore uri to connect: "
                             + "either set {} for paimon table or set hive.metastore.uris "
