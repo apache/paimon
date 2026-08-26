@@ -158,7 +158,7 @@ public class RetryingMetaStoreClientFactory {
                 Method getProxy = RetryingMetaStoreClient.class.getMethod("getProxy", classes);
                 HiveMetastoreProxySupplier supplier = entry.getValue();
                 IMetaStoreClient client = supplier.get(getProxy, hiveConf, clientClassName);
-                return isNullOrWhitespaceOnly(hiveConf.get(HiveConf.ConfVars.METASTOREURIS.varname))
+                return isNullOrWhitespaceOnly(hiveConf.get("hive.metastore.uris"))
                         ? client
                         : HiveMetaStoreClient.newSynchronizedClient(client);
             } catch (Exception e) {
