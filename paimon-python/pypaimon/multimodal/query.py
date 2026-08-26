@@ -164,6 +164,46 @@ class ScanQuery:
             max_buffer_input_splits=max_buffer_input_splits,
         )
 
+    def to_contiguous_window_dataset(
+            self,
+            *,
+            window_size,
+            columns=None,
+            group_key="episode_id",
+            order_key="step_idx",
+            stride=1,
+            tail="drop",
+            column_transforms=None,
+            pad_values=None,
+            adapter=None,
+            blob_parallelism=64):
+        """Build a snapshot-pinned, map-style Dataset of contiguous rows.
+
+        The Dataset indexes only ``group_key``, ``order_key``, and Paimon row
+        IDs, then reads projected values on demand. It sorts rows within each
+        group and never creates a window across groups. See
+        :class:`pypaimon.multimodal.window_dataset.ContiguousWindowDataset`
+        for tail, padding, mask, transform, and adapter semantics.
+        """
+        if self._result_factory is not None:
+            raise TypeError(
+                "to_contiguous_window_dataset is only supported on scan(), "
+                "not search queries.")
+        from pypaimon.multimodal.window_dataset import ContiguousWindowDataset
+        return ContiguousWindowDataset(
+            self,
+            window_size=window_size,
+            columns=columns,
+            group_key=group_key,
+            order_key=order_key,
+            stride=stride,
+            tail=tail,
+            column_transforms=column_transforms,
+            pad_values=pad_values,
+            adapter=adapter,
+            blob_parallelism=blob_parallelism,
+        )
+
     def to_ray(
             self,
             *,

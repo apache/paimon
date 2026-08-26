@@ -157,7 +157,46 @@ embedded frame ordinals keep frame mapping out of the normal data file. Use
 physical video ranges and cache decoder sessions per worker. See
 [Multimodal API: Video Frame Storage](multimodal-api#video-frame-storage)
 for the write path and a complete decoder example.
+## Contiguous Windows
 
+Use a map-style `ContiguousWindowDataset` when training samples are fixed-size
+windows which must not cross a sequence boundary. The dataset builds an index
+from only the group column, order column, and Paimon row IDs. Projected values,
+including BLOB payloads, are read from the pinned snapshot when a sample is
+requested; they are not retained in the index.
+
+```python
+from torch.utils.data import DataLoader
+
+dataset = (
+    frames.scan()
+    .to_contiguous_window_dataset(
+        window_size=16,
+        columns=["state", "image"],
+        group_key="episode_id",
+        order_key="step_idx",
+        tail="pad",
+    )
+)
+
+loader = DataLoader(dataset, batch_size=32, num_workers=4, shuffle=True)
+```
+
+Each item contains the group and order keys, one list for each requested
+column, and a boolean `is_pad` tensor where `True` marks padding. Padding
+repeats the final real value by default; `pad_values` can override individual
+columns. Use `column_transforms` to convert column lists to tensors and
+`adapter` to produce a model-specific sample mapping. Keep these callbacks
+picklable when using multiple DataLoader workers.
+
+Scheduled anchors start at row zero and advance by `stride` (default `1`).
+`tail="drop"` omits incomplete windows, `tail="pad"` includes and pads them,
+and `tail="error"` rejects a sequence with any scheduled incomplete window.
+Rows are sorted by `order_key` inside each `group_key` value. Order values must
+be integers which increase by exactly one; duplicates and missing steps are
+rejected, and windows never cross groups. The resolved Paimon
+snapshot is pinned for the lifetime of the dataset, so later commits cannot
+change its index or sample contents.
 ## File Format Metadata Cache
 
 Reusable PyArrow Dataset metadata is cached across reads. Configure its estimated
