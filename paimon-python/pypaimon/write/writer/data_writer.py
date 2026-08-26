@@ -30,6 +30,7 @@ from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.write.writer.mosaic_writer_options import create_mosaic_writer_options
+from pypaimon.write.writer.write_buffer import WriteBuffer
 
 
 class DataWriter(ABC):
@@ -72,7 +73,7 @@ class DataWriter(ABC):
         )
         self.sequence_generator = SequenceGenerator(max_seq_number)
 
-        self.pending_data: Optional[pa.Table] = None
+        self._buffer = WriteBuffer(self._merge_data)
         self.committed_files: List[DataFileMeta] = []
         self.committed_changelog_files: List[DataFileMeta] = []
         self.changelog_producer = changelog_producer
@@ -104,15 +105,38 @@ class DataWriter(ABC):
         # the table schema is fixed for the lifetime of this writer.
         self._paimon_field_id: Dict[str, int] = {pf.name: pf.id for pf in self.table.fields}
 
+    # Set by the composite writers when a flush landed its normal data file but a
+    # later phase of the same flush failed; see their ``_close_current_writers``.
+    _pending_normal_meta: Optional[DataFileMeta] = None
+
+    @property
+    def pending_row_count(self) -> int:
+        """Rows held for the file being written, not yet in a finished file.
+
+        The composite writers override this: they keep their normal rows in
+        ``_normal_buffer`` and hand the rest to their sub-writers, so the base
+        ``_buffer`` stays empty for them.
+        """
+        return self._buffer.num_rows
+
+    def _require_finished_flush(self):
+        """Refuse to buffer more rows while a flush is only half done.
+
+        A composite flush writes the normal data file first and the sidecars
+        after. Once that file is on disk it covers exactly the rows flushed so
+        far, so rows appended before the retry finishes would belong to no file
+        the resumed flush writes.
+        """
+        if self._pending_normal_meta is not None:
+            raise RuntimeError(
+                "Cannot write: a previous flush left a data file that no commit "
+                "has taken yet. Retry prepare_commit() to finish that flush, or "
+                "abort() this writer.")
+
     def write(self, data: pa.RecordBatch):
         try:
             processed_data = self._process_data(data)
-
-            if self.pending_data is None:
-                self.pending_data = processed_data
-            else:
-                self.pending_data = self._merge_data(self.pending_data, processed_data)
-
+            self._buffer.append(processed_data)
             self._check_and_roll_if_needed()
         except Exception as e:
             import logging
@@ -122,9 +146,11 @@ class DataWriter(ABC):
             raise e
 
     def prepare_commit(self) -> List[DataFileMeta]:
-        if self.pending_data is not None and self.pending_data.num_rows > 0:
-            self._write_data_to_file(self.pending_data)
-            self.pending_data = None
+        if self._buffer.num_rows > 0:
+            # Clear only once the write lands: a caller that retries
+            # prepare_commit after a failed write has to still find its rows.
+            self._write_data_to_file(self._buffer.materialize())
+            self._buffer.reset()
 
         return self.committed_files.copy()
 
@@ -133,8 +159,8 @@ class DataWriter(ABC):
 
     def close(self):
         try:
-            if self.pending_data is not None and self.pending_data.num_rows > 0:
-                self._write_data_to_file(self.pending_data)
+            if self._buffer.num_rows > 0:
+                self._write_data_to_file(self._buffer.materialize())
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)
@@ -142,7 +168,7 @@ class DataWriter(ABC):
             self.abort()
             raise e
         finally:
-            self.pending_data = None
+            self._buffer.reset()
             # Note: Don't clear committed_files in close() - they should be returned by prepare_commit()
 
     def abort(self):
@@ -150,10 +176,15 @@ class DataWriter(ABC):
         Abort all writers and clean up resources. This method should be called when an error occurs
         during writing. It deletes any files that were written and cleans up resources.
         """
-        self._delete_committed_files(self.committed_files + self.committed_changelog_files)
+        to_delete = self.committed_files + self.committed_changelog_files
+        if self._pending_normal_meta is not None:
+            # No list tracks this one: it landed but its flush never published it.
+            to_delete.append(self._pending_normal_meta)
+            self._pending_normal_meta = None
+        self._delete_committed_files(to_delete)
 
         # Clean up resources
-        self.pending_data = None
+        self._buffer.reset()
         self.committed_files.clear()
         self.committed_changelog_files.clear()
 
@@ -191,16 +222,20 @@ class DataWriter(ABC):
         return -1, -1
 
     def _check_and_roll_if_needed(self):
-        while self.pending_data is not None:
-            num_rows = self.pending_data.num_rows
+        # Neither trigger can fire below these thresholds, so the running counts
+        # rule out rolling -- the common case -- without concatenating anything.
+        while (self._buffer.nbytes > self.target_file_size
+                or self._buffer.num_rows > self.target_file_row_num):
+            pending = self._buffer.materialize()
+            num_rows = pending.num_rows
             # Row-count trigger: keep at most target_file_row_num rows per file.
             split_row = num_rows
             if num_rows > self.target_file_row_num:
                 split_row = self.target_file_row_num
             # Size trigger: roll earlier if the size split point comes first.
-            if self.pending_data.nbytes > self.target_file_size:
+            if pending.nbytes > self.target_file_size:
                 size_split = self._find_optimal_split_point(
-                    self.pending_data, self.target_file_size)
+                    pending, self.target_file_size)
                 # First row alone exceeds target_file_size: roll it by itself.
                 if size_split <= 0:
                     size_split = 1
@@ -208,8 +243,8 @@ class DataWriter(ABC):
                     split_row = size_split
             if split_row <= 0 or split_row >= num_rows:
                 break
-            self._write_data_to_file(self.pending_data.slice(0, split_row))
-            self.pending_data = self.pending_data.slice(split_row)
+            self._write_data_to_file(pending.slice(0, split_row))
+            self._buffer.reset(pending.slice(split_row))
 
     def _write_data_to_file(self, data: pa.Table):
         if data.num_rows == 0:
@@ -223,9 +258,16 @@ class DataWriter(ABC):
         logical_data = data
         extra_files = []
         row_sidecar_path = None
+        changelog_meta = None
         if self._variant_shredding:
             data = self._apply_variant_shredding(data)
 
+        # One data file means up to three files on disk -- the data file, its row
+        # sidecar and its changelog -- and none of them is committed until all of
+        # them have landed. A caller that retries the flush still holds these
+        # rows in its buffer, so publishing the data file before the changelog
+        # exists would make the retry write a second copy of rows the first meta
+        # already covers.
         try:
             if self.file_format == CoreOptions.FILE_FORMAT_PARQUET:
                 self.file_io.write_parquet(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
@@ -255,74 +297,80 @@ class DataWriter(ABC):
                     fields=self._row_sidecar_fields(logical_data),
                     zstd_level=self.zstd_level)
                 extra_files.append(row_sidecar_name)
+
+            # min key & max key
+
+            selected_table = data.select(self.trimmed_primary_keys)
+            key_columns_batch = selected_table.to_batches()[0]
+            min_key_row_batch = key_columns_batch.slice(0, 1)
+            max_key_row_batch = key_columns_batch.slice(key_columns_batch.num_rows - 1, 1)
+            min_key = [col.to_pylist()[0] for col in min_key_row_batch.columns]
+            max_key = [col.to_pylist()[0] for col in max_key_row_batch.columns]
+
+            # key stats & value stats
+            value_stats_enabled = self.options.metadata_stats_enabled()
+            if value_stats_enabled:
+                stats_fields = self.table.fields if self.table.is_primary_key_table \
+                    else PyarrowFieldParser.to_paimon_schema(data.schema)
+            else:
+                stats_fields = self.table.trimmed_primary_keys_fields
+            column_stats = {
+                field.name: self._get_column_stats(data, field.name)
+                for field in stats_fields
+            }
+            key_fields = self.trimmed_primary_keys_fields
+            key_stats = self._collect_value_stats(data, key_fields, column_stats)
+            if not self.options.primary_key_nullable() and not all(
+                    count == 0 for count in key_stats.null_counts):
+                raise RuntimeError("Primary key should not be null")
+
+            value_fields = stats_fields if value_stats_enabled else []
+            value_stats = self._collect_value_stats(data, value_fields, column_stats)
+
+            # Read the range without advancing it: the advance belongs with the
+            # append below, so a retried flush derives the same range.
+            min_seq = self.sequence_generator.start
+            max_seq = self.sequence_generator.current
+            creation_time = Timestamp.now()
+            data_meta = DataFileMeta.create(
+                file_name=file_name,
+                file_size=self.file_io.get_file_size(file_path),
+                row_count=data.num_rows,
+                min_key=GenericRow(min_key, self.trimmed_primary_keys_fields),
+                max_key=GenericRow(max_key, self.trimmed_primary_keys_fields),
+                key_stats=key_stats,
+                value_stats=value_stats,
+                min_sequence_number=min_seq,
+                max_sequence_number=max_seq,
+                schema_id=self.table.table_schema.id,
+                level=0,
+                extra_files=extra_files,
+                creation_time=creation_time,
+                delete_row_count=0,
+                file_source=0,
+                value_stats_cols=None if value_stats_enabled else [],
+                external_path=external_path_str,
+                first_row_id=None,
+                write_cols=self.write_cols,
+                file_path=file_path,
+            )
+
+            if self.changelog_producer == ChangelogProducer.INPUT:
+                changelog_meta = self._write_changelog_file(
+                    data, min_key, max_key, key_stats, value_stats,
+                    min_seq, max_seq, creation_time,
+                    value_stats_enabled, external_path_str is not None,
+                )
         except Exception:
             self.file_io.delete_quietly(file_path)
             if row_sidecar_path is not None:
                 self.file_io.delete_quietly(row_sidecar_path)
             raise
 
-        # min key & max key
-
-        selected_table = data.select(self.trimmed_primary_keys)
-        key_columns_batch = selected_table.to_batches()[0]
-        min_key_row_batch = key_columns_batch.slice(0, 1)
-        max_key_row_batch = key_columns_batch.slice(key_columns_batch.num_rows - 1, 1)
-        min_key = [col.to_pylist()[0] for col in min_key_row_batch.columns]
-        max_key = [col.to_pylist()[0] for col in max_key_row_batch.columns]
-
-        # key stats & value stats
-        value_stats_enabled = self.options.metadata_stats_enabled()
-        if value_stats_enabled:
-            stats_fields = self.table.fields if self.table.is_primary_key_table \
-                else PyarrowFieldParser.to_paimon_schema(data.schema)
-        else:
-            stats_fields = self.table.trimmed_primary_keys_fields
-        column_stats = {
-            field.name: self._get_column_stats(data, field.name)
-            for field in stats_fields
-        }
-        key_fields = self.trimmed_primary_keys_fields
-        key_stats = self._collect_value_stats(data, key_fields, column_stats)
-        if not self.options.primary_key_nullable() and not all(
-                count == 0 for count in key_stats.null_counts):
-            raise RuntimeError("Primary key should not be null")
-
-        value_fields = stats_fields if value_stats_enabled else []
-        value_stats = self._collect_value_stats(data, value_fields, column_stats)
-
-        min_seq = self.sequence_generator.start
-        max_seq = self.sequence_generator.current
         self.sequence_generator.start = self.sequence_generator.current
-        creation_time = Timestamp.now()
-        self.committed_files.append(DataFileMeta.create(
-            file_name=file_name,
-            file_size=self.file_io.get_file_size(file_path),
-            row_count=data.num_rows,
-            min_key=GenericRow(min_key, self.trimmed_primary_keys_fields),
-            max_key=GenericRow(max_key, self.trimmed_primary_keys_fields),
-            key_stats=key_stats,
-            value_stats=value_stats,
-            min_sequence_number=min_seq,
-            max_sequence_number=max_seq,
-            schema_id=self.table.table_schema.id,
-            level=0,
-            extra_files=extra_files,
-            creation_time=creation_time,
-            delete_row_count=0,
-            file_source=0,
-            value_stats_cols=None if value_stats_enabled else [],
-            external_path=external_path_str,
-            first_row_id=None,
-            write_cols=self.write_cols,
-            file_path=file_path,
-        ))
-
-        if self.changelog_producer == ChangelogProducer.INPUT:
-            self._write_changelog_file(
-                data, min_key, max_key, key_stats, value_stats,
-                min_seq, max_seq, creation_time,
-                value_stats_enabled, external_path_str is not None,
-            )
+        self.committed_files.append(data_meta)
+        if changelog_meta is not None:
+            self.committed_changelog_files.append(changelog_meta)
 
     def _apply_variant_shredding(self, data: pa.Table) -> pa.Table:
         """Transform VARIANT columns into shredded Parquet format.
@@ -351,48 +399,58 @@ class DataWriter(ABC):
 
     def _write_changelog_file(self, data, min_key, max_key, key_stats, value_stats,
                               min_seq, max_seq, creation_time,
-                              value_stats_enabled, is_external):
+                              value_stats_enabled, is_external) -> DataFileMeta:
+        """Write the changelog file for one data file and return its meta.
+
+        The caller appends the returned meta only once the whole data file has
+        landed, so a failure here leaves nothing behind: no meta to commit, and
+        no file on disk either.
+        """
         cl_fmt = self.changelog_file_format
         changelog_file_name = f"changelog-{uuid.uuid4()}-0.{cl_fmt}"
         changelog_file_path = self._generate_file_path(changelog_file_name)
 
         changelog_external_path = changelog_file_path if is_external else None
 
-        if cl_fmt == CoreOptions.FILE_FORMAT_PARQUET:
-            self.file_io.write_parquet(changelog_file_path, data, compression=self.compression,
+        try:
+            if cl_fmt == CoreOptions.FILE_FORMAT_PARQUET:
+                self.file_io.write_parquet(changelog_file_path, data, compression=self.compression,
+                                           zstd_level=self.zstd_level)
+            elif cl_fmt == CoreOptions.FILE_FORMAT_ORC:
+                self.file_io.write_orc(changelog_file_path, data, compression=self.compression,
                                        zstd_level=self.zstd_level)
-        elif cl_fmt == CoreOptions.FILE_FORMAT_ORC:
-            self.file_io.write_orc(changelog_file_path, data, compression=self.compression,
-                                   zstd_level=self.zstd_level)
-        elif cl_fmt == CoreOptions.FILE_FORMAT_AVRO:
-            self.file_io.write_avro(changelog_file_path, data, compression=self.compression,
-                                    zstd_level=self.zstd_level)
-        else:
-            raise ValueError(f"Unsupported changelog file format: {cl_fmt}. "
-                             f"Supported formats: parquet, orc, avro.")
+            elif cl_fmt == CoreOptions.FILE_FORMAT_AVRO:
+                self.file_io.write_avro(changelog_file_path, data, compression=self.compression,
+                                        zstd_level=self.zstd_level)
+            else:
+                raise ValueError(f"Unsupported changelog file format: {cl_fmt}. "
+                                 f"Supported formats: parquet, orc, avro.")
 
-        self.committed_changelog_files.append(DataFileMeta.create(
-            file_name=changelog_file_name,
-            file_size=self.file_io.get_file_size(changelog_file_path),
-            row_count=data.num_rows,
-            min_key=GenericRow(min_key, self.trimmed_primary_keys_fields),
-            max_key=GenericRow(max_key, self.trimmed_primary_keys_fields),
-            key_stats=key_stats,
-            value_stats=value_stats,
-            min_sequence_number=min_seq,
-            max_sequence_number=max_seq,
-            schema_id=self.table.table_schema.id,
-            level=0,
-            extra_files=[],
-            creation_time=creation_time,
-            delete_row_count=0,
-            file_source=0,
-            value_stats_cols=None if value_stats_enabled else [],
-            external_path=changelog_external_path,
-            first_row_id=None,
-            write_cols=self.write_cols,
-            file_path=changelog_file_path,
-        ))
+            return DataFileMeta.create(
+                file_name=changelog_file_name,
+                file_size=self.file_io.get_file_size(changelog_file_path),
+                row_count=data.num_rows,
+                min_key=GenericRow(min_key, self.trimmed_primary_keys_fields),
+                max_key=GenericRow(max_key, self.trimmed_primary_keys_fields),
+                key_stats=key_stats,
+                value_stats=value_stats,
+                min_sequence_number=min_seq,
+                max_sequence_number=max_seq,
+                schema_id=self.table.table_schema.id,
+                level=0,
+                extra_files=[],
+                creation_time=creation_time,
+                delete_row_count=0,
+                file_source=0,
+                value_stats_cols=None if value_stats_enabled else [],
+                external_path=changelog_external_path,
+                first_row_id=None,
+                write_cols=self.write_cols,
+                file_path=changelog_file_path,
+            )
+        except Exception:
+            self.file_io.delete_quietly(changelog_file_path)
+            raise
 
     def _generate_file_path(self, file_name: str) -> str:
         if self.external_path_provider:

@@ -1958,9 +1958,9 @@ class TableWriteTest(unittest.TestCase):
         )
         writer.write(big_batch)
 
-        pending_rows = writer.pending_data.num_rows if writer.pending_data is not None else 0
+        pending_rows = writer.pending_row_count
         committed_rows = sum(f.row_count for f in writer.committed_files)
         self.assertEqual(committed_rows + pending_rows, num_rows)
         self.assertGreater(len(writer.committed_files), 0)
-        if writer.pending_data is not None:
-            self.assertLessEqual(writer.pending_data.nbytes, target)
+        if pending_rows > 0:
+            self.assertLessEqual(writer._buffer.materialize().nbytes, target)
