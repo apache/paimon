@@ -38,6 +38,7 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.TableCommit;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PartitionPathUtils;
+import org.apache.paimon.utils.ThreadPoolUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -46,23 +47,35 @@ import javax.annotation.Nullable;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.table.format.FormatBatchWriteBuilder.validateStaticPartition;
+import static org.apache.paimon.utils.ThreadPoolUtils.CloseableBatchIterator;
+import static org.apache.paimon.utils.ThreadPoolUtils.sequentialBatchedExecuteNonCancellable;
 
 /** Commit for Format Table. */
 public class FormatTableCommit implements BatchTableCommit {
 
     private static final Logger LOG = LoggerFactory.getLogger(FormatTableCommit.class);
+
+    private static final int MAX_CLEANUP_THREAD_NUM = 64;
+
+    private static final ExecutorService CLEANUP_EXECUTOR =
+            ThreadPoolUtils.createCachedThreadPool(
+                    MAX_CLEANUP_THREAD_NUM, "FORMAT-TABLE-COMMIT-CLEANUP-THREAD-POOL");
 
     private String location;
     private final boolean formatTablePartitionOnlyValueInPath;
@@ -75,6 +88,7 @@ public class FormatTableCommit implements BatchTableCommit {
     private Identifier tableIdentifier;
     @Nullable private final FormatTablePartitionManager partitionManager;
     private final boolean dynamicPartitionOverwrite;
+    private final int cleanupThreadNum;
 
     public FormatTableCommit(
             String location,
@@ -88,7 +102,14 @@ public class FormatTableCommit implements BatchTableCommit {
             @Nullable String syncHiveUri,
             CatalogContext catalogContext,
             @Nullable FormatTablePartitionManager partitionManager,
-            boolean dynamicPartitionOverwrite) {
+            boolean dynamicPartitionOverwrite,
+            int cleanupThreadNum) {
+        if (cleanupThreadNum < 1 || cleanupThreadNum > MAX_CLEANUP_THREAD_NUM) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Format Table cleanup thread number must be between 1 and %s, but was %s.",
+                            MAX_CLEANUP_THREAD_NUM, cleanupThreadNum));
+        }
         this.location = location;
         this.fileIO = fileIO;
         this.formatTablePartitionOnlyValueInPath = formatTablePartitionOnlyValueInPath;
@@ -100,6 +121,7 @@ public class FormatTableCommit implements BatchTableCommit {
         this.tableIdentifier = tableIdentifier;
         this.partitionManager = partitionManager;
         this.dynamicPartitionOverwrite = dynamicPartitionOverwrite;
+        this.cleanupThreadNum = cleanupThreadNum;
         if (syncHiveUri != null) {
             try {
                 Options options = new Options();
@@ -151,32 +173,31 @@ public class FormatTableCommit implements BatchTableCommit {
                     // A static partition may name only the leading keys, in which case the path
                     // is a prefix and the partition directories of the remaining keys sit below.
                     clearedPartitionPaths.addAll(
-                            deletePreviousDataFile(
-                                    partitionPath, partitionKeys.size() - staticPartitions.size()));
+                            deletePreviousDataFiles(
+                                    Collections.singletonList(partitionPath),
+                                    partitionKeys.size() - staticPartitions.size(),
+                                    cleanupThreadNum));
                 }
                 if (!fileIO.exists(partitionPath)) {
                     fileIO.mkdirs(partitionPath);
                 }
             } else if (overwrite) {
                 if (replacesOnlyWrittenPartitions()) {
-                    Set<Path> partitionPaths = new HashSet<>();
+                    Set<Path> partitionPaths = new LinkedHashSet<>();
                     for (TwoPhaseCommitMessage message : messages) {
                         partitionPaths.add(message.getCommitter().targetPath().getParent());
                     }
-                    for (Path p : partitionPaths) {
-                        // The parent of a written file is a complete partition directory - the
-                        // table directory itself when the table is unpartitioned - so there is no
-                        // partition level below it to descend, and it is a partition this commit
-                        // writes anyway.
-                        deletePreviousDataFile(p, 0);
-                    }
+                    // The parent of a written file is a complete partition directory - the table
+                    // directory itself when the table is unpartitioned - so there is no partition
+                    // level below it to descend. Collect every selected directory before deleting
+                    // so many small partitions can share the same cleanup concurrency window.
+                    deletePreviousDataFiles(new ArrayList<>(partitionPaths), 0, cleanupThreadNum);
                 } else {
                     // Overwriting without naming a partition replaces the table, so what has to go
                     // is everything the table holds rather than the files this commit happens to
                     // write: a statement whose query returns nothing still empties the table.
-                    for (Path dataDirectory : tableDataDirectories()) {
-                        clearedPartitionPaths.addAll(deletePreviousDataFile(dataDirectory, 0));
-                    }
+                    clearedPartitionPaths.addAll(
+                            deletePreviousDataFiles(tableDataDirectories(), 0, cleanupThreadNum));
                 }
             }
 
@@ -244,9 +265,26 @@ public class FormatTableCommit implements BatchTableCommit {
                 }
             }
 
-        } catch (Exception e) {
-            this.abort(commitMessages);
-            throw new RuntimeException(e);
+        } catch (Throwable failure) {
+            // Cleanup restores the caller's interrupt before failing. Clear it only while aborting
+            // staging output, then restore it; an abort failure is secondary to the commit failure
+            // that made abort necessary.
+            boolean interrupted = Thread.interrupted();
+            try {
+                this.abort(commitMessages);
+            } catch (Throwable abortFailure) {
+                if (failure != abortFailure) {
+                    failure.addSuppressed(abortFailure);
+                }
+            } finally {
+                if (interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            if (failure instanceof Error) {
+                throw (Error) failure;
+            }
+            throw new RuntimeException(failure);
         }
     }
 
@@ -506,40 +544,140 @@ public class FormatTableCommit implements BatchTableCommit {
      */
     private Set<Path> deletePreviousDataFile(Path partitionPath, int partitionLevels)
             throws IOException {
+        return deletePreviousDataFiles(
+                Collections.singletonList(partitionPath), partitionLevels, 1);
+    }
+
+    private Set<Path> deletePreviousDataFiles(
+            List<Path> partitionPaths, int partitionLevels, int threadNum) throws IOException {
+        PreviousDataFiles dataFiles = new PreviousDataFiles(partitionPaths, partitionLevels);
         Set<Path> clearedPartitionPaths = new HashSet<>();
-        if (fileIO.exists(partitionPath)) {
-            // Committed data files only: what sits under a staging directory is another writer's
-            // uncommitted output, whatever its name looks like.
-            for (FileStatus file :
-                    FormatTableScan.listDataFiles(
-                            fileIO,
-                            partitionPath,
-                            partitionLevels,
-                            formatTablePartitionOnlyValueInPath,
-                            defaultPartName)) {
-                boolean deleted;
-                try {
-                    deleted = fileIO.delete(file.getPath(), false);
-                } catch (FileNotFoundException ignore) {
-                    continue;
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
+        try {
+            if (threadNum == 1) {
+                while (dataFiles.hasNext()) {
+                    FileStatus file = dataFiles.next();
+                    if (deleteDataFile(file)) {
+                        clearedPartitionPaths.add(file.getPath().getParent());
+                    }
                 }
-                if (deleted) {
-                    // Only what this commit removed: a file another writer deleted first would
-                    // have every concurrent writer report the whole subtree.
-                    clearedPartitionPaths.add(file.getPath().getParent());
-                } else if (fileIO.exists(file.getPath())) {
-                    // A refusal is not that race: the file is still readable, and going on would
-                    // report the partition as holding nothing while its rows are still there.
-                    throw new IOException(
-                            String.format(
-                                    "Failed to delete data file %s of table %s.",
-                                    file.getPath(), tableIdentifier.getFullName()));
+                return clearedPartitionPaths;
+            }
+            // Listing lazily keeps the memory of an overwrite that replaces the table
+            // proportional to one partition rather than to everything the table holds. Closing
+            // the iterator is what stops new deletes and waits for the ones already handed out,
+            // so a failure cannot leave a worker still deleting after this method returns.
+            try (CloseableBatchIterator<Path> cleared =
+                    sequentialBatchedExecuteNonCancellable(
+                            CLEANUP_EXECUTOR, this::deleteAndReportCleared, dataFiles, threadNum)) {
+                while (cleared.hasNext()) {
+                    clearedPartitionPaths.add(cleared.next());
                 }
             }
+        } catch (UncheckedIOException e) {
+            throw (IOException) withoutUncheckedWrapper(e);
         }
         return clearedPartitionPaths;
+    }
+
+    /**
+     * Unwraps the {@link UncheckedIOException} a worker has to throw to cross a {@link
+     * java.util.function.Function}, so a caller sees the {@link IOException} the file system raised
+     * rather than the wrapper. Whatever else failed while the accepted deletes drained is attached
+     * to the wrapper, so it has to travel with the cause rather than be dropped with it.
+     */
+    private static Throwable withoutUncheckedWrapper(Throwable failure) {
+        if (!(failure instanceof UncheckedIOException)) {
+            return failure;
+        }
+        Throwable unwrapped = failure.getCause();
+        for (Throwable suppressed : failure.getSuppressed()) {
+            unwrapped.addSuppressed(withoutUncheckedWrapper(suppressed));
+        }
+        return unwrapped;
+    }
+
+    /** Deletes one file and reports the partition it emptied, for a worker that cannot throw. */
+    private List<Path> deleteAndReportCleared(FileStatus file) {
+        try {
+            return deleteDataFile(file)
+                    ? Collections.singletonList(file.getPath().getParent())
+                    : Collections.emptyList();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /** Deletes one listed data file and reports whether this commit removed it. */
+    private boolean deleteDataFile(FileStatus file) throws IOException {
+        boolean deleted;
+        try {
+            deleted = fileIO.delete(file.getPath(), false);
+        } catch (FileNotFoundException ignore) {
+            return false;
+        }
+        if (deleted) {
+            return true;
+        }
+        if (fileIO.exists(file.getPath())) {
+            // A refusal is not a concurrent-delete race: the file is still readable, and going on
+            // would report the partition as holding nothing while its rows are still there.
+            throw new IOException(
+                    String.format(
+                            "Failed to delete data file %s of table %s.",
+                            file.getPath(), tableIdentifier.getFullName()));
+        }
+        return false;
+    }
+
+    /** The committed data files below the given paths, listed one partition at a time. */
+    private final class PreviousDataFiles implements Iterator<FileStatus> {
+
+        private final List<Path> partitionPaths;
+        private final int partitionLevels;
+        private List<FileStatus> currentFiles = Collections.emptyList();
+        private int nextPartition;
+        private int nextFile;
+
+        private PreviousDataFiles(List<Path> partitionPaths, int partitionLevels) {
+            this.partitionPaths = partitionPaths;
+            this.partitionLevels = partitionLevels;
+        }
+
+        @Override
+        public boolean hasNext() {
+            while (nextFile >= currentFiles.size()) {
+                if (nextPartition >= partitionPaths.size()) {
+                    return false;
+                }
+                Path partitionPath = partitionPaths.get(nextPartition++);
+                try {
+                    if (!fileIO.exists(partitionPath)) {
+                        continue;
+                    }
+                    // Committed data files only: what sits under a staging directory is another
+                    // writer's uncommitted output, whatever its name looks like.
+                    currentFiles =
+                            FormatTableScan.listDataFiles(
+                                    fileIO,
+                                    partitionPath,
+                                    partitionLevels,
+                                    formatTablePartitionOnlyValueInPath,
+                                    defaultPartName);
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+                nextFile = 0;
+            }
+            return true;
+        }
+
+        @Override
+        public FileStatus next() {
+            if (!hasNext()) {
+                throw new NoSuchElementException();
+            }
+            return currentFiles.get(nextFile++);
+        }
     }
 
     @Override

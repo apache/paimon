@@ -288,4 +288,41 @@ public class CoreOptionsTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("local-kv-db.block-size");
     }
+
+    @Test
+    public void testFormatTableCommitCleanupThreadNumDefaultsTo64AndAcceptsBounds() {
+        Options conf = new Options();
+        assertThat(new CoreOptions(conf).formatTableCommitCleanupThreadNum()).isEqualTo(64);
+
+        conf.set(CoreOptions.FORMAT_TABLE_COMMIT_CLEANUP_THREAD_NUM, 1);
+        assertThat(new CoreOptions(conf).formatTableCommitCleanupThreadNum()).isEqualTo(1);
+
+        conf.set(CoreOptions.FORMAT_TABLE_COMMIT_CLEANUP_THREAD_NUM, 64);
+        assertThat(new CoreOptions(conf).formatTableCommitCleanupThreadNum()).isEqualTo(64);
+    }
+
+    @Test
+    public void testFormatTableCommitCleanupThreadNumRejectsValuesOutsideSupportedRange() {
+        Options conf = new Options();
+        conf.set(CoreOptions.FORMAT_TABLE_COMMIT_CLEANUP_THREAD_NUM, 0);
+        assertThatThrownBy(() -> new CoreOptions(conf).formatTableCommitCleanupThreadNum())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("format-table.commit.cleanup-thread-num")
+                .hasMessageContaining("1")
+                .hasMessageContaining("64");
+
+        conf.set(CoreOptions.FORMAT_TABLE_COMMIT_CLEANUP_THREAD_NUM, -1);
+        assertThatThrownBy(() -> new CoreOptions(conf).formatTableCommitCleanupThreadNum())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("format-table.commit.cleanup-thread-num")
+                .hasMessageContaining("1")
+                .hasMessageContaining("64");
+
+        conf.set(CoreOptions.FORMAT_TABLE_COMMIT_CLEANUP_THREAD_NUM, 65);
+        assertThatThrownBy(() -> new CoreOptions(conf).formatTableCommitCleanupThreadNum())
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("format-table.commit.cleanup-thread-num")
+                .hasMessageContaining("1")
+                .hasMessageContaining("64");
+    }
 }
