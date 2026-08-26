@@ -450,7 +450,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 snapshotManager(),
                 changelogManager(),
                 store().newSnapshotDeletion(),
-                store().newTagManager());
+                store().newTagManager(),
+                store().options().scanManifestParallelism());
     }
 
     @Override
