@@ -295,6 +295,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
                 collectTagSkippers(tags.values());
         Predicate<ExpireFileEntry> deleteAll = entry -> false;
         List<CompletableFuture<List<Path>>> futures = new ArrayList<>();
+        int plannedSnapshots = 0;
         for (Snapshot snapshot : snapshotsIncludingEnd) {
             long id = snapshot.id();
             if (id == beginInclusiveId) {
@@ -315,18 +316,18 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
                         id);
                 continue;
             }
-
             futures.add(
                     CompletableFuture.supplyAsync(
                             () ->
                                     snapshotDeletion.planDeletedInDeltaManifest(
                                             snapshot, skipper.get()),
                             fileExecutor));
-            if (futures.size() >= snapshotExpireBatchSize) {
-                collectAndClean(futures);
+            if (++plannedSnapshots >= snapshotExpireBatchSize) {
+                cleanBatch(futures);
+                plannedSnapshots = 0;
             }
         }
-        collectAndClean(futures);
+        cleanBatch(futures);
     }
 
     private Map<Long, Optional<Predicate<ExpireFileEntry>>> collectTagSkippers(
@@ -363,6 +364,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
     private void cleanChangelogFiles(List<Snapshot> snapshots)
             throws ExecutionException, InterruptedException {
         List<CompletableFuture<List<Path>>> futures = new ArrayList<>();
+        int plannedSnapshots = 0;
         for (Snapshot snapshot : snapshots) {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Ready to delete changelog files from snapshot #{}", snapshot.id());
@@ -372,15 +374,16 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
                         CompletableFuture.supplyAsync(
                                 () -> snapshotDeletion.planAddedInChangelogManifest(snapshot),
                                 fileExecutor));
-                if (futures.size() >= snapshotExpireBatchSize) {
-                    collectAndClean(futures);
+                if (++plannedSnapshots >= snapshotExpireBatchSize) {
+                    cleanBatch(futures);
+                    plannedSnapshots = 0;
                 }
             }
         }
-        collectAndClean(futures);
+        cleanBatch(futures);
     }
 
-    private void collectAndClean(List<CompletableFuture<List<Path>>> futures)
+    private void cleanBatch(List<CompletableFuture<List<Path>>> futures)
             throws ExecutionException, InterruptedException {
         Collection<Path> paths = flatten(getAll(futures));
         futures.clear();

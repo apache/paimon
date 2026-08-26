@@ -82,7 +82,6 @@ public abstract class FileDeletionBase<T extends Snapshot> {
     protected final Map<BinaryRow, Set<Integer>> deletionBuckets;
 
     private final Executor fileExecutor;
-    private final int fileOperationParallelism;
     @Nullable private final Integer manifestReadParallelism;
 
     protected boolean changelogDecoupled;
@@ -112,10 +111,6 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         this.cleanEmptyDirectories = cleanEmptyDirectories;
         this.deletionBuckets = new ConcurrentHashMap<>();
         this.fileExecutor = FileOperationThreadPool.getExecutorService(fileOperationThreadNum);
-        this.fileOperationParallelism =
-                fileOperationThreadNum > 0
-                        ? fileOperationThreadNum
-                        : Runtime.getRuntime().availableProcessors();
         this.manifestReadParallelism = manifestReadParallelism;
     }
 
