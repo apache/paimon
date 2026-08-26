@@ -18,7 +18,11 @@
 
 package org.apache.paimon.flink.globalindex;
 
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryRowWriter;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.globalindex.SortedIndexTopoBuilder.SortedBuildTask;
+import org.apache.paimon.flink.utils.InternalTypeInfo;
 import org.apache.paimon.globalindex.GlobalIndexSingleColumnWriter;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexWriter;
@@ -27,9 +31,13 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 
+import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.transformations.PartitionTransformation;
+import org.apache.flink.streaming.api.transformations.StreamExchangeMode;
 import org.junit.jupiter.api.Test;
 
 import java.io.Closeable;
@@ -179,5 +187,31 @@ public class SortedIndexTopoBuilderTest {
     public void testNormalizedSortColumnsUseRowIdAsTieBreaker() {
         assertThat(SortedIndexTopoBuilder.createSortColumns("task-id", "index-key"))
                 .containsExactly("task-id", "index-key", SpecialFields.ROW_ID.name());
+    }
+
+    @Test
+    public void testBuildTaskPartitioner() {
+        assertThat(SortedIndexTopoBuilder.BUILD_TASK_PARTITIONER.partition(0, 4)).isEqualTo(0);
+        assertThat(SortedIndexTopoBuilder.BUILD_TASK_PARTITIONER.partition(5, 4)).isEqualTo(1);
+        assertThat(SortedIndexTopoBuilder.BUILD_TASK_PARTITIONER.partition(9, 4)).isEqualTo(1);
+    }
+
+    @Test
+    public void testBuildTaskPartitionUsesBatchExchange() {
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        BinaryRow row = new BinaryRow(1);
+        BinaryRowWriter writer = new BinaryRowWriter(row);
+        writer.writeInt(0, 0);
+        writer.complete();
+        DataStream<InternalRow> input =
+                env.fromData(
+                        Collections.<InternalRow>singletonList(row),
+                        InternalTypeInfo.fromRowType(RowType.of(DataTypes.INT())));
+
+        DataStream<InternalRow> partitioned = SortedIndexTopoBuilder.partitionByBuildTask(input, 0);
+
+        assertThat(partitioned.getTransformation()).isInstanceOf(PartitionTransformation.class);
+        assertThat(((PartitionTransformation<?>) partitioned.getTransformation()).getExchangeMode())
+                .isEqualTo(StreamExchangeMode.BATCH);
     }
 }
