@@ -131,10 +131,12 @@ public class SchemaManagerGlobalIndexTest {
         assertThatCode(
                         () ->
                                 schemaManager.commitChanges(
-                                        SchemaChange.updateColumnType(
-                                                "indexed_col", DataTypes.BIGINT()),
+                                        SchemaChange.dropColumn("indexed_col"),
                                         SchemaChange.renameColumn("extra_col", "renamed_extra")))
                 .doesNotThrowAnyException();
+
+        assertThat(schemaManager.latest().get().fieldNames())
+                .containsExactly("id", "renamed_extra", "other_col");
     }
 
     private void assertReferencedChangeRejected(SchemaChange change) {

@@ -1125,52 +1125,15 @@ public class SchemaManager implements Serializable {
 
     private static void collectAffectedGlobalIndexFieldIds(
             List<DataField> fields, String[] fieldNames, Set<Integer> affectedFieldIds) {
-        collectAffectedGlobalIndexFieldIds(fields, fieldNames, 0, affectedFieldIds);
-    }
-
-    private static void collectAffectedGlobalIndexFieldIds(
-            List<DataField> fields, String[] fieldNames, int depth, Set<Integer> affectedFieldIds) {
-        DataField field = null;
-        for (DataField candidate : fields) {
-            if (candidate.name().equals(fieldNames[depth])) {
-                field = candidate;
-                break;
-            }
-        }
-        if (field == null) {
+        if (fieldNames.length == 0) {
             return;
         }
 
-        affectedFieldIds.add(field.id());
-        if (depth == fieldNames.length - 1) {
-            field.type().collectFieldIds(affectedFieldIds);
-            return;
-        }
-
-        DataType nestedType = field.type();
-        int nestedDepth = depth;
-        while (true) {
-            switch (nestedType.getTypeRoot()) {
-                case ROW:
-                    nestedDepth++;
-                    if (nestedDepth < fieldNames.length) {
-                        collectAffectedGlobalIndexFieldIds(
-                                ((RowType) nestedType).getFields(),
-                                fieldNames,
-                                nestedDepth,
-                                affectedFieldIds);
-                    }
-                    return;
-                case ARRAY:
-                    nestedDepth++;
-                    nestedType = ((ArrayType) nestedType).getElementType();
-                    break;
-                case MAP:
-                    nestedDepth++;
-                    nestedType = ((MapType) nestedType).getValueType();
-                    break;
-                default:
-                    return;
+        // Global Index metadata resolves field IDs against the table's top-level row type.
+        for (DataField field : fields) {
+            if (field.name().equals(fieldNames[0])) {
+                affectedFieldIds.add(field.id());
+                return;
             }
         }
     }
