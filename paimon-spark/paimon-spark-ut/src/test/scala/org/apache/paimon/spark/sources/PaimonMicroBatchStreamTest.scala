@@ -68,6 +68,25 @@ class PaimonMicroBatchStreamTest extends AnyFunSuite {
     verify(scan, times(2)).notifyCheckpointComplete(6L)
   }
 
+  test("propagate empty snapshot consumer update failure and allow retry") {
+    val (stream, scan) = createStreamWithConsumer()
+    val empty = PaimonSourceOffset.withTotalSplits(
+      snapshotId = 6L,
+      index = PaimonSourceOffset.INIT_OFFSET_INDEX,
+      scanSnapshot = false,
+      totalSplits = 0L)
+    val failure = new UncheckedIOException(new IOException("expected failure"))
+    doThrow(failure).doNothing().when(scan).notifyCheckpointComplete(6L)
+
+    val thrown = intercept[UncheckedIOException] {
+      stream.commit(empty)
+    }
+    assert(thrown eq failure)
+
+    stream.commit(empty)
+    verify(scan, times(2)).notifyCheckpointComplete(6L)
+  }
+
   private def consumerOffset(index: Long, totalSplits: Long): PaimonSourceOffset = {
     PaimonSourceOffset.withTotalSplits(
       snapshotId = 5L,
