@@ -226,6 +226,29 @@ class StatisticsOrRecordChannelComputerTest {
         assertThat(assignment).containsKey(p2);
     }
 
+    @Test
+    void testUnknownPartitionWhoseKeyHashesToMinValue() {
+        // Math.abs leaves Integer.MIN_VALUE negative. Pin the fixture: if the row hash ever
+        // changes this stops testing anything, and this assertion says so instead of passing.
+        InternalRow row =
+                GenericRow.of(
+                        0, BinaryString.fromString("p3588823253"), BinaryString.fromString("d"));
+        assertThat(getPartitionKey(row).hashCode()).isEqualTo(Integer.MIN_VALUE);
+
+        // Integer.MIN_VALUE % n is only zero when n divides 2^31, so a parallelism that is not a
+        // power of two is what turns the negative hash into a negative channel.
+        for (int downstreamParallelism = 1; downstreamParallelism <= 16; downstreamParallelism++) {
+            StatisticsOrRecordChannelComputer channelComputer =
+                    new StatisticsOrRecordChannelComputer(schema);
+            channelComputer.setup(downstreamParallelism);
+            for (int i = 0; i < 50; i++) {
+                assertThat(channelComputer.channel(StatisticsOrRecord.fromRecord(row)))
+                        .as("parallelism %d", downstreamParallelism)
+                        .isBetween(0, downstreamParallelism - 1);
+            }
+        }
+    }
+
     private BinaryRow getPartitionKey(InternalRow row) {
         RowPartitionKeyExtractor extractor = new RowPartitionKeyExtractor(schema);
         return extractor.partition(row).copy();
