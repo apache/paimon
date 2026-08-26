@@ -145,6 +145,26 @@ class ContiguousWindowDatasetTest(unittest.TestCase):
             sample["payload"],
         )
 
+    def test_plural_access_coalesces_overlapping_window_reads(self):
+        dataset = self._dataset(self._table())
+        expected = [dataset[0], dataset[1]]
+
+        with patch.object(
+                dataset, "_read_rows", wraps=dataset._read_rows) as read:
+            actual = dataset.__getitems__([0, 1])
+
+        self.assertEqual(1, read.call_count)
+        self.assertEqual(4, len(read.call_args.args[0]))
+        for expected_sample, actual_sample in zip(expected, actual):
+            self.assertEqual(
+                expected_sample["episode"], actual_sample["episode"])
+            self.assertEqual(expected_sample["step"], actual_sample["step"])
+            self.assertEqual(expected_sample["value"], actual_sample["value"])
+            self.assertEqual(
+                expected_sample["payload"], actual_sample["payload"])
+            self.assertTrue(torch.equal(
+                expected_sample["is_pad"], actual_sample["is_pad"]))
+
     def test_pad_tail_repeats_last_row_and_marks_real_padding(self):
         dataset = self._dataset(
             self._table(), tail="pad", pad_values={"value": -1})

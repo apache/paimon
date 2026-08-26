@@ -115,16 +115,41 @@ class ContiguousWindowDataset(Dataset):
         return len(self._anchors)
 
     def __getitem__(self, index):
+        anchor, row_ids = self._resolve_window(index)
+        return self._sample(anchor, self._read_rows(row_ids))
+
+    def __getitems__(self, indices):
+        windows = [self._resolve_window(index) for index in indices]
+        if not windows:
+            return []
+        row_ids = list(dict.fromkeys(
+            row_id for _, window_row_ids in windows
+            for row_id in window_row_ids
+        ))
+        rows_by_id = dict(zip(row_ids, self._read_rows(row_ids)))
+        return [
+            self._sample(
+                anchor,
+                [rows_by_id[row_id] for row_id in window_row_ids],
+            )
+            for anchor, window_row_ids in windows
+        ]
+
+    def _resolve_window(self, index):
         index = operator.index(index)
         if index < 0:
             index += len(self._anchors)
         if index < 0 or index >= len(self._anchors):
             raise IndexError("window index out of range")
 
-        group_index, start, valid_count = self._anchors[index]
-        group_key, order_values, row_ids = self._groups[group_index]
-        selected_row_ids = row_ids[start:start + valid_count]
-        rows = self._read_rows(selected_row_ids)
+        anchor = self._anchors[index]
+        group_index, start, valid_count = anchor
+        row_ids = self._groups[group_index][2]
+        return anchor, row_ids[start:start + valid_count]
+
+    def _sample(self, anchor, rows):
+        group_index, start, valid_count = anchor
+        group_key, order_values, _ = self._groups[group_index]
         padding_count = self.window_size - valid_count
         padding_mask = torch.zeros(self.window_size, dtype=torch.bool)
         if padding_count:

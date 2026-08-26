@@ -255,6 +255,10 @@ setup(
         'torch': [
             'torch',
         ],
+        'act': [
+            'lerobot==0.4.4',
+            'Pillow',
+        ],
         'daft': [
             'daft>=0.7.6; python_version>="3.10"',
         ],
