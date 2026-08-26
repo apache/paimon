@@ -2662,7 +2662,10 @@ public class CoreOptions implements Serializable {
                             "The maximum number of concurrent old-data file deletions during "
                                     + "overwrite commits for an internal Format Table with "
                                     + "catalog-managed partitions. Supported values are 1 through "
-                                    + "64. Other Format Tables use serial cleanup.");
+                                    + "64. Other Format Tables use serial cleanup. This limit uses "
+                                    + "a separate thread pool and is independent of "
+                                    + "file-operation.thread-num, so the total file-operation "
+                                    + "concurrency in one process may be the sum of both limits.");
 
     @Immutable
     public static final ConfigOption<String> BLOB_FIELD =

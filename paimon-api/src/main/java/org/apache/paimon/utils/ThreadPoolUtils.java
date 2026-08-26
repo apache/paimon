@@ -143,24 +143,7 @@ public class ThreadPoolUtils {
             Function<U, List<T>> processor,
             List<U> input,
             int queueSize) {
-        return sequentialBatchedExecuteCloseable(executor, processor, input.iterator(), queueSize);
-    }
-
-    /**
-     * Parallel processes a lazily supplied input, keeping at most {@code queueSize} tasks in flight
-     * and returning results in input order. The input is read only as slots free, so a caller that
-     * discovers its work by listing storage does not have to list all of it up front.
-     *
-     * <p>The caller must close the iterator to stop reading input, cancel unstarted tasks and wait
-     * for running tasks. An input that fails to produce its next element reports that by throwing
-     * an unchecked exception, as a processor does.
-     */
-    public static <T, U> CloseableBatchIterator<T> sequentialBatchedExecuteCloseable(
-            ExecutorService executor,
-            Function<U, List<T>> processor,
-            Iterator<U> input,
-            int queueSize) {
-        return newSequentialBatchIterator(executor, processor, input, queueSize, true);
+        return newSequentialBatchIterator(executor, processor, input.iterator(), queueSize, true);
     }
 
     /**
@@ -271,10 +254,12 @@ public class ThreadPoolUtils {
         private final int queueSize;
         private final boolean cancelRunningOnClose;
         private final Queue<BatchTask<T, U>> activeTasks = new ArrayDeque<>();
+        private final Object submissionLock = new Object();
 
         private Iterator<T> activeResults = Collections.<T>emptyList().iterator();
         private T next;
         private boolean closed;
+        private boolean submissionStopped;
 
         private SequentialBatchIterator(
                 ExecutorService executor,
@@ -334,10 +319,23 @@ public class ThreadPoolUtils {
         /** Hands out work until the window is full or the input is exhausted. */
         private void fillWindow() {
             ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
-            while (activeTasks.size() < queueSize && input.hasNext()) {
-                BatchTask<T, U> task = new BatchTask<>(processor, input.next(), classLoader);
-                executor.execute(task);
-                activeTasks.add(task);
+            while (activeTasks.size() < queueSize) {
+                synchronized (submissionLock) {
+                    if (submissionStopped || !input.hasNext()) {
+                        return;
+                    }
+                    BatchTask<T, U> task =
+                            new BatchTask<>(
+                                    processor, input.next(), classLoader, this::stopSubmission);
+                    executor.execute(task);
+                    activeTasks.add(task);
+                }
+            }
+        }
+
+        private void stopSubmission() {
+            synchronized (submissionLock) {
+                submissionStopped = true;
             }
         }
 
@@ -352,13 +350,18 @@ public class ThreadPoolUtils {
             boolean interrupted = Thread.interrupted();
             for (BatchTask<T, U> task : activeTasks) {
                 try {
-                    if (cancelRunningOnClose) {
-                        task.cancel();
-                    } else {
-                        task.cancelIfUnstarted();
-                    }
+                    task.cancelIfUnstarted();
                 } catch (Throwable cleanupFailure) {
                     failure = firstOrSuppressed(cleanupFailure, failure);
+                }
+            }
+            if (cancelRunningOnClose) {
+                for (BatchTask<T, U> task : activeTasks) {
+                    try {
+                        task.interruptIfRunning();
+                    } catch (Throwable cleanupFailure) {
+                        failure = firstOrSuppressed(cleanupFailure, failure);
+                    }
                 }
             }
             for (BatchTask<T, U> task : activeTasks) {
@@ -398,6 +401,7 @@ public class ThreadPoolUtils {
         private final Function<U, List<T>> processor;
         private final U input;
         private final ClassLoader classLoader;
+        private final Runnable stopSubmission;
         private final CountDownLatch completion = new CountDownLatch(1);
 
         private int state = CREATED;
@@ -406,10 +410,15 @@ public class ThreadPoolUtils {
         private Throwable failure;
         private volatile boolean failureReported;
 
-        private BatchTask(Function<U, List<T>> processor, U input, ClassLoader classLoader) {
+        private BatchTask(
+                Function<U, List<T>> processor,
+                U input,
+                ClassLoader classLoader,
+                Runnable stopSubmission) {
             this.processor = processor;
             this.input = input;
             this.classLoader = classLoader;
+            this.stopSubmission = stopSubmission;
         }
 
         @Override
@@ -425,15 +434,20 @@ public class ThreadPoolUtils {
             }
 
             Thread currentThread = Thread.currentThread();
+            boolean wasInterrupted = currentThread.isInterrupted();
             ClassLoader originalClassLoader = currentThread.getContextClassLoader();
             try {
                 currentThread.setContextClassLoader(classLoader);
                 result = processor.apply(input);
             } catch (RuntimeException | Error taskFailure) {
                 failure = taskFailure;
+                stopSubmission.run();
             } finally {
                 currentThread.setContextClassLoader(originalClassLoader);
                 Thread.interrupted();
+                if (wasInterrupted) {
+                    currentThread.interrupt();
+                }
                 synchronized (this) {
                     runner = null;
                     state = FINISHED;
@@ -442,31 +456,28 @@ public class ThreadPoolUtils {
             }
         }
 
-        private synchronized void cancel() {
-            if (cancelIfUnstarted()) {
-                return;
-            }
+        private synchronized void interruptIfRunning() {
             if (state == RUNNING) {
                 runner.interrupt();
             }
         }
 
         /** Gives up on a task only while it can still be given up on without interrupting it. */
-        private synchronized boolean cancelIfUnstarted() {
+        private synchronized void cancelIfUnstarted() {
             if (state == CREATED) {
                 state = CANCELLED;
                 completion.countDown();
-                return true;
             }
-            return false;
         }
 
         private List<T> result() {
-            try {
-                completion.await();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new RuntimeException(e);
+            if (completion.getCount() != 0) {
+                try {
+                    completion.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException(e);
+                }
             }
             if (failure != null) {
                 failureReported = true;

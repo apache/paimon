@@ -40,6 +40,8 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.PartitionPathUtils;
 import org.apache.paimon.utils.ThreadPoolUtils;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -57,7 +59,6 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
@@ -550,7 +551,7 @@ public class FormatTableCommit implements BatchTableCommit {
 
     private Set<Path> deletePreviousDataFiles(
             List<Path> partitionPaths, int partitionLevels, int threadNum) throws IOException {
-        PreviousDataFiles dataFiles = new PreviousDataFiles(partitionPaths, partitionLevels);
+        Iterator<FileStatus> dataFiles = previousDataFiles(partitionPaths, partitionLevels);
         Set<Path> clearedPartitionPaths = new HashSet<>();
         try {
             if (threadNum == 1) {
@@ -609,14 +610,12 @@ public class FormatTableCommit implements BatchTableCommit {
 
     /** Deletes one listed data file and reports whether this commit removed it. */
     private boolean deleteDataFile(FileStatus file) throws IOException {
-        boolean deleted;
         try {
-            deleted = fileIO.delete(file.getPath(), false);
+            if (fileIO.delete(file.getPath(), false)) {
+                return true;
+            }
         } catch (FileNotFoundException ignore) {
             return false;
-        }
-        if (deleted) {
-            return true;
         }
         if (fileIO.exists(file.getPath())) {
             // A refusal is not a concurrent-delete race: the file is still readable, and going on
@@ -630,54 +629,29 @@ public class FormatTableCommit implements BatchTableCommit {
     }
 
     /** The committed data files below the given paths, listed one partition at a time. */
-    private final class PreviousDataFiles implements Iterator<FileStatus> {
-
-        private final List<Path> partitionPaths;
-        private final int partitionLevels;
-        private List<FileStatus> currentFiles = Collections.emptyList();
-        private int nextPartition;
-        private int nextFile;
-
-        private PreviousDataFiles(List<Path> partitionPaths, int partitionLevels) {
-            this.partitionPaths = partitionPaths;
-            this.partitionLevels = partitionLevels;
-        }
-
-        @Override
-        public boolean hasNext() {
-            while (nextFile >= currentFiles.size()) {
-                if (nextPartition >= partitionPaths.size()) {
-                    return false;
-                }
-                Path partitionPath = partitionPaths.get(nextPartition++);
-                try {
-                    if (!fileIO.exists(partitionPath)) {
-                        continue;
-                    }
-                    // Committed data files only: what sits under a staging directory is another
-                    // writer's uncommitted output, whatever its name looks like.
-                    currentFiles =
-                            FormatTableScan.listDataFiles(
-                                    fileIO,
-                                    partitionPath,
-                                    partitionLevels,
-                                    formatTablePartitionOnlyValueInPath,
-                                    defaultPartName);
-                } catch (IOException e) {
-                    throw new UncheckedIOException(e);
-                }
-                nextFile = 0;
-            }
-            return true;
-        }
-
-        @Override
-        public FileStatus next() {
-            if (!hasNext()) {
-                throw new NoSuchElementException();
-            }
-            return currentFiles.get(nextFile++);
-        }
+    private Iterator<FileStatus> previousDataFiles(List<Path> partitionPaths, int partitionLevels) {
+        return Iterators.concat(
+                Iterators.transform(
+                        partitionPaths.iterator(),
+                        partitionPath -> {
+                            try {
+                                if (!fileIO.exists(partitionPath)) {
+                                    return Collections.<FileStatus>emptyList().iterator();
+                                }
+                                // Committed data files only: what sits under a staging directory is
+                                // another writer's uncommitted output, whatever its name looks
+                                // like.
+                                return FormatTableScan.listDataFiles(
+                                                fileIO,
+                                                partitionPath,
+                                                partitionLevels,
+                                                formatTablePartitionOnlyValueInPath,
+                                                defaultPartName)
+                                        .iterator();
+                            } catch (IOException e) {
+                                throw new UncheckedIOException(e);
+                            }
+                        }));
     }
 
     @Override

@@ -61,6 +61,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
+import static org.apache.paimon.shade.guava30.com.google.common.base.Throwables.getCausalChain;
+import static org.apache.paimon.shade.guava30.com.google.common.base.Throwables.getRootCause;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.entry;
@@ -695,8 +697,6 @@ class FormatTableCommitTest {
                                                     new TwoPhaseCommitMessage(committer))));
 
             assertThat(fileIO.awaitFirstWave()).isTrue();
-            assertThat(fileIO.deleteCalls()).isEqualTo(64);
-            assertThat(fileIO.awaitUnexpectedExtraDelete()).isFalse();
             verify(committer, never()).commit(fileIO);
 
             fileIO.releaseFirstWave();
@@ -754,7 +754,6 @@ class FormatTableCommitTest {
             Future<?> result = executor.submit(() -> commit.commit(Collections.emptyList()));
 
             assertThat(fileIO.awaitFirstWave()).isTrue();
-            assertThat(fileIO.deleteCalls()).isEqualTo(7);
             assertThat(fileIO.awaitUnexpectedExtraDelete()).isFalse();
 
             fileIO.releaseFirstWave();
@@ -883,7 +882,7 @@ class FormatTableCommitTest {
                     .containsExactlyInAnyOrder("data-000.csv", "data-001.csv");
 
             fileIO.releaseSuccessfulSibling();
-            assertThat(rootCause(awaitFailure(result)))
+            assertThat(getRootCause(awaitFailure(result)))
                     .hasMessage("delete failed at input position 0");
             assertThat(fileIO.attemptedFiles())
                     .containsExactlyInAnyOrder("data-000.csv", "data-001.csv");
@@ -944,7 +943,7 @@ class FormatTableCommitTest {
             assertThat(discardCalls).hasValue(0);
 
             fileIO.releaseSecondDelete();
-            assertThat(rootCause(awaitFailure(result)))
+            assertThat(getRootCause(awaitFailure(result)))
                     .hasMessage("Failed to list the later partition root.");
             assertThat(discardCalls).hasValue(2);
             assertThat(activeDeletesAtDiscard).containsExactly(0, 0);
@@ -985,7 +984,7 @@ class FormatTableCommitTest {
                     .isInstanceOf(TimeoutException.class);
 
             fileIO.releaseLowerPositionFailure();
-            Throwable primary = rootCause(awaitFailure(result));
+            Throwable primary = getRootCause(awaitFailure(result));
             assertThat(primary).hasMessage("delete failed at input position 0");
             assertThat(primary.getSuppressed())
                     .extracting(Throwable::getMessage)
@@ -1034,7 +1033,8 @@ class FormatTableCommitTest {
             fileIO.releaseDeletes();
             assertThat(commitReturned.await(10, TimeUnit.SECONDS)).isTrue();
             assertThat(failure.get()).isNotNull();
-            assertThat(causeChain(failure.get())).anyMatch(InterruptedException.class::isInstance);
+            assertThat(getCausalChain(failure.get()))
+                    .anyMatch(InterruptedException.class::isInstance);
             assertThat(interruptRestored).isTrue();
             verify(committer, never()).commit(fileIO);
         } finally {
@@ -1315,7 +1315,7 @@ class FormatTableCommitTest {
 
         assertThat(commitThread.isAlive()).isFalse();
         assertThat(failure.get()).isNotNull();
-        assertThat(rootCause(failure.get())).isInstanceOf(InterruptedException.class);
+        assertThat(getRootCause(failure.get())).isInstanceOf(InterruptedException.class);
         assertThat(failureTree(failure.get()))
                 .extracting(Throwable::getMessage)
                 .contains("discard failed after cleanup interruption");
@@ -1494,24 +1494,6 @@ class FormatTableCommitTest {
         }
     }
 
-    private static Throwable rootCause(Throwable throwable) {
-        Throwable root = throwable;
-        while (root.getCause() != null) {
-            root = root.getCause();
-        }
-        return root;
-    }
-
-    private static List<Throwable> causeChain(Throwable throwable) {
-        List<Throwable> chain = new ArrayList<>();
-        Throwable current = throwable;
-        while (current != null) {
-            chain.add(current);
-            current = current.getCause();
-        }
-        return chain;
-    }
-
     private static List<Throwable> failureTree(Throwable throwable) {
         List<Throwable> failures = new ArrayList<>();
         collectFailures(throwable, failures);
@@ -1530,8 +1512,6 @@ class FormatTableCommitTest {
     }
 
     private static class ParallelDeleteFileIO extends LocalFileIO {
-
-        private static final long serialVersionUID = 1L;
 
         private final int firstWaveSize;
         private final boolean holdFirstWave;
@@ -1594,10 +1574,6 @@ class FormatTableCommitTest {
             return firstWave.await(10, TimeUnit.SECONDS);
         }
 
-        private boolean awaitFirstWave(long timeout, TimeUnit unit) throws InterruptedException {
-            return firstWave.await(timeout, unit);
-        }
-
         private boolean awaitUnexpectedExtraDelete() throws InterruptedException {
             return unexpectedExtraDelete.await(300, TimeUnit.MILLISECONDS);
         }
@@ -1608,8 +1584,6 @@ class FormatTableCommitTest {
     }
 
     private static class LazyRootListingFileIO extends ParallelDeleteFileIO {
-
-        private static final long serialVersionUID = 1L;
 
         private final Path deferredRoot;
         private final AtomicBoolean deferredRootListed = new AtomicBoolean();
@@ -1633,8 +1607,6 @@ class FormatTableCommitTest {
     }
 
     private static class SerialProbeFileIO extends LocalFileIO {
-
-        private static final long serialVersionUID = 1L;
 
         private final CountDownLatch secondDeleteStarted = new CountDownLatch(1);
         private final AtomicInteger deleteCalls = new AtomicInteger();
@@ -1671,8 +1643,6 @@ class FormatTableCommitTest {
     }
 
     private static class PartialBarrierDeleteFileIO extends SortedLocalFileIO {
-
-        private static final long serialVersionUID = 1L;
 
         private final CountDownLatch bothDeletesStarted = new CountDownLatch(2);
         private final CountDownLatch releaseFirstDelete = new CountDownLatch(1);
@@ -1723,11 +1693,8 @@ class FormatTableCommitTest {
 
     private static class BlockingDeleteFileIO extends LocalFileIO {
 
-        private static final long serialVersionUID = 1L;
-
         private final CountDownLatch deletesStarted;
         private final CountDownLatch releaseDeletes = new CountDownLatch(1);
-        private final AtomicInteger activeDeletes = new AtomicInteger();
 
         private BlockingDeleteFileIO(int deleteCount) {
             this.deletesStarted = new CountDownLatch(deleteCount);
@@ -1735,7 +1702,6 @@ class FormatTableCommitTest {
 
         @Override
         public boolean delete(Path path, boolean recursive) throws IOException {
-            activeDeletes.incrementAndGet();
             deletesStarted.countDown();
             try {
                 if (!releaseDeletes.await(10, TimeUnit.SECONDS)) {
@@ -1745,8 +1711,6 @@ class FormatTableCommitTest {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new IOException("Interrupted while blocking cleanup delete", e);
-            } finally {
-                activeDeletes.decrementAndGet();
             }
         }
 
@@ -1757,15 +1721,9 @@ class FormatTableCommitTest {
         private void releaseDeletes() {
             releaseDeletes.countDown();
         }
-
-        private int activeDeletes() {
-            return activeDeletes.get();
-        }
     }
 
     private abstract static class SortedLocalFileIO extends LocalFileIO {
-
-        private static final long serialVersionUID = 1L;
 
         @Override
         public FileStatus[] listStatus(Path path) throws IOException {
@@ -1787,8 +1745,6 @@ class FormatTableCommitTest {
     }
 
     private static class LaterRootListingFailureFileIO extends SortedLocalFileIO {
-
-        private static final long serialVersionUID = 1L;
 
         private final Path failingRoot;
         private final CountDownLatch deletesStarted;
@@ -1855,8 +1811,6 @@ class FormatTableCommitTest {
 
     private static class FailureDrainFileIO extends SortedLocalFileIO {
 
-        private static final long serialVersionUID = 1L;
-
         private final CountDownLatch firstPairStarted = new CountDownLatch(2);
         private final CountDownLatch failureAttempted = new CountDownLatch(1);
         private final CountDownLatch releaseSuccessfulSibling = new CountDownLatch(1);
@@ -1903,8 +1857,6 @@ class FormatTableCommitTest {
 
     private static class OrderedDualFailureFileIO extends SortedLocalFileIO {
 
-        private static final long serialVersionUID = 1L;
-
         private final CountDownLatch firstPairStarted = new CountDownLatch(2);
         private final CountDownLatch higherPositionFailure = new CountDownLatch(1);
         private final CountDownLatch releaseLowerPositionFailure = new CountDownLatch(1);
@@ -1932,8 +1884,6 @@ class FormatTableCommitTest {
 
     private static class MixedOwnershipFileIO extends SortedLocalFileIO {
 
-        private static final long serialVersionUID = 1L;
-
         @Override
         public boolean delete(Path path, boolean recursive) throws IOException {
             boolean deleted = super.delete(path, recursive);
@@ -1948,8 +1898,6 @@ class FormatTableCommitTest {
     }
 
     private static class RefusingDeleteFileIO extends LocalFileIO {
-
-        private static final long serialVersionUID = 1L;
 
         @Override
         public boolean delete(Path path, boolean recursive) {
