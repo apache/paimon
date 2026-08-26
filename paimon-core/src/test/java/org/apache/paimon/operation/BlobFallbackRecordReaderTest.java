@@ -358,6 +358,21 @@ public class BlobFallbackRecordReaderTest {
     }
 
     @Test
+    public void testBlobFallbackRecordReaderResolvesPlaceholderInSingleFullRangeGroup()
+            throws Exception {
+        DataFileMeta file = blobFile("single-full-range-file", 0, 3, 1);
+
+        ReadResult rows =
+                readFallback(Collections.singletonList(file), null, placeholderRows(file, 1));
+
+        assertThat(rows.rowIds).containsExactly(0L, 2L);
+        assertThat(rows.sequenceNumbers).containsExactly(1L, 1L);
+        assertThat(rows.nullBlobRowIds).containsExactly(1L);
+        assertThat(rows.nullBlobSequenceNumbers).containsExactly(-1L);
+        assertThat(rows.placeholderRowCount).isZero();
+    }
+
+    @Test
     public void testBlobFallbackRecordReaderReturnsNullIfAllRowsArePlaceholders() throws Exception {
         DataFileMeta newFile = blobFile("new-placeholder-file", 0, 1, 2);
         DataFileMeta oldFile = blobFile("old-placeholder-file", 0, 1, 1);
