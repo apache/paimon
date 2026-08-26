@@ -122,6 +122,13 @@ public class PermissionResource {
         return view;
     }
 
+    /** Validates that this resource can carry a data policy in the current contract. */
+    public void validatePolicyAttachment() {
+        checkArgument(
+                type == ResourceType.TABLE,
+                "Policies can currently be attached only to TABLE resources.");
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) {

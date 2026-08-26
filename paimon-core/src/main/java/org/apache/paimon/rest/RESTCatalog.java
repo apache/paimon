@@ -41,6 +41,7 @@ import org.apache.paimon.fs.cache.LocalCacheManager;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.management.PermissionManagement;
+import org.apache.paimon.management.PolicyManagement;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -142,6 +143,11 @@ public class RESTCatalog implements Catalog {
     @Experimental
     public PermissionManagement permissionManagement() {
         return new RESTPermissionManagement(api);
+    }
+
+    @Experimental
+    public PolicyManagement policyManagement() {
+        return new RESTPolicyManagement(api);
     }
 
     @Override
