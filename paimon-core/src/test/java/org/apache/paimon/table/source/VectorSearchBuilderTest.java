@@ -1821,7 +1821,8 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         rowRange,
                         vectorField.id(),
                         TestVectorGlobalIndexerFactory.IDENTIFIER,
-                        entries);
+                        entries,
+                        table.schema().id());
 
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
         CommitMessage message =
@@ -1863,7 +1864,8 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         rowRange1,
                         vectorField.id(),
                         TestVectorGlobalIndexerFactory.IDENTIFIER,
-                        entries1);
+                        entries1,
+                        table.schema().id());
 
         // Build second index file covering rows [mid, end)
         GlobalIndexSingleColumnWriter writer2 =
@@ -1886,7 +1888,8 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         rowRange2,
                         vectorField.id(),
                         TestVectorGlobalIndexerFactory.IDENTIFIER,
-                        entries2);
+                        entries2,
+                        table.schema().id());
 
         // Combine all index files and commit together
         List<IndexFileMeta> allIndexFiles = new ArrayList<>();
@@ -2060,7 +2063,8 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         indexFields,
                         TestVectorGlobalIndexerFactory.IDENTIFIER,
                         entries,
-                        null);
+                        null,
+                        table.schema().id());
 
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
         CommitMessage message =
@@ -2098,7 +2102,8 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         rowRange,
                         idField.id(),
                         BTreeGlobalIndexerFactory.IDENTIFIER,
-                        entries);
+                        entries,
+                        table.schema().id());
 
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
         CommitMessage message =
@@ -2139,7 +2144,8 @@ public class VectorSearchBuilderTest extends TableTestBase {
                         rowRange,
                         vectorField.id(),
                         TestVectorGlobalIndexerFactory.IDENTIFIER,
-                        entries);
+                        entries,
+                        table.schema().id());
 
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
         CommitMessage message =

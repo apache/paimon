@@ -64,7 +64,8 @@ public class IndexManifestEntrySerializer extends ObjectSerializer<IndexManifest
                                         ? null
                                         : new GenericArray(globalIndexMeta.extraFieldIds()),
                                 globalIndexMeta.indexMeta(),
-                                globalIndexMeta.sourceMeta());
+                                globalIndexMeta.sourceMeta(),
+                                globalIndexMeta.buildSchemaId());
         return GenericRow.of(
                 FORMAT_IDENTIFIER,
                 record.kind().toByteValue(),
@@ -102,6 +103,7 @@ public class IndexManifestEntrySerializer extends ObjectSerializer<IndexManifest
                     globalIndexRow.isNullAt(3) ? null : globalIndexRow.getArray(3).toIntArray();
             byte[] indexMeta = globalIndexRow.isNullAt(4) ? null : globalIndexRow.getBinary(4);
             byte[] sourceMeta = globalIndexRow.isNullAt(5) ? null : globalIndexRow.getBinary(5);
+            Long buildSchemaId = globalIndexRow.isNullAt(6) ? null : globalIndexRow.getLong(6);
             globalIndexMeta =
                     new GlobalIndexMeta(
                             rowRangeStart,
@@ -109,7 +111,8 @@ public class IndexManifestEntrySerializer extends ObjectSerializer<IndexManifest
                             indexFieldId,
                             extralFields,
                             indexMeta,
-                            sourceMeta);
+                            sourceMeta,
+                            buildSchemaId);
         }
 
         return new IndexManifestEntry(

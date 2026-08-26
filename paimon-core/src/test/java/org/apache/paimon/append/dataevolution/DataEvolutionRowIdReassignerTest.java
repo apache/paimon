@@ -1538,6 +1538,7 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
     public void testReassignGlobalIndexRowRanges() throws Exception {
         FileStoreTable table = createTableWithInterleavedPartitions();
         createBTreeIndex(table);
+        long buildSchemaId = table.schema().id();
 
         assertThat(table.snapshotManager().latestSnapshot().nextRowId()).isEqualTo(5L);
 
@@ -1556,6 +1557,11 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                         new Range(7, 7),
                         new Range(8, 8),
                         new Range(9, 9));
+        assertThat(table.store().newIndexFileHandler().scanEntries())
+                .allSatisfy(
+                        entry ->
+                                assertThat(entry.indexFile().globalIndexMeta().buildSchemaId())
+                                        .isEqualTo(buildSchemaId));
 
         Predicate predicate =
                 new PredicateBuilder(table.rowType()).equal(table.rowType().getFieldIndex("id"), 4);
@@ -2787,7 +2793,8 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                                             globalIndex.indexFieldId(),
                                             globalIndex.extraFieldIds(),
                                             globalIndex.indexMeta(),
-                                            sourceMeta))));
+                                            sourceMeta,
+                                            globalIndex.buildSchemaId()))));
         }
         replaceLatestSnapshotIndexManifest(
                 table, latest, indexManifestFile.writeWithoutRolling(rewritten));
@@ -2818,7 +2825,9 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                             staleRowRange.to,
                             globalIndex.indexFieldId(),
                             globalIndex.extraFieldIds(),
-                            globalIndex.indexMeta());
+                            globalIndex.indexMeta(),
+                            globalIndex.sourceMeta(),
+                            globalIndex.buildSchemaId());
             IndexFileMeta indexFile = entry.indexFile();
             rewritten.add(
                     new IndexManifestEntry(
@@ -2875,7 +2884,9 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                                         rowRange.to,
                                         globalIndex.indexFieldId(),
                                         globalIndex.extraFieldIds(),
-                                        globalIndex.indexMeta()))));
+                                        globalIndex.indexMeta(),
+                                        globalIndex.sourceMeta(),
+                                        globalIndex.buildSchemaId()))));
         replaceLatestSnapshotIndexManifest(
                 table, latest, indexManifestFile.writeWithoutRolling(entries));
     }

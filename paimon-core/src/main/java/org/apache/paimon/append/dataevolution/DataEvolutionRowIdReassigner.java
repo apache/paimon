@@ -667,7 +667,8 @@ public class DataEvolutionRowIdReassigner {
                             globalIndex.indexFieldId(),
                             globalIndex.extraFieldIds(),
                             globalIndex.indexMeta(),
-                            globalIndex.sourceMeta());
+                            globalIndex.sourceMeta(),
+                            globalIndex.buildSchemaId());
             IndexFileMeta newIndexFile =
                     new IndexFileMeta(
                             indexFile.indexType(),

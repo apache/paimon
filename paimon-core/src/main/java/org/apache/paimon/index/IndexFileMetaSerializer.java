@@ -50,7 +50,8 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
                                         ? null
                                         : new GenericArray(globalIndexMeta.extraFieldIds()),
                                 globalIndexMeta.indexMeta(),
-                                globalIndexMeta.sourceMeta());
+                                globalIndexMeta.sourceMeta(),
+                                globalIndexMeta.buildSchemaId());
         return GenericRow.of(
                 fromString(record.indexType()),
                 fromString(record.fileName()),
@@ -65,7 +66,7 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
     public IndexFileMeta fromRow(InternalRow row) {
         GlobalIndexMeta globalIndexMeta = null;
         if (!row.isNullAt(6)) {
-            InternalRow globalIndexRow = row.getRow(6, 6);
+            InternalRow globalIndexRow = row.getRow(6, GlobalIndexMeta.SCHEMA.getFieldCount());
             Long rowRangeStart = globalIndexRow.getLong(0);
             Long rowRangeEnd = globalIndexRow.getLong(1);
             Integer indexFieldId = globalIndexRow.getInt(2);
@@ -73,6 +74,7 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
                     globalIndexRow.isNullAt(3) ? null : globalIndexRow.getArray(3).toIntArray();
             byte[] indexMeta = globalIndexRow.isNullAt(4) ? null : globalIndexRow.getBinary(4);
             byte[] sourceMeta = globalIndexRow.isNullAt(5) ? null : globalIndexRow.getBinary(5);
+            Long buildSchemaId = globalIndexRow.isNullAt(6) ? null : globalIndexRow.getLong(6);
             globalIndexMeta =
                     new GlobalIndexMeta(
                             rowRangeStart,
@@ -80,7 +82,8 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
                             indexFieldId,
                             extralFields,
                             indexMeta,
-                            sourceMeta);
+                            sourceMeta,
+                            buildSchemaId);
         }
         return new IndexFileMeta(
                 row.getString(0).toString(),

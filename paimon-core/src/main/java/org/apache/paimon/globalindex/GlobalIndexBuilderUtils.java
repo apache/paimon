@@ -72,7 +72,8 @@ public class GlobalIndexBuilderUtils {
             Range range,
             int indexFieldId,
             String indexType,
-            List<ResultEntry> entries)
+            List<ResultEntry> entries,
+            long buildSchemaId)
             throws IOException {
         return toIndexFileMetas(
                 fileIO,
@@ -83,7 +84,8 @@ public class GlobalIndexBuilderUtils {
                 null,
                 indexType,
                 entries,
-                null);
+                null,
+                buildSchemaId);
     }
 
     /**
@@ -100,7 +102,8 @@ public class GlobalIndexBuilderUtils {
             List<DataField> fields,
             String indexType,
             List<ResultEntry> entries,
-            @Nullable byte[] sourceMeta)
+            @Nullable byte[] sourceMeta,
+            long buildSchemaId)
             throws IOException {
         return toIndexFileMetas(
                 fileIO,
@@ -111,7 +114,8 @@ public class GlobalIndexBuilderUtils {
                 extraFieldIds(fields),
                 indexType,
                 entries,
-                sourceMeta);
+                sourceMeta,
+                buildSchemaId);
     }
 
     public static List<Range> unindexedRowRanges(
@@ -569,7 +573,8 @@ public class GlobalIndexBuilderUtils {
             @Nullable int[] extraFieldIds,
             String indexType,
             List<ResultEntry> entries,
-            @Nullable byte[] sourceMeta)
+            @Nullable byte[] sourceMeta,
+            long buildSchemaId)
             throws IOException {
         List<IndexFileMeta> results = new ArrayList<>();
         for (ResultEntry entry : entries) {
@@ -582,7 +587,8 @@ public class GlobalIndexBuilderUtils {
                             indexFieldId,
                             extraFieldIds,
                             entry.meta(),
-                            sourceMeta);
+                            sourceMeta,
+                            buildSchemaId);
 
             Path externalPathDir = options.globalIndexExternalPath();
             String externalPathString = null;

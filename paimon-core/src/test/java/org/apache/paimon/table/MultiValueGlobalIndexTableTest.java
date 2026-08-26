@@ -21,15 +21,21 @@ package org.apache.paimon.table;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.globalindex.DataEvolutionGlobalIndexScanner;
+import org.apache.paimon.globalindex.GlobalIndexSchemaCompatibility;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.ScanResult;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexScanner;
 import org.apache.paimon.globalindex.sorted.SortedGlobalIndexTestUtils;
+import org.apache.paimon.index.GlobalIndexMeta;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.schema.NestedSchemaUtils;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
@@ -37,6 +43,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
 
@@ -106,6 +113,89 @@ public class MultiValueGlobalIndexTableTest extends TableTestBase {
         assertThat(readIds(fullSearchTable, containsRed)).containsExactlyInAnyOrder(1, 5, 6);
     }
 
+    @Test
+    public void testIndexCompatibilityAcrossSchemaEvolution() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        write(table, GenericRow.of(1, array(-1)));
+        long firstBuildSchemaId = table.schema().id();
+        buildIndex(table);
+
+        catalog.alterTable(identifier(), SchemaChange.addColumn("note", DataTypes.STRING()), false);
+        table = (FileStoreTable) catalog.getTable(identifier());
+        FileStoreTable fullSearchTable = fullSearchTable(table);
+        Predicate sameTypePredicate =
+                new PredicateBuilder(fullSearchTable.rowType()).arrayContains(1, -1);
+        assertThat(readIds(fullSearchTable, sameTypePredicate)).containsExactly(1);
+
+        List<SchemaChange> schemaChanges = new ArrayList<>();
+        NestedSchemaUtils.generateNestedColumnUpdates(
+                Collections.singletonList("tags"),
+                table.rowType().getTypeAt(1),
+                DataTypes.ARRAY(DataTypes.BIGINT()),
+                schemaChanges);
+        table.schemaManager().commitChanges(schemaChanges);
+        table = table.copyWithLatestSchema();
+        write(table, GenericRow.of(2, array(-1L), null));
+        buildIndex(table);
+
+        fullSearchTable = fullSearchTable(table.copyWithLatestSchema());
+        Predicate evolvedTypePredicate =
+                new PredicateBuilder(fullSearchTable.rowType()).arrayContains(1, -1L);
+        IndexFileMeta incompatibleMultiColumnIndex =
+                new IndexFileMeta(
+                        "multivalue",
+                        "incompatible-index",
+                        0,
+                        1,
+                        new GlobalIndexMeta(0, 0, 0, new int[] {1}, null, null, firstBuildSchemaId),
+                        null);
+        assertThat(
+                        GlobalIndexSchemaCompatibility.filterCompatible(
+                                fullSearchTable,
+                                Collections.singletonList(incompatibleMultiColumnIndex)))
+                .isEmpty();
+        try (DataEvolutionGlobalIndexScanner scanner =
+                DataEvolutionGlobalIndexScanner.create(fullSearchTable, null, evolvedTypePredicate)
+                        .get()) {
+            assertThat(scanner.scan(evolvedTypePredicate).get().results().toRangeList())
+                    .containsExactly(new Range(1, 1));
+            assertThat(scanner.unindexedRows(evolvedTypePredicate).results().toRangeList())
+                    .containsExactly(new Range(0, 0));
+        }
+        assertThat(readIds(fullSearchTable, evolvedTypePredicate)).containsExactly(1, 2);
+
+        assertThat(firstBuildSchemaId).isNotEqualTo(fullSearchTable.schema().id());
+    }
+
+    @Test
+    public void testIndexWithoutResolvableBuildSchemaIsIgnored() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        write(table, GenericRow.of(1, array(RED)));
+        IndexFileMeta legacyIndex =
+                new IndexFileMeta(
+                        "multivalue",
+                        "legacy-index",
+                        0,
+                        1,
+                        new GlobalIndexMeta(0, 0, 1, null, null),
+                        null);
+        IndexFileMeta missingSchemaIndex =
+                new IndexFileMeta(
+                        "multivalue",
+                        "missing-schema-index",
+                        0,
+                        1,
+                        new GlobalIndexMeta(0, 0, 1, null, null, null, Long.MAX_VALUE),
+                        null);
+
+        assertThat(
+                        DataEvolutionGlobalIndexScanner.create(
+                                table, Arrays.asList(legacyIndex, missingSchemaIndex)))
+                .isEmpty();
+    }
+
     private void buildIndex(FileStoreTable table) throws Exception {
         SortedGlobalIndexScanner scanner =
                 new SortedGlobalIndexScanner(table, "multivalue").withIndexField("tags");
@@ -146,6 +236,11 @@ public class MultiValueGlobalIndexTableTest extends TableTestBase {
     private List<Integer> readIdsWithFallback(FileStoreTable table, Predicate predicate)
             throws Exception {
         return readIds(table, predicate, false);
+    }
+
+    private FileStoreTable fullSearchTable(FileStoreTable table) {
+        return table.copy(
+                Collections.singletonMap(CoreOptions.GLOBAL_INDEX_SEARCH_MODE.key(), "full"));
     }
 
     private List<Integer> readIds(

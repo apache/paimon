@@ -18,6 +18,8 @@
 
 package org.apache.paimon.table.sink;
 
+import org.apache.paimon.index.GlobalIndexMeta;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 
@@ -49,6 +51,16 @@ public class CommitMessageSerializerTest {
                                 .get(0)
                                 .withColumnMaxSequenceNumbers(new long[] {3L, 42L}));
         dataIncrement.newIndexFiles().addAll(Arrays.asList(randomIndexFile(), randomIndexFile()));
+        dataIncrement
+                .newIndexFiles()
+                .add(
+                        new IndexFileMeta(
+                                "btree",
+                                "global-index-file",
+                                100,
+                                10,
+                                new GlobalIndexMeta(0, 9, 7, null, null, null, 11L),
+                                null));
         dataIncrement
                 .deletedIndexFiles()
                 .addAll(Arrays.asList(randomIndexFile(), randomIndexFile()));

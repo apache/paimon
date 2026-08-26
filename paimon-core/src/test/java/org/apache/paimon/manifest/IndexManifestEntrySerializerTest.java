@@ -55,16 +55,17 @@ public class IndexManifestEntrySerializerTest extends ObjectSerializerTestBase<I
         InternalRow serialized = serializer.toRow(entry);
         assertThat(serialized.getInt(0)).isEqualTo(1);
         assertThat(serialized.getRow(10, GlobalIndexMeta.SCHEMA.getFieldCount()).getFieldCount())
-                .isEqualTo(6);
+                .isEqualTo(7);
 
         GlobalIndexMeta restored = serializer.fromRow(serialized).indexFile().globalIndexMeta();
 
         assertThat(restored.indexMeta()).containsExactly(1);
         assertThat(restored.sourceMeta()).isNull();
+        assertThat(restored.buildSchemaId()).isNull();
     }
 
     @Test
-    void testGlobalIndexSourceMetaRoundTrip() throws IOException {
+    void testGlobalIndexMetadataRoundTrip() throws IOException {
         IndexManifestEntrySerializer serializer = new IndexManifestEntrySerializer();
         IndexManifestEntry entry =
                 new IndexManifestEntry(
@@ -77,7 +78,7 @@ public class IndexManifestEntrySerializerTest extends ObjectSerializerTestBase<I
                                 100,
                                 10,
                                 new GlobalIndexMeta(
-                                        0, 9, 7, null, new byte[] {3, 4}, new byte[] {1, 2}),
+                                        0, 9, 7, null, new byte[] {3, 4}, new byte[] {1, 2}, 11L),
                                 null));
         assertThat(serializer.toRow(entry).getInt(0)).isEqualTo(1);
 
@@ -89,6 +90,7 @@ public class IndexManifestEntrySerializerTest extends ObjectSerializerTestBase<I
 
         assertThat(restored.indexMeta()).containsExactly(3, 4);
         assertThat(restored.sourceMeta()).containsExactly(1, 2);
+        assertThat(restored.buildSchemaId()).isEqualTo(11L);
     }
 
     @Override

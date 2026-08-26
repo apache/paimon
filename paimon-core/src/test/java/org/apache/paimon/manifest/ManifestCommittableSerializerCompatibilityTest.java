@@ -50,7 +50,79 @@ public class ManifestCommittableSerializerCompatibilityTest {
             "generateManifestCommittableGoldenFiles";
 
     @Test
+    public void testCompatibilityToV5CommitV14() throws IOException {
+        ManifestCommittable committable =
+                createCurrentCommitCommittable(new GlobalIndexMeta(0, 9, 7, null, null, null, 11L));
+
+        ManifestCommittableSerializer serializer = new ManifestCommittableSerializer();
+        byte[] current = serializer.serialize(committable);
+        byte[] serialized;
+        if (Boolean.parseBoolean(
+                System.getProperties().getProperty(GENERATE_GOLDEN_FILES_PROPERTY))) {
+            CompatibilityUtils.writeCompatibilityFile("manifest-committable-v14-v5", current);
+            serialized = current;
+        } else {
+            serialized =
+                    IOUtils.readFully(
+                            ManifestCommittableSerializerCompatibilityTest.class
+                                    .getClassLoader()
+                                    .getResourceAsStream(
+                                            "compatibility/manifest-committable-v14-v5"),
+                            true);
+        }
+
+        assertThat(current).isEqualTo(serialized);
+        assertThat(serializer.deserialize(5, serialized)).isEqualTo(committable);
+    }
+
+    @Test
     public void testCompatibilityToV5CommitV13() throws IOException {
+        byte[] serialized =
+                IOUtils.readFully(
+                        ManifestCommittableSerializerCompatibilityTest.class
+                                .getClassLoader()
+                                .getResourceAsStream("compatibility/manifest-committable-v13-v5"),
+                        true);
+
+        assertThat(new ManifestCommittableSerializer().deserialize(5, serialized))
+                .isEqualTo(createCurrentCommitCommittable(null));
+    }
+
+    @Test
+    public void testCompatibilityToV5CommitV13WithGlobalIndex() throws IOException {
+        byte[] serialized =
+                IOUtils.readFully(
+                        ManifestCommittableSerializerCompatibilityTest.class
+                                .getClassLoader()
+                                .getResourceAsStream(
+                                        "compatibility/manifest-committable-v13-global-index-v5"),
+                        true);
+        GlobalIndexMeta expectedGlobalIndex =
+                new GlobalIndexMeta(
+                        0L,
+                        9L,
+                        7,
+                        new int[] {8, 9},
+                        new byte[] {0x12, 0x34},
+                        new byte[] {0x56, 0x78},
+                        null);
+
+        ManifestCommittable deserialized =
+                new ManifestCommittableSerializer().deserialize(5, serialized);
+        assertThat(deserialized).isEqualTo(createCurrentCommitCommittable(expectedGlobalIndex));
+        GlobalIndexMeta actualGlobalIndex =
+                ((CommitMessageImpl) deserialized.fileCommittables().get(0))
+                        .newFilesIncrement()
+                        .newIndexFiles()
+                        .get(0)
+                        .globalIndexMeta();
+        assertThat(actualGlobalIndex).isEqualTo(expectedGlobalIndex);
+        assertThat(actualGlobalIndex.sourceMeta()).containsExactly(0x56, 0x78);
+        assertThat(actualGlobalIndex.buildSchemaId()).isNull();
+    }
+
+    private static ManifestCommittable createCurrentCommitCommittable(
+            GlobalIndexMeta globalIndexMeta) {
         DataFileMeta dataFile =
                 DataFileMeta.create(
                                 "column-sequence-file",
@@ -77,31 +149,11 @@ public class ManifestCommittableSerializerCompatibilityTest {
                                 null)
                         .withColumnMaxSequenceNumbers(new long[] {3L, 5L});
         IndexFileMeta indexFile =
-                new IndexFileMeta(
-                        "index-type", "index-file", 100L, 10L, (GlobalIndexMeta) null, null);
+                new IndexFileMeta("index-type", "index-file", 100L, 10L, globalIndexMeta, null);
         ManifestCommittable committable =
                 createManifestCommittable(
                         Collections.singletonList(dataFile), indexFile, indexFile);
-
-        ManifestCommittableSerializer serializer = new ManifestCommittableSerializer();
-        byte[] current = serializer.serialize(committable);
-        byte[] serialized;
-        if (Boolean.parseBoolean(
-                System.getProperties().getProperty(GENERATE_GOLDEN_FILES_PROPERTY))) {
-            CompatibilityUtils.writeCompatibilityFile("manifest-committable-v13-v5", current);
-            serialized = current;
-        } else {
-            serialized =
-                    IOUtils.readFully(
-                            ManifestCommittableSerializerCompatibilityTest.class
-                                    .getClassLoader()
-                                    .getResourceAsStream(
-                                            "compatibility/manifest-committable-v13-v5"),
-                            true);
-        }
-
-        assertThat(current).isEqualTo(serialized);
-        assertThat(serializer.deserialize(5, serialized)).isEqualTo(committable);
+        return committable;
     }
 
     @Test

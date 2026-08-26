@@ -44,6 +44,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -57,6 +58,8 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
+
+import javax.annotation.Nullable;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -275,6 +278,52 @@ public class FullTextSearchBuilderTest extends TableTestBase {
 
             assertThat(readIds(nonFastModeTable, result)).containsExactly(1);
         }
+    }
+
+    @Test
+    public void testFullTextSearchNonFastModesScanDataWithLegacyIndex() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        String[] documents = {"legacy needle", "other document"};
+        writeDocuments(table, documents);
+        buildAndCommitIndexWithFields(
+                table,
+                documents,
+                Collections.singletonList(table.rowType().getField(TEXT_FIELD_NAME)),
+                null);
+
+        assertNonFastModesUseRawFallback(table, "needle", 0);
+    }
+
+    @Test
+    public void testFullTextSearchNonFastModesScanDataWithIncompatibleIndex() throws Exception {
+        Identifier identifier = identifier("full_text_incompatible_index");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column(TEXT_FIELD_NAME, DataTypes.VARCHAR(32))
+                        .option(CoreOptions.BUCKET.key(), "-1")
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+        FileStoreTable table = getTable(identifier);
+
+        String[] documents = {"incompatible needle", "other document"};
+        writeDocuments(table, documents);
+        buildAndCommitIndex(table, documents);
+        long buildSchemaId = table.schema().id();
+
+        catalog.alterTable(
+                identifier,
+                Collections.singletonList(
+                        SchemaChange.updateColumnType(TEXT_FIELD_NAME, DataTypes.STRING())),
+                false);
+        table = getTable(identifier);
+        assertThat(table.schema().id()).isNotEqualTo(buildSchemaId);
+
+        assertNonFastModesUseRawFallback(table, "needle", 0);
     }
 
     @Test
@@ -881,7 +930,9 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         }
 
         RawFullTextSearchSplit rawOriginal =
-                new RawFullTextSearchSplit(Collections.singletonList(new Range(2, 3)));
+                new RawFullTextSearchSplit(
+                        Collections.singletonList(new Range(2, 3)),
+                        TestFullTextGlobalIndexerFactory.IDENTIFIER);
         bos = new ByteArrayOutputStream();
         try (ObjectOutputStream out = new ObjectOutputStream(bos)) {
             out.writeObject(rawOriginal);
@@ -894,6 +945,7 @@ public class FullTextSearchBuilderTest extends TableTestBase {
         }
 
         assertThat(rawDeserialized.rowRanges()).isEqualTo(rawOriginal.rowRanges());
+        assertThat(rawDeserialized.indexType()).isEqualTo(rawOriginal.indexType());
     }
 
     // ====================== Helper methods ======================
@@ -962,6 +1014,15 @@ public class FullTextSearchBuilderTest extends TableTestBase {
     private void buildAndCommitIndexWithFields(
             FileStoreTable table, String[] documents, List<DataField> indexFields)
             throws Exception {
+        buildAndCommitIndexWithFields(table, documents, indexFields, table.schema().id());
+    }
+
+    private void buildAndCommitIndexWithFields(
+            FileStoreTable table,
+            String[] documents,
+            List<DataField> indexFields,
+            @Nullable Long buildSchemaId)
+            throws Exception {
         Options options = table.coreOptions().toConfiguration();
         DataField textField = table.rowType().getField(TEXT_FIELD_NAME);
 
@@ -987,7 +1048,31 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         indexFields,
                         TestFullTextGlobalIndexerFactory.IDENTIFIER,
                         entries,
-                        null);
+                        null,
+                        buildSchemaId == null ? table.schema().id() : buildSchemaId);
+        if (buildSchemaId == null) {
+            List<IndexFileMeta> legacyIndexFiles = new ArrayList<>();
+            for (IndexFileMeta indexFile : indexFiles) {
+                GlobalIndexMeta globalIndex = indexFile.globalIndexMeta();
+                legacyIndexFiles.add(
+                        new IndexFileMeta(
+                                indexFile.indexType(),
+                                indexFile.fileName(),
+                                indexFile.fileSize(),
+                                indexFile.rowCount(),
+                                indexFile.dvRanges(),
+                                indexFile.externalPath(),
+                                new GlobalIndexMeta(
+                                        globalIndex.rowRangeStart(),
+                                        globalIndex.rowRangeEnd(),
+                                        globalIndex.indexFieldId(),
+                                        globalIndex.extraFieldIds(),
+                                        globalIndex.indexMeta(),
+                                        globalIndex.sourceMeta(),
+                                        null)));
+            }
+            indexFiles = legacyIndexFiles;
+        }
 
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
         CommitMessage message =
@@ -999,6 +1084,30 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         CompactIncrement.emptyIncrement());
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.commit(Collections.singletonList(message));
+        }
+    }
+
+    private void assertNonFastModesUseRawFallback(
+            FileStoreTable table, String query, int expectedId) throws Exception {
+        for (String searchMode : Arrays.asList("full", "detail")) {
+            FileStoreTable nonFastModeTable =
+                    (FileStoreTable)
+                            table.copy(
+                                    Collections.singletonMap(
+                                            CoreOptions.FULL_TEXT_INDEX_SEARCH_MODE.key(),
+                                            searchMode));
+            FullTextSearchBuilder searchBuilder =
+                    nonFastModeTable
+                            .newFullTextSearchBuilder()
+                            .withQuery(TEXT_FIELD_NAME, matchQuery(query))
+                            .withLimit(10);
+
+            List<FullTextSearchSplit> splits = searchBuilder.newFullTextScan().scan().splits();
+            assertThat(splits).singleElement().isInstanceOf(RawFullTextSearchSplit.class);
+            RawFullTextSearchSplit rawSplit = (RawFullTextSearchSplit) splits.get(0);
+            assertThat(rawSplit.indexType()).isEqualTo(TestFullTextGlobalIndexerFactory.IDENTIFIER);
+            assertThat(readIds(nonFastModeTable, searchBuilder.executeLocal()))
+                    .containsExactly(expectedId);
         }
     }
 
@@ -1026,7 +1135,8 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         Collections.singletonList(textField),
                         TestFullTextGlobalIndexerFactory.IDENTIFIER,
                         writer.finish(),
-                        null);
+                        null,
+                        table.schema().id());
         byte[] sourceMeta =
                 new PrimaryKeyIndexSourceMeta(
                                 1, new PrimaryKeyIndexSourceFile("data-file", documents.length))
@@ -1046,7 +1156,8 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                                     meta.indexFieldId(),
                                     meta.extraFieldIds(),
                                     meta.indexMeta(),
-                                    sourceMeta),
+                                    sourceMeta,
+                                    meta.buildSchemaId()),
                             indexFile.externalPath()));
         }
 
@@ -1098,7 +1209,8 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         indexFields,
                         TestFullTextGlobalIndexerFactory.IDENTIFIER,
                         entries,
-                        null);
+                        null,
+                        table.schema().id());
 
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
         CommitMessage message =
@@ -1176,7 +1288,8 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         rowRange,
                         textField.id(),
                         TestFullTextGlobalIndexerFactory.IDENTIFIER,
-                        entries);
+                        entries,
+                        table.schema().id());
 
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
         CommitMessage message =
@@ -1210,7 +1323,8 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         rowRange,
                         textField.id(),
                         BTreeGlobalIndexerFactory.IDENTIFIER,
-                        entries);
+                        entries,
+                        table.schema().id());
 
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
         CommitMessage message =
@@ -1262,7 +1376,8 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         rowRange1,
                         textField.id(),
                         TestFullTextGlobalIndexerFactory.IDENTIFIER,
-                        entries1);
+                        entries1,
+                        table.schema().id());
 
         // Build second index file covering rows [mid, end)
         GlobalIndexSingleColumnWriter writer2 =
@@ -1285,7 +1400,8 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         rowRange2,
                         textField.id(),
                         TestFullTextGlobalIndexerFactory.IDENTIFIER,
-                        entries2);
+                        entries2,
+                        table.schema().id());
 
         // Combine all index files and commit together
         List<IndexFileMeta> allIndexFiles = new ArrayList<>();

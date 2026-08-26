@@ -223,7 +223,14 @@ public class LuminaVectorGlobalIndexScanTest {
         for (ResultEntry entry : entries) {
             long fileSize = fileIO.getFileSize(new Path(indexDir, entry.fileName()));
             GlobalIndexMeta globalMeta =
-                    new GlobalIndexMeta(0, vectors.length - 1, fieldId, null, entry.meta());
+                    new GlobalIndexMeta(
+                            0,
+                            vectors.length - 1,
+                            fieldId,
+                            null,
+                            entry.meta(),
+                            null,
+                            ipTable.schema().id());
 
             metas.add(
                     new IndexFileMeta(
@@ -314,7 +321,14 @@ public class LuminaVectorGlobalIndexScanTest {
         for (ResultEntry entry : entries) {
             long fileSize = fileIO.getFileSize(new Path(indexDir, entry.fileName()));
             GlobalIndexMeta globalMeta =
-                    new GlobalIndexMeta(0, vectors.length - 1, fieldId, null, entry.meta());
+                    new GlobalIndexMeta(
+                            0,
+                            vectors.length - 1,
+                            fieldId,
+                            null,
+                            entry.meta(),
+                            null,
+                            table.schema().id());
 
             metas.add(
                     new IndexFileMeta(
