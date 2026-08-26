@@ -294,11 +294,16 @@ class BlobFallbackBatchReader(RecordBatchReader):
     def __init__(self, file_reader_suppliers: List[Tuple[DataFileMeta, Callable]],
                  field_name: str, output_type, row_ranges: Optional[List[Range]] = None,
                  blob_as_descriptor: bool = False, deletion_vector=None, batch_size: int = 1024,
-                 blob_parallelism: int = 1):
+                 blob_parallelism: int = 1,
+                 logical_ranges: Optional[List[Range]] = None):
         self._file_reader_suppliers = file_reader_suppliers
         self._field_name = field_name
         self._output_type = output_type
         self._row_ranges = Range.sort_and_merge_overlap(row_ranges) if row_ranges else None
+        self._logical_ranges = (
+            Range.sort_and_merge_overlap(logical_ranges)
+            if logical_ranges is not None else None
+        )
         self._blob_as_descriptor = blob_as_descriptor
         self._is_array_blob = pa.types.is_list(output_type) or pa.types.is_large_list(output_type)
         self._is_map_blob = pa.types.is_map(output_type)
@@ -386,14 +391,15 @@ class BlobFallbackBatchReader(RecordBatchReader):
             if state.selected_range_index >= len(state.selected_ranges):
                 self._close_state_reader(state)
 
-        if not groups:
-            return None
-
+        groups_by_sequence = [
+            groups[sequence]
+            for sequence in sorted(groups.keys(), reverse=True)
+        ]
         result = []
         for row_id in batch_row_ids:
             found = False
-            for max_sequence_number in sorted(groups.keys(), reverse=True):
-                candidate = groups[max_sequence_number].get(row_id)
+            for group in groups_by_sequence:
+                candidate = group.get(row_id)
                 if candidate is None:
                     continue
                 value, is_placeholder = candidate
@@ -402,7 +408,7 @@ class BlobFallbackBatchReader(RecordBatchReader):
                     found = True
                     break
             if not found:
-                raise ValueError("All blob files at the same row id store a placeholder.")
+                result.append(None)
 
         if resolve_blobs_concurrently:
             result = self._resolve_selected_blobs(result)
@@ -492,10 +498,12 @@ class BlobFallbackBatchReader(RecordBatchReader):
         return resolved
 
     def _compute_target_ranges(self) -> List[Range]:
-        ranges = Range.sort_and_merge_overlap([
-            file.row_id_range()
-            for file, _ in self._file_reader_suppliers
-        ])
+        ranges = self._logical_ranges
+        if ranges is None:
+            ranges = Range.sort_and_merge_overlap([
+                file.row_id_range()
+                for file, _ in self._file_reader_suppliers
+            ])
         if self._row_ranges is not None:
             ranges = Range.and_(ranges, self._row_ranges)
         return ranges

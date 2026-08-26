@@ -306,7 +306,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                         rowRanges != null);
 
         long rowCount = fieldsFiles.get(0).rowCount();
-        long firstRowId = fieldsFiles.get(0).files().get(0).nonNullFirstRowId();
+        long firstRowId = bunchFirstRowId(fieldsFiles.get(0));
 
         if (rowRanges == null) {
             for (FieldBunch bunch : fieldsFiles) {
@@ -314,7 +314,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                         bunch.rowCount() == rowCount,
                         "All files in a field merge split should have the same row count.");
                 checkArgument(
-                        bunch.files().get(0).nonNullFirstRowId() == firstRowId,
+                        bunchFirstRowId(bunch) == firstRowId,
                         "All files in a field merge split should have the same first row id and could not be null.");
             }
         }
@@ -437,7 +437,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             // for blob bunch, fallback on placeholders
 
             // fast path: only contains one max_seq group
-            if (((BlobFileBunch) bunch).sequentialReadOptimize()) {
+            BlobFileBunch blobBunch = (BlobFileBunch) bunch;
+            if (blobBunch.sequentialReadOptimize()) {
                 return sequentialReadFiles(
                         bunch.files(),
                         partition,
@@ -461,6 +462,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                     deletionVector),
                     (reader, range) ->
                             applyDeletionVector(reader, range, rowRanges, deletionVector),
+                    blobBunch.logicalRange(),
                     rowRanges,
                     readRowType,
                     blobIndex);
@@ -1008,14 +1010,15 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         Map<Integer, BlobFileBunch> blobBunchMap = new HashMap<>();
         Map<VectorStoreBunchKey, VectorFileBunch> vectorStoreBunchMap = new TreeMap<>();
         long rowCount = -1;
+        Range rowRange = null;
         for (DataFileMeta file : needMergeFiles) {
             if (isBlobFile(file.fileName())) {
                 RowType rowType = fileToRowType.apply(file);
                 int fieldId = rowType.getField(file.writeCols().get(0)).id();
-                final long expectedRowCount = rowCount;
+                final Range expectedRowRange = rowRange;
                 blobBunchMap
                         .computeIfAbsent(
-                                fieldId, key -> new BlobFileBunch(expectedRowCount, rowIdPushDown))
+                                fieldId, key -> new BlobFileBunch(expectedRowRange, rowIdPushDown))
                         .add(file);
             } else if (isVectorStoreFile(file.fileName())) {
                 RowType rowType = fileToRowType.apply(file);
@@ -1033,6 +1036,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 // Normal file, just add it to the current merge split
                 fieldsFiles.add(new DataBunch(file));
                 rowCount = file.rowCount();
+                rowRange = file.nonNullRowIdRange();
             }
         }
         fieldsFiles.addAll(blobBunchMap.values());
@@ -1046,6 +1050,13 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         long rowCount();
 
         List<DataFileMeta> files();
+    }
+
+    private static long bunchFirstRowId(FieldBunch bunch) {
+        if (bunch instanceof BlobFileBunch) {
+            return ((BlobFileBunch) bunch).logicalRange().from;
+        }
+        return bunch.files().get(0).nonNullFirstRowId();
     }
 
     private static class DataBunch implements FieldBunch {
@@ -1076,12 +1087,14 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
         final List<DataFileMeta> files;
         final List<Range> ranges;
-        final long expectedRowCount;
+        // The normal file owns the logical rows; a Blob column added later may physically cover
+        // only a subset of that anchor range.
+        @Nullable final Range expectedRowRange;
         final boolean rowIdPushdown;
 
-        BlobFileBunch(long expectedRowCount, boolean rowIdPushdown) {
+        BlobFileBunch(@Nullable Range expectedRowRange, boolean rowIdPushdown) {
             this.files = new ArrayList<>();
-            this.expectedRowCount = expectedRowCount;
+            this.expectedRowRange = expectedRowRange;
             this.ranges = new ArrayList<>();
             this.rowIdPushdown = rowIdPushdown;
         }
@@ -1103,22 +1116,38 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         @Override
         public long rowCount() {
             List<Range> merged = Range.sortAndMergeOverlap(ranges, true);
+            if (expectedRowRange != null) {
+                for (Range range : merged) {
+                    Preconditions.checkState(
+                            range.from >= expectedRowRange.from && range.to <= expectedRowRange.to,
+                            "Blob file range %s should be within normal file range %s.",
+                            range,
+                            expectedRowRange);
+                }
+                return expectedRowRange.count();
+            }
+
             if (!rowIdPushdown) {
                 Preconditions.checkState(
                         merged.size() == 1,
                         "Blob file bunch should always contain a contiguous row range.");
-
-                long rowCount = merged.get(0).count();
-                if (expectedRowCount >= 0) {
-                    Preconditions.checkState(
-                            rowCount == expectedRowCount,
-                            "The merged rowCount %s of blob file bunch should be aligned with normal files %s.",
-                            rowCount,
-                            expectedRowCount);
-                }
             }
 
             return merged.stream().mapToLong(Range::count).sum();
+        }
+
+        Range logicalRange() {
+            if (expectedRowRange != null) {
+                return expectedRowRange;
+            }
+            List<Range> merged = Range.sortAndMergeOverlap(ranges, true);
+            Preconditions.checkState(!merged.isEmpty(), "Blob file bunch should not be empty.");
+            return new Range(merged.get(0).from, merged.get(merged.size() - 1).to);
+        }
+
+        private boolean fullyCoversLogicalRange() {
+            List<Range> merged = Range.sortAndMergeOverlap(ranges, true);
+            return merged.size() == 1 && merged.get(0).equals(logicalRange());
         }
 
         public boolean sequentialReadOptimize() {
@@ -1133,7 +1162,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 }
             }
 
-            return true;
+            return fullyCoversLogicalRange();
         }
 
         @Override

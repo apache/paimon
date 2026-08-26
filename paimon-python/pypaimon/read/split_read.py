@@ -1319,14 +1319,14 @@ class DataEvolutionSplitRead(SplitRead):
 
         # Validate row counts and first row IDs (skip when row ranges are pushed down)
         row_count = fields_files[0].row_count()
-        first_row_id = fields_files[0].files()[0].first_row_id
+        first_row_id = self._bunch_first_row_id(fields_files[0])
 
         if self.row_ranges is None:
             for bunch in fields_files:
                 if bunch.row_count() != row_count:
                     raise ValueError(
                         "All files in a field merge split should have the same row count.")
-                if bunch.files()[0].first_row_id != first_row_id:
+                if self._bunch_first_row_id(bunch) != first_row_id:
                     raise ValueError(
                         "All files in a field merge split should have the same "
                         "first row id and could not be null."
@@ -1387,12 +1387,10 @@ class DataEvolutionSplitRead(SplitRead):
                 # non-empty bunch reader created below must return the same row-id
                 # sequence. Keep row_ranges and the group-level deletion vector
                 # applied uniformly across normal, blob, and vector bunches.
-                if len(bunch.files()) == 1:
-                    suppliers = [lambda r=self._create_file_reader(
-                        bunch.files()[0], read_field_names, deletion_vector
-                    ): r]
-                    file_record_readers[i] = MergeAllBatchReader(suppliers, batch_size=batch_size)
-                elif DataFileMeta.is_blob_file(first_file.file_name):
+                is_blob_bunch = isinstance(bunch, BlobBunch)
+                if (is_blob_bunch
+                        and (len(bunch.files()) != 1
+                             or not bunch.sequential_read_optimize())):
                     file_reader_suppliers = [
                         (
                             file,
@@ -1415,7 +1413,13 @@ class DataEvolutionSplitRead(SplitRead):
                         deletion_vector=deletion_vector,
                         batch_size=batch_size,
                         blob_parallelism=self._blob_parallelism,
+                        logical_ranges=[bunch.logical_range()],
                     )
+                elif len(bunch.files()) == 1:
+                    suppliers = [lambda r=self._create_file_reader(
+                        bunch.files()[0], read_field_names, deletion_vector
+                    ): r]
+                    file_record_readers[i] = MergeAllBatchReader(suppliers, batch_size=batch_size)
                 else:
                     # Create concatenated reader for multiple files
                     suppliers = [
@@ -1480,13 +1484,15 @@ class DataEvolutionSplitRead(SplitRead):
         blob_bunch_map = {}
         vector_bunch_map = {}
         row_count = -1
+        row_range = None
         row_id_push_down = self.row_ranges is not None
 
         for file in need_merge_files:
             if DataFileMeta.is_blob_file(file.file_name):
                 field_id = self._get_field_id_from_write_cols(file)
                 if field_id not in blob_bunch_map:
-                    blob_bunch_map[field_id] = BlobBunch(row_count, row_id_push_down)
+                    blob_bunch_map[field_id] = BlobBunch(
+                        row_count, row_id_push_down, row_range)
                 blob_bunch_map[field_id].add(file)
             elif DataFileMeta.is_vector_file(file.file_name):
                 field_id = self._get_field_id_from_write_cols(file)
@@ -1496,12 +1502,19 @@ class DataEvolutionSplitRead(SplitRead):
             else:
                 fields_files.append(DataBunch(file))
                 row_count = file.row_count
+                row_range = file.row_id_range()
 
         for bunch in blob_bunch_map.values():
             bunch.finish()
             fields_files.append(bunch)
         fields_files.extend(vector_bunch_map.values())
         return fields_files
+
+    @staticmethod
+    def _bunch_first_row_id(bunch: FieldBunch) -> int:
+        if isinstance(bunch, BlobBunch):
+            return bunch.logical_range().from_
+        return bunch.files()[0].first_row_id
 
     def _get_field_id_from_write_cols(self, file: DataFileMeta) -> int:
         """Get field ID from write columns for blob/vector files."""
