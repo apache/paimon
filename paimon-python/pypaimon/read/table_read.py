@@ -664,28 +664,15 @@ class TableRead:
     ) -> "torch.utils.data.Dataset":
         """Wrap Paimon table data in a PyTorch Dataset.
 
-        ``batch_format="row"`` preserves the original behavior and yields one
-        Python dictionary per row. Streaming reads can instead yield native
-        PyArrow ``RecordBatch`` objects or dictionaries of Torch tensors,
-        avoiding per-row Python conversion. Use ``DataLoader(batch_size=None)``
-        for either batch-first format so PyTorch does not batch the data again.
-
         Args:
-            splits: Scan-plan splits to read.
-            streaming: Whether to stream through an ``IterableDataset``.
-            prefetch_concurrency: Split-read threads inside each DataLoader
-                worker.
-            batch_format: ``"row"`` (default), ``"pyarrow"``, or ``"torch"``.
-                Batch formats require ``streaming=True``.
-            batch_size: Optional number of rows per yielded batch. ``None``
-                preserves native Paimon reader batch sizes. A positive value
-                combines or slices RecordBatches, with only the last batch in
-                each DataLoader worker allowed to be smaller.
-            to_tensor_fn: Optional callable receiving a PyArrow RecordBatch in
-                ``batch_format="torch"`` mode. By default, numeric, boolean,
-                and fixed-size-list columns are converted to tensors.
-            shuffle: Whether to apply Paimon's row-level streaming shuffle.
-                This currently supports only ``batch_format="row"``.
+            splits: Splits to read.
+            streaming: Whether to stream data.
+            prefetch_concurrency: Reader threads per DataLoader worker.
+            batch_format: ``"row"``, ``"pyarrow"``, or ``"torch"``. Batch
+                formats require streaming.
+            batch_size: Rows per batch; ``None`` preserves reader batches.
+            to_tensor_fn: Optional RecordBatch converter for Torch batches.
+            shuffle: Whether to shuffle rows; supported only in row format.
         """
         valid_batch_formats = {"row", "pyarrow", "torch"}
         if batch_format not in valid_batch_formats:
