@@ -21,10 +21,10 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.spark.{PaimonSparkTestBase, SparkConnectorOptions}
 
 import org.apache.spark.sql.{PaimonUtils, Row}
-import org.apache.spark.sql.catalyst.expressions.{AttributeReference, LessThan, Literal}
+import org.apache.spark.sql.catalyst.expressions.{AttributeReference, Expression, LessThan, Literal}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.plans.logical.MergeRows
-import org.apache.spark.sql.catalyst.plans.logical.MergeRows.{Discard, Keep, Split}
+import org.apache.spark.sql.catalyst.plans.logical.MergeRows.{Discard, Instruction, Split}
 import org.apache.spark.sql.execution.WholeStageCodegenExec
 import org.apache.spark.sql.execution.datasources.v2.MergeRowsExec
 import org.apache.spark.sql.types.IntegerType
@@ -32,6 +32,8 @@ import org.apache.spark.sql.types.IntegerType
 abstract class MergeRowsCodegenTestBase extends PaimonSparkTestBase {
 
   import testImplicits._
+
+  protected def keepInstruction(condition: Expression, output: Seq[Expression]): Instruction
 
   test("merge row codegen requires Spark and Paimon flags") {
     assert(!SparkConnectorOptions.MERGE_CODEGEN_ENABLED.defaultValue())
@@ -67,9 +69,10 @@ abstract class MergeRowsCodegenTestBase extends PaimonSparkTestBase {
             isSourceRowPresent = sourcePresent,
             isTargetRowPresent = targetPresent,
             matchedInstructions = Seq(
-              Keep(LessThan(sourceValue, Literal(15)), Seq(targetId, sourceValue)),
+              keepInstruction(LessThan(sourceValue, Literal(15)), Seq(targetId, sourceValue)),
               Discard(TrueLiteral)),
-            notMatchedInstructions = Seq(Keep(TrueLiteral, Seq(sourceValue, sourceValue))),
+            notMatchedInstructions =
+              Seq(keepInstruction(TrueLiteral, Seq(sourceValue, sourceValue))),
             notMatchedBySourceInstructions =
               Seq(Split(TrueLiteral, Seq(targetId, Literal(-1)), Seq(targetId, Literal(-2)))),
             checkCardinality = true,

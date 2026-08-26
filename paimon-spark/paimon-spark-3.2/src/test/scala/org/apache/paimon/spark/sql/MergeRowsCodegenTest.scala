@@ -18,4 +18,13 @@
 
 package org.apache.paimon.spark.sql
 
-class MergeRowsCodegenTest extends MergeRowsCodegenTestBase
+import org.apache.spark.sql.catalyst.expressions.Expression
+import org.apache.spark.sql.catalyst.plans.logical.MergeRows.{Instruction, Keep}
+
+class MergeRowsCodegenTest extends MergeRowsCodegenTestBase {
+
+  override protected def keepInstruction(
+      condition: Expression,
+      output: Seq[Expression]): Instruction =
+    Keep(condition, output)
+}
