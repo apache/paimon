@@ -29,9 +29,7 @@ public interface PolicyManagement {
 
     PagedList<DataPolicy> listPolicies(ListPoliciesRequest request);
 
-    void createPolicy(DataPolicy policy);
-
-    void createOrReplacePolicy(DataPolicy policy);
+    void createPolicy(DataPolicy policy) throws PolicyAlreadyExistException;
 
     void dropPolicy(
             PermissionResource resource,
@@ -39,4 +37,34 @@ public interface PolicyManagement {
             String principal,
             @Nullable String column,
             boolean ignoreIfNotExists);
+
+    /** Exception for trying to create a policy that already exists. */
+    class PolicyAlreadyExistException extends Exception {
+
+        private final DataPolicy policy;
+
+        public PolicyAlreadyExistException(DataPolicy policy) {
+            this(policy, null);
+        }
+
+        public PolicyAlreadyExistException(DataPolicy policy, Throwable cause) {
+            super(message(policy), cause);
+            this.policy = policy;
+        }
+
+        public DataPolicy policy() {
+            return policy;
+        }
+
+        private static String message(DataPolicy policy) {
+            String target = policy.type().name();
+            if (policy.getColumnMask() != null) {
+                target += "(" + policy.getColumnMask().getOnColumn() + ")";
+            }
+            PermissionResource resource = policy.getResource();
+            return String.format(
+                    "%s policy for principal '%s' already exists on table '%s.%s'.",
+                    target, policy.getPrincipal(), resource.getDatabase(), resource.getTable());
+        }
+    }
 }

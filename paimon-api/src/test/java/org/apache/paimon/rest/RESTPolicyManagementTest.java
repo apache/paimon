@@ -24,9 +24,11 @@ import org.apache.paimon.management.DataPolicy;
 import org.apache.paimon.management.ListPoliciesRequest;
 import org.apache.paimon.management.PermissionResource;
 import org.apache.paimon.management.PolicyManagement;
+import org.apache.paimon.management.PolicyManagement.PolicyAlreadyExistException;
 import org.apache.paimon.management.PolicyType;
 import org.apache.paimon.management.ResourceType;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
@@ -60,7 +62,7 @@ public class RESTPolicyManagementTest {
     private PolicyManagement management;
     private final AtomicReference<String> listQuery = new AtomicReference<>();
     private final AtomicReference<String> createBody = new AtomicReference<>();
-    private final AtomicReference<String> updateBody = new AtomicReference<>();
+    private final AtomicReference<String> createError = new AtomicReference<>();
     private final AtomicReference<String> deleteBody = new AtomicReference<>();
     private final AtomicReference<String> deleteError = new AtomicReference<>();
     private final AtomicInteger deleteCalls = new AtomicInteger();
@@ -78,10 +80,11 @@ public class RESTPolicyManagementTest {
                         respond(exchange, 200, listResponse());
                     } else if (COLLECTION_PATH.equals(path) && "POST".equals(method)) {
                         createBody.set(readBody(exchange));
-                        respond(exchange, 200, null);
-                    } else if (COLLECTION_PATH.equals(path) && "PUT".equals(method)) {
-                        updateBody.set(readBody(exchange));
-                        respond(exchange, 200, null);
+                        if (createError.get() == null) {
+                            respond(exchange, 200, null);
+                        } else {
+                            respond(exchange, 409, createError.get());
+                        }
                     } else if (COLLECTION_PATH.equals(path) && "DELETE".equals(method)) {
                         deleteBody.set(readBody(exchange));
                         deleteCalls.incrementAndGet();
@@ -134,10 +137,9 @@ public class RESTPolicyManagementTest {
     }
 
     @Test
-    void testCreateUpdateAndDropUseCrudMethods() {
+    void testCreateAndDropUseCrudMethods() throws Exception {
         DataPolicy policy = policy();
         management.createPolicy(policy);
-        management.createOrReplacePolicy(policy);
         management.dropPolicy(
                 policy.getResource(),
                 policy.type(),
@@ -147,11 +149,31 @@ public class RESTPolicyManagementTest {
 
         assertThat(createBody.get()).contains("\"principal\":\"analyst\"");
         assertThat(createBody.get()).doesNotContain("\"resource\"");
-        assertThat(updateBody.get()).contains("\"columnMask\"");
         assertThat(deleteBody.get())
                 .contains("\"type\":\"COLUMN_MASKING\"")
                 .contains("\"column\":\"email\"");
         assertThat(deleteCalls).hasValue(1);
+    }
+
+    @Test
+    void testCreateMapsOnlyPolicyConflict() {
+        DataPolicy policy = policy();
+        createError.set(
+                "{\"resourceType\":\"POLICY\",\"resourceName\":"
+                        + "\"COLUMN_MASKING:analyst:email\","
+                        + "\"message\":\"already exists\",\"code\":409}");
+
+        assertThatThrownBy(() -> management.createPolicy(policy))
+                .isInstanceOf(PolicyAlreadyExistException.class)
+                .hasMessageContaining("COLUMN_MASKING(email)")
+                .hasCauseInstanceOf(AlreadyExistsException.class);
+
+        createError.set(
+                "{\"resourceType\":\"TABLE\",\"resourceName\":\"orders\","
+                        + "\"message\":\"table conflict\",\"code\":409}");
+        assertThatThrownBy(() -> management.createPolicy(policy))
+                .isInstanceOf(AlreadyExistsException.class)
+                .hasMessageContaining("table conflict");
     }
 
     @Test
