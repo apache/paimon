@@ -23,9 +23,9 @@ info:
     table column masks in one Paimon REST Catalog prefix. A data policy restricts an
     already-authorized read;
     it never grants SELECT by itself. Each policy is attached to one principal: a principal has at
-    most one row filter per table and at most one mask per table column. Policy creation and
-    replacement are accepted only when the target table exists, has `query-auth.enabled=true`, and
-    the referenced principal, serialized Paimon predicate or transform, and columns are valid.
+    most one row filter per table and at most one mask per table column. Policy creation is accepted
+    only when the target table exists, has `query-auth.enabled=true`, and the referenced principal,
+    serialized Paimon predicate or transform, and columns are valid.
     Authentication follows the REST Catalog deployment configuration and is not fixed by this
     extension.
     Principal lifecycle, audit, and persistence remain server responsibilities. This contract may
@@ -205,35 +205,6 @@ paths:
       responses:
         '200':
           description: Policy created.
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/ServerError'
-        '503':
-          $ref: '#/components/responses/ServiceUnavailable'
-    put:
-      tags: [policy]
-      summary: Create or fully replace a table policy
-      operationId: createOrReplaceTablePolicy
-      description: |
-        Upserts the policy identified by the body principal, definition type, and, for a column
-        mask, `onColumn`. The same validation and `query-auth.enabled=true` requirement as create
-        applies. Replacing one column mask does not replace masks on other columns.
-      requestBody:
-        $ref: '#/components/requestBodies/PolicyRequest'
-      responses:
-        '200':
-          description: Policy created or fully replaced.
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -727,7 +698,7 @@ components:
             JSON serialization of one Paimon `Predicate`, using the same representation as one
             entry in `AuthTableQueryResponse.filter`. The UTF-8 representation must not exceed
             60 KiB. The server must deserialize, validate against the target table schema, and
-            canonicalize it when the policy is created or replaced.
+            canonicalize it when the policy is created.
     ColumnMask:
       type: object
       additionalProperties: false
@@ -746,7 +717,7 @@ components:
             value for `onColumn` in `AuthTableQueryResponse.columnMasking`. The UTF-8
             representation must not exceed 60 KiB. The server must deserialize it, validate all
             field references and the output type against the target table schema, and canonicalize
-            it when the policy is created or replaced.
+            it when the policy is created.
     RowFilterPolicyRequest:
       type: object
       additionalProperties: false

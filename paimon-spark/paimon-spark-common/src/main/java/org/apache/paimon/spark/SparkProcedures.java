@@ -29,7 +29,6 @@ import org.apache.paimon.spark.procedure.CopyFilesProcedure;
 import org.apache.paimon.spark.procedure.CreateBranchProcedure;
 import org.apache.paimon.spark.procedure.CreateFunctionProcedure;
 import org.apache.paimon.spark.procedure.CreateGlobalIndexProcedure;
-import org.apache.paimon.spark.procedure.CreateOrReplacePolicyProcedure;
 import org.apache.paimon.spark.procedure.CreatePolicyProcedure;
 import org.apache.paimon.spark.procedure.CreateTagFromTimestampProcedure;
 import org.apache.paimon.spark.procedure.CreateTagProcedure;
@@ -145,7 +144,6 @@ public class SparkProcedures {
         procedureBuilders.put("revoke_permission", RevokePermissionProcedure::builder);
         procedureBuilders.put("list_permissions", ListPermissionsProcedure::builder);
         procedureBuilders.put("create_policy", CreatePolicyProcedure::builder);
-        procedureBuilders.put("create_or_replace_policy", CreateOrReplacePolicyProcedure::builder);
         procedureBuilders.put("drop_policy", DropPolicyProcedure::builder);
         procedureBuilders.put("list_policies", ListPoliciesProcedure::builder);
         return procedureBuilders.build();

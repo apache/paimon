@@ -312,7 +312,6 @@ function validateManagementOpenApi() {
     'revokePermission',
     'listTablePolicies',
     'createTablePolicy',
-    'createOrReplaceTablePolicy',
     'dropTablePolicy',
   ];
   const resourcePaths = [
@@ -352,7 +351,7 @@ function validateManagementOpenApi() {
     ]),
   );
   contract.requireResponses('grantPermission', ['409']);
-  ['listTablePolicies', 'createTablePolicy', 'createOrReplaceTablePolicy'].forEach((operationId) =>
+  ['listTablePolicies', 'createTablePolicy'].forEach((operationId) =>
     contract.requireResponses(operationId, [
       '200',
       '400',
@@ -374,9 +373,7 @@ function validateManagementOpenApi() {
     '500',
     '503',
   ]);
-  ['createTablePolicy', 'createOrReplaceTablePolicy'].forEach((operationId) =>
-    contract.requireResponses(operationId, ['409']),
-  );
+  contract.requireResponses('createTablePolicy', ['409']);
   contract.checkSpec(
     contract.spec.info.version === '1.0' &&
       contract.spec.info.description.toLowerCase().includes('experimental'),
@@ -761,8 +758,8 @@ function validateManagementOpenApi() {
   const tablePoliciesPath =
     contract.spec.paths['/v1/{prefix}/databases/{database}/tables/{table}/policies'];
   contract.checkSpec(
-    tablePoliciesPath.put && tablePoliciesPath.delete,
-    'Full policy replacement and deletion must use the table policy collection identity',
+    tablePoliciesPath.post && tablePoliciesPath.delete && !tablePoliciesPath.put,
+    'Policy creation and deletion must use the table policy collection identity without PUT',
   );
 
   contract.checkSpec(

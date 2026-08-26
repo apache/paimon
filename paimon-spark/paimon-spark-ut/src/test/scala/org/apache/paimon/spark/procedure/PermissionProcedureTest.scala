@@ -278,7 +278,7 @@ class PermissionProcedureTest extends PaimonSparkTestWithRestCatalogBase {
     assertThat(missing.getMessage).contains("Permission column does not exist")
   }
 
-  test("create, replace, apply and idempotently drop table data policies") {
+  test("create, reject duplicates, apply and idempotently drop table data policies") {
     restCatalogServer.setQueryPrincipals(Collections.singleton("analyst"))
     spark.sql(
       "INSERT OVERWRITE paimon.sales.orders VALUES " +
@@ -325,17 +325,19 @@ class PermissionProcedureTest extends PaimonSparkTestWithRestCatalogBase {
       Row(1, "APAC", "apac@example.com")
     )
 
-    checkAnswer(
-      spark.sql(s"""CALL sys.create_or_replace_policy(
-                   |  database => 'sales',
-                   |  table => 'orders',
-                   |  policy_type => 'ROW_FILTER',
-                   |  principal => 'analyst',
-                   |  predicate_json => ${sqlLiteral(emeaFilter)})
-                   |""".stripMargin),
-      Row(true)
-    )
-    val replaced = spark
+    val duplicate = intercept[Exception] {
+      spark
+        .sql(s"""CALL sys.create_policy(
+                |  database => 'sales',
+                |  table => 'orders',
+                |  policy_type => 'ROW_FILTER',
+                |  principal => 'analyst',
+                |  predicate_json => ${sqlLiteral(emeaFilter)})
+                |""".stripMargin)
+        .collect()
+    }
+    assertThat(duplicate.getMessage).contains("already exists")
+    val unchanged = spark
       .sql("""CALL sys.list_policies(
              |  database => 'sales',
              |  table => 'orders',
@@ -343,7 +345,7 @@ class PermissionProcedureTest extends PaimonSparkTestWithRestCatalogBase {
              |  principal => 'analyst')
              |""".stripMargin)
       .head()
-    assertThat(replaced.getString(4)).contains("EMEA")
+    assertThat(unchanged.getString(4)).contains("APAC").doesNotContain("EMEA")
 
     checkAnswer(
       spark.sql(s"""CALL sys.create_policy(
@@ -372,11 +374,11 @@ class PermissionProcedureTest extends PaimonSparkTestWithRestCatalogBase {
 
     checkAnswer(
       spark.sql("SELECT id, region, email FROM paimon.sales.orders ORDER BY id"),
-      Row(2, "EMEA", "EMEA-masked")
+      Row(1, "APAC", "APAC-masked")
     )
     checkAnswer(
       spark.sql("SELECT email FROM paimon.sales.orders"),
-      Row("EMEA-masked")
+      Row("APAC-masked")
     )
     checkAnswer(
       spark.sql("""CALL sys.drop_policy(

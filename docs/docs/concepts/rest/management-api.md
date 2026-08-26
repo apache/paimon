@@ -41,7 +41,6 @@ POST /v1/{prefix}/permissions/revoke
 
 GET    /v1/{prefix}/databases/{database}/tables/{table}/policies
 POST   /v1/{prefix}/databases/{database}/tables/{table}/policies
-PUT    /v1/{prefix}/databases/{database}/tables/{table}/policies
 DELETE /v1/{prefix}/databases/{database}/tables/{table}/policies
 ```
 
@@ -208,7 +207,7 @@ one key and value in `AuthTableQueryResponse.columnMasking`. Each JSON value is 
 in UTF-8. This is Paimon's versioned serialization format rather than SQL text or a portable policy
 DSL; clients and servers must use compatible Paimon versions.
 
-Policy create and create-or-replace must be rejected unless all of these conditions hold:
+Policy creation must be rejected unless all of these conditions hold:
 
 1. The target database and table exist.
 2. The table has `query-auth.enabled=true`; otherwise a stored policy could be silently bypassed.
@@ -223,7 +222,7 @@ stable table identity, preserve that binding across table renames, and remove th
 table is dropped. A table with policies must reject changes that disable `query-auth.enabled` or
 remove or rename a protected or referenced column, unless the policy update and schema change are
 performed atomically. If an implementation persists all masks for one principal in one document,
-creating, replacing, or dropping one column mask must atomically preserve masks for other columns.
+creating or dropping one column mask must atomically preserve masks for other columns.
 
 At authorization time, all applicable row filters must be combined with logical `AND`. More than
 one applicable column mask targeting the same column must fail closed. An invalid, unsupported, or
@@ -449,8 +448,8 @@ CALL paimon.sys.create_policy(
 );
 ```
 
-The call fails if that principal already has a row filter on the table. Use
-`create_or_replace_policy` when upsert semantics are intended. Create another policy for a second
+The call fails if that principal already has a row filter on the table. Drop the existing policy
+before creating a different definition for the same identity. Create another policy for a second
 principal with a separate call.
 
 ### Create column-masking policies
@@ -488,25 +487,6 @@ CALL paimon.sys.create_policy(
 `predicate_json` is required only for `ROW_FILTER`. `on_column` and `transform_json` are required
 only for `COLUMN_MASKING`. JSON containing a single quote must escape it as `''` inside the SQL
 string literal.
-
-### Create or fully replace a policy
-
-`create_or_replace_policy` maps to HTTP `PUT`. It creates an absent policy or fully replaces the
-policy with the same table, policy type, principal, and, for a mask, protected column. Omitted
-optional values are cleared.
-
-```sql
-CALL paimon.sys.create_or_replace_policy(
-  database => 'sales',
-  table => 'orders',
-  policy_type => 'ROW_FILTER',
-  principal => 'group:analysts',
-  predicate_json => '{"kind":"LEAF","transform":{"name":"FIELD_REF","fieldRef":{"index":1,"name":"region","type":"STRING"}},"function":"EQUAL","literals":["EMEA"]}'
-);
-```
-
-This is deliberately separate from `create_policy`: callers must opt in to replacement instead of
-passing a generic `replace` flag.
 
 ### List policies
 
@@ -574,6 +554,6 @@ CALL paimon.sys.drop_policy(
 );
 ```
 
-Creating, replacing, dropping, or inspecting permissions and policies requires the server to
+Creating, dropping, or inspecting permissions and policies requires the server to
 authorize the caller for `GRANT` on the relevant resource. Authentication, principal
 membership, policy persistence, schema validation, and audit logging remain REST server concerns.

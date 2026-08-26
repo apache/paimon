@@ -3599,23 +3599,6 @@ public class RESTCatalogServer {
             return new MockResponse().setResponseCode(200);
         }
 
-        if ("PUT".equals(method)) {
-            DataPolicy policy = RESTApi.fromJson(data, PolicyRequest.class).policy(path.resource);
-            synchronized (policyLock(tableUuid)) {
-                MockResponse targetError = validatePolicyTableVersion(path.resource, tableUuid);
-                if (targetError != null) {
-                    return targetError;
-                }
-                MockResponse validation = validatePolicy(policy);
-                if (validation != null) {
-                    return validation;
-                }
-                policy = canonicalizePolicy(policy);
-                policyStore.put(new PolicyKey(tableUuid, policy), policy);
-            }
-            return new MockResponse().setResponseCode(200);
-        }
-
         if ("DELETE".equals(method)) {
             DropPolicyRequest request = RESTApi.fromJson(data, DropPolicyRequest.class);
             DataPolicy existing;
