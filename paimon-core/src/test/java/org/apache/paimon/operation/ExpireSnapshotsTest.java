@@ -1353,7 +1353,8 @@ public class ExpireSnapshotsTest {
                     store.newStatsFileHandler(),
                     store.options().changelogProducer() != CoreOptions.ChangelogProducer.NONE,
                     store.options().cleanEmptyDirectories(),
-                    store.options().fileOperationThreadNum());
+                    store.options().fileOperationThreadNum(),
+                    store.options().scanManifestParallelism());
             this.minBlockedSnapshotId = minBlockedSnapshotId;
             this.maxBlockedSnapshotId = maxBlockedSnapshotId;
         }
@@ -1426,7 +1427,8 @@ public class ExpireSnapshotsTest {
                     store.newStatsFileHandler(),
                     store.options().changelogProducer() != CoreOptions.ChangelogProducer.NONE,
                     store.options().cleanEmptyDirectories(),
-                    store.options().fileOperationThreadNum());
+                    store.options().fileOperationThreadNum(),
+                    store.options().scanManifestParallelism());
         }
 
         @Override

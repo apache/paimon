@@ -113,6 +113,7 @@ Run the following command to submit a compaction job for the table.
     --database <database-name> \
     --table <table-name> \
     [--partition <partition-name>] \
+    [--buckets <bucket-ids-or-ranges>] \
     [--compact_strategy <minor / full>] \
     [--table_conf <table_conf>] \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
@@ -154,6 +155,25 @@ For more usage of the compact action, see
 </TabItem>
 
 </Tabs>
+
+### Compact Specified Buckets
+
+For fixed-bucket tables, a dedicated compaction can target selected buckets. The `sys.compact` procedure is available in Flink SQL and Spark SQL. The expression supports a single ID, comma-separated IDs, closed ranges, or combinations such as `0`, `0,2,5`, `0-9`, and `0-9,20`.
+
+```sql
+CALL sys.compact(`table` => 'default.T', partitions => 'dt=20221126', compact_strategy => 'full', buckets => '0-1,3');
+```
+
+The equivalent Flink Action command is:
+
+```bash
+<FLINK_HOME>/bin/flink run -Dexecution.runtime-mode=batch \
+    /path/to/paimon-flink-action-@@VERSION@@.jar compact \
+    --warehouse s3:///path/to/warehouse --database test_db --table test_table \
+    --partition dt=20221126 --compact_strategy full --buckets 0-1,3
+```
+
+`buckets` is supported only for fixed-bucket tables (`bucket > 0`). Each ID must be in the range `0` (inclusive) to the configured bucket number (exclusive). Partition filters can be combined with the bucket filter. Bucket selection is not supported for [Sort Compact](#sort-compact), dynamic-bucket tables, unaware-bucket tables, or postpone-bucket tables.
 
 :::info
 

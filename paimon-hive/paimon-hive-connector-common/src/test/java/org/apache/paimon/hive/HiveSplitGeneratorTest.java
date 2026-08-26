@@ -44,7 +44,6 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.TraceableFileIO;
 
-import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.mapred.InputSplit;
 import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
@@ -118,8 +117,8 @@ public class HiveSplitGeneratorTest {
     @Test
     public void testPackSplitsForNonBucketTable() throws Exception {
         JobConf jobConf = new JobConf();
-        jobConf.set(HiveConf.ConfVars.MAPREDMAXSPLITSIZE.varname, "268435456"); // 256MB
-        jobConf.set(HiveConf.ConfVars.MAPREDMINSPLITSIZE.varname, "268435456"); // 256MB
+        jobConf.set("mapreduce.input.fileinputformat.split.maxsize", "268435456"); // 256MB
+        jobConf.set("mapreduce.input.fileinputformat.split.minsize", "268435456"); // 256MB
 
         FileStoreTable table = createFileStoreTable(TABLE_SCHEMA);
 
@@ -140,8 +139,8 @@ public class HiveSplitGeneratorTest {
     @Test
     public void testPackSplitsForBucketTable() throws Exception {
         JobConf jobConf = new JobConf();
-        jobConf.set(HiveConf.ConfVars.MAPREDMAXSPLITSIZE.varname, "268435456");
-        jobConf.set(HiveConf.ConfVars.MAPREDMINSPLITSIZE.varname, "268435456");
+        jobConf.set("mapreduce.input.fileinputformat.split.maxsize", "268435456");
+        jobConf.set("mapreduce.input.fileinputformat.split.minsize", "268435456");
 
         FileStoreTable table = createFileStoreTable(TABLE_SCHEMA);
 
