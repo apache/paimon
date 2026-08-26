@@ -24,6 +24,8 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.DelegateCatalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.fs.BatchDeleteResult;
+import org.apache.paimon.fs.BatchFileDeleter;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -58,6 +60,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.CompletionService;
@@ -383,7 +386,13 @@ public class FormatTableCommit implements BatchTableCommit {
                     // directory itself when the table is unpartitioned - so there is no partition
                     // level below it to descend. Collect every selected directory before deleting
                     // so many small partitions can share the same cleanup concurrency window.
-                    deletePreviousDataFiles(new ArrayList<>(partitionPaths), 0, cleanupThreadNum);
+                    if (partitionManager != null && cleanupThreadNum > 1) {
+                        deletePreviousDynamicDataFiles(
+                                new ArrayList<>(partitionPaths), cleanupThreadNum);
+                    } else {
+                        deletePreviousDataFiles(
+                                new ArrayList<>(partitionPaths), 0, cleanupThreadNum);
+                    }
                 } else {
                     // Overwriting without naming a partition replaces the table, so what has to go
                     // is everything the table holds rather than the files this commit happens to
@@ -936,6 +945,11 @@ public class FormatTableCommit implements BatchTableCommit {
     private Set<Path> deletePreviousDataFiles(
             List<Path> partitionPaths, int partitionLevels, int threadNum) throws IOException {
         PreviousDataFiles dataFiles = new PreviousDataFiles(partitionPaths, partitionLevels);
+        return deletePreviousDataFiles(dataFiles, threadNum);
+    }
+
+    private Set<Path> deletePreviousDataFiles(PreviousDataFiles dataFiles, int threadNum)
+            throws IOException {
         Set<Path> clearedPartitionPaths = new HashSet<>();
         if (threadNum == 1) {
             FileStatus file;
@@ -948,6 +962,84 @@ public class FormatTableCommit implements BatchTableCommit {
             clearedPartitionPaths.addAll(deleteDataFilesConcurrently(dataFiles, threadNum));
         }
         return clearedPartitionPaths;
+    }
+
+    private void deletePreviousDynamicDataFiles(List<Path> partitionPaths, int threadNum)
+            throws IOException {
+        PreviousDataFiles dataFiles = new PreviousDataFiles(partitionPaths, 0);
+        FileStatus firstFile = dataFiles.next();
+        if (firstFile == null) {
+            return;
+        }
+
+        Optional<BatchFileDeleter> capability = fileIO.batchFileDeleter(firstFile.getPath());
+        if (capability == null) {
+            throw new IOException(
+                    String.format(
+                            "Batch delete capability lookup returned null for table %s.",
+                            tableIdentifier.getFullName()));
+        }
+
+        dataFiles.pushBack(firstFile);
+        if (!capability.isPresent()) {
+            deletePreviousDataFiles(dataFiles, threadNum);
+            return;
+        }
+
+        deleteDataFilesInBatches(dataFiles, capability.get());
+    }
+
+    private void deleteDataFilesInBatches(PreviousDataFiles dataFiles, BatchFileDeleter fileDeleter)
+            throws IOException {
+        int maxBatchSize = fileDeleter.maxBatchSize();
+        if (maxBatchSize <= 0) {
+            throw new IOException(
+                    String.format(
+                            "Batch delete size for table %s must be greater than 0, but was %s.",
+                            tableIdentifier.getFullName(), maxBatchSize));
+        }
+
+        while (true) {
+            List<Path> batch = new ArrayList<>();
+            while (batch.size() < maxBatchSize) {
+                FileStatus file = dataFiles.next();
+                if (file == null) {
+                    break;
+                }
+                batch.add(file.getPath());
+            }
+            if (batch.isEmpty()) {
+                return;
+            }
+
+            List<Path> request = Collections.unmodifiableList(batch);
+            BatchDeleteResult result = fileDeleter.delete(request);
+            if (Thread.currentThread().isInterrupted()) {
+                InterruptedException interruption =
+                        new InterruptedException(
+                                "Interrupted while deleting old Format Table data files in batches.");
+                throw new IOException(interruption.getMessage(), interruption);
+            }
+            if (result == null) {
+                throw new IOException(
+                        String.format(
+                                "Batch delete for table %s returned no result.",
+                                tableIdentifier.getFullName()));
+            }
+
+            List<Path> confirmed = result.deletedOrNotFound();
+            if (confirmed == null || !request.equals(confirmed)) {
+                throw new IOException(
+                        String.format(
+                                "Batch delete result for table %s did not exactly match the %s requested files in order (result size: %s).",
+                                tableIdentifier.getFullName(),
+                                request.size(),
+                                confirmed == null ? "null" : confirmed.size()));
+            }
+            if (batch.size() < maxBatchSize) {
+                return;
+            }
+        }
     }
 
     /** Deletes one listed data file and reports whether this commit removed it. */
@@ -1168,6 +1260,7 @@ public class FormatTableCommit implements BatchTableCommit {
         private final List<Path> partitionPaths;
         private final int partitionLevels;
         private List<FileStatus> currentFiles = Collections.emptyList();
+        @Nullable private FileStatus pushedBack;
         private int nextPartition;
         private int nextFile;
 
@@ -1178,6 +1271,11 @@ public class FormatTableCommit implements BatchTableCommit {
 
         @Nullable
         private FileStatus next() throws IOException {
+            if (pushedBack != null) {
+                FileStatus file = pushedBack;
+                pushedBack = null;
+                return file;
+            }
             while (nextFile >= currentFiles.size()) {
                 if (nextPartition >= partitionPaths.size()) {
                     return null;
@@ -1198,6 +1296,13 @@ public class FormatTableCommit implements BatchTableCommit {
                 nextFile = 0;
             }
             return currentFiles.get(nextFile++);
+        }
+
+        private void pushBack(FileStatus file) {
+            if (pushedBack != null) {
+                throw new IllegalStateException("Only one old data file can be pushed back.");
+            }
+            pushedBack = file;
         }
     }
 
