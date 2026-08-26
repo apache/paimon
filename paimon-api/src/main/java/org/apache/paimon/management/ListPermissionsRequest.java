@@ -58,7 +58,7 @@ public class ListPermissionsRequest {
                 MAX_PAGE_SIZE);
         this.principal = isBlank(principal) ? null : principal;
         this.access = isBlank(access) ? null : PermissionAccess.canonicalize(resource, access);
-        this.pageToken = isBlank(pageToken) ? null : pageToken;
+        this.pageToken = pageToken;
         this.maxResults = maxResults;
     }
 

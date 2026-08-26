@@ -21,6 +21,7 @@ package org.apache.paimon.management;
 import org.apache.paimon.rest.RESTApi;
 import org.apache.paimon.rest.requests.GrantPermissionRequest;
 import org.apache.paimon.rest.requests.RevokePermissionRequest;
+import org.apache.paimon.rest.responses.ListPermissionsResponse;
 
 import org.junit.jupiter.api.Test;
 
@@ -37,13 +38,13 @@ public class PermissionManagementJsonTest {
 
     private static final String ASSIGNMENT_JSON =
             "{\"resource\":{\"type\":\"TABLE\",\"database\":\"sales\","
-                    + "\"table\":\"orders\"},\"access\":\"select\","
+                    + "\"table\":\"orders\"},\"access\":\"SELECT\","
                     + "\"principal\":\"analyst\","
                     + "\"expireTime\":\"2027-01-01T00:00:00Z\"}";
 
     private static final String COLUMN_ASSIGNMENT_JSON =
             "{\"resource\":{\"type\":\"COLUMN\",\"database\":\"sales\","
-                    + "\"table\":\"orders\"},\"access\":\"select\","
+                    + "\"table\":\"orders\"},\"access\":\"SELECT\","
                     + "\"principal\":\"analyst\",\"columns\":{"
                     + "\"columnNames\":[\"id\",\"region\"]}}";
 
@@ -63,6 +64,30 @@ public class PermissionManagementJsonTest {
         assertAssignment(
                 new com.fasterxml.jackson.databind.ObjectMapper()
                         .readValue(lowerCaseJson, PermissionAssignment.class));
+    }
+
+    @Test
+    void testListResponseDoesNotApplyGrantValidation() throws Exception {
+        String preciseExpiry = "2027-01-01T00:00:00.123456Z";
+        String responseJson =
+                "{\"permissions\":["
+                        + ASSIGNMENT_JSON.replace("2027-01-01T00:00:00Z", preciseExpiry)
+                        + "]}";
+
+        ListPermissionsResponse shaded =
+                RESTApi.fromJson(responseJson, ListPermissionsResponse.class);
+        ListPermissionsResponse external =
+                new com.fasterxml.jackson.databind.ObjectMapper()
+                        .readValue(responseJson, ListPermissionsResponse.class);
+
+        assertThat(shaded.getPermissions().get(0).getExpireTime()).isEqualTo(preciseExpiry);
+        assertThat(external.getPermissions().get(0).getExpireTime()).isEqualTo(preciseExpiry);
+        assertThatThrownBy(
+                        () ->
+                                new GrantPermissionRequest(
+                                        tableResource(), "SELECT", "analyst", null, preciseExpiry))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("millisecond");
     }
 
     @Test
@@ -386,6 +411,8 @@ public class PermissionManagementJsonTest {
                                         25))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("not valid for DATABASE");
+
+        assertThat(databaseAccess.withPageToken(" \t").getPageToken()).isEqualTo(" \t");
     }
 
     @Test

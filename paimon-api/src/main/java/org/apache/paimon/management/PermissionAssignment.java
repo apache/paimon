@@ -78,41 +78,13 @@ public class PermissionAssignment {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private final String expireTime;
 
-    @JsonCreator
-    @ConstructorProperties({
-        FIELD_RESOURCE,
-        FIELD_ACCESS,
-        FIELD_PRINCIPAL,
-        FIELD_COLUMNS,
-        FIELD_EXPIRE_TIME
-    })
     public PermissionAssignment(
             @JsonProperty(FIELD_RESOURCE) PermissionResource resource,
             @JsonProperty(FIELD_ACCESS) String access,
             @JsonProperty(FIELD_PRINCIPAL) String principal,
             @Nullable @JsonProperty(FIELD_COLUMNS) PermissionColumns columns,
             @Nullable @JsonProperty(FIELD_EXPIRE_TIME) String expireTime) {
-        this.resource = checkNotNull(resource, "resource cannot be null");
-        this.access = PermissionAccess.canonicalize(resource, access);
-        this.principal = validatePrincipal(principal);
-        checkArgument(
-                resource.getType() == ResourceType.COLUMN ? columns != null : columns == null,
-                resource.getType() == ResourceType.COLUMN
-                        ? "columns is required for COLUMN resource."
-                        : "columns is only valid for COLUMN resource.");
-        this.columns = columns;
-        if (expireTime != null) {
-            try {
-                Instant instant = Instant.parse(expireTime);
-                checkArgument(
-                        instant.getNano() % 1_000_000 == 0,
-                        "expireTime must have at most millisecond precision.");
-            } catch (DateTimeParseException e) {
-                throw new IllegalArgumentException(
-                        "expireTime must be an ISO-8601 UTC instant.", e);
-            }
-        }
-        this.expireTime = expireTime;
+        this(resource, access, principal, columns, expireTime, true);
     }
 
     public PermissionAssignment(
@@ -121,6 +93,24 @@ public class PermissionAssignment {
             String principal,
             @Nullable String expireTime) {
         this(resource, access, principal, null, expireTime);
+    }
+
+    /** Jackson-only response constructor; request DTOs use the validated public constructor. */
+    @JsonCreator
+    @ConstructorProperties({
+        FIELD_RESOURCE,
+        FIELD_ACCESS,
+        FIELD_PRINCIPAL,
+        FIELD_COLUMNS,
+        FIELD_EXPIRE_TIME
+    })
+    PermissionAssignment(
+            @JsonProperty(FIELD_RESOURCE) PermissionResource resource,
+            @JsonProperty(FIELD_ACCESS) String access,
+            @JsonProperty(FIELD_PRINCIPAL) String principal,
+            @Nullable @JsonProperty(FIELD_COLUMNS) PermissionColumns columns,
+            @Nullable @JsonProperty(FIELD_EXPIRE_TIME) Object expireTime) {
+        this(resource, access, principal, columns, (String) expireTime, false);
     }
 
     @JsonGetter(FIELD_RESOURCE)
@@ -161,5 +151,41 @@ public class PermissionAssignment {
     @JsonGetter(FIELD_EXPIRE_TIME)
     public String getExpireTime() {
         return expireTime;
+    }
+
+    private PermissionAssignment(
+            PermissionResource resource,
+            String access,
+            String principal,
+            @Nullable PermissionColumns columns,
+            @Nullable String expireTime,
+            boolean validate) {
+        this.resource = validate ? checkNotNull(resource, "resource cannot be null") : resource;
+        this.access = validate ? PermissionAccess.canonicalize(resource, access) : access;
+        this.principal = validate ? validatePrincipal(principal) : principal;
+        if (validate) {
+            checkArgument(
+                    resource.getType() == ResourceType.COLUMN ? columns != null : columns == null,
+                    resource.getType() == ResourceType.COLUMN
+                            ? "columns is required for COLUMN resource."
+                            : "columns is only valid for COLUMN resource.");
+            validateExpireTime(expireTime);
+        }
+        this.columns = columns;
+        this.expireTime = expireTime;
+    }
+
+    private static void validateExpireTime(@Nullable String expireTime) {
+        if (expireTime == null) {
+            return;
+        }
+        try {
+            Instant instant = Instant.parse(expireTime);
+            checkArgument(
+                    instant.getNano() % 1_000_000 == 0,
+                    "expireTime must have at most millisecond precision.");
+        } catch (DateTimeParseException e) {
+            throw new IllegalArgumentException("expireTime must be an ISO-8601 UTC instant.", e);
+        }
     }
 }
