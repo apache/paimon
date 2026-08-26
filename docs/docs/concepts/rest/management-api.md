@@ -170,10 +170,11 @@ are intersected. If any applicable range rejects a selected column, the query fa
 silently dropping that column.
 
 Schema evolution keeps the assignment attached to the stable table identity. Renaming a referenced
-column updates its stored name. Dropping a referenced column removes it from the range; if that
-would leave the stored list empty, the assignment is removed. An allowlist denies columns added
-later, while a denylist allows them, so allowlists are safer when new columns may contain sensitive
-data.
+column updates its stored name. Dropping a referenced column removes it from the range. The server
+must reject a schema change that would leave an allowlist empty because removing that assignment
+would widen access; an empty denylist is equivalent to no column restriction, so that assignment is
+removed. An allowlist denies columns added later, while a denylist allows them, so allowlists are
+safer when new columns may contain sensitive data.
 
 `expireTime`, when present, is an exclusive upper bound evaluated against the REST server clock.
 At `now >= expireTime`, the assignment must not authorize access. Expired direct assignments may

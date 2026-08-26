@@ -638,7 +638,9 @@ components:
         names must exist when granted. An allowlist denies columns added later, while a denylist
         allows columns added later. All applicable column ranges are intersected, and selecting any
         column outside the effective range fails the query. The target table must enforce query
-        authorization before the grant becomes visible.
+        authorization before the grant becomes visible. Schema evolution must reject removal of
+        every column in an allowlist because deleting the resulting empty assignment would widen
+        access; an empty denylist assignment may be removed.
       properties:
         columnNames:
           type: array
