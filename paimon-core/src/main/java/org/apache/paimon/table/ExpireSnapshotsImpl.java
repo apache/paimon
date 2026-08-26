@@ -70,7 +70,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
     private final SnapshotDeletion snapshotDeletion;
     private final Executor fileExecutor;
     private final TagManager tagManager;
-    private final int filesExpireBatchSize;
+    private final int snapshotExpireBatchSize;
 
     private ExpireConfig expireConfig;
     private Supplier<Long> currentTimeMillis = System::currentTimeMillis;
@@ -92,7 +92,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         this.tagManager = tagManager;
         this.expireConfig = ExpireConfig.builder().build();
         this.fileExecutor = snapshotDeletion.fileExecutor();
-        this.filesExpireBatchSize =
+        this.snapshotExpireBatchSize =
                 scanManifestParallelism == null || scanManifestParallelism <= 0
                         ? Runtime.getRuntime().availableProcessors()
                         : scanManifestParallelism;
@@ -274,8 +274,8 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             List<Snapshot> taggedSnapshots,
             long beginInclusiveId)
             throws ExecutionException, InterruptedException {
-        for (int from = 0; from < snapshotsIncludingEnd.size(); from += filesExpireBatchSize) {
-            int to = Math.min(from + filesExpireBatchSize, snapshotsIncludingEnd.size());
+        for (int from = 0; from < snapshotsIncludingEnd.size(); from += snapshotExpireBatchSize) {
+            int to = Math.min(from + snapshotExpireBatchSize, snapshotsIncludingEnd.size());
             snapshotDeletion.cleanDataFiles(
                     collectDataFilesToDelete(
                             snapshotsIncludingEnd.subList(from, to),
@@ -374,8 +374,8 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
 
     private void cleanChangelogFiles(List<Snapshot> snapshots)
             throws ExecutionException, InterruptedException {
-        for (int from = 0; from < snapshots.size(); from += filesExpireBatchSize) {
-            int to = Math.min(from + filesExpireBatchSize, snapshots.size());
+        for (int from = 0; from < snapshots.size(); from += snapshotExpireBatchSize) {
+            int to = Math.min(from + snapshotExpireBatchSize, snapshots.size());
             snapshotDeletion.cleanDataFiles(
                     collectChangelogFilesToDelete(snapshots.subList(from, to)));
         }
