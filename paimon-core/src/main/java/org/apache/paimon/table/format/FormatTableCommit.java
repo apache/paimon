@@ -79,6 +79,12 @@ public class FormatTableCommit implements BatchTableCommit {
             ThreadPoolUtils.createCachedThreadPool(
                     MAX_COMMIT_THREAD_NUM, "FORMAT-TABLE-COMMIT-THREAD-POOL");
 
+    /**
+     * How many files a single batch delete hands the file system. Listing stays lazy, so an
+     * overwrite that replaces many partitions holds one batch rather than every file the table has.
+     */
+    private static final int CLEANUP_BATCH_SIZE = 1000;
+
     private String location;
     private final boolean formatTablePartitionOnlyValueInPath;
     private final String defaultPartName;
@@ -233,7 +239,11 @@ public class FormatTableCommit implements BatchTableCommit {
                     // directory itself when the table is unpartitioned - so there is no partition
                     // level below it to descend. Collect every selected directory before deleting
                     // so many small partitions can share the same cleanup concurrency window.
-                    deletePreviousDataFiles(new ArrayList<>(partitionPaths), 0, cleanupThreadNum);
+                    List<Path> writtenPartitions = new ArrayList<>(partitionPaths);
+                    if (!deletesInBatches()
+                            || !deletePreviousDataFilesInBatches(writtenPartitions)) {
+                        deletePreviousDataFiles(writtenPartitions, 0, cleanupThreadNum);
+                    }
                 } else {
                     // Overwriting without naming a partition replaces the table, so what has to go
                     // is everything the table holds rather than the files this commit happens to
@@ -656,6 +666,51 @@ public class FormatTableCommit implements BatchTableCommit {
                 null,
                 null,
                 defaultPartName);
+    }
+
+    /**
+     * Whether this commit may hand the file system whole batches of files to delete. Only an
+     * overwrite that replaces the partitions it writes qualifies: it deletes what it is about to
+     * replace, so it needs no per-file answer about which directories it emptied, while a static or
+     * whole-table overwrite reports the partitions it cleared and a batch cannot say which files it
+     * found. The catalog-managed and thread number conditions are the ones cleanup concurrency
+     * already applies, which keeps {@code cleanup-thread-num = 1} a full opt out of both.
+     */
+    private boolean deletesInBatches() {
+        return replacesOnlyWrittenPartitions() && partitionManager != null && cleanupThreadNum > 1;
+    }
+
+    /**
+     * Deletes the data files below the given partition directories in batches. Returns false when
+     * the file system does not delete in batches, in which case it made no storage access and the
+     * caller still has every file to delete. Once a batch is handed over the file system either
+     * deletes all of it or fails, so a partly deleted overwrite fails rather than reporting
+     * partitions it did not empty.
+     */
+    private boolean deletePreviousDataFilesInBatches(List<Path> partitionPaths) throws IOException {
+        Iterator<FileStatus> dataFiles = previousDataFiles(partitionPaths, 0);
+        if (!dataFiles.hasNext()) {
+            return true;
+        }
+        // Ask with the first file on its own. A file system that deletes one file at a time
+        // answers without touching storage, and this commit has then listed one file rather than a
+        // whole batch of them before going back to deleting file by file.
+        if (!fileIO.deleteFilesInBatch(Collections.singletonList(dataFiles.next().getPath()))) {
+            return false;
+        }
+        List<Path> batch = new ArrayList<>();
+        while (dataFiles.hasNext()) {
+            batch.add(dataFiles.next().getPath());
+            if (batch.size() == CLEANUP_BATCH_SIZE) {
+                if (!fileIO.deleteFilesInBatch(batch)) {
+                    return false;
+                }
+                // A handed-over batch belongs to the file system, so the next one starts its own
+                // list rather than reusing this one.
+                batch = new ArrayList<>();
+            }
+        }
+        return batch.isEmpty() || fileIO.deleteFilesInBatch(batch);
     }
 
     /**
