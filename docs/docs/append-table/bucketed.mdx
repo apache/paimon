@@ -83,7 +83,7 @@ CREATE TABLE FACT_TABLE (order_id INT, f1 STRING) TBLPROPERTIES ('bucket'='10', 
 
 CREATE TABLE DIM_TABLE (order_id INT, f2 STRING) TBLPROPERTIES ('bucket'='10', 'primary-key' = 'order_id');
 
-SELECT * FROM FACT_TABLE JOIN DIM_TABLE on t1.order_id = t4.order_id;
+SELECT * FROM FACT_TABLE AS fact JOIN DIM_TABLE AS dim ON fact.order_id = dim.order_id;
 ```
 
 The `spark.sql.sources.v2.bucketing.enabled` config is used to enable bucketing for V2 data sources. When turned on,
