@@ -35,6 +35,8 @@ import org.apache.paimon.utils.TagManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -69,8 +71,8 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
     private final ConsumerManager consumerManager;
     private final SnapshotDeletion snapshotDeletion;
     private final Executor fileExecutor;
-    private final int fileOperationParallelism;
     private final TagManager tagManager;
+    private final int filesExpireBatchSize;
 
     private ExpireConfig expireConfig;
     private Supplier<Long> currentTimeMillis = System::currentTimeMillis;
@@ -79,7 +81,8 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             SnapshotManager snapshotManager,
             ChangelogManager changelogManager,
             SnapshotDeletion snapshotDeletion,
-            TagManager tagManager) {
+            TagManager tagManager,
+            @Nullable Integer scanManifestParallelism) {
         this.snapshotManager = snapshotManager;
         this.changelogManager = changelogManager;
         this.consumerManager =
@@ -91,7 +94,10 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         this.tagManager = tagManager;
         this.expireConfig = ExpireConfig.builder().build();
         this.fileExecutor = snapshotDeletion.fileExecutor();
-        this.fileOperationParallelism = snapshotDeletion.fileOperationParallelism();
+        this.filesExpireBatchSize =
+                scanManifestParallelism == null
+                        ? Runtime.getRuntime().availableProcessors()
+                        : scanManifestParallelism;
     }
 
     @VisibleForTesting
@@ -318,7 +324,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
                                     snapshotDeletion.planDeletedInDeltaManifest(
                                             snapshot, skipper.get()),
                             fileExecutor));
-            if (futures.size() >= fileOperationParallelism) {
+            if (futures.size() >= filesExpireBatchSize) {
                 collectAndClean(futures);
             }
         }
@@ -368,7 +374,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
                         CompletableFuture.supplyAsync(
                                 () -> snapshotDeletion.planAddedInChangelogManifest(snapshot),
                                 fileExecutor));
-                if (futures.size() >= fileOperationParallelism) {
+                if (futures.size() >= filesExpireBatchSize) {
                     collectAndClean(futures);
                 }
             }
