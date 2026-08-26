@@ -344,8 +344,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 newStatsFileHandler(),
                 options.changelogProducer() != CoreOptions.ChangelogProducer.NONE,
                 options.cleanEmptyDirectories(),
-                options.fileOperationThreadNum(),
-                options.scanManifestParallelism());
+                options.fileOperationThreadNum());
     }
 
     @Override
@@ -358,8 +357,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 newIndexFileHandler(),
                 newStatsFileHandler(),
                 options.cleanEmptyDirectories(),
-                options.fileOperationThreadNum(),
-                options.scanManifestParallelism());
+                options.fileOperationThreadNum());
     }
 
     @Override
@@ -377,8 +375,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 newIndexFileHandler(),
                 newStatsFileHandler(),
                 options.cleanEmptyDirectories(),
-                options.fileOperationThreadNum(),
-                options.scanManifestParallelism());
+                options.fileOperationThreadNum());
     }
 
     public abstract Comparator<InternalRow> newKeyComparator();

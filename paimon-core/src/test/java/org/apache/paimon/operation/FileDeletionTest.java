@@ -56,8 +56,6 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import javax.annotation.Nullable;
-
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -750,8 +748,7 @@ public class FileDeletionTest {
                         store.newStatsFileHandler(),
                         store.options().changelogProducer() != CoreOptions.ChangelogProducer.NONE,
                         store.options().cleanEmptyDirectories(),
-                        store.options().fileOperationThreadNum(),
-                        store.options().scanManifestParallelism());
+                        store.options().fileOperationThreadNum());
 
         ExpireSnapshots expireSnapshots =
                 new ExpireSnapshotsImpl(
@@ -816,8 +813,7 @@ public class FileDeletionTest {
                         store.newStatsFileHandler(),
                         store.options().changelogProducer() != CoreOptions.ChangelogProducer.NONE,
                         store.options().cleanEmptyDirectories(),
-                        store.options().fileOperationThreadNum(),
-                        store.options().scanManifestParallelism());
+                        store.options().fileOperationThreadNum());
         ExpireSnapshots expireSnapshots =
                 new ExpireSnapshotsImpl(
                         snapshotManager, changelogManager, snapshotDeletion, tagManager);
@@ -956,8 +952,7 @@ public class FileDeletionTest {
                 StatsFileHandler statsFileHandler,
                 boolean produceChangelog,
                 boolean cleanEmptyDirectories,
-                int deleteFileThreadNum,
-                @Nullable Integer scanManifestParallelism) {
+                int deleteFileThreadNum) {
             super(
                     fileIO,
                     pathFactory,
@@ -967,8 +962,7 @@ public class FileDeletionTest {
                     statsFileHandler,
                     produceChangelog,
                     cleanEmptyDirectories,
-                    deleteFileThreadNum,
-                    scanManifestParallelism);
+                    deleteFileThreadNum);
         }
 
         @Override

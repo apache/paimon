@@ -42,9 +42,11 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -67,6 +69,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
     private final ConsumerManager consumerManager;
     private final SnapshotDeletion snapshotDeletion;
     private final Executor fileExecutor;
+    private final int fileOperationParallelism;
     private final TagManager tagManager;
 
     private ExpireConfig expireConfig;
@@ -88,6 +91,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         this.tagManager = tagManager;
         this.expireConfig = ExpireConfig.builder().build();
         this.fileExecutor = snapshotDeletion.fileExecutor();
+        this.fileOperationParallelism = snapshotDeletion.fileOperationParallelism();
     }
 
     @VisibleForTesting
@@ -207,12 +211,11 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         // delete merge tree files
         // deleted merge tree files in a snapshot are not used by the next snapshot, so the range of
         // id should be (beginInclusiveId, endExclusiveId]
-        snapshotDeletion.cleanDataFiles(
-                collectDataFilesToDelete(snapshotsIncludingEnd, taggedSnapshots, beginInclusiveId));
+        cleanDataFiles(snapshotsIncludingEnd, taggedSnapshots, beginInclusiveId);
 
         // delete changelog files
         if (!expireConfig.isChangelogDecoupled()) {
-            snapshotDeletion.cleanDataFiles(collectChangelogFilesToDelete(snapshotsExcludingEnd));
+            planAndCleanChangelogFiles(snapshotsExcludingEnd);
         }
 
         // data files and changelog files in bucket directories has been deleted
@@ -262,7 +265,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         return snapshotsExcludingEnd.size();
     }
 
-    private Collection<Path> collectDataFilesToDelete(
+    private void cleanDataFiles(
             List<Snapshot> snapshotsIncludingEnd,
             List<Snapshot> taggedSnapshots,
             long beginInclusiveId)
@@ -287,7 +290,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         Map<Long, Optional<Predicate<ExpireFileEntry>>> skippers =
                 collectTagSkippers(tags.values());
         Predicate<ExpireFileEntry> deleteAll = entry -> false;
-        List<CompletableFuture<List<Path>>> futures = new ArrayList<>();
+        Queue<CompletableFuture<List<Path>>> futures = new LinkedList<>();
         for (Snapshot snapshot : snapshotsIncludingEnd) {
             long id = snapshot.id();
             if (id == beginInclusiveId) {
@@ -315,8 +318,11 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
                                     snapshotDeletion.planDeletedInDeltaManifest(
                                             snapshot, skipper.get()),
                             fileExecutor));
+            if (futures.size() >= fileOperationParallelism) {
+                collectAndClean(futures);
+            }
         }
-        return flatten(getAll(futures));
+        collectAndClean(futures);
     }
 
     private Map<Long, Optional<Predicate<ExpireFileEntry>>> collectTagSkippers(
@@ -350,9 +356,9 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         return skippers;
     }
 
-    private Collection<Path> collectChangelogFilesToDelete(List<Snapshot> snapshots)
+    private void planAndCleanChangelogFiles(List<Snapshot> snapshots)
             throws ExecutionException, InterruptedException {
-        List<CompletableFuture<List<Path>>> futures = new ArrayList<>();
+        Queue<CompletableFuture<List<Path>>> futures = new LinkedList<>();
         for (Snapshot snapshot : snapshots) {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Ready to delete changelog files from snapshot #{}", snapshot.id());
@@ -362,9 +368,20 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
                         CompletableFuture.supplyAsync(
                                 () -> snapshotDeletion.planAddedInChangelogManifest(snapshot),
                                 fileExecutor));
+                if (futures.size() >= fileOperationParallelism) {
+                    collectAndClean(futures);
+                }
             }
         }
-        return flatten(getAll(futures));
+        collectAndClean(futures);
+    }
+
+    private void collectAndClean(Queue<CompletableFuture<List<Path>>> futures)
+            throws ExecutionException, InterruptedException {
+        while (!futures.isEmpty()) {
+            CompletableFuture<List<Path>> future = futures.remove();
+            snapshotDeletion.cleanDataFiles(future.get());
+        }
     }
 
     private Collection<Runnable> collectManifestDeletionTasks(

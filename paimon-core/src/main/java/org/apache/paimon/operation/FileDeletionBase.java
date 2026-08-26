@@ -44,8 +44,6 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
-
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -83,7 +81,6 @@ public abstract class FileDeletionBase<T extends Snapshot> {
 
     private final Executor fileExecutor;
     private final int fileOperationParallelism;
-    @Nullable private final Integer manifestReadParallelism;
 
     protected boolean changelogDecoupled;
 
@@ -101,8 +98,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
             IndexFileHandler indexFileHandler,
             StatsFileHandler statsFileHandler,
             boolean cleanEmptyDirectories,
-            int fileOperationThreadNum,
-            @Nullable Integer manifestReadParallelism) {
+            int fileOperationThreadNum) {
         this.fileIO = fileIO;
         this.pathFactory = pathFactory;
         this.manifestFile = manifestFile;
@@ -116,11 +112,14 @@ public abstract class FileDeletionBase<T extends Snapshot> {
                 fileOperationThreadNum > 0
                         ? fileOperationThreadNum
                         : Runtime.getRuntime().availableProcessors();
-        this.manifestReadParallelism = manifestReadParallelism;
     }
 
     public Executor fileExecutor() {
         return fileExecutor;
+    }
+
+    public int fileOperationParallelism() {
+        return fileOperationParallelism;
     }
 
     /**
@@ -262,7 +261,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
                             }
                         },
                         manifests,
-                        manifestReadParallelism);
+                        fileOperationParallelism);
 
         List<Path> dataFiles = new ArrayList<>();
         DataFilePathFactories factories = new DataFilePathFactories(pathFactory);
@@ -281,7 +280,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         return ManifestReadThreadPool.sequentialBatchedExecute(
                 manifest -> manifestFile.readExpireFileEntries(manifest.fileName()),
                 manifests,
-                manifestReadParallelism);
+                fileOperationParallelism);
     }
 
     public void cleanDataFiles(Collection<Path> dataFiles) {
@@ -468,7 +467,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
             futures.add(
                     CompletableFuture.supplyAsync(
                             () -> manifestSkippingSet(skippingSnapshot),
-                            ManifestReadThreadPool.getExecutorService(manifestReadParallelism)));
+                            ManifestReadThreadPool.getExecutorService(fileOperationParallelism)));
         }
 
         Set<String> skippingSet = new HashSet<>();

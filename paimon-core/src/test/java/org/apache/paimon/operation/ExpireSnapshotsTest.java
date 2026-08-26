@@ -673,6 +673,37 @@ public class ExpireSnapshotsTest {
     }
 
     @Test
+    public void testExpireConsumesDataFilePlansInBoundedBatches() throws Exception {
+        int fileOperationParallelism = 2;
+        store.options()
+                .toConfiguration()
+                .set(CoreOptions.FILE_OPERATION_THREAD_NUM, fileOperationParallelism);
+
+        List<KeyValue> allData = new ArrayList<>();
+        List<Integer> snapshotPositions = new ArrayList<>();
+        commit(8, allData, snapshotPositions);
+        int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
+        for (int i = 1; i <= latestSnapshotId; i++) {
+            rewriteSnapshotTime(i, 0);
+        }
+
+        TrackingSnapshotDeletion snapshotDeletion = new TrackingSnapshotDeletion(store);
+        ExpireSnapshotsImpl expire =
+                newExpireWithSnapshotDeletion(store, snapshotManager, snapshotDeletion);
+        expire.config(expireAllButLatestConfig());
+        expire.setCurrentTimeMillis(() -> 1000L);
+
+        expire.expire();
+
+        assertThat(snapshotDeletion.maxPendingDataFilePlans())
+                .isLessThanOrEqualTo(fileOperationParallelism);
+        assertThat(snapshotDeletion.pendingDataFilePlans()).isZero();
+        assertThat(snapshotDeletion.dataFileCleanCalls()).isGreaterThan(1);
+        assertSnapshot(latestSnapshotId, allData, snapshotPositions);
+        store.assertCleaned();
+    }
+
+    @Test
     public void testExpirePlansChangelogFilesConcurrently() throws Exception {
         TestFileStore inputStore = createStore(CoreOptions.ChangelogProducer.INPUT);
         inputStore.options().toConfiguration().set(CoreOptions.FILE_OPERATION_THREAD_NUM, 4);
@@ -1353,8 +1384,7 @@ public class ExpireSnapshotsTest {
                     store.newStatsFileHandler(),
                     store.options().changelogProducer() != CoreOptions.ChangelogProducer.NONE,
                     store.options().cleanEmptyDirectories(),
-                    store.options().fileOperationThreadNum(),
-                    store.options().scanManifestParallelism());
+                    store.options().fileOperationThreadNum());
             this.minBlockedSnapshotId = minBlockedSnapshotId;
             this.maxBlockedSnapshotId = maxBlockedSnapshotId;
         }
@@ -1427,8 +1457,7 @@ public class ExpireSnapshotsTest {
                     store.newStatsFileHandler(),
                     store.options().changelogProducer() != CoreOptions.ChangelogProducer.NONE,
                     store.options().cleanEmptyDirectories(),
-                    store.options().fileOperationThreadNum(),
-                    store.options().scanManifestParallelism());
+                    store.options().fileOperationThreadNum());
         }
 
         @Override
@@ -1448,6 +1477,66 @@ public class ExpireSnapshotsTest {
 
         private void reset() {
             deleteBatches.clear();
+        }
+    }
+
+    private static class TrackingSnapshotDeletion extends SnapshotDeletion {
+
+        private final AtomicInteger pendingDataFilePlans = new AtomicInteger();
+        private final AtomicInteger maxPendingDataFilePlans = new AtomicInteger();
+        private final AtomicInteger dataFileCleanCalls = new AtomicInteger();
+
+        private TrackingSnapshotDeletion(TestFileStore store) {
+            super(
+                    store.fileIO(),
+                    store.pathFactory(),
+                    store.manifestFileFactory().create(),
+                    store.manifestListFactory().create(),
+                    store.newIndexFileHandler(),
+                    store.newStatsFileHandler(),
+                    store.options().changelogProducer() != CoreOptions.ChangelogProducer.NONE,
+                    store.options().cleanEmptyDirectories(),
+                    store.options().fileOperationThreadNum());
+        }
+
+        @Override
+        public List<Path> planDeletedInDeltaManifest(
+                Snapshot snapshot, Predicate<ExpireFileEntry> skipper) {
+            List<Path> paths = super.planDeletedInDeltaManifest(snapshot, skipper);
+            int pending = pendingDataFilePlans.incrementAndGet();
+            maxPendingDataFilePlans.accumulateAndGet(pending, Math::max);
+            return new TrackedDataFiles(paths);
+        }
+
+        @Override
+        public void cleanDataFiles(Collection<Path> dataFiles) {
+            try {
+                super.cleanDataFiles(dataFiles);
+            } finally {
+                if (dataFiles instanceof TrackedDataFiles) {
+                    pendingDataFilePlans.decrementAndGet();
+                    dataFileCleanCalls.incrementAndGet();
+                }
+            }
+        }
+
+        private int pendingDataFilePlans() {
+            return pendingDataFilePlans.get();
+        }
+
+        private int maxPendingDataFilePlans() {
+            return maxPendingDataFilePlans.get();
+        }
+
+        private int dataFileCleanCalls() {
+            return dataFileCleanCalls.get();
+        }
+    }
+
+    private static class TrackedDataFiles extends ArrayList<Path> {
+
+        private TrackedDataFiles(Collection<Path> paths) {
+            super(paths);
         }
     }
 

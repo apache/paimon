@@ -35,8 +35,6 @@ import org.apache.paimon.utils.FileStorePathFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
-
 import java.io.IOException;
 import java.util.Collection;
 import java.util.HashMap;
@@ -59,8 +57,7 @@ public class TagDeletion extends FileDeletionBase<Snapshot> {
             IndexFileHandler indexFileHandler,
             StatsFileHandler statsFileHandler,
             boolean cleanEmptyDirectories,
-            int fileOperationThreadNum,
-            @Nullable Integer manifestReadParallelism) {
+            int fileOperationThreadNum) {
         super(
                 fileIO,
                 pathFactory,
@@ -69,8 +66,7 @@ public class TagDeletion extends FileDeletionBase<Snapshot> {
                 indexFileHandler,
                 statsFileHandler,
                 cleanEmptyDirectories,
-                fileOperationThreadNum,
-                manifestReadParallelism);
+                fileOperationThreadNum);
     }
 
     @Override
