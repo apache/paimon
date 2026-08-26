@@ -62,7 +62,9 @@ public class PolicyManagementJsonTest {
         PolicyRequest request = new PolicyRequest(policy);
         assertThat(request.isRetrySafe()).isFalse();
         Map<?, ?> wire = RESTApi.fromJson(RESTApi.toJson(request), Map.class);
-        assertThat(wire.keySet()).containsExactlyInAnyOrder("columnMask", "principal");
+        assertThat(wire).hasSize(2);
+        assertThat(wire.get("columnMask")).isNotNull();
+        assertThat(wire.get("principal")).isEqualTo("analyst");
         assertThat(request.policy(tableResource()).getResource()).isEqualTo(tableResource());
     }
 
