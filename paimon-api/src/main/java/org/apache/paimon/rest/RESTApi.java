@@ -926,8 +926,8 @@ public class RESTApi {
             boolean ignoreIfNotExists) {
         checkNotNull(resource, "resource cannot be null").validatePolicyAttachment();
         try {
-            client.delete(
-                    resourcePaths.policies(resource),
+            client.post(
+                    resourcePaths.dropPolicy(resource),
                     new DropPolicyRequest(type, principal, column),
                     restAuthFunction);
         } catch (NoSuchResourceException e) {

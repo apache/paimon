@@ -86,6 +86,12 @@ public class ResourcePaths {
         return SLASH.join(table(resource.getDatabase(), resource.getTable()), POLICIES);
     }
 
+    /** Action endpoint for dropping one policy from its attachment resource. */
+    @Experimental
+    public String dropPolicy(PermissionResource resource) {
+        return SLASH.join(policies(resource), "drop");
+    }
+
     public String databases() {
         return SLASH.join(V1, prefix, DATABASES);
     }

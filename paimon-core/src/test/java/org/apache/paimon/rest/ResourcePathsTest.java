@@ -67,5 +67,8 @@ public class ResourcePathsTest {
         assertEquals(
                 "/v1/catalog%2Fid/databases/sales+db/tables/orders%2Fall/policies",
                 paths.policies(table));
+        assertEquals(
+                "/v1/catalog%2Fid/databases/sales+db/tables/orders%2Fall/policies/drop",
+                paths.dropPolicy(table));
     }
 }

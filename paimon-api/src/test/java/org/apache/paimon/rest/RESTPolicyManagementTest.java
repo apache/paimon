@@ -57,15 +57,16 @@ public class RESTPolicyManagementTest {
 
     private static final String COLLECTION_PATH =
             "/v1/catalog+id/databases/sales/tables/orders/policies";
+    private static final String DROP_PATH = COLLECTION_PATH + "/drop";
 
     private HttpServer server;
     private PolicyManagement management;
     private final AtomicReference<String> listQuery = new AtomicReference<>();
     private final AtomicReference<String> createBody = new AtomicReference<>();
     private final AtomicReference<String> createError = new AtomicReference<>();
-    private final AtomicReference<String> deleteBody = new AtomicReference<>();
-    private final AtomicReference<String> deleteError = new AtomicReference<>();
-    private final AtomicInteger deleteCalls = new AtomicInteger();
+    private final AtomicReference<String> dropBody = new AtomicReference<>();
+    private final AtomicReference<String> dropError = new AtomicReference<>();
+    private final AtomicInteger dropCalls = new AtomicInteger();
 
     @BeforeEach
     void setUp() throws Exception {
@@ -85,13 +86,13 @@ public class RESTPolicyManagementTest {
                         } else {
                             respond(exchange, 409, createError.get());
                         }
-                    } else if (COLLECTION_PATH.equals(path) && "DELETE".equals(method)) {
-                        deleteBody.set(readBody(exchange));
-                        deleteCalls.incrementAndGet();
-                        if (deleteError.get() == null) {
+                    } else if (DROP_PATH.equals(path) && "POST".equals(method)) {
+                        dropBody.set(readBody(exchange));
+                        dropCalls.incrementAndGet();
+                        if (dropError.get() == null) {
                             respond(exchange, 200, null);
                         } else {
-                            respond(exchange, 404, deleteError.get());
+                            respond(exchange, 404, dropError.get());
                         }
                     } else {
                         respond(exchange, 404, "{\"message\":\"missing\",\"code\":404}");
@@ -137,7 +138,7 @@ public class RESTPolicyManagementTest {
     }
 
     @Test
-    void testCreateAndDropUseCrudMethods() throws Exception {
+    void testCreateAndDropUsePostEndpoints() throws Exception {
         DataPolicy policy = policy();
         management.createPolicy(policy);
         management.dropPolicy(
@@ -149,10 +150,10 @@ public class RESTPolicyManagementTest {
 
         assertThat(createBody.get()).contains("\"principal\":\"analyst\"");
         assertThat(createBody.get()).doesNotContain("\"resource\"");
-        assertThat(deleteBody.get())
+        assertThat(dropBody.get())
                 .contains("\"type\":\"COLUMN_MASKING\"")
                 .contains("\"column\":\"email\"");
-        assertThat(deleteCalls).hasValue(1);
+        assertThat(dropCalls).hasValue(1);
     }
 
     @Test
@@ -179,7 +180,7 @@ public class RESTPolicyManagementTest {
     @Test
     void testDropIfExistsOnlyIgnoresMissingPolicy() {
         DataPolicy policy = policy();
-        deleteError.set(
+        dropError.set(
                 "{\"resourceType\":\"POLICY\",\"resourceName\":"
                         + "\"COLUMN_MASKING:analyst:email\","
                         + "\"message\":\"missing\",\"code\":404}");
@@ -191,7 +192,7 @@ public class RESTPolicyManagementTest {
                 policy.getColumnMask().getOnColumn(),
                 true);
 
-        deleteError.set(
+        dropError.set(
                 "{\"resourceType\":\"TABLE\",\"resourceName\":\"orders\","
                         + "\"message\":\"missing table\",\"code\":404}");
         assertThatThrownBy(
