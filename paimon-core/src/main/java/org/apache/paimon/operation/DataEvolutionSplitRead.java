@@ -435,18 +435,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                     deletionVector);
         } else if (bunch instanceof BlobFileBunch) {
             // for blob bunch, fallback on placeholders
-
-            // fast path: only contains one max_seq group
             BlobFileBunch blobBunch = (BlobFileBunch) bunch;
-            if (blobBunch.sequentialReadOptimize()) {
-                return sequentialReadFiles(
-                        bunch.files(),
-                        partition,
-                        dataFilePathFactory,
-                        formatReaderMapping,
-                        rowRanges,
-                        deletionVector);
-            }
             int blobIndex = findBlobFieldIndex(readRowType);
             checkArgument(blobIndex >= 0, "Blob bunch read type should contain a blob field.");
             return new BlobFallbackRecordReader(
@@ -1143,26 +1132,6 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             List<Range> merged = Range.sortAndMergeOverlap(ranges, true);
             Preconditions.checkState(!merged.isEmpty(), "Blob file bunch should not be empty.");
             return new Range(merged.get(0).from, merged.get(merged.size() - 1).to);
-        }
-
-        private boolean fullyCoversLogicalRange() {
-            List<Range> merged = Range.sortAndMergeOverlap(ranges, true);
-            return merged.size() == 1 && merged.get(0).equals(logicalRange());
-        }
-
-        public boolean sequentialReadOptimize() {
-            Preconditions.checkState(!files.isEmpty(), "Blob file bunch should not be empty.");
-
-            // If blob files share the same max_seq_num, we could sequentially read them.
-            // Files have already been sorted by first_row_id
-            long maxSeq = files.get(0).maxSequenceNumber();
-            for (int i = 1; i < files.size(); i++) {
-                if (files.get(i).maxSequenceNumber() != maxSeq) {
-                    return false;
-                }
-            }
-
-            return fullyCoversLogicalRange();
         }
 
         @Override
