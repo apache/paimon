@@ -325,4 +325,29 @@ public class CoreOptionsTest {
                 .hasMessageContaining("1")
                 .hasMessageContaining("64");
     }
+
+    @Test
+    public void testFormatTableCommitPublishThreadNumDefaultsTo64AndAcceptsBounds() {
+        Options conf = new Options();
+        assertThat(new CoreOptions(conf).formatTableCommitPublishThreadNum()).isEqualTo(64);
+
+        conf.set(CoreOptions.FORMAT_TABLE_COMMIT_PUBLISH_THREAD_NUM, 1);
+        assertThat(new CoreOptions(conf).formatTableCommitPublishThreadNum()).isEqualTo(1);
+
+        conf.set(CoreOptions.FORMAT_TABLE_COMMIT_PUBLISH_THREAD_NUM, 64);
+        assertThat(new CoreOptions(conf).formatTableCommitPublishThreadNum()).isEqualTo(64);
+    }
+
+    @Test
+    public void testFormatTableCommitPublishThreadNumRejectsValuesOutsideSupportedRange() {
+        for (int invalid : new int[] {0, -1, 65}) {
+            Options conf = new Options();
+            conf.set(CoreOptions.FORMAT_TABLE_COMMIT_PUBLISH_THREAD_NUM, invalid);
+            assertThatThrownBy(() -> new CoreOptions(conf).formatTableCommitPublishThreadNum())
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("format-table.commit.publish-thread-num")
+                    .hasMessageContaining("1")
+                    .hasMessageContaining("64");
+        }
+    }
 }

@@ -21,6 +21,9 @@ package org.apache.paimon.utils;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
+import java.security.AccessControlContext;
+import java.security.AccessController;
+import java.security.PrivilegedAction;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -319,6 +322,7 @@ public class ThreadPoolUtils {
         /** Does not consume more input than the active-task window can hold. */
         private void fillWindow() {
             ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
+            AccessControlContext accessControlContext = AccessController.getContext();
             while (activeTasks.size() < queueSize) {
                 synchronized (submissionLock) {
                     if (submissionStopped || !input.hasNext()) {
@@ -326,7 +330,11 @@ public class ThreadPoolUtils {
                     }
                     BatchTask<T, U> task =
                             new BatchTask<>(
-                                    processor, input.next(), classLoader, this::stopSubmission);
+                                    processor,
+                                    input.next(),
+                                    classLoader,
+                                    accessControlContext,
+                                    this::stopSubmission);
                     executor.execute(task);
                     activeTasks.add(task);
                 }
@@ -401,6 +409,7 @@ public class ThreadPoolUtils {
         private final Function<U, List<T>> processor;
         private final U input;
         private final ClassLoader classLoader;
+        private final AccessControlContext accessControlContext;
         private final Runnable stopSubmission;
         private final CountDownLatch completion = new CountDownLatch(1);
 
@@ -414,10 +423,12 @@ public class ThreadPoolUtils {
                 Function<U, List<T>> processor,
                 U input,
                 ClassLoader classLoader,
+                AccessControlContext accessControlContext,
                 Runnable stopSubmission) {
             this.processor = processor;
             this.input = input;
             this.classLoader = classLoader;
+            this.accessControlContext = accessControlContext;
             this.stopSubmission = stopSubmission;
         }
 
@@ -438,7 +449,10 @@ public class ThreadPoolUtils {
             ClassLoader originalClassLoader = currentThread.getContextClassLoader();
             try {
                 currentThread.setContextClassLoader(classLoader);
-                result = processor.apply(input);
+                result =
+                        AccessController.doPrivileged(
+                                (PrivilegedAction<List<T>>) () -> processor.apply(input),
+                                accessControlContext);
             } catch (RuntimeException | Error taskFailure) {
                 failure = taskFailure;
                 stopSubmission.run();

@@ -64,6 +64,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.table.format.FormatBatchWriteBuilder.validateStaticPartition;
+import static org.apache.paimon.utils.ExceptionUtils.firstOrSuppressed;
 import static org.apache.paimon.utils.ThreadPoolUtils.CloseableBatchIterator;
 import static org.apache.paimon.utils.ThreadPoolUtils.sequentialBatchedExecuteAwaitRunningTasksOnClose;
 
@@ -72,11 +73,11 @@ public class FormatTableCommit implements BatchTableCommit {
 
     private static final Logger LOG = LoggerFactory.getLogger(FormatTableCommit.class);
 
-    private static final int MAX_CLEANUP_THREAD_NUM = 64;
+    private static final int MAX_COMMIT_THREAD_NUM = 64;
 
-    private static final ExecutorService CLEANUP_EXECUTOR =
+    private static final ExecutorService COMMIT_EXECUTOR =
             ThreadPoolUtils.createCachedThreadPool(
-                    MAX_CLEANUP_THREAD_NUM, "FORMAT-TABLE-COMMIT-CLEANUP-THREAD-POOL");
+                    MAX_COMMIT_THREAD_NUM, "FORMAT-TABLE-COMMIT-THREAD-POOL");
 
     private String location;
     private final boolean formatTablePartitionOnlyValueInPath;
@@ -90,6 +91,7 @@ public class FormatTableCommit implements BatchTableCommit {
     @Nullable private final FormatTablePartitionManager partitionManager;
     private final boolean dynamicPartitionOverwrite;
     private final int cleanupThreadNum;
+    private final int publishThreadNum;
 
     public FormatTableCommit(
             String location,
@@ -105,11 +107,49 @@ public class FormatTableCommit implements BatchTableCommit {
             @Nullable FormatTablePartitionManager partitionManager,
             boolean dynamicPartitionOverwrite,
             int cleanupThreadNum) {
-        if (cleanupThreadNum < 1 || cleanupThreadNum > MAX_CLEANUP_THREAD_NUM) {
+        this(
+                location,
+                partitionKeys,
+                fileIO,
+                formatTablePartitionOnlyValueInPath,
+                defaultPartName,
+                overwrite,
+                tableIdentifier,
+                staticPartitions,
+                syncHiveUri,
+                catalogContext,
+                partitionManager,
+                dynamicPartitionOverwrite,
+                cleanupThreadNum,
+                1);
+    }
+
+    FormatTableCommit(
+            String location,
+            List<String> partitionKeys,
+            FileIO fileIO,
+            boolean formatTablePartitionOnlyValueInPath,
+            String defaultPartName,
+            boolean overwrite,
+            Identifier tableIdentifier,
+            @Nullable Map<String, String> staticPartitions,
+            @Nullable String syncHiveUri,
+            CatalogContext catalogContext,
+            @Nullable FormatTablePartitionManager partitionManager,
+            boolean dynamicPartitionOverwrite,
+            int cleanupThreadNum,
+            int publishThreadNum) {
+        if (cleanupThreadNum < 1 || cleanupThreadNum > MAX_COMMIT_THREAD_NUM) {
             throw new IllegalArgumentException(
                     String.format(
                             "Format Table cleanup thread number must be between 1 and %s, but was %s.",
-                            MAX_CLEANUP_THREAD_NUM, cleanupThreadNum));
+                            MAX_COMMIT_THREAD_NUM, cleanupThreadNum));
+        }
+        if (publishThreadNum < 1 || publishThreadNum > MAX_COMMIT_THREAD_NUM) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Format Table publish thread number must be between 1 and %s, but was %s.",
+                            MAX_COMMIT_THREAD_NUM, publishThreadNum));
         }
         this.location = location;
         this.fileIO = fileIO;
@@ -123,6 +163,7 @@ public class FormatTableCommit implements BatchTableCommit {
         this.partitionManager = partitionManager;
         this.dynamicPartitionOverwrite = dynamicPartitionOverwrite;
         this.cleanupThreadNum = cleanupThreadNum;
+        this.publishThreadNum = publishThreadNum;
         if (syncHiveUri != null) {
             try {
                 Options options = new Options();
@@ -209,9 +250,9 @@ public class FormatTableCommit implements BatchTableCommit {
             boolean reportsStatistics = registersPartitions && partitionManager != null;
             Map<Map<String, String>, PartitionStatistics> statisticsByPartition =
                     new LinkedHashMap<>();
+            publishMessages(messages);
             for (TwoPhaseCommitMessage message : messages) {
                 TwoPhaseOutputStream.Committer committer = message.getCommitter();
-                committer.commit(this.fileIO);
                 if (registersPartitions) {
                     // Extracted once: registration and statistics must key on the same spec.
                     Map<String, String> spec =
@@ -286,6 +327,37 @@ public class FormatTableCommit implements BatchTableCommit {
                 throw (Error) failure;
             }
             throw new RuntimeException(failure);
+        }
+    }
+
+    private void publishMessages(List<TwoPhaseCommitMessage> messages) throws IOException {
+        if (publishThreadNum == 1 || messages.size() <= 1) {
+            for (TwoPhaseCommitMessage message : messages) {
+                message.getCommitter().commit(fileIO);
+            }
+            return;
+        }
+
+        try (CloseableBatchIterator<Void> published =
+                sequentialBatchedExecuteAwaitRunningTasksOnClose(
+                        COMMIT_EXECUTOR,
+                        this::publishMessage,
+                        messages.iterator(),
+                        publishThreadNum)) {
+            while (published.hasNext()) {
+                published.next();
+            }
+        } catch (UncheckedIOException e) {
+            throw (IOException) unwrapUncheckedIOException(e);
+        }
+    }
+
+    private List<Void> publishMessage(TwoPhaseCommitMessage message) {
+        try {
+            message.getCommitter().commit(fileIO);
+            return Collections.emptyList();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
         }
     }
 
@@ -465,20 +537,69 @@ public class FormatTableCommit implements BatchTableCommit {
 
     @Override
     public void abort(List<CommitMessage> commitMessages) {
-        try {
-            for (CommitMessage commitMessage : commitMessages) {
-                if (commitMessage instanceof TwoPhaseCommitMessage) {
-                    TwoPhaseCommitMessage twoPhaseCommitMessage =
-                            (TwoPhaseCommitMessage) commitMessage;
-                    twoPhaseCommitMessage.getCommitter().discard(this.fileIO);
-                } else {
-                    throw new RuntimeException(
-                            "Unsupported commit message type: "
-                                    + commitMessage.getClass().getName());
-                }
+        Throwable failure = null;
+        for (CommitMessage commitMessage : commitMessages) {
+            if (!(commitMessage instanceof TwoPhaseCommitMessage)) {
+                failure =
+                        firstOrSuppressed(
+                                new RuntimeException(
+                                        "Unsupported commit message type: "
+                                                + commitMessage.getClass().getName()),
+                                failure);
+                continue;
             }
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+
+            TwoPhaseOutputStream.Committer committer =
+                    ((TwoPhaseCommitMessage) commitMessage).getCommitter();
+            try {
+                committer.discard(fileIO);
+            } catch (Throwable discardFailure) {
+                failure = firstOrSuppressed(discardFailure, failure);
+            }
+
+            // FormatTableSingleFileWriter opens every target with overwrite=false. The target is
+            // therefore owned by this write attempt, so it is safe to remove even when a remote
+            // multipart completion took effect but its response was lost. Keep this rollback here:
+            // a generic multipart committer may also be used to overwrite an existing object.
+            try {
+                deletePublishedFile(committer.targetPath());
+            } catch (Throwable deleteFailure) {
+                failure = firstOrSuppressed(deleteFailure, failure);
+            }
+        }
+
+        if (failure instanceof Error) {
+            throw (Error) failure;
+        }
+        if (failure != null) {
+            throw new RuntimeException(failure);
+        }
+    }
+
+    private void deletePublishedFile(Path targetPath) throws IOException {
+        String failureMessage = "Failed to delete published Format Table file " + targetPath;
+        boolean deleted;
+        try {
+            deleted = fileIO.delete(targetPath, false);
+        } catch (FileNotFoundException ignored) {
+            return;
+        } catch (IOException e) {
+            throw new IOException(failureMessage, e);
+        }
+        if (deleted) {
+            return;
+        }
+
+        boolean stillExists;
+        try {
+            stillExists = fileIO.exists(targetPath);
+        } catch (FileNotFoundException ignored) {
+            return;
+        } catch (IOException e) {
+            throw new IOException(failureMessage, e);
+        }
+        if (stillExists) {
+            throw new IOException(failureMessage);
         }
     }
 
@@ -569,7 +690,7 @@ public class FormatTableCommit implements BatchTableCommit {
             // so a failure cannot leave a worker still deleting after this method returns.
             try (CloseableBatchIterator<Path> cleared =
                     sequentialBatchedExecuteAwaitRunningTasksOnClose(
-                            CLEANUP_EXECUTOR, this::deleteAndReportCleared, dataFiles, threadNum)) {
+                            COMMIT_EXECUTOR, this::deleteAndReportCleared, dataFiles, threadNum)) {
                 while (cleared.hasNext()) {
                     clearedPartitionPaths.add(cleared.next());
                 }
@@ -592,7 +713,7 @@ public class FormatTableCommit implements BatchTableCommit {
         return unwrapped;
     }
 
-    /** Deletes one file and reports the partition it emptied, for a worker that cannot throw. */
+    /** Deletes one listed file and reports its parent when this commit removed the file. */
     private List<Path> deleteAndReportCleared(FileStatus file) {
         try {
             return deleteDataFile(file)

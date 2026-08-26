@@ -82,6 +82,10 @@ public class FormatBatchWriteBuilder implements BatchWriteBuilder {
                 table.partitionManager() != null && !table.partitionKeys().isEmpty()
                         ? options.formatTableCommitCleanupThreadNum()
                         : 1;
+        int publishThreadNum =
+                table.partitionManager() != null && !table.partitionKeys().isEmpty()
+                        ? options.formatTableCommitPublishThreadNum()
+                        : 1;
         return new FormatTableCommit(
                 table.location(),
                 table.partitionKeys(),
@@ -95,7 +99,8 @@ public class FormatBatchWriteBuilder implements BatchWriteBuilder {
                 table.catalogContext(),
                 table.partitionManager(),
                 options.dynamicPartitionOverwrite(),
-                cleanupThreadNum);
+                cleanupThreadNum,
+                publishThreadNum);
     }
 
     @Override
