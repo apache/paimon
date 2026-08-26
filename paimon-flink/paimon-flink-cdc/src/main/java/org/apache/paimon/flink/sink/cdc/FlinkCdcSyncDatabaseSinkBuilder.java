@@ -185,15 +185,10 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         DataStream<CdcMultiplexRecord> converted =
                 CaseSensitiveUtils.cdcMultiplexRecordConvert(catalogLoader, newlyAddedTableStream);
 
-        DataStream<CdcMultiplexRecord> partitioned =
-                partition(
-                        converted,
-                        new CdcMultiplexRecordChannelComputer(catalogLoader),
-                        parallelism);
-
         FlinkCdcMultiTableSink sink =
                 new FlinkCdcMultiTableSink(
                         catalogLoader,
+                        database,
                         writerCpu,
                         writerMemory,
                         committerCpu,
@@ -201,7 +196,8 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                         commitUser,
                         eagerInit,
                         tableFilter);
-        sink.sinkFrom(partitioned);
+        // the sink shuffles by bucket itself
+        sink.sinkFrom(converted, parallelism);
     }
 
     private void buildForFixedBucket(FileStoreTable table, DataStream<CdcRecord> parsed) {

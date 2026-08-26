@@ -24,10 +24,12 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.sink.MultiTableCommittable;
 import org.apache.paimon.flink.sink.MultiTableCommittableTypeInfo;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
 import org.apache.paimon.flink.sink.StoreSinkWriteImpl;
+import org.apache.paimon.flink.sink.StoreSinkWriteState;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.options.CatalogOptions;
@@ -48,6 +50,7 @@ import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
 import org.apache.flink.runtime.state.JavaSerializer;
+import org.apache.flink.streaming.util.AbstractStreamOperatorTestHarness;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -71,9 +74,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Predicate;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link CdcRecordStoreMultiWriteOperator}. */
 public class CdcRecordStoreMultiWriteOperatorTest {
+
+    private static final String STATE_NAME = "paimon_test_state";
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -689,31 +695,200 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         harness.close();
     }
 
+    @Test
+    @Timeout(30)
+    public void testWriterStateIsPartitionedOnRestore() throws Exception {
+        // Write a state value for every bucket of both tables, from a single subtask.
+        int numBuckets = 4;
+        List<StoreSinkWriteState.StateValue> stateValues = new ArrayList<>();
+        for (int bucket = 0; bucket < numBuckets; bucket++) {
+            stateValues.add(
+                    new StoreSinkWriteState.StateValue(
+                            BinaryRow.EMPTY_ROW, bucket, new byte[] {(byte) bucket}));
+        }
+
+        OneInputStreamOperatorTestHarness<CdcMultiplexRecord, MultiTableCommittable> harness =
+                createTestHarness(catalogLoader, 1, 0);
+        harness.open();
+        CdcRecordStoreMultiWriteOperator operator =
+                (CdcRecordStoreMultiWriteOperator) harness.getOperator();
+        operator.state().put(firstTable.getObjectName(), STATE_NAME, stateValues);
+        operator.state().put(secondTable.getObjectName(), STATE_NAME, stateValues);
+        OperatorSubtaskState snapshot = harness.snapshot(0, 1);
+        harness.close();
+
+        // Restore with a scaled up parallelism. Every state value must be restored into exactly
+        // one subtask, and that subtask must be the one the channel computer routes the
+        // corresponding bucket to -- otherwise the subtask owning the bucket would silently lose
+        // its state.
+        int numTasks = 3;
+        for (String tableName :
+                Arrays.asList(firstTable.getObjectName(), secondTable.getObjectName())) {
+            for (int bucket = 0; bucket < numBuckets; bucket++) {
+                int currentBucket = bucket;
+                List<Integer> owners = new ArrayList<>();
+                for (int subtaskId = 0; subtaskId < numTasks; subtaskId++) {
+                    OneInputStreamOperatorTestHarness<CdcMultiplexRecord, MultiTableCommittable>
+                            restored = createTestHarness(catalogLoader, numTasks, subtaskId);
+                    restored.initializeState(snapshot);
+                    restored.open();
+                    List<StoreSinkWriteState.StateValue> restoredValues =
+                            ((CdcRecordStoreMultiWriteOperator) restored.getOperator())
+                                    .state()
+                                    .get(tableName, STATE_NAME);
+                    if (restoredValues != null
+                            && restoredValues.stream().anyMatch(v -> v.bucket() == currentBucket)) {
+                        owners.add(subtaskId);
+                    }
+                    restored.close();
+                }
+
+                int expected =
+                        CdcMultiplexRecordChannelComputer.computeChannel(
+                                databaseName, tableName, BinaryRow.EMPTY_ROW, bucket, numTasks);
+                assertThat(owners)
+                        .as(
+                                "state of %s bucket %s must be owned by exactly one subtask",
+                                tableName, bucket)
+                        .containsExactly(expected);
+            }
+        }
+    }
+
+    @Test
+    public void testRejectRecordFromDifferentDatabase() throws Exception {
+        OneInputStreamOperatorTestHarness<CdcMultiplexRecord, MultiTableCommittable> harness =
+                createTestHarness(catalogLoader);
+        harness.open();
+
+        Map<String, String> data = new HashMap<>();
+        data.put("pt", "0");
+        data.put("k", "1");
+        data.put("v", "10");
+        CdcMultiplexRecord record =
+                CdcMultiplexRecord.fromCdcRecord(
+                        "another_database",
+                        firstTable.getObjectName(),
+                        new CdcRecord(RowKind.INSERT, data));
+
+        assertThatThrownBy(() -> harness.processElement(record, 1))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("only accepts records from database " + databaseName)
+                .hasMessageContaining("another_database");
+        harness.close();
+    }
+
+    @Test
+    @Timeout(30)
+    public void testRestoreWithoutDatabaseName() throws Exception {
+        // Preserve the exact legacy union-state behavior: every restored subtask receives every
+        // state value. This is compatible with old savepoints, but does not provide unique bucket
+        // ownership for stateful writers.
+        int numTasks = 2;
+        List<OperatorSubtaskState> snapshots = new ArrayList<>();
+        for (int subtaskId = 0; subtaskId < numTasks; subtaskId++) {
+            OneInputStreamOperatorTestHarness<CdcMultiplexRecord, MultiTableCommittable> harness =
+                    createTestHarness(
+                            createOperatorFactoryWithoutDatabaseName(), numTasks, subtaskId);
+            harness.open();
+            CdcRecordStoreMultiWriteOperator operator =
+                    (CdcRecordStoreMultiWriteOperator) harness.getOperator();
+            StoreSinkWriteState.StateValue stateValue =
+                    new StoreSinkWriteState.StateValue(
+                            BinaryRow.EMPTY_ROW, subtaskId, new byte[] {(byte) subtaskId});
+            operator.state()
+                    .put(
+                            firstTable.getObjectName(),
+                            STATE_NAME,
+                            Collections.singletonList(stateValue));
+            snapshots.add(harness.snapshot(0, 1));
+            harness.close();
+        }
+
+        OperatorSubtaskState unionState =
+                AbstractStreamOperatorTestHarness.repackageState(
+                        snapshots.toArray(new OperatorSubtaskState[0]));
+        for (int subtaskId = 0; subtaskId < numTasks; subtaskId++) {
+            OneInputStreamOperatorTestHarness<CdcMultiplexRecord, MultiTableCommittable> restored =
+                    createTestHarness(
+                            createOperatorFactoryWithoutDatabaseName(), numTasks, subtaskId);
+            restored.initializeState(unionState);
+            restored.open();
+            List<StoreSinkWriteState.StateValue> restoredValues =
+                    ((CdcRecordStoreMultiWriteOperator) restored.getOperator())
+                            .state()
+                            .get(firstTable.getObjectName(), STATE_NAME);
+            assertThat(restoredValues)
+                    .extracting(StoreSinkWriteState.StateValue::bucket)
+                    .containsExactlyInAnyOrder(0, 1);
+            restored.close();
+        }
+    }
+
     private OneInputStreamOperatorTestHarness<CdcMultiplexRecord, MultiTableCommittable>
             createTestHarness(CatalogLoader catalogLoader) throws Exception {
-        CdcRecordStoreMultiWriteOperator.Factory operatorFactory =
-                new CdcRecordStoreMultiWriteOperator.Factory(
-                        catalogLoader,
-                        (t, commitUser, state, ioManager, memoryPoolFactory, metricGroup) ->
-                                new StoreSinkWriteImpl(
-                                        t,
-                                        commitUser,
-                                        state,
-                                        ioManager,
-                                        false,
-                                        false,
-                                        true,
-                                        memoryPoolFactory,
-                                        metricGroup),
-                        commitUser,
-                        Options.fromMap(new HashMap<>()));
         TypeSerializer<CdcMultiplexRecord> inputSerializer = new JavaSerializer<>();
-        TypeSerializer<MultiTableCommittable> outputSerializer =
-                new MultiTableCommittableTypeInfo().createSerializer(new ExecutionConfig());
         OneInputStreamOperatorTestHarness<CdcMultiplexRecord, MultiTableCommittable> harness =
-                new OneInputStreamOperatorTestHarness<>(operatorFactory, inputSerializer);
-        harness.setup(outputSerializer);
+                new OneInputStreamOperatorTestHarness<>(
+                        createOperatorFactory(catalogLoader), inputSerializer);
+        harness.setup(outputSerializer());
         return harness;
+    }
+
+    private OneInputStreamOperatorTestHarness<CdcMultiplexRecord, MultiTableCommittable>
+            createTestHarness(CatalogLoader catalogLoader, int numTasks, int subtaskId)
+                    throws Exception {
+        return createTestHarness(createOperatorFactory(catalogLoader), numTasks, subtaskId);
+    }
+
+    private OneInputStreamOperatorTestHarness<CdcMultiplexRecord, MultiTableCommittable>
+            createTestHarness(
+                    CdcRecordStoreMultiWriteOperator.Factory operatorFactory,
+                    int numTasks,
+                    int subtaskId)
+                    throws Exception {
+        OneInputStreamOperatorTestHarness<CdcMultiplexRecord, MultiTableCommittable> harness =
+                new OneInputStreamOperatorTestHarness<>(
+                        operatorFactory, numTasks, numTasks, subtaskId);
+        harness.setup(outputSerializer());
+        return harness;
+    }
+
+    private TypeSerializer<MultiTableCommittable> outputSerializer() {
+        return new MultiTableCommittableTypeInfo().createSerializer(new ExecutionConfig());
+    }
+
+    private CdcRecordStoreMultiWriteOperator.Factory createOperatorFactory(
+            CatalogLoader catalogLoader) {
+        return new CdcRecordStoreMultiWriteOperator.Factory(
+                catalogLoader,
+                storeSinkWriteProvider(),
+                commitUser,
+                databaseName,
+                Options.fromMap(new HashMap<>()));
+    }
+
+    @SuppressWarnings("deprecation")
+    private CdcRecordStoreMultiWriteOperator.Factory createOperatorFactoryWithoutDatabaseName() {
+        return new CdcRecordStoreMultiWriteOperator.Factory(
+                catalogLoader,
+                storeSinkWriteProvider(),
+                commitUser,
+                Options.fromMap(new HashMap<>()));
+    }
+
+    private StoreSinkWrite.Provider storeSinkWriteProvider() {
+        return (t, commitUser, state, ioManager, memoryPoolFactory, metricGroup) ->
+                new StoreSinkWriteImpl(
+                        t,
+                        commitUser,
+                        state,
+                        ioManager,
+                        false,
+                        false,
+                        true,
+                        memoryPoolFactory,
+                        metricGroup);
     }
 
     private static class Runner implements Runnable {
