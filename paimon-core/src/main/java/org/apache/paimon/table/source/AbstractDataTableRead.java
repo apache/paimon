@@ -27,14 +27,15 @@ import org.apache.paimon.predicate.PredicateProjectionConverter;
 import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.ListUtils;
 import org.apache.paimon.utils.ProjectedRow;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -143,11 +144,19 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
         Predicate authPredicate = authResult.extractPredicate();
         Map<String, Transform> columnMasking = authResult.extractColumnMasking();
         ProjectedRow backRow = null;
+        List<String> readFields = readType.getFieldNames();
+        Set<String> readFieldSet = new HashSet<>(readFields);
+        Map<String, Transform> selectedColumnMasking = new HashMap<>();
+        for (Map.Entry<String, Transform> mask : columnMasking.entrySet()) {
+            if (readFieldSet.contains(mask.getKey())) {
+                selectedColumnMasking.put(mask.getKey(), mask.getValue());
+            }
+        }
         Set<String> authFields = new HashSet<>();
         if (authPredicate != null) {
             authFields.addAll(collectFieldNames(authPredicate));
         }
-        for (Map.Entry<String, Transform> mask : columnMasking.entrySet()) {
+        for (Map.Entry<String, Transform> mask : selectedColumnMasking.entrySet()) {
             authFields.add(mask.getKey());
             for (Object input : mask.getValue().inputs()) {
                 if (input instanceof FieldRef) {
@@ -156,21 +165,19 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
             }
         }
         if (!authFields.isEmpty()) {
-            List<String> readFields = readType.getFieldNames();
-            List<String> authAddNames = new ArrayList<>();
-            Set<String> readFieldSet = new HashSet<>(readFields);
-            for (String field : tableType.getFieldNames()) {
-                if (authFields.contains(field) && !readFieldSet.contains(field)) {
-                    authAddNames.add(field);
+            List<DataField> expandedFields = new ArrayList<>(readType.getFields());
+            for (DataField field : tableType.getFields()) {
+                if (authFields.contains(field.name()) && !readFieldSet.contains(field.name())) {
+                    expandedFields.add(field);
                 }
             }
-            if (!authAddNames.isEmpty()) {
-                readType = tableType.project(ListUtils.union(readFields, authAddNames));
+            if (expandedFields.size() > readType.getFieldCount()) {
+                readType = readType.copy(expandedFields);
                 applyReadType(readType);
                 backRow = ProjectedRow.from(readType.projectIndexes(readFields));
             }
         }
-        reader = authResult.doAuth(reader(split), readType);
+        reader = authResult.doAuth(reader(split), readType, authPredicate, selectedColumnMasking);
         if (backRow != null) {
             reader = reader.transform(backRow::replaceRow);
         }

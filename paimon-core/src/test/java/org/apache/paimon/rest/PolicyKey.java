@@ -87,4 +87,15 @@ final class PolicyKey implements Comparable<PolicyKey> {
         }
         return that.column == null ? 1 : column.compareTo(that.column);
     }
+
+    String sortKey() {
+        return cursorPart(tableUuid)
+                + cursorPart(type.name())
+                + cursorPart(principal)
+                + cursorPart(column);
+    }
+
+    private static String cursorPart(String value) {
+        return value == null ? "-1:" : value.length() + ":" + value;
+    }
 }

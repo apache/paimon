@@ -133,7 +133,15 @@ public class TableQueryAuthResult implements Serializable {
 
     public RecordReader<InternalRow> doAuth(
             RecordReader<InternalRow> reader, RowType outputRowType) {
-        Predicate rowFilter = extractPredicate();
+        return doAuth(reader, outputRowType, extractPredicate(), extractColumnMasking());
+    }
+
+    /** Applies already decoded query-authorization definitions to a physical read projection. */
+    public RecordReader<InternalRow> doAuth(
+            RecordReader<InternalRow> reader,
+            RowType outputRowType,
+            @Nullable Predicate rowFilter,
+            Map<String, Transform> selectedColumnMasking) {
         if (rowFilter != null) {
             Predicate remappedFilter = remapPredicate(rowFilter, outputRowType);
             if (remappedFilter != null) {
@@ -141,10 +149,9 @@ public class TableQueryAuthResult implements Serializable {
             }
         }
 
-        Map<String, Transform> columnMasking = extractColumnMasking();
-        if (columnMasking != null && !columnMasking.isEmpty()) {
+        if (!selectedColumnMasking.isEmpty()) {
             Map<Integer, Transform> remappedMasking =
-                    transformRemapping(outputRowType, columnMasking);
+                    transformRemapping(outputRowType, selectedColumnMasking);
             if (!remappedMasking.isEmpty()) {
                 reader = reader.transform(row -> transform(outputRowType, remappedMasking, row));
             }

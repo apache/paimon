@@ -158,10 +158,12 @@ import javax.annotation.Nullable;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -177,6 +179,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -217,7 +220,7 @@ public class RESTCatalogServer {
     private final RESTFileSystemCatalog catalog;
     private final MockWebServer server;
 
-    private final Map<String, Database> databaseStore = new HashMap<>();
+    private final Map<String, Database> databaseStore = new ConcurrentHashMap<>();
     private final Map<String, TableMetadata> tableMetadataStore = new ConcurrentHashMap<>();
     private final RESTPermissionStore permissionStore = new RESTPermissionStore();
     private final Map<PolicyKey, DataPolicy> policyStore = new ConcurrentHashMap<>();
@@ -235,13 +238,13 @@ public class RESTCatalogServer {
             new ConcurrentLinkedQueue<>();
 
     private final Map<String, List<Partition>> tablePartitionsStore = new HashMap<>();
-    private final Map<String, View> viewStore = new HashMap<>();
+    private final Map<String, View> viewStore = new ConcurrentHashMap<>();
     private final Map<String, TableSnapshot> tableLatestSnapshotStore = new HashMap<>();
     private final Map<String, TableSnapshot> tableWithSnapshotId2SnapshotStore = new HashMap<>();
     private final List<String> noPermissionDatabases = new ArrayList<>();
     private final List<String> noPermissionTables = new ArrayList<>();
     private final List<String> noPermissionViews = new ArrayList<>();
-    private final Map<String, Function> functionStore = new HashMap<>();
+    private final Map<String, Function> functionStore = new ConcurrentHashMap<>();
     private final Map<String, List<String>> columnAuthHandler = new HashMap<>();
     private final Map<String, List<Predicate>> rowFilterAuthHandler = new HashMap<>();
     private final Map<String, Map<String, Transform>> columnMaskingAuthHandler = new HashMap<>();
@@ -1318,7 +1321,12 @@ public class RESTCatalogServer {
         Function function = functionStore.get(identifier.getFullName());
         switch (method) {
             case "DELETE":
-                functionStore.remove(identifier.getFullName());
+                permissionStore.executeAtomically(
+                        () -> {
+                            functionStore.remove(identifier.getFullName());
+                            permissionStore.removeFunction(identifier);
+                            return null;
+                        });
                 break;
             case "GET":
                 GetFunctionResponse response = toGetFunctionResponse(function);
@@ -1611,7 +1619,12 @@ public class RESTCatalogServer {
                 case "DELETE":
                     catalog.dropDatabase(databaseName, false, true);
                     removeDatabaseTableState(databaseName);
-                    databaseStore.remove(databaseName);
+                    permissionStore.executeAtomically(
+                            () -> {
+                                databaseStore.remove(databaseName);
+                                permissionStore.removeDatabase(databaseName);
+                                return null;
+                            });
                     return new MockResponse().setResponseCode(200);
                 case "POST":
                     AlterDatabaseRequest requestBody =
@@ -1977,6 +1990,7 @@ public class RESTCatalogServer {
                             }
                         }
                         removePolicies(current.uuid());
+                        permissionStore.removeTable(identifier);
                         tableMetadataStore.remove(identifier.getFullName(), current);
                         tableLatestSnapshotStore.remove(identifier.getFullName());
                         tablePartitionsStore.remove(identifier.getFullName());
@@ -2009,12 +2023,14 @@ public class RESTCatalogServer {
                                     current.isExternal())
                             .schema();
             validatePoliciesForSchema(identifier, current.uuid(), replacementSchema);
+            validatePermissionsForSchema(identifier, current.schema(), replacementSchema);
             if (isFormatTable(current.schema().toSchema()) || isFormatTable(newSchema)) {
                 throw new UnsupportedOperationException(
                         "replaceTable does not support format tables.");
             }
             catalog.replaceTable(identifier, newSchema, false);
             TableSchema replacedSchema = catalog.loadTableSchema(identifier);
+            permissionStore.evolveTableColumns(identifier, current.schema(), replacedSchema);
             TableMetadata newTableMetadata =
                     createTableMetadata(
                             identifier,
@@ -2072,6 +2088,7 @@ public class RESTCatalogServer {
                                     current.isExternal());
                     tableMetadataStore.remove(fromTable.getFullName(), current);
                     tableMetadataStore.put(toTable.getFullName(), renamedMetadata);
+                    permissionStore.renameTable(fromTable, toTable);
                 }
             }
         }
@@ -2895,7 +2912,12 @@ public class RESTCatalogServer {
                     }
                     throw new Catalog.ViewNotExistException(identifier);
                 case "DELETE":
-                    viewStore.remove(identifier.getFullName());
+                    permissionStore.executeAtomically(
+                            () -> {
+                                viewStore.remove(identifier.getFullName());
+                                permissionStore.removeView(identifier);
+                                return null;
+                            });
                     return new MockResponse().setResponseCode(200);
                 case "POST":
                     if (viewStore.containsKey(identifier.getFullName())) {
@@ -2982,11 +3004,16 @@ public class RESTCatalogServer {
         if (viewStore.containsKey(toView.getFullName())) {
             throw new Catalog.ViewAlreadyExistException(toView);
         }
-        if (viewStore.containsKey(fromView.getFullName())) {
-            View view = viewStore.get(fromView.getFullName());
-            viewStore.remove(fromView.getFullName());
-            viewStore.put(toView.getFullName(), view);
-        }
+        permissionStore.executeAtomically(
+                () -> {
+                    if (viewStore.containsKey(fromView.getFullName())) {
+                        View view = viewStore.get(fromView.getFullName());
+                        viewStore.remove(fromView.getFullName());
+                        viewStore.put(toView.getFullName(), view);
+                        permissionStore.renameView(fromView, toView);
+                    }
+                    return null;
+                });
         return new MockResponse().setResponseCode(200);
     }
 
@@ -3009,6 +3036,7 @@ public class RESTCatalogServer {
                                     new LazyField<>(() -> false),
                                     new LazyField<>(() -> identifier));
                     validatePoliciesForSchema(identifier, current.uuid(), candidateSchema);
+                    validatePermissionsForSchema(identifier, current.schema(), candidateSchema);
                     if (isFormatTable(schema.toSchema())) {
                         TableMetadata newTableMetadata =
                                 createTableMetadata(
@@ -3018,11 +3046,14 @@ public class RESTCatalogServer {
                                         current.uuid(),
                                         current.isExternal());
                         tableMetadataStore.put(identifier.getFullName(), newTableMetadata);
+                        permissionStore.evolveTableColumns(
+                                identifier, current.schema(), candidateSchema);
                         return;
                     }
                     catalog.alterTable(identifier, changes, false);
                     FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
                     TableSchema newSchema = table.schema();
+                    permissionStore.evolveTableColumns(identifier, current.schema(), newSchema);
                     TableMetadata newTableMetadata =
                             createTableMetadata(
                                     identifier,
@@ -3323,14 +3354,14 @@ public class RESTCatalogServer {
                 return validation;
             }
             List<PermissionAssignment> filtered = permissionStore.list(target, parameters);
-            int start =
-                    parameters.containsKey(PAGE_TOKEN)
-                            ? Integer.parseInt(parameters.get(PAGE_TOKEN))
-                            : 0;
-            int end = Math.min(start + getPermissionMaxResults(parameters), filtered.size());
-            List<PermissionAssignment> page = new ArrayList<>(filtered.subList(start, end));
-            String nextPageToken = end < filtered.size() ? String.valueOf(end) : null;
-            return mockResponse(new ListPermissionsResponse(page, nextPageToken), 200);
+            PagedList<PermissionAssignment> page =
+                    buildManagementPage(
+                            filtered,
+                            getPermissionMaxResults(parameters),
+                            parameters.get(PAGE_TOKEN),
+                            RESTPermissionStore::sortKey);
+            return mockResponse(
+                    new ListPermissionsResponse(page.getElements(), page.getNextPageToken()), 200);
         }
 
         if ("POST".equals(method) && (permissionUri + "/grant").equals(resourcePath)) {
@@ -3340,18 +3371,22 @@ public class RESTCatalogServer {
             if (authorization != null) {
                 return authorization;
             }
-            MockResponse validation =
-                    validateResourceAndPrincipal(
-                            assignment.getResource(), assignment.getPrincipal());
-            if (validation != null) {
-                return validation;
-            }
-            validation = validateColumnAssignment(assignment);
-            if (validation != null) {
-                return validation;
-            }
-            permissionStore.put(assignment);
-            return new MockResponse().setResponseCode(200);
+            return mutatePermission(
+                    assignment.getResource(),
+                    () -> {
+                        MockResponse validation =
+                                validateResourceAndPrincipal(
+                                        assignment.getResource(), assignment.getPrincipal());
+                        if (validation != null) {
+                            return validation;
+                        }
+                        validation = validateColumnAssignment(assignment);
+                        if (validation != null) {
+                            return validation;
+                        }
+                        permissionStore.put(assignment);
+                        return new MockResponse().setResponseCode(200);
+                    });
         }
 
         if ("POST".equals(method) && (permissionUri + "/revoke").equals(resourcePath)) {
@@ -3360,17 +3395,43 @@ public class RESTCatalogServer {
             if (authorization != null) {
                 return authorization;
             }
-            MockResponse validation =
-                    validateResourceAndPrincipal(request.getResource(), request.getPrincipal());
-            if (validation != null) {
-                return validation;
-            }
-            permissionStore.remove(
-                    request.getResource(), request.getAccess(), request.getPrincipal());
-            return new MockResponse().setResponseCode(200);
+            return mutatePermission(
+                    request.getResource(),
+                    () -> {
+                        MockResponse validation =
+                                validateResourceAndPrincipal(
+                                        request.getResource(), request.getPrincipal());
+                        if (validation != null) {
+                            return validation;
+                        }
+                        permissionStore.remove(
+                                request.getResource(), request.getAccess(), request.getPrincipal());
+                        return new MockResponse().setResponseCode(200);
+                    });
         }
 
         return new MockResponse().setResponseCode(404);
+    }
+
+    private MockResponse mutatePermission(
+            PermissionResource resource, Supplier<MockResponse> mutation) {
+        if (resource.getType() != ResourceType.TABLE && resource.getType() != ResourceType.COLUMN) {
+            return permissionStore.executeAtomically(mutation);
+        }
+        TableMetadata observed = tableMetadata(resource);
+        if (observed == null) {
+            return resourceNotFound(resource);
+        }
+        synchronized (policyLock(observed.uuid())) {
+            return permissionStore.executeAtomically(
+                    () -> {
+                        TableMetadata current = tableMetadata(resource);
+                        if (current == null || !observed.uuid().equals(current.uuid())) {
+                            return resourceNotFound(resource);
+                        }
+                        return mutation.get();
+                    });
+        }
     }
 
     @Nullable
@@ -3423,34 +3484,43 @@ public class RESTCatalogServer {
             case TABLE:
             case COLUMN:
                 exists =
-                        tableMetadataStore.containsKey(
-                                Identifier.create(resource.getDatabase(), resource.getTable())
-                                        .getFullName());
+                        databaseStore.containsKey(resource.getDatabase())
+                                && tableMetadataStore.containsKey(
+                                        Identifier.create(
+                                                        resource.getDatabase(), resource.getTable())
+                                                .getFullName());
                 break;
             case FUNCTION:
                 exists =
-                        functionStore.containsKey(
-                                Identifier.create(resource.getDatabase(), resource.getFunction())
-                                        .getFullName());
+                        databaseStore.containsKey(resource.getDatabase())
+                                && functionStore.containsKey(
+                                        Identifier.create(
+                                                        resource.getDatabase(),
+                                                        resource.getFunction())
+                                                .getFullName());
                 break;
             case VIEW:
                 exists =
-                        viewStore.containsKey(
-                                Identifier.create(resource.getDatabase(), resource.getView())
-                                        .getFullName());
+                        databaseStore.containsKey(resource.getDatabase())
+                                && viewStore.containsKey(
+                                        Identifier.create(
+                                                        resource.getDatabase(), resource.getView())
+                                                .getFullName());
                 break;
             default:
                 exists = false;
         }
-        return exists
-                ? null
-                : mockResponse(
-                        new ErrorResponse(
-                                resource.getType().name(),
-                                resourceName(resource),
-                                "Permission resource does not exist.",
-                                404),
-                        404);
+        return exists ? null : resourceNotFound(resource);
+    }
+
+    private MockResponse resourceNotFound(PermissionResource resource) {
+        return mockResponse(
+                new ErrorResponse(
+                        resource.getType().name(),
+                        resourceName(resource),
+                        "Permission resource does not exist.",
+                        404),
+                404);
     }
 
     @Nullable
@@ -3508,6 +3578,50 @@ public class RESTCatalogServer {
         return Math.max(1, Math.min(maxResults, ListPermissionsRequest.MAX_PAGE_SIZE));
     }
 
+    private static <T> PagedList<T> buildManagementPage(
+            List<T> elements,
+            int maxResults,
+            @Nullable String pageToken,
+            java.util.function.Function<T, String> sortKey) {
+        String after = decodeManagementPageToken(pageToken);
+        List<T> remaining =
+                elements.stream()
+                        .sorted(Comparator.comparing(sortKey))
+                        .filter(
+                                element ->
+                                        after == null
+                                                || sortKey.apply(element).compareTo(after) > 0)
+                        .collect(Collectors.toList());
+        int end = Math.min(maxResults, remaining.size());
+        List<T> page = new ArrayList<>(remaining.subList(0, end));
+        String nextPageToken =
+                end < remaining.size()
+                        ? encodeManagementPageToken(sortKey.apply(page.get(page.size() - 1)))
+                        : null;
+        return new PagedList<>(page, nextPageToken);
+    }
+
+    @Nullable
+    private static String decodeManagementPageToken(@Nullable String pageToken) {
+        if (pageToken == null) {
+            return null;
+        }
+        String decoded;
+        try {
+            decoded = new String(Base64.getUrlDecoder().decode(pageToken), StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Invalid management page token.", e);
+        }
+        checkArgument(decoded.startsWith("v1\0"), "Invalid management page token version.");
+        return decoded.substring(3);
+    }
+
+    private static String encodeManagementPageToken(String sortKey) {
+        return Base64.getUrlEncoder()
+                .withoutPadding()
+                .encodeToString(("v1\0" + sortKey).getBytes(StandardCharsets.UTF_8));
+    }
+
     private static boolean matches(
             Map<String, String> parameters, String key, @Nullable String value) {
         return !parameters.containsKey(key) || Objects.equals(parameters.get(key), value);
@@ -3539,11 +3653,11 @@ public class RESTCatalogServer {
         if (authorization != null) {
             return authorization;
         }
-        MockResponse resourceError = validateResource(path.resource);
-        if (resourceError != null) {
-            return resourceError;
+        TableMetadata policyTable = tableMetadata(path.resource);
+        if (policyTable == null) {
+            return resourceNotFound(path.resource);
         }
-        String tableUuid = tableUuid(path.resource);
+        String tableUuid = policyTable.uuid();
         if ("GET".equals(method)) {
             if (parameters.containsKey("principal")) {
                 MockResponse principalError = validatePrincipal(parameters.get("principal"));
@@ -3560,16 +3674,14 @@ public class RESTCatalogServer {
                                     Comparator.comparing(
                                             policy -> new PolicyKey(tableUuid, policy)))
                             .collect(Collectors.toList());
-            int start =
-                    parameters.containsKey(PAGE_TOKEN)
-                            ? Integer.parseInt(parameters.get(PAGE_TOKEN))
-                            : 0;
-            int end = Math.min(start + getPermissionMaxResults(parameters), filtered.size());
-            String nextPageToken = end < filtered.size() ? String.valueOf(end) : null;
+            PagedList<DataPolicy> page =
+                    buildManagementPage(
+                            filtered,
+                            getPermissionMaxResults(parameters),
+                            parameters.get(PAGE_TOKEN),
+                            policy -> new PolicyKey(tableUuid, policy).sortKey());
             return mockResponse(
-                    new ListPoliciesResponse(
-                            new ArrayList<>(filtered.subList(start, end)), nextPageToken),
-                    200);
+                    new ListPoliciesResponse(page.getElements(), page.getNextPageToken()), 200);
         }
 
         if ("POST".equals(method) && !path.drop) {
@@ -3693,10 +3805,10 @@ public class RESTCatalogServer {
                 + (request.getColumn() == null ? "" : ":" + request.getColumn());
     }
 
-    private String tableUuid(PermissionResource resource) {
-        return tableMetadataStore
-                .get(Identifier.create(resource.getDatabase(), resource.getTable()).getFullName())
-                .uuid();
+    @Nullable
+    private TableMetadata tableMetadata(PermissionResource resource) {
+        return tableMetadataStore.get(
+                Identifier.create(resource.getDatabase(), resource.getTable()).getFullName());
     }
 
     private Object policyLock(String tableUuid) {
@@ -3706,12 +3818,11 @@ public class RESTCatalogServer {
     @Nullable
     private MockResponse validatePolicyTableVersion(
             PermissionResource resource, String expectedTableUuid) {
-        MockResponse resourceError = validateResource(resource);
-        if (resourceError != null) {
-            return resourceError;
+        TableMetadata current = tableMetadata(resource);
+        if (current == null) {
+            return resourceNotFound(resource);
         }
-        String currentTableUuid = tableUuid(resource);
-        return expectedTableUuid.equals(currentTableUuid)
+        return expectedTableUuid.equals(current.uuid())
                 ? null
                 : mockResponse(
                         new ErrorResponse(
@@ -3828,6 +3939,20 @@ public class RESTCatalogServer {
             } else {
                 parseRowFilter(schema, policy.getRowFilter());
             }
+        }
+    }
+
+    private void validatePermissionsForSchema(
+            Identifier identifier, TableSchema previous, TableSchema current) {
+        if (permissionStore.hasColumnAssignments(identifier)) {
+            checkArgument(
+                    CoreOptions.fromMap(current.options()).queryAuthEnabled(),
+                    "Cannot disable query-auth.enabled while table %s has column permissions.",
+                    identifier.getFullName());
+            checkArgument(
+                    permissionStore.canEvolveTableColumns(identifier, previous, current),
+                    "Cannot drop every allowed column while table %s has column permissions.",
+                    identifier.getFullName());
         }
     }
 

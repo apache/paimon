@@ -53,4 +53,22 @@ public class PolicyKeyTest {
 
         assertThat(sorted).containsExactly(second, first);
     }
+
+    @Test
+    void testCursorKeyDoesNotFlattenOpaquePrincipalAndColumn() {
+        PermissionResource resource =
+                new PermissionResource(ResourceType.TABLE, "database", "table", null, null);
+        PolicyKey first =
+                new PolicyKey(
+                        "table-id",
+                        DataPolicy.columnMask(
+                                resource, new ColumnMask("b\0\1c", "{\"name\":\"NULL\"}"), "a"));
+        PolicyKey second =
+                new PolicyKey(
+                        "table-id",
+                        DataPolicy.columnMask(
+                                resource, new ColumnMask("c", "{\"name\":\"NULL\"}"), "a\0\1b"));
+
+        assertThat(first.sortKey()).isNotEqualTo(second.sortKey());
+    }
 }
