@@ -215,7 +215,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
 
         // delete changelog files
         if (!expireConfig.isChangelogDecoupled()) {
-            planAndCleanChangelogFiles(snapshotsExcludingEnd);
+            cleanChangelogFiles(snapshotsExcludingEnd);
         }
 
         // data files and changelog files in bucket directories has been deleted
@@ -356,7 +356,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         return skippers;
     }
 
-    private void planAndCleanChangelogFiles(List<Snapshot> snapshots)
+    private void cleanChangelogFiles(List<Snapshot> snapshots)
             throws ExecutionException, InterruptedException {
         Queue<CompletableFuture<List<Path>>> futures = new LinkedList<>();
         for (Snapshot snapshot : snapshots) {
