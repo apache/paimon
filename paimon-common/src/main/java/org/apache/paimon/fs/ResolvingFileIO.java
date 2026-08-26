@@ -31,11 +31,10 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.Supplier;
 
 import static org.apache.paimon.options.CatalogOptions.RESOLVING_FILE_IO_ENABLED;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * An implementation of {@link FileIO} that supports multiple file system schemas. It dynamically
@@ -99,27 +98,23 @@ public class ResolvingFileIO implements FileIO {
     }
 
     @Override
-    public Optional<BatchFileDeleter> batchFileDeleter(Path path) throws IOException {
-        Optional<BatchFileDeleter> capability = wrap(() -> fileIO(path).batchFileDeleter(path));
-        if (!capability.isPresent()) {
-            return Optional.empty();
+    public boolean deleteFilesInBatch(List<Path> files) throws IOException {
+        checkArgument(files != null, "Batch delete files must not be null.");
+        if (files.isEmpty()) {
+            return true;
         }
 
-        URI provider = path.toUri();
-        BatchFileDeleter delegate = capability.get();
-        return Optional.of(
-                new BatchFileDeleter() {
-                    @Override
-                    public int maxBatchSize() {
-                        return wrapUnchecked(delegate::maxBatchSize);
-                    }
-
-                    @Override
-                    public BatchDeleteResult delete(List<Path> files) throws IOException {
-                        validateProvider(files, provider);
-                        return wrap(() -> delegate.delete(files));
-                    }
-                });
+        Path first = files.get(0);
+        checkArgument(first != null, "Batch delete file must not be null.");
+        URI provider = first.toUri();
+        for (Path file : files) {
+            checkArgument(
+                    file != null
+                            && Objects.equals(provider.getScheme(), file.toUri().getScheme())
+                            && Objects.equals(provider.getAuthority(), file.toUri().getAuthority()),
+                    "Batch delete files must use the same URI scheme and authority.");
+        }
+        return wrap(() -> fileIO(first).deleteFilesInBatch(files));
     }
 
     @Override
@@ -174,30 +169,6 @@ public class ResolvingFileIO implements FileIO {
             return func.apply();
         } finally {
             Thread.currentThread().setContextClassLoader(cl);
-        }
-    }
-
-    private <T> T wrapUnchecked(Supplier<T> supplier) {
-        ClassLoader cl = Thread.currentThread().getContextClassLoader();
-        try {
-            Thread.currentThread().setContextClassLoader(ResolvingFileIO.class.getClassLoader());
-            return supplier.get();
-        } finally {
-            Thread.currentThread().setContextClassLoader(cl);
-        }
-    }
-
-    private static void validateProvider(List<Path> files, URI provider) {
-        if (files == null) {
-            throw new IllegalArgumentException("Batch delete files must not be null.");
-        }
-        for (Path file : files) {
-            if (file == null
-                    || !Objects.equals(provider.getScheme(), file.toUri().getScheme())
-                    || !Objects.equals(provider.getAuthority(), file.toUri().getAuthority())) {
-                throw new IllegalArgumentException(
-                        "Batch delete files must use the capability provider's scheme and authority.");
-            }
         }
     }
 

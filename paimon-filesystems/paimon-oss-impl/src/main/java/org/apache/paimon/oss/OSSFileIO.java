@@ -20,8 +20,6 @@ package org.apache.paimon.oss;
 
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BlobDescriptor;
-import org.apache.paimon.fs.BatchDeleteResult;
-import org.apache.paimon.fs.BatchFileDeleter;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.HadoopOptionsProvider;
 import org.apache.paimon.fs.Path;
@@ -68,7 +66,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
@@ -151,19 +148,35 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
     }
 
     @Override
-    public Optional<BatchFileDeleter> batchFileDeleter(Path path) {
-        return Optional.of(
-                new BatchFileDeleter() {
-                    @Override
-                    public int maxBatchSize() {
-                        return MAX_BATCH_DELETE_SIZE;
-                    }
+    public boolean deleteFilesInBatch(List<Path> files) throws IOException {
+        checkArgument(files != null, "Batch delete files must not be null.");
+        if (files.isEmpty()) {
+            return true;
+        }
 
-                    @Override
-                    public BatchDeleteResult delete(List<Path> files) throws IOException {
-                        return deleteBatch(files);
-                    }
-                });
+        List<String> keys = validateBatch(files);
+        String bucket = files.get(0).toUri().getHost();
+        OSSClient client;
+        try {
+            client = ossClient(files.get(0));
+        } catch (Exception e) {
+            throw new IOException("Failed to create OSS client for batch delete.", e);
+        }
+
+        for (int start = 0; start < keys.size(); start += MAX_BATCH_DELETE_SIZE) {
+            List<String> batch =
+                    keys.subList(start, Math.min(start + MAX_BATCH_DELETE_SIZE, keys.size()));
+            DeleteObjectsRequest request =
+                    new DeleteObjectsRequest(bucket).withKeys(batch).withQuiet(false);
+            DeleteObjectsResult response;
+            try {
+                response = client.deleteObjects(request);
+            } catch (Exception e) {
+                throw new IOException("Failed to delete OSS object batch.", e);
+            }
+            validateResponse(batch, response);
+        }
+        return true;
     }
 
     @Override
@@ -313,33 +326,8 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
         return getOssClient((AliyunOSSFileSystem) getFileSystem(path(path)));
     }
 
-    private BatchDeleteResult deleteBatch(List<Path> files) throws IOException {
-        ValidatedBatch batch = validateBatch(files);
-        DeleteObjectsRequest request =
-                new DeleteObjectsRequest(batch.bucket).withKeys(batch.keys).withQuiet(false);
-
-        DeleteObjectsResult response;
-        try {
-            response = ossClient(batch.files.get(0)).deleteObjects(request);
-        } catch (Exception e) {
-            throw new IOException("Failed to delete OSS object batch.", e);
-        }
-
-        validateResponse(batch.keys, response);
-        return new BatchDeleteResult(batch.files);
-    }
-
-    private static ValidatedBatch validateBatch(List<Path> files) {
-        checkArgument(files != null, "Batch delete files must not be null.");
-        checkArgument(
-                !files.isEmpty() && files.size() <= MAX_BATCH_DELETE_SIZE,
-                "Batch delete requires between 1 and %s files, but got %s.",
-                MAX_BATCH_DELETE_SIZE,
-                files.size());
-
-        List<Path> validatedFiles = new ArrayList<>(files.size());
+    private static List<String> validateBatch(List<Path> files) {
         List<String> keys = new ArrayList<>(files.size());
-        Set<Path> uniqueFiles = new HashSet<>();
         Set<String> uniqueKeys = new HashSet<>();
         String bucket = null;
         for (Path file : files) {
@@ -363,13 +351,12 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
                     path != null && path.length() > 1,
                     "Batch delete OSS object key must not be empty.");
             String key = path.substring(1);
-            checkArgument(uniqueFiles.add(file), "Batch delete files must not contain duplicates.");
+            OSSUtils.ensureObjectKeyValid(key);
             checkArgument(
                     uniqueKeys.add(key), "Batch delete object keys must not contain duplicates.");
-            validatedFiles.add(file);
             keys.add(key);
         }
-        return new ValidatedBatch(bucket, validatedFiles, keys);
+        return keys;
     }
 
     private static void validateResponse(List<String> requestedKeys, DeleteObjectsResult response)
@@ -383,12 +370,8 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
             throw new IOException("OSS batch delete returned an incomplete acknowledgement.");
         }
 
-        Set<String> requested = new HashSet<>(requestedKeys);
-        Set<String> acknowledged = new HashSet<>();
-        for (String key : deletedObjects) {
-            if (key == null || !requested.contains(key) || !acknowledged.add(key)) {
-                throw new IOException("OSS batch delete returned an invalid acknowledgement.");
-            }
+        if (!new HashSet<>(requestedKeys).equals(new HashSet<>(deletedObjects))) {
+            throw new IOException("OSS batch delete returned an invalid acknowledgement.");
         }
     }
 
@@ -670,19 +653,6 @@ public class OSSFileIO extends HadoopCompliantFileIO implements HadoopOptionsPro
         @Override
         public int hashCode() {
             return Objects.hash(options, scheme, authority);
-        }
-    }
-
-    private static class ValidatedBatch {
-
-        private final String bucket;
-        private final List<Path> files;
-        private final List<String> keys;
-
-        private ValidatedBatch(String bucket, List<Path> files, List<String> keys) {
-            this.bucket = bucket;
-            this.files = files;
-            this.keys = keys;
         }
     }
 }
