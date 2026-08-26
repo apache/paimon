@@ -152,6 +152,69 @@ public class BinaryStringTest {
     }
 
     @TestTemplate
+    public void substringSQL() {
+        BinaryString s = fromString("abcdef");
+        assertThat(s.substringSQL(0, 2)).isEqualTo(fromString("ab"));
+        assertThat(s.substringSQL(1, 2)).isEqualTo(fromString("ab"));
+        assertThat(s.substringSQL(-2, 2)).isEqualTo(fromString("ef"));
+        assertThat(s.substringSQL(-9, 2)).isEqualTo(EMPTY_UTF8);
+        assertThat(s.substringSQL(-9, 5)).isEqualTo(fromString("ab"));
+        assertThat(s.substringSQL(-9, Integer.MAX_VALUE)).isEqualTo(fromString("abcdef"));
+        assertThat(s.substringSQL(Integer.MIN_VALUE, Integer.MIN_VALUE)).isEqualTo(EMPTY_UTF8);
+        assertThat(s.substringSQL(2, 0)).isEqualTo(EMPTY_UTF8);
+        assertThat(s.substringSQL(9, 2)).isEqualTo(EMPTY_UTF8);
+        assertThat(s.substringSQL(1, Integer.MAX_VALUE)).isEqualTo(fromString("abcdef"));
+        assertThat(s.substringSQL(-2, Integer.MAX_VALUE)).isEqualTo(fromString("ef"));
+
+        assertThat(fromString("\uD83D\uDE00abc").substringSQL(2, 2)).isEqualTo(fromString("ab"));
+    }
+
+    @TestTemplate
+    public void trimWithTrimString() {
+        assertThat(fromString("xyzaxyz").trim(fromString("xyz"))).isEqualTo(fromString("a"));
+        assertThat(fromString("zyxaxyz").trim(fromString("xyz"))).isEqualTo(fromString("a"));
+        assertThat(fromString("xyzaxyz").trimLeft(fromString("xyz"))).isEqualTo(fromString("axyz"));
+        assertThat(fromString("xyzaxyz").trimRight(fromString("xyz")))
+                .isEqualTo(fromString("xyza"));
+
+        assertThat(fromString("abc").trim(fromString("xyz"))).isEqualTo(fromString("abc"));
+        assertThat(fromString("abc").trim(EMPTY_UTF8)).isEqualTo(fromString("abc"));
+
+        assertThat(fromString("xyx").trim(fromString("xyz"))).isEqualTo(EMPTY_UTF8);
+        assertThat(fromString("xyx").trimLeft(fromString("xyz"))).isEqualTo(EMPTY_UTF8);
+        assertThat(fromString("xyx").trimRight(fromString("xyz"))).isEqualTo(EMPTY_UTF8);
+        assertThat(fromString("").trim(fromString("x"))).isEqualTo(EMPTY_UTF8);
+
+        assertThat(fromString("abc").trim(null)).isNull();
+        assertThat(fromString("abc").trimLeft(null)).isNull();
+        assertThat(fromString("abc").trimRight(null)).isNull();
+    }
+
+    @TestTemplate
+    public void trimComparesWholeCharacters() {
+        assertThat(fromString("。x。").trim(fromString("、"))).isEqualTo(fromString("。x。"));
+        assertThat(fromString("中x中").trim(fromString("丁"))).isEqualTo(fromString("中x中"));
+        assertThat(fromString("中x中").trim(fromString("中"))).isEqualTo(fromString("x"));
+
+        assertThat(fromString("😁x😁").trim(fromString("😀"))).isEqualTo(fromString("😁x😁"));
+        assertThat(fromString("😁x😁").trim(fromString("😁"))).isEqualTo(fromString("x"));
+        assertThat(fromString("x𐈀").trimRight(fromString("😀"))).isEqualTo(fromString("x𐈀"));
+
+        assertThat(fromString("a中b").trim(fromString("ab中"))).isEqualTo(EMPTY_UTF8);
+    }
+
+    @TestTemplate
+    public void truncatedSequenceIsNotTakenFromTheNeighbouringBytes() {
+        byte[] buffer = new byte[16];
+        System.arraycopy("\u4e2dSECRET".getBytes(UTF_8), 0, buffer, 0, 9);
+        MemorySegment[] segments = {MemorySegment.wrap(buffer)};
+
+        BinaryString truncated = BinaryString.fromAddress(segments, 0, 1);
+        assertThat(truncated.trimLeft(fromString("\u4e2d")).getSizeInBytes()).isEqualTo(1);
+        assertThat(truncated.trimRight(fromString("\u4e2d")).getSizeInBytes()).isEqualTo(1);
+    }
+
+    @TestTemplate
     public void compareTo() {
         assertThat(fromString("   ").compareTo(blankString(3))).isEqualTo(0);
         assertThat(fromString("").compareTo(fromString("a"))).isLessThan(0);
