@@ -24,11 +24,13 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Queue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -44,6 +46,13 @@ import static org.apache.paimon.utils.ThreadUtils.newDaemonThreadFactory;
 
 /** Utils for thread pool. */
 public class ThreadPoolUtils {
+
+    /** An iterator which waits for its active batch to quiesce when closed. */
+    public interface CloseableBatchIterator<T> extends Iterator<T>, AutoCloseable {
+
+        @Override
+        void close();
+    }
 
     /**
      * Create a thread pool with max thread number. Inactive threads will automatically exit.
@@ -124,6 +133,22 @@ public class ThreadPoolUtils {
                 };
     }
 
+    /**
+     * Parallel processes one bounded batch at a time and returns results in input order.
+     *
+     * <p>The caller must close the iterator to cancel unstarted tasks and wait for running tasks.
+     */
+    public static <T, U> CloseableBatchIterator<T> sequentialBatchedExecuteCloseable(
+            ExecutorService executor,
+            Function<U, List<T>> processor,
+            List<U> input,
+            int queueSize) {
+        if (queueSize <= 0) {
+            throw new NegativeArraySizeException("queue size should not be negative");
+        }
+        return new SequentialBatchIterator<>(executor, processor, input, queueSize);
+    }
+
     public static <U> void randomlyOnlyExecute(
             ExecutorService executor, Consumer<U> processor, Collection<U> input) {
         awaitAllFutures(submitAllTasks(executor, processor, input));
@@ -193,5 +218,225 @@ public class ThreadPoolUtils {
                 throw new RuntimeException(e);
             }
         }
+    }
+
+    private static class SequentialBatchIterator<T, U> implements CloseableBatchIterator<T> {
+
+        private final ExecutorService executor;
+        private final Function<U, List<T>> processor;
+        private final Queue<List<U>> batches;
+        private final Queue<BatchTask<T, U>> activeTasks = new ArrayDeque<>();
+
+        private Iterator<T> activeResults = Collections.<T>emptyList().iterator();
+        private T next;
+        private boolean closed;
+
+        private SequentialBatchIterator(
+                ExecutorService executor,
+                Function<U, List<T>> processor,
+                List<U> input,
+                int queueSize) {
+            this.executor = executor;
+            this.processor = processor;
+            this.batches = new ArrayDeque<>(Lists.partition(input, queueSize));
+        }
+
+        @Override
+        public boolean hasNext() {
+            if (!closed) {
+                advanceIfNeeded();
+            }
+            return next != null;
+        }
+
+        @Override
+        public T next() {
+            if (!hasNext()) {
+                throw new NoSuchElementException();
+            }
+            T result = next;
+            next = null;
+            return result;
+        }
+
+        private void advanceIfNeeded() {
+            while (next == null) {
+                if (activeResults.hasNext()) {
+                    next = activeResults.next();
+                } else if (!activeTasks.isEmpty()) {
+                    BatchTask<T, U> task = activeTasks.peek();
+                    try {
+                        List<T> results = task.result();
+                        activeTasks.poll();
+                        activeResults = results.iterator();
+                    } catch (RuntimeException | Error failure) {
+                        if (task.failureReported()) {
+                            activeTasks.poll();
+                        }
+                        throw failure;
+                    }
+                } else if (batches.isEmpty()) {
+                    return;
+                } else {
+                    submitBatch(batches.poll());
+                }
+            }
+        }
+
+        private void submitBatch(List<U> batch) {
+            ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
+            for (U input : batch) {
+                BatchTask<T, U> task = new BatchTask<>(processor, input, classLoader);
+                executor.execute(task);
+                activeTasks.add(task);
+            }
+        }
+
+        @Override
+        public synchronized void close() {
+            if (closed) {
+                return;
+            }
+            closed = true;
+            batches.clear();
+
+            Throwable failure = null;
+            boolean interrupted = Thread.interrupted();
+            for (BatchTask<T, U> task : activeTasks) {
+                try {
+                    task.cancel();
+                } catch (Throwable cleanupFailure) {
+                    failure = firstOrSuppressed(cleanupFailure, failure);
+                }
+            }
+            for (BatchTask<T, U> task : activeTasks) {
+                while (true) {
+                    try {
+                        task.awaitCompletion();
+                        break;
+                    } catch (InterruptedException e) {
+                        interrupted = true;
+                    }
+                }
+                Throwable taskFailure = task.unreportedFailure();
+                if (taskFailure != null) {
+                    failure = firstOrSuppressed(taskFailure, failure);
+                }
+            }
+            activeTasks.clear();
+            activeResults = Collections.<T>emptyList().iterator();
+            next = null;
+
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+            if (failure != null) {
+                throw rethrow(failure);
+            }
+        }
+    }
+
+    private static class BatchTask<T, U> implements Runnable {
+
+        private static final int CREATED = 0;
+        private static final int RUNNING = 1;
+        private static final int CANCELLED = 2;
+        private static final int FINISHED = 3;
+
+        private final Function<U, List<T>> processor;
+        private final U input;
+        private final ClassLoader classLoader;
+        private final CountDownLatch completion = new CountDownLatch(1);
+
+        private int state = CREATED;
+        private Thread runner;
+        private List<T> result;
+        private Throwable failure;
+        private volatile boolean failureReported;
+
+        private BatchTask(Function<U, List<T>> processor, U input, ClassLoader classLoader) {
+            this.processor = processor;
+            this.input = input;
+            this.classLoader = classLoader;
+        }
+
+        @Override
+        public void run() {
+            synchronized (this) {
+                if (state == CANCELLED) {
+                    state = FINISHED;
+                    completion.countDown();
+                    return;
+                }
+                state = RUNNING;
+                runner = Thread.currentThread();
+            }
+
+            try {
+                Thread.currentThread().setContextClassLoader(classLoader);
+                result = processor.apply(input);
+            } catch (RuntimeException | Error taskFailure) {
+                failure = taskFailure;
+            } finally {
+                synchronized (this) {
+                    runner = null;
+                    state = FINISHED;
+                }
+                completion.countDown();
+            }
+        }
+
+        private synchronized void cancel() {
+            if (state == CREATED) {
+                state = CANCELLED;
+                completion.countDown();
+            } else if (state == RUNNING) {
+                runner.interrupt();
+            }
+        }
+
+        private List<T> result() {
+            try {
+                completion.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(e);
+            }
+            if (failure != null) {
+                failureReported = true;
+                throw rethrow(failure);
+            }
+            return result;
+        }
+
+        private void awaitCompletion() throws InterruptedException {
+            completion.await();
+        }
+
+        private boolean failureReported() {
+            return failureReported;
+        }
+
+        private Throwable unreportedFailure() {
+            return failureReported ? null : failure;
+        }
+    }
+
+    private static Throwable firstOrSuppressed(Throwable newFailure, Throwable previousFailure) {
+        if (previousFailure == null || previousFailure == newFailure) {
+            return newFailure;
+        }
+        previousFailure.addSuppressed(newFailure);
+        return previousFailure;
+    }
+
+    private static RuntimeException rethrow(Throwable failure) {
+        if (failure instanceof Error) {
+            throw (Error) failure;
+        }
+        if (failure instanceof RuntimeException) {
+            return (RuntimeException) failure;
+        }
+        return new RuntimeException(failure);
     }
 }
