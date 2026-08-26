@@ -110,7 +110,16 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
       table: DataSourceV2Relation,
       options: Options,
       mergeSchemaEnabled: Boolean): LogicalPlan = {
-    val query = stripHiveDynamicPartitionMarker(v2WriteCommand.query)
+    val queryWithoutMarker = stripHiveDynamicPartitionMarker(v2WriteCommand.query)
+    val query =
+      if (
+        v2WriteCommand.isByName &&
+        containsColumnListWrite(v2WriteCommand.query)
+      ) {
+        PaimonOutputResolver.renameNestedFieldsByPosition(queryWithoutMarker, table.output)
+      } else {
+        queryWithoutMarker
+      }
     val hiveStyleDynamicPartitionEnabled = OptionUtils.hiveStyleDynamicPartitionEnabled()
     hiveDynamicPartitionColumns(v2WriteCommand.query) match {
       case Some(dynamicPartitionColumns)
@@ -152,6 +161,14 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
 
   private def stripHiveDynamicPartitionMarker(query: LogicalPlan): LogicalPlan = {
     query.transformDown { case PaimonHiveDynamicPartitionQuery(_, child) => child }
+  }
+
+  private def containsColumnListWrite(query: LogicalPlan): Boolean = {
+    query
+      .collectFirst {
+        case node if node.getTagValue(COLUMN_LIST_WRITE).isDefined => true
+      }
+      .contains(true)
   }
 
   private def resolveDynamicPartitionWrite(
@@ -273,6 +290,7 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
 
 object PaimonAnalysis {
   val PAIMON_WRITE_RESOLVED: TreeNodeTag[Unit] = TreeNodeTag[Unit]("paimon.write.resolved")
+  val COLUMN_LIST_WRITE: TreeNodeTag[Unit] = TreeNodeTag[Unit]("paimon.write.columnList")
 }
 
 case class PaimonPostHocResolutionRules(session: SparkSession) extends Rule[LogicalPlan] {

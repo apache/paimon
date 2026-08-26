@@ -19,6 +19,7 @@
 package org.apache.spark.sql.catalyst.parser.extensions
 
 import org.apache.paimon.spark.SparkProcedures
+import org.apache.paimon.spark.catalyst.analysis.PaimonAnalysis.COLUMN_LIST_WRITE
 import org.apache.paimon.spark.catalyst.plans.logical.PaimonHiveDynamicPartitionQuery
 
 import org.antlr.v4.runtime._
@@ -112,6 +113,7 @@ abstract class AbstractPaimonSparkSqlExtensionsParser(val delegate: ParserInterf
 
   private def parserRules(sparkSession: SparkSession): Seq[Rule[LogicalPlan]] = {
     Seq(
+      MarkInsertColumnList,
       MarkHiveDynamicPartitionWrite,
       RewritePaimonViewCommands(sparkSession),
       RewritePaimonFunctionCommands(sparkSession),
@@ -370,6 +372,21 @@ class UpperCaseCharStream(wrapped: CodePointCharStream) extends CharStream {
   // scalastyle:on
 }
 
+object MarkInsertColumnList extends Rule[LogicalPlan] {
+
+  override def apply(plan: LogicalPlan): LogicalPlan = {
+    AnalysisHelper.allowInvokingTransformsInAnalyzer {
+      plan.transformDown {
+        case insert: InsertIntoStatement
+            if insert.userSpecifiedCols.nonEmpty &&
+              !MarkHiveDynamicPartitionWrite.isByName(insert) =>
+          insert.query.setTagValue(COLUMN_LIST_WRITE, ())
+          insert
+      }
+    }
+  }
+}
+
 object MarkHiveDynamicPartitionWrite extends Rule[LogicalPlan] {
 
   override def apply(plan: LogicalPlan): LogicalPlan = {
@@ -391,7 +408,7 @@ object MarkHiveDynamicPartitionWrite extends Rule[LogicalPlan] {
     insert.withNewChildren(Seq(query)).asInstanceOf[InsertIntoStatement]
   }
 
-  private def isByName(insert: InsertIntoStatement): Boolean = {
+  private[extensions] def isByName(insert: InsertIntoStatement): Boolean = {
     try {
       insert.getClass.getMethod("byName").invoke(insert).asInstanceOf[Boolean]
     } catch {

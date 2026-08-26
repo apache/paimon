@@ -58,6 +58,29 @@ object PaimonOutputResolver extends SQLConfHelper {
 
   import MissingFieldBehavior._
 
+  def renameNestedFieldsByPosition(query: LogicalPlan, expected: Seq[Attribute]): LogicalPlan = {
+    val renamed = query.output.map {
+      input =>
+        expected.find(target => conf.resolver(input.name, target.name)) match {
+          case Some(target) =>
+            val targetType =
+              CharVarcharUtils.getRawType(target.metadata).getOrElse(target.dataType)
+            val renamedType = renameFieldsInType(input.dataType, targetType)
+            if (renamedType == input.dataType) {
+              input
+            } else {
+              applyColumnMetadata(addCast(input, renamedType), input)
+            }
+          case None => input
+        }
+    }
+    if (renamed == query.output) {
+      query
+    } else {
+      Project(renamed, query)
+    }
+  }
+
   def resolveOutputColumns(
       tableName: String,
       expected: Seq[Attribute],
@@ -476,6 +499,36 @@ object PaimonOutputResolver extends SQLConfHelper {
 
   private def restoreActualType(attr: Attribute): Attribute = {
     attr.withDataType(CharVarcharUtils.getRawType(attr.metadata).getOrElse(attr.dataType))
+  }
+
+  private def renameFieldsInStruct(input: StructType, expected: StructType): StructType = {
+    if (input.length == expected.length) {
+      StructType(input.zip(expected).map {
+        case (inputField, expectedField) =>
+          inputField.copy(
+            name = expectedField.name,
+            dataType = renameFieldsInType(inputField.dataType, expectedField.dataType))
+      })
+    } else {
+      input
+    }
+  }
+
+  private def renameFieldsInType(input: DataType, expected: DataType): DataType = {
+    (input, expected) match {
+      case (inputStruct: StructType, expectedStruct: StructType) =>
+        renameFieldsInStruct(inputStruct, expectedStruct)
+      case (ArrayType(inputElement, containsNull), ArrayType(expectedElement, _)) =>
+        ArrayType(renameFieldsInType(inputElement, expectedElement), containsNull)
+      case (
+            MapType(inputKey, inputValue, valueContainsNull),
+            MapType(expectedKey, expectedValue, _)) =>
+        MapType(
+          renameFieldsInType(inputKey, expectedKey),
+          renameFieldsInType(inputValue, expectedValue),
+          valueContainsNull)
+      case _ => input
+    }
   }
 
   // Inlined `CharVarcharUtils.CHAR_VARCHAR_TYPE_STRING_METADATA_KEY` — the constant is
