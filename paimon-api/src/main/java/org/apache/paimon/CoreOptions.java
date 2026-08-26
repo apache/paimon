@@ -2659,7 +2659,7 @@ public class CoreOptions implements Serializable {
                     .intType()
                     .defaultValue(64)
                     .withDescription(
-                            "The maximum number of concurrent old-data file deletions during "
+                            "The maximum number of concurrent deletions of old data files during "
                                     + "overwrite commits for an internal Format Table with "
                                     + "catalog-managed partitions. Supported values are 1 through "
                                     + "64. Other Format Tables use serial cleanup. This limit uses "

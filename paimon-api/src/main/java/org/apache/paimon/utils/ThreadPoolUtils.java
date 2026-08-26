@@ -134,7 +134,7 @@ public class ThreadPoolUtils {
     }
 
     /**
-     * Parallel processes a bounded number of inputs at a time and returns results in input order.
+     * Processes a bounded number of inputs in parallel and returns results in input order.
      *
      * <p>The caller must close the iterator to cancel unstarted tasks and wait for running tasks.
      */
@@ -154,7 +154,7 @@ public class ThreadPoolUtils {
      * the caller unable to say whether it took effect, so a caller that has to know the outcome of
      * everything it handed out cannot let close cancel work that is already running.
      */
-    public static <T, U> CloseableBatchIterator<T> sequentialBatchedExecuteNonCancellable(
+    public static <T, U> CloseableBatchIterator<T> sequentialBatchedExecuteAwaitRunningTasksOnClose(
             ExecutorService executor,
             Function<U, List<T>> processor,
             Iterator<U> input,
@@ -316,7 +316,7 @@ public class ThreadPoolUtils {
             }
         }
 
-        /** Hands out work until the window is full or the input is exhausted. */
+        /** Does not consume more input than the active-task window can hold. */
         private void fillWindow() {
             ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
             while (activeTasks.size() < queueSize) {
@@ -434,7 +434,7 @@ public class ThreadPoolUtils {
             }
 
             Thread currentThread = Thread.currentThread();
-            boolean wasInterrupted = currentThread.isInterrupted();
+            boolean interruptedOnEntry = currentThread.isInterrupted();
             ClassLoader originalClassLoader = currentThread.getContextClassLoader();
             try {
                 currentThread.setContextClassLoader(classLoader);
@@ -444,8 +444,10 @@ public class ThreadPoolUtils {
                 stopSubmission.run();
             } finally {
                 currentThread.setContextClassLoader(originalClassLoader);
+                // Reset the flag to its entry state so a cancelled task cannot leak an interrupt
+                // to a reused worker and a direct executor cannot clear its caller's interrupt.
                 Thread.interrupted();
-                if (wasInterrupted) {
+                if (interruptedOnEntry) {
                     currentThread.interrupt();
                 }
                 synchronized (this) {
@@ -462,7 +464,6 @@ public class ThreadPoolUtils {
             }
         }
 
-        /** Gives up on a task only while it can still be given up on without interrupting it. */
         private synchronized void cancelIfUnstarted() {
             if (state == CREATED) {
                 state = CANCELLED;

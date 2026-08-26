@@ -65,7 +65,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.table.format.FormatBatchWriteBuilder.validateStaticPartition;
 import static org.apache.paimon.utils.ThreadPoolUtils.CloseableBatchIterator;
-import static org.apache.paimon.utils.ThreadPoolUtils.sequentialBatchedExecuteNonCancellable;
+import static org.apache.paimon.utils.ThreadPoolUtils.sequentialBatchedExecuteAwaitRunningTasksOnClose;
 
 /** Commit for Format Table. */
 public class FormatTableCommit implements BatchTableCommit {
@@ -568,31 +568,26 @@ public class FormatTableCommit implements BatchTableCommit {
             // the iterator is what stops new deletes and waits for the ones already handed out,
             // so a failure cannot leave a worker still deleting after this method returns.
             try (CloseableBatchIterator<Path> cleared =
-                    sequentialBatchedExecuteNonCancellable(
+                    sequentialBatchedExecuteAwaitRunningTasksOnClose(
                             CLEANUP_EXECUTOR, this::deleteAndReportCleared, dataFiles, threadNum)) {
                 while (cleared.hasNext()) {
                     clearedPartitionPaths.add(cleared.next());
                 }
             }
         } catch (UncheckedIOException e) {
-            throw (IOException) withoutUncheckedWrapper(e);
+            throw (IOException) unwrapUncheckedIOException(e);
         }
         return clearedPartitionPaths;
     }
 
-    /**
-     * Unwraps the {@link UncheckedIOException} a worker has to throw to cross a {@link
-     * java.util.function.Function}, so a caller sees the {@link IOException} the file system raised
-     * rather than the wrapper. Whatever else failed while the accepted deletes drained is attached
-     * to the wrapper, so it has to travel with the cause rather than be dropped with it.
-     */
-    private static Throwable withoutUncheckedWrapper(Throwable failure) {
+    /** Unwraps worker I/O failures while preserving recursively suppressed failures. */
+    private static Throwable unwrapUncheckedIOException(Throwable failure) {
         if (!(failure instanceof UncheckedIOException)) {
             return failure;
         }
         Throwable unwrapped = failure.getCause();
         for (Throwable suppressed : failure.getSuppressed()) {
-            unwrapped.addSuppressed(withoutUncheckedWrapper(suppressed));
+            unwrapped.addSuppressed(unwrapUncheckedIOException(suppressed));
         }
         return unwrapped;
     }

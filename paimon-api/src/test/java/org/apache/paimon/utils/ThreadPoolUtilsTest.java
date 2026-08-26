@@ -111,10 +111,10 @@ public class ThreadPoolUtilsTest {
     }
 
     @Test
-    public void testLazyInputIsReadOnlyAsSlotsFree() throws Exception {
+    public void testLazyInputIsConsumedOnlyAsSlotsFree() throws Exception {
         ExecutorService workers = Executors.newFixedThreadPool(2);
         CountDownLatch releaseFirst = new CountDownLatch(1);
-        AtomicInteger read = new AtomicInteger();
+        AtomicInteger inputsRead = new AtomicInteger();
         Iterator<Integer> input =
                 new Iterator<Integer>() {
                     private int next;
@@ -126,12 +126,12 @@ public class ThreadPoolUtilsTest {
 
                     @Override
                     public Integer next() {
-                        read.incrementAndGet();
+                        inputsRead.incrementAndGet();
                         return next++;
                     }
                 };
         try (CloseableBatchIterator<Integer> iterator =
-                ThreadPoolUtils.sequentialBatchedExecuteNonCancellable(
+                ThreadPoolUtils.sequentialBatchedExecuteAwaitRunningTasksOnClose(
                         workers,
                         value -> {
                             if (value == 0) {
@@ -143,7 +143,7 @@ public class ThreadPoolUtilsTest {
                         4)) {
             releaseFirst.countDown();
             assertThat(iterator.next()).isEqualTo(0);
-            assertThat(read).hasValue(4);
+            assertThat(inputsRead).hasValue(4);
         } finally {
             workers.shutdownNow();
         }
@@ -165,7 +165,7 @@ public class ThreadPoolUtilsTest {
                             return value;
                         });
         CloseableBatchIterator<Integer> iterator =
-                ThreadPoolUtils.sequentialBatchedExecuteNonCancellable(
+                ThreadPoolUtils.sequentialBatchedExecuteAwaitRunningTasksOnClose(
                         workers,
                         value -> {
                             if (value == 0) {
@@ -209,7 +209,7 @@ public class ThreadPoolUtilsTest {
     }
 
     @Test
-    public void testWorkerRunsWithTheCallersClassLoaderAndGivesItBack() throws Exception {
+    public void testWorkerUsesCallerClassLoaderAndRestoresPoolClassLoader() throws Exception {
         ExecutorService workers = Executors.newFixedThreadPool(1);
         ClassLoader callerClassLoader = new ClassLoader(getClass().getClassLoader()) {};
         AtomicReference<ClassLoader> poolClassLoader = new AtomicReference<>();
@@ -240,10 +240,13 @@ public class ThreadPoolUtilsTest {
         assertThat(seen).containsExactly(callerClassLoader, callerClassLoader);
         // The pool is shared, so a worker that keeps a caller's loader would hand it to whatever
         // runs on that thread next.
-        AtomicReference<ClassLoader> afterwards = new AtomicReference<>();
-        workers.submit(() -> afterwards.set(Thread.currentThread().getContextClassLoader()))
+        AtomicReference<ClassLoader> restoredPoolClassLoader = new AtomicReference<>();
+        workers.submit(
+                        () ->
+                                restoredPoolClassLoader.set(
+                                        Thread.currentThread().getContextClassLoader()))
                 .get(10, TimeUnit.SECONDS);
-        assertThat(afterwards.get()).isSameAs(poolClassLoader.get());
+        assertThat(restoredPoolClassLoader.get()).isSameAs(poolClassLoader.get());
         workers.shutdownNow();
     }
 
@@ -268,6 +271,8 @@ public class ThreadPoolUtilsTest {
     public void testCloseCancelsQueuedTasksAndWaitsUninterruptibly() throws Exception {
         LinkedBlockingQueue<Runnable> taskQueue = new LinkedBlockingQueue<>();
         AtomicBoolean runQueuedTaskOnInterrupt = new AtomicBoolean();
+        // If close interrupts the worker before cancelling queued tasks, interrupt() runs the
+        // queued task and exposes the ordering bug.
         ThreadPoolExecutor workers =
                 new ThreadPoolExecutor(
                         1,
@@ -422,5 +427,4 @@ public class ThreadPoolUtilsTest {
             }
         }
     }
-
 }

@@ -61,7 +61,7 @@ public class ManifestReadThreadPool {
                 executor, processor, input, effectiveThreadNum(threadNum, executor));
     }
 
-    /** This method parallel processes a bounded number of inputs and waits for them when closed. */
+    /** Processes a bounded number of inputs in parallel and waits for submitted tasks on close. */
     public static <T, U>
             ThreadPoolUtils.CloseableBatchIterator<T> sequentialBatchedExecuteCloseable(
                     Function<U, List<T>> processor, List<U> input, @Nullable Integer threadNum) {
