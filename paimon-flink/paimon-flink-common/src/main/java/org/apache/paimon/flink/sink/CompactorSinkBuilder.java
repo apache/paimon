@@ -66,6 +66,7 @@ public class CompactorSinkBuilder {
         switch (bucketMode) {
             case HASH_FIXED:
             case HASH_DYNAMIC:
+            case KEY_DYNAMIC:
                 return buildForBucketAware();
             default:
                 throw new UnsupportedOperationException("Unsupported bucket mode: " + bucketMode);

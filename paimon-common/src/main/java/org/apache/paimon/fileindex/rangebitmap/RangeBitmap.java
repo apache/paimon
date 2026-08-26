@@ -285,7 +285,11 @@ public class RangeBitmap {
             @Nullable RoaringBitmap32 foundSet,
             boolean strict) {
         return fillNulls(
-                k, nullOrdering, foundSet, (l, r) -> getBitSliceIndexBitmap().topK(l, r, strict));
+                k,
+                nullOrdering,
+                foundSet,
+                (l, r) -> getBitSliceIndexBitmap().topK(l, r, strict),
+                strict);
     }
 
     public RoaringBitmap32 bottomK(
@@ -297,14 +301,16 @@ public class RangeBitmap {
                 k,
                 nullOrdering,
                 foundSet,
-                (l, r) -> getBitSliceIndexBitmap().bottomK(l, r, strict));
+                (l, r) -> getBitSliceIndexBitmap().bottomK(l, r, strict),
+                strict);
     }
 
     private RoaringBitmap32 fillNulls(
             int k,
             SortValue.NullOrdering nullOrdering,
             @Nullable RoaringBitmap32 foundSet,
-            BiFunction<Integer, RoaringBitmap32, RoaringBitmap32> function) {
+            BiFunction<Integer, RoaringBitmap32, RoaringBitmap32> function,
+            boolean strict) {
         if (cardinality <= 0) {
             return rid > 0 ? RoaringBitmap32.bitmapOfRange(0, rid) : new RoaringBitmap32();
         }
@@ -316,12 +322,14 @@ public class RangeBitmap {
             if (cardinality >= k) {
                 return bitmap;
             }
-            bitmap.or(isNull(foundSet).limit((int) (k - cardinality)));
+            // Nulls are all tied, so keep the whole group when duplicates are allowed.
+            RoaringBitmap32 nulls = isNull(foundSet);
+            bitmap.or(strict ? nulls.limit((int) (k - cardinality)) : nulls);
         } else {
             bitmap = isNull(foundSet);
             long cardinality = bitmap.getCardinality();
             if (cardinality >= k) {
-                return bitmap.limit(k);
+                return strict ? bitmap.limit(k) : bitmap;
             }
             bitmap.or(function.apply((int) (k - cardinality), foundSet));
         }

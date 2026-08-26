@@ -257,6 +257,7 @@ class GenericIndexTopoBuilderTest {
                         null,
                         null,
                         firstRowId,
+                        null,
                         null);
         return ManifestEntry.create(FileKind.ADD, partition, 0, 1, file);
     }

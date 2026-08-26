@@ -339,6 +339,7 @@ public class IndexBootstrapTest extends TableTestBase {
                 null,
                 null,
                 null,
+                null,
                 null);
     }
 

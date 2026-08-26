@@ -80,6 +80,7 @@ public interface DataFileMeta {
     String EXTERNAL_PATH = "_EXTERNAL_PATH";
     String FIRST_ROW_ID = "_FIRST_ROW_ID";
     String WRITE_COLS = "_WRITE_COLS";
+    String WRITE_COLS_SEQUENCES = "_WRITE_COLS_SEQUENCES";
 
     RowType SCHEMA =
             new RowType(
@@ -109,7 +110,11 @@ public interface DataFileMeta {
                             new DataField(17, EXTERNAL_PATH, newStringType(true)),
                             new DataField(18, FIRST_ROW_ID, new BigIntType(true)),
                             new DataField(
-                                    19, WRITE_COLS, new ArrayType(true, newStringType(false)))));
+                                    19, WRITE_COLS, new ArrayType(true, newStringType(false))),
+                            new DataField(
+                                    20,
+                                    WRITE_COLS_SEQUENCES,
+                                    new ArrayType(true, new BigIntType(false)))));
 
     BinaryRow EMPTY_MIN_KEY = EMPTY_ROW;
     BinaryRow EMPTY_MAX_KEY = EMPTY_ROW;
@@ -150,7 +155,8 @@ public interface DataFileMeta {
                 valueStatsCols,
                 externalPath,
                 firstRowId,
-                writeCols);
+                writeCols,
+                null);
     }
 
     static DataFileMeta create(
@@ -173,7 +179,7 @@ public interface DataFileMeta {
             @Nullable String externalPath,
             @Nullable Long firstRowId,
             @Nullable List<String> writeCols) {
-        return new PojoDataFileMeta(
+        return create(
                 fileName,
                 fileSize,
                 rowCount,
@@ -193,7 +199,8 @@ public interface DataFileMeta {
                 valueStatsCols,
                 externalPath,
                 firstRowId,
-                writeCols);
+                writeCols,
+                null);
     }
 
     static DataFileMeta create(
@@ -234,7 +241,8 @@ public interface DataFileMeta {
                 valueStatsCols,
                 null,
                 firstRowId,
-                writeCols);
+                writeCols,
+                null);
     }
 
     static DataFileMeta create(
@@ -257,7 +265,8 @@ public interface DataFileMeta {
             @Nullable List<String> valueStatsCols,
             @Nullable String externalPath,
             @Nullable Long firstRowId,
-            @Nullable List<String> writeCols) {
+            @Nullable List<String> writeCols,
+            @Nullable long[] columnMaxSequenceNumbers) {
         return new PojoDataFileMeta(
                 fileName,
                 fileSize,
@@ -278,7 +287,8 @@ public interface DataFileMeta {
                 valueStatsCols,
                 externalPath,
                 firstRowId,
-                writeCols);
+                writeCols,
+                columnMaxSequenceNumbers);
     }
 
     String fileName();
@@ -354,6 +364,16 @@ public interface DataFileMeta {
     @Nullable
     List<String> writeCols();
 
+    /**
+     * Maximum sequence number per physical table field after data-evolution compaction.
+     *
+     * <p>Values follow the table-field order selected by {@link #writeCols()} when it is non-null
+     * (system fields are ignored), or the file schema field order otherwise. A null value means
+     * that only the file-level sequence range is available.
+     */
+    @Nullable
+    long[] columnMaxSequenceNumbers();
+
     DataFileMeta upgrade(int newLevel);
 
     DataFileMeta rename(String newFileName);
@@ -361,6 +381,8 @@ public interface DataFileMeta {
     DataFileMeta copyWithoutStats();
 
     DataFileMeta assignSequenceNumber(long minSequenceNumber, long maxSequenceNumber);
+
+    DataFileMeta withColumnMaxSequenceNumbers(long[] columnMaxSequenceNumbers);
 
     DataFileMeta assignFirstRowId(long firstRowId);
 

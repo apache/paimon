@@ -30,12 +30,14 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.PartitionPathUtils;
 
 import org.junit.jupiter.api.DisplayName;
@@ -53,6 +55,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalLong;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -180,6 +183,53 @@ class CatalogManagedPartitionScanTest {
         assertThat(entries.get(0).lastFileCreationTime()).isEqualTo(44L);
         assertThat(entries.get(0).totalBuckets()).isEqualTo(5);
         assertThat(fileIO.listedPaths).isEmpty();
+    }
+
+    @Test
+    void testPlanReusesCatalogListingForSplitsAndRowCount() throws Exception {
+        Catalog catalog = mock(Catalog.class);
+        Partition october =
+                new Partition(partition("2025", "10").spec(), 2L, 0L, 0L, 0L, -1, false);
+        Partition november =
+                new Partition(partition("2025", "11").spec(), 3L, 0L, 0L, 0L, -1, false);
+        when(catalog.listPartitionsPaged(eq(IDENTIFIER), eq(1000), isNull(), isNull()))
+                .thenReturn(new PagedList<>(Arrays.asList(october, november), null));
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        writeDataFile(fileIO, tablePath, "year=2025/month=10");
+        writeDataFile(fileIO, tablePath, "year=2025/month=11");
+        FormatTable table = createTable(fileIO, tablePath, partitionManager(catalog), false);
+
+        FormatTableScan.Plan plan = new FormatTableScan(table, null, null).plan();
+
+        assertThat(plan.splits()).hasSize(2);
+        assertThat(plan.rowCount()).isEqualTo(OptionalLong.of(5L));
+        verify(catalog).listPartitionsPaged(IDENTIFIER, 1000, null, null);
+    }
+
+    @Test
+    void testPlanRowCountStaysUnknownWhenCatalogReportsNoStatistics() throws Exception {
+        // Partitions as they come off the wire from a catalog that stores no statistics. Summing
+        // them as zeros would tell Spark the table is empty and get a huge scan broadcast.
+        Catalog catalog = mock(Catalog.class);
+        Partition october =
+                JsonSerdeUtil.fromJson(
+                        "{\"spec\":{\"year\":\"2025\",\"month\":\"10\"}}", Partition.class);
+        Partition november =
+                JsonSerdeUtil.fromJson(
+                        "{\"spec\":{\"year\":\"2025\",\"month\":\"11\"}}", Partition.class);
+        when(catalog.listPartitionsPaged(eq(IDENTIFIER), eq(1000), isNull(), isNull()))
+                .thenReturn(new PagedList<>(Arrays.asList(october, november), null));
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        writeDataFile(fileIO, tablePath, "year=2025/month=10");
+        writeDataFile(fileIO, tablePath, "year=2025/month=11");
+        FormatTable table = createTable(fileIO, tablePath, partitionManager(catalog), false);
+
+        FormatTableScan.Plan plan = new FormatTableScan(table, null, null).plan();
+
+        assertThat(plan.splits()).hasSize(2);
+        assertThat(plan.rowCount()).isEqualTo(OptionalLong.empty());
     }
 
     @Test
@@ -400,7 +450,10 @@ class CatalogManagedPartitionScanTest {
 
             @Override
             public void createPartitions(
-                    List<Map<String, String>> partitions, boolean ignoreIfExists) {
+                    List<Map<String, String>> partitions,
+                    boolean ignoreIfExists,
+                    @Nullable List<PartitionStatistics> statistics,
+                    boolean replaceStatistics) {
                 throw new UnsupportedOperationException();
             }
 

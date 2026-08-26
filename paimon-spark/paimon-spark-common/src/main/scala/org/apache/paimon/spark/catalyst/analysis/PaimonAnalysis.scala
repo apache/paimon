@@ -23,7 +23,8 @@ import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation.isPaimonTable
 import org.apache.paimon.spark.catalyst.plans.logical.{PaimonDropPartitions, PaimonHiveDynamicPartitionQuery}
-import org.apache.paimon.spark.commands.{PaimonAnalyzeTableColumnCommand, PaimonDynamicPartitionOverwriteCommand, PaimonShowColumnsCommand, SchemaEvolutionHelper}
+import org.apache.paimon.spark.commands.{PaimonAnalyzeFormatTablePartitionsCommand, PaimonAnalyzeTableColumnCommand, PaimonDynamicPartitionOverwriteCommand, PaimonShowColumnsCommand, SchemaEvolutionHelper}
+import org.apache.paimon.spark.format.PaimonFormatTable
 import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.table.FileStoreTable
 
@@ -282,6 +283,15 @@ case class PaimonPostHocResolutionRules(session: SparkSession) extends Rule[Logi
     }
 
     withoutHiveDynamicPartitionMarkers match {
+      // Spark rejects ANALYZE TABLE for every v2 table, so intercept before it does. Unlike a
+      // Paimon table, a Format Table has no snapshot to carry statistics and no column statistics
+      // to compute: analyzing it measures its partitions, for which PARTITION(...) and NOSCAN both
+      // mean something. Tables using filesystem partition discovery have no catalog to write to
+      // and fall through to the upstream rejection.
+      case a @ AnalyzeTable(ResolvedTable(_, _, table: PaimonFormatTable, _), partitionSpec, noScan)
+          if a.resolved && table.hasCatalogManagedPartitions =>
+        PaimonAnalyzeFormatTablePartitionsCommand(table, partitionSpec, noScan)
+
       case a @ AnalyzeTable(
             ResolvedTable(catalog, identifier, table: SparkTable, _),
             partitionSpec,

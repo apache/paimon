@@ -33,6 +33,7 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ProjectedManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.DataField;
@@ -53,8 +54,10 @@ import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.function.Function;
 
-import static org.apache.paimon.utils.DataEvolutionUtils.fileFieldIds;
+import static org.apache.paimon.utils.DataEvolutionUtils.fieldMaxSequenceNumber;
+import static org.apache.paimon.utils.DataEvolutionUtils.fileFields;
 
 /** Plans existing global index files which need refresh after data-evolution updates. */
 public final class DataEvolutionGlobalIndexRefreshPlanner {
@@ -77,7 +80,8 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
         }
 
         Set<Integer> indexedFieldIds = indexedFieldIds(indexedFields);
-        Map<Pair<Long, List<String>>, Set<Integer>> fileFieldIdsCache = new HashMap<>();
+        Function<Long, TableSchema> schemaLoader = cachedSchemaLoader(schemaManager);
+        Map<Pair<Long, List<String>>, List<DataField>> fileFieldsCache = new HashMap<>();
         for (ManifestEntry dataEntry : dataEntries) {
             DataFileMeta file = dataEntry.file();
             if (dataEntry.kind() != FileKind.ADD || file.firstRowId() == null) {
@@ -89,8 +93,7 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
                 continue;
             }
 
-            addIfUpdatesIndexedFields(
-                    schemaManager, fileFieldIdsCache, indexedFieldIds, group, file);
+            addIfUpdatesIndexedFields(schemaLoader, fileFieldsCache, indexedFieldIds, group, file);
         }
 
         return collectMarkedIndexes(groups, indexEntries);
@@ -205,7 +208,8 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
             CompactFileIdentifierSet deleted,
             Map<Pair<BinaryRow, Integer>, RefreshGroup> groups,
             Set<Integer> indexedFieldIds) {
-        Map<Pair<Long, List<String>>, Set<Integer>> fileFieldIdsCache = new HashMap<>();
+        Function<Long, TableSchema> schemaLoader = cachedSchemaLoader(schemaManager);
+        Map<Pair<Long, List<String>>, List<DataField>> fileFieldsCache = new HashMap<>();
         ProjectedManifestEntry.Projection projection = addedEntryProjection(!deleted.isEmpty());
         for (ManifestFileMeta manifest : manifests) {
             if (manifest.numAddedFiles() <= 0) {
@@ -230,7 +234,7 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
                         continue;
                     }
                     addIfUpdatesIndexedFields(
-                            schemaManager, fileFieldIdsCache, indexedFieldIds, group, file);
+                            schemaLoader, fileFieldsCache, indexedFieldIds, group, file);
                 }
             } catch (Exception e) {
                 throw manifestScanException(manifest, e);
@@ -239,18 +243,34 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
     }
 
     private static void addIfUpdatesIndexedFields(
-            SchemaManager schemaManager,
-            Map<Pair<Long, List<String>>, Set<Integer>> fileFieldIdsCache,
+            Function<Long, TableSchema> schemaLoader,
+            Map<Pair<Long, List<String>>, List<DataField>> fileFieldsCache,
             Set<Integer> indexedFieldIds,
             RefreshGroup group,
             DataFileMeta file) {
-        Set<Integer> physicalFieldIds =
-                fileFieldIdsCache.computeIfAbsent(
+        List<DataField> physicalFields =
+                fileFieldsCache.computeIfAbsent(
                         Pair.of(file.schemaId(), file.writeCols()),
-                        key -> fileFieldIds(schemaManager::schema, file));
-        if (!disjoint(indexedFieldIds, physicalFieldIds)) {
-            group.addUpdatedFile(file.maxSequenceNumber(), file.nonNullRowIdRange());
+                        key -> fileFields(schemaLoader, file));
+        long[] columnSequences = file.columnMaxSequenceNumbers();
+        long indexedMaxSequence = Long.MIN_VALUE;
+        for (int position = 0; position < physicalFields.size(); position++) {
+            if (indexedFieldIds.contains(physicalFields.get(position).id())) {
+                indexedMaxSequence =
+                        Math.max(
+                                indexedMaxSequence,
+                                fieldMaxSequenceNumber(
+                                        file, columnSequences, position, physicalFields.size()));
+            }
         }
+        if (indexedMaxSequence != Long.MIN_VALUE) {
+            group.addUpdatedFile(indexedMaxSequence, file.nonNullRowIdRange());
+        }
+    }
+
+    private static Function<Long, TableSchema> cachedSchemaLoader(SchemaManager schemaManager) {
+        Map<Long, TableSchema> schemaCache = new HashMap<>();
+        return schemaId -> schemaCache.computeIfAbsent(schemaId, schemaManager::schema);
     }
 
     /**
@@ -265,6 +285,7 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
         fileFields.add(DataFileMeta.SCHEMA.getField(DataFileMeta.SCHEMA_ID));
         fileFields.add(DataFileMeta.SCHEMA.getField(DataFileMeta.FIRST_ROW_ID));
         fileFields.add(DataFileMeta.SCHEMA.getField(DataFileMeta.WRITE_COLS));
+        fileFields.add(DataFileMeta.SCHEMA.getField(DataFileMeta.WRITE_COLS_SEQUENCES));
         if (includeIdentifierFields) {
             fileFields.add(DataFileMeta.SCHEMA.getField(DataFileMeta.FILE_NAME));
             fileFields.add(DataFileMeta.SCHEMA.getField(DataFileMeta.LEVEL));
@@ -351,6 +372,9 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
         }
 
         private void addUpdatedFile(long maxSequenceNumber, Range rowRange) {
+            if (maxSequenceNumber <= minScanSnapshotId) {
+                return;
+            }
             // Merge the range eagerly instead of retaining the file metadata.
             int sequenceNumberIndex = firstIndexWithSequenceNumberBelow(maxSequenceNumber);
             if (updatedRangesPerSequenceNumber[sequenceNumberIndex] == null) {
@@ -472,14 +496,5 @@ public final class DataEvolutionGlobalIndexRefreshPlanner {
             return expectedExtraFields == null || expectedExtraFields.length == 0;
         }
         return expectedExtraFields != null && Arrays.equals(actualExtraFields, expectedExtraFields);
-    }
-
-    private static boolean disjoint(Set<Integer> left, Set<Integer> right) {
-        for (Integer value : left) {
-            if (right.contains(value)) {
-                return false;
-            }
-        }
-        return true;
     }
 }

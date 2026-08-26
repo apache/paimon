@@ -22,7 +22,7 @@ import org.apache.paimon.catalog.{CatalogContext, Identifier}
 import org.apache.paimon.fs.{FileIO, Path}
 import org.apache.paimon.fs.local.LocalFileIO
 import org.apache.paimon.options.Options
-import org.apache.paimon.partition.Partition
+import org.apache.paimon.partition.{Partition, PartitionStatistics}
 import org.apache.paimon.predicate.Predicate
 import org.apache.paimon.spark.PaimonSparkTestWithRestCatalogBase
 import org.apache.paimon.spark.catalyst.plans.logical.PaimonDropPartitions
@@ -368,7 +368,9 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
     val gateway = new FormatTablePartitionManager {
       override def createPartitions(
           partitions: JList[JMap[String, String]],
-          ignoreIfExists: Boolean): Unit = {}
+          ignoreIfExists: Boolean,
+          statistics: JList[PartitionStatistics],
+          replaceStatistics: Boolean): Unit = {}
 
       override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = dropCalls += 1
 
@@ -419,7 +421,9 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
     val gateway = new FormatTablePartitionManager {
       override def createPartitions(
           partitions: JList[JMap[String, String]],
-          ignoreIfExists: Boolean): Unit = {}
+          ignoreIfExists: Boolean,
+          statistics: JList[PartitionStatistics],
+          replaceStatistics: Boolean): Unit = {}
 
       override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = {
         dropped = partitions.asScala.map(_.asScala.toMap).toSeq
@@ -486,7 +490,9 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
     def newGateway(): FormatTablePartitionManager = new FormatTablePartitionManager {
       override def createPartitions(
           partitions: JList[JMap[String, String]],
-          ignoreIfExists: Boolean): Unit = {
+          ignoreIfExists: Boolean,
+          statistics: JList[PartitionStatistics],
+          replaceStatistics: Boolean): Unit = {
         val specs = partitions.asScala.map(_.asScala.toMap).toSeq
         compensationCreates :+= ((specs, ignoreIfExists))
         registered ++= specs
@@ -551,7 +557,9 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
     def newGateway(): FormatTablePartitionManager = new FormatTablePartitionManager {
       override def createPartitions(
           partitions: JList[JMap[String, String]],
-          ignoreIfExists: Boolean): Unit = {
+          ignoreIfExists: Boolean,
+          statistics: JList[PartitionStatistics],
+          replaceStatistics: Boolean): Unit = {
         val specs = partitions.asScala.map(_.asScala.toMap).toSeq
         compensationCreates :+= ((specs, ignoreIfExists))
         registered ++= specs
@@ -615,7 +623,9 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
     val gateway = new FormatTablePartitionManager {
       override def createPartitions(
           partitions: JList[JMap[String, String]],
-          ignoreIfExists: Boolean): Unit = {}
+          ignoreIfExists: Boolean,
+          statistics: JList[PartitionStatistics],
+          replaceStatistics: Boolean): Unit = {}
 
       override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = {
         dropped = partitions.asScala.map(_.asScala.toMap).toSeq
@@ -657,7 +667,9 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
     val gateway = new FormatTablePartitionManager {
       override def createPartitions(
           partitions: JList[JMap[String, String]],
-          ignoreIfExists: Boolean): Unit = {}
+          ignoreIfExists: Boolean,
+          statistics: JList[PartitionStatistics],
+          replaceStatistics: Boolean): Unit = {}
 
       override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = {
         dropped = partitions.asScala.map(_.asScala.toMap).toSeq
@@ -713,7 +725,9 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
     val gateway = new FormatTablePartitionManager {
       override def createPartitions(
           partitions: JList[JMap[String, String]],
-          ignoreIfExists: Boolean): Unit = {}
+          ignoreIfExists: Boolean,
+          statistics: JList[PartitionStatistics],
+          replaceStatistics: Boolean): Unit = {}
 
       override def dropPartitions(partitions: JList[JMap[String, String]]): Unit = dropCalls += 1
 
@@ -869,8 +883,7 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
   private def registerPartitions(tableName: String, specs: Map[String, String]*): Unit =
     paimonCatalog.createPartitions(
       Identifier.create(dbName0, tableName),
-      specs.map(_.asJava).asJava,
-      true)
+      specs.map(_.asJava).asJava)
 
   private def registeredPartitionSpecs(tableName: String): Set[Map[String, String]] =
     paimonCatalog
@@ -908,7 +921,9 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
 
     override def createPartitions(
         partitions: JList[JMap[String, String]],
-        ignoreIfExists: Boolean): Unit = {
+        ignoreIfExists: Boolean,
+        statistics: JList[PartitionStatistics],
+        replaceStatistics: Boolean): Unit = {
       createCalls += 1
       created = partitions.asScala.toSeq
       this.ignoreIfExists = ignoreIfExists
@@ -941,7 +956,9 @@ class FormatTablePartitionDdlPlanningTest extends PaimonSparkTestWithRestCatalog
 
     override def createPartitions(
         partitionsToCreate: JList[JMap[String, String]],
-        ignoreIfExists: Boolean): Unit = synchronized {
+        ignoreIfExists: Boolean,
+        statistics: JList[PartitionStatistics],
+        replaceStatistics: Boolean): Unit = synchronized {
       val batch = partitionsToCreate.asScala.map(_.asScala.toMap).toSeq
       batches :+= batch
       val duplicates = batch.filter(partitions.contains)

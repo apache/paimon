@@ -43,7 +43,8 @@ public class CheckpointCommittablesSerializer
     public int getVersion() {
         // v1: checkpointId + watermark + committables
         // v2: v1 + idle bit (appended before the committable list to keep the ordering explicit)
-        return 2;
+        // v3: v2 + savepoint-tag bit (appended after idle, still before the committable list)
+        return 3;
     }
 
     @Override
@@ -52,6 +53,7 @@ public class CheckpointCommittablesSerializer
         out.writeLong(value.checkpointId());
         out.writeLong(value.watermark());
         out.writeBoolean(value.idle());
+        out.writeBoolean(value.shouldCreateSavepointTag());
         // Nested serializer version comes before the list so the reader can pick the right decoder
         // before touching any list bytes — mirrors ManifestCommittableSerializer's layout.
         out.writeInt(committableSerializer.getVersion());
@@ -67,7 +69,7 @@ public class CheckpointCommittablesSerializer
 
     @Override
     public CheckpointCommittables deserialize(int version, byte[] serialized) throws IOException {
-        if (version != 1 && version != 2) {
+        if (version != 1 && version != 2 && version != 3) {
             throw new IOException("Unknown version " + version);
         }
         DataInputDeserializer in = new DataInputDeserializer(serialized);
@@ -75,7 +77,9 @@ public class CheckpointCommittablesSerializer
         long watermark = in.readLong();
         // v1 payloads pre-date idle tracking; default to ACTIVE (idle=false), which reproduces
         // the pre-idle-aware behaviour: every subtask contributes to the min unconditionally.
-        boolean idle = version >= 2 && in.readBoolean();
+        boolean idle = version >= 2 ? in.readBoolean() : false;
+        // v1/v2 payloads pre-date the savepoint-tag bit; older payloads have no tag.
+        boolean shouldCreateSavepointTag = version >= 3 ? in.readBoolean() : false;
         int committableVersion = in.readInt();
         int count = in.readInt();
         List<Committable> committables = new ArrayList<>(count);
@@ -85,6 +89,7 @@ public class CheckpointCommittablesSerializer
             in.readFully(bytes);
             committables.add(committableSerializer.deserialize(committableVersion, bytes));
         }
-        return new CheckpointCommittables(checkpointId, committables, watermark, idle);
+        return new CheckpointCommittables(
+                checkpointId, committables, watermark, idle, shouldCreateSavepointTag);
     }
 }

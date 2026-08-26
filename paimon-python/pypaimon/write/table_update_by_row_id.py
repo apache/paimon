@@ -17,7 +17,7 @@
 
 import bisect
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import pyarrow as pa
@@ -424,30 +424,32 @@ class TableUpdateByRowId:
             column_names: List[str],
             first_row_id: int,
             blob_object_columns: Optional[Dict[str, List[Any]]] = None,
+            blob_columns_with_baseline: Optional[Set[str]] = None,
     ) -> Tuple[Optional[pa.Table], Dict[str, List[object]]]:
         """Merge update data with original data, preserving row order.
 
         For rows that have updates, use the update values.
         For rows without updates, use the original values (if available).
 
-        Blob delta files cover ``[first_row_id, first_row_id + max_updated_pos]``
-        — anchored at the original file's first_row_id, spanning up to and
-        including the last updated row. The span is NOT shrunk at the head:
-        ``BlobFallbackRecordReader`` resolves placeholders by relative offset
-        from the delta file's ``first_row_id``, so anchoring anywhere other
-        than the original ``first_row_id`` would misalign unchanged rows
-        before ``min_updated_pos`` with the older blob file. This anchor is
-        the same in every blob column being updated.
+        Blob delta files are anchored at the original file's first_row_id.
+        Existing Blob columns only need to span through their last updated
+        row because placeholders can fall back to older files. A Blob column
+        without a physical baseline spans the complete normal file and writes
+        real nulls for unchanged rows, so it does not create placeholders with
+        nowhere to fall back.
 
         Args:
             original_data: Original data from the file (may be None if no columns need to be read)
             update_data: Update data (may contain only partial rows)
             column_names: Column names being updated
             first_row_id: The first_row_id of this file group
+            blob_object_columns: Blob objects supplied by row-based updates
+            blob_columns_with_baseline: Blob columns backed by an existing physical file
 
         Returns:
-            Normal merged PyArrow Table, and per-blob-column values list. All
-            blob value lists have the same length (= ``max_updated_pos + 1``).
+            Normal merged PyArrow Table, and per-blob-column values list.
+            Blob value list lengths may differ when the updated columns do not
+            all have physical baselines.
         """
 
         # Get the _ROW_ID values from update_data to determine which rows are being updated
@@ -471,25 +473,32 @@ class TableUpdateByRowId:
         sorted_updates = None
         # Caller (_write_by_first_row_id) only enters this method with a
         # non-empty group, so update_positions is non-empty here.
-        blob_row_count = max(update_positions) + 1
+        blob_columns_with_baseline = blob_columns_with_baseline or set()
         for col_name in column_names:
             if self._is_blob_column(col_name):
+                has_baseline = col_name in blob_columns_with_baseline
+                blob_row_count = (
+                    max(update_positions) + 1
+                    if has_baseline else original_data.num_rows
+                )
+                missing_value = (
+                    self._blob_placeholder(col_name)
+                    if has_baseline else None
+                )
                 if blob_object_columns and col_name in blob_object_columns:
                     update_values = blob_object_columns[col_name]
-                    placeholder = self._blob_placeholder(col_name)
                     blob_columns[col_name] = [
                         update_values[update_positions[i]]
                         if i in update_positions
-                        else placeholder
+                        else missing_value
                         for i in range(blob_row_count)
                     ]
                     continue
                 update_col = update_by_col[col_name]
-                placeholder = self._blob_placeholder(col_name)
                 blob_columns[col_name] = [
                     update_col[update_positions[i]].as_py()
                     if i in update_positions
-                    else placeholder
+                    else missing_value
                     for i in range(blob_row_count)
                 ]
                 continue
@@ -744,12 +753,20 @@ class TableUpdateByRowId:
         writes a single output file (rolling disabled) for the group.
         """
         original_data = self._read_original_file_data(first_row_id, column_names)
+        _, target_files = self._first_row_id_index[first_row_id]
+        blob_columns_with_baseline = {
+            column_name
+            for file in target_files
+            if DataFileMeta.is_blob_file(file.file_name)
+            for column_name in (file.write_cols or [])
+        }
         merged_data, blob_columns = self._merge_update_with_original(
             original_data,
             data,
             column_names,
             first_row_id,
             blob_object_columns,
+            blob_columns_with_baseline,
         )
 
         partition_tuple = tuple(partition.values)
@@ -811,13 +828,10 @@ class TableUpdateByRowId:
     def _assign_update_file_metadata(new_files: List[DataFileMeta], first_row_id: int,
                                      column_names: List[str],
                                      blob_columns: Dict[str, List[object]]):
-        # All blob columns share the same anchored span (see
-        # _merge_update_with_original docstring), so any column's length is
-        # the per-blob delta-file row count.
-        blob_row_count = (
-            len(next(iter(blob_columns.values()))) if blob_columns else 0
-        )
-        blob_end = first_row_id + blob_row_count
+        blob_ends = {
+            column_name: first_row_id + len(values)
+            for column_name, values in blob_columns.items()
+        }
         blob_starts = {}
         # BlobWriter.prepare_commit preserves write/rolling order, which is required
         # for assigning continuous row-id ranges to rolled blob files.
@@ -831,6 +845,7 @@ class TableUpdateByRowId:
                 blob_column = file.write_cols[0]
                 blob_start = blob_starts.get(blob_column, first_row_id)
                 next_blob_start = blob_start + file.row_count
+                blob_end = blob_ends[blob_column]
                 if next_blob_start > blob_end:
                     raise RuntimeError(
                         f"Blob update file {file.file_name} row-id range "
@@ -846,6 +861,7 @@ class TableUpdateByRowId:
                 file.first_row_id = first_row_id
 
         for blob_column, next_blob_start in blob_starts.items():
+            blob_end = blob_ends[blob_column]
             if next_blob_start != blob_end:
                 raise RuntimeError(
                     f"Blob update column {blob_column} covers row ids "

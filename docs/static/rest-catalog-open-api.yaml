@@ -2489,6 +2489,14 @@ components:
         ignoreIfExists:
           type: boolean
           default: true
+        partitionStatistics:
+          description: Statistics of the partitions being created, matched to partitionSpecs by their spec rather than by position, so they may cover only some of them. A field left negative was never measured, which is not the same as zero.
+          type: [ array, "null" ]
+          items:
+            $ref: '#/components/schemas/PartitionStatistics'
+        replaceStatistics:
+          description: Whether partitionStatistics replace the stored values rather than add to them; required whenever partitionStatistics is present, and absent otherwise. Replacing overwrites recordCount, fileSizeInBytes, fileCount and lastFileCreationTime; adding sums the three counts and keeps the later lastFileCreationTime, since two timestamps do not add. A field reported as unknown leaves the stored one alone either way, and totalBuckets is never combined. A client that reports only the files it just wrote adds; one that reports a whole partition, such as an overwrite or a directory rescan, replaces.
+          type: [ boolean, "null" ]
     CreatePartitionsResponse:
       type: object
       required:

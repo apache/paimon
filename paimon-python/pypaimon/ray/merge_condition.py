@@ -16,13 +16,19 @@
 # limitations under the License.
 ################################################################################
 
+import logging
 import re
-from typing import Mapping, Set
+from typing import Mapping, Optional, Set
 
 import pyarrow as pa
 
+from pypaimon.common.predicate import Predicate
+from pypaimon.common.predicate_builder import PredicateBuilder
+from pypaimon.schema.data_types import AtomicType
+
 
 _COL_REF_PATTERN = re.compile(r'\b([st])\.(\w+)\b')
+logger = logging.getLogger(__name__)
 
 
 def _load_datafusion():
@@ -103,3 +109,164 @@ def extract_target_columns(condition: str) -> Set[str]:
     stripped = _strip_string_literals(condition)
     return {m.group(2) for m in _COL_REF_PATTERN.finditer(stripped)
             if m.group(1) == "t"}
+
+
+def try_parse_self_merge_predicate(condition, fields) -> Optional[Predicate]:
+    """Best-effort conversion of a self-merge condition for scan pruning."""
+    if not isinstance(condition, str):
+        return None
+
+    # Conversion failure keeps the original unfiltered DataFusion execution.
+    try:
+        expression = _parse_self_merge_expression(condition, fields)
+        return _to_paimon_predicate(
+            expression,
+            PredicateBuilder(fields),
+            {field.name: field for field in fields},
+        )
+    except Exception:
+        logger.debug(
+            "Unable to push down self-merge condition %r",
+            condition,
+            exc_info=True,
+        )
+        return None
+
+
+def _parse_self_merge_expression(condition, fields):
+    from pypaimon.schema.data_types import PyarrowFieldParser
+    from pypaimon.table.special_fields import SpecialFields
+
+    pa_schema = PyarrowFieldParser.from_paimon_schema(fields)
+    arrays, names = [], []
+    for alias in ('s', 't'):
+        for field in pa_schema:
+            arrays.append(pa.array([], type=field.type))
+            names.append('{}.{}'.format(alias, field.name))
+        arrays.append(pa.array([], type=pa.int64()))
+        names.append('{}.{}'.format(alias, SpecialFields.ROW_ID.name))
+
+    batch = pa.RecordBatch.from_arrays(arrays, names)
+    context = _load_datafusion().SessionContext()
+    context.register_record_batches('_self_merge', [[batch]])
+    df_schema = context.table(
+        '_self_merge'
+    ).logical_plan().to_variant().schema()
+    return context.parse_sql_expr(rewrite_condition(condition), df_schema)
+
+
+def _to_paimon_predicate(expression, builder, fields_by_name):
+    kind = expression.variant_name()
+    node = expression.to_variant()
+
+    if kind == 'BinaryExpr':
+        op = node.op().upper()
+        if op in ('AND', 'OR'):
+            predicates = []
+            pending = [expression]
+            while pending:
+                current = pending.pop()
+                if current.variant_name() == 'BinaryExpr':
+                    current_node = current.to_variant()
+                    if current_node.op().upper() == op:
+                        pending.append(current_node.right())
+                        pending.append(current_node.left())
+                        continue
+                predicate = _to_paimon_predicate(
+                    current, builder, fields_by_name,
+                )
+                if predicate is None:
+                    return None
+                predicates.append(predicate)
+            if op == 'AND':
+                return PredicateBuilder.and_predicates(predicates)
+            return PredicateBuilder.or_predicates(predicates)
+        return _comparison_predicate(node, builder, fields_by_name)
+
+    if kind == 'InList':
+        field = _datafusion_field(node.expr(), fields_by_name)
+        literals = [_datafusion_literal(item) for item in node.list()]
+        if (field is None or any(not found for found, _ in literals)
+                or not _safe_literals(field, [v for _, v in literals])):
+            return None
+        values = [value for _, value in literals]
+        if node.negated():
+            return builder.is_not_in(field.name, values)
+        return builder.is_in(field.name, values)
+
+    if kind == 'Between':
+        field = _datafusion_field(node.expr(), fields_by_name)
+        low_found, low = _datafusion_literal(node.low())
+        high_found, high = _datafusion_literal(node.high())
+        if (field is None or not low_found or not high_found
+                or not _safe_literals(field, [low, high])):
+            return None
+        if node.negated():
+            return builder.not_between(field.name, low, high)
+        return builder.between(field.name, low, high)
+
+    if kind in ('IsNull', 'IsNotNull'):
+        field = _datafusion_field(node.expr(), fields_by_name)
+        if field is None or not isinstance(field.type, AtomicType):
+            return None
+        if kind == 'IsNull':
+            return builder.is_null(field.name)
+        return builder.is_not_null(field.name)
+
+    return None
+
+
+def _comparison_predicate(node, builder, fields_by_name):
+    field = _datafusion_field(node.left(), fields_by_name)
+    found, literal = _datafusion_literal(node.right())
+    if field is None or not found or not _safe_literals(field, [literal]):
+        return None
+
+    methods = {
+        '=': builder.equal,
+        '!=': builder.not_equal,
+        '<': builder.less_than,
+        '<=': builder.less_or_equal,
+        '>': builder.greater_than,
+        '>=': builder.greater_or_equal,
+    }
+    method = methods.get(node.op())
+    if method is None:
+        return None
+    return method(field.name, literal)
+
+
+def _datafusion_field(expression, fields_by_name):
+    if expression.variant_name() != 'Column':
+        return None
+    name = expression.to_variant().name()
+    if not (name.startswith('s.') or name.startswith('t.')):
+        return None
+    return fields_by_name.get(name[2:])
+
+
+def _datafusion_literal(expression):
+    if expression.variant_name() != 'Literal':
+        return False, None
+    value = expression.python_value()
+    if isinstance(value, pa.Scalar):
+        value = value.as_py()
+    return True, value
+
+
+def _safe_literals(field, literals) -> bool:
+    if not isinstance(field.type, AtomicType):
+        return False
+    type_name = field.type.type.upper().split('(', 1)[0].strip()
+    if type_name in {'TINYINT', 'SMALLINT', 'INT', 'INTEGER', 'BIGINT'}:
+        return all(
+            isinstance(literal, int)
+            and not isinstance(literal, bool)
+            and -(1 << 63) <= literal <= (1 << 63) - 1
+            for literal in literals
+        )
+    if type_name == 'BOOLEAN':
+        return all(isinstance(literal, bool) for literal in literals)
+    if type_name in {'STRING', 'CHAR', 'VARCHAR'}:
+        return all(isinstance(literal, str) for literal in literals)
+    return False

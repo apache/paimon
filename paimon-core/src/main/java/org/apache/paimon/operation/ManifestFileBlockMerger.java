@@ -42,6 +42,7 @@ import org.apache.paimon.stats.SimpleStatsConverter;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.ThreadPoolUtils.CloseableBatchIterator;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -60,6 +61,7 @@ import java.util.function.Function;
 
 import static org.apache.paimon.manifest.ManifestFileMeta.allContainsRowId;
 import static org.apache.paimon.utils.ManifestReadThreadPool.sequentialBatchedExecute;
+import static org.apache.paimon.utils.ManifestReadThreadPool.sequentialBatchedExecuteCloseable;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -398,33 +400,37 @@ final class ManifestFileBlockMerger {
                                         e);
                             }
                         };
-                for (ManifestRewritePlan plan :
-                        sequentialBatchedExecute(planner, manifests, manifestReadParallelism)) {
-                    if (fullCompaction
-                            && mustChange != null
-                            && !mustChange.test(plan.manifest)
-                            && plan.unchanged()) {
-                        checkState(
-                                unchangedManifests != null,
-                                "Full compaction requires an unchanged manifest result.");
-                        unchangedManifests.add(plan.manifest);
-                        continue;
-                    }
-                    for (PlannedBlock block : plan.blocks) {
-                        if (block.compaction.canCopyEncodedBlock()) {
-                            writer.writeEncodedBlock(
-                                    block.raw.encodedBlock(), block.compaction.metadata);
-                        } else {
-                            writeBlockEntries(
-                                    block.raw,
-                                    writer,
-                                    deletes,
-                                    reusableIdentifier,
-                                    fullCompaction,
-                                    matchedEntries,
-                                    emittedDeletes,
-                                    metadata,
-                                    plan.encodedRecordsCompatible);
+                try (CloseableBatchIterator<ManifestRewritePlan> plans =
+                        sequentialBatchedExecuteCloseable(
+                                planner, manifests, manifestReadParallelism)) {
+                    while (plans.hasNext()) {
+                        ManifestRewritePlan plan = plans.next();
+                        if (fullCompaction
+                                && mustChange != null
+                                && !mustChange.test(plan.manifest)
+                                && plan.unchanged()) {
+                            checkState(
+                                    unchangedManifests != null,
+                                    "Full compaction requires an unchanged manifest result.");
+                            unchangedManifests.add(plan.manifest);
+                            continue;
+                        }
+                        for (PlannedBlock block : plan.blocks) {
+                            if (block.compaction.canCopyEncodedBlock()) {
+                                writer.writeEncodedBlock(
+                                        block.raw.encodedBlock(), block.compaction.metadata);
+                            } else {
+                                writeBlockEntries(
+                                        block.raw,
+                                        writer,
+                                        deletes,
+                                        reusableIdentifier,
+                                        fullCompaction,
+                                        matchedEntries,
+                                        emittedDeletes,
+                                        metadata,
+                                        plan.encodedRecordsCompatible);
+                            }
                         }
                     }
                 }
@@ -483,7 +489,7 @@ final class ManifestFileBlockMerger {
             writer.close();
             return writer.result();
         } catch (Exception | Error failure) {
-            writer.abort();
+            writer.abort(failure);
             throw failure;
         } finally {
             reusableIdentifier.release();

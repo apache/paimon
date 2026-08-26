@@ -44,6 +44,7 @@ from pypaimon.schema.data_types import ArrayType, AtomicType, DataField, MapType
 from pypaimon.table.row.blob import Blob, BlobData, BlobRef, BlobDescriptor, BlobViewStruct, BlobView
 from pypaimon.table.row.generic_row import GenericRowDeserializer, GenericRowSerializer, GenericRow
 from pypaimon.table.row.row_kind import RowKind
+from pypaimon.utils.range import Range
 
 
 class MockFileIO:
@@ -579,6 +580,52 @@ class BlobTest(unittest.TestCase):
                 self.assertEqual(1, len(created_by_file["third.blob"]))
                 reader.close()
                 self.assertTrue(created_by_file["third.blob"][0].closed)
+
+    def test_blob_fallback_batch_reader_fills_logical_range_gaps_with_null(self):
+        class FakeBlobReader:
+            def __init__(self):
+                self._file_io = None
+                self.file_path = "partial.blob"
+                self.blob_lengths = [20]
+                self.blob_offsets = [0]
+                self._input_stream = None
+
+            def close(self):
+                pass
+
+        file = DataFileMeta(
+            file_name="partial.blob",
+            file_size=0,
+            row_count=1,
+            min_key=None,
+            max_key=None,
+            key_stats=None,
+            value_stats=None,
+            min_sequence_number=1,
+            max_sequence_number=1,
+            schema_id=0,
+            level=0,
+            extra_files=[],
+            first_row_id=2,
+            file_path="partial.blob",
+        )
+        reader = BlobFallbackBatchReader(
+            [(file, FakeBlobReader)],
+            "picture",
+            pa.large_binary(),
+            blob_as_descriptor=True,
+            logical_ranges=[Range(0, 4)],
+        )
+
+        batch = reader.read_arrow_batch()
+
+        values = batch.column("picture").to_pylist()
+        self.assertIsNone(values[0])
+        self.assertIsNone(values[1])
+        self.assertEqual(4, BlobDescriptor.deserialize(values[2]).offset)
+        self.assertIsNone(values[3])
+        self.assertIsNone(values[4])
+        self.assertIsNone(reader.read_arrow_batch())
 
     def test_blob_fallback_batch_reader_materializes_selected_values_in_parallel(self):
         class RecordingFileIO:

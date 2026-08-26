@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.TableType;
+import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
@@ -39,6 +40,7 @@ import org.apache.paimon.fs.cache.CachingFileIO;
 import org.apache.paimon.fs.cache.LocalCacheManager;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
+import org.apache.paimon.management.PermissionManagement;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -135,6 +137,11 @@ public class RESTCatalog implements Catalog {
     @Override
     public RESTCatalogLoader catalogLoader() {
         return new RESTCatalogLoader(context);
+    }
+
+    @Experimental
+    public PermissionManagement permissionManagement() {
+        return new RESTPermissionManagement(api);
     }
 
     @Override
@@ -747,15 +754,20 @@ public class RESTCatalog implements Catalog {
     @Override
     public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
-        createPartitions(identifier, partitions, true);
+        createPartitions(identifier, partitions, true, null, false);
     }
 
     @Override
     public void createPartitions(
-            Identifier identifier, List<Map<String, String>> partitions, boolean ignoreIfExists)
+            Identifier identifier,
+            List<Map<String, String>> partitions,
+            boolean ignoreIfExists,
+            @Nullable List<PartitionStatistics> statistics,
+            boolean replaceStatistics)
             throws TableNotExistException {
         try {
-            api.createPartitions(identifier, partitions, ignoreIfExists);
+            api.createPartitions(
+                    identifier, partitions, ignoreIfExists, statistics, replaceStatistics);
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {

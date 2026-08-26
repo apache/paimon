@@ -838,7 +838,7 @@ case class MergeIntoPaimonDataEvolutionTable(
       mergeFields.filter(field => targetTable.output.exists(attr => attr.equals(field)))
 
     val targetReadPlan =
-      touchedFileTargetRelation.copy(targetRelation.table, allReadFieldsOnTarget.toSeq)
+      touchedFileTargetRelation.copy(output = allReadFieldsOnTarget.toSeq)
     val sourceReadPlan = persistSourceDss.map(_.queryExecution.logical).getOrElse(sourceTable)
 
     val joinPlan =

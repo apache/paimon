@@ -31,8 +31,12 @@ public class IcebergManifestEntrySerializer extends ObjectSerializer<IcebergMani
     private final IcebergDataFileMetaSerializer fileSerializer;
 
     public IcebergManifestEntrySerializer(RowType partitionType) {
-        super(IcebergManifestEntry.schema(partitionType));
-        this.fileSerializer = new IcebergDataFileMetaSerializer(partitionType);
+        this(partitionType, false);
+    }
+
+    public IcebergManifestEntrySerializer(RowType partitionType, boolean withFirstRowId) {
+        super(IcebergManifestEntry.schema(partitionType, withFirstRowId));
+        this.fileSerializer = new IcebergDataFileMetaSerializer(partitionType, withFirstRowId);
     }
 
     @Override

@@ -27,6 +27,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import javax.annotation.Nullable;
 
+import java.beans.ConstructorProperties;
 import java.util.List;
 import java.util.Map;
 
@@ -48,6 +49,7 @@ public class DropPartitionsRequest implements RESTRequest {
     }
 
     @JsonCreator
+    @ConstructorProperties({FIELD_PARTITION_SPECS, FIELD_IGNORE_IF_NOT_EXISTS})
     public DropPartitionsRequest(
             @JsonProperty(FIELD_PARTITION_SPECS) List<Map<String, String>> partitionSpecs,
             @JsonProperty(FIELD_IGNORE_IF_NOT_EXISTS) @Nullable Boolean ignoreIfNotExists) {

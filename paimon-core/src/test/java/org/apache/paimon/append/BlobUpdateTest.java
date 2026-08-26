@@ -502,7 +502,8 @@ public class BlobUpdateTest extends TableTestBase {
                 null,
                 null,
                 firstRowId,
-                writeCols);
+                writeCols,
+                null);
     }
 
     @Override

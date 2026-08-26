@@ -39,4 +39,12 @@ public class ResourcePathsTest {
                 "/v1/paimon%2Faaaa/databases/test_db/tables/test_table%24snapshot",
                 resourcePaths.table(database, objectName));
     }
+
+    @Test
+    public void testPermissionManagementUsesPrefix() {
+        ResourcePaths resourcePaths = new ResourcePaths("catalog/id");
+        assertEquals("/v1/catalog%2Fid/permissions", resourcePaths.permissions());
+        assertEquals("/v1/catalog%2Fid/permissions/grant", resourcePaths.grantPermission());
+        assertEquals("/v1/catalog%2Fid/permissions/revoke", resourcePaths.revokePermission());
+    }
 }

@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.util
 
 import org.apache.paimon.CoreOptions
-import org.apache.paimon.catalog.Identifier
+import org.apache.paimon.catalog.{CatalogUtils, Identifier}
 import org.apache.paimon.options.ConfigOption
 import org.apache.paimon.spark.{SparkCatalogOptions, SparkConnectorOptions}
 import org.apache.paimon.table.Table
@@ -146,6 +146,14 @@ object OptionUtils extends SQLConfHelper with Logging {
     getOptionString(SparkConnectorOptions.SOURCE_SPLIT_TARGET_SIZE_WITH_COLUMN_PRUNING).toBoolean
   }
 
+  def formatTableRepairCollectStatistics(): Boolean = {
+    getOptionString(SparkConnectorOptions.FORMAT_TABLE_REPAIR_COLLECT_STATISTICS).toBoolean
+  }
+
+  def formatTableStatisticsParallelism(): Int = {
+    getOptionString(SparkConnectorOptions.FORMAT_TABLE_STATISTICS_PARALLELISM).toInt
+  }
+
   private def mergeSQLConf(extraOptions: JMap[String, String]): JMap[String, String] = {
     val mergedOptions = new JHashMap[String, String](
       conf.getAllConfs
@@ -203,6 +211,18 @@ object OptionUtils extends SQLConfHelper with Logging {
     } else {
       mergeSQLConf(extraOptions)
     }
+  }
+
+  def usePaimonFormatTableImplementation(
+      catalogName: String,
+      ident: Identifier,
+      catalogOptions: JMap[String, String],
+      tableOptions: JMap[String, String]): Boolean = {
+    val mergedOptions =
+      new JHashMap[String, String](CatalogUtils.tableDefaultOptions(catalogOptions))
+    mergedOptions.putAll(tableOptions)
+    mergedOptions.putAll(getMergedOptions(catalogName, ident))
+    new CoreOptions(mergedOptions).formatTableImplementationIsPaimon
   }
 
   def withBranchFromOptions(

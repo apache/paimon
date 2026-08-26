@@ -28,6 +28,8 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import javax.annotation.Nullable;
 
+import java.beans.ConstructorProperties;
+
 /** Request for listing partitions by filter. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -55,6 +57,12 @@ public class ListPartitionsByFilterRequest implements RESTRequest {
     private final String pageToken;
 
     @JsonCreator
+    @ConstructorProperties({
+        FIELD_FILTER,
+        FIELD_PARTITION_NAME_PATTERN,
+        FIELD_MAX_RESULTS,
+        FIELD_PAGE_TOKEN
+    })
     public ListPartitionsByFilterRequest(
             @JsonProperty(FIELD_FILTER) String filter,
             @JsonProperty(FIELD_PARTITION_NAME_PATTERN) @Nullable String partitionNamePattern,

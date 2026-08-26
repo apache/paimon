@@ -298,7 +298,8 @@ public class SnapshotsTableTest extends TableTestBase {
                             snapshot.nextRowId(),
                             snapshot.operation() == null
                                     ? null
-                                    : BinaryString.fromString(snapshot.operation().toString())));
+                                    : BinaryString.fromString(snapshot.operation().toString()),
+                            BinaryString.fromString(snapshot.writerVersion())));
         }
 
         return expectedRow;

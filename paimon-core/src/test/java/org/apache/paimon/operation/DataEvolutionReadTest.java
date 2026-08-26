@@ -28,6 +28,7 @@ import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -354,7 +355,8 @@ public class DataEvolutionReadTest {
                 null,
                 null,
                 firstRowId,
-                Arrays.asList("blob_col"));
+                Arrays.asList("blob_col"),
+                null);
     }
 
     /** Creates a blob file with custom write columns. */
@@ -384,7 +386,8 @@ public class DataEvolutionReadTest {
                 null,
                 null,
                 firstRowId,
-                writeCols);
+                writeCols,
+                null);
     }
 
     private DataFileMeta createVectorFile(
@@ -445,7 +448,8 @@ public class DataEvolutionReadTest {
                 null,
                 null,
                 firstRowId,
-                writeCols);
+                writeCols,
+                null);
     }
 
     @Test
@@ -461,7 +465,7 @@ public class DataEvolutionReadTest {
 
     @Test
     void testAddBlobFilesWithDifferentSchemaId() {
-        BlobFileBunch blobBunch = new BlobFileBunch(300, false);
+        BlobFileBunch blobBunch = new BlobFileBunch(new Range(0, 299), false);
         DataFileMeta blobEntry1 = createBlobFileWithSchema("blob1", 0, 100, 1, 0L);
         DataFileMeta blobEntry2 = createBlobFileWithSchema("blob2", 100, 200, 1, 1L);
 
@@ -472,6 +476,26 @@ public class DataEvolutionReadTest {
         assertThat(blobBunch.files.get(0).schemaId()).isEqualTo(0L);
         assertThat(blobBunch.files.get(1).schemaId()).isEqualTo(1L);
         assertThat(blobBunch.rowCount()).isEqualTo(300);
+    }
+
+    @Test
+    void testBlobBunchUsesNormalFileRangeForPartialCoverage() {
+        BlobFileBunch blobBunch = new BlobFileBunch(new Range(100, 109), false);
+        blobBunch.add(createBlobFile("blob", 103, 5, 1));
+
+        assertThat(blobBunch.rowCount()).isEqualTo(10);
+        assertThat(blobBunch.logicalRange()).isEqualTo(new Range(100, 109));
+        assertThat(blobBunch.sequentialReadOptimize()).isFalse();
+    }
+
+    @Test
+    void testBlobBunchRejectsRangeOutsideNormalFile() {
+        BlobFileBunch blobBunch = new BlobFileBunch(new Range(100, 109), false);
+        blobBunch.add(createBlobFile("blob", 99, 2, 1));
+
+        assertThatThrownBy(blobBunch::rowCount)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("should be within normal file range");
     }
 
     @Test
@@ -523,6 +547,7 @@ public class DataEvolutionReadTest {
                 null,
                 null,
                 firstRowId,
+                null,
                 null);
     }
 

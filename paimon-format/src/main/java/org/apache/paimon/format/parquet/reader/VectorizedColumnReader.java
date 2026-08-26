@@ -317,6 +317,30 @@ public class VectorizedColumnReader {
                 return new VectorizedDeltaLengthByteArrayReader();
             case DELTA_BINARY_PACKED:
                 return new VectorizedDeltaBinaryPackedReader();
+            case BYTE_STREAM_SPLIT:
+                {
+                    PrimitiveType.PrimitiveTypeName typeName =
+                            this.descriptor.getPrimitiveType().getPrimitiveTypeName();
+                    int typeWidth;
+                    switch (typeName) {
+                        case FLOAT:
+                        case INT32:
+                            typeWidth = 4;
+                            break;
+                        case DOUBLE:
+                        case INT64:
+                            typeWidth = 8;
+                            break;
+                        case FIXED_LEN_BYTE_ARRAY:
+                            typeWidth = this.descriptor.getPrimitiveType().getTypeLength();
+                            break;
+                        default:
+                            throw new RuntimeException(
+                                    "error: _LEGACY_ERROR_TEMP_3190, typeName: "
+                                            + typeName.toString());
+                    }
+                    return new VectorizedByteStreamSplitValuesReader(typeWidth);
+                }
             case RLE:
                 {
                     PrimitiveType.PrimitiveTypeName typeName =

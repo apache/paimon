@@ -408,6 +408,20 @@ class TestCheckRowIdFromSnapshot(unittest.TestCase):
         self.assertIsNone(
             detection.check_row_id_from_snapshot(compact_snap, self._blob_delta()))
 
+    def test_missing_intermediate_snapshot_fails_closed(self):
+        check_snap = _FakeSnapshot(1, "APPEND", next_row_id=200)
+        latest_snap = _FakeSnapshot(3, "COMPACT", next_row_id=200)
+        detection = self._make_detection(
+            [check_snap, latest_snap], {3: []})
+
+        with self.assertRaisesRegex(
+                RuntimeError, "snapshot 2 cannot be found"):
+            detection.check_row_id_from_snapshot(
+                latest_snap,
+                self._blob_delta(),
+                check_compaction=False,
+            )
+
     def test_compact_no_conflict_when_no_matching_delete(self):
         check_snap = _FakeSnapshot(1, "APPEND", next_row_id=400)
         compact_snap = _FakeSnapshot(2, "COMPACT", next_row_id=400)

@@ -1,0 +1,191 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.management;
+
+import org.apache.paimon.annotation.Experimental;
+
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonInclude;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+
+import javax.annotation.Nullable;
+
+import java.beans.ConstructorProperties;
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
+
+/**
+ * Direct permission assignment on one exact resource or explicit descendant scope.
+ *
+ * <p>A {@link ResourceType#COLUMN COLUMN} assignment carries one {@link PermissionColumns} value.
+ * The column range is mutable assignment content rather than identity: granting the same resource,
+ * access, and principal replaces the complete range.
+ *
+ * <p>{@code expireTime}, when present, is an exclusive authorization upper bound evaluated against
+ * the server clock. At or after that instant, the assignment must not authorize access, although an
+ * expired record may remain listable until cleanup.
+ */
+@Experimental
+@JsonIgnoreProperties(ignoreUnknown = true)
+public class PermissionAssignment {
+
+    /** Maximum principal identifier length in the portable REST management contract. */
+    public static final int MAX_PRINCIPAL_LENGTH = 128;
+
+    private static final String FIELD_RESOURCE = "resource";
+    private static final String FIELD_ACCESS = "access";
+    private static final String FIELD_PRINCIPAL = "principal";
+    private static final String FIELD_COLUMNS = "columns";
+    private static final String FIELD_EXPIRE_TIME = "expireTime";
+
+    @JsonProperty(FIELD_RESOURCE)
+    private final PermissionResource resource;
+
+    @JsonProperty(FIELD_ACCESS)
+    private final String access;
+
+    @JsonProperty(FIELD_PRINCIPAL)
+    private final String principal;
+
+    @Nullable
+    @JsonProperty(FIELD_COLUMNS)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private final PermissionColumns columns;
+
+    @Nullable
+    @JsonProperty(FIELD_EXPIRE_TIME)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private final String expireTime;
+
+    public PermissionAssignment(
+            @JsonProperty(FIELD_RESOURCE) PermissionResource resource,
+            @JsonProperty(FIELD_ACCESS) String access,
+            @JsonProperty(FIELD_PRINCIPAL) String principal,
+            @Nullable @JsonProperty(FIELD_COLUMNS) PermissionColumns columns,
+            @Nullable @JsonProperty(FIELD_EXPIRE_TIME) String expireTime) {
+        this(resource, access, principal, columns, expireTime, true);
+    }
+
+    public PermissionAssignment(
+            PermissionResource resource,
+            String access,
+            String principal,
+            @Nullable String expireTime) {
+        this(resource, access, principal, null, expireTime);
+    }
+
+    /** Jackson-only response constructor; request DTOs use the validated public constructor. */
+    @JsonCreator
+    @ConstructorProperties({
+        FIELD_RESOURCE,
+        FIELD_ACCESS,
+        FIELD_PRINCIPAL,
+        FIELD_COLUMNS,
+        FIELD_EXPIRE_TIME
+    })
+    PermissionAssignment(
+            @JsonProperty(FIELD_RESOURCE) PermissionResource resource,
+            @JsonProperty(FIELD_ACCESS) String access,
+            @JsonProperty(FIELD_PRINCIPAL) String principal,
+            @Nullable @JsonProperty(FIELD_COLUMNS) PermissionColumns columns,
+            @Nullable @JsonProperty(FIELD_EXPIRE_TIME) Object expireTime) {
+        this(resource, access, principal, columns, (String) expireTime, false);
+    }
+
+    @JsonGetter(FIELD_RESOURCE)
+    public PermissionResource getResource() {
+        return resource;
+    }
+
+    @JsonGetter(FIELD_ACCESS)
+    public String getAccess() {
+        return access;
+    }
+
+    @JsonGetter(FIELD_PRINCIPAL)
+    public String getPrincipal() {
+        return principal;
+    }
+
+    /** Validates and returns an opaque principal identifier. */
+    public static String validatePrincipal(String principal) {
+        checkArgument(
+                principal != null && !principal.trim().isEmpty(), "principal cannot be empty.");
+        checkArgument(
+                principal.length() <= MAX_PRINCIPAL_LENGTH,
+                "principal must contain at most %s characters.",
+                MAX_PRINCIPAL_LENGTH);
+        return principal;
+    }
+
+    /** Returns the selected or excluded column range for a COLUMN assignment. */
+    @Nullable
+    @JsonGetter(FIELD_COLUMNS)
+    public PermissionColumns getColumns() {
+        return columns;
+    }
+
+    /** Returns the exclusive authorization upper bound, or null for no expiry. */
+    @Nullable
+    @JsonGetter(FIELD_EXPIRE_TIME)
+    public String getExpireTime() {
+        return expireTime;
+    }
+
+    private PermissionAssignment(
+            PermissionResource resource,
+            String access,
+            String principal,
+            @Nullable PermissionColumns columns,
+            @Nullable String expireTime,
+            boolean validate) {
+        this.resource = validate ? checkNotNull(resource, "resource cannot be null") : resource;
+        this.access = validate ? PermissionAccess.canonicalize(resource, access) : access;
+        this.principal = validate ? validatePrincipal(principal) : principal;
+        if (validate) {
+            checkArgument(
+                    resource.getType() == ResourceType.COLUMN ? columns != null : columns == null,
+                    resource.getType() == ResourceType.COLUMN
+                            ? "columns is required for COLUMN resource."
+                            : "columns is only valid for COLUMN resource.");
+            validateExpireTime(expireTime);
+        }
+        this.columns = columns;
+        this.expireTime = expireTime;
+    }
+
+    private static void validateExpireTime(@Nullable String expireTime) {
+        if (expireTime == null) {
+            return;
+        }
+        try {
+            Instant instant = Instant.parse(expireTime);
+            checkArgument(
+                    instant.getNano() % 1_000_000 == 0,
+                    "expireTime must have at most millisecond precision.");
+        } catch (DateTimeParseException e) {
+            throw new IllegalArgumentException("expireTime must be an ISO-8601 UTC instant.", e);
+        }
+    }
+}

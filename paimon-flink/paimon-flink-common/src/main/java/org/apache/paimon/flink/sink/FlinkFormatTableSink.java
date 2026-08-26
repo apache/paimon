@@ -18,80 +18,37 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.flink.PaimonDataStreamSinkProvider;
 import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.sink.BatchTableCommit;
 
 import org.apache.flink.table.catalog.ObjectIdentifier;
-import org.apache.flink.table.connector.ChangelogMode;
-import org.apache.flink.table.connector.sink.DynamicTableSink;
-import org.apache.flink.table.connector.sink.abilities.SupportsOverwrite;
-import org.apache.flink.table.connector.sink.abilities.SupportsPartitioning;
+import org.apache.flink.table.connector.sink.abilities.SupportsTruncate;
 import org.apache.flink.table.factories.DynamicTableFactory;
 
-import java.util.HashMap;
-import java.util.Map;
-
 /** Table sink for format tables. */
-public class FlinkFormatTableSink
-        implements DynamicTableSink, SupportsOverwrite, SupportsPartitioning {
-
-    private final ObjectIdentifier tableIdentifier;
-    private final FormatTable table;
-    private final DynamicTableFactory.Context context;
-    private Map<String, String> staticPartitions = new HashMap<>();
-    protected boolean overwrite = false;
+public class FlinkFormatTableSink extends FlinkFormatTableSinkBase implements SupportsTruncate {
 
     public FlinkFormatTableSink(
             ObjectIdentifier tableIdentifier,
             FormatTable table,
             DynamicTableFactory.Context context) {
-        this.tableIdentifier = tableIdentifier;
-        this.table = table;
-        this.context = context;
+        super(tableIdentifier, table, context);
     }
 
+    /**
+     * Removes the data of the whole table - of its registered partitions, when the catalog manages
+     * them. The partition directories stay, and so do their catalog registrations: emptying a table
+     * does not redefine which partitions it has.
+     */
     @Override
-    public ChangelogMode getChangelogMode(ChangelogMode requestedMode) {
-        throw new UnsupportedOperationException("Format Table doesn't support changelog mode.");
-    }
-
-    @Override
-    public SinkRuntimeProvider getSinkRuntimeProvider(Context context) {
-        return new PaimonDataStreamSinkProvider(
-                (dataStream) ->
-                        new FlinkFormatTableDataStreamSink(table, overwrite, staticPartitions)
-                                .sinkFrom(dataStream),
-                tableIdentifier.asSummaryString(),
-                table);
-    }
-
-    @Override
-    public DynamicTableSink copy() {
-        FlinkFormatTableSink copied = new FlinkFormatTableSink(tableIdentifier, table, context);
-        copied.staticPartitions = new HashMap<>(staticPartitions);
-        copied.overwrite = overwrite;
-        return copied;
-    }
-
-    @Override
-    public String asSummaryString() {
-        return "PaimonFormatTableSink";
-    }
-
-    @Override
-    public void applyStaticPartition(Map<String, String> partition) {
-        table.partitionKeys()
-                .forEach(
-                        partitionKey -> {
-                            if (partition.containsKey(partitionKey)) {
-                                this.staticPartitions.put(
-                                        partitionKey, partition.get(partitionKey));
-                            }
-                        });
-    }
-
-    @Override
-    public void applyOverwrite(boolean overwrite) {
-        this.overwrite = overwrite;
+    public void executeTruncation() {
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.truncateTable();
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    String.format(
+                            "Failed to truncate table %s.", tableIdentifier.asSummaryString()),
+                    e);
+        }
     }
 }

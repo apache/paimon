@@ -28,6 +28,10 @@ _UNSAFE_ARROW_FILTER_METHODS = frozenset([
     'like',
 ])
 
+# Large boolean trees can overflow or crash native Dataset scanners even when
+# balanced. Keep complex predicates on Paimon's exact row-filter path instead.
+_MAX_ARROW_FILTER_LEAVES = 256
+
 
 def extract_partition_spec_from_predicate(
     predicate: Predicate, partition_keys: List[str]
@@ -149,12 +153,20 @@ def predicate_supports_arrow_filter(predicate: Optional[Predicate]) -> bool:
     """
     if predicate is None:
         return True
-    if predicate.method == 'and' or predicate.method == 'or':
-        return all(
-            predicate_supports_arrow_filter(p)
-            for p in (predicate.literals or [])
-        )
-    return predicate.method not in _UNSAFE_ARROW_FILTER_METHODS
+
+    leaves = 0
+    pending = [predicate]
+    while pending:
+        current = pending.pop()
+        if current.method == 'and' or current.method == 'or':
+            pending.extend(current.literals or [])
+            continue
+        if current.method in _UNSAFE_ARROW_FILTER_METHODS:
+            return False
+        leaves += 1
+        if leaves > _MAX_ARROW_FILTER_LEAVES:
+            return False
+    return True
 
 
 def remove_row_id_filter(predicate: Predicate) -> Optional[Predicate]:

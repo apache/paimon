@@ -45,6 +45,29 @@ class CatalogManagedPartitionTest extends PaimonSparkTestWithRestCatalogBase {
     }
   }
 
+  test("TRUNCATE on a catalog-managed Format Table empties data and keeps the registrations") {
+    val tableName = "catalog_partition_truncate"
+    withTable(tableName) {
+      sql(s"""CREATE TABLE $tableName (id INT, dt STRING)
+             |USING CSV
+             |PARTITIONED BY (dt)
+             |TBLPROPERTIES (
+             |  'format-table.implementation' = 'paimon',
+             |  'metastore.partitioned-table' = 'true')
+             |""".stripMargin)
+      sql(s"INSERT INTO $tableName VALUES (1, '20260715'), (2, '20260716')")
+
+      sql(s"TRUNCATE TABLE $tableName PARTITION (dt = '20260715')")
+      checkAnswer(sql(s"SELECT id FROM $tableName"), Seq(Row(2)))
+      checkAnswer(sql(s"SHOW PARTITIONS $tableName"), Seq(Row("dt=20260715"), Row("dt=20260716")))
+
+      sql(s"TRUNCATE TABLE $tableName")
+      checkAnswer(sql(s"SELECT id FROM $tableName"), Seq.empty)
+      // The registrations outlive the data they pointed at: TRUNCATE is not DROP PARTITION.
+      checkAnswer(sql(s"SHOW PARTITIONS $tableName"), Seq(Row("dt=20260715"), Row("dt=20260716")))
+    }
+  }
+
   test("catalog-managed Format Table sends partition predicate to REST filtered listing") {
     val tableName = "catalog_partition_filter_pushdown"
     withTable(tableName) {

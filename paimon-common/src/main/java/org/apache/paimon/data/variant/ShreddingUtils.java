@@ -21,6 +21,8 @@ package org.apache.paimon.data.variant;
 import org.apache.paimon.data.Timestamp;
 
 import java.math.BigDecimal;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.UUID;
 
@@ -61,6 +63,10 @@ public class ShreddingUtils {
 
         byte[] getBinary(int ordinal);
 
+        default ByteBuffer getBinaryBuffer(int ordinal) {
+            return ByteBuffer.wrap(getBinary(ordinal)).order(ByteOrder.LITTLE_ENDIAN);
+        }
+
         UUID getUuid(int ordinal);
 
         Timestamp getTimestamp(int ordinal, int precision);
@@ -78,13 +84,13 @@ public class ShreddingUtils {
         if (schema.topLevelMetadataIdx < 0 || row.isNullAt(schema.topLevelMetadataIdx)) {
             throw malformedVariant();
         }
-        byte[] metadata = row.getBinary(schema.topLevelMetadataIdx);
+        ByteBuffer metadata = row.getBinaryBuffer(schema.topLevelMetadataIdx);
         if (schema.isUnshredded()) {
             // `rebuild` is unnecessary for unshredded variant.
             if (row.isNullAt(schema.variantIdx)) {
                 throw malformedVariant();
             }
-            return new GenericVariant(row.getBinary(schema.variantIdx), metadata);
+            return new GenericVariant(row.getBinaryBuffer(schema.variantIdx), metadata);
         }
         GenericVariantBuilder builder = new GenericVariantBuilder(false);
         rebuild(row, metadata, schema, builder);
@@ -96,6 +102,14 @@ public class ShreddingUtils {
     // Append the result to `builder`.
     public static void rebuild(
             ShreddedRow row, byte[] metadata, VariantSchema schema, GenericVariantBuilder builder) {
+        rebuild(row, ByteBuffer.wrap(metadata).order(ByteOrder.LITTLE_ENDIAN), schema, builder);
+    }
+
+    public static void rebuild(
+            ShreddedRow row,
+            ByteBuffer metadata,
+            VariantSchema schema,
+            GenericVariantBuilder builder) {
         int typedIdx = schema.typedIdx;
         int variantIdx = schema.variantIdx;
         if (typedIdx >= 0 && !row.isNullAt(typedIdx)) {
@@ -128,7 +142,7 @@ public class ShreddingUtils {
                 } else if (scalar instanceof VariantSchema.BooleanType) {
                     builder.appendBoolean(row.getBoolean(typedIdx));
                 } else if (scalar instanceof VariantSchema.BinaryType) {
-                    builder.appendBinary(row.getBinary(typedIdx));
+                    builder.appendBinary(row.getBinaryBuffer(typedIdx));
                 } else if (scalar instanceof VariantSchema.UuidType) {
                     builder.appendUuid(row.getUuid(typedIdx));
                 } else if (scalar instanceof VariantSchema.DecimalType) {
@@ -181,7 +195,8 @@ public class ShreddingUtils {
                 }
                 if (variantIdx >= 0 && !row.isNullAt(variantIdx)) {
                     // Add the leftover fields in the variant binary.
-                    GenericVariant v = new GenericVariant(row.getBinary(variantIdx), metadata);
+                    GenericVariant v =
+                            new GenericVariant(row.getBinaryBuffer(variantIdx), metadata);
                     if (v.getType() != GenericVariantUtil.Type.OBJECT) {
                         throw malformedVariant();
                     }
@@ -202,7 +217,7 @@ public class ShreddingUtils {
             }
         } else if (variantIdx >= 0 && !row.isNullAt(variantIdx)) {
             // `typed_value` doesn't exist or is null. Read from `value`.
-            builder.appendVariant(new GenericVariant(row.getBinary(variantIdx), metadata));
+            builder.appendVariant(new GenericVariant(row.getBinaryBuffer(variantIdx), metadata));
         } else {
             // This means the variant is missing in a context where it must present, so the input
             // data is invalid.

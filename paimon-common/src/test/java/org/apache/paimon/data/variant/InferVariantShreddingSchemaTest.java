@@ -73,6 +73,25 @@ public class InferVariantShreddingSchemaTest {
     }
 
     @Test
+    void testInferSchemaFromByteBufferBackedVariant() {
+        RowType schema = RowType.of(new DataType[] {DataTypes.VARIANT()}, new String[] {"v"});
+        GenericVariant expected = GenericVariant.fromJson("{\"name\":\"Alice\",\"age\":30}");
+        GenericVariant bufferBacked =
+                new GenericVariant(expected.valueBuffer(), expected.metadataBuffer());
+
+        RowType inferredSchema =
+                defaultInferVariantShreddingSchema(schema)
+                        .inferSchema(Arrays.asList(GenericRow.of(bufferBacked)));
+
+        RowType expectedType =
+                RowType.of(
+                        new DataType[] {DataTypes.BIGINT(), DataTypes.STRING()},
+                        new String[] {"age", "name"});
+        assertThat(inferredSchema.getField("v").type())
+                .isEqualTo(variantShreddingSchema(expectedType));
+    }
+
+    @Test
     void testInferSchemaWithNestedStruct() {
         // Schema: row<data: row<v: variant>>
         RowType innerSchema = RowType.of(new DataType[] {DataTypes.VARIANT()}, new String[] {"v"});

@@ -50,7 +50,6 @@ CREATE TABLE my_table (
     id INT,
     tags ARRAY<STRING>
 ) TBLPROPERTIES (
-    'bucket' = '-1',
     'row-tracking.enabled' = 'true',
     'data-evolution.enabled' = 'true',
     'global-index.enabled' = 'true'

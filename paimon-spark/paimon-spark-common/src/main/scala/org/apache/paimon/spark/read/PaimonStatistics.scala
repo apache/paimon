@@ -39,11 +39,22 @@ case class PaimonStatistics(
     splits: Array[Split],
     readRowType: RowType,
     tableRowType: RowType,
-    paimonStats: Optional[stats.Statistics]
+    paimonStats: Optional[stats.Statistics],
+    scanRowCount: OptionalLong = OptionalLong.empty()
 ) extends Statistics {
 
+  private lazy val fileTotalSize: Long = splits.map(SplitUtils.splitSize).sum
+
   lazy val numRows: OptionalLong = {
-    if (splits.exists(_.rowCount() == -1)) {
+    if (scanRowCount.isPresent) {
+      // A catalog may report zero because it cannot tell "never measured" from "measured, and
+      // empty". Over real bytes leave it unknown; over zero bytes the scan really is empty.
+      if (scanRowCount.getAsLong > 0 || fileTotalSize == 0) {
+        scanRowCount
+      } else {
+        OptionalLong.empty()
+      }
+    } else if (splits.exists(_.rowCount() == -1)) {
       OptionalLong.empty()
     } else {
       OptionalLong.of(splits.map(_.rowCount()).sum)
@@ -51,20 +62,19 @@ case class PaimonStatistics(
   }
 
   lazy val sizeInBytes: OptionalLong = {
-    if (numRows.isPresent) {
+    if (numRows.isPresent && numRows.getAsLong > 0) {
       val sizeInBytes = numRows.getAsLong * estimateRowSize(readRowType)
       // Avoid return 0 bytes if there are some valid rows.
       // Avoid return too small size in bytes which may less than row count,
       // note the compression ratio on disk is usually bigger than memory.
       OptionalLong.of(Math.max(sizeInBytes, numRows.getAsLong))
+    } else if (fileTotalSize > 0) {
+      // Zero rows times any row size is zero, so weigh the files instead.
+      OptionalLong.of((fileTotalSize * readRowSizeRatio).toLong)
+    } else if (numRows.isPresent) {
+      OptionalLong.of(0L)
     } else {
-      val fileTotalSize = splits.map(SplitUtils.splitSize).sum
-      if (fileTotalSize == 0) {
-        OptionalLong.empty()
-      } else {
-        val size = (fileTotalSize * readRowSizeRatio).toLong
-        OptionalLong.of(size)
-      }
+      OptionalLong.empty()
     }
   }
 

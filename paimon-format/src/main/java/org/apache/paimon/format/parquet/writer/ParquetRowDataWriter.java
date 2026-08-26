@@ -621,6 +621,9 @@ public class ParquetRowDataWriter {
 
     private class VariantWriter implements FieldWriter {
 
+        private byte[] valueScratch = new byte[0];
+        private byte[] metadataScratch = new byte[0];
+
         @Override
         public void write(InternalRow row, int ordinal) {
             writeVariant(row.getVariant(ordinal));
@@ -634,12 +637,43 @@ public class ParquetRowDataWriter {
         private void writeVariant(Variant variant) {
             recordConsumer.startGroup();
             recordConsumer.startField(Variant.VALUE, 0);
-            recordConsumer.addBinary(Binary.fromReusedByteArray(variant.value()));
+            recordConsumer.addBinary(valueBinary(variant.valueBuffer()));
             recordConsumer.endField(Variant.VALUE, 0);
             recordConsumer.startField(Variant.METADATA, 1);
-            recordConsumer.addBinary(Binary.fromReusedByteArray(variant.metadata()));
+            recordConsumer.addBinary(metadataBinary(variant.metadataBuffer()));
             recordConsumer.endField(Variant.METADATA, 1);
             recordConsumer.endGroup();
+        }
+
+        private Binary valueBinary(ByteBuffer buffer) {
+            if (buffer.hasArray()) {
+                return arrayBackedBinary(buffer);
+            }
+            valueScratch = ensureCapacity(valueScratch, buffer.remaining());
+            return copyToBinary(buffer, valueScratch);
+        }
+
+        private Binary metadataBinary(ByteBuffer buffer) {
+            if (buffer.hasArray()) {
+                return arrayBackedBinary(buffer);
+            }
+            metadataScratch = ensureCapacity(metadataScratch, buffer.remaining());
+            return copyToBinary(buffer, metadataScratch);
+        }
+
+        private Binary arrayBackedBinary(ByteBuffer buffer) {
+            return Binary.fromReusedByteArray(
+                    buffer.array(), buffer.arrayOffset() + buffer.position(), buffer.remaining());
+        }
+
+        private Binary copyToBinary(ByteBuffer buffer, byte[] scratch) {
+            int length = buffer.remaining();
+            buffer.duplicate().get(scratch, 0, length);
+            return Binary.fromReusedByteArray(scratch, 0, length);
+        }
+
+        private byte[] ensureCapacity(byte[] scratch, int length) {
+            return scratch.length < length ? new byte[length] : scratch;
         }
     }
 
