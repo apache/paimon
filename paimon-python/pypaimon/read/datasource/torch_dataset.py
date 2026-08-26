@@ -28,6 +28,8 @@ import pyarrow as pa
 import torch
 from torch.utils.data import Dataset, IterableDataset
 
+from pypaimon.read.reader.concat_batch_reader import (
+    _MAX_ARROW_OFFSET, _batch_offset_usage)
 from pypaimon.read.split import Split
 from pypaimon.read.table_read import TableRead
 
@@ -112,6 +114,10 @@ class _BaseTorchIterDataset(IterableDataset):
     def _worker_splits(self, worker_info) -> List[Split]:
         if worker_info is None:
             return self.splits
+
+        # DataLoader workers cannot share the global limit budget.
+        if self.table_read.limit is not None:
+            return self.splits if worker_info.id == 0 else []
 
         worker_id = worker_info.id
         num_workers = worker_info.num_workers
@@ -268,17 +274,35 @@ def _sized_record_batches(
 
     pending: List[pa.RecordBatch] = []
     pending_rows = 0
+    offset_usage = {}
     for batch in batches:
         offset = 0
         while offset < batch.num_rows:
             take = min(batch_size - pending_rows, batch.num_rows - offset)
-            pending.append(batch.slice(offset, take))
-            pending_rows += take
-            offset += take
-            if pending_rows == batch_size:
+            piece = batch.slice(offset, take)
+            piece_usage = _batch_offset_usage(piece)
+            if pending and any(
+                offset_usage.get(path, 0) + value > _MAX_ARROW_OFFSET
+                for path, value in piece_usage.items()
+            ):
                 yield _concat_record_batches(pending)
                 pending = []
                 pending_rows = 0
+                offset_usage = {}
+                continue
+
+            pending.append(piece)
+            pending_rows += take
+            offset += take
+            for path, value in piece_usage.items():
+                offset_usage[path] = offset_usage.get(path, 0) + value
+            if pending_rows == batch_size or any(
+                value >= _MAX_ARROW_OFFSET for value in offset_usage.values()
+            ):
+                yield _concat_record_batches(pending)
+                pending = []
+                pending_rows = 0
+                offset_usage = {}
 
     if pending:
         yield _concat_record_batches(pending)

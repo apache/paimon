@@ -19,6 +19,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import pyarrow as pa
 from parameterized import parameterized
@@ -243,6 +244,65 @@ class TorchReadTest(unittest.TestCase):
         )
         batches = list(dataset)
         self.assertEqual([batch.num_rows for batch in batches], [3, 2])
+
+    def test_torch_streaming_batches_respect_limit_with_workers(self):
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema, partition_keys=['user_id']
+        )
+        self.catalog.create_table(
+            'default.test_torch_batch_worker_limit', schema, False
+        )
+        table = self.catalog.get_table(
+            'default.test_torch_batch_worker_limit'
+        )
+        self._write_test_table(table)
+
+        predicate = (
+            table.new_read_builder().new_predicate_builder()
+            .greater_than('item_id', 0)
+        )
+        read_builder = (
+            table.new_read_builder()
+            .with_filter(predicate)
+            .with_projection(['user_id'])
+            .with_limit(5)
+        )
+        splits = read_builder.new_scan().plan().splits()
+        self.assertGreater(len(splits), 1)
+        dataset = read_builder.new_read().to_torch(
+            splits,
+            streaming=True,
+            batch_format='pyarrow',
+            batch_size=3,
+        )
+        batches = list(DataLoader(
+            dataset, batch_size=None, num_workers=2
+        ))
+        user_ids = [
+            value
+            for batch in batches
+            for value in batch.column('user_id').to_pylist()
+        ]
+        self.assertEqual(len(user_ids), 5)
+        self.assertEqual(len(set(user_ids)), 5)
+
+    def test_torch_batch_sizing_respects_arrow_offset_limit(self):
+        from pypaimon.read.datasource.torch_dataset import (
+            _sized_record_batches)
+
+        batches = iter([
+            pa.record_batch([pa.array(['aaaa'])], names=['value']),
+            pa.record_batch([pa.array(['bbbb'])], names=['value']),
+        ])
+        with patch(
+            'pypaimon.read.datasource.torch_dataset._MAX_ARROW_OFFSET', 4
+        ):
+            actual = list(_sized_record_batches(batches, batch_size=2))
+
+        self.assertEqual(
+            [batch.column('value').to_pylist() for batch in actual],
+            [['aaaa'], ['bbbb']],
+        )
 
     def test_default_tensor_converter_supports_fixed_size_list(self):
         from pypaimon.read.datasource.torch_dataset import _default_to_tensor
