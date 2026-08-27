@@ -19,43 +19,82 @@
 
 
 def fetch_blob_bodies(file_io, data, blob_cols, parallelism):
-    """Fetch BLOB payload bytes for descriptor/inline/null cells.
+    """Fetch scalar and MAP BLOB payload bytes.
 
     ``data`` is a ``dict`` mapping each BLOB column name to row-aligned cells.
-    Each cell may be serialized ``BlobDescriptor`` bytes, inline payload bytes,
-    or ``None``. Returned values preserve row order and are grouped per column.
+    A cell may be serialized ``BlobDescriptor`` bytes, inline payload bytes,
+    ``None``, or a MAP represented by key-value pairs. Returned values preserve
+    row and MAP entry order and are grouped per column.
     """
     from pypaimon.table.row.blob import BlobDescriptor, BlobViewStruct
 
     ranges = []
     inline = {}
-    index = 0
+    targets = []
+    bodies = {col: [] for col in blob_cols}
+
+    def queue_blob_fetch(value, target):
+        index = len(ranges)
+        if value is None:
+            ranges.append(None)
+        else:
+            raw = bytes(value)
+            if BlobViewStruct.is_blob_view_struct(raw):
+                raise ValueError(
+                    "read_blobs does not support unresolved blob-view columns; "
+                    "read such a column on its own, or enable blob-view resolution.")
+            if BlobDescriptor.is_blob_descriptor(raw):
+                descriptor = BlobDescriptor.deserialize(raw)
+                ranges.append(
+                    (descriptor.uri, descriptor.offset, descriptor.length)
+                )
+            else:
+                ranges.append(None)
+                inline[index] = raw
+        targets.append((target, index))
+
     for col in blob_cols:
         for value in data[col]:
             if value is None:
-                ranges.append(None)
-            else:
-                raw = bytes(value)
-                if BlobViewStruct.is_blob_view_struct(raw):
-                    raise ValueError(
-                        "read_blobs does not support unresolved blob-view columns; "
-                        "read such a column on its own, or enable blob-view resolution.")
-                if BlobDescriptor.is_blob_descriptor(raw):
-                    descriptor = BlobDescriptor.deserialize(raw)
-                    ranges.append((descriptor.uri, descriptor.offset, descriptor.length))
-                else:
-                    ranges.append(None)
-                    inline[index] = raw
-            index += 1
+                bodies[col].append(None)
+                continue
 
-    fetched = file_io.read_ranges_coalesced(ranges, parallelism)
+            entries = _map_entries(value)
+            if entries is None:
+                row_index = len(bodies[col])
+                bodies[col].append(None)
+                queue_blob_fetch(value, (col, row_index, None))
+            else:
+                row_index = len(bodies[col])
+                row = []
+                bodies[col].append(row)
+                for key, item in entries:
+                    entry_index = len(row)
+                    row.append((key, None))
+                    queue_blob_fetch(item, (col, row_index, entry_index))
+
+    fetched = (
+        file_io.read_ranges_coalesced(ranges, parallelism)
+        if ranges
+        else []
+    )
     for index, raw in inline.items():
         fetched[index] = raw
 
-    bodies = {}
-    offset = 0
-    for col in blob_cols:
-        count = len(data[col])
-        bodies[col] = fetched[offset:offset + count]
-        offset += count
+    for (col, row_index, entry_index), index in targets:
+        if entry_index is None:
+            bodies[col][row_index] = fetched[index]
+        else:
+            key = bodies[col][row_index][entry_index][0]
+            bodies[col][row_index][entry_index] = (key, fetched[index])
     return bodies
+
+
+def _map_entries(value):
+    if isinstance(value, dict):
+        return list(value.items())
+    if isinstance(value, (list, tuple)) and all(
+            isinstance(entry, (list, tuple)) and len(entry) == 2
+            for entry in value):
+        return value
+    return None

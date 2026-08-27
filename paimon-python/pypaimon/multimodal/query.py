@@ -21,7 +21,7 @@ import pyarrow as pa
 
 from pypaimon.common.where_parser import parse_where_clause
 from pypaimon.multimodal.blob_read import fetch_blob_bodies
-from pypaimon.schema.data_types import is_blob_type
+from pypaimon.schema.data_types import is_blob_type, is_map_blob_type
 from pypaimon.table.special_fields import SpecialFields
 
 
@@ -140,14 +140,16 @@ class ScanQuery:
 
     def read_blobs(
             self, columns=None, *, parallelism: int = 64
-    ) -> Tuple[pa.Table, Dict[str, List[Optional[bytes]]]]:
-        """Materialise BLOB column(s) for the filtered rows with concurrent,
+    ) -> Tuple[pa.Table, Dict[str, List[Any]]]:
+        """Materialise BLOB or MAP BLOB column(s) for the filtered rows with concurrent,
         coalesced ranged reads. Reads via blob-as-descriptor to skip the slow
         row-by-row blob resolution on multi-group data-evolution splits.
 
         ``columns`` picks the BLOB column(s) (default: all, intersected with
-        ``select(...)``). Returns ``(scalar_arrow_table, {column: [bytes|None]})``,
-        row-aligned. Use :meth:`stream_blobs` for a memory-bounded read.
+        ``select(...)``). Scalar BLOB values are ``bytes|None``; MAP BLOB rows
+        are ``None`` or key-value pairs with ``bytes|None`` values. Returns a
+        row-aligned ``(scalar_arrow_table, blobs_by_column)`` tuple. Use
+        :meth:`stream_blobs` for a memory-bounded read.
 
         Unresolved blob-view columns are not supported and raise ``ValueError``.
         """
@@ -248,8 +250,14 @@ class ScanQuery:
             if is_blob_type(field.type)
         ]
 
+    def _readable_blob_columns(self) -> List[str]:
+        return [
+            field.name for field in self._table.fields
+            if is_blob_type(field.type) or is_map_blob_type(field.type)
+        ]
+
     def _resolve_blob_columns(self, columns) -> List[str]:
-        all_blob = self._all_blob_columns()
+        all_blob = self._readable_blob_columns()
         if columns is None:
             selected = all_blob
             if self._projection is not None:
@@ -270,7 +278,7 @@ class ScanQuery:
         # descriptors, then append the requested BLOB columns and every predicate
         # column -- including predicate columns that are themselves BLOB (read as
         # descriptor) -- so SplitRead keeps the row-level filter for where().
-        blob_set = set(self._all_blob_columns())
+        blob_set = set(self._readable_blob_columns())
         effective = self._effective_projection()
         if effective is None:
             base = [f.name for f in self._table.fields if f.name not in blob_set]
@@ -285,7 +293,7 @@ class ScanQuery:
         # Non-BLOB columns to expose, based on _effective_projection() so
         # with_row_id() is honoured; drop BLOBs and predicate-only helpers, and
         # skip unknown projected names to match to_arrow()'s silent drop.
-        blob_set = set(self._all_blob_columns())
+        blob_set = set(self._readable_blob_columns())
         effective = self._effective_projection()
         if effective is None:
             return [name for name in available if name not in blob_set]

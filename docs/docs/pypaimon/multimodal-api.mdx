@@ -360,10 +360,13 @@ scalar, blobs = docs.scan().where(f"id IN ({in_clause})").read_blobs("image")
 `where()` is a SQL string, so build the `IN (...)` clause only from trusted,
 already-escaped ids -- do not interpolate untrusted external input.
 
-Read several BLOB columns at once (fetched together, not column-by-column):
+Read several BLOB columns at once, including `MAP<K, BLOB>`:
 
 ```python
-scalar, blobs = docs.scan().where("category = 'lake'").read_blobs(["image", "audio"])
+scalar, blobs = docs.scan().where("category = 'lake'").read_blobs(
+    ["image", "audio", "renditions"]
+)
+renditions = [None if row is None else dict(row) for row in blobs["renditions"]]
 ```
 
 For a memory-bounded read (e.g. streaming into a trainer), `stream_blobs` yields
