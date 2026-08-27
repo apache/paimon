@@ -726,11 +726,20 @@ class MultimodalHdf5Test(unittest.TestCase):
         item_field = pa.field("value", pa.int32(), nullable=False)
         map_type = pa.map_(pa.string(), item_field)
         schema = pa.schema([pa.field("attributes", map_type)])
-        values = pa.MapArray.from_arrays(
-            pa.array([0, 1, 2], type=pa.int32()),
-            pa.array(["hidden", "visible"]),
-            pa.array([None, 1], type=pa.int32()),
-            mask=pa.array([True, False]),
+        offsets = pa.array([0, 1, 2], type=pa.int32())
+        entries = pa.StructArray.from_arrays(
+            [
+                pa.array(["hidden", "visible"]),
+                pa.array([None, 1], type=pa.int32()),
+            ],
+            fields=[map_type.key_field, map_type.item_field],
+        )
+        validity = pa.array([False, True], type=pa.bool_()).buffers()[1]
+        values = pa.MapArray.from_buffers(
+            map_type,
+            2,
+            [validity, offsets.buffers()[1]],
+            children=[entries],
         )
         table = pa.Table.from_arrays([values], schema=schema)
 
