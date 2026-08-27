@@ -82,9 +82,8 @@ and `world_size` arguments take precedence and do not require automatic
 detection. PyPaimon first assigns a balanced slice to the rank, then balances
 that rank's splits across its DataLoader workers.
 
-Do not combine `auto_detect_rank=True` with application-side code such as
-`splits[rank::world_size]`; remove that slicing or keep automatic detection
-disabled to avoid double sharding.
+If splits are already sharded by rank upstream, keep `auto_detect_rank=False`
+or remove the upstream sharding before enabling it.
 
 ### Batch Streaming
 
