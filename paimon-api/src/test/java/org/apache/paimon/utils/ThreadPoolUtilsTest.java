@@ -29,6 +29,7 @@ import javax.security.auth.Subject;
 
 import java.security.AccessController;
 import java.security.PrivilegedAction;
+import java.util.AbstractList;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -59,6 +60,20 @@ public class ThreadPoolUtilsTest {
         CountDownLatch secondFinished = new CountDownLatch(1);
         CountDownLatch thirdStarted = new CountDownLatch(1);
         CountDownLatch releaseFirst = new CountDownLatch(1);
+        AtomicInteger inputsRead = new AtomicInteger();
+        List<Integer> inputs =
+                new AbstractList<Integer>() {
+                    @Override
+                    public Integer get(int index) {
+                        inputsRead.incrementAndGet();
+                        return index;
+                    }
+
+                    @Override
+                    public int size() {
+                        return 4;
+                    }
+                };
         CloseableBatchIterator<Integer> iterator =
                 ThreadPoolUtils.sequentialBatchedExecuteCloseable(
                         workers,
@@ -73,7 +88,7 @@ public class ThreadPoolUtilsTest {
                             }
                             return Collections.singletonList(input);
                         },
-                        Arrays.asList(0, 1, 2, 3),
+                        inputs,
                         2);
 
         try {
@@ -86,19 +101,22 @@ public class ThreadPoolUtilsTest {
 
             assertThat(firstStarted.await(3, TimeUnit.SECONDS)).isTrue();
             assertThat(secondFinished.await(3, TimeUnit.SECONDS)).isTrue();
-            workers.submit(() -> {}).get(3, TimeUnit.SECONDS);
+            assertThat(inputsRead).hasValue(2);
             assertThat(thirdStarted.getCount()).isOne();
             assertThat(firstResult.isDone()).isFalse();
 
             releaseFirst.countDown();
             List<Integer> results = new ArrayList<>();
             results.add(firstResult.get(3, TimeUnit.SECONDS));
-            // Consuming input 0 frees one slot. The next lookup refills it before input 1 is
-            // consumed, instead of waiting for the whole window to drain.
+            // Reading the remaining result must not submit the next batch.
+            assertThat(iterator.hasNext()).isTrue();
+            assertThat(inputsRead).hasValue(2);
+            assertThat(thirdStarted.getCount()).isOne();
+            results.add(iterator.next());
+
+            // The next lookup starts the second batch only after the first batch is drained.
             assertThat(iterator.hasNext()).isTrue();
             assertThat(thirdStarted.await(3, TimeUnit.SECONDS)).isTrue();
-            results.add(iterator.next());
-            assertThat(iterator.hasNext()).isTrue();
             results.add(iterator.next());
             assertThat(iterator.hasNext()).isTrue();
             results.add(iterator.next());
@@ -135,7 +153,7 @@ public class ThreadPoolUtilsTest {
                     }
                 };
         try (CloseableBatchIterator<Integer> iterator =
-                ThreadPoolUtils.sequentialBatchedExecuteAwaitRunningTasksOnClose(
+                ThreadPoolUtils.sequentialSlidingWindowExecuteAwaitRunningTasksOnClose(
                         workers,
                         value -> {
                             if (value == 0) {
@@ -148,6 +166,8 @@ public class ThreadPoolUtilsTest {
             releaseFirst.countDown();
             assertThat(iterator.next()).isEqualTo(0);
             assertThat(inputsRead).hasValue(4);
+            assertThat(iterator.next()).isEqualTo(1);
+            assertThat(inputsRead).hasValue(5);
         } finally {
             workers.shutdownNow();
         }
@@ -169,7 +189,7 @@ public class ThreadPoolUtilsTest {
                             return value;
                         });
         CloseableBatchIterator<Integer> iterator =
-                ThreadPoolUtils.sequentialBatchedExecuteAwaitRunningTasksOnClose(
+                ThreadPoolUtils.sequentialSlidingWindowExecuteAwaitRunningTasksOnClose(
                         workers,
                         value -> {
                             if (value == 0) {
@@ -279,34 +299,25 @@ public class ThreadPoolUtilsTest {
         Subject secondSubject = new Subject();
         List<Subject> seenSubjects = new ArrayList<>();
         List<Thread> seenWorkers = new ArrayList<>();
+        PrivilegedAction<Subject> readSubjectFromWorker =
+                () -> {
+                    try (CloseableBatchIterator<Subject> iterator =
+                            ThreadPoolUtils.sequentialBatchedExecuteCloseable(
+                                    workers,
+                                    ignored -> {
+                                        seenWorkers.add(Thread.currentThread());
+                                        return Collections.singletonList(
+                                                Subject.getSubject(AccessController.getContext()));
+                                    },
+                                    Collections.singletonList(0),
+                                    1)) {
+                        return iterator.next();
+                    }
+                };
 
         try {
             for (Subject subject : Arrays.asList(firstSubject, secondSubject)) {
-                seenSubjects.add(
-                        Subject.doAs(
-                                subject,
-                                (PrivilegedAction<Subject>)
-                                        () -> {
-                                            try (CloseableBatchIterator<Subject> iterator =
-                                                    ThreadPoolUtils
-                                                            .sequentialBatchedExecuteCloseable(
-                                                                    workers,
-                                                                    ignored -> {
-                                                                        seenWorkers.add(
-                                                                                Thread
-                                                                                        .currentThread());
-                                                                        return Collections
-                                                                                .singletonList(
-                                                                                        Subject
-                                                                                                .getSubject(
-                                                                                                        AccessController
-                                                                                                                .getContext()));
-                                                                    },
-                                                                    Collections.singletonList(0),
-                                                                    1)) {
-                                                return iterator.next();
-                                            }
-                                        }));
+                seenSubjects.add(Subject.doAs(subject, readSubjectFromWorker));
             }
 
             assertThat(seenWorkers.get(1)).isSameAs(seenWorkers.get(0));
@@ -406,6 +417,88 @@ public class ThreadPoolUtilsTest {
             assertThat(executions).hasValue(2);
         } finally {
             allowSecondToExit.countDown();
+            iterator.close();
+            closer.shutdownNow();
+            workers.shutdownNow();
+            assertThat(closer.awaitTermination(3, TimeUnit.SECONDS)).isTrue();
+            assertThat(workers.awaitTermination(3, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
+    @Test
+    public void testCloseDoesNotLeakAnInterruptAfterTaskCompletion() throws Exception {
+        AtomicBoolean delayInterruptUntilWorkerFinishes = new AtomicBoolean();
+        AtomicBoolean workerBlockedBeforeInterrupt = new AtomicBoolean();
+        AtomicBoolean interruptedAfterTask = new AtomicBoolean();
+        AtomicInteger completedTasks = new AtomicInteger();
+        CountDownLatch secondStarted = new CountDownLatch(1);
+        CountDownLatch releaseSecond = new CountDownLatch(1);
+        CountDownLatch secondFinished = new CountDownLatch(1);
+        ThreadPoolExecutor workers =
+                new ThreadPoolExecutor(
+                        1,
+                        1,
+                        0L,
+                        TimeUnit.MILLISECONDS,
+                        new LinkedBlockingQueue<>(),
+                        runnable ->
+                                new Thread(runnable) {
+                                    // close holds BatchTask's monitor here. Release the processor,
+                                    // wait for the worker to block publishing FINISHED, then
+                                    // deliver the interrupt in the old leak window.
+                                    @Override
+                                    public void interrupt() {
+                                        if (delayInterruptUntilWorkerFinishes.compareAndSet(
+                                                true, false)) {
+                                            releaseSecond.countDown();
+                                            long deadline =
+                                                    System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+                                            while (getState() != State.BLOCKED
+                                                    && System.nanoTime() < deadline) {
+                                                Thread.yield();
+                                            }
+                                            workerBlockedBeforeInterrupt.set(
+                                                    getState() == State.BLOCKED);
+                                        }
+                                        super.interrupt();
+                                    }
+                                }) {
+                    @Override
+                    protected void afterExecute(Runnable runnable, Throwable throwable) {
+                        super.afterExecute(runnable, throwable);
+                        if (completedTasks.incrementAndGet() == 2) {
+                            interruptedAfterTask.set(Thread.currentThread().isInterrupted());
+                            secondFinished.countDown();
+                        }
+                    }
+                };
+        ExecutorService closer = Executors.newSingleThreadExecutor();
+        CloseableBatchIterator<Integer> iterator =
+                ThreadPoolUtils.sequentialBatchedExecuteCloseable(
+                        workers,
+                        input -> {
+                            if (input == 1) {
+                                secondStarted.countDown();
+                                await(releaseSecond);
+                            }
+                            return Collections.singletonList(input);
+                        },
+                        Arrays.asList(0, 1),
+                        2);
+
+        try {
+            assertThat(iterator.next()).isZero();
+            assertThat(secondStarted.await(3, TimeUnit.SECONDS)).isTrue();
+            delayInterruptUntilWorkerFinishes.set(true);
+
+            Future<?> closeResult = closer.submit(iterator::close);
+            assertThat(secondFinished.await(3, TimeUnit.SECONDS)).isTrue();
+            closeResult.get(3, TimeUnit.SECONDS);
+
+            assertThat(workerBlockedBeforeInterrupt).isTrue();
+            assertThat(interruptedAfterTask).isFalse();
+        } finally {
+            releaseSecond.countDown();
             iterator.close();
             closer.shutdownNow();
             workers.shutdownNow();

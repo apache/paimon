@@ -303,27 +303,15 @@ public class CoreOptionsTest {
 
     @Test
     public void testFormatTableCommitCleanupThreadNumRejectsValuesOutsideSupportedRange() {
-        Options conf = new Options();
-        conf.set(CoreOptions.FORMAT_TABLE_COMMIT_CLEANUP_THREAD_NUM, 0);
-        assertThatThrownBy(() -> new CoreOptions(conf).formatTableCommitCleanupThreadNum())
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("format-table.commit.cleanup-thread-num")
-                .hasMessageContaining("1")
-                .hasMessageContaining("64");
-
-        conf.set(CoreOptions.FORMAT_TABLE_COMMIT_CLEANUP_THREAD_NUM, -1);
-        assertThatThrownBy(() -> new CoreOptions(conf).formatTableCommitCleanupThreadNum())
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("format-table.commit.cleanup-thread-num")
-                .hasMessageContaining("1")
-                .hasMessageContaining("64");
-
-        conf.set(CoreOptions.FORMAT_TABLE_COMMIT_CLEANUP_THREAD_NUM, 65);
-        assertThatThrownBy(() -> new CoreOptions(conf).formatTableCommitCleanupThreadNum())
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("format-table.commit.cleanup-thread-num")
-                .hasMessageContaining("1")
-                .hasMessageContaining("64");
+        for (int invalid : new int[] {0, -1, 65}) {
+            Options conf = new Options();
+            conf.set(CoreOptions.FORMAT_TABLE_COMMIT_CLEANUP_THREAD_NUM, invalid);
+            assertThatThrownBy(() -> new CoreOptions(conf).formatTableCommitCleanupThreadNum())
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("format-table.commit.cleanup-thread-num")
+                    .hasMessageContaining("1")
+                    .hasMessageContaining("64");
+        }
     }
 
     @Test

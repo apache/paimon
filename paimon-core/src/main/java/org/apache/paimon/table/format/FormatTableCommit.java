@@ -66,7 +66,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.table.format.FormatBatchWriteBuilder.validateStaticPartition;
 import static org.apache.paimon.utils.ExceptionUtils.firstOrSuppressed;
 import static org.apache.paimon.utils.ThreadPoolUtils.CloseableBatchIterator;
-import static org.apache.paimon.utils.ThreadPoolUtils.sequentialBatchedExecuteAwaitRunningTasksOnClose;
+import static org.apache.paimon.utils.ThreadPoolUtils.sequentialSlidingWindowExecuteAwaitRunningTasksOnClose;
 
 /** Commit for Format Table. */
 public class FormatTableCommit implements BatchTableCommit {
@@ -94,6 +94,35 @@ public class FormatTableCommit implements BatchTableCommit {
     private final int publishThreadNum;
 
     public FormatTableCommit(
+            String location,
+            List<String> partitionKeys,
+            FileIO fileIO,
+            boolean formatTablePartitionOnlyValueInPath,
+            String defaultPartName,
+            boolean overwrite,
+            Identifier tableIdentifier,
+            @Nullable Map<String, String> staticPartitions,
+            @Nullable String syncHiveUri,
+            CatalogContext catalogContext,
+            @Nullable FormatTablePartitionManager partitionManager,
+            boolean dynamicPartitionOverwrite) {
+        this(
+                location,
+                partitionKeys,
+                fileIO,
+                formatTablePartitionOnlyValueInPath,
+                defaultPartName,
+                overwrite,
+                tableIdentifier,
+                staticPartitions,
+                syncHiveUri,
+                catalogContext,
+                partitionManager,
+                dynamicPartitionOverwrite,
+                1);
+    }
+
+    FormatTableCommit(
             String location,
             List<String> partitionKeys,
             FileIO fileIO,
@@ -278,6 +307,7 @@ public class FormatTableCommit implements BatchTableCommit {
             }
             if (reportsStatistics) {
                 reportPartitions(
+                        messages,
                         partitionSpecs,
                         statisticsByPartition,
                         clearedPartitionPaths,
@@ -286,8 +316,10 @@ public class FormatTableCommit implements BatchTableCommit {
             } else if (partitionManager != null && !partitionSpecs.isEmpty()) {
                 // Concurrent writers may touch the same partition, so registration ignores the
                 // ones that already exist rather than failing the commit.
+                markPublishedTargetsToPreserveOnAbort(messages);
                 partitionManager.createPartitions(new ArrayList<>(partitionSpecs), true);
             }
+            boolean hiveMutationStarted = false;
             for (Map<String, String> partitionSpec : partitionSpecs) {
                 if (hiveCatalog != null) {
                     try {
@@ -296,6 +328,10 @@ public class FormatTableCommit implements BatchTableCommit {
                         }
                         Method hiveCreatePartitionsInHmsMethod =
                                 getHiveCreatePartitionsInHmsMethod();
+                        if (!hiveMutationStarted) {
+                            markPublishedTargetsToPreserveOnAbort(messages);
+                            hiveMutationStarted = true;
+                        }
                         hiveCreatePartitionsInHmsMethod.invoke(
                                 hiveCatalog,
                                 tableIdentifier,
@@ -339,7 +375,7 @@ public class FormatTableCommit implements BatchTableCommit {
         }
 
         try (CloseableBatchIterator<Void> published =
-                sequentialBatchedExecuteAwaitRunningTasksOnClose(
+                sequentialSlidingWindowExecuteAwaitRunningTasksOnClose(
                         COMMIT_EXECUTOR,
                         this::publishMessage,
                         messages.iterator(),
@@ -361,6 +397,13 @@ public class FormatTableCommit implements BatchTableCommit {
         }
     }
 
+    private static void markPublishedTargetsToPreserveOnAbort(
+            List<TwoPhaseCommitMessage> messages) {
+        for (TwoPhaseCommitMessage message : messages) {
+            message.markPublishedTargetToPreserveOnAbort();
+        }
+    }
+
     /**
      * Registers the partitions this commit touched, carrying the statistics of what it wrote. An
      * overwrite also empties partitions it writes nothing to - those below a static prefix, and
@@ -370,6 +413,7 @@ public class FormatTableCommit implements BatchTableCommit {
      * reports every partition it emptied.
      */
     private void reportPartitions(
+            List<TwoPhaseCommitMessage> messages,
             Set<Map<String, String>> writtenPartitionSpecs,
             Map<Map<String, String>, PartitionStatistics> statisticsByPartition,
             Set<Path> clearedPartitionPaths,
@@ -391,6 +435,7 @@ public class FormatTableCommit implements BatchTableCommit {
         }
         // A commit that replaced what the partitions held reports a total; an appending one saw
         // only its own files, so its numbers are an increment.
+        markPublishedTargetsToPreserveOnAbort(messages);
         partitionManager.createPartitions(
                 new ArrayList<>(specs),
                 true,
@@ -549,8 +594,12 @@ public class FormatTableCommit implements BatchTableCommit {
                 continue;
             }
 
-            TwoPhaseOutputStream.Committer committer =
-                    ((TwoPhaseCommitMessage) commitMessage).getCommitter();
+            TwoPhaseCommitMessage twoPhaseCommitMessage = (TwoPhaseCommitMessage) commitMessage;
+            if (twoPhaseCommitMessage.shouldPreservePublishedTargetOnAbort()) {
+                continue;
+            }
+
+            TwoPhaseOutputStream.Committer committer = twoPhaseCommitMessage.getCommitter();
             try {
                 committer.discard(fileIO);
             } catch (Throwable discardFailure) {
@@ -689,7 +738,7 @@ public class FormatTableCommit implements BatchTableCommit {
             // the iterator is what stops new deletes and waits for the ones already handed out,
             // so a failure cannot leave a worker still deleting after this method returns.
             try (CloseableBatchIterator<Path> cleared =
-                    sequentialBatchedExecuteAwaitRunningTasksOnClose(
+                    sequentialSlidingWindowExecuteAwaitRunningTasksOnClose(
                             COMMIT_EXECUTOR, this::deleteAndReportCleared, dataFiles, threadNum)) {
                 while (cleared.hasNext()) {
                     clearedPartitionPaths.add(cleared.next());
@@ -889,6 +938,7 @@ public class FormatTableCommit implements BatchTableCommit {
             // too, so the catalog stops describing files that are gone.
             try {
                 reportPartitions(
+                        Collections.emptyList(),
                         Collections.emptySet(),
                         emptied,
                         clearedPartitionPaths,

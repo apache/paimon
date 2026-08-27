@@ -972,7 +972,7 @@ class FormatTableCommitStatisticsTest {
     }
 
     @Test
-    void testAFailedReportFailsTheCommitAndDiscardsWhatItWrote() throws Exception {
+    void testAFailedReportPreservesPublishedTargetWhenCatalogOutcomeIsUnknown() throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         Path tablePath = new Path(tempDir.toUri());
         FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
@@ -983,20 +983,19 @@ class FormatTableCommitStatisticsTest {
         CommitMessage message = writtenFile(fileIO, tablePath, "year=2025/month=10", 3, 128);
         Path written = ((TwoPhaseCommitMessage) message).getCommitter().targetPath();
 
-        // Registration and statistics ride in one request, so a failure says nothing about
-        // whether the partition was registered. Committing anyway would leave data behind that
-        // nothing points at.
+        // Once the catalog call starts, an exception cannot prove whether registration took
+        // effect. Removing the target could leave durable metadata pointing at a missing file.
         assertThatThrownBy(
                         () ->
                                 commit(tablePath, fileIO, partitionManager, false, null)
                                         .commit(Collections.singletonList(message)))
                 .hasRootCause(failure);
 
-        assertThat(fileIO.exists(written)).isFalse();
+        assertThat(fileIO.exists(written)).isTrue();
     }
 
     @Test
-    void testAFailedReportOfAnOverwriteLeavesThePartitionEmpty() throws Exception {
+    void testFailedOverwriteReportPreservesReplacementAfterDeletingOldData() throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         Path tablePath = new Path(tempDir.toUri());
         FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
@@ -1018,10 +1017,9 @@ class FormatTableCommitStatisticsTest {
                                         .commit(Collections.singletonList(message)))
                 .hasRootCauseMessage("catalog says 429");
 
-        // The state this leaves is worth stating rather than discovering: the overwrite already
-        // deleted what the partition held, and the abort takes back what it wrote, so the
-        // partition is empty on disk while the catalog still describes what used to be there.
-        assertThat(fileIO.exists(written)).isFalse();
+        // The old file cannot be restored. Keep the replacement because the failed catalog call
+        // may already have made its metadata durable.
+        assertThat(fileIO.exists(written)).isTrue();
         assertThat(fileIO.exists(new Path(tablePath, "year=2025/month=10/old-data.csv"))).isFalse();
     }
 

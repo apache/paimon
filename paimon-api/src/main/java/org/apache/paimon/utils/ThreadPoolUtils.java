@@ -50,7 +50,7 @@ import static org.apache.paimon.utils.ThreadUtils.newDaemonThreadFactory;
 /** Utils for thread pool. */
 public class ThreadPoolUtils {
 
-    /** An iterator which waits for its active batch to quiesce when closed. */
+    /** An iterator which waits for its active tasks to quiesce when closed. */
     public interface CloseableBatchIterator<T> extends Iterator<T>, AutoCloseable {
 
         @Override
@@ -137,32 +137,43 @@ public class ThreadPoolUtils {
     }
 
     /**
-     * Processes a bounded number of inputs in parallel and returns results in input order.
+     * Processes one bounded batch at a time and returns results in input order.
      *
-     * <p>The caller must close the iterator to cancel unstarted tasks and wait for running tasks.
+     * <p>Closing cancels unstarted tasks, interrupts running tasks, and waits for every submitted
+     * task to finish.
      */
     public static <T, U> CloseableBatchIterator<T> sequentialBatchedExecuteCloseable(
             ExecutorService executor,
             Function<U, List<T>> processor,
             List<U> input,
             int queueSize) {
-        return newSequentialBatchIterator(executor, processor, input.iterator(), queueSize, true);
+        return newSequentialBatchIterator(
+                executor,
+                processor,
+                input.iterator(),
+                queueSize,
+                SchedulingMode.BATCHED_CANCEL_RUNNING);
     }
 
     /**
-     * As {@link #sequentialBatchedExecuteCloseable}, but closing waits for a task that has already
-     * started instead of interrupting it.
+     * Processes a bounded sliding window of inputs from the iterator and returns results in input
+     * order.
+     *
+     * <p>Unlike {@link #sequentialBatchedExecuteCloseable}, closing waits for a task that has
+     * already started instead of interrupting it.
      *
      * <p>Use this when a task changes stored state. Interrupting a delete or a write halfway leaves
      * the caller unable to say whether it took effect, so a caller that has to know the outcome of
      * everything it handed out cannot let close cancel work that is already running.
      */
-    public static <T, U> CloseableBatchIterator<T> sequentialBatchedExecuteAwaitRunningTasksOnClose(
-            ExecutorService executor,
-            Function<U, List<T>> processor,
-            Iterator<U> input,
-            int queueSize) {
-        return newSequentialBatchIterator(executor, processor, input, queueSize, false);
+    public static <T, U>
+            CloseableBatchIterator<T> sequentialSlidingWindowExecuteAwaitRunningTasksOnClose(
+                    ExecutorService executor,
+                    Function<U, List<T>> processor,
+                    Iterator<U> input,
+                    int queueSize) {
+        return newSequentialBatchIterator(
+                executor, processor, input, queueSize, SchedulingMode.SLIDING_AWAIT_RUNNING);
     }
 
     private static <T, U> CloseableBatchIterator<T> newSequentialBatchIterator(
@@ -170,12 +181,11 @@ public class ThreadPoolUtils {
             Function<U, List<T>> processor,
             Iterator<U> input,
             int queueSize,
-            boolean cancelRunningOnClose) {
+            SchedulingMode mode) {
         if (queueSize <= 0) {
             throw new NegativeArraySizeException("queue size should not be negative");
         }
-        return new SequentialBatchIterator<>(
-                executor, processor, input, queueSize, cancelRunningOnClose);
+        return new SequentialBatchIterator<>(executor, processor, input, queueSize, mode);
     }
 
     public static <U> void randomlyOnlyExecute(
@@ -249,13 +259,26 @@ public class ThreadPoolUtils {
         }
     }
 
+    private enum SchedulingMode {
+        BATCHED_CANCEL_RUNNING(true, false),
+        SLIDING_AWAIT_RUNNING(false, true);
+
+        private final boolean cancelRunningOnClose;
+        private final boolean slidingWindow;
+
+        SchedulingMode(boolean cancelRunningOnClose, boolean slidingWindow) {
+            this.cancelRunningOnClose = cancelRunningOnClose;
+            this.slidingWindow = slidingWindow;
+        }
+    }
+
     private static class SequentialBatchIterator<T, U> implements CloseableBatchIterator<T> {
 
         private final ExecutorService executor;
         private final Function<U, List<T>> processor;
         private final Iterator<U> input;
         private final int queueSize;
-        private final boolean cancelRunningOnClose;
+        private final SchedulingMode mode;
         private final Queue<BatchTask<T, U>> activeTasks = new ArrayDeque<>();
         private final Object submissionLock = new Object();
 
@@ -269,12 +292,12 @@ public class ThreadPoolUtils {
                 Function<U, List<T>> processor,
                 Iterator<U> input,
                 int queueSize,
-                boolean cancelRunningOnClose) {
+                SchedulingMode mode) {
             this.executor = executor;
             this.processor = processor;
             this.input = input;
             this.queueSize = queueSize;
-            this.cancelRunningOnClose = cancelRunningOnClose;
+            this.mode = mode;
         }
 
         @Override
@@ -301,7 +324,9 @@ public class ThreadPoolUtils {
                     next = activeResults.next();
                     continue;
                 }
-                fillWindow();
+                if (mode.slidingWindow || activeTasks.isEmpty()) {
+                    fillWindow();
+                }
                 if (activeTasks.isEmpty()) {
                     return;
                 }
@@ -363,7 +388,7 @@ public class ThreadPoolUtils {
                     failure = firstOrSuppressed(cleanupFailure, failure);
                 }
             }
-            if (cancelRunningOnClose) {
+            if (mode.cancelRunningOnClose) {
                 for (BatchTask<T, U> task : activeTasks) {
                     try {
                         task.interruptIfRunning();
@@ -458,15 +483,15 @@ public class ThreadPoolUtils {
                 stopSubmission.run();
             } finally {
                 currentThread.setContextClassLoader(originalClassLoader);
+                synchronized (this) {
+                    runner = null;
+                    state = FINISHED;
+                }
                 // Reset the flag to its entry state so a cancelled task cannot leak an interrupt
                 // to a reused worker and a direct executor cannot clear its caller's interrupt.
                 Thread.interrupted();
                 if (interruptedOnEntry) {
                     currentThread.interrupt();
-                }
-                synchronized (this) {
-                    runner = null;
-                    state = FINISHED;
                 }
                 completion.countDown();
             }

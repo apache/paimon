@@ -40,6 +40,10 @@ public class TwoPhaseCommitMessage implements CommitMessage {
     private final long recordCount;
     private final long fileSizeInBytes;
 
+    // Set before external partition metadata may become durable. Keeping this state in the
+    // serialized message prevents a later abort instance from deleting a referenced target.
+    private boolean preservePublishedTargetOnAbort;
+
     public TwoPhaseCommitMessage(TwoPhaseOutputStream.Committer committer) {
         this(committer, PartitionStatistics.UNKNOWN, PartitionStatistics.UNKNOWN);
     }
@@ -68,6 +72,14 @@ public class TwoPhaseCommitMessage implements CommitMessage {
 
     public TwoPhaseOutputStream.Committer getCommitter() {
         return committer;
+    }
+
+    void markPublishedTargetToPreserveOnAbort() {
+        preservePublishedTargetOnAbort = true;
+    }
+
+    boolean shouldPreservePublishedTargetOnAbort() {
+        return preservePublishedTargetOnAbort;
     }
 
     /** Rows in this file, or {@link PartitionStatistics#UNKNOWN} when nobody counted them. */
