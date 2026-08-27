@@ -5293,6 +5293,193 @@ class DedicatedFormatWriterTest(unittest.TestCase):
         self.assertEqual(result.num_rows, 1)
         self.assertEqual(result.column('picture').to_pylist()[0], payload)
 
+    def test_blob_view_predicate_and_limit_resolves_filtered_row(self):
+        """Predicate + LIMIT must not restrict prescan to the unfiltered first-N.
+
+        The matching row can sit past LIMIT in file order; prescan has to
+        preload that view or convert fails with a missing BlobViewStruct.
+        """
+        from pypaimon import Schema
+        from pypaimon.table.row.blob import BlobViewStruct
+
+        source_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        source = Schema.from_pyarrow_schema(
+            source_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            }
+        )
+        self.catalog.create_table(
+            'test_db.blob_view_pred_limit_source', source, False)
+        source_table = self.catalog.get_table(
+            'test_db.blob_view_pred_limit_source')
+
+        num_rows = 10
+        payloads = [f'payload-{i}'.encode() for i in range(num_rows)]
+        write_builder = source_table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': list(range(num_rows)),
+            'picture': payloads,
+        }, schema=source_schema))
+        write_builder.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+        picture_field_id = next(
+            field.id for field in source_table.table_schema.fields
+            if field.name == 'picture'
+        )
+        view_values = [
+            BlobViewStruct(
+                'test_db.blob_view_pred_limit_source', picture_field_id, i
+            ).serialize()
+            for i in range(num_rows)
+        ]
+
+        target_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        target = Schema.from_pyarrow_schema(
+            target_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob-view-field': 'picture',
+            }
+        )
+        self.catalog.create_table(
+            'test_db.blob_view_pred_limit_target', target, False)
+        target_table = self.catalog.get_table(
+            'test_db.blob_view_pred_limit_target')
+
+        target_write_builder = target_table.new_batch_write_builder()
+        target_writer = target_write_builder.new_write()
+        target_writer.write_arrow(pa.Table.from_pydict({
+            'id': list(range(num_rows)),
+            'picture': view_values,
+        }, schema=target_schema))
+        target_write_builder.new_commit().commit(
+            target_writer.prepare_commit())
+        target_writer.close()
+
+        read_builder = target_table.new_read_builder()
+        predicate = read_builder.new_predicate_builder().equal("id", 9)
+        read_builder = read_builder.with_filter(predicate).with_limit(1)
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits()
+        )
+        self.assertEqual(result.num_rows, 1)
+        self.assertEqual(result.column('id').to_pylist(), [9])
+        self.assertEqual(result.column('picture').to_pylist(), [b'payload-9'])
+
+    def test_blob_view_raw_split_predicate_and_limit_resolves_filtered_row(self):
+        """Same hole on RawFileSplitRead: view-only prescan plus LIMIT.
+
+        Python schema validation still requires data-evolution for BLOB
+        tables, so the table is created that way and the read is copied
+        with data-evolution off to force the append/raw split path.
+        """
+        from unittest import mock
+
+        from pypaimon import Schema
+        from pypaimon.read.split_read import RawFileSplitRead
+        from pypaimon.read.table_read import TableRead
+        from pypaimon.table.row.blob import BlobViewStruct
+
+        source_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        source = Schema.from_pyarrow_schema(
+            source_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+            }
+        )
+        self.catalog.create_table(
+            'test_db.blob_view_raw_pred_limit_source', source, False)
+        source_table = self.catalog.get_table(
+            'test_db.blob_view_raw_pred_limit_source')
+
+        num_rows = 10
+        payloads = [f'raw-payload-{i}'.encode() for i in range(num_rows)]
+        write_builder = source_table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(pa.Table.from_pydict({
+            'id': list(range(num_rows)),
+            'picture': payloads,
+        }, schema=source_schema))
+        write_builder.new_commit().commit(writer.prepare_commit())
+        writer.close()
+
+        picture_field_id = next(
+            field.id for field in source_table.table_schema.fields
+            if field.name == 'picture'
+        )
+        view_values = [
+            BlobViewStruct(
+                'test_db.blob_view_raw_pred_limit_source', picture_field_id, i
+            ).serialize()
+            for i in range(num_rows)
+        ]
+
+        target_schema = pa.schema([
+            ('id', pa.int32()),
+            ('picture', pa.large_binary()),
+        ])
+        target = Schema.from_pyarrow_schema(
+            target_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob-view-field': 'picture',
+            }
+        )
+        self.catalog.create_table(
+            'test_db.blob_view_raw_pred_limit_target', target, False)
+        target_table = self.catalog.get_table(
+            'test_db.blob_view_raw_pred_limit_target')
+
+        target_write_builder = target_table.new_batch_write_builder()
+        target_writer = target_write_builder.new_write()
+        target_writer.write_arrow(pa.Table.from_pydict({
+            'id': list(range(num_rows)),
+            'picture': view_values,
+        }, schema=target_schema))
+        target_write_builder.new_commit().commit(
+            target_writer.prepare_commit())
+        target_writer.close()
+
+        raw_table = target_table.copy({'data-evolution.enabled': 'false'})
+        self.assertFalse(raw_table.options.data_evolution_enabled())
+
+        read_builder = raw_table.new_read_builder()
+        predicate = read_builder.new_predicate_builder().equal("id", 9)
+        read_builder = read_builder.with_filter(predicate).with_limit(1)
+        split_types = []
+        orig_build = TableRead._build_split_read
+
+        def capturing_build(self, *args, **kwargs):
+            split_read = orig_build(self, *args, **kwargs)
+            split_types.append(type(split_read))
+            return split_read
+
+        with mock.patch.object(TableRead, '_build_split_read', capturing_build):
+            result = read_builder.new_read().to_arrow(
+                read_builder.new_scan().plan().splits()
+            )
+        self.assertIn(RawFileSplitRead, split_types)
+        self.assertEqual(result.num_rows, 1)
+        self.assertEqual(result.column('id').to_pylist(), [9])
+        self.assertEqual(
+            result.column('picture').to_pylist(), [b'raw-payload-9'])
+
 
 class GetBlobTest(unittest.TestCase):
 
