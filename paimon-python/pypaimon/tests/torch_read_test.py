@@ -324,6 +324,28 @@ class TorchReadTest(unittest.TestCase):
                 [id(split) for split in splits],
             )
 
+    def test_non_binding_limit_uses_merged_row_counts(self):
+        from pypaimon.read.datasource.torch_dataset import TorchIterDataset
+
+        table_read = SimpleNamespace(limit=8, read_type=[])
+        splits = [
+            SimpleNamespace(row_count=10, merged_row_count=lambda: 4),
+            SimpleNamespace(row_count=10, merged_row_count=lambda: 4),
+        ]
+        dataset = TorchIterDataset(table_read, splits)
+
+        assigned = [
+            dataset._worker_splits(
+                SimpleNamespace(id=worker_id, num_workers=2)
+            )
+            for worker_id in range(2)
+        ]
+        self.assertTrue(all(assigned))
+        self.assertCountEqual(
+            [id(split) for group in assigned for split in group],
+            [id(split) for split in splits],
+        )
+
     def test_torch_batch_sizing_respects_arrow_offset_limit(self):
         from pypaimon.read.datasource.torch_dataset import (
             _sized_record_batches)

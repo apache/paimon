@@ -110,13 +110,26 @@ class _BaseTorchIterDataset(IterableDataset):
             return True
         total_rows = 0
         for split in self.splits:
-            row_count = getattr(split, "row_count", None)
+            physical_row_count = getattr(split, "row_count", None)
             if (
-                isinstance(row_count, bool)
-                or not isinstance(row_count, int)
-                or row_count < 0
+                isinstance(physical_row_count, bool)
+                or not isinstance(physical_row_count, int)
+                or physical_row_count < 0
             ):
                 return False
+            row_count = physical_row_count
+            merged_row_count = getattr(split, "merged_row_count", None)
+            if callable(merged_row_count):
+                try:
+                    merged_row_count = merged_row_count()
+                except Exception:
+                    merged_row_count = None
+                if (
+                    not isinstance(merged_row_count, bool)
+                    and isinstance(merged_row_count, int)
+                    and 0 <= merged_row_count <= physical_row_count
+                ):
+                    row_count = merged_row_count
             total_rows += row_count
             if total_rows > limit:
                 return False
