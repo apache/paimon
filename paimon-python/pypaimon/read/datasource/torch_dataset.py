@@ -53,19 +53,9 @@ def _validate_distributed_context(rank: int, world_size: int):
     return rank, world_size
 
 
-def _resolve_distributed_context(
-    auto_detect_rank: bool,
-    rank: Optional[int],
-    world_size: Optional[int],
-):
+def _resolve_distributed_context(auto_detect_rank: bool):
     if not isinstance(auto_detect_rank, bool):
         raise ValueError("auto_detect_rank must be a bool")
-    if (rank is None) != (world_size is None):
-        raise ValueError("rank and world_size must be provided together")
-
-    if rank is not None:
-        return _validate_distributed_context(rank, world_size)
-
     if not auto_detect_rank:
         return 0, 1
 
@@ -161,15 +151,11 @@ class _BaseTorchIterDataset(IterableDataset):
         table_read: TableRead,
         splits: List[Split],
         auto_detect_rank: bool = False,
-        rank: Optional[int] = None,
-        world_size: Optional[int] = None,
     ):
         self.table_read = table_read
         self.splits = splits
         self.field_names = [field.name for field in table_read.read_type]
-        self.rank, self.world_size = _resolve_distributed_context(
-            auto_detect_rank, rank, world_size
-        )
+        self.rank, self.world_size = _resolve_distributed_context(auto_detect_rank)
 
     def _row_to_dict(self, offset_row) -> dict:
         row_dict = {}
@@ -247,8 +233,6 @@ class TorchIterDataset(_BaseTorchIterDataset):
         splits: List[Split],
         prefetch_concurrency: int = 1,
         auto_detect_rank: bool = False,
-        rank: Optional[int] = None,
-        world_size: Optional[int] = None,
     ):
         """
         Initialize TorchIterDataset.
@@ -260,7 +244,7 @@ class TorchIterDataset(_BaseTorchIterDataset):
                 this worker (default 1). When > 1, splits are partitioned across
                 threads to increase read throughput.
         """
-        super().__init__(table_read, splits, auto_detect_rank, rank, world_size)
+        super().__init__(table_read, splits, auto_detect_rank)
         self.prefetch_concurrency = max(1, int(prefetch_concurrency))
 
     def __iter__(self):
@@ -464,10 +448,8 @@ class TorchBatchIterDataset(_BaseTorchIterDataset):
         batch_size: Optional[int],
         to_tensor_fn: Optional[Callable[[pa.RecordBatch], Any]] = None,
         auto_detect_rank: bool = False,
-        rank: Optional[int] = None,
-        world_size: Optional[int] = None,
     ):
-        super().__init__(table_read, splits, auto_detect_rank, rank, world_size)
+        super().__init__(table_read, splits, auto_detect_rank)
         self.batch_format = batch_format
         self.batch_size = batch_size
         self.to_tensor_fn = to_tensor_fn
@@ -531,10 +513,8 @@ class TorchShuffledIterDataset(_BaseTorchIterDataset):
         buffer_size: int = 1000,
         max_buffer_input_splits: int = 10,
         auto_detect_rank: bool = False,
-        rank: Optional[int] = None,
-        world_size: Optional[int] = None,
     ):
-        super().__init__(table_read, splits, auto_detect_rank, rank, world_size)
+        super().__init__(table_read, splits, auto_detect_rank)
         self.seed = self._require_int(seed, "seed")
         self.buffer_size = self._require_positive_int(buffer_size, "buffer_size")
         self.max_buffer_input_splits = self._require_positive_int(

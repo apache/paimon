@@ -74,10 +74,9 @@ dataset = table_read.to_torch(
 dataloader = DataLoader(dataset, batch_size=32, num_workers=2)
 ```
 
-PyPaimon checks `torch.distributed`, then `RANK` and `WORLD_SIZE`. Explicit
-`rank` and `world_size` take precedence. Automatic detection is disabled by
-default; if splits are already sharded upstream, leave it disabled or remove
-the upstream sharding.
+PyPaimon checks `torch.distributed`, then `RANK` and `WORLD_SIZE`. Detection is
+disabled by default; if splits are already sharded upstream, leave it disabled
+or remove the upstream sharding.
 
 ### Batch Streaming
 
