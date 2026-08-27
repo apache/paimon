@@ -158,6 +158,23 @@ class TorchDistributedShardingTest(unittest.TestCase):
         self.assertEqual(context, (2, 4))
         self.assertEqual(assigned, [4, 5])
 
+    def test_constructor_context_is_preserved_in_spawned_worker(self):
+        with patch(
+            "pypaimon.read.datasource.torch_dataset."
+            "_resolve_distributed_context",
+            return_value=(1, 2),
+        ):
+            dataset = TorchIterDataset(self._table_read(), list(range(8)))
+
+        with patch(
+            "pypaimon.read.datasource.torch_dataset."
+            "_resolve_distributed_context",
+            return_value=(0, 1),
+        ):
+            assigned = dataset._worker_splits(None)
+
+        self.assertEqual(assigned, [4, 5, 6, 7])
+
     def test_auto_falls_back_to_single_process(self):
         with patch.dict(os.environ, {}, clear=True), patch.object(
             torch.distributed, "is_available", return_value=False

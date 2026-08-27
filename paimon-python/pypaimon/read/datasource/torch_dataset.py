@@ -155,9 +155,17 @@ class _BaseTorchIterDataset(IterableDataset):
         self.table_read = table_read
         self.splits = splits
         self.field_names = [field.name for field in table_read.read_type]
-        if not isinstance(auto_detect_rank, bool):
-            raise ValueError("auto_detect_rank must be a bool")
         self.auto_detect_rank = auto_detect_rank
+        self.rank, self.world_size = _resolve_distributed_context(auto_detect_rank)
+
+    def _distributed_context(self):
+        rank, world_size = _resolve_distributed_context(
+            self.auto_detect_rank
+        )
+        if world_size == 1 and self.world_size > 1:
+            return self.rank, self.world_size
+        self.rank, self.world_size = rank, world_size
+        return rank, world_size
 
     def _row_to_dict(self, offset_row) -> dict:
         row_dict = {}
@@ -198,7 +206,7 @@ class _BaseTorchIterDataset(IterableDataset):
         return True
 
     def _worker_splits(self, worker_info) -> List[Split]:
-        rank, world_size = _resolve_distributed_context(self.auto_detect_rank)
+        rank, world_size = self._distributed_context()
         worker_id = worker_info.id if worker_info is not None else 0
         num_workers = worker_info.num_workers if worker_info is not None else 1
 
@@ -624,7 +632,7 @@ class TorchShuffledIterDataset(_BaseTorchIterDataset):
         rows: Iterator[dict],
         worker_id: int,
     ) -> Iterator[dict]:
-        rank, world_size = _resolve_distributed_context(self.auto_detect_rank)
+        rank, world_size = self._distributed_context()
         rng_seed = self.seed + self.epoch * 1000003 + worker_id
         if world_size > 1:
             rng_seed = "%d:%d" % (rng_seed, rank)
