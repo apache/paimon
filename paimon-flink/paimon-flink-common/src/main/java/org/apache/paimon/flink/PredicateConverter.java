@@ -36,13 +36,13 @@ import org.apache.flink.table.functions.FunctionDefinition;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.LogicalTypeFamily;
+import org.apache.flink.table.types.logical.LogicalTypeRoot;
 import org.apache.flink.table.types.logical.RowType;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.function.BiFunction;
 import java.util.regex.Matcher;
@@ -74,74 +74,93 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
 
     @Override
     public Predicate visit(CallExpression call) {
+        return visit(call, false);
+    }
+
+    private Predicate visit(CallExpression call, boolean negated) {
         FunctionDefinition func = call.getFunctionDefinition();
         List<Expression> children = call.getChildren();
 
         if (func == BuiltInFunctionDefinitions.AND) {
-            return PredicateBuilder.and(flattenAndConvert(children, func));
+            requireAtLeastArity(children, 2);
+            List<Predicate> predicates = flattenAndConvert(children, func, negated);
+            return negated ? PredicateBuilder.or(predicates) : PredicateBuilder.and(predicates);
         } else if (func == BuiltInFunctionDefinitions.OR) {
-            return PredicateBuilder.or(flattenAndConvert(children, func));
+            requireAtLeastArity(children, 2);
+            List<Predicate> predicates = flattenAndConvert(children, func, negated);
+            return negated ? PredicateBuilder.and(predicates) : PredicateBuilder.or(predicates);
+        } else if (func == BuiltInFunctionDefinitions.NOT) {
+            requireArity(children, 1);
+            return visit(children.get(0), !negated);
         } else if (func == BuiltInFunctionDefinitions.EQUALS) {
-            return visitBiFunction(children, builder::equal, builder::equal);
+            return negated
+                    ? visitBiFunction(children, builder::notEqual, builder::notEqual)
+                    : visitBiFunction(children, builder::equal, builder::equal);
         } else if (func == BuiltInFunctionDefinitions.NOT_EQUALS) {
-            return visitBiFunction(children, builder::notEqual, builder::notEqual);
+            return negated
+                    ? visitBiFunction(children, builder::equal, builder::equal)
+                    : visitBiFunction(children, builder::notEqual, builder::notEqual);
         } else if (func == BuiltInFunctionDefinitions.GREATER_THAN) {
-            return visitBiFunction(children, builder::greaterThan, builder::lessThan);
+            return negated
+                    ? visitBiFunction(children, builder::lessOrEqual, builder::greaterOrEqual)
+                    : visitBiFunction(children, builder::greaterThan, builder::lessThan);
         } else if (func == BuiltInFunctionDefinitions.GREATER_THAN_OR_EQUAL) {
-            return visitBiFunction(children, builder::greaterOrEqual, builder::lessOrEqual);
+            return negated
+                    ? visitBiFunction(children, builder::lessThan, builder::greaterThan)
+                    : visitBiFunction(children, builder::greaterOrEqual, builder::lessOrEqual);
         } else if (func == BuiltInFunctionDefinitions.LESS_THAN) {
-            return visitBiFunction(children, builder::lessThan, builder::greaterThan);
+            return negated
+                    ? visitBiFunction(children, builder::greaterOrEqual, builder::lessOrEqual)
+                    : visitBiFunction(children, builder::lessThan, builder::greaterThan);
         } else if (func == BuiltInFunctionDefinitions.LESS_THAN_OR_EQUAL) {
-            return visitBiFunction(children, builder::lessOrEqual, builder::greaterOrEqual);
+            return negated
+                    ? visitBiFunction(children, builder::greaterThan, builder::lessThan)
+                    : visitBiFunction(children, builder::lessOrEqual, builder::greaterOrEqual);
         } else if (func == BuiltInFunctionDefinitions.IN) {
-            FieldReferenceExpression fieldRefExpr =
-                    extractFieldReference(children.get(0)).orElseThrow(UnsupportedExpression::new);
+            requireAtLeastArity(children, 2);
+            ResolvedField field = resolveField(children.get(0));
             List<Object> literals = new ArrayList<>();
             for (int i = 1; i < children.size(); i++) {
-                literals.add(extractLiteral(fieldRefExpr.getOutputDataType(), children.get(i)));
+                literals.add(extractLiteral(field.expression.getOutputDataType(), children.get(i)));
             }
-            return builder.in(builder.indexOf(fieldRefExpr.getName()), literals);
+            return negated
+                    ? builder.notIn(field.index, literals)
+                    : builder.in(field.index, literals);
         } else if (func == BuiltInFunctionDefinitions.IS_NULL) {
-            return extractFieldReference(children.get(0))
-                    .map(FieldReferenceExpression::getName)
-                    .map(builder::indexOf)
-                    .map(builder::isNull)
-                    .orElseThrow(UnsupportedExpression::new);
+            requireArity(children, 1);
+            ResolvedField field = resolveField(children.get(0));
+            return negated ? builder.isNotNull(field.index) : builder.isNull(field.index);
         } else if (func == BuiltInFunctionDefinitions.IS_NOT_NULL) {
-            return extractFieldReference(children.get(0))
-                    .map(FieldReferenceExpression::getName)
-                    .map(builder::indexOf)
-                    .map(builder::isNotNull)
-                    .orElseThrow(UnsupportedExpression::new);
+            requireArity(children, 1);
+            ResolvedField field = resolveField(children.get(0));
+            return negated ? builder.isNull(field.index) : builder.isNotNull(field.index);
         } else if (func == BuiltInFunctionDefinitions.BETWEEN) {
-            FieldReferenceExpression fieldRefExpr =
-                    extractFieldReference(children.get(0)).orElseThrow(UnsupportedExpression::new);
-            DataType fieldType = fieldRefExpr.getOutputDataType();
-            return builder.between(
-                    builder.indexOf(fieldRefExpr.getName()),
-                    extractLiteral(fieldType, children.get(1)),
-                    extractLiteral(fieldType, children.get(2)));
+            requireArity(children, 3);
+            ResolvedField field = resolveField(children.get(0));
+            Object lower = extractLiteral(field.expression.getOutputDataType(), children.get(1));
+            Object upper = extractLiteral(field.expression.getOutputDataType(), children.get(2));
+            Predicate between = builder.between(field.index, lower, upper);
+            return negated ? negate(between) : between;
         } else if (func == BuiltInFunctionDefinitions.LIKE) {
-            FieldReferenceExpression fieldRefExpr =
-                    extractFieldReference(children.get(0)).orElseThrow(UnsupportedExpression::new);
-            if (fieldRefExpr
+            if (children.size() != 2 && children.size() != 3) {
+                throw new UnsupportedExpression();
+            }
+            ResolvedField field = resolveField(children.get(0));
+            if (field.expression
                     .getOutputDataType()
                     .getLogicalType()
                     .getTypeRoot()
                     .getFamilies()
                     .contains(LogicalTypeFamily.CHARACTER_STRING)) {
                 String sqlPattern =
-                        Objects.requireNonNull(
-                                        extractLiteral(
-                                                fieldRefExpr.getOutputDataType(), children.get(1)))
+                        extractNonNullLiteral(field.expression.getOutputDataType(), children.get(1))
                                 .toString();
                 String escape =
                         children.size() <= 2
                                 ? null
-                                : Objects.requireNonNull(
-                                                extractLiteral(
-                                                        fieldRefExpr.getOutputDataType(),
-                                                        children.get(2)))
+                                : extractNonNullLiteral(
+                                                field.expression.getOutputDataType(),
+                                                children.get(2))
                                         .toString();
                 String escapedSqlPattern = sqlPattern;
                 boolean allowQuick = false;
@@ -185,25 +204,55 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                 if (allowQuick) {
                     Matcher beginMatcher = BEGIN_PATTERN.matcher(escapedSqlPattern);
                     if (beginMatcher.matches()) {
+                        if (negated) {
+                            // StartsWith has no negated predicate, so NOT LIKE must remain a
+                            // residual filter evaluated by Flink.
+                            throw new UnsupportedExpression();
+                        }
                         return builder.startsWith(
-                                builder.indexOf(fieldRefExpr.getName()),
-                                BinaryString.fromString(beginMatcher.group(1)));
+                                field.index, BinaryString.fromString(beginMatcher.group(1)));
                     }
                 }
             }
         } else if (func == BuiltInFunctionDefinitions.IS_TRUE) {
-            FieldReferenceExpression fieldRefExpr =
-                    extractFieldReference(children.get(0)).orElseThrow(UnsupportedExpression::new);
-            return builder.equal(builder.indexOf(fieldRefExpr.getName()), Boolean.TRUE);
+            requireArity(children, 1);
+            return booleanTest(resolveField(children.get(0)), true, negated);
         } else if (func == BuiltInFunctionDefinitions.IS_FALSE) {
-            FieldReferenceExpression fieldRefExpr =
-                    extractFieldReference(children.get(0)).orElseThrow(UnsupportedExpression::new);
-            return builder.equal(builder.indexOf(fieldRefExpr.getName()), Boolean.FALSE);
+            requireArity(children, 1);
+            return booleanTest(resolveField(children.get(0)), false, negated);
+        } else if (func == BuiltInFunctionDefinitions.IS_NOT_TRUE) {
+            requireArity(children, 1);
+            return booleanTest(resolveField(children.get(0)), true, !negated);
+        } else if (func == BuiltInFunctionDefinitions.IS_NOT_FALSE) {
+            requireArity(children, 1);
+            return booleanTest(resolveField(children.get(0)), false, !negated);
         }
 
-        // TODO is_xxx, between_xxx, similar, in, not_in, not?
-
         throw new UnsupportedExpression();
+    }
+
+    private Predicate visit(Expression expression, boolean negated) {
+        if (expression instanceof CallExpression) {
+            return visit((CallExpression) expression, negated);
+        }
+        throw new UnsupportedExpression();
+    }
+
+    private Predicate booleanTest(ResolvedField field, boolean expected, boolean complement) {
+        if (field.expression.getOutputDataType().getLogicalType().getTypeRoot()
+                != LogicalTypeRoot.BOOLEAN) {
+            throw new UnsupportedExpression();
+        }
+        Predicate equals = builder.equal(field.index, expected);
+        if (!complement) {
+            return equals;
+        }
+        return PredicateBuilder.or(
+                builder.isNull(field.index), builder.notEqual(field.index, expected));
+    }
+
+    private Predicate negate(Predicate predicate) {
+        return predicate.negate().orElseThrow(UnsupportedExpression::new);
     }
 
     /**
@@ -213,10 +262,11 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
      *
      * @param children the children of the top-level AND/OR {@link CallExpression}
      * @param targetFunc the function definition to flatten ({@code AND} or {@code OR})
+     * @param negated whether to negate every flattened child and combine them using De Morgan's law
      * @return a flat list of converted child predicates in original order
      */
     private List<Predicate> flattenAndConvert(
-            List<Expression> children, FunctionDefinition targetFunc) {
+            List<Expression> children, FunctionDefinition targetFunc, boolean negated) {
         List<Predicate> result = new ArrayList<>();
         Deque<Expression> stack = new ArrayDeque<>();
         for (int i = children.size() - 1; i >= 0; i--) {
@@ -228,14 +278,15 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                 CallExpression ce = (CallExpression) expr;
                 if (ce.getFunctionDefinition() == targetFunc) {
                     List<Expression> ceChildren = ce.getChildren();
+                    requireAtLeastArity(ceChildren, 2);
                     for (int i = ceChildren.size() - 1; i >= 0; i--) {
                         stack.push(ceChildren.get(i));
                     }
                 } else {
-                    result.add(ce.accept(this));
+                    result.add(visit(ce, negated));
                 }
             } else {
-                result.add(expr.accept(this));
+                result.add(visit(expr, negated));
             }
         }
         return result;
@@ -245,21 +296,50 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
             List<Expression> children,
             BiFunction<Integer, Object, Predicate> visit1,
             BiFunction<Integer, Object, Predicate> visit2) {
+        requireArity(children, 2);
         Optional<FieldReferenceExpression> fieldRefExpr = extractFieldReference(children.get(0));
         if (fieldRefExpr.isPresent()) {
+            int fieldIndex = resolveFieldIndex(fieldRefExpr.get());
             Object literal =
                     extractLiteral(fieldRefExpr.get().getOutputDataType(), children.get(1));
-            return visit1.apply(builder.indexOf(fieldRefExpr.get().getName()), literal);
+            return visit1.apply(fieldIndex, literal);
         } else {
             fieldRefExpr = extractFieldReference(children.get(1));
             if (fieldRefExpr.isPresent()) {
+                int fieldIndex = resolveFieldIndex(fieldRefExpr.get());
                 Object literal =
                         extractLiteral(fieldRefExpr.get().getOutputDataType(), children.get(0));
-                return visit2.apply(builder.indexOf(fieldRefExpr.get().getName()), literal);
+                return visit2.apply(fieldIndex, literal);
             }
         }
 
         throw new UnsupportedExpression();
+    }
+
+    private ResolvedField resolveField(Expression expression) {
+        FieldReferenceExpression field =
+                extractFieldReference(expression).orElseThrow(UnsupportedExpression::new);
+        return new ResolvedField(field, resolveFieldIndex(field));
+    }
+
+    private int resolveFieldIndex(FieldReferenceExpression field) {
+        int index = builder.indexOf(field.getName());
+        if (index < 0) {
+            throw new UnsupportedExpression();
+        }
+        return index;
+    }
+
+    private void requireArity(List<Expression> children, int expected) {
+        if (children.size() != expected) {
+            throw new UnsupportedExpression();
+        }
+    }
+
+    private void requireAtLeastArity(List<Expression> children, int minimum) {
+        if (children.size() < minimum) {
+            throw new UnsupportedExpression();
+        }
     }
 
     private Optional<FieldReferenceExpression> extractFieldReference(Expression expression) {
@@ -304,6 +384,14 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
         throw new UnsupportedExpression();
     }
 
+    private Object extractNonNullLiteral(DataType expectedType, Expression expression) {
+        Object literal = extractLiteral(expectedType, expression);
+        if (literal == null) {
+            throw new UnsupportedExpression();
+        }
+        return literal;
+    }
+
     private boolean supportsPredicate(LogicalType type) {
         switch (type.getTypeRoot()) {
             case CHAR:
@@ -328,6 +416,17 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                 return true;
             default:
                 return false;
+        }
+    }
+
+    private static class ResolvedField {
+
+        private final FieldReferenceExpression expression;
+        private final int index;
+
+        private ResolvedField(FieldReferenceExpression expression, int index) {
+            this.expression = expression;
+            this.index = index;
         }
     }
 

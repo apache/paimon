@@ -23,6 +23,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.Or;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.FileSystemSchemaManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
@@ -139,6 +140,69 @@ public class FlinkTableSourceTest extends TableTestBase {
         filters = ImmutableList.of(p2Like("a%"), and(col1Equal1(), p1Equal1()));
         Assertions.assertThat(tableSource.applyFilters(filters).getRemainingFilters())
                 .isEqualTo(ImmutableList.of(filters.get(1)));
+    }
+
+    @Test
+    public void testApplyNotFilters() throws Exception {
+        FileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, "T"));
+        Schema schema =
+                Schema.newBuilder()
+                        .column("col1", DataTypes.INT())
+                        .column("col2", DataTypes.INT())
+                        .column("p1", DataTypes.INT())
+                        .column("p2", DataTypes.STRING())
+                        .partitionKeys("p1", "p2")
+                        .build();
+        TableSchema tableSchema =
+                new FileSystemSchemaManager(fileIO, tablePath).createTable(schema);
+        Table table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
+        PredicateBuilder builder = new PredicateBuilder(table.rowType());
+
+        ResolvedExpression supportedPartitionFilter = not(p1Equal1());
+        FlinkTableSource tableSource = dataTableSource(table);
+        Assertions.assertThat(
+                        tableSource
+                                .applyFilters(ImmutableList.of(supportedPartitionFilter))
+                                .getRemainingFilters())
+                .isEmpty();
+        Assertions.assertThat(tableSource.predicate).isEqualTo(builder.notEqual(2, 1));
+
+        ResolvedExpression supportedNonPartitionFilter = not(col1Equal1());
+        tableSource = dataTableSource(table);
+        Assertions.assertThat(
+                        tableSource
+                                .applyFilters(ImmutableList.of(supportedNonPartitionFilter))
+                                .getRemainingFilters())
+                .containsExactly(supportedNonPartitionFilter);
+        Assertions.assertThat(tableSource.predicate).isEqualTo(builder.notEqual(0, 1));
+
+        ResolvedExpression unsupportedLike = not(p2Like("%a"));
+        tableSource = dataTableSource(table);
+        Assertions.assertThat(
+                        tableSource
+                                .applyFilters(ImmutableList.of(unsupportedLike))
+                                .getRemainingFilters())
+                .containsExactly(unsupportedLike);
+        Assertions.assertThat(tableSource.predicate).isNull();
+
+        ResolvedExpression unsupportedPrefixLike = not(p2Like("prefix%"));
+        tableSource = dataTableSource(table);
+        Assertions.assertThat(
+                        tableSource
+                                .applyFilters(ImmutableList.of(unsupportedPrefixLike))
+                                .getRemainingFilters())
+                .containsExactly(unsupportedPrefixLike);
+        Assertions.assertThat(tableSource.predicate).isNull();
+
+        ResolvedExpression unsupportedSimilar = not(p2Similar("a.*"));
+        tableSource = dataTableSource(table);
+        Assertions.assertThat(
+                        tableSource
+                                .applyFilters(ImmutableList.of(unsupportedSimilar))
+                                .getRemainingFilters())
+                .containsExactly(unsupportedSimilar);
+        Assertions.assertThat(tableSource.predicate).isNull();
     }
 
     // ==================== Nested OR Tree Tests ====================
@@ -357,6 +421,17 @@ public class FlinkTableSourceTest extends TableTestBase {
                 org.apache.flink.table.api.DataTypes.BOOLEAN());
     }
 
+    private ResolvedExpression p2Similar(String literal) {
+        return CallExpression.anonymous(
+                BuiltInFunctionDefinitions.SIMILAR,
+                ImmutableList.of(
+                        new FieldReferenceExpression(
+                                "p2", org.apache.flink.table.api.DataTypes.STRING(), 0, 3),
+                        new ValueLiteralExpression(
+                                literal, org.apache.flink.table.api.DataTypes.STRING().notNull())),
+                org.apache.flink.table.api.DataTypes.BOOLEAN());
+    }
+
     // where rand(42) > 0.1
     private ResolvedExpression rand() {
         return CallExpression.anonymous(
@@ -405,5 +480,16 @@ public class FlinkTableSourceTest extends TableTestBase {
                 BuiltInFunctionDefinitions.AND,
                 ImmutableList.of(e1, e2),
                 org.apache.flink.table.api.DataTypes.BOOLEAN());
+    }
+
+    private ResolvedExpression not(ResolvedExpression expression) {
+        return CallExpression.anonymous(
+                BuiltInFunctionDefinitions.NOT,
+                ImmutableList.of(expression),
+                org.apache.flink.table.api.DataTypes.BOOLEAN());
+    }
+
+    private DataTableSource dataTableSource(Table table) {
+        return new DataTableSource(ObjectIdentifier.of("catalog1", "db1", "T"), table, false, null);
     }
 }
