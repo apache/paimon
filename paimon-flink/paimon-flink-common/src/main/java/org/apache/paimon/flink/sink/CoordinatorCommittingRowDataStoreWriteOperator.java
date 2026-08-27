@@ -67,6 +67,7 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
 
     private static final Logger LOG =
             LoggerFactory.getLogger(CoordinatorCommittingRowDataStoreWriteOperator.class);
+    private static final long END_INPUT_CHECKPOINT_ID = Long.MAX_VALUE;
 
     @VisibleForTesting
     static final String PENDING_COMMITTABLE_STATE_NAME = "pending_committable_state";
@@ -96,6 +97,7 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
 
     private transient CheckpointCommittablesSerializer stateSerializer;
     private transient TypeSerializer<CheckpointCommittables> eventSerializer;
+    private boolean endOfInput;
 
     public CoordinatorCommittingRowDataStoreWriteOperator(
             StreamOperatorParameters<Committable> parameters,
@@ -142,6 +144,13 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
             List<CheckpointCommittables> restored = new ArrayList<>();
             for (CheckpointCommittables entry : pendingCommittableState.get()) {
                 restored.add(entry);
+                if (entry.checkpointId() == END_INPUT_CHECKPOINT_ID) {
+                    // The terminal committable can only be replayed from state after a task or
+                    // region failover. Ordinary restored checkpoint entries keep their existing
+                    // one-shot replay behavior.
+                    pendingCommittables.put(entry.checkpointId(), entry);
+                    endOfInput = true;
+                }
             }
             pendingCommittableState.clear();
 
@@ -190,6 +199,25 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
     }
 
     @Override
+    public void prepareSnapshotPreBarrier(long checkpointId) throws Exception {
+        if (endOfInput) {
+            // The marker proves this real checkpoint was snapshotted after the terminal
+            // committable. It deliberately contains no newly prepared data.
+            emitCheckpointMarker(checkpointId);
+        } else {
+            emitCommittables(false, checkpointId);
+        }
+    }
+
+    @Override
+    public void endInput() throws Exception {
+        endOfInput = true;
+        emitCommittables(true, END_INPUT_CHECKPOINT_ID);
+        // endInput is not followed by snapshotState, so report the terminal entry directly.
+        reportToCoordinator(END_INPUT_CHECKPOINT_ID);
+    }
+
+    @Override
     public void notifyCheckpointAborted(long checkpointId) throws Exception {
         super.notifyCheckpointAborted(checkpointId);
         if (!autoTagForSavepoint) {
@@ -220,13 +248,11 @@ public class CoordinatorCommittingRowDataStoreWriteOperator
         committables.forEach(committable -> output.collect(new StreamRecord<>(committable)));
     }
 
-    @Override
-    public void endInput() throws Exception {
-        super.endInput();
-        // endInput emits the Long.MAX_VALUE committables but is not followed by a snapshotState,
-        // so report them here just to keep the existing behavior.
-        // TODO: revisit how end-of-input committables should be handled.
-        reportToCoordinator(Long.MAX_VALUE);
+    private void emitCheckpointMarker(long checkpointId) throws IOException {
+        CheckpointCommittables marker =
+                new CheckpointCommittables(
+                        checkpointId, new ArrayList<>(), currentWatermark, currentIdle);
+        pendingCommittables.put(checkpointId, marker);
     }
 
     /**

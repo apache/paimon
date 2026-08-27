@@ -131,6 +131,39 @@ public class CoordinatorCommittingRowDataStoreWriteOperatorTest extends Committe
     }
 
     @Test
+    @Timeout(30)
+    public void testEndInputEmitsFinalCommittableThenEmptyCheckpointMarker() throws Exception {
+        FileStoreTable table = createUnawareBucketTable();
+        String commitUser = UUID.randomUUID().toString();
+        List<OperatorEvent> events = new ArrayList<>();
+        OneInputStreamOperatorTestHarness<InternalRow, Committable> harness =
+                createHarness(table, commitUser, events::add);
+        harness.setup(new CommittableTypeInfo().createSerializer(new ExecutionConfig()));
+        harness.open();
+
+        harness.processElement(GenericRow.of(1, 1L), 1L);
+        harness.endInput();
+        harness.prepareSnapshotPreBarrier(2L);
+
+        // The post-EndInput marker is buffered at the pre-barrier and follows the regular
+        // checkpoint reporting lifecycle: it is sent only when checkpoint state is snapshotted.
+        assertThat(events).hasSize(1);
+        harness.snapshot(2L, 20L);
+
+        assertThat(events).hasSize(2);
+        CheckpointCommittables endInput =
+                ((CommittableEvent) events.get(0)).deserialize(COMMITTABLES_SERIALIZER);
+        CheckpointCommittables marker =
+                ((CommittableEvent) events.get(1)).deserialize(COMMITTABLES_SERIALIZER);
+        assertThat(endInput.checkpointId()).isEqualTo(Long.MAX_VALUE);
+        assertThat(endInput.committables()).hasSize(1);
+        assertThat(marker.checkpointId()).isEqualTo(2L);
+        assertThat(marker.committables()).isEmpty();
+        assertThat(extractCommittables(harness)).hasSize(1);
+        harness.close();
+    }
+
+    @Test
     public void
             testPendingCommittablesAccumulateAcrossUncompletedCheckpointsAndAreClearedOnComplete()
                     throws Exception {
