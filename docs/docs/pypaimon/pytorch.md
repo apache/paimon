@@ -74,6 +74,7 @@ dataloader = DataLoader(dataset, batch_size=32, num_workers=2)
 
 PyPaimon checks `torch.distributed`, then `RANK` and `WORLD_SIZE`. Detection is
 enabled by default; set `auto_detect_rank=False` to disable rank sharding.
+A limit that may truncate the input is rejected when multiple ranks are active.
 
 ### Batch Streaming
 
