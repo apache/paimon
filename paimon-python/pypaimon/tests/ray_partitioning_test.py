@@ -221,6 +221,32 @@ class RayPartitioningTest(unittest.TestCase):
         MapBatches.can_modify_num_rows = staticmethod(lambda: False)
         self.assertIsNone(_estimate_dataset_num_rows(dataset))
 
+    def test_ray_legacy_map_batches_cardinality_is_unknown(self):
+        import inspect
+
+        import ray
+
+        dataset = ray.data.from_arrow(pa.table({"seed": [0]})).map_batches(
+            lambda _: pa.table({"id": list(range(500))}),
+            batch_format="pyarrow",
+        )
+        operator = dataset._logical_plan.dag
+        descriptor = inspect.getattr_static(
+            type(operator), "can_modify_num_rows", None
+        )
+        if not isinstance(descriptor, property):
+            self.skipTest("Ray does not use legacy MapBatches cardinality")
+
+        operator._input_dependencies = [
+            types.SimpleNamespace(
+                infer_metadata=mock.Mock(
+                    return_value=types.SimpleNamespace(num_rows=1)
+                ),
+                can_modify_num_rows=None,
+            )
+        ]
+        self.assertIsNone(_estimate_dataset_num_rows(dataset))
+
     def test_sparse_row_ids_keep_shuffle_parallelism(self):
         with mock.patch(
             "ray.cluster_resources", return_value={"CPU": 320}
