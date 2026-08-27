@@ -305,7 +305,7 @@ public class FormatTableCommit implements BatchTableCommit {
             for (TwoPhaseCommitMessage message : messages) {
                 message.getCommitter().clean(this.fileIO);
             }
-            if (reportsStatistics) {
+            if (reportsStatistics && overwrite) {
                 reportPartitions(
                         messages,
                         partitionSpecs,
@@ -314,9 +314,9 @@ public class FormatTableCommit implements BatchTableCommit {
                         commitTime,
                         overwrite);
             } else if (partitionManager != null && !partitionSpecs.isEmpty()) {
-                // Concurrent writers may touch the same partition, so registration ignores the
-                // ones that already exist rather than failing the commit.
-                markPublishedTargetsToPreserveOnAbort(messages);
+                // Register an append before reporting its additive statistics. Registration is
+                // idempotent, so a failed multi-batch call can roll back every file from this
+                // attempt and leave any completed batches as harmless empty partition entries.
                 partitionManager.createPartitions(new ArrayList<>(partitionSpecs), true);
             }
             boolean hiveMutationStarted = false;
@@ -328,7 +328,7 @@ public class FormatTableCommit implements BatchTableCommit {
                         }
                         Method hiveCreatePartitionsInHmsMethod =
                                 getHiveCreatePartitionsInHmsMethod();
-                        if (!hiveMutationStarted) {
+                        if (overwrite && !hiveMutationStarted) {
                             markPublishedTargetsToPreserveOnAbort(messages);
                             hiveMutationStarted = true;
                         }
@@ -339,6 +339,32 @@ public class FormatTableCommit implements BatchTableCommit {
                                 formatTablePartitionOnlyValueInPath);
                     } catch (Exception ex) {
                         throw new RuntimeException("Failed to sync partition to hms", ex);
+                    }
+                }
+            }
+            if (!overwrite && registersPartitions) {
+                // Every partition registration is now complete. A later abort must not remove
+                // these visible files, while a failed additive report must not make the engine
+                // retry the data write and add the same rows again.
+                markPublishedTargetsToPreserveOnAbort(messages);
+                if (reportsStatistics && !statisticsByPartition.isEmpty()) {
+                    try {
+                        reportPartitions(
+                                messages,
+                                partitionSpecs,
+                                statisticsByPartition,
+                                clearedPartitionPaths,
+                                commitTime,
+                                false);
+                    } catch (RuntimeException statisticsFailure) {
+                        LOG.warn(
+                                "Committed data for format table {}, but failed to report append "
+                                        + "statistics for {} partitions. Run ANALYZE TABLE {} "
+                                        + "COMPUTE STATISTICS to refresh the partition statistics.",
+                                tableIdentifier.getFullName(),
+                                partitionSpecs.size(),
+                                tableIdentifier.getFullName(),
+                                statisticsFailure);
                     }
                 }
             }
@@ -435,7 +461,9 @@ public class FormatTableCommit implements BatchTableCommit {
         }
         // A commit that replaced what the partitions held reports a total; an appending one saw
         // only its own files, so its numbers are an increment.
-        markPublishedTargetsToPreserveOnAbort(messages);
+        if (replaceStatistics) {
+            markPublishedTargetsToPreserveOnAbort(messages);
+        }
         partitionManager.createPartitions(
                 new ArrayList<>(specs),
                 true,

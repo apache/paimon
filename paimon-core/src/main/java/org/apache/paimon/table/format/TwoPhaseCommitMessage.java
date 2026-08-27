@@ -40,8 +40,8 @@ public class TwoPhaseCommitMessage implements CommitMessage {
     private final long recordCount;
     private final long fileSizeInBytes;
 
-    // Set before external partition metadata may become durable. Keeping this state in the
-    // serialized message prevents a later abort instance from deleting a referenced target.
+    // Set once an abort must preserve the published target. Serializing the flag lets a later abort
+    // instance preserve it too.
     private boolean preservePublishedTargetOnAbort;
 
     public TwoPhaseCommitMessage(TwoPhaseOutputStream.Committer committer) {

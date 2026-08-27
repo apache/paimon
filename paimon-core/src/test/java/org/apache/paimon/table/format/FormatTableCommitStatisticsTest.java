@@ -19,6 +19,8 @@
 package org.apache.paimon.table.format;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -39,6 +41,7 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.InstantiationUtil;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -55,6 +58,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -63,6 +67,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -972,25 +977,125 @@ class FormatTableCommitStatisticsTest {
     }
 
     @Test
-    void testAFailedReportPreservesPublishedTargetWhenCatalogOutcomeIsUnknown() throws Exception {
+    void testAppendRegistrationLoaderFailureDeletesPublishedTarget() throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         Path tablePath = new Path(tempDir.toUri());
-        FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
-        RuntimeException failure = new RuntimeException("catalog says 429");
-        doThrow(failure)
-                .when(partitionManager)
-                .createPartitions(anyList(), anyBoolean(), any(), anyBoolean());
+        RuntimeException failure = new RuntimeException("catalog loader failed");
+        AtomicInteger loads = new AtomicInteger();
+        CatalogLoader loader =
+                () -> {
+                    loads.incrementAndGet();
+                    throw failure;
+                };
+        FormatTablePartitionManager partitionManager =
+                FormatTablePartitionManager.create(TABLE, PARTITION_KEYS, loader);
         CommitMessage message = writtenFile(fileIO, tablePath, "year=2025/month=10", 3, 128);
         Path written = ((TwoPhaseCommitMessage) message).getCommitter().targetPath();
 
-        // Once the catalog call starts, an exception cannot prove whether registration took
-        // effect. Removing the target could leave durable metadata pointing at a missing file.
         assertThatThrownBy(
                         () ->
                                 commit(tablePath, fileIO, partitionManager, false, null)
                                         .commit(Collections.singletonList(message)))
                 .hasRootCause(failure);
 
+        // No catalog request ran, so abort can safely delete this attempt's published file.
+        assertThat(loads).hasValue(1);
+        assertThat(fileIO.exists(written)).isFalse();
+    }
+
+    @Test
+    void testEmptyStaticAppendOnlyRegistersPartition() {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
+        Map<String, String> staticPartition = spec("2025", "10");
+
+        commit(tablePath, fileIO, partitionManager, false, staticPartition)
+                .commit(Collections.emptyList());
+
+        verify(partitionManager).createPartitions(Collections.singletonList(staticPartition), true);
+        verify(partitionManager, never())
+                .createPartitions(anyList(), eq(true), any(), anyBoolean());
+    }
+
+    @Test
+    void testAppendRegistrationBatchFailureDeletesAllTargetsWithoutReportingStatistics()
+            throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        Catalog catalog = mock(Catalog.class);
+        Catalog.TableNoPermissionException failure = new Catalog.TableNoPermissionException(TABLE);
+        AtomicInteger requests = new AtomicInteger();
+        List<Map<String, String>> registered = new ArrayList<>();
+        List<PartitionStatistics> appliedStatistics = new ArrayList<>();
+        doAnswer(
+                        invocation -> {
+                            @SuppressWarnings("unchecked")
+                            List<Map<String, String>> batch = invocation.getArgument(1);
+                            @SuppressWarnings("unchecked")
+                            List<PartitionStatistics> statistics = invocation.getArgument(3);
+                            if (requests.incrementAndGet() == 2) {
+                                // Permission is checked before the catalog mutation, so the second
+                                // batch was not applied.
+                                throw failure;
+                            }
+                            registered.addAll(batch);
+                            if (statistics != null) {
+                                appliedStatistics.addAll(statistics);
+                            }
+                            return null;
+                        })
+                .when(catalog)
+                .createPartitions(any(), anyList(), anyBoolean(), any(), anyBoolean());
+        FormatTablePartitionManager partitionManager =
+                FormatTablePartitionManager.create(TABLE, PARTITION_KEYS, () -> catalog);
+        List<CommitMessage> messages = new ArrayList<>();
+        List<Path> targets = new ArrayList<>();
+        for (int i = 0; i < 1001; i++) {
+            CommitMessage message =
+                    writtenFile(fileIO, tablePath, String.format("year=2025/month=%04d", i), 1, 1);
+            messages.add(message);
+            targets.add(((TwoPhaseCommitMessage) message).getCommitter().targetPath());
+        }
+
+        assertThatThrownBy(
+                        () ->
+                                commit(tablePath, fileIO, partitionManager, false, null)
+                                        .commit(messages))
+                .hasRootCause(failure);
+
+        assertThat(requests).hasValue(2);
+        assertThat(registered).hasSize(1000);
+        // Partition rows left by a successful registration batch are harmlessly empty. Applying
+        // additive statistics before every registration succeeds would instead leave them
+        // describing files this failed attempt rolls back.
+        assertThat(appliedStatistics).isEmpty();
+        assertThat(targets).allSatisfy(target -> assertThat(fileIO.exists(target)).isFalse());
+    }
+
+    @Test
+    void testAppendStatisticsResponseLossIsNotRetriedAndDoesNotFailCommit() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        ApplyingThenFailingStatisticsManager partitionManager =
+                new ApplyingThenFailingStatisticsManager();
+        CommitMessage message = writtenFile(fileIO, tablePath, "year=2025/month=10", 3, 128);
+        Path written = ((TwoPhaseCommitMessage) message).getCommitter().targetPath();
+
+        // The catalog may have applied an additive report before its response was lost. Retrying
+        // that report would double count it, so the data commit succeeds after one best-effort try.
+        commit(tablePath, fileIO, partitionManager, false, null)
+                .commit(Collections.singletonList(message));
+
+        assertThat(partitionManager.calls).containsExactly("registration", "statistics");
+        assertThat(partitionManager.statisticsAttempts).isOne();
+        assertThat(partitionManager.appliedRecordCount).isEqualTo(3);
+        assertThat(fileIO.exists(written)).isTrue();
+
+        TwoPhaseCommitMessage roundTripped =
+                InstantiationUtil.clone((TwoPhaseCommitMessage) message);
+        commit(tablePath, fileIO, partitionManager, false, null)
+                .abort(Collections.singletonList(roundTripped));
         assertThat(fileIO.exists(written)).isTrue();
     }
 
@@ -1021,6 +1126,52 @@ class FormatTableCommitStatisticsTest {
         // may already have made its metadata durable.
         assertThat(fileIO.exists(written)).isTrue();
         assertThat(fileIO.exists(new Path(tablePath, "year=2025/month=10/old-data.csv"))).isFalse();
+    }
+
+    /** A catalog whose additive report takes effect before its response is lost. */
+    private static class ApplyingThenFailingStatisticsManager
+            implements FormatTablePartitionManager {
+
+        private static final long serialVersionUID = 1L;
+
+        private final List<String> calls = new ArrayList<>();
+        private int statisticsAttempts;
+        private long appliedRecordCount;
+
+        @Override
+        public void createPartitions(
+                List<Map<String, String>> partitions,
+                boolean ignoreIfExists,
+                @Nullable List<PartitionStatistics> statistics,
+                boolean replaceStatistics) {
+            if (statistics == null) {
+                calls.add("registration");
+                return;
+            }
+
+            calls.add("statistics");
+            statisticsAttempts++;
+            for (PartitionStatistics statistic : statistics) {
+                appliedRecordCount += statistic.recordCount();
+            }
+            throw new RuntimeException("statistics response lost");
+        }
+
+        @Override
+        public List<Partition> listPartitions(
+                Map<String, String> prefix, @Nullable Predicate filter) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public List<Partition> listPartitionsByNames(List<Map<String, String>> partitions) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void dropPartitions(List<Map<String, String>> partitions) {
+            throw new UnsupportedOperationException();
+        }
     }
 
     /** What one call reported to the catalog. */

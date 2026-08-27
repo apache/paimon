@@ -280,12 +280,11 @@ public class ThreadPoolUtils {
         private final int queueSize;
         private final SchedulingMode mode;
         private final Queue<BatchTask<T, U>> activeTasks = new ArrayDeque<>();
-        private final Object submissionLock = new Object();
 
         private Iterator<T> activeResults = Collections.<T>emptyList().iterator();
         private T next;
         private boolean closed;
-        private boolean submissionStopped;
+        private volatile boolean submissionStopped;
 
         private SequentialBatchIterator(
                 ExecutorService executor,
@@ -349,27 +348,23 @@ public class ThreadPoolUtils {
             ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
             AccessControlContext accessControlContext = AccessController.getContext();
             while (activeTasks.size() < queueSize) {
-                synchronized (submissionLock) {
-                    if (submissionStopped || !input.hasNext()) {
-                        return;
-                    }
-                    BatchTask<T, U> task =
-                            new BatchTask<>(
-                                    processor,
-                                    input.next(),
-                                    classLoader,
-                                    accessControlContext,
-                                    this::stopSubmission);
-                    executor.execute(task);
-                    activeTasks.add(task);
+                if (submissionStopped || !input.hasNext()) {
+                    return;
                 }
+                BatchTask<T, U> task =
+                        new BatchTask<>(
+                                processor,
+                                input.next(),
+                                classLoader,
+                                accessControlContext,
+                                this::stopSubmission);
+                executor.execute(task);
+                activeTasks.add(task);
             }
         }
 
         private void stopSubmission() {
-            synchronized (submissionLock) {
-                submissionStopped = true;
-            }
+            submissionStopped = true;
         }
 
         @Override
@@ -471,29 +466,47 @@ public class ThreadPoolUtils {
 
             Thread currentThread = Thread.currentThread();
             boolean interruptedOnEntry = currentThread.isInterrupted();
-            ClassLoader originalClassLoader = currentThread.getContextClassLoader();
+            ClassLoader originalClassLoader = null;
+            boolean originalClassLoaderCaptured = false;
             try {
-                currentThread.setContextClassLoader(classLoader);
-                result =
-                        AccessController.doPrivileged(
-                                (PrivilegedAction<List<T>>) () -> processor.apply(input),
-                                accessControlContext);
-            } catch (RuntimeException | Error taskFailure) {
-                failure = taskFailure;
-                stopSubmission.run();
+                try {
+                    originalClassLoader = currentThread.getContextClassLoader();
+                    originalClassLoaderCaptured = true;
+                    currentThread.setContextClassLoader(classLoader);
+                    result =
+                            AccessController.doPrivileged(
+                                    (PrivilegedAction<List<T>>) () -> processor.apply(input),
+                                    accessControlContext);
+                } catch (RuntimeException | Error taskFailure) {
+                    failure = taskFailure;
+                } finally {
+                    if (originalClassLoaderCaptured) {
+                        try {
+                            currentThread.setContextClassLoader(originalClassLoader);
+                        } catch (RuntimeException | Error restoreFailure) {
+                            failure = firstOrSuppressed(restoreFailure, failure);
+                        }
+                    }
+                }
+                if (failure != null) {
+                    stopSubmission.run();
+                }
             } finally {
-                currentThread.setContextClassLoader(originalClassLoader);
-                synchronized (this) {
-                    runner = null;
-                    state = FINISHED;
+                try {
+                    synchronized (this) {
+                        runner = null;
+                        state = FINISHED;
+                    }
+                    // Reset the flag to its entry state so a cancelled task cannot leak an
+                    // interrupt to a reused worker or clear its caller's interrupt when using a
+                    // direct executor.
+                    Thread.interrupted();
+                    if (interruptedOnEntry) {
+                        currentThread.interrupt();
+                    }
+                } finally {
+                    completion.countDown();
                 }
-                // Reset the flag to its entry state so a cancelled task cannot leak an interrupt
-                // to a reused worker and a direct executor cannot clear its caller's interrupt.
-                Thread.interrupted();
-                if (interruptedOnEntry) {
-                    currentThread.interrupt();
-                }
-                completion.countDown();
             }
         }
 

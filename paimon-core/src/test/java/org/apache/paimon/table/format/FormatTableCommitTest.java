@@ -79,7 +79,6 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -89,7 +88,7 @@ class FormatTableCommitTest {
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    void testPartitionRegistrationFailureSurvivesFreshCommitAbort() throws Exception {
+    void testPartitionRegistrationFailureDeletesPublishedTarget() throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         Path tablePath = new Path(tempDir.toUri());
         Path targetPath = new Path(tablePath, "year=2025/month=10/data-1.csv");
@@ -100,9 +99,7 @@ class FormatTableCommitTest {
         FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
         RuntimeException registrationFailure =
                 new RuntimeException("Catalog partition registration unavailable");
-        doThrow(registrationFailure)
-                .when(partitionManager)
-                .createPartitions(anyList(), eq(true), any(), anyBoolean());
+        doThrow(registrationFailure).when(partitionManager).createPartitions(anyList(), eq(true));
         Identifier identifier =
                 Identifier.create("catalog_partition_db", "catalog_partition_table");
         FormatTableCommit commit =
@@ -126,67 +123,37 @@ class FormatTableCommitTest {
         assertThatThrownBy(() -> commit.commit(messages))
                 .isInstanceOf(RuntimeException.class)
                 .hasRootCauseMessage("Catalog partition registration unavailable");
-        // The catalog call's outcome is indeterminate, so abort must keep the published target.
-        assertThat(fileIO.exists(targetPath)).isTrue();
-
-        // Spark may serialize the marked message before invoking abort on a fresh commit object.
-        TwoPhaseCommitMessage roundTripped = InstantiationUtil.clone(message);
-        assertThat(roundTripped).isNotSameAs(message);
-        FormatTableCommit freshAbort =
-                new FormatTableCommit(
-                        tablePath.toString(),
-                        Arrays.asList("year", "month"),
-                        fileIO,
-                        false,
-                        PARTITION_DEFAULT_NAME.defaultValue(),
-                        false,
-                        identifier,
-                        null,
-                        null,
-                        null,
-                        partitionManager,
-                        /* dynamicPartitionOverwrite */ true,
-                        /* cleanupThreadNum */ 1);
-        freshAbort.abort(Collections.singletonList(roundTripped));
-        assertThat(fileIO.exists(targetPath)).isTrue();
-        verify(partitionManager).createPartitions(anyList(), eq(true), any(), anyBoolean());
+        assertThat(fileIO.exists(targetPath)).isFalse();
+        verify(partitionManager).createPartitions(anyList(), eq(true));
+        verify(partitionManager, never())
+                .createPartitions(anyList(), eq(true), any(), anyBoolean());
     }
 
     @Test
-    void testPartialCatalogRegistrationPreservesEveryPublishedTarget() throws Exception {
+    void testRegistrationResponseLossStillDeletesPublishedTarget() throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         Path tablePath = new Path(tempDir.toUri());
+        Path targetPath = new Path(tablePath, "part=p/data.csv");
         Identifier identifier =
                 Identifier.create("catalog_partition_db", "catalog_partition_table");
         Catalog catalog = mock(Catalog.class);
         List<Map<String, String>> registeredPartitions = new ArrayList<>();
-        AtomicInteger requests = new AtomicInteger();
-        RuntimeException registrationFailure =
-                new RuntimeException("second catalog partition batch failed");
+        RuntimeException registrationFailure = new RuntimeException("registration response lost");
         doAnswer(
                         invocation -> {
                             List<Map<String, String>> batch = invocation.getArgument(1);
-                            if (requests.getAndIncrement() == 0) {
-                                registeredPartitions.addAll(batch);
-                                return null;
-                            }
+                            registeredPartitions.addAll(batch);
                             throw registrationFailure;
                         })
                 .when(catalog)
-                .createPartitions(eq(identifier), anyList(), eq(true), anyList(), eq(false));
+                .createPartitions(eq(identifier), anyList(), eq(true), eq(null), eq(false));
         FormatTablePartitionManager partitionManager =
                 FormatTablePartitionManager.create(
                         identifier, Collections.singletonList("part"), () -> catalog);
-        List<Path> targetPaths = new ArrayList<>();
-        List<CommitMessage> messages = new ArrayList<>();
-        for (int partition = 0; partition < 1001; partition++) {
-            Path targetPath = new Path(tablePath, String.format("part=%04d/data.csv", partition));
-            RenamingTwoPhaseOutputStream outputStream =
-                    new RenamingTwoPhaseOutputStream(fileIO, targetPath, false);
-            outputStream.write(1);
-            targetPaths.add(targetPath);
-            messages.add(new TwoPhaseCommitMessage(outputStream.closeForCommit()));
-        }
+        RenamingTwoPhaseOutputStream outputStream =
+                new RenamingTwoPhaseOutputStream(fileIO, targetPath, false);
+        outputStream.write(1);
+        CommitMessage message = new TwoPhaseCommitMessage(outputStream.closeForCommit());
         FormatTableCommit commit =
                 new FormatTableCommit(
                         tablePath.toString(),
@@ -203,17 +170,16 @@ class FormatTableCommitTest {
                         /* dynamicPartitionOverwrite */ true,
                         /* cleanupThreadNum */ 1);
 
-        assertThatThrownBy(() -> commit.commit(messages))
+        assertThatThrownBy(() -> commit.commit(Collections.singletonList(message)))
                 .isInstanceOf(RuntimeException.class)
-                .hasRootCauseMessage("second catalog partition batch failed");
+                .hasRootCauseMessage("registration response lost");
 
-        // The real manager splits this into batches of 1000, so the first request is durable.
-        assertThat(registeredPartitions).hasSize(1000);
-        verify(catalog, times(2))
+        // Registration without statistics is idempotent. Even if it took effect before the
+        // response was lost, deleting this attempt's unique file leaves a safe empty partition.
+        assertThat(registeredPartitions).containsExactly(Collections.singletonMap("part", "p"));
+        assertThat(fileIO.exists(targetPath)).isFalse();
+        verify(catalog, never())
                 .createPartitions(eq(identifier), anyList(), eq(true), anyList(), eq(false));
-        for (Path targetPath : targetPaths) {
-            assertThat(fileIO.exists(targetPath)).isTrue();
-        }
     }
 
     @Test
@@ -257,6 +223,101 @@ class FormatTableCommitTest {
         // The replacement is the only remaining copy after Hive mutates and then fails.
         assertThat(hiveCatalog.registeredPartitions).containsExactly(staticPartition);
         assertThat(fileIO.exists(oldPath)).isFalse();
+        assertThat(fileIO.exists(targetPath)).isTrue();
+    }
+
+    @Test
+    void testHivePostRegistrationFailureDeletesAppendTarget() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        Path targetPath = new Path(tablePath, "part=p/data-new.csv");
+        RenamingTwoPhaseOutputStream outputStream =
+                new RenamingTwoPhaseOutputStream(fileIO, targetPath, false);
+        outputStream.write(1);
+        Map<String, String> staticPartition = Collections.singletonMap("part", "p");
+        FormatTableCommit commit =
+                new FormatTableCommit(
+                        tablePath.toString(),
+                        Collections.singletonList("part"),
+                        fileIO,
+                        false,
+                        PARTITION_DEFAULT_NAME.defaultValue(),
+                        false,
+                        Identifier.create("hive_db", "hive_table"),
+                        staticPartition,
+                        null,
+                        null,
+                        null,
+                        /* dynamicPartitionOverwrite */ true,
+                        /* cleanupThreadNum */ 1);
+        PostRegistrationFailingHiveCatalog hiveCatalog =
+                new PostRegistrationFailingHiveCatalog(fileIO, tablePath);
+        ReflectionUtils.setPrivateFieldValue(commit, "hiveCatalog", hiveCatalog);
+
+        assertThatThrownBy(
+                        () ->
+                                commit.commit(
+                                        Collections.singletonList(
+                                                new TwoPhaseCommitMessage(
+                                                        outputStream.closeForCommit()))))
+                .isInstanceOf(RuntimeException.class)
+                .hasRootCauseMessage("Hive failed after partition registration");
+
+        // Hive registration is idempotent and carries no file statistics. Its empty partition may
+        // remain, while removing this attempt's file makes a retry safe.
+        assertThat(hiveCatalog.registeredPartitions).containsExactly(staticPartition);
+        assertThat(fileIO.exists(targetPath)).isFalse();
+    }
+
+    @Test
+    void testSuccessfulHiveAppendSurvivesAbortAfterMessageRoundTrip() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        Path targetPath = new Path(tablePath, "part=p/data-new.csv");
+        RenamingTwoPhaseOutputStream outputStream =
+                new RenamingTwoPhaseOutputStream(fileIO, targetPath, false);
+        outputStream.write(1);
+        TwoPhaseCommitMessage message = new TwoPhaseCommitMessage(outputStream.closeForCommit());
+        Map<String, String> staticPartition = Collections.singletonMap("part", "p");
+        FormatTableCommit commit =
+                new FormatTableCommit(
+                        tablePath.toString(),
+                        Collections.singletonList("part"),
+                        fileIO,
+                        false,
+                        PARTITION_DEFAULT_NAME.defaultValue(),
+                        false,
+                        Identifier.create("hive_db", "hive_table"),
+                        staticPartition,
+                        null,
+                        null,
+                        null,
+                        /* dynamicPartitionOverwrite */ true,
+                        /* cleanupThreadNum */ 1);
+        RecordingHiveCatalog hiveCatalog = new RecordingHiveCatalog(fileIO, tablePath);
+        ReflectionUtils.setPrivateFieldValue(commit, "hiveCatalog", hiveCatalog);
+
+        commit.commit(Collections.singletonList(message));
+
+        TwoPhaseCommitMessage roundTripped = InstantiationUtil.clone(message);
+        FormatTableCommit abortCommit =
+                new FormatTableCommit(
+                        tablePath.toString(),
+                        Collections.singletonList("part"),
+                        fileIO,
+                        false,
+                        PARTITION_DEFAULT_NAME.defaultValue(),
+                        false,
+                        Identifier.create("hive_db", "hive_table"),
+                        staticPartition,
+                        null,
+                        null,
+                        null,
+                        /* dynamicPartitionOverwrite */ true,
+                        /* cleanupThreadNum */ 1);
+        abortCommit.abort(Collections.singletonList(roundTripped));
+
+        assertThat(hiveCatalog.registeredPartitions).containsExactly(staticPartition);
         assertThat(fileIO.exists(targetPath)).isTrue();
     }
 
@@ -2011,6 +2072,22 @@ class FormatTableCommitTest {
                 boolean partitionOnlyValueInPath) {
             registeredPartitions.addAll(partitions);
             throw new RuntimeException("Hive failed after partition registration");
+        }
+    }
+
+    private static class RecordingHiveCatalog extends FileSystemCatalog {
+
+        private final List<Map<String, String>> registeredPartitions = new ArrayList<>();
+
+        private RecordingHiveCatalog(FileIO fileIO, Path warehouse) {
+            super(fileIO, warehouse);
+        }
+
+        public void createPartitionsUtil(
+                Identifier identifier,
+                List<Map<String, String>> partitions,
+                boolean partitionOnlyValueInPath) {
+            registeredPartitions.addAll(partitions);
         }
     }
 
