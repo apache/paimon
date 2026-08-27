@@ -423,6 +423,34 @@ public class SnapshotManagerTest {
         assertThat(snapshotManager.laterOrEqualTimeMills(millis + 10001)).isNull();
     }
 
+    @Test
+    public void testEarlierOrEqualTimeMillsWithDuplicateCommitTimes() throws IOException {
+        long millis = 1684726826L;
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                newSnapshotManager(localFileIO, new Path(tempDir.toString()));
+        for (long i = 0; i < 3; i++) {
+            Snapshot snapshot = createSnapshotWithMillis(i, millis);
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+
+        assertThat(snapshotManager.earlierOrEqualTimeMills(millis).id()).isEqualTo(2);
+    }
+
+    @Test
+    public void testLaterOrEqualTimeMillsWithDuplicateCommitTimes() throws IOException {
+        long millis = 1684726826L;
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                newSnapshotManager(localFileIO, new Path(tempDir.toString()));
+        for (long i = 0; i < 3; i++) {
+            Snapshot snapshot = createSnapshotWithMillis(i, millis);
+            localFileIO.tryToWriteAtomic(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+
+        assertThat(snapshotManager.laterOrEqualTimeMills(millis).id()).isEqualTo(0);
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     public void testLaterOrEqualWatermark(boolean isRaceCondition) throws IOException {

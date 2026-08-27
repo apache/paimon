@@ -382,8 +382,8 @@ public class SnapshotManager implements Serializable {
                 earliest = mid + 1; // Search in the right half
                 finalSnapshot = snapshot;
             } else {
-                finalSnapshot = snapshot; // Found the exact match
-                break;
+                finalSnapshot = snapshot;
+                earliest = mid + 1;
             }
         }
         return finalSnapshot;
@@ -415,8 +415,8 @@ public class SnapshotManager implements Serializable {
             } else if (commitTime < timestampMills) {
                 earliest = mid + 1; // Search in the right half
             } else {
-                finalSnapshot = snapshot; // Found the exact match
-                break;
+                finalSnapshot = snapshot;
+                latest = mid - 1;
             }
         }
         return finalSnapshot;
