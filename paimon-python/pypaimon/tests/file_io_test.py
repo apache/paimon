@@ -58,13 +58,19 @@ class FileIOTest(unittest.TestCase):
         self.assertEqual(
             file_io.to_filesystem_path(
                 "s3://my-bucket/path/episode%23copy%3F1.h5"),
-            "my-bucket/path/episode#copy?1.h5",
+            "my-bucket/path/episode%23copy%3F1.h5",
         )
         self.assertEqual(
             file_io.to_filesystem_path(
                 "s3://my-bucket/path/episode%2523copy.h5"),
-            "my-bucket/path/episode%23copy.h5",
+            "my-bucket/path/episode%2523copy.h5",
         )
+        self.assertEqual(
+            file_io.to_filesystem_path(
+                "s3://my-bucket/t/p=a%2Fb/data.parquet"),
+            "my-bucket/t/p=a%2Fb/data.parquet",
+        )
+
         self.assertEqual(file_io.to_filesystem_path("oss://my-bucket/path/to/file.txt"),
                          "my-bucket/path/to/file.txt")
 
@@ -141,6 +147,30 @@ class FileIOTest(unittest.TestCase):
                         p.startswith("test-bucket/"),
                         "OSS+PyArrow<16 must pass key only to get_file_info, not bucket/key. Got: %r" % (p,)
                     )
+
+    @patch("pypaimon.filesystem.pyarrow_file_io.pafs.S3FileSystem")
+    def test_explicit_s3_and_oss_credentials_do_not_mutate_aws_environment(
+            self, _s3_file_system):
+        environment = dict(os.environ)
+        environment.pop("AWS_EC2_METADATA_DISABLED", None)
+        with patch.dict(os.environ, environment, clear=True):
+            PyArrowFileIO(
+                "s3://bucket/source",
+                Options({
+                    "fs.s3.access-key": "key",
+                    "fs.s3.secret-key": "secret",
+                }),
+            )
+            PyArrowFileIO(
+                "oss://bucket/source",
+                Options({
+                    OssOptions.OSS_ENDPOINT.key(): "oss.example.com",
+                    OssOptions.OSS_ACCESS_KEY_ID.key(): "key",
+                    OssOptions.OSS_ACCESS_KEY_SECRET.key(): "secret",
+                    OssOptions.OSS_IMPL.key(): "legacy",
+                }),
+            )
+            self.assertNotIn("AWS_EC2_METADATA_DISABLED", os.environ)
 
     def test_exists(self):
         lt7 = _pyarrow_lt_7()

@@ -34,6 +34,7 @@ import pypaimon.multimodal as pmm
 from pypaimon.common.options import Options
 from pypaimon.filesystem.pyarrow_file_io import LegacyOssDirectoryListingError
 from pypaimon.multimodal.hdf5 import (
+    _Hdf5SourceFileIO,
     _normalize_source_path,
     _qualified_status_path,
     _strict_arrow_table,
@@ -60,6 +61,27 @@ class Hdf5RuntimeContractTest(unittest.TestCase):
                 "pypaimon.multimodal.hdf5.sys.version_info", (3, 7)):
             with self.assertRaisesRegex(RuntimeError, "Python 3.8 or newer"):
                 load_from_hdf5(Mock(), [], transform=lambda h5, source: ())
+
+    def test_hdf5_source_io_decodes_only_its_external_uri(self):
+        backend = Mock()
+        backend.to_filesystem_path.return_value = (
+            "bucket/episode%23copy%3F1.h5")
+        backend.get_file_status.return_value = "status"
+        resolver = Mock()
+        resolver._get_fileio.return_value = backend
+
+        with patch(
+                "pypaimon.multimodal.hdf5.ResolvingFileIO",
+                return_value=resolver):
+            source_io = _Hdf5SourceFileIO(Options({}))
+            self.assertEqual(
+                "status",
+                source_io.get_file_status(
+                    "s3://bucket/episode%23copy%3F1.h5"),
+            )
+
+        backend.get_file_status.assert_called_once_with(
+            "bucket/episode#copy?1.h5")
 
 
 class _WriterProxy:
@@ -149,8 +171,15 @@ class _RemoteSourceFileIO:
             directories=None,
             seekable=True,
             native_stream=False):
-        self.objects = dict(objects or {})
-        self.directories = dict(directories or {})
+        self.objects = {
+            self._filesystem_path(path): value
+            for path, value in dict(objects or {}).items()
+        }
+        self.directories = {
+            self._filesystem_path(path): [
+                self._filesystem_path(child) for child in children]
+            for path, children in dict(directories or {}).items()
+        }
         self.seekable = seekable
         self.native_stream = native_stream
         self.opened_paths = []
@@ -172,7 +201,13 @@ class _RemoteSourceFileIO:
             file_type = pafs.FileType.Directory
         else:
             raise FileNotFoundError(path)
-        return pafs.FileInfo(self._filesystem_path(path), file_type)
+        return pafs.FileInfo(path, file_type)
+
+    def _get_fileio(self, path):
+        return self
+
+    def to_filesystem_path(self, path):
+        return self._filesystem_path(path)
 
     def get_file_status(self, path):
         return self._status(path)
@@ -477,7 +512,10 @@ class MultimodalHdf5Test(unittest.TestCase):
 
         self.assertEqual((2, 4, 8), (
             result.file_count, result.batch_count, result.row_count))
-        self.assertEqual([first, second], source_file_io.opened_paths)
+        self.assertEqual([
+            "source-bucket/episodes/a.hdf5",
+            "source-bucket/episodes/nested/b.h5",
+        ], source_file_io.opened_paths)
         self.assertEqual([
             (first, "a.hdf5", "a"),
             (second, "b.h5", "b"),
@@ -684,6 +722,26 @@ class MultimodalHdf5Test(unittest.TestCase):
         self.assertEqual(
             [[("inside", 1)]], result.column("attributes").to_pylist())
 
+    def test_nested_nullability_ignores_entries_hidden_by_null_maps(self):
+        item_field = pa.field("value", pa.int32(), nullable=False)
+        map_type = pa.map_(pa.string(), item_field)
+        schema = pa.schema([pa.field("attributes", map_type)])
+        values = pa.MapArray.from_arrays(
+            pa.array([0, 1, 2], type=pa.int32()),
+            pa.array(["hidden", "visible"]),
+            pa.array([None, 1], type=pa.int32()),
+            mask=pa.array([True, False]),
+        )
+        table = pa.Table.from_arrays([values], schema=schema)
+
+        result = _strict_arrow_table(
+            table, schema, pmm.Hdf5File("file:///tmp/episode.h5"), 0)
+
+        self.assertEqual(
+            [None, [("visible", 1)]],
+            result.column("attributes").to_pylist(),
+        )
+
     def test_load_from_hdf5_rejects_invalid_schemas(self):
         source = self._write_source("episode.hdf5")
         good = {
@@ -718,19 +776,14 @@ class MultimodalHdf5Test(unittest.TestCase):
                 self.assertIsNone(
                     table.raw_table.snapshot_manager().get_latest_snapshot())
 
-    def test_hdfs_source_rejects_a_different_target_kerberos_principal(self):
+    def test_hdfs_source_rejects_explicit_keytab_for_any_target(self):
         table = self._create_table("kerberos_isolation")
-        table.raw_table.table_path = "hdfs://target-ns/warehouse/table"
-        table.raw_table.file_io.properties = Options({
-            "security.kerberos.login.principal": "target@REALM",
-            "security.kerberos.login.keytab": "/target.keytab",
-        })
 
         with patch.object(
                 self.conn, "get_table", return_value=table), patch(
                     "pypaimon.multimodal.hdf5.ResolvingFileIO") as resolving:
             with self.assertRaisesRegex(
-                    ValueError, "different Kerberos principals"):
+                    ValueError, "process-isolated"):
                 self.conn.load_from_hdf5(
                     table.identifier,
                     "hdfs://source-ns/episode.h5",

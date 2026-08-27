@@ -23,7 +23,7 @@ import threading
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from typing import Any, Dict, List, Optional
-from urllib.parse import splitport, unquote, urlparse
+from urllib.parse import splitport, urlparse
 
 import pyarrow
 import pyarrow.fs as pafs
@@ -192,13 +192,6 @@ class PyArrowFileIO(FileIO):
         return pafs.PyFileSystem(fs_handler)
 
     def _initialize_oss_fs(self, path) -> FileSystem:
-        if self.properties.get(OssOptions.OSS_ACCESS_KEY_ID):
-            # When explicit credentials are provided, disable the EC2 Instance Metadata
-            # Service (IMDS) probe to avoid multi-second timeouts in non-AWS environments.
-            # Uses setdefault so that an explicit user setting is never overridden.
-            # Note: this is process-wide and affects all AWS SDK clients.
-            os.environ.setdefault("AWS_EC2_METADATA_DISABLED", "true")
-
         client_kwargs = {
             "access_key": self.properties.get(OssOptions.OSS_ACCESS_KEY_ID),
             "secret_key": self.properties.get(OssOptions.OSS_ACCESS_KEY_SECRET),
@@ -232,13 +225,6 @@ class PyArrowFileIO(FileIO):
                 "security-token", "security.token"))
         endpoint = self._get_s3_property("endpoint", S3Options.S3_ENDPOINT.key())
         region = self._get_s3_property("region", S3Options.S3_REGION.key())
-
-        if access_key:
-            # When explicit credentials are provided, disable the EC2 Instance Metadata
-            # Service (IMDS) probe to avoid multi-second timeouts in non-AWS environments.
-            # Uses setdefault so that an explicit user setting is never overridden.
-            # Note: this is process-wide and affects all AWS SDK clients.
-            os.environ.setdefault("AWS_EC2_METADATA_DISABLED", "true")
 
         client_kwargs = {
             "endpoint_override": endpoint,
@@ -788,8 +774,7 @@ class PyArrowFileIO(FileIO):
         from pyarrow.fs import S3FileSystem
 
         parsed = urlparse(path)
-        normalized_path = (
-            unquote(re.sub(r'/+', '/', parsed.path)) if parsed.path else '')
+        normalized_path = re.sub(r'/+', '/', parsed.path) if parsed.path else ''
 
         if parsed.scheme and len(parsed.scheme) == 1 and not parsed.netloc:
             return str(path)

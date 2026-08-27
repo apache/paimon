@@ -197,7 +197,7 @@ files into an existing multimodal table. HDF5 loading requires Python 3.8 or
 newer. Install the optional dependency first:
 
 ```shell
-pip install pypaimon[hdf5]
+pip install 'pypaimon[hdf5]'
 ```
 
 The transform receives an open `h5py.File` and an `Hdf5File`. Its `path` is the
@@ -276,10 +276,10 @@ remote_result = conn.load_from_hdf5(
 )
 ```
 
-Because native HDFS Kerberos credentials use process-global ticket state, an
-HDFS source configured with an explicit keytab must use the same principal as
-an HDFS target. A different or unverifiable target principal is rejected before
-source discovery; isolate such a load in another process instead.
+Because native HDFS Kerberos credentials use process-global ticket state, HDF5
+sources cannot run an explicit-keytab login in a shared process. Acquire the
+ticket in a process-isolated worker, omit the source principal/keytab options,
+and then call `load_from_hdf5` in that worker.
 
 HDF5 requires random access. `load_from_hdf5` passes the seekable stream returned
 by `FileIO.new_input_stream` directly to h5py and never downloads it to a local

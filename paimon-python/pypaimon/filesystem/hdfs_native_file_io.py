@@ -23,7 +23,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from typing import Dict, Optional
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
 
 import pyarrow
 import pyarrow.fs as pafs
@@ -441,7 +441,7 @@ class HdfsNativeFileIO(FileIO):
             if parsed.scheme == self._scheme and (
                 not parsed.netloc or parsed.netloc == self._netloc
             ):
-                return unquote(parsed.path) or "/"
+                return parsed.path or "/"
         return path
 
     def _adapt_status(self, status, fallback_path: str = '') -> _HdfsFileInfo:

@@ -89,6 +89,35 @@ class _SnapshotRecorder(CommitCallback):
         self.snapshot_id = context.snapshot.id
 
 
+class _Hdf5SourceFileIO:
+    """Resolve HDF5 URIs while keeping decoding local to external sources."""
+
+    def __init__(self, options):
+        self._resolver = ResolvingFileIO(options)
+
+    def _resolve(self, path):
+        file_io = self._resolver._get_fileio(path)
+        native_path = file_io.to_filesystem_path(path)
+        if urlparse(path).scheme.lower() != "file":
+            native_path = unquote(native_path)
+        return file_io, native_path
+
+    def get_file_status(self, path):
+        file_io, native_path = self._resolve(path)
+        return file_io.get_file_status(native_path)
+
+    def list_status(self, path):
+        file_io, native_path = self._resolve(path)
+        return file_io.list_status(native_path)
+
+    def new_input_stream(self, path):
+        file_io, native_path = self._resolve(path)
+        return file_io.new_input_stream(native_path)
+
+    def close(self):
+        self._resolver.close()
+
+
 def load_from_hdf5(
         table,
         paths,
@@ -118,9 +147,8 @@ def load_from_hdf5(
         raise ValueError("transform must be callable.")
     validated_options = _validated_source_options(source_options)
     path_values = _path_values(paths)
-    _validate_kerberos_isolation(table, path_values, validated_options)
-    source_file_io = ResolvingFileIO(
-        Options(validated_options))
+    _validate_source_kerberos(path_values, validated_options)
+    source_file_io = _Hdf5SourceFileIO(Options(validated_options))
     try:
         files = _discover_hdf5_files(path_values, source_file_io)
         if not files:
@@ -136,7 +164,7 @@ def load_from_hdf5(
             import h5py
         except ImportError as error:
             raise ImportError(
-                "load_from_hdf5 requires h5py; install pypaimon[hdf5]."
+                "load_from_hdf5 requires h5py; install 'pypaimon[hdf5]'."
             ) from error
         return _load_hdf5_files(
             table, files, transform, source_file_io, h5py)
@@ -422,7 +450,7 @@ def _validated_source_options(source_options):
     return dict(source_options)
 
 
-def _validate_kerberos_isolation(table, paths, source_options):
+def _validate_source_kerberos(paths, source_options):
     source_principal = (
         source_options.get("security.kerberos.login.principal")
         or source_options.get("security.principal")
@@ -441,27 +469,11 @@ def _validate_kerberos_isolation(table, paths, source_options):
             urlparse(_source_path_text(path)).scheme.lower()
             in ("hdfs", "viewfs") for path in paths):
         return
-
-    target_path = getattr(table.raw_table, "table_path", "")
-    if urlparse(target_path).scheme.lower() not in ("hdfs", "viewfs"):
-        return
-    target_file_io = getattr(table.raw_table, "file_io", None)
-    target_properties = getattr(target_file_io, "properties", None)
-    target_options = (
-        target_properties.to_map()
-        if target_properties is not None
-        and callable(getattr(target_properties, "to_map", None))
-        else {}
-    )
-    target_principal = (
-        target_options.get("security.kerberos.login.principal")
-        or target_options.get("security.principal")
-    )
-    if target_principal != source_principal:
-        raise ValueError(
-            "HDF5 source and target use different Kerberos principals; "
-            "loading would overwrite process-global Kerberos credentials. "
-            "Use the same principal or isolate the load in another process.")
+    raise ValueError(
+        "HDF5 sources cannot use an explicit Kerberos keytab in a shared "
+        "process because kinit overwrites process-global credentials. "
+        "Run the load in a process-isolated worker with a pre-acquired "
+        "ticket cache and omit the source principal and keytab options.")
 
 
 def _require_seekable(stream, source):
@@ -557,11 +569,25 @@ def _validate_array_nullability(array, field, path):
         start = array.offsets[0].as_py()
         stop = array.offsets[-1].as_py()
         length = stop - start
+        offsets = pc.subtract(
+            array.offsets,
+            pa.scalar(start, type=array.offsets.type),
+        )
+        entries = pa.StructArray.from_arrays(
+            [array.keys.slice(start, length),
+             array.items.slice(start, length)],
+            fields=[source_type.key_field, source_type.item_field],
+        )
+        logical_entries = pc.list_flatten(pa.ListArray.from_arrays(
+            offsets,
+            entries,
+            mask=pc.is_null(array),
+        ))
         _validate_array_nullability(
-            array.keys.slice(start, length), target_type.key_field,
+            logical_entries.field(0), target_type.key_field,
             "%s.%s" % (path, target_type.key_field.name))
         _validate_array_nullability(
-            array.items.slice(start, length), target_type.item_field,
+            logical_entries.field(1), target_type.item_field,
             "%s.%s" % (path, target_type.item_field.name))
         return
 
