@@ -33,8 +33,9 @@ The command will install the package and core dependencies to your local Python 
 
 # HDF5 to multimodal tables
 
-Install the optional HDF5 dependency and create the target multimodal table
-before appending local or remote HDF5 files as one or more Arrow batches:
+HDF5 loading requires Python 3.8 or newer. Install the optional dependency and
+create the target multimodal table before loading local or remote HDF5 files as
+one or more Arrow batches:
 
 ```commandline
 pip install 'pypaimon[hdf5,vortex]'
@@ -73,11 +74,12 @@ frames = connection.create_table(
     "frames",
     schema=schema,
 )
-result = frames.append_hdf5("/data/episodes", transform=transform)
+result = connection.load_from_hdf5(
+    "frames", "/data/episodes", transform=transform)
 print(result.file_count, result.batch_count, result.row_count, result.snapshot_id)
 ```
 
-`append_hdf5` accepts one `.h5`/`.hdf5` file, an iterable of paths, or
+`load_from_hdf5` accepts one `.h5`/`.hdf5` file, an iterable of paths, or
 directories that are searched recursively. Paths are resolved, duplicate
 files within the call are removed, and the remaining files are processed in
 sorted order. Every yielded batch must have exactly the target columns and be

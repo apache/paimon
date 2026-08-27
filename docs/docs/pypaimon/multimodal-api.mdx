@@ -190,10 +190,11 @@ docs.add([
 ])
 ```
 
-## Append HDF5
+## Load HDF5
 
-`append_hdf5` streams one or more local or remote HDF5 files into an existing
-multimodal table. Install the optional dependency first:
+`MultimodalConnection.load_from_hdf5` streams one or more local or remote HDF5
+files into an existing multimodal table. HDF5 loading requires Python 3.8 or
+newer. Install the optional dependency first:
 
 ```shell
 pip install pypaimon[hdf5]
@@ -236,7 +237,8 @@ def transform(h5, source):
         }, schema=schema)
 
 
-result = frames.append_hdf5(
+result = conn.load_from_hdf5(
+    "frames",
     "/data/episodes",
     transform=transform,
 )
@@ -247,7 +249,7 @@ print(result.snapshot_id)
 ```
 
 A path can be one `.h5` or `.hdf5` file, an iterable of paths, or a directory.
-Directories are searched recursively. Before opening files, `append_hdf5`
+Directories are searched recursively. Before opening files, `load_from_hdf5`
 resolves every discovered path, removes duplicate files within that call, and
 sorts by the resolved path. Overlapping directory and file arguments therefore
 read a physical file once per call. Local paths and `file://`, `hdfs://`,
@@ -262,7 +264,8 @@ source-specific settings explicitly, while configuration discoverable by the
 underlying filesystem client can still come from its normal environment:
 
 ```python
-remote_result = frames.append_hdf5(
+remote_result = conn.load_from_hdf5(
+    "frames",
     "oss://source-bucket/episodes",
     transform=transform,
     source_options={
@@ -273,7 +276,12 @@ remote_result = frames.append_hdf5(
 )
 ```
 
-HDF5 requires random access. `append_hdf5` passes the seekable stream returned
+Because native HDFS Kerberos credentials use process-global ticket state, an
+HDFS source configured with an explicit keytab must use the same principal as
+an HDFS target. A different or unverifiable target principal is rejected before
+source discovery; isolate such a load in another process instead.
+
+HDF5 requires random access. `load_from_hdf5` passes the seekable stream returned
 by `FileIO.new_input_stream` directly to h5py and never downloads it to a local
 temporary file. A non-seekable stream fails before commit. Recursive directory
 discovery requires backend listing support; legacy OSS on PyArrow before 16
@@ -295,16 +303,16 @@ whole call.
 One call uses one writer and one commit for all discovered files, and a
 successful non-empty call creates exactly one snapshot. Any failure before the
 commit aborts the writer and leaves no partial snapshot. An exception after the
-commit starts has Paimon's unknown-commit-result semantics: `append_hdf5` does
+commit starts has Paimon's unknown-commit-result semantics: `load_from_hdf5` does
 not retry and does not abort files that a snapshot may already reference.
 
 For a future Ray integration, split HDF5 file descriptions across worker tasks,
 apply the same transform and strict batch contract in each task, and collect
-writer commit messages for one coordinator commit. Do not call `append_hdf5`
+writer commit messages for one coordinator commit. Do not call `load_from_hdf5`
 independently in every task, because that would create one commit per task. The
 HDF5 core itself has no Ray dependency.
 
-`append_hdf5` is append-only and is **not retry-safe**. It does not add source
+`load_from_hdf5` is append-only and is **not retry-safe**. It does not add source
 provenance columns, maintain a source ledger, skip prior inputs, or detect
 source drift. Calling it again with the same input appends the rows again.
 

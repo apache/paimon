@@ -17,17 +17,20 @@
 """Strict append-only ingestion from seekable HDF5 sources."""
 
 import os
+import re
+import sys
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Callable, Mapping, Optional
-from urllib.parse import quote, urlparse, urlunparse
-from urllib.request import url2pathname
+from urllib.parse import quote, unquote, urlparse, urlunparse
 
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.fs as pafs
 
 from pypaimon.common.options import Options
+from pypaimon.filesystem.local_file_io import _file_uri_path
 from pypaimon.filesystem.pyarrow_file_io import LegacyOssDirectoryListingError
 from pypaimon.filesystem.resolving_file_io import ResolvingFileIO
 from pypaimon.multimodal.table import _target_schema
@@ -49,7 +52,7 @@ class Hdf5File:
         parsed = urlparse(self.path)
         if parsed.scheme.lower() != "file":
             return None
-        return Path(url2pathname(parsed.path))
+        return Path(_file_uri_path(parsed))
 
     @property
     def name(self) -> str:
@@ -58,7 +61,7 @@ class Hdf5File:
         if local_path is not None:
             return local_path.name
         parsed = urlparse(self.path)
-        path = parsed.path if parsed.scheme else self.path
+        path = unquote(parsed.path) if parsed.scheme else self.path
         return PurePosixPath(path).name
 
     @property
@@ -68,8 +71,8 @@ class Hdf5File:
 
 
 @dataclass(frozen=True)
-class Hdf5AppendResult:
-    """Counts and optional committed snapshot for one ``append_hdf5`` call."""
+class Hdf5LoadResult:
+    """Counts and optional snapshot for one ``load_from_hdf5`` call."""
 
     file_count: int
     batch_count: int
@@ -86,13 +89,13 @@ class _SnapshotRecorder(CommitCallback):
         self.snapshot_id = context.snapshot.id
 
 
-def append_hdf5(
+def load_from_hdf5(
         table,
         paths,
         *,
         transform: Callable,
         source_options: Optional[Mapping[str, object]] = None):
-    """Append HDF5 files to an existing multimodal table.
+    """Load HDF5 files into an existing multimodal table.
 
     ``transform`` receives an open ``h5py.File`` and :class:`Hdf5File`, and
     must return one Arrow table/batch or an iterable of Arrow tables/batches.
@@ -107,14 +110,21 @@ def append_hdf5(
     became visible and is returned without retrying or aborting written files.
     Empty discovery is a no-op and returns zero counts with no snapshot.
     """
+    if sys.version_info < (3, 8):
+        raise RuntimeError(
+            "load_from_hdf5 requires Python 3.8 or newer; the hdf5 extra "
+            "is not available on older Python versions.")
     if not callable(transform):
         raise ValueError("transform must be callable.")
+    validated_options = _validated_source_options(source_options)
+    path_values = _path_values(paths)
+    _validate_kerberos_isolation(table, path_values, validated_options)
     source_file_io = ResolvingFileIO(
-        Options(_validated_source_options(source_options)))
+        Options(validated_options))
     try:
-        files = _discover_hdf5_files(paths, source_file_io)
+        files = _discover_hdf5_files(path_values, source_file_io)
         if not files:
-            return Hdf5AppendResult(
+            return Hdf5LoadResult(
                 file_count=0,
                 batch_count=0,
                 row_count=0,
@@ -126,15 +136,15 @@ def append_hdf5(
             import h5py
         except ImportError as error:
             raise ImportError(
-                "append_hdf5 requires h5py; install pypaimon[hdf5]."
+                "load_from_hdf5 requires h5py; install pypaimon[hdf5]."
             ) from error
-        return _append_hdf5_files(
+        return _load_hdf5_files(
             table, files, transform, source_file_io, h5py)
     finally:
         source_file_io.close()
 
 
-def _append_hdf5_files(table, files, transform, source_file_io, h5py):
+def _load_hdf5_files(table, files, transform, source_file_io, h5py):
     target_schema = _target_schema(table.raw_table)
     write_builder = table.raw_table.new_batch_write_builder()
     table_write = None
@@ -150,6 +160,7 @@ def _append_hdf5_files(table, files, transform, source_file_io, h5py):
         table_commit.add_commit_callback(snapshot_recorder)
 
         for source in files:
+            source_row_count = 0
             with closing(source_file_io.new_input_stream(source.path)) as stream:
                 _require_seekable(stream, source)
                 with h5py.File(stream, "r") as h5:
@@ -166,21 +177,24 @@ def _append_hdf5_files(table, files, transform, source_file_io, h5py):
                             )
                             batch_count += 1
                             row_count += arrow_table.num_rows
+                            source_row_count += arrow_table.num_rows
                             if arrow_table.num_rows:
                                 table_write.write_arrow(arrow_table)
                     finally:
                         _close_transform_iterator(
                             batches if batches is not None else transformed)
 
-        if row_count == 0:
-            raise ValueError("HDF5 transform produced no rows.")
+            if source_row_count == 0:
+                raise ValueError(
+                    "HDF5 source %s produced no rows." % source.path)
+
         commit_messages = table_write.prepare_commit()
         commit_started = True
         table_commit.commit(commit_messages)
         if snapshot_recorder.snapshot_id is None:
             raise RuntimeError(
                 "HDF5 append committed without reporting a snapshot id.")
-        return Hdf5AppendResult(
+        return Hdf5LoadResult(
             file_count=len(files),
             batch_count=batch_count,
             row_count=row_count,
@@ -331,21 +345,28 @@ def _source_path_text(value):
 def _normalize_source_path(value):
     path = _source_path_text(value)
     parsed = urlparse(path)
-    if not parsed.scheme:
-        return Path(path).expanduser().resolve().as_uri()
     if _is_windows_drive_path(parsed):
         windows_path = PureWindowsPath(path)
         if not windows_path.is_absolute():
             raise ValueError("Windows source paths must be absolute: %s" % path)
         return "file:///%s" % quote(windows_path.as_posix(), safe="/:")
-    return path
+    if not parsed.scheme:
+        return Path(path).expanduser().resolve().as_uri()
+    return _quote_uri_path(path)
+
+
+def _quote_uri_path(uri):
+    match = re.match(r"^([A-Za-z][A-Za-z0-9+.-]*://[^/]*)(.*)$", uri)
+    if match is None:
+        return uri
+    return match.group(1) + quote(match.group(2), safe="/:%")
 
 
 def _qualified_status_path(parent_path, status):
     status_path = str(status.path)
     status_uri = urlparse(status_path)
     if status_uri.scheme and not _is_windows_drive_path(status_uri):
-        return status_path
+        return _quote_uri_path(status_path)
 
     parent_uri = urlparse(parent_path)
     scheme = parent_uri.scheme.lower()
@@ -358,7 +379,7 @@ def _qualified_status_path(parent_path, status):
         return urlunparse((
             scheme,
             parent_uri.netloc,
-            "/" + status_path.lstrip("/"),
+            quote("/" + status_path.lstrip("/"), safe="/:"),
             "",
             "",
             "",
@@ -369,7 +390,7 @@ def _qualified_status_path(parent_path, status):
             key == parent_uri.netloc
             or key.startswith(parent_uri.netloc + "/")):
         key = parent_uri.netloc + "/" + key
-    return "%s://%s" % (scheme, key)
+    return "%s://%s" % (scheme, quote(key, safe="/:"))
 
 
 def _is_windows_drive_path(parsed):
@@ -378,7 +399,7 @@ def _is_windows_drive_path(parsed):
 
 def _hdf5_suffix(path):
     parsed = urlparse(path)
-    return PurePosixPath(parsed.path).suffix.lower() in _HDF5_SUFFIXES
+    return PurePosixPath(unquote(parsed.path)).suffix.lower() in _HDF5_SUFFIXES
 
 
 def _path_values(paths):
@@ -399,6 +420,48 @@ def _validated_source_options(source_options):
     if not isinstance(source_options, Mapping):
         raise ValueError("source_options must be a mapping.")
     return dict(source_options)
+
+
+def _validate_kerberos_isolation(table, paths, source_options):
+    source_principal = (
+        source_options.get("security.kerberos.login.principal")
+        or source_options.get("security.principal")
+    )
+    source_keytab = (
+        source_options.get("security.kerberos.login.keytab")
+        or source_options.get("security.keytab")
+    )
+    if not source_principal and not source_keytab:
+        return
+    if bool(source_principal) != bool(source_keytab):
+        raise ValueError(
+            "Source Kerberos principal and keytab must be both set or both "
+            "unset.")
+    if not any(
+            urlparse(_source_path_text(path)).scheme.lower()
+            in ("hdfs", "viewfs") for path in paths):
+        return
+
+    target_path = getattr(table.raw_table, "table_path", "")
+    if urlparse(target_path).scheme.lower() not in ("hdfs", "viewfs"):
+        return
+    target_file_io = getattr(table.raw_table, "file_io", None)
+    target_properties = getattr(target_file_io, "properties", None)
+    target_options = (
+        target_properties.to_map()
+        if target_properties is not None
+        and callable(getattr(target_properties, "to_map", None))
+        else {}
+    )
+    target_principal = (
+        target_options.get("security.kerberos.login.principal")
+        or target_options.get("security.principal")
+    )
+    if target_principal != source_principal:
+        raise ValueError(
+            "HDF5 source and target use different Kerberos principals; "
+            "loading would overwrite process-global Kerberos credentials. "
+            "Use the same principal or isolate the load in another process.")
 
 
 def _require_seekable(stream, source):
@@ -448,11 +511,73 @@ def _strict_arrow_table(data, target_schema, source, batch_index):
             % (batch_index, source.path, table.column_names,
                target_schema.names))
     try:
-        return table.cast(target_schema, safe=True)
+        _validate_nested_nullability(table, target_schema)
+        if table.schema.equals(target_schema, check_metadata=False):
+            return table
+        casted = table.cast(target_schema, safe=True)
+        _validate_nested_nullability(casted, target_schema)
+        return casted
     except (ValueError, TypeError, NotImplementedError) as error:
         raise ValueError(
             "HDF5 batch %d from %s cannot be converted to the table schema: %s"
             % (batch_index, source.path, error)) from error
+
+
+def _validate_nested_nullability(table, schema):
+    for field, column in zip(schema, table.columns):
+        for chunk in column.chunks:
+            _validate_array_nullability(chunk, field, field.name)
+
+
+def _validate_array_nullability(array, field, path):
+    if not field.nullable and array.null_count:
+        raise ValueError(
+            "non-nullable field %s contains %d null value(s)"
+            % (path, array.null_count))
+
+    target_type = field.type
+    source_type = array.type
+    if (pa.types.is_list(target_type)
+            or pa.types.is_large_list(target_type)
+            or pa.types.is_fixed_size_list(target_type)):
+        if not (pa.types.is_list(source_type)
+                or pa.types.is_large_list(source_type)
+                or pa.types.is_fixed_size_list(source_type)):
+            return
+        _validate_array_nullability(
+            pc.list_flatten(array),
+            target_type.value_field,
+            "%s.%s" % (path, target_type.value_field.name),
+        )
+        return
+
+    if pa.types.is_map(target_type):
+        if not pa.types.is_map(source_type):
+            return
+        start = array.offsets[0].as_py()
+        stop = array.offsets[-1].as_py()
+        length = stop - start
+        _validate_array_nullability(
+            array.keys.slice(start, length), target_type.key_field,
+            "%s.%s" % (path, target_type.key_field.name))
+        _validate_array_nullability(
+            array.items.slice(start, length), target_type.item_field,
+            "%s.%s" % (path, target_type.item_field.name))
+        return
+
+    if pa.types.is_struct(target_type):
+        if not pa.types.is_struct(source_type):
+            return
+        parent_valid = pc.is_valid(array) if array.null_count else None
+        for index, child_field in enumerate(target_type):
+            child = array.field(index)
+            if parent_valid is not None:
+                child = pc.filter(child, parent_valid)
+            _validate_array_nullability(
+                child,
+                child_field,
+                "%s.%s" % (path, child_field.name),
+            )
 
 
 def _arrow_batches(transformed):

@@ -23,7 +23,7 @@ import threading
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from typing import Any, Dict, List, Optional
-from urllib.parse import splitport, urlparse
+from urllib.parse import splitport, unquote, urlparse
 
 import pyarrow
 import pyarrow.fs as pafs
@@ -788,7 +788,8 @@ class PyArrowFileIO(FileIO):
         from pyarrow.fs import S3FileSystem
 
         parsed = urlparse(path)
-        normalized_path = re.sub(r'/+', '/', parsed.path) if parsed.path else ''
+        normalized_path = (
+            unquote(re.sub(r'/+', '/', parsed.path)) if parsed.path else '')
 
         if parsed.scheme and len(parsed.scheme) == 1 and not parsed.netloc:
             return str(path)

@@ -31,10 +31,13 @@ import pyarrow as pa
 import pyarrow.fs as pafs
 
 import pypaimon.multimodal as pmm
+from pypaimon.common.options import Options
 from pypaimon.filesystem.pyarrow_file_io import LegacyOssDirectoryListingError
 from pypaimon.multimodal.hdf5 import (
     _normalize_source_path,
     _qualified_status_path,
+    _strict_arrow_table,
+    load_from_hdf5,
 )
 
 try:
@@ -48,6 +51,15 @@ _OPTIONS = {
     "vector.file.format": "parquet",
     "blob-as-descriptor": "false",
 }
+
+
+class Hdf5RuntimeContractTest(unittest.TestCase):
+
+    def test_hdf5_load_requires_python_38_or_newer(self):
+        with patch(
+                "pypaimon.multimodal.hdf5.sys.version_info", (3, 7)):
+            with self.assertRaisesRegex(RuntimeError, "Python 3.8 or newer"):
+                load_from_hdf5(Mock(), [], transform=lambda h5, source: ())
 
 
 class _WriterProxy:
@@ -229,6 +241,15 @@ class MultimodalHdf5Test(unittest.TestCase):
         return self.conn.create_table(
             name, schema=self._schema(), options=_OPTIONS)
 
+    def _load(self, table, paths, *, transform, source_options=None):
+        with patch.object(self.conn, "get_table", return_value=table):
+            return self.conn.load_from_hdf5(
+                table.identifier,
+                paths,
+                transform=transform,
+                source_options=source_options,
+            )
+
     @staticmethod
     def _transform(h5, source):
         values = np.asarray(h5["values"][:], dtype=np.float32)
@@ -239,7 +260,7 @@ class MultimodalHdf5Test(unittest.TestCase):
         for begin in range(0, len(values), 2):
             end = min(begin + 2, len(values))
             # Deliberately let Arrow infer int64, list<double>, and binary.
-            # append_hdf5 may safely cast types after validating exact columns.
+            # HDF5 loading may safely cast after validating exact columns.
             yield pa.Table.from_pydict({
                 "source": [source.name] * (end - begin),
                 "frame_index": list(range(begin, end)),
@@ -266,7 +287,7 @@ class MultimodalHdf5Test(unittest.TestCase):
         proxy = _WriteBuilderProxy(writer, committer)
         return proxy, writer, committer
 
-    def test_append_hdf5_streams_multiple_files_in_one_snapshot(self):
+    def test_load_from_hdf5_streams_multiple_files_in_one_snapshot(self):
         first = self._write_source("a.hdf5", 0)
         self._write_source("nested/b.h5", 100)
         table = self._create_table()
@@ -286,8 +307,11 @@ class MultimodalHdf5Test(unittest.TestCase):
             seen_paths.append(source.path)
             yield from self._transform(h5, source)
 
-        result = table.append_hdf5(
-            [self.source_dir, first, first.resolve()], transform=transform)
+        result = self._load(
+            table,
+            [self.source_dir, first, first.resolve()],
+            transform=transform,
+        )
 
         self.assertEqual(2, result.file_count)
         self.assertEqual(4, result.batch_count)
@@ -318,18 +342,19 @@ class MultimodalHdf5Test(unittest.TestCase):
         ))
         self.assertEqual(3, len(rows[-1]["value"]))
 
-    def test_append_hdf5_accepts_single_list_and_directory_and_reappends(self):
+    def test_load_from_hdf5_accepts_paths_and_reappends(self):
         first = self._write_source("a.hdf5", 0)
         self._write_source("nested/b.h5", 100)
         table = self._create_table()
 
-        single = table.append_hdf5(first, transform=self._transform)
-        duplicate_list = table.append_hdf5(
+        single = self._load(table, first, transform=self._transform)
+        duplicate_list = self._load(
+            table,
             [first, first.resolve(), first.resolve().as_uri()],
             transform=self._transform,
         )
-        directory = table.append_hdf5(
-            self.source_dir, transform=self._transform)
+        directory = self._load(
+            table, self.source_dir, transform=self._transform)
 
         self.assertEqual((1, 2, 4), (
             single.file_count, single.batch_count, single.row_count))
@@ -358,7 +383,7 @@ class MultimodalHdf5Test(unittest.TestCase):
             seen.append(context)
             yield from self._transform(h5, context)
 
-        table.append_hdf5(source, transform=transform)
+        self._load(table, source, transform=transform)
 
         self.assertEqual(source.resolve(), seen[0].local_path)
         self.assertEqual("episode 中文.h5", seen[0].name)
@@ -400,6 +425,12 @@ class MultimodalHdf5Test(unittest.TestCase):
              "oss://bucket/root/a.h5"),
             ("gs://bucket/root", "root/a.h5",
              "gs://bucket/root/a.h5"),
+            ("s3://bucket/root", "bucket/root/episode#backup.h5",
+             "s3://bucket/root/episode%23backup.h5"),
+            ("hdfs://namenode/root", "/root/episode?copy.hdf5",
+             "hdfs://namenode/root/episode%3Fcopy.hdf5"),
+            ("s3://bucket/root", "bucket/root/episode%23copy.h5",
+             "s3://bucket/root/episode%2523copy.h5"),
         )
         for parent, status_path, expected in cases:
             with self.subTest(parent=parent, status_path=status_path):
@@ -407,7 +438,7 @@ class MultimodalHdf5Test(unittest.TestCase):
                 self.assertEqual(
                     expected, _qualified_status_path(parent, status))
 
-    def test_append_hdf5_reads_recursive_remote_sources_with_source_options(self):
+    def test_load_from_hdf5_reads_recursive_remote_sources(self):
         root = "s3://source-bucket/episodes"
         first = root + "/a.hdf5"
         nested = root + "/nested"
@@ -437,7 +468,8 @@ class MultimodalHdf5Test(unittest.TestCase):
         with patch(
                 "pypaimon.multimodal.hdf5.ResolvingFileIO",
                 return_value=source_file_io) as resolving_file_io:
-            result = table.append_hdf5(
+            result = self._load(
+                table,
                 [root, first],
                 transform=transform,
                 source_options=source_options,
@@ -477,7 +509,7 @@ class MultimodalHdf5Test(unittest.TestCase):
                     "new_batch_write_builder",
                     return_value=proxy):
             with self.assertRaisesRegex(ValueError, "seekable"):
-                table.append_hdf5(source, transform=self._transform)
+                self._load(table, source, transform=self._transform)
 
         self.assertEqual(1, writer.abort_count)
         self.assertEqual(1, writer.close_count)
@@ -503,12 +535,12 @@ class MultimodalHdf5Test(unittest.TestCase):
                     new_builder):
             with self.assertRaisesRegex(
                     ValueError, "pass explicit HDF5 file paths"):
-                table.append_hdf5(source, transform=self._transform)
+                self._load(table, source, transform=self._transform)
 
         new_builder.assert_not_called()
         self.assertEqual(1, source_file_io.close_count)
 
-    def test_append_hdf5_rejects_non_arrow_and_empty_output(self):
+    def test_load_from_hdf5_rejects_non_arrow_and_empty_output(self):
         source = self._write_source("episode.h5")
         cases = (
             (lambda h5, info: {"frame_index": [0]}, "Arrow data"),
@@ -518,11 +550,141 @@ class MultimodalHdf5Test(unittest.TestCase):
             table = self._create_table("invalid_output_%d" % index)
             with self.subTest(message=message):
                 with self.assertRaisesRegex(ValueError, message):
-                    table.append_hdf5(source, transform=transform)
+                    self._load(table, source, transform=transform)
                 self.assertIsNone(
                     table.raw_table.snapshot_manager().get_latest_snapshot())
 
-    def test_append_hdf5_rejects_missing_extra_incompatible_and_invalid_vector(self):
+    def test_each_discovered_file_must_produce_rows(self):
+        valid = self._write_source("valid.h5")
+        empty = self._write_source("empty.h5")
+        table = self._create_table("per_source_rows")
+        proxy, writer, committer = self._instrument_write(table)
+
+        def transform(h5, source):
+            if source.name == "empty.h5":
+                return iter(())
+            return self._transform(h5, source)
+
+        with patch.object(
+                table.raw_table,
+                "new_batch_write_builder",
+                return_value=proxy):
+            with self.assertRaisesRegex(
+                    ValueError, "empty.h5.*produced no rows"):
+                self._load(table, [valid, empty], transform=transform)
+
+        self.assertEqual(1, writer.abort_count)
+        self.assertEqual(0, committer.commit_count)
+        self.assertIsNone(
+            table.raw_table.snapshot_manager().get_latest_snapshot())
+
+    def test_strict_schema_rejects_nested_non_nullable_values(self):
+        source = pmm.Hdf5File("file:///tmp/episode.h5")
+        cases = (
+            (
+                pa.field(
+                    "items",
+                    pa.list_(pa.field("item", pa.int32(), nullable=False)),
+                ),
+                [[1, None]],
+                "items.item",
+            ),
+            (
+                pa.field(
+                    "vector",
+                    pa.list_(
+                        pa.field("item", pa.float32(), nullable=False), 2),
+                ),
+                [[1.0, None]],
+                "vector.item",
+            ),
+            (
+                pa.field(
+                    "attributes",
+                    pa.map_(
+                        pa.string(),
+                        pa.field("value", pa.int32(), nullable=False),
+                    ),
+                ),
+                [[("key", None)]],
+                "attributes.value",
+            ),
+        )
+
+        for field, values, path in cases:
+            schema = pa.schema([field])
+            batch = pa.Table.from_arrays(
+                [pa.array(values, type=field.type)], schema=schema)
+            with self.subTest(path=path):
+                with self.assertRaisesRegex(ValueError, path):
+                    _strict_arrow_table(batch, schema, source, 0)
+
+    def test_orc_load_rejects_null_array_elements_and_map_values(self):
+        source = self._write_source("nested_nulls.h5")
+        cases = (
+            (
+                "orc_array_null",
+                pa.field(
+                    "nested",
+                    pa.list_(pa.field("item", pa.int32(), nullable=False)),
+                ),
+                [[1, None]],
+            ),
+            (
+                "orc_map_null",
+                pa.field(
+                    "nested",
+                    pa.map_(
+                        pa.string(),
+                        pa.field("value", pa.int32(), nullable=False),
+                    ),
+                ),
+                [[("key", None)]],
+            ),
+        )
+        for name, nested_field, values in cases:
+            schema = pa.schema([
+                pa.field("id", pa.int32(), nullable=False),
+                nested_field,
+            ])
+            table = self.conn.create_table(
+                name,
+                schema=schema,
+                options={
+                    "file.format": "orc",
+                    "blob-as-descriptor": "false",
+                },
+            )
+
+            def transform(h5, context, field=nested_field, data=values):
+                return pa.Table.from_arrays(
+                    [pa.array([1], type=pa.int32()),
+                     pa.array(data, type=field.type)],
+                    names=["id", "nested"],
+                )
+
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(ValueError, "nested"):
+                    self._load(table, source, transform=transform)
+                self.assertIsNone(
+                    table.raw_table.snapshot_manager().get_latest_snapshot())
+
+    def test_nested_nullability_checks_only_logical_sliced_map_values(self):
+        item_field = pa.field("value", pa.int32(), nullable=False)
+        map_type = pa.map_(pa.string(), item_field)
+        schema = pa.schema([pa.field("attributes", map_type)])
+        values = pa.array(
+            [[("outside", None)], [("inside", 1)]], type=map_type)
+        sliced = pa.Table.from_arrays(
+            [values.slice(1, 1)], schema=schema)
+
+        result = _strict_arrow_table(
+            sliced, schema, pmm.Hdf5File("file:///tmp/episode.h5"), 0)
+
+        self.assertEqual(
+            [[("inside", 1)]], result.column("attributes").to_pylist())
+
+    def test_load_from_hdf5_rejects_invalid_schemas(self):
         source = self._write_source("episode.hdf5")
         good = {
             "source": ["episode.hdf5"],
@@ -552,9 +714,34 @@ class MultimodalHdf5Test(unittest.TestCase):
 
             with self.subTest(message=message):
                 with self.assertRaisesRegex(ValueError, message):
-                    table.append_hdf5(source, transform=transform)
+                    self._load(table, source, transform=transform)
                 self.assertIsNone(
                     table.raw_table.snapshot_manager().get_latest_snapshot())
+
+    def test_hdfs_source_rejects_a_different_target_kerberos_principal(self):
+        table = self._create_table("kerberos_isolation")
+        table.raw_table.table_path = "hdfs://target-ns/warehouse/table"
+        table.raw_table.file_io.properties = Options({
+            "security.kerberos.login.principal": "target@REALM",
+            "security.kerberos.login.keytab": "/target.keytab",
+        })
+
+        with patch.object(
+                self.conn, "get_table", return_value=table), patch(
+                    "pypaimon.multimodal.hdf5.ResolvingFileIO") as resolving:
+            with self.assertRaisesRegex(
+                    ValueError, "different Kerberos principals"):
+                self.conn.load_from_hdf5(
+                    table.identifier,
+                    "hdfs://source-ns/episode.h5",
+                    transform=self._transform,
+                    source_options={
+                        "security.kerberos.login.principal": "source@REALM",
+                        "security.kerberos.login.keytab": "/source.keytab",
+                    },
+                )
+
+        resolving.assert_not_called()
 
     def test_precommit_failures_abort_and_close_all_open_resources(self):
         valid_source = self._write_source("valid.h5")
@@ -598,7 +785,8 @@ class MultimodalHdf5Test(unittest.TestCase):
                         "new_batch_write_builder",
                         return_value=proxy):
                     with self.assertRaises(error_type):
-                        table.append_hdf5(source, transform=tracked_transform)
+                        self._load(
+                            table, source, transform=tracked_transform)
                 self.assertEqual(1, writer.abort_count)
                 self.assertEqual(1, writer.close_count)
                 self.assertEqual(1, committer.close_count)
@@ -620,8 +808,8 @@ class MultimodalHdf5Test(unittest.TestCase):
                 new_builder), patch.dict(sys.modules, {"h5py": None}):
             for paths in ([], self.source_dir):
                 with self.subTest(paths=paths):
-                    result = table.append_hdf5(
-                        paths, transform=self._transform)
+                    result = self._load(
+                        table, paths, transform=self._transform)
                     self.assertEqual(
                         (0, 0, 0, None),
                         (
@@ -647,7 +835,7 @@ class MultimodalHdf5Test(unittest.TestCase):
             with self.assertRaisesRegex(
                     ValueError,
                     "HDF5 path does not exist: %s" % missing):
-                table.append_hdf5(missing, transform=self._transform)
+                self._load(table, missing, transform=self._transform)
         new_builder.assert_not_called()
 
     def test_existing_file_with_unsupported_suffix_reports_suffix_only(self):
@@ -658,7 +846,7 @@ class MultimodalHdf5Test(unittest.TestCase):
         with self.assertRaisesRegex(
                 ValueError,
                 "HDF5 file has unsupported suffix: %s" % source):
-            table.append_hdf5(source, transform=self._transform)
+            self._load(table, source, transform=self._transform)
 
     def test_commit_exception_is_not_retried_or_aborted(self):
         source = self._write_source("episode.h5")
@@ -675,7 +863,7 @@ class MultimodalHdf5Test(unittest.TestCase):
                 "new_batch_write_builder",
                 return_value=proxy):
             with self.assertRaisesRegex(RuntimeError, "unknown commit result"):
-                table.append_hdf5(source, transform=self._transform)
+                self._load(table, source, transform=self._transform)
 
         self.assertEqual(1, committer.commit_count)
         self.assertEqual(0, writer.abort_count)
@@ -685,9 +873,11 @@ class MultimodalHdf5Test(unittest.TestCase):
         self.assertEqual(
             1, table.raw_table.snapshot_manager().get_latest_snapshot().id)
 
-    def test_hdf5_api_is_table_only_and_has_no_managed_provenance(self):
-        self.assertFalse(hasattr(self.conn, "from_hdf5"))
-        self.assertFalse(hasattr(self._create_table(), "from_hdf5"))
+    def test_hdf5_api_is_connection_only_and_has_no_managed_provenance(self):
+        table = self._create_table()
+        self.assertTrue(hasattr(self.conn, "load_from_hdf5"))
+        self.assertFalse(hasattr(table, "append_hdf5"))
+        self.assertFalse(hasattr(table, "from_hdf5"))
         self.assertFalse(hasattr(pmm, "HDF5_SOURCE_PATH_COLUMN"))
         self.assertFalse(hasattr(pmm, "HDF5_SOURCE_SHA256_COLUMN"))
         self.assertFalse(hasattr(pmm, "Hdf5SourceDriftError"))
