@@ -150,6 +150,10 @@ public class Levels {
                 + levels.stream().mapToLong(SortedRun::totalSize).sum();
     }
 
+    public long totalFileCount() {
+        return level0.size() + levels.stream().mapToInt(r -> r.files().size()).sum();
+    }
+
     public List<DataFileMeta> allFiles() {
         List<DataFileMeta> files = new ArrayList<>();
         List<LevelSortedRun> runs = levelSortedRuns();
