@@ -36,6 +36,7 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.read.datasource.torch_dataset import (
     TorchIterDataset,
     TorchShuffledIterDataset,
+    _resolve_distributed_context,
 )
 from pypaimon.table.file_store_table import FileStoreTable
 
@@ -63,57 +64,38 @@ class TorchDistributedShardingTest(unittest.TestCase):
         for rank in range(world_size):
             dataset = self._dataset(splits, rank, world_size)
             for worker_id in range(num_workers):
-                assignments[(rank, worker_id)] = dataset._assigned_splits(
+                assignments[(rank, worker_id)] = dataset._worker_splits(
                     self._worker(worker_id, num_workers)
                 )
         return assignments
 
     def assertCompleteNonOverlapping(self, assignments, expected):
         assigned = [
-            split
-            for splits in assignments.values()
-            for split in splits
+            split for splits in assignments.values() for split in splits
         ]
         self.assertCountEqual(assigned, expected)
         self.assertEqual(len(assigned), len(set(assigned)))
 
-    def test_world_size_one_single_worker_returns_all_splits(self):
-        splits = list(range(7))
-        dataset = self._dataset(splits)
-        self.assertEqual(dataset._assigned_splits(None), splits)
-
-    def test_world_size_one_preserves_worker_sharding(self):
-        assignments = self._assignments(10, world_size=1, num_workers=3)
+    @parameterized.expand([
+        ("single", 7, 1, 1, [7]),
+        ("workers", 10, 1, 3, [4, 3, 3]),
+        ("ranks", 10, 3, 1, [4, 3, 3]),
+        ("rank_workers", 17, 3, 2, [3, 3, 3, 3, 3, 2]),
+        ("uneven", 11, 2, 2, [3, 3, 3, 2]),
+        ("sparse", 3, 2, 3, [1, 1, 0, 1, 0, 0]),
+    ])
+    def test_balanced_assignments(
+        self, _, split_count, world_size, num_workers, expected_sizes
+    ):
+        assignments = self._assignments(
+            split_count, world_size, num_workers
+        )
+        self.assertCompleteNonOverlapping(
+            assignments, list(range(split_count))
+        )
         self.assertEqual(
-            list(assignments.values()),
-            [list(range(4)), list(range(4, 7)), list(range(7, 10))],
+            [len(splits) for splits in assignments.values()], expected_sizes
         )
-
-    def test_multiple_ranks_single_worker(self):
-        assignments = self._assignments(10, world_size=3, num_workers=1)
-        self.assertCompleteNonOverlapping(assignments, list(range(10)))
-        self.assertEqual(
-            list(assignments.values()),
-            [list(range(4)), list(range(4, 7)), list(range(7, 10))],
-        )
-
-    def test_multiple_ranks_and_workers(self):
-        assignments = self._assignments(17, world_size=3, num_workers=2)
-        self.assertCompleteNonOverlapping(assignments, list(range(17)))
-        sizes = [len(splits) for splits in assignments.values()]
-        self.assertLessEqual(max(sizes) - min(sizes), 1)
-
-    def test_uneven_and_sparse_assignments(self):
-        uneven = self._assignments(11, world_size=2, num_workers=2)
-        self.assertCompleteNonOverlapping(uneven, list(range(11)))
-        self.assertLessEqual(
-            max(map(len, uneven.values())) - min(map(len, uneven.values())),
-            1,
-        )
-
-        sparse = self._assignments(3, world_size=2, num_workers=3)
-        self.assertCompleteNonOverlapping(sparse, list(range(3)))
-        self.assertTrue(any(not splits for splits in sparse.values()))
 
     def test_binding_limit_uses_one_distributed_consumer(self):
         splits = [SimpleNamespace(row_count=10) for _ in range(4)]
@@ -126,16 +108,15 @@ class TorchDistributedShardingTest(unittest.TestCase):
                 world_size=2,
             )
             for worker_id in range(2):
-                assignments[(rank, worker_id)] = dataset._assigned_splits(
+                assignments[(rank, worker_id)] = dataset._worker_splits(
                     self._worker(worker_id, 2)
                 )
 
         self.assertEqual(assignments[(0, 0)], splits)
         self.assertTrue(
             all(
-                not assigned
-                for consumer, assigned in assignments.items()
-                if consumer != (0, 0)
+                not value for key, value in assignments.items()
+                if key != (0, 0)
             )
         )
 
@@ -151,15 +132,9 @@ class TorchDistributedShardingTest(unittest.TestCase):
         ), patch.object(
             torch.distributed, "get_world_size", return_value=3
         ):
-            dataset = TorchIterDataset(
-                self._table_read(),
-                list(range(6)),
-                auto_detect_rank=True,
-                rank=1,
-                world_size=2,
-            )
+            context = _resolve_distributed_context(True, 1, 2)
 
-        self.assertEqual((dataset.rank, dataset.world_size), (1, 2))
+        self.assertEqual(context, (1, 2))
 
     def test_initialized_distributed_context_precedes_environment(self):
         with patch.dict(
@@ -173,13 +148,9 @@ class TorchDistributedShardingTest(unittest.TestCase):
         ), patch.object(
             torch.distributed, "get_world_size", return_value=3
         ):
-            dataset = TorchIterDataset(
-                self._table_read(),
-                list(range(6)),
-                auto_detect_rank=True,
-            )
+            context = _resolve_distributed_context(True, None, None)
 
-        self.assertEqual((dataset.rank, dataset.world_size), (1, 3))
+        self.assertEqual(context, (1, 3))
 
     def test_worker_process_can_resolve_torchrun_environment(self):
         with patch.dict(
@@ -189,27 +160,19 @@ class TorchDistributedShardingTest(unittest.TestCase):
         ), patch.object(
             torch.distributed, "is_initialized", return_value=False
         ):
-            dataset = TorchIterDataset(
-                self._table_read(),
-                list(range(8)),
-                auto_detect_rank=True,
-            )
+            context = _resolve_distributed_context(True, None, None)
 
-        self.assertEqual((dataset.rank, dataset.world_size), (2, 4))
-        self.assertEqual(dataset._assigned_splits(None), [4, 5])
+        self.assertEqual(context, (2, 4))
+        dataset = self._dataset(list(range(8)), *context)
+        self.assertEqual(dataset._worker_splits(None), [4, 5])
 
     def test_auto_falls_back_to_single_process(self):
         with patch.dict(os.environ, {}, clear=True), patch.object(
             torch.distributed, "is_available", return_value=False
         ):
-            dataset = TorchIterDataset(
-                self._table_read(),
-                list(range(4)),
-                auto_detect_rank=True,
-            )
+            context = _resolve_distributed_context(True, None, None)
 
-        self.assertEqual((dataset.rank, dataset.world_size), (0, 1))
-        self.assertEqual(dataset._assigned_splits(None), list(range(4)))
+        self.assertEqual(context, (0, 1))
 
     def test_off_preserves_existing_behavior(self):
         splits = list(range(8))
@@ -224,7 +187,7 @@ class TorchDistributedShardingTest(unittest.TestCase):
 
         self.assertEqual((dataset.rank, dataset.world_size), (0, 1))
         self.assertEqual(
-            dataset._assigned_splits(self._worker(1, 2)),
+            dataset._worker_splits(self._worker(1, 2)),
             list(range(4, 8)),
         )
 
@@ -241,7 +204,7 @@ class TorchDistributedShardingTest(unittest.TestCase):
             )
             for rank in range(2)
         ]
-        local_splits = [dataset._assigned_splits(None) for dataset in datasets]
+        local_splits = [dataset._worker_splits(None) for dataset in datasets]
         self.assertTrue(set(local_splits[0]).isdisjoint(local_splits[1]))
         self.assertCountEqual(local_splits[0] + local_splits[1], splits)
         restored = pickle.loads(pickle.dumps(datasets[1]))
@@ -270,42 +233,30 @@ class TorchDistributedShardingTest(unittest.TestCase):
         invalid_options = [
             ({"auto_detect_rank": "auto"}, "auto_detect_rank"),
             ({"rank": 0}, "provided together"),
-            (
-                {
-                    "rank": 0,
-                    "world_size": 0,
-                },
-                "greater than 0",
-            ),
-            (
-                {
-                    "rank": 2,
-                    "world_size": 2,
-                },
-                "0 <= rank < world_size",
-            ),
+            ({"rank": 0, "world_size": 0}, "greater than 0"),
+            ({"rank": 2, "world_size": 2}, "0 <= rank < world_size"),
         ]
         for options, message in invalid_options:
             with self.subTest(options=options), self.assertRaisesRegex(
                 ValueError, message
             ):
-                TorchIterDataset(self._table_read(), [], **options)
+                _resolve_distributed_context(
+                    options.get("auto_detect_rank", False),
+                    options.get("rank"),
+                    options.get("world_size"),
+                )
 
         with patch.dict(os.environ, {"RANK": "one"}, clear=True), patch.object(
             torch.distributed, "is_available", return_value=False
         ), self.assertRaisesRegex(ValueError, "must be set together"):
-            TorchIterDataset(
-                self._table_read(), [], auto_detect_rank=True
-            )
+            _resolve_distributed_context(True, None, None)
 
         with patch.dict(
             os.environ, {"RANK": "one", "WORLD_SIZE": "2"}, clear=True
         ), patch.object(
             torch.distributed, "is_available", return_value=False
         ), self.assertRaisesRegex(ValueError, "must be integers"):
-            TorchIterDataset(
-                self._table_read(), [], auto_detect_rank=True
-            )
+            _resolve_distributed_context(True, None, None)
 
     @unittest.skipUnless(
         torch.distributed.is_available(), "torch.distributed is unavailable"
@@ -615,7 +566,7 @@ class TorchReadTest(unittest.TestCase):
             batch_size=3,
         )
         self.assertEqual(
-            dataset._assigned_splits(SimpleNamespace(id=1, num_workers=2)),
+            dataset._worker_splits(SimpleNamespace(id=1, num_workers=2)),
             [],
         )
         batches = list(DataLoader(
@@ -653,7 +604,7 @@ class TorchReadTest(unittest.TestCase):
                 batch_format=batch_format,
             )
             assigned = [
-                dataset._assigned_splits(
+                dataset._worker_splits(
                     SimpleNamespace(id=worker_id, num_workers=2)
                 )
                 for worker_id in range(2)
@@ -675,7 +626,7 @@ class TorchReadTest(unittest.TestCase):
         dataset = TorchIterDataset(table_read, splits)
 
         assigned = [
-            dataset._assigned_splits(
+            dataset._worker_splits(
                 SimpleNamespace(id=worker_id, num_workers=2)
             )
             for worker_id in range(2)

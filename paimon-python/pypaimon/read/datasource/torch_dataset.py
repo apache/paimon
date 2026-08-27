@@ -41,17 +41,15 @@ def _share_epoch_with_torch_workers(value):
     return torch.tensor(value, dtype=torch.long).share_memory_()
 
 
-def _validate_distributed_context(rank: int, world_size: int, source: str):
+def _validate_distributed_context(rank: int, world_size: int):
     if isinstance(rank, bool) or not isinstance(rank, int):
-        raise ValueError("%s rank must be an int" % source)
+        raise ValueError("rank must be an int")
     if isinstance(world_size, bool) or not isinstance(world_size, int):
-        raise ValueError("%s world_size must be an int" % source)
+        raise ValueError("world_size must be an int")
     if world_size <= 0:
-        raise ValueError("%s world_size must be greater than 0" % source)
+        raise ValueError("world_size must be greater than 0")
     if rank < 0 or rank >= world_size:
-        raise ValueError(
-            "%s rank must satisfy 0 <= rank < world_size" % source
-        )
+        raise ValueError("rank must satisfy 0 <= rank < world_size")
     return rank, world_size
 
 
@@ -66,7 +64,7 @@ def _resolve_distributed_context(
         raise ValueError("rank and world_size must be provided together")
 
     if rank is not None:
-        return _validate_distributed_context(rank, world_size, "explicit")
+        return _validate_distributed_context(rank, world_size)
 
     if not auto_detect_rank:
         return 0, 1
@@ -77,11 +75,9 @@ def _resolve_distributed_context(
         and distributed.is_available()
         and distributed.is_initialized()
     ):
-        return _validate_distributed_context(
-            distributed.get_rank(),
-            distributed.get_world_size(),
-            "torch.distributed",
-        )
+        rank = distributed.get_rank()
+        world_size = distributed.get_world_size()
+        return _validate_distributed_context(rank, world_size)
 
     env_rank = os.environ.get("RANK")
     env_world_size = os.environ.get("WORLD_SIZE")
@@ -91,15 +87,12 @@ def _resolve_distributed_context(
                 "RANK and WORLD_SIZE environment variables must be set together"
             )
         try:
-            parsed_rank = int(env_rank)
-            parsed_world_size = int(env_world_size)
+            rank, world_size = int(env_rank), int(env_world_size)
         except ValueError:
             raise ValueError(
                 "RANK and WORLD_SIZE environment variables must be integers"
             )
-        return _validate_distributed_context(
-            parsed_rank, parsed_world_size, "environment"
-        )
+        return _validate_distributed_context(rank, world_size)
 
     return 0, 1
 
@@ -174,7 +167,6 @@ class _BaseTorchIterDataset(IterableDataset):
         self.table_read = table_read
         self.splits = splits
         self.field_names = [field.name for field in table_read.read_type]
-        self.auto_detect_rank = auto_detect_rank
         self.rank, self.world_size = _resolve_distributed_context(
             auto_detect_rank, rank, world_size
         )
@@ -217,24 +209,18 @@ class _BaseTorchIterDataset(IterableDataset):
                 return False
         return True
 
-    def _assigned_splits(self, worker_info) -> List[Split]:
+    def _worker_splits(self, worker_info) -> List[Split]:
         worker_id = worker_info.id if worker_info is not None else 0
         num_workers = worker_info.num_workers if worker_info is not None else 1
 
-        # Distributed consumers cannot share a limit budget that may truncate.
         if (
             self.table_read.limit is not None
             and not self._limit_covers_all_splits()
         ):
-            return (
-                self.splits
-                if self.rank == 0 and worker_id == 0
-                else []
-            )
+            # A binding limit cannot be shared safely.
+            return self.splits if self.rank == 0 and worker_id == 0 else []
 
-        rank_splits = _balanced_slice(
-            self.splits, self.rank, self.world_size
-        )
+        rank_splits = _balanced_slice(self.splits, self.rank, self.world_size)
         return _balanced_slice(rank_splits, worker_id, num_workers)
 
 
@@ -274,9 +260,7 @@ class TorchIterDataset(_BaseTorchIterDataset):
                 this worker (default 1). When > 1, splits are partitioned across
                 threads to increase read throughput.
         """
-        super().__init__(
-            table_read, splits, auto_detect_rank, rank, world_size
-        )
+        super().__init__(table_read, splits, auto_detect_rank, rank, world_size)
         self.prefetch_concurrency = max(1, int(prefetch_concurrency))
 
     def __iter__(self):
@@ -290,7 +274,7 @@ class TorchIterDataset(_BaseTorchIterDataset):
             row data of dict type, where keys are column names
         """
         worker_info = torch.utils.data.get_worker_info()
-        splits_to_process = self._assigned_splits(worker_info)
+        splits_to_process = self._worker_splits(worker_info)
 
         if self.prefetch_concurrency > 1:
             for row in self._iter_rows(splits_to_process):
@@ -483,16 +467,14 @@ class TorchBatchIterDataset(_BaseTorchIterDataset):
         rank: Optional[int] = None,
         world_size: Optional[int] = None,
     ):
-        super().__init__(
-            table_read, splits, auto_detect_rank, rank, world_size
-        )
+        super().__init__(table_read, splits, auto_detect_rank, rank, world_size)
         self.batch_format = batch_format
         self.batch_size = batch_size
         self.to_tensor_fn = to_tensor_fn
 
     def __iter__(self):
         worker_info = torch.utils.data.get_worker_info()
-        splits_to_process = self._assigned_splits(worker_info)
+        splits_to_process = self._worker_splits(worker_info)
         raw_batches = self._arrow_batches_for_splits(splits_to_process)
 
         batches = _sized_record_batches(
@@ -552,9 +534,7 @@ class TorchShuffledIterDataset(_BaseTorchIterDataset):
         rank: Optional[int] = None,
         world_size: Optional[int] = None,
     ):
-        super().__init__(
-            table_read, splits, auto_detect_rank, rank, world_size
-        )
+        super().__init__(table_read, splits, auto_detect_rank, rank, world_size)
         self.seed = self._require_int(seed, "seed")
         self.buffer_size = self._require_positive_int(buffer_size, "buffer_size")
         self.max_buffer_input_splits = self._require_positive_int(
@@ -593,7 +573,7 @@ class TorchShuffledIterDataset(_BaseTorchIterDataset):
     def __iter__(self):
         worker_info = torch.utils.data.get_worker_info()
         worker_id = worker_info.id if worker_info is not None else 0
-        splits_to_process = self._assigned_splits(worker_info)
+        splits_to_process = self._worker_splits(worker_info)
 
         if self.max_buffer_input_splits == 1:
             rows = self._iter_ordered_rows(splits_to_process)
@@ -655,12 +635,9 @@ class TorchShuffledIterDataset(_BaseTorchIterDataset):
         rows: Iterator[dict],
         worker_id: int,
     ) -> Iterator[dict]:
-        if self.world_size == 1:
-            rng_seed = self.seed + self.epoch * 1000003 + worker_id
-        else:
-            rng_seed = "%d:%d:%d:%d" % (
-                self.seed, self.epoch, self.rank, worker_id
-            )
+        rng_seed = self.seed + self.epoch * 1000003 + worker_id
+        if self.world_size > 1:
+            rng_seed = "%d:%d" % (rng_seed, self.rank)
         rng = random.Random(rng_seed)
         buffer = []
         for row in rows:
