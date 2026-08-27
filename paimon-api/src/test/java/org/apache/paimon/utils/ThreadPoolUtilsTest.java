@@ -322,6 +322,7 @@ public class ThreadPoolUtilsTest {
     public void testCloseCancelsQueuedTasksAndWaitsUninterruptibly() throws Exception {
         LinkedBlockingQueue<Runnable> taskQueue = new LinkedBlockingQueue<>();
         AtomicBoolean runQueuedTaskOnInterrupt = new AtomicBoolean();
+        CountDownLatch interruptHookFinished = new CountDownLatch(1);
         // If close interrupts the worker before cancelling queued tasks, interrupt() runs the
         // queued task and exposes the ordering bug.
         ThreadPoolExecutor workers =
@@ -341,6 +342,7 @@ public class ThreadPoolUtilsTest {
                                             if (queuedTask != null) {
                                                 queuedTask.run();
                                             }
+                                            interruptHookFinished.countDown();
                                         }
                                     }
                                 });
@@ -387,6 +389,7 @@ public class ThreadPoolUtilsTest {
                             });
             assertThat(closeStarted.await(3, TimeUnit.SECONDS)).isTrue();
             assertThat(workerInterrupted.await(3, TimeUnit.SECONDS)).isTrue();
+            assertThat(interruptHookFinished.await(3, TimeUnit.SECONDS)).isTrue();
             assertThat(runQueuedTaskOnInterrupt).isFalse();
             assertThat(closeResult.isDone()).isFalse();
 
