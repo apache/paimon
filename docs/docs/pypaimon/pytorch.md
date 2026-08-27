@@ -60,6 +60,32 @@ when it is false, it will read the full amount of data into memory.
 **`prefetch_concurrency`** (default: 1): In streaming row mode, controls
 reader threads per DataLoader worker. It has no effect in non-streaming mode.
 
+### Distributed Sharding
+
+Streaming datasets can shard splits across both DDP ranks and DataLoader
+workers:
+
+```python
+dataset = table_read.to_torch(
+    splits,
+    streaming=True,
+    auto_detect_rank=True,
+)
+dataloader = DataLoader(dataset, batch_size=32, num_workers=2)
+```
+
+`auto_detect_rank=False` is the default and preserves the existing worker-only
+behavior. Use it when the application already shards `splits` by rank. When
+enabled, PyPaimon resolves rank and world size from an initialized
+`torch.distributed` process group or `RANK` and `WORLD_SIZE`. Explicit `rank`
+and `world_size` arguments take precedence and do not require automatic
+detection. PyPaimon first assigns a balanced slice to the rank, then balances
+that rank's splits across its DataLoader workers.
+
+Do not combine `auto_detect_rank=True` with application-side code such as
+`splits[rank::world_size]`; remove that slicing or keep automatic detection
+disabled to avoid double sharding.
+
 ### Batch Streaming
 
 For batch-oriented training, make the streaming dataset yield batches directly:

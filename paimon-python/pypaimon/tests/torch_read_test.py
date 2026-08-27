@@ -15,8 +15,12 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import json
 import os
+import pickle
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -29,7 +33,343 @@ from torch.utils.data import DataLoader
 
 from pypaimon import CatalogFactory, Schema
 
+from pypaimon.read.datasource.torch_dataset import (
+    TorchIterDataset,
+    TorchShuffledIterDataset,
+)
 from pypaimon.table.file_store_table import FileStoreTable
+
+
+class TorchDistributedShardingTest(unittest.TestCase):
+    @staticmethod
+    def _table_read(limit=None):
+        return SimpleNamespace(limit=limit, read_type=[])
+
+    @staticmethod
+    def _worker(worker_id, num_workers):
+        return SimpleNamespace(id=worker_id, num_workers=num_workers)
+
+    def _dataset(self, splits, rank=0, world_size=1):
+        return TorchIterDataset(
+            self._table_read(),
+            splits,
+            rank=rank,
+            world_size=world_size,
+        )
+
+    def _assignments(self, split_count, world_size, num_workers):
+        splits = list(range(split_count))
+        assignments = {}
+        for rank in range(world_size):
+            dataset = self._dataset(splits, rank, world_size)
+            for worker_id in range(num_workers):
+                assignments[(rank, worker_id)] = dataset._assigned_splits(
+                    self._worker(worker_id, num_workers)
+                )
+        return assignments
+
+    def assertCompleteNonOverlapping(self, assignments, expected):
+        assigned = [
+            split
+            for splits in assignments.values()
+            for split in splits
+        ]
+        self.assertCountEqual(assigned, expected)
+        self.assertEqual(len(assigned), len(set(assigned)))
+
+    def test_world_size_one_single_worker_returns_all_splits(self):
+        splits = list(range(7))
+        dataset = self._dataset(splits)
+        self.assertEqual(dataset._assigned_splits(None), splits)
+
+    def test_world_size_one_preserves_worker_sharding(self):
+        assignments = self._assignments(10, world_size=1, num_workers=3)
+        self.assertEqual(
+            list(assignments.values()),
+            [list(range(4)), list(range(4, 7)), list(range(7, 10))],
+        )
+
+    def test_multiple_ranks_single_worker(self):
+        assignments = self._assignments(10, world_size=3, num_workers=1)
+        self.assertCompleteNonOverlapping(assignments, list(range(10)))
+        self.assertEqual(
+            list(assignments.values()),
+            [list(range(4)), list(range(4, 7)), list(range(7, 10))],
+        )
+
+    def test_multiple_ranks_and_workers(self):
+        assignments = self._assignments(17, world_size=3, num_workers=2)
+        self.assertCompleteNonOverlapping(assignments, list(range(17)))
+        sizes = [len(splits) for splits in assignments.values()]
+        self.assertLessEqual(max(sizes) - min(sizes), 1)
+
+    def test_uneven_and_sparse_assignments(self):
+        uneven = self._assignments(11, world_size=2, num_workers=2)
+        self.assertCompleteNonOverlapping(uneven, list(range(11)))
+        self.assertLessEqual(
+            max(map(len, uneven.values())) - min(map(len, uneven.values())),
+            1,
+        )
+
+        sparse = self._assignments(3, world_size=2, num_workers=3)
+        self.assertCompleteNonOverlapping(sparse, list(range(3)))
+        self.assertTrue(any(not splits for splits in sparse.values()))
+
+    def test_binding_limit_uses_one_distributed_consumer(self):
+        splits = [SimpleNamespace(row_count=10) for _ in range(4)]
+        assignments = {}
+        for rank in range(2):
+            dataset = TorchIterDataset(
+                self._table_read(limit=5),
+                splits,
+                rank=rank,
+                world_size=2,
+            )
+            for worker_id in range(2):
+                assignments[(rank, worker_id)] = dataset._assigned_splits(
+                    self._worker(worker_id, 2)
+                )
+
+        self.assertEqual(assignments[(0, 0)], splits)
+        self.assertTrue(
+            all(
+                not assigned
+                for consumer, assigned in assignments.items()
+                if consumer != (0, 0)
+            )
+        )
+
+    def test_explicit_context_has_highest_priority(self):
+        with patch.dict(
+            os.environ, {"RANK": "4", "WORLD_SIZE": "5"}, clear=True
+        ), patch.object(
+            torch.distributed, "is_available", return_value=True
+        ), patch.object(
+            torch.distributed, "is_initialized", return_value=True
+        ), patch.object(
+            torch.distributed, "get_rank", return_value=2
+        ), patch.object(
+            torch.distributed, "get_world_size", return_value=3
+        ):
+            dataset = TorchIterDataset(
+                self._table_read(),
+                list(range(6)),
+                auto_detect_rank=True,
+                rank=1,
+                world_size=2,
+            )
+
+        self.assertEqual((dataset.rank, dataset.world_size), (1, 2))
+
+    def test_initialized_distributed_context_precedes_environment(self):
+        with patch.dict(
+            os.environ, {"RANK": "4", "WORLD_SIZE": "5"}, clear=True
+        ), patch.object(
+            torch.distributed, "is_available", return_value=True
+        ), patch.object(
+            torch.distributed, "is_initialized", return_value=True
+        ), patch.object(
+            torch.distributed, "get_rank", return_value=1
+        ), patch.object(
+            torch.distributed, "get_world_size", return_value=3
+        ):
+            dataset = TorchIterDataset(
+                self._table_read(),
+                list(range(6)),
+                auto_detect_rank=True,
+            )
+
+        self.assertEqual((dataset.rank, dataset.world_size), (1, 3))
+
+    def test_worker_process_can_resolve_torchrun_environment(self):
+        with patch.dict(
+            os.environ, {"RANK": "2", "WORLD_SIZE": "4"}, clear=True
+        ), patch.object(
+            torch.distributed, "is_available", return_value=True
+        ), patch.object(
+            torch.distributed, "is_initialized", return_value=False
+        ):
+            dataset = TorchIterDataset(
+                self._table_read(),
+                list(range(8)),
+                auto_detect_rank=True,
+            )
+
+        self.assertEqual((dataset.rank, dataset.world_size), (2, 4))
+        self.assertEqual(dataset._assigned_splits(None), [4, 5])
+
+    def test_auto_falls_back_to_single_process(self):
+        with patch.dict(os.environ, {}, clear=True), patch.object(
+            torch.distributed, "is_available", return_value=False
+        ):
+            dataset = TorchIterDataset(
+                self._table_read(),
+                list(range(4)),
+                auto_detect_rank=True,
+            )
+
+        self.assertEqual((dataset.rank, dataset.world_size), (0, 1))
+        self.assertEqual(dataset._assigned_splits(None), list(range(4)))
+
+    def test_off_preserves_existing_behavior(self):
+        splits = list(range(8))
+        with patch.dict(
+            os.environ, {"RANK": "1", "WORLD_SIZE": "2"}, clear=True
+        ), patch.object(
+            torch.distributed, "is_available", return_value=True
+        ), patch.object(
+            torch.distributed, "is_initialized", return_value=True
+        ):
+            dataset = TorchIterDataset(self._table_read(), splits)
+
+        self.assertEqual((dataset.rank, dataset.world_size), (0, 1))
+        self.assertEqual(
+            dataset._assigned_splits(self._worker(1, 2)),
+            list(range(4, 8)),
+        )
+
+    def test_shuffled_dataset_is_reproducible_and_rank_local(self):
+        splits = list(range(20))
+        datasets = [
+            TorchShuffledIterDataset(
+                self._table_read(),
+                splits,
+                seed=17,
+                buffer_size=20,
+                rank=rank,
+                world_size=2,
+            )
+            for rank in range(2)
+        ]
+        local_splits = [dataset._assigned_splits(None) for dataset in datasets]
+        self.assertTrue(set(local_splits[0]).isdisjoint(local_splits[1]))
+        self.assertCountEqual(local_splits[0] + local_splits[1], splits)
+        restored = pickle.loads(pickle.dumps(datasets[1]))
+        self.assertEqual((restored.rank, restored.world_size), (1, 2))
+
+        rows = [{"id": value} for value in range(20)]
+        first = list(datasets[0]._iter_buffer_shuffled_rows(iter(rows), 0))
+        repeat = list(datasets[0]._iter_buffer_shuffled_rows(iter(rows), 0))
+        other_rank = list(
+            datasets[1]._iter_buffer_shuffled_rows(iter(rows), 0)
+        )
+        other_worker = list(
+            datasets[0]._iter_buffer_shuffled_rows(iter(rows), 1)
+        )
+        self.assertEqual(first, repeat)
+        self.assertNotEqual(first, other_rank)
+        self.assertNotEqual(first, other_worker)
+
+        datasets[0].set_epoch(1)
+        next_epoch = list(
+            datasets[0]._iter_buffer_shuffled_rows(iter(rows), 0)
+        )
+        self.assertNotEqual(first, next_epoch)
+
+    def test_invalid_distributed_context(self):
+        invalid_options = [
+            ({"auto_detect_rank": "auto"}, "auto_detect_rank"),
+            ({"rank": 0}, "provided together"),
+            (
+                {
+                    "rank": 0,
+                    "world_size": 0,
+                },
+                "greater than 0",
+            ),
+            (
+                {
+                    "rank": 2,
+                    "world_size": 2,
+                },
+                "0 <= rank < world_size",
+            ),
+        ]
+        for options, message in invalid_options:
+            with self.subTest(options=options), self.assertRaisesRegex(
+                ValueError, message
+            ):
+                TorchIterDataset(self._table_read(), [], **options)
+
+        with patch.dict(os.environ, {"RANK": "one"}, clear=True), patch.object(
+            torch.distributed, "is_available", return_value=False
+        ), self.assertRaisesRegex(ValueError, "must be set together"):
+            TorchIterDataset(
+                self._table_read(), [], auto_detect_rank=True
+            )
+
+        with patch.dict(
+            os.environ, {"RANK": "one", "WORLD_SIZE": "2"}, clear=True
+        ), patch.object(
+            torch.distributed, "is_available", return_value=False
+        ), self.assertRaisesRegex(ValueError, "must be integers"):
+            TorchIterDataset(
+                self._table_read(), [], auto_detect_rank=True
+            )
+
+    @unittest.skipUnless(
+        torch.distributed.is_available(), "torch.distributed is unavailable"
+    )
+    def test_torchrun_rank_and_worker_sharding(self):
+        script = os.path.join(
+            os.path.dirname(__file__), "torch_distributed_sharding_worker.py"
+        )
+        python_root = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "..")
+        )
+        with tempfile.TemporaryDirectory() as output_dir:
+            env = os.environ.copy()
+            env["PYTHONPATH"] = os.pathsep.join(
+                filter(None, [python_root, env.get("PYTHONPATH")])
+            )
+            process = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "torch.distributed.run",
+                    "--standalone",
+                    "--nproc-per-node=2",
+                    script,
+                    output_dir,
+                ],
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=180,
+            )
+            self.assertEqual(
+                process.returncode,
+                0,
+                "torchrun failed:\n%s\n%s" % (
+                    process.stdout, process.stderr
+                ),
+            )
+            rows = []
+            for rank in range(2):
+                with open(
+                    os.path.join(output_dir, "rank-%d.json" % rank),
+                    encoding="utf-8",
+                ) as result_file:
+                    rows.extend(json.load(result_file))
+
+        split_ids = [row["split_id"] for row in rows]
+        self.assertCountEqual(split_ids, list(range(11)))
+        self.assertEqual(len(split_ids), len(set(split_ids)))
+        assignments = {}
+        for row in rows:
+            assignments.setdefault(
+                (row["rank"], row["worker"]), []
+            ).append(row["split_id"])
+        self.assertEqual(
+            {key: sorted(values) for key, values in assignments.items()},
+            {
+                (0, 0): [0, 1, 2],
+                (0, 1): [3, 4, 5],
+                (1, 0): [6, 7, 8],
+                (1, 1): [9, 10],
+            },
+        )
 
 
 class TorchReadTest(unittest.TestCase):
@@ -275,7 +615,7 @@ class TorchReadTest(unittest.TestCase):
             batch_size=3,
         )
         self.assertEqual(
-            dataset._worker_splits(SimpleNamespace(id=1, num_workers=2)),
+            dataset._assigned_splits(SimpleNamespace(id=1, num_workers=2)),
             [],
         )
         batches = list(DataLoader(
@@ -313,7 +653,7 @@ class TorchReadTest(unittest.TestCase):
                 batch_format=batch_format,
             )
             assigned = [
-                dataset._worker_splits(
+                dataset._assigned_splits(
                     SimpleNamespace(id=worker_id, num_workers=2)
                 )
                 for worker_id in range(2)
@@ -335,7 +675,7 @@ class TorchReadTest(unittest.TestCase):
         dataset = TorchIterDataset(table_read, splits)
 
         assigned = [
-            dataset._worker_splits(
+            dataset._assigned_splits(
                 SimpleNamespace(id=worker_id, num_workers=2)
             )
             for worker_id in range(2)
@@ -467,6 +807,47 @@ class TorchReadTest(unittest.TestCase):
                         batch_format='pyarrow',
                         prefetch_concurrency=invalid,
                     )
+
+    def test_torch_distributed_sharding_public_api(self):
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema, partition_keys=['user_id']
+        )
+        self.catalog.create_table(
+            'default.test_torch_distributed_api', schema, False
+        )
+        table = self.catalog.get_table(
+            'default.test_torch_distributed_api'
+        )
+        self._write_test_table(table)
+        read_builder = table.new_read_builder().with_projection(['user_id'])
+        splits = read_builder.new_scan().plan().splits()
+        table_read = read_builder.new_read()
+
+        datasets = [
+            table_read.to_torch(
+                splits,
+                streaming=True,
+                batch_format=batch_format,
+                shuffle=batch_format == 'row' and shuffle,
+                rank=1,
+                world_size=2,
+            )
+            for batch_format, shuffle in [
+                ('row', False),
+                ('row', True),
+                ('pyarrow', False),
+            ]
+        ]
+        for dataset in datasets:
+            self.assertEqual((dataset.rank, dataset.world_size), (1, 2))
+
+        with self.assertRaisesRegex(ValueError, 'requires streaming=True'):
+            table_read.to_torch(
+                splits,
+                auto_detect_rank=True,
+                rank=1,
+                world_size=2,
+            )
 
     def test_blob_torch_read(self):
         """Test end-to-end blob functionality using blob descriptors."""
