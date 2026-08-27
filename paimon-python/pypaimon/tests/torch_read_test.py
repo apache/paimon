@@ -166,7 +166,7 @@ class TorchDistributedShardingTest(unittest.TestCase):
 
         self.assertEqual(context, (0, 1))
 
-    def test_off_preserves_existing_behavior(self):
+    def test_disabled_preserves_worker_sharding(self):
         splits = list(range(8))
         with patch.dict(
             os.environ, {"RANK": "1", "WORLD_SIZE": "2"}, clear=True
@@ -175,7 +175,9 @@ class TorchDistributedShardingTest(unittest.TestCase):
         ), patch.object(
             torch.distributed, "is_initialized", return_value=True
         ):
-            dataset = TorchIterDataset(self._table_read(), splits)
+            dataset = TorchIterDataset(
+                self._table_read(), splits, auto_detect_rank=False
+            )
 
         self.assertEqual((dataset.rank, dataset.world_size), (0, 1))
         self.assertEqual(
@@ -775,7 +777,6 @@ class TorchReadTest(unittest.TestCase):
                     streaming=True,
                     batch_format=batch_format,
                     shuffle=batch_format == 'row' and shuffle,
-                    auto_detect_rank=True,
                 )
                 for batch_format, shuffle in [
                     ('row', False),
@@ -786,8 +787,7 @@ class TorchReadTest(unittest.TestCase):
         for dataset in datasets:
             self.assertEqual((dataset.rank, dataset.world_size), (1, 2))
 
-        with self.assertRaisesRegex(ValueError, 'requires streaming=True'):
-            table_read.to_torch(splits, auto_detect_rank=True)
+        self.assertIsNotNone(table_read.to_torch(splits))
 
     def test_blob_torch_read(self):
         """Test end-to-end blob functionality using blob descriptors."""

@@ -62,21 +62,18 @@ reader threads per DataLoader worker. It has no effect in non-streaming mode.
 
 ### Distributed Sharding
 
-Set `auto_detect_rank=True` to shard streaming reads across DDP ranks and
-DataLoader workers:
+Streaming reads shard splits across DDP ranks and DataLoader workers:
 
 ```python
 dataset = table_read.to_torch(
     splits,
     streaming=True,
-    auto_detect_rank=True,
 )
 dataloader = DataLoader(dataset, batch_size=32, num_workers=2)
 ```
 
 PyPaimon checks `torch.distributed`, then `RANK` and `WORLD_SIZE`. Detection is
-disabled by default; if splits are already sharded upstream, leave it disabled
-or remove the upstream sharding.
+enabled by default; set `auto_detect_rank=False` to disable rank sharding.
 
 ### Batch Streaming
 

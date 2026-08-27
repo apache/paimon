@@ -58,7 +58,6 @@ def main():
         dataset = TorchIterDataset(
             _TableRead(),
             list(range(11)),
-            auto_detect_rank=True,
         )
         rows = list(DataLoader(dataset, batch_size=None, num_workers=2))
         with open(

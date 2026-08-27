@@ -661,7 +661,7 @@ class TableRead:
         seed: int = 0,
         buffer_size: int = 1000,
         max_buffer_input_splits: int = 10,
-        auto_detect_rank: bool = False,
+        auto_detect_rank: bool = True,
     ) -> "torch.utils.data.Dataset":
         """Wrap Paimon table data in a PyTorch Dataset.
 
@@ -675,8 +675,7 @@ class TableRead:
             batch_size: Rows per batch; ``None`` preserves reader batches.
             to_tensor_fn: Optional RecordBatch converter for Torch batches.
             shuffle: Whether to shuffle rows; supported only in row format.
-            auto_detect_rank: Whether to detect DDP rank and world size from
-                torch.distributed or torchrun environment variables.
+            auto_detect_rank: Whether streaming reads detect the DDP context.
         """
         valid_batch_formats = {"row", "pyarrow", "torch"}
         if batch_format not in valid_batch_formats:
@@ -757,10 +756,6 @@ class TableRead:
             )
             return dataset
         else:
-            if auto_detect_rank:
-                raise ValueError(
-                    "distributed sharding requires streaming=True"
-                )
             from pypaimon.read.datasource.torch_dataset import TorchDataset
             dataset = TorchDataset(self, splits)
             return dataset
