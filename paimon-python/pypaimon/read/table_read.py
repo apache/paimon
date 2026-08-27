@@ -1080,6 +1080,15 @@ class TableRead:
         if not isinstance(reader, RecordBatchReader):
             schema = PyarrowFieldParser.from_paimon_schema(effective_read_type)
             reader = RecordReaderToBatchAdapter(reader, schema, include_row_kind=self.include_row_kind)
+            if getattr(reader, 'blob_field_indices', None) is None:
+                from pypaimon.read.reader.field_indices import (
+                    blob_field_indices, descriptor_field_indices_for_table,
+                    vector_field_indices)
+                reader.file_io = self.table.file_io
+                reader.blob_field_indices = blob_field_indices(effective_read_type)
+                reader.descriptor_field_indices = descriptor_field_indices_for_table(
+                    self.table, effective_read_type)
+                reader.vector_field_indices = vector_field_indices(effective_read_type)
             needs_convert_back = True
 
         if filter_fn and not embed_filter:

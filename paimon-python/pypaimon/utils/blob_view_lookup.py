@@ -16,10 +16,10 @@
 # under the License.
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Dict, List, Tuple, Set
+from typing import Dict, List, Set, Tuple
 
 from pypaimon.common.identifier import Identifier
-from pypaimon.common.uri_reader import FileUriReader, UriReader
+from pypaimon.common.uri_reader import UriReader, UriReaderFactory
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.table.row.blob import Blob, BlobDescriptor, BlobViewStruct
 from pypaimon.table.special_fields import SpecialFields
@@ -60,6 +60,7 @@ class BlobViewLookup:
         self._table = table
         self._descriptor_cache: Dict[BlobViewStruct, BlobDescriptor] = {}
         self._uri_reader_cache: Dict[str, UriReader] = {}
+        self._uri_reader_factory_cache: Dict[str, UriReaderFactory] = {}
         self._null_value_cache: Set[BlobViewStruct] = set()
 
     def preload(self, view_structs: List[BlobViewStruct]):
@@ -79,9 +80,7 @@ class BlobViewLookup:
 
         if len(tasks) <= 1:
             for plan, range_chunk in tasks:
-                descriptors, null_values = self._load_descriptor_chunk(plan, range_chunk)
-                self._descriptor_cache.update(descriptors)
-                self._null_value_cache.update(null_values)
+                self._store_chunk_results(*self._load_descriptor_chunk(plan, range_chunk))
             return
 
         with ThreadPoolExecutor(max_workers=min(_PRELOAD_THREAD_NUM, len(tasks))) as executor:
@@ -91,9 +90,7 @@ class BlobViewLookup:
             }
             for future in as_completed(futures):
                 try:
-                    descriptors, null_values = future.result()
-                    self._descriptor_cache.update(descriptors)
-                    self._null_value_cache.update(null_values)
+                    self._store_chunk_results(*future.result())
                 except Exception as exc:
                     # Cancel remaining futures that have not started yet so a single
                     # failure can abort the rest of the preload work as early as possible.
@@ -119,18 +116,14 @@ class BlobViewLookup:
         uri_reader = self.resolve_uri_reader(view_struct)
         return Blob.from_descriptor(uri_reader, descriptor)
 
-    def resolve_file_io(self, view_struct: BlobViewStruct):
-        uri_reader = self.resolve_uri_reader(view_struct)
-        if not isinstance(uri_reader, FileUriReader):
-            raise ValueError(
-                "Cannot resolve BlobViewStruct {} with parallel blob reads because "
-                "upstream table {} does not use a file-backed UriReader.".format(
-                    view_struct, view_struct.identifier.get_full_name())
-            )
-        return uri_reader._file_io
-
     def resolve_uri_reader(self, view_struct: BlobViewStruct) -> UriReader:
         table_key = view_struct.identifier.get_full_name()
+        factory = self._uri_reader_factory_cache.get(table_key)
+        descriptor = self._descriptor_cache.get(view_struct)
+        if factory is not None and descriptor is not None:
+            # from_file_io: HTTP(S) stays on HttpUriReader; other URIs reuse
+            # the upstream table FileIO (REST table token).
+            return factory.create(descriptor.uri)
         uri_reader = self._uri_reader_cache.get(table_key)
         if uri_reader is None:
             raise ValueError(
@@ -138,6 +131,10 @@ class BlobViewLookup:
                 "was not loaded.".format(view_struct, table_key)
             )
         return uri_reader
+
+    def _store_chunk_results(self, descriptors, null_values):
+        self._descriptor_cache.update(descriptors)
+        self._null_value_cache.update(null_values)
 
     def resolve_to_null(self, view_struct: BlobViewStruct) -> bool:
         if view_struct in self._null_value_cache:
@@ -162,9 +159,11 @@ class BlobViewLookup:
 
     def _create_table_read_plan(self, table_refs: TableReferences) -> TableReadPlan:
         upstream_table = self._load_table(table_refs.identifier)
-        self._uri_reader_cache[table_refs.identifier.get_full_name()] = (
-            UriReader.from_file(upstream_table.file_io)
-        )
+        table_key = table_refs.identifier.get_full_name()
+        self._uri_reader_cache[table_key] = UriReader.from_file(
+            upstream_table.file_io)
+        self._uri_reader_factory_cache[table_key] = (
+            UriReaderFactory.from_file_io(upstream_table.file_io))
 
         fields: List = []
         for field_id in table_refs.references_by_field:

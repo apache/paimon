@@ -299,4 +299,7 @@ class RESTTokenFileIO(FileIO):
         return self.token
 
     def close(self):
-        pass
+        factory = self._uri_reader_factory_cache
+        self._uri_reader_factory_cache = None
+        if factory is not None:
+            factory.close()
