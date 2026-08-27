@@ -163,9 +163,8 @@ class ScanQuery:
         return scalar, bodies
 
     def stream_blobs(self, columns=None, *, parallelism: int = 64):
-        """Memory-bounded streaming variant of :meth:`read_blobs`: yield
-        ``(scalar_batch, {column: [bytes|None]})`` per Arrow batch, so peak memory
-        is one batch rather than the whole result.
+        """Memory-bounded streaming variant of :meth:`read_blobs`, with the same
+        return shape per Arrow batch and one-batch peak memory.
         """
         # Validate eagerly so a bad column raises here, not on the first next().
         blob_cols = self._resolve_blob_columns(columns)

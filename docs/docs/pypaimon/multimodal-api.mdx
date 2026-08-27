@@ -339,7 +339,7 @@ rows using concurrent, same-file coalesced ranged reads. This is much faster tha
 a per-row loop and avoids the slow row-by-row blob resolution on data-evolution
 tables. It returns `(scalar_table, {column: rows})`, row-aligned. Scalar BLOB
 rows are `bytes | None`; `MAP<K, BLOB>` rows are `None` or ordered lists of
-`(key, bytes | None)` pairs. The scalar table drops all BLOB columns.
+`(key, bytes | None)` pairs. The scalar table drops the readable BLOB columns.
 
 ```python
 scalar, blobs = (
