@@ -70,9 +70,7 @@ public class PrimaryKeyBatchScan extends AbstractBatchTableScan {
         Set<Integer> definitionFieldIds = new HashSet<>();
         for (PrimaryKeyIndexDefinition definition :
                 PrimaryKeyIndexDefinitions.create(table.schema()).definitions()) {
-            if (definition.family() == PrimaryKeyIndexDefinition.Family.BTREE
-                    || definition.family() == PrimaryKeyIndexDefinition.Family.BITMAP
-                    || definition.family() == PrimaryKeyIndexDefinition.Family.MULTI_VALUE) {
+            if (definition.family().isScalar()) {
                 definitions.add(definition);
                 definitionFieldIds.add(definition.fieldId());
             }

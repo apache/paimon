@@ -25,12 +25,13 @@ import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
-/** The single payload which indexes one complete data level. */
+/** The payloads which together index one complete data level. */
 public final class PkSortedIndexGroup {
 
     private final int dataLevel;
@@ -51,7 +52,7 @@ public final class PkSortedIndexGroup {
             String indexType,
             List<PrimaryKeyIndexSourceFile> sourceFiles,
             List<IndexFileMeta> payloads) {
-        if (payloads.size() != 1) {
+        if (payloads.isEmpty()) {
             return Optional.empty();
         }
         long sourceRowCount = 0;
@@ -70,10 +71,19 @@ public final class PkSortedIndexGroup {
             return Optional.empty();
         }
 
-        long payloadRowCount = 0;
+        List<IndexFileMeta> orderedPayloads = new ArrayList<>(payloads);
+        for (IndexFileMeta payload : orderedPayloads) {
+            if (payload.globalIndexMeta() == null) {
+                return Optional.empty();
+            }
+        }
+        orderedPayloads.sort(
+                Comparator.comparingLong(payload -> payload.globalIndexMeta().rowRangeStart()));
+
+        long nextRow = 0;
         Set<String> payloadNames = new HashSet<>();
         Integer dataLevel = null;
-        for (IndexFileMeta payload : payloads) {
+        for (IndexFileMeta payload : orderedPayloads) {
             GlobalIndexMeta meta = payload.globalIndexMeta();
             PrimaryKeyIndexSourceMeta sourceMeta = PrimaryKeyIndexSourceMeta.fromIndexFile(payload);
             List<PrimaryKeyIndexSourceFile> payloadSources = sourceMeta.sourceFiles();
@@ -81,23 +91,26 @@ public final class PkSortedIndexGroup {
                     || !sourceFiles.equals(payloadSources)
                     || (dataLevel != null && dataLevel != sourceMeta.dataLevel())
                     || !indexType.equals(payload.indexType())
-                    || meta == null
                     || meta.indexFieldId() != fieldId
-                    || meta.rowRangeStart() != 0
-                    || meta.rowRangeEnd() != sourceRowCount - 1) {
+                    || payload.rowCount() <= 0
+                    || meta.rowRangeStart() != nextRow) {
                 return Optional.empty();
             }
             dataLevel = sourceMeta.dataLevel();
             try {
-                payloadRowCount = Math.addExact(payloadRowCount, payload.rowCount());
+                long rangeEnd = Math.addExact(nextRow, payload.rowCount()) - 1;
+                if (meta.rowRangeEnd() != rangeEnd || rangeEnd >= sourceRowCount) {
+                    return Optional.empty();
+                }
+                nextRow = rangeEnd + 1;
             } catch (ArithmeticException e) {
                 return Optional.empty();
             }
         }
-        if (dataLevel == null || payloadRowCount != sourceRowCount) {
+        if (dataLevel == null || nextRow != sourceRowCount) {
             return Optional.empty();
         }
-        return Optional.of(new PkSortedIndexGroup(dataLevel, sourceFiles, payloads));
+        return Optional.of(new PkSortedIndexGroup(dataLevel, sourceFiles, orderedPayloads));
     }
 
     public int dataLevel() {

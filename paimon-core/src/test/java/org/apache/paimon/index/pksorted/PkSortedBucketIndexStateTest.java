@@ -93,6 +93,38 @@ class PkSortedBucketIndexStateTest {
     }
 
     @Test
+    void testAcceptsMultiplePayloadsWithCanonicalRanges() {
+        DataFileMeta data = dataFile("data", 5, 2);
+        IndexFileMeta second = payload("second", 2, 2, 4, data);
+        IndexFileMeta first = payload("first", 2, 0, 1, data);
+
+        PkSortedBucketIndexState state =
+                PkSortedBucketIndexState.fromActiveDataFiles(
+                        7, "btree", Collections.singletonList(data), Arrays.asList(second, first));
+
+        assertThat(state.groups()).hasSize(1);
+        assertThat(state.groups().get(0).payloads())
+                .extracting(IndexFileMeta::fileName)
+                .containsExactly("first", "second");
+        assertThat(state.coveredSourceFiles()).hasSize(1);
+        assertThat(state.rejectedPayloads()).isEmpty();
+    }
+
+    @Test
+    void testRejectsGapBetweenPayloadRanges() {
+        DataFileMeta data = dataFile("data", 5, 2);
+        IndexFileMeta first = payload("first", 2, 0, 1, data);
+        IndexFileMeta second = payload("second", 2, 3, 4, data);
+
+        PkSortedBucketIndexState state =
+                PkSortedBucketIndexState.fromActiveDataFiles(
+                        7, "btree", Collections.singletonList(data), Arrays.asList(first, second));
+
+        assertThat(state.groups()).isEmpty();
+        assertThat(state.rejectedPayloads()).containsExactly(first, second);
+    }
+
+    @Test
     void testRejectsPayloadForDifferentLevel() {
         DataFileMeta data = dataFile("data", 3, 2);
         IndexFileMeta wrongLevel = payload("wrong-level", 3, data);
@@ -171,6 +203,31 @@ class PkSortedBucketIndexStateTest {
                 new GlobalIndexMeta(
                         0,
                         rowCount - 1,
+                        7,
+                        null,
+                        new byte[] {1},
+                        new PrimaryKeyIndexSourceMeta(level, sources).serialize()),
+                null);
+    }
+
+    private static IndexFileMeta payload(
+            String name, int level, long rowRangeStart, long rowRangeEnd, DataFileMeta... files) {
+        List<PrimaryKeyIndexSourceFile> sources =
+                Arrays.asList(files).stream()
+                        .sorted(java.util.Comparator.comparing(DataFileMeta::fileName))
+                        .map(
+                                file ->
+                                        new PrimaryKeyIndexSourceFile(
+                                                file.fileName(), file.rowCount()))
+                        .collect(java.util.stream.Collectors.toList());
+        return new IndexFileMeta(
+                "btree",
+                name,
+                100,
+                rowRangeEnd - rowRangeStart + 1,
+                new GlobalIndexMeta(
+                        rowRangeStart,
+                        rowRangeEnd,
                         7,
                         null,
                         new byte[] {1},

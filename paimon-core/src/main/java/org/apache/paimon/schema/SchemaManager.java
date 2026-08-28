@@ -1028,6 +1028,7 @@ public class SchemaManager implements Serializable {
                 || options.primaryKeyBTreeIndexColumns().contains(fieldName)
                 || options.primaryKeyBitmapIndexColumns().contains(fieldName)
                 || options.primaryKeyMultiValueIndexColumns().contains(fieldName)
+                || options.primaryKeyFMIndexColumns().contains(fieldName)
                 || options.primaryKeyFullTextIndexColumns().contains(fieldName)) {
             throw new UnsupportedOperationException(
                     String.format(

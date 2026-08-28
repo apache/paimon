@@ -97,13 +97,8 @@ public final class PkSortedBucketIndexState {
         for (Map.Entry<Integer, List<IndexFileMeta>> entry : payloadsByLevel.entrySet()) {
             List<IndexFileMeta> levelPayloads = entry.getValue();
             Optional<PkSortedIndexGroup> group =
-                    levelPayloads.size() == 1
-                            ? PkSortedIndexGroup.create(
-                                    fieldId,
-                                    indexType,
-                                    sourcesByLevel.get(entry.getKey()),
-                                    levelPayloads)
-                            : Optional.empty();
+                    PkSortedIndexGroup.create(
+                            fieldId, indexType, sourcesByLevel.get(entry.getKey()), levelPayloads);
             if (group.isPresent()) {
                 groups.add(group.get());
                 coveredLevels.add(entry.getKey());

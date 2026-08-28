@@ -39,14 +39,17 @@ import org.apache.paimon.utils.IOUtils;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Builds source-backed sorted-index payloads for ordered physical data files. */
+/** Builds source-backed scalar-index payloads for ordered physical data files. */
 public class PkSortedIndexFile extends IndexFile {
 
     public PkSortedIndexFile(FileIO fileIO, IndexPathFactory pathFactory) {
@@ -61,12 +64,46 @@ public class PkSortedIndexFile extends IndexFile {
             Options indexOptions,
             Iterator<Entry> sortedEntries)
             throws IOException {
+        List<IndexFileMeta> payloads =
+                buildInternal(
+                        dataLevel,
+                        sourceFiles,
+                        indexField,
+                        indexType,
+                        indexOptions,
+                        sortedEntries,
+                        true);
+        return payloads.get(0);
+    }
+
+    List<IndexFileMeta> buildAll(
+            int dataLevel,
+            List<PrimaryKeyIndexSourceFile> sourceFiles,
+            DataField indexField,
+            String indexType,
+            Options indexOptions,
+            Iterator<Entry> entries)
+            throws IOException {
+        return buildInternal(
+                dataLevel, sourceFiles, indexField, indexType, indexOptions, entries, false);
+    }
+
+    private List<IndexFileMeta> buildInternal(
+            int dataLevel,
+            List<PrimaryKeyIndexSourceFile> sourceFiles,
+            DataField indexField,
+            String indexType,
+            Options indexOptions,
+            Iterator<Entry> entries,
+            boolean requireSinglePayload)
+            throws IOException {
         long sourceRowCount = 0;
         for (PrimaryKeyIndexSourceFile sourceFile : sourceFiles) {
             sourceRowCount = Math.addExact(sourceRowCount, sourceFile.rowCount());
         }
         checkArgument(
-                sourceRowCount > 0, "A sorted index group must reference at least one source row.");
+                sourceRowCount > 0,
+                "A source-backed index group must reference at least one source row.");
 
         TrackingFileWriter fileWriter = new TrackingFileWriter();
         GlobalIndexSingleColumnWriter writer = null;
@@ -74,11 +111,11 @@ public class PkSortedIndexFile extends IndexFile {
         try {
             writer = createWriter(indexType, indexField, indexOptions, fileWriter);
 
-            while (sortedEntries.hasNext()) {
-                Entry entry = sortedEntries.next();
+            while (entries.hasNext()) {
+                Entry entry = entries.next();
                 checkArgument(
                         entry.rowId >= 0 && entry.rowId < sourceRowCount,
-                        "Row id %s is outside sorted index group row range [0, %s).",
+                        "Row id %s is outside source-backed index group row range [0, %s).",
                         entry.rowId,
                         sourceRowCount);
                 writer.write(entry.value, entry.rowId);
@@ -86,33 +123,58 @@ public class PkSortedIndexFile extends IndexFile {
 
             List<ResultEntry> results = writer.finish(sourceRowCount);
             checkArgument(
-                    results.size() == 1,
-                    "Sorted index build must produce exactly one payload file, but produced %s.",
-                    results.size());
-            ResultEntry result = results.get(0);
-            checkArgument(
-                    result.rowCount() == sourceRowCount,
-                    "Sorted payload row count %s does not match source row count %s.",
-                    result.rowCount(),
-                    sourceRowCount);
+                    !results.isEmpty(), "Index build must produce at least one payload file.");
+            if (requireSinglePayload) {
+                checkArgument(
+                        results.size() == 1,
+                        "Sorted index build must produce exactly one payload file, but produced %s.",
+                        results.size());
+            }
             byte[] sourceMeta = new PrimaryKeyIndexSourceMeta(dataLevel, sourceFiles).serialize();
-            Path payloadPath = fileWriter.path(result.fileName());
-            IndexFileMeta payload =
-                    new IndexFileMeta(
-                            indexType,
-                            result.fileName(),
-                            fileIO.getFileSize(payloadPath),
-                            result.rowCount(),
-                            new GlobalIndexMeta(
-                                    0,
-                                    sourceRowCount - 1,
-                                    indexField.id(),
-                                    null,
-                                    result.meta(),
-                                    sourceMeta),
-                            pathFactory.isExternalPath() ? payloadPath.toString() : null);
+            List<IndexFileMeta> payloads = new ArrayList<>(results.size());
+            Set<String> resultNames = new HashSet<>();
+            long nextRow = 0;
+            for (ResultEntry result : results) {
+                checkArgument(
+                        result.rowCount() > 0,
+                        "Index payload %s must cover at least one source row.",
+                        result.fileName());
+                checkArgument(
+                        resultNames.add(result.fileName()),
+                        "Index build produced duplicate payload file %s.",
+                        result.fileName());
+                long rangeEnd = Math.addExact(nextRow, result.rowCount()) - 1;
+                checkArgument(
+                        rangeEnd < sourceRowCount,
+                        "Index payload rows exceed source row count %s.",
+                        sourceRowCount);
+                Path payloadPath = fileWriter.path(result.fileName());
+                payloads.add(
+                        new IndexFileMeta(
+                                indexType,
+                                result.fileName(),
+                                fileIO.getFileSize(payloadPath),
+                                result.rowCount(),
+                                new GlobalIndexMeta(
+                                        nextRow,
+                                        rangeEnd,
+                                        indexField.id(),
+                                        null,
+                                        result.meta(),
+                                        sourceMeta),
+                                pathFactory.isExternalPath() ? payloadPath.toString() : null));
+                nextRow = rangeEnd + 1;
+            }
+            checkArgument(
+                    nextRow == sourceRowCount,
+                    "Index payload row count %s does not match source row count %s.",
+                    nextRow,
+                    sourceRowCount);
+            checkArgument(
+                    resultNames.equals(fileWriter.createdFileNames()),
+                    "Index build payload results do not match allocated files.");
             success = true;
-            return payload;
+            return payloads;
         } finally {
             if (writer instanceof AutoCloseable) {
                 IOUtils.closeQuietly((AutoCloseable) writer);
@@ -138,7 +200,7 @@ public class PkSortedIndexFile extends IndexFile {
         return (GlobalIndexSingleColumnWriter) writer;
     }
 
-    /** One sorted normalized key and its zero-based source-row ordinal. */
+    /** One index value and its zero-based source-row ordinal. */
     public static final class Entry {
 
         @Nullable private final Object value;
@@ -179,6 +241,10 @@ public class PkSortedIndexFile extends IndexFile {
             Path path = createdFiles.get(fileName);
             checkArgument(path != null, "Sorted payload file %s was not allocated.", fileName);
             return path;
+        }
+
+        private Set<String> createdFileNames() {
+            return new HashSet<>(createdFiles.keySet());
         }
 
         private void deleteCreatedFiles() {

@@ -29,6 +29,7 @@ import org.apache.paimon.index.pkfulltext.PkFullTextDataFileReader;
 import org.apache.paimon.index.pkfulltext.PkFullTextIndexBuilder;
 import org.apache.paimon.index.pkfulltext.PkFullTextIndexFile;
 import org.apache.paimon.index.pksorted.BucketedSortedIndexMaintainer;
+import org.apache.paimon.index.pksorted.PkSequentialIndexBuilder;
 import org.apache.paimon.index.pksorted.PkSortedDataFileReader;
 import org.apache.paimon.index.pksorted.PkSortedIndexBuilder;
 import org.apache.paimon.index.pksorted.PkSortedIndexFile;
@@ -382,7 +383,17 @@ public final class BucketedPrimaryKeyIndexMaintainer {
                                         readerFactoryBuilder,
                                         field,
                                         definition.indexType(),
-                                        definition.options()));
+                                        definition.options(),
+                                        false));
+                        break;
+                    case FM:
+                        sortedFactories.add(
+                                new SortedDefinitionFactory(
+                                        readerFactoryBuilder,
+                                        field,
+                                        definition.indexType(),
+                                        definition.options(),
+                                        true));
                         break;
                     case FULL_TEXT:
                         checkArgument(
@@ -516,16 +527,19 @@ public final class BucketedPrimaryKeyIndexMaintainer {
             private final DataField field;
             private final String indexType;
             private final org.apache.paimon.options.Options options;
+            private final boolean sequential;
 
             private SortedDefinitionFactory(
                     KeyValueFileReaderFactory.Builder readerFactoryBuilder,
                     DataField field,
                     String indexType,
-                    org.apache.paimon.options.Options options) {
+                    org.apache.paimon.options.Options options,
+                    boolean sequential) {
                 this.readerFactoryBuilder = readerFactoryBuilder;
                 this.field = field;
                 this.indexType = indexType;
                 this.options = options;
+                this.sequential = sequential;
             }
 
             private BucketedSortedIndexMaintainer create(
@@ -537,15 +551,25 @@ public final class BucketedPrimaryKeyIndexMaintainer {
                     ExecutorService executor,
                     @Nullable IOManager ioManager) {
                 PkSortedIndexFile indexFile = handler.pkSortedIndex(partition, bucket);
+                PkSortedDataFileReader.Factory readerFactory =
+                        new PkSortedDataFileReader.Factory(
+                                readerFactoryBuilder, partition, bucket, field);
+                if (sequential) {
+                    PkSequentialIndexBuilder builder =
+                            new PkSequentialIndexBuilder(
+                                    readerFactory, indexFile, field, indexType, options);
+                    return BucketedSortedIndexMaintainer.withMultiplePayloads(
+                            field.id(),
+                            indexType,
+                            indexFile,
+                            builder::build,
+                            restoredDataFiles,
+                            restoredPayloads,
+                            executor);
+                }
                 PkSortedIndexBuilder builder =
                         new PkSortedIndexBuilder(
-                                new PkSortedDataFileReader.Factory(
-                                        readerFactoryBuilder, partition, bucket, field),
-                                indexFile,
-                                field,
-                                indexType,
-                                options,
-                                ioManager);
+                                readerFactory, indexFile, field, indexType, options, ioManager);
                 return new BucketedSortedIndexMaintainer(
                         field.id(),
                         indexType,

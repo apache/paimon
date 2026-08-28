@@ -50,7 +50,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Tests bucket-local BTree/Bitmap source maintenance. */
+/** Tests bucket-local source-backed scalar-index maintenance. */
 class BucketedSortedIndexMaintainerTest {
 
     @TempDir java.nio.file.Path tempPath;
@@ -392,6 +392,35 @@ class BucketedSortedIndexMaintainerTest {
         assertThat(commit.compactIncrement().get().newIndexFiles()).containsExactly(payload);
         assertThat(maintainer.state().coveredSourceFiles())
                 .containsExactly(new PrimaryKeyIndexSourceFile("data-1", 3));
+    }
+
+    @Test
+    void testPublishesAllPayloadsFromOneBuildAtomically() throws Exception {
+        DataFileMeta source = dataFile("data-1", 5);
+        List<PrimaryKeyIndexSourceFile> sources =
+                Collections.singletonList(new PrimaryKeyIndexSourceFile("data-1", 5));
+        byte[] sourceMeta = new PrimaryKeyIndexSourceMeta(1, sources).serialize();
+        IndexFileMeta first = payload("fm-1", "fmindex", sourceMeta, 0, 2);
+        IndexFileMeta second = payload("fm-2", "fmindex", sourceMeta, 2, 3);
+        BucketedSortedIndexMaintainer maintainer =
+                BucketedSortedIndexMaintainer.withMultiplePayloads(
+                        7,
+                        "fmindex",
+                        new PkSortedIndexFile(LocalFileIO.create(), pathFactory()),
+                        sourceFiles -> Arrays.asList(first, second),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        executor);
+
+        BucketedSortedIndexMaintainer.SortedIndexCommit commit =
+                maintainer.prepareCommit(
+                        DataIncrement.emptyIncrement(), compactAfter(source), true);
+
+        assertThat(commit.compactIncrement()).isPresent();
+        assertThat(commit.compactIncrement().get().newIndexFiles()).containsExactly(first, second);
+        assertThat(maintainer.state().groups())
+                .singleElement()
+                .satisfies(group -> assertThat(group.payloads()).containsExactly(first, second));
     }
 
     @Test
@@ -751,6 +780,27 @@ class BucketedSortedIndexMaintainerTest {
                         null,
                         new byte[] {1},
                         new PrimaryKeyIndexSourceMeta(dataLevel, sources).serialize()),
+                null);
+    }
+
+    private static IndexFileMeta payload(
+            String fileName,
+            String indexType,
+            byte[] sourceMeta,
+            long rowRangeStart,
+            long rowCount) {
+        return new IndexFileMeta(
+                indexType,
+                fileName,
+                1,
+                rowCount,
+                new GlobalIndexMeta(
+                        rowRangeStart,
+                        rowRangeStart + rowCount - 1,
+                        7,
+                        null,
+                        new byte[] {1},
+                        sourceMeta),
                 null);
     }
 

@@ -27,7 +27,7 @@ under the License.
 
 # Primary-Key Indexes
 
-Primary-key tables can maintain Vector, Full Text, BTree, Bitmap, and Multivalue indexes together
+Primary-key tables can maintain Vector, Full Text, FM, BTree, Bitmap, and Multivalue indexes together
 with compact data files. These indexes are bucket-local and source-backed: every index group records
 its source data files and maps matches back to physical row positions. Deletion vectors are applied
 when indexed rows are read, so updates and deletes remain exact.
@@ -100,11 +100,23 @@ For an append-only or Data Evolution table whose full-text index is built indepe
 
 </TabItem>
 
+<TabItem value="fm" label="FM">
+
+Use FM for exact substring predicates on a `CHAR`, `VARCHAR`, or `STRING` column. Normal batch
+scans apply it automatically after a connector converts a literal substring expression to
+Paimon's `CONTAINS` predicate. Needles of any byte length are supported without choosing a gram
+size.
+
+For an append-only or Data Evolution table whose FM index is built independently, see
+[FM Index](../multimodal-table/global-index/fm).
+
+</TabItem>
+
 </Tabs>
 
 Different columns in one table can use different index families. One column can occur in at most
 one of `pk-vector.index.columns`, `pk-full-text.index.columns`, `pk-btree.index.columns`,
-`pk-bitmap.index.columns`, and `pk-multivalue.index.columns`.
+`pk-bitmap.index.columns`, `pk-multivalue.index.columns`, and `pk-fm.index.columns`.
 
 ## Requirements
 
@@ -120,14 +132,14 @@ supported by this configuration.
 
 <Tabs groupId="primary-key-index-requirements">
 
-<TabItem value="sorted" label="BTree, Bitmap, and Multivalue">
+<TabItem value="sorted" label="BTree, Bitmap, Multivalue, and FM">
 
-BTree, Bitmap, and Multivalue additionally require:
+BTree, Bitmap, Multivalue, and FM additionally require:
 
 - `deletion-vectors.enabled = true`.
 - `deletion-vectors.merge-on-read = false`.
 - A supported scalar column type for BTree and Bitmap, or an `ARRAY` of supported scalar elements
-  for Multivalue.
+  for Multivalue. FM requires a `CHAR`, `VARCHAR`, or `STRING` column.
 
 Each entry creates an independent single-column index. Multiple columns are supported as long as a
 column is not listed by another primary-key index family.
@@ -166,8 +178,9 @@ Exactly one full-text column is currently supported per table.
 
 ## Create a Table
 
-The following table uses all five families on different columns: Vector for `embedding`, Full Text
-for `content`, BTree for `amount`, Bitmap for `status`, and Multivalue for `tags`.
+The following table uses all six families on different columns: Vector for `embedding`, Full Text
+for `content`, FM for `raw_text`, BTree for `amount`, Bitmap for `status`, and Multivalue for
+`tags`.
 
 <Tabs groupId="primary-key-index-create-table">
 
@@ -180,6 +193,7 @@ CREATE TABLE items (
     amount DECIMAL(12, 2),
     tags ARRAY<STRING>,
     content STRING,
+    raw_text STRING,
     embedding ARRAY<FLOAT> COMMENT '__VECTOR_FIELD;3',
     PRIMARY KEY (id) NOT ENFORCED
 ) WITH (
@@ -191,6 +205,8 @@ CREATE TABLE items (
     'fields.embedding.pk-vector.index.options' = '{"nlist":"256"}',
     'pk-full-text.index.columns' = 'content',
     'fields.content.pk-full-text.index.options' = '{"tokenizer":"jieba"}',
+    'pk-fm.index.columns' = 'raw_text',
+    'fields.raw_text.pk-fm.index.options' = '{"partition-row-count":"100000"}',
     'pk-btree.index.columns' = 'amount',
     'fields.amount.pk-btree.index.options' = '{"block-size":"64 kb"}',
     'pk-bitmap.index.columns' = 'status',
@@ -215,6 +231,7 @@ CREATE TABLE items (
     amount DECIMAL(12, 2),
     tags ARRAY<STRING>,
     content STRING,
+    raw_text STRING,
     embedding ARRAY<FLOAT> COMMENT '__VECTOR_FIELD;3'
 ) USING paimon
 TBLPROPERTIES (
@@ -227,6 +244,8 @@ TBLPROPERTIES (
     'fields.embedding.pk-vector.index.options' = '{"nlist":"256"}',
     'pk-full-text.index.columns' = 'content',
     'fields.content.pk-full-text.index.options' = '{"tokenizer":"jieba"}',
+    'pk-fm.index.columns' = 'raw_text',
+    'fields.raw_text.pk-fm.index.options' = '{"partition-row-count":"100000"}',
     'pk-btree.index.columns' = 'amount',
     'fields.amount.pk-btree.index.options' = '{"block-size":"64 kb"}',
     'pk-bitmap.index.columns' = 'status',
@@ -253,6 +272,8 @@ schema validation.
 | `fields.<column>.pk-vector.index.options` | Not set | JSON object containing build options for the selected ANN implementation. |
 | `pk-full-text.index.columns` | Not set | Character column to index. Exactly one full-text column is currently supported. |
 | `fields.<column>.pk-full-text.index.options` | Not set | JSON object containing native analyzer options. Unqualified keys are scoped to `full-text`. |
+| `pk-fm.index.columns` | Not set | Comma-separated character columns which own independent exact FM indexes. |
+| `fields.<column>.pk-fm.index.options` | Not set | JSON object containing FM build and read options. Unqualified keys are scoped to `fm-index`. |
 | `pk-btree.index.columns` | Not set | Comma-separated columns which own independent BTree indexes. |
 | `fields.<column>.pk-btree.index.options` | Not set | JSON object containing BTree build options. Unqualified keys are scoped to `btree-index`. |
 | `pk-bitmap.index.columns` | Not set | Comma-separated columns which own independent Bitmap indexes. |
@@ -268,7 +289,9 @@ schema validation.
 
 For algorithm-specific options, see the corresponding
 [BTree](../multimodal-table/global-index/btree),
-[Bitmap](../multimodal-table/global-index/bitmap), or
+[Bitmap](../multimodal-table/global-index/bitmap),
+[Multivalue](../multimodal-table/global-index/multivalue),
+[FM](../multimodal-table/global-index/fm), or
 [Vector](../multimodal-table/global-index/vector) index page. Full-text analyzer options are listed
 in the [`paimon-full-text` README](https://github.com/apache/paimon/blob/master/paimon-full-text/README.md).
 
@@ -289,13 +312,15 @@ output; simply assigning or upgrading a pending file does not make it an index s
 
 ### Data-Level Maintenance
 
-Each indexed column maintains one immutable index payload for the complete eligible source-file
-set in every non-zero data level. When data compaction changes a level, Paimon rebuilds that whole
-level payload, including files in the target level which were not direct compaction inputs. A
-level payload is used only when its ordered source names and row counts exactly match the current
-data level; partial, duplicate, stale, and cross-level payloads are rejected.
+Each indexed column maintains one immutable index group for the complete eligible source-file set
+in every non-zero data level. Most families write one payload per group; FM can write several
+ordered partition payloads. When data compaction changes a level, Paimon rebuilds that whole level
+group, including files in the target level which were not direct compaction inputs. A level group
+is used only when its ordered source names and row counts exactly match the current data level and
+its payload row ranges cover the level exactly; gaps, overlaps, stale payloads, and cross-level
+payloads are rejected.
 
-A rebuild atomically replaces the old payload after the complete new payload is ready. Unrelated
+A rebuild atomically replaces the old group after the complete new group is ready. Unrelated
 data levels retain their existing payloads.
 
 Index construction can execute asynchronously inside the writer. A writer which waits for
@@ -307,7 +332,7 @@ Coverage behavior depends on the index family and search mode. `vector-index.sea
 queries search only data covered by an active index group. Uncovered files are not searched, so
 partial coverage can make results incomplete.
 
-- BTree, Bitmap, and Multivalue scans always read uncovered files through the ordinary data path.
+- BTree, Bitmap, Multivalue, and FM scans always read uncovered files through the ordinary data path.
   Partial coverage affects their acceleration, not result completeness. The original predicate and
   deletion vectors are applied after index pruning.
 - Vector search in `full` or `detail` mode evaluates files without an active ANN group exactly and
@@ -318,12 +343,24 @@ persistent archives and ignores uncovered files; `full` and `detail` are rejecte
 merge-aware logical-row fallback is not implemented. Consequently, newly appended Level-0 rows
 become full-text searchable only after compaction publishes an eligible data file and archive.
 
-## BTree, Bitmap, and Multivalue Queries
+## BTree, Bitmap, Multivalue, and FM Queries
 
-BTree, Bitmap, and Multivalue indexes are applied automatically to snapshot-scoped Core batch
+BTree, Bitmap, Multivalue, and FM indexes are applied automatically to snapshot-scoped Core batch
 scans after a supported predicate reaches Paimon. BTree and Bitmap can accelerate equality, `IN`,
 null checks, comparisons and ranges, complement predicates, and supported string predicates.
 Multivalue accelerates `ARRAY_CONTAINS`, `ARRAYS_OVERLAP`, and `ARRAY_CONTAINS_ALL` predicates.
+FM accelerates exact `CONTAINS` predicates. For example, Spark converts the following literal
+substring filter to Paimon's `CONTAINS` predicate:
+
+```sql
+SELECT id, raw_text
+FROM items
+WHERE raw_text LIKE '%needle%';
+```
+
+The FM result is exact for indexed files. Paimon reads uncovered files normally and reapplies the
+original predicate and deletion vectors, so partial index coverage affects performance rather than
+result completeness.
 
 The Java/Core predicate can be constructed directly:
 
@@ -558,7 +595,7 @@ create a table with the desired definition and migrate the data.
 
 ## Limitations
 
-- BTree, Bitmap, and Multivalue definitions are single-column indexes.
+- BTree, Bitmap, Multivalue, and FM definitions are single-column indexes.
 - Multivalue supports arrays of scalar element types accepted by the global-index key serializer.
   Null elements are not indexed. Higher array and element cardinality increases the expanded-sort
   I/O and index-file size.
