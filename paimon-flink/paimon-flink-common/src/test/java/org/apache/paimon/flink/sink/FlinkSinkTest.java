@@ -30,12 +30,17 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.apache.flink.api.common.RuntimeExecutionMode;
+import org.apache.flink.streaming.api.CheckpointingMode;
+import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.CheckpointConfig;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
 import java.util.function.Consumer;
 
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link FlinkSink}. */
@@ -125,6 +130,44 @@ public class FlinkSinkTest extends CommitterTestBase {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    public void testCoordinatorCommitAllowsUnalignedCheckpoints() throws Exception {
+        FileStoreTable table =
+                createUnawareBucketTable(
+                        options -> {
+                            options.set(CoreOptions.ROW_TRACKING_ENABLED, true);
+                            options.set(CoreOptions.DATA_EVOLUTION_ENABLED, true);
+                            options.set(
+                                    FlinkConnectorOptions.SINK_COORDINATOR_COMMIT_ENABLED, true);
+                        });
+
+        assertThatCode(() -> buildCommitTopology(table, CheckpointingMode.EXACTLY_ONCE, true))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testOperatorCommitRejectsUnalignedCheckpoints() throws Exception {
+        FileStoreTable table = createUnawareBucketTable(options -> {});
+
+        assertThatThrownBy(() -> buildCommitTopology(table, CheckpointingMode.EXACTLY_ONCE, true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("does not support unaligned checkpoints");
+    }
+
+    @Test
+    public void testCoordinatorCommitRejectsAtLeastOnceCheckpoints() throws Exception {
+        FileStoreTable table =
+                createUnawareBucketTable(
+                        options ->
+                                options.set(
+                                        FlinkConnectorOptions.SINK_COORDINATOR_COMMIT_ENABLED,
+                                        true));
+
+        assertThatThrownBy(() -> buildCommitTopology(table, CheckpointingMode.AT_LEAST_ONCE, false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("only supports EXACTLY_ONCE checkpoint mode");
+    }
+
     private FileStoreTable createUnawareBucketTable(Consumer<Options> setOptions) throws Exception {
         return createFileStoreTable(
                 options -> {
@@ -154,5 +197,18 @@ public class FlinkSinkTest extends CommitterTestBase {
         CheckpointConfig config = new CheckpointConfig();
         config.setMaxConcurrentCheckpoints(maxConcurrentCheckpoints);
         return config;
+    }
+
+    private static void buildCommitTopology(
+            FileStoreTable table, CheckpointingMode checkpointingMode, boolean unaligned) {
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setRuntimeMode(RuntimeExecutionMode.STREAMING);
+        env.enableCheckpointing(10L);
+        env.getCheckpointConfig().setCheckpointingMode(checkpointingMode);
+        env.getCheckpointConfig().enableUnalignedCheckpoints(unaligned);
+        DataStream<Committable> written =
+                env.fromCollection(Collections.emptyList(), new CommittableTypeInfo());
+
+        new RowAppendTableSink(table, null, null).doCommit(written, "test-commit-user");
     }
 }
