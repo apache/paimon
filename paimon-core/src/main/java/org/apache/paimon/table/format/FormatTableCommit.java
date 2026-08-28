@@ -51,6 +51,10 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.lang.reflect.Method;
+import java.security.AccessControlContext;
+import java.security.AccessController;
+import java.security.PrivilegedAction;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -60,13 +64,15 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.table.format.FormatBatchWriteBuilder.validateStaticPartition;
 import static org.apache.paimon.utils.ExceptionUtils.firstOrSuppressed;
-import static org.apache.paimon.utils.ThreadPoolUtils.CloseableBatchIterator;
-import static org.apache.paimon.utils.ThreadPoolUtils.sequentialSlidingWindowExecuteAwaitRunningTasksOnClose;
 
 /** Commit for Format Table. */
 public class FormatTableCommit implements BatchTableCommit {
@@ -119,37 +125,7 @@ public class FormatTableCommit implements BatchTableCommit {
                 catalogContext,
                 partitionManager,
                 dynamicPartitionOverwrite,
-                1);
-    }
-
-    FormatTableCommit(
-            String location,
-            List<String> partitionKeys,
-            FileIO fileIO,
-            boolean formatTablePartitionOnlyValueInPath,
-            String defaultPartName,
-            boolean overwrite,
-            Identifier tableIdentifier,
-            @Nullable Map<String, String> staticPartitions,
-            @Nullable String syncHiveUri,
-            CatalogContext catalogContext,
-            @Nullable FormatTablePartitionManager partitionManager,
-            boolean dynamicPartitionOverwrite,
-            int cleanupThreadNum) {
-        this(
-                location,
-                partitionKeys,
-                fileIO,
-                formatTablePartitionOnlyValueInPath,
-                defaultPartName,
-                overwrite,
-                tableIdentifier,
-                staticPartitions,
-                syncHiveUri,
-                catalogContext,
-                partitionManager,
-                dynamicPartitionOverwrite,
-                cleanupThreadNum,
+                1,
                 1);
     }
 
@@ -400,15 +376,13 @@ public class FormatTableCommit implements BatchTableCommit {
             return;
         }
 
-        try (CloseableBatchIterator<Void> published =
-                sequentialSlidingWindowExecuteAwaitRunningTasksOnClose(
-                        COMMIT_EXECUTOR,
-                        this::publishMessage,
-                        messages.iterator(),
-                        publishThreadNum)) {
-            while (published.hasNext()) {
-                published.next();
-            }
+        try {
+            executeSideEffects(
+                    COMMIT_EXECUTOR,
+                    this::publishMessage,
+                    messages.iterator(),
+                    publishThreadNum,
+                    ignored -> {});
         } catch (UncheckedIOException e) {
             throw (IOException) unwrapUncheckedIOException(e);
         }
@@ -762,20 +736,251 @@ public class FormatTableCommit implements BatchTableCommit {
                 return clearedPartitionPaths;
             }
             // Listing lazily keeps the memory of an overwrite that replaces the table
-            // proportional to one partition rather than to everything the table holds. Closing
-            // the iterator is what stops new deletes and waits for the ones already handed out,
-            // so a failure cannot leave a worker still deleting after this method returns.
-            try (CloseableBatchIterator<Path> cleared =
-                    sequentialSlidingWindowExecuteAwaitRunningTasksOnClose(
-                            COMMIT_EXECUTOR, this::deleteAndReportCleared, dataFiles, threadNum)) {
-                while (cleared.hasNext()) {
-                    clearedPartitionPaths.add(cleared.next());
-                }
-            }
+            // proportional to one partition rather than to everything the table holds. The local
+            // runner stops filling its window and waits for the deletes already handed out, so a
+            // failure cannot leave a worker still deleting after this method returns.
+            executeSideEffects(
+                    COMMIT_EXECUTOR,
+                    this::deleteAndReportCleared,
+                    dataFiles,
+                    threadNum,
+                    clearedPartitionPaths::add);
         } catch (UncheckedIOException e) {
             throw (IOException) unwrapUncheckedIOException(e);
         }
         return clearedPartitionPaths;
+    }
+
+    /**
+     * Runs a bounded sliding window of side effects and consumes their results in input order.
+     *
+     * <p>Once a failure is observed, the runner stops filling the window. Tasks which have not
+     * started are cancelled, while running tasks are allowed to finish and are drained before the
+     * failure is returned, so rollback cannot race a side effect already handed to the executor.
+     */
+    private static <I, O> void executeSideEffects(
+            ExecutorService executor,
+            Function<I, List<O>> processor,
+            Iterator<I> input,
+            int maxConcurrency,
+            Consumer<O> resultConsumer) {
+        AtomicBoolean submissionStopped = new AtomicBoolean();
+        ArrayDeque<SideEffectTask<I, O>> activeTasks = new ArrayDeque<>(maxConcurrency);
+        long nextInputPosition = 0;
+        Throwable failure = null;
+
+        try {
+            while (true) {
+                while (activeTasks.size() < maxConcurrency && !submissionStopped.get()) {
+                    if (!input.hasNext() || submissionStopped.get()) {
+                        break;
+                    }
+                    I nextInput = input.next();
+                    if (submissionStopped.get()) {
+                        break;
+                    }
+                    SideEffectTask<I, O> task =
+                            new SideEffectTask<>(
+                                    processor,
+                                    nextInput,
+                                    nextInputPosition++,
+                                    Thread.currentThread().getContextClassLoader(),
+                                    AccessController.getContext(),
+                                    submissionStopped);
+                    if (submissionStopped.get()) {
+                        break;
+                    }
+                    // Add before execute so a rejected submission is covered by the drain below.
+                    activeTasks.addLast(task);
+                    executor.execute(task);
+                }
+
+                if (activeTasks.isEmpty()) {
+                    return;
+                }
+
+                SideEffectTask<I, O> first = activeTasks.getFirst();
+                for (O result : first.result()) {
+                    resultConsumer.accept(result);
+                }
+                activeTasks.removeFirst();
+            }
+        } catch (Throwable sideEffectFailure) {
+            failure = sideEffectFailure;
+            submissionStopped.set(true);
+        }
+
+        boolean interrupted = Thread.interrupted();
+        for (SideEffectTask<I, O> task : activeTasks) {
+            try {
+                task.cancelIfUnstarted();
+            } catch (Throwable cancellationFailure) {
+                failure = firstOrSuppressed(cancellationFailure, failure);
+            }
+        }
+        // ArrayDeque iteration is input order, so the earliest worker failure is primary unless a
+        // caller-side listing, submission, consumption, or interruption failure initiated drain.
+        for (SideEffectTask<I, O> task : activeTasks) {
+            while (true) {
+                try {
+                    task.awaitCompletion();
+                    break;
+                } catch (InterruptedException ignored) {
+                    interrupted = true;
+                }
+            }
+            Throwable taskFailure = task.unreportedFailure();
+            if (taskFailure != null) {
+                failure = firstOrSuppressed(taskFailure, failure);
+            }
+        }
+
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+        }
+        throw rethrowSideEffectFailure(failure);
+    }
+
+    private static RuntimeException rethrowSideEffectFailure(Throwable failure) {
+        if (failure instanceof Error) {
+            throw (Error) failure;
+        }
+        if (failure instanceof RuntimeException) {
+            return (RuntimeException) failure;
+        }
+        return new RuntimeException(failure);
+    }
+
+    private static class SideEffectTask<I, O> implements Runnable {
+
+        private static final int CREATED = 0;
+        private static final int RUNNING = 1;
+        private static final int CANCELLED = 2;
+        private static final int FINISHED = 3;
+
+        private final Function<I, List<O>> processor;
+        private final I input;
+        private final long inputPosition;
+        private final ClassLoader callerClassLoader;
+        private final AccessControlContext callerAccessControlContext;
+        private final AtomicBoolean submissionStopped;
+        private final CountDownLatch completion = new CountDownLatch(1);
+
+        private int state = CREATED;
+        private List<O> result;
+        private Throwable failure;
+        private volatile boolean failureReported;
+
+        private SideEffectTask(
+                Function<I, List<O>> processor,
+                I input,
+                long inputPosition,
+                ClassLoader callerClassLoader,
+                AccessControlContext callerAccessControlContext,
+                AtomicBoolean submissionStopped) {
+            this.processor = processor;
+            this.input = input;
+            this.inputPosition = inputPosition;
+            this.callerClassLoader = callerClassLoader;
+            this.callerAccessControlContext = callerAccessControlContext;
+            this.submissionStopped = submissionStopped;
+        }
+
+        @Override
+        public void run() {
+            synchronized (this) {
+                // A queued task which reaches a worker after another task failed has not started
+                // its side effect and is safe to skip. The volatile stop check is the
+                // linearization point between a task which was already running and one which can
+                // still be cancelled.
+                if (state == CANCELLED || submissionStopped.get()) {
+                    result = Collections.emptyList();
+                    state = FINISHED;
+                    completion.countDown();
+                    return;
+                }
+                state = RUNNING;
+            }
+
+            Thread currentThread = Thread.currentThread();
+            boolean interruptedOnEntry = currentThread.isInterrupted();
+            ClassLoader workerClassLoader = null;
+            boolean workerClassLoaderCaptured = false;
+            try {
+                try {
+                    workerClassLoader = currentThread.getContextClassLoader();
+                    workerClassLoaderCaptured = true;
+                    currentThread.setContextClassLoader(callerClassLoader);
+                    result =
+                            AccessController.doPrivileged(
+                                    (PrivilegedAction<List<O>>) () -> processor.apply(input),
+                                    callerAccessControlContext);
+                } catch (RuntimeException | Error taskFailure) {
+                    failure = taskFailure;
+                } finally {
+                    if (workerClassLoaderCaptured) {
+                        try {
+                            currentThread.setContextClassLoader(workerClassLoader);
+                        } catch (RuntimeException | Error restoreFailure) {
+                            failure = firstOrSuppressed(restoreFailure, failure);
+                        }
+                    }
+                }
+                if (failure != null) {
+                    submissionStopped.set(true);
+                }
+            } finally {
+                try {
+                    synchronized (this) {
+                        state = FINISHED;
+                    }
+                    // Do not leak an interrupt into a reused worker, while preserving the entry
+                    // state for an executor which runs tasks directly on the caller thread.
+                    Thread.interrupted();
+                    if (interruptedOnEntry) {
+                        currentThread.interrupt();
+                    }
+                } finally {
+                    completion.countDown();
+                }
+            }
+        }
+
+        private synchronized void cancelIfUnstarted() {
+            if (state == CREATED) {
+                state = CANCELLED;
+                completion.countDown();
+            }
+        }
+
+        private List<O> result() {
+            if (completion.getCount() != 0) {
+                try {
+                    completion.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException(e);
+                }
+            }
+            if (failure != null) {
+                failureReported = true;
+                throw rethrowSideEffectFailure(failure);
+            }
+            return result;
+        }
+
+        private void awaitCompletion() throws InterruptedException {
+            completion.await();
+        }
+
+        private Throwable unreportedFailure() {
+            return failureReported ? null : failure;
+        }
+
+        @Override
+        public String toString() {
+            return "FormatTableSideEffectTask{inputPosition=" + inputPosition + '}';
+        }
     }
 
     /** Unwraps worker I/O failures while preserving recursively suppressed failures. */

@@ -41,19 +41,29 @@ import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.PartitionPathUtils;
 import org.apache.paimon.utils.ReflectionUtils;
 
+import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 
+import javax.security.auth.Subject;
+
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.security.AccessController;
+import java.security.PrivilegedAction;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -65,6 +75,8 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
+import java.util.function.Function;
 
 import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
 import static org.apache.paimon.shade.guava30.com.google.common.base.Throwables.getCausalChain;
@@ -117,8 +129,7 @@ class FormatTableCommitTest {
                         null,
                         null,
                         partitionManager,
-                        /* dynamicPartitionOverwrite */ true,
-                        /* cleanupThreadNum */ 1);
+                        /* dynamicPartitionOverwrite */ true);
         TwoPhaseCommitMessage message = new TwoPhaseCommitMessage(committer);
         List<CommitMessage> messages = Collections.singletonList(message);
 
@@ -169,8 +180,7 @@ class FormatTableCommitTest {
                         null,
                         null,
                         partitionManager,
-                        /* dynamicPartitionOverwrite */ true,
-                        /* cleanupThreadNum */ 1);
+                        /* dynamicPartitionOverwrite */ true);
 
         assertThatThrownBy(() -> commit.commit(Collections.singletonList(message)))
                 .isInstanceOf(RuntimeException.class)
@@ -210,8 +220,7 @@ class FormatTableCommitTest {
                         null,
                         null,
                         null,
-                        /* dynamicPartitionOverwrite */ true,
-                        /* cleanupThreadNum */ 1);
+                        /* dynamicPartitionOverwrite */ true);
         PostRegistrationFailingHiveCatalog hiveCatalog =
                 new PostRegistrationFailingHiveCatalog(fileIO, tablePath);
         ReflectionUtils.setPrivateFieldValue(commit, "hiveCatalog", hiveCatalog);
@@ -250,8 +259,7 @@ class FormatTableCommitTest {
                         null,
                         null,
                         null,
-                        /* dynamicPartitionOverwrite */ true,
-                        /* cleanupThreadNum */ 1);
+                        /* dynamicPartitionOverwrite */ true);
         PostRegistrationFailingHiveCatalog hiveCatalog =
                 new PostRegistrationFailingHiveCatalog(fileIO, tablePath);
         ReflectionUtils.setPrivateFieldValue(commit, "hiveCatalog", hiveCatalog);
@@ -294,8 +302,7 @@ class FormatTableCommitTest {
                         null,
                         null,
                         null,
-                        /* dynamicPartitionOverwrite */ true,
-                        /* cleanupThreadNum */ 1);
+                        /* dynamicPartitionOverwrite */ true);
         RecordingHiveCatalog hiveCatalog = new RecordingHiveCatalog(fileIO, tablePath);
         ReflectionUtils.setPrivateFieldValue(commit, "hiveCatalog", hiveCatalog);
 
@@ -315,8 +322,7 @@ class FormatTableCommitTest {
                         null,
                         null,
                         null,
-                        /* dynamicPartitionOverwrite */ true,
-                        /* cleanupThreadNum */ 1);
+                        /* dynamicPartitionOverwrite */ true);
         abortCommit.abort(Collections.singletonList(roundTripped));
 
         assertThat(hiveCatalog.registeredPartitions).containsExactly(staticPartition);
@@ -343,8 +349,7 @@ class FormatTableCommitTest {
                         null,
                         null,
                         partitionManager,
-                        /* dynamicPartitionOverwrite */ true,
-                        /* cleanupThreadNum */ 1);
+                        /* dynamicPartitionOverwrite */ true);
         CommitMessage message = new TwoPhaseCommitMessage(committer);
 
         assertThatThrownBy(() -> commit.commit(Collections.singletonList(message)))
@@ -385,8 +390,7 @@ class FormatTableCommitTest {
                         null,
                         null,
                         partitionManager,
-                        /* dynamicPartitionOverwrite */ true,
-                        /* cleanupThreadNum */ 1);
+                        /* dynamicPartitionOverwrite */ true);
 
         assertThatThrownBy(
                         () ->
@@ -537,8 +541,7 @@ class FormatTableCommitTest {
                         null,
                         null,
                         null,
-                        /* dynamicPartitionOverwrite */ true,
-                        /* cleanupThreadNum */ 1);
+                        /* dynamicPartitionOverwrite */ true);
 
         Throwable failure = catchThrowable(() -> commit.abort(messages));
 
@@ -636,8 +639,7 @@ class FormatTableCommitTest {
                         null,
                         null,
                         null,
-                        /* dynamicPartitionOverwrite */ true,
-                        /* cleanupThreadNum */ 1);
+                        /* dynamicPartitionOverwrite */ true);
 
         commit.commit(Collections.singletonList(new TwoPhaseCommitMessage(committer)));
 
@@ -686,8 +688,7 @@ class FormatTableCommitTest {
                         null,
                         null,
                         null,
-                        /* dynamicPartitionOverwrite */ true,
-                        /* cleanupThreadNum */ 1);
+                        /* dynamicPartitionOverwrite */ true);
 
         commit.commit(Collections.emptyList());
 
@@ -731,8 +732,7 @@ class FormatTableCommitTest {
                         null,
                         null,
                         null,
-                        /* dynamicPartitionOverwrite */ true,
-                        /* cleanupThreadNum */ 1);
+                        /* dynamicPartitionOverwrite */ true);
 
         commit.commit(Collections.emptyList());
 
@@ -782,8 +782,7 @@ class FormatTableCommitTest {
                         null,
                         null,
                         null,
-                        /* dynamicPartitionOverwrite */ true,
-                        /* cleanupThreadNum */ 1);
+                        /* dynamicPartitionOverwrite */ true);
 
         assertThatThrownBy(() -> commit.commit(Collections.emptyList()))
                 .isInstanceOf(RuntimeException.class)
@@ -1057,6 +1056,262 @@ class FormatTableCommitTest {
         assertThat(fileIO.exists(new Path(tablePath, "year=2025/month=10/data-1.csv"))).isFalse();
         assertThat(fileIO.exists(new Path(tablePath, "year=2025/nomonth/data-2.csv"))).isTrue();
         assertThat(fileIO.exists(new Path(tablePath, "loose.csv"))).isTrue();
+    }
+
+    @Test
+    void testLocalSideEffectRunnerPropagatesContextAndRestoresWorkerClassLoader() throws Exception {
+        ExecutorService workers = Executors.newSingleThreadExecutor();
+        try {
+            ClassLoader workerClassLoader =
+                    workers.submit(() -> Thread.currentThread().getContextClassLoader())
+                            .get(10, TimeUnit.SECONDS);
+            ClassLoader callerClassLoader = new ClassLoader(getClass().getClassLoader()) {};
+            Subject callerSubject = new Subject();
+            AtomicReference<ClassLoader> seenClassLoader = new AtomicReference<>();
+            AtomicReference<Subject> seenSubject = new AtomicReference<>();
+
+            ClassLoader originalClassLoader = Thread.currentThread().getContextClassLoader();
+            try {
+                Thread.currentThread().setContextClassLoader(callerClassLoader);
+                Subject.doAs(
+                        callerSubject,
+                        (PrivilegedAction<Void>)
+                                () -> {
+                                    try {
+                                        invokeSideEffectRunner(
+                                                workers,
+                                                value -> {
+                                                    seenClassLoader.set(
+                                                            Thread.currentThread()
+                                                                    .getContextClassLoader());
+                                                    seenSubject.set(
+                                                            Subject.getSubject(
+                                                                    AccessController.getContext()));
+                                                    return Collections.singletonList(value);
+                                                },
+                                                Collections.singletonList(1).iterator(),
+                                                1,
+                                                result -> assertThat(result).isOne());
+                                        return null;
+                                    } catch (Exception e) {
+                                        throw new RuntimeException(e);
+                                    }
+                                });
+            } finally {
+                Thread.currentThread().setContextClassLoader(originalClassLoader);
+            }
+
+            assertThat(seenClassLoader.get()).isSameAs(callerClassLoader);
+            assertThat(seenSubject.get()).isSameAs(callerSubject);
+            assertThat(
+                            workers.submit(() -> Thread.currentThread().getContextClassLoader())
+                                    .get(10, TimeUnit.SECONDS))
+                    .isSameAs(workerClassLoader);
+        } finally {
+            workers.shutdownNow();
+            assertThat(workers.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
+    @Test
+    void testLocalSideEffectRunnerCancelsAcceptedTaskWhichHasNotStarted() throws Exception {
+        ExecutorService workers = Executors.newSingleThreadExecutor();
+        ExecutorService caller = Executors.newSingleThreadExecutor();
+        ExecutorService withholdingExecutor = mock(ExecutorService.class);
+        CountDownLatch secondTaskAccepted = new CountDownLatch(1);
+        CountDownLatch releaseFirstTask = new CountDownLatch(1);
+        AtomicInteger submissions = new AtomicInteger();
+        AtomicReference<Runnable> withheldTask = new AtomicReference<>();
+        ConcurrentLinkedQueue<Integer> attemptedInputs = new ConcurrentLinkedQueue<>();
+        RuntimeException workerFailure = new RuntimeException("first side effect failed");
+        doAnswer(
+                        invocation -> {
+                            Runnable task = invocation.getArgument(0);
+                            if (submissions.getAndIncrement() == 0) {
+                                workers.execute(task);
+                            } else {
+                                withheldTask.set(task);
+                                secondTaskAccepted.countDown();
+                            }
+                            return null;
+                        })
+                .when(withholdingExecutor)
+                .execute(any(Runnable.class));
+
+        Future<?> result =
+                caller.submit(
+                        (Callable<Void>)
+                                () -> {
+                                    invokeSideEffectRunner(
+                                            withholdingExecutor,
+                                            input -> {
+                                                attemptedInputs.add(input);
+                                                if (input == 0) {
+                                                    try {
+                                                        if (!releaseFirstTask.await(
+                                                                10, TimeUnit.SECONDS)) {
+                                                            throw new RuntimeException(
+                                                                    "Timed out waiting to release "
+                                                                            + "the first side effect");
+                                                        }
+                                                    } catch (InterruptedException e) {
+                                                        Thread.currentThread().interrupt();
+                                                        throw new RuntimeException(e);
+                                                    }
+                                                    throw workerFailure;
+                                                }
+                                                return Collections.emptyList();
+                                            },
+                                            Arrays.asList(0, 1).iterator(),
+                                            2,
+                                            ignored -> {});
+                                    return null;
+                                });
+        try {
+            assertThat(secondTaskAccepted.await(10, TimeUnit.SECONDS)).isTrue();
+            releaseFirstTask.countDown();
+            assertThat(getRootCause(awaitFailure(result))).isSameAs(workerFailure);
+            Runnable cancelledTask = withheldTask.getAndSet(null);
+            assertThat(cancelledTask).isNotNull();
+            cancelledTask.run();
+            assertThat(attemptedInputs).containsExactly(0);
+        } finally {
+            releaseFirstTask.countDown();
+            Runnable pendingTask = withheldTask.getAndSet(null);
+            if (pendingTask != null) {
+                pendingTask.run();
+            }
+            caller.shutdownNow();
+            workers.shutdownNow();
+            assertThat(caller.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+            assertThat(workers.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
+    @Test
+    void testLocalSideEffectRunnerSkipsEarlierInputAfterLaterFailure() throws Exception {
+        ExecutorService workers = Executors.newSingleThreadExecutor();
+        ExecutorService reverseOrderExecutor = mock(ExecutorService.class);
+        AtomicReference<Runnable> firstTask = new AtomicReference<>();
+        ConcurrentLinkedQueue<Integer> attemptedInputs = new ConcurrentLinkedQueue<>();
+        ConcurrentLinkedQueue<Integer> consumedResults = new ConcurrentLinkedQueue<>();
+        RuntimeException workerFailure = new RuntimeException("later side effect failed");
+        doAnswer(
+                        invocation -> {
+                            Runnable task = invocation.getArgument(0);
+                            if (firstTask.compareAndSet(null, task)) {
+                                return null;
+                            }
+                            workers.execute(
+                                    () -> {
+                                        task.run();
+                                        firstTask.get().run();
+                                    });
+                            return null;
+                        })
+                .when(reverseOrderExecutor)
+                .execute(any(Runnable.class));
+
+        try {
+            Throwable failure =
+                    catchThrowable(
+                            () ->
+                                    invokeSideEffectRunner(
+                                            reverseOrderExecutor,
+                                            input -> {
+                                                attemptedInputs.add(input);
+                                                if (input == 1) {
+                                                    throw workerFailure;
+                                                }
+                                                return Collections.singletonList(input);
+                                            },
+                                            Arrays.asList(0, 1).iterator(),
+                                            2,
+                                            consumedResults::add));
+
+            assertThat(failure).isSameAs(workerFailure);
+            assertThat(attemptedInputs).containsExactly(1);
+            assertThat(consumedResults).isEmpty();
+        } finally {
+            workers.shutdownNow();
+            assertThat(workers.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
+    @Test
+    void testLocalSideEffectRunnerCompletesWhenContextClassLoaderChangesFail() throws Exception {
+        SecurityException setFailure = new SecurityException("set TCCL denied");
+        SecurityException restoreFailure = new SecurityException("restore TCCL denied");
+        AtomicBoolean denyContextClassLoaderChanges = new AtomicBoolean();
+        AtomicInteger setAttempts = new AtomicInteger();
+        AtomicBoolean processorCalled = new AtomicBoolean();
+        ExecutorService workers =
+                Executors.newSingleThreadExecutor(
+                        runnable ->
+                                new Thread(runnable, "format-table-denied-tccl-worker") {
+                                    @Override
+                                    public void setContextClassLoader(ClassLoader classLoader) {
+                                        if (denyContextClassLoaderChanges.get()) {
+                                            throw setAttempts.incrementAndGet() == 1
+                                                    ? setFailure
+                                                    : restoreFailure;
+                                        }
+                                        super.setContextClassLoader(classLoader);
+                                    }
+                                });
+        ExecutorService caller = Executors.newSingleThreadExecutor();
+        try {
+            workers.submit(() -> {}).get(10, TimeUnit.SECONDS);
+            denyContextClassLoaderChanges.set(true);
+
+            Future<Throwable> result =
+                    caller.submit(
+                            () ->
+                                    catchThrowable(
+                                            () ->
+                                                    invokeSideEffectRunner(
+                                                            workers,
+                                                            input -> {
+                                                                processorCalled.set(true);
+                                                                return Collections.singletonList(
+                                                                        input);
+                                                            },
+                                                            Collections.singletonList(1).iterator(),
+                                                            1,
+                                                            ignored -> {})));
+            Throwable failure = result.get(10, TimeUnit.SECONDS);
+
+            assertThat(failure).isSameAs(setFailure).hasSuppressedException(restoreFailure);
+            assertThat(setAttempts).hasValue(2);
+            assertThat(processorCalled).isFalse();
+        } finally {
+            denyContextClassLoaderChanges.set(false);
+            caller.shutdownNow();
+            workers.shutdownNow();
+            assertThat(caller.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+            assertThat(workers.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
+    @Test
+    void testLocalSideEffectRunnerPreservesDirectExecutorCallerInterrupt() throws Exception {
+        ExecutorService directExecutor = MoreExecutors.newDirectExecutorService();
+        List<Integer> consumedResults = new ArrayList<>();
+        Thread.currentThread().interrupt();
+        try {
+            invokeSideEffectRunner(
+                    directExecutor,
+                    Collections::singletonList,
+                    Collections.singletonList(1).iterator(),
+                    1,
+                    consumedResults::add);
+
+            assertThat(consumedResults).containsExactly(1);
+            assertThat(Thread.currentThread().isInterrupted()).isTrue();
+        } finally {
+            Thread.interrupted();
+            directExecutor.shutdownNow();
+        }
     }
 
     @Test
@@ -1723,6 +1978,7 @@ class FormatTableCommitTest {
             assertThat(getCausalChain(failure.get()))
                     .anyMatch(InterruptedException.class::isInstance);
             assertThat(interruptRestored).isTrue();
+            assertThat(fileIO.interruptedDeletes()).isZero();
             verify(committer, never()).commit(fileIO);
         } finally {
             fileIO.releaseDeletes();
@@ -1755,7 +2011,8 @@ class FormatTableCommitTest {
                         null,
                         partitionManager,
                         /* dynamicPartitionOverwrite */ true,
-                        2);
+                        /* cleanupThreadNum */ 2,
+                        /* publishThreadNum */ 1);
 
         commit.commit(Collections.emptyList());
 
@@ -1836,7 +2093,8 @@ class FormatTableCommitTest {
                         null,
                         partitionManager,
                         /* dynamicPartitionOverwrite */ true,
-                        4);
+                        /* cleanupThreadNum */ 4,
+                        /* publishThreadNum */ 1);
 
         commit.commit(Collections.emptyList());
 
@@ -2031,8 +2289,7 @@ class FormatTableCommitTest {
                 null,
                 null,
                 null,
-                dynamicPartitionOverwrite,
-                /* cleanupThreadNum */ 1);
+                dynamicPartitionOverwrite);
     }
 
     private FormatTableCommit staticPartitionOverwriteCommit(
@@ -2180,7 +2437,8 @@ class FormatTableCommitTest {
                 null,
                 partitionManager,
                 /* dynamicPartitionOverwrite */ true,
-                cleanupThreadNum);
+                cleanupThreadNum,
+                /* publishThreadNum */ 1);
     }
 
     private static void writeOldFiles(LocalFileIO fileIO, Path partitionPath, int count)
@@ -2220,6 +2478,36 @@ class FormatTableCommitTest {
             throw new AssertionError("Expected Format Table commit to fail");
         } catch (ExecutionException expected) {
             return expected;
+        }
+    }
+
+    private static <I, O> void invokeSideEffectRunner(
+            ExecutorService executor,
+            Function<I, List<O>> processor,
+            Iterator<I> input,
+            int maxConcurrency,
+            Consumer<O> resultConsumer)
+            throws Exception {
+        Method method =
+                FormatTableCommit.class.getDeclaredMethod(
+                        "executeSideEffects",
+                        ExecutorService.class,
+                        Function.class,
+                        Iterator.class,
+                        int.class,
+                        Consumer.class);
+        method.setAccessible(true);
+        try {
+            method.invoke(null, executor, processor, input, maxConcurrency, resultConsumer);
+        } catch (InvocationTargetException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof Exception) {
+                throw (Exception) cause;
+            }
+            if (cause instanceof Error) {
+                throw (Error) cause;
+            }
+            throw new RuntimeException(cause);
         }
     }
 
@@ -2519,6 +2807,7 @@ class FormatTableCommitTest {
 
         private final CountDownLatch deletesStarted;
         private final CountDownLatch releaseDeletes = new CountDownLatch(1);
+        private final AtomicInteger interruptedDeletes = new AtomicInteger();
 
         private BlockingDeleteFileIO(int deleteCount) {
             this.deletesStarted = new CountDownLatch(deleteCount);
@@ -2533,6 +2822,7 @@ class FormatTableCommitTest {
                 }
                 return super.delete(path, recursive);
             } catch (InterruptedException e) {
+                interruptedDeletes.incrementAndGet();
                 Thread.currentThread().interrupt();
                 throw new IOException("Interrupted while blocking cleanup delete", e);
             }
@@ -2544,6 +2834,10 @@ class FormatTableCommitTest {
 
         private void releaseDeletes() {
             releaseDeletes.countDown();
+        }
+
+        private int interruptedDeletes() {
+            return interruptedDeletes.get();
         }
     }
 
@@ -2755,8 +3049,7 @@ class FormatTableCommitTest {
                 null,
                 null,
                 partitionManager,
-                /* dynamicPartitionOverwrite */ true,
-                /* cleanupThreadNum */ 1);
+                /* dynamicPartitionOverwrite */ true);
     }
 
     private FormatTablePartitionManager commitPartitionedFile(
@@ -2781,8 +3074,7 @@ class FormatTableCommitTest {
                         null,
                         null,
                         partitionManager,
-                        /* dynamicPartitionOverwrite */ true,
-                        /* cleanupThreadNum */ 1);
+                        /* dynamicPartitionOverwrite */ true);
         commit.commit(Collections.singletonList(new TwoPhaseCommitMessage(committer)));
         return partitionManager;
     }

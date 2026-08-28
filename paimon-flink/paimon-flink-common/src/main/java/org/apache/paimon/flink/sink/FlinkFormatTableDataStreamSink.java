@@ -135,7 +135,13 @@ public class FlinkFormatTableDataStreamSink {
                         }
                     } catch (Exception e) {
                         if (commitMessages != null && !commitMessages.isEmpty()) {
-                            tableCommit.abort(commitMessages);
+                            try {
+                                tableCommit.abort(commitMessages);
+                            } catch (Throwable abortFailure) {
+                                if (abortFailure != e) {
+                                    e.addSuppressed(abortFailure);
+                                }
+                            }
                         }
                         throw new RuntimeException(e);
                     } finally {
