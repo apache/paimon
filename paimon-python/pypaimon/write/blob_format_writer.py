@@ -129,8 +129,7 @@ class BlobFormatWriter:
 
         # Write length (8 bytes, little endian)
         length_bytes = struct.pack('<Q', bin_length)
-        self.output_stream.write(length_bytes)
-        self.position += 8
+        crc32 = self._write_with_crc(length_bytes, crc32)
 
         # Write CRC32 (4 bytes, little endian)
         crc_bytes = struct.pack('<I', crc32 & 0xffffffff)
@@ -195,8 +194,7 @@ class BlobFormatWriter:
 
         bin_length = self.position - previous_pos + self.METADATA_SIZE
         self.lengths.append(bin_length)
-        self.output_stream.write(struct.pack('<Q', bin_length))
-        self.position += 8
+        crc32 = self._write_with_crc(struct.pack('<Q', bin_length), crc32)
         self.output_stream.write(struct.pack('<I', crc32 & 0xffffffff))
         self.position += 4
 

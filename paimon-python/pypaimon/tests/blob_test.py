@@ -2228,12 +2228,29 @@ class BlobEndToEndTest(unittest.TestCase):
         return output.getvalue(), payload
 
     def test_blob_crc_fallback_matches_zlib(self):
+        record, _ = self._write_blob_record_with_crc_backend(zlib)
+        self._assert_record_crc(record)
+
+    def test_blob_array_crc_includes_record_length(self):
         from pypaimon.write.blob_format_writer import BlobFormatWriter
 
-        record, payload = self._write_blob_record_with_crc_backend(zlib)
-        expected_crc = zlib.crc32(
-            struct.pack('<I', BlobFormatWriter.MAGIC_NUMBER))
-        expected_crc = zlib.crc32(payload, expected_crc) & 0xffffffff
+        output = io.BytesIO()
+        writer = BlobFormatWriter(output)
+        writer.add_blob_array(
+            'blob_field', [BlobData(b'first'), None, BlobData(b'second')])
+        self._assert_record_crc(output.getvalue())
+
+    def test_blob_map_crc_includes_record_length(self):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        output = io.BytesIO()
+        writer = BlobFormatWriter(output)
+        writer.add_blob_map(
+            'blob_field', {'key': BlobData(b'value')}, AtomicType('STRING'))
+        self._assert_record_crc(output.getvalue())
+
+    def _assert_record_crc(self, record):
+        expected_crc = zlib.crc32(record[:-4]) & 0xffffffff
         actual_crc = struct.unpack('<I', record[-4:])[0]
         self.assertEqual(expected_crc, actual_crc)
 
@@ -2764,6 +2781,71 @@ class BlobEndToEndTest(unittest.TestCase):
             + index
             + struct.pack('<I', index_length)
         )
+
+    def test_blob_golden_bytes(self):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        source_file_path = os.path.join(self.temp_dir, "source.bin")
+        with open(source_file_path, 'wb') as source_file:
+            source_file.write(b"descriptor")
+
+        blob_file_path = os.path.join(self.temp_dir, "blob_golden.blob")
+        fields = [DataField(0, "blob", AtomicType("BLOB"))]
+        writer = BlobFormatWriter(open(blob_file_path, 'wb'))
+        writer.add_element(GenericRow([BlobData(b"inline")], fields, RowKind.INSERT))
+        writer.add_element(
+            GenericRow([Blob.from_local(source_file_path)], fields, RowKind.INSERT)
+        )
+        writer.add_element(GenericRow([None], fields, RowKind.INSERT))
+        writer.add_element(GenericRow([Blob.PLACE_HOLDER], fields, RowKind.INSERT))
+        writer.close()
+
+        with open(blob_file_path, 'rb') as blob_file:
+            self.assertEqual(
+                blob_file.read().hex(),
+                "cf114e58696e6c696e6516000000000000002960c8e9"
+                "cf114e5864657363726970746f721a000000000000003f69146b"
+                "2c0835010400000001",
+            )
+
+    def test_array_blob_golden_bytes(self):
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+
+        source_file_path = os.path.join(self.temp_dir, "source.bin")
+        with open(source_file_path, 'wb') as source_file:
+            source_file.write(b"descriptor")
+
+        blob_file_path = os.path.join(self.temp_dir, "array_golden.blob")
+        fields = [DataField(
+            0,
+            "blob_array",
+            ArrayType(True, AtomicType("BLOB")),
+        )]
+        writer = BlobFormatWriter(open(blob_file_path, 'wb'))
+        writer.add_element(GenericRow([[]], fields, RowKind.INSERT))
+        writer.add_element(GenericRow(
+            [[
+                BlobData(b"inline"),
+                None,
+                BlobData(b""),
+                Blob.from_local(source_file_path),
+            ]],
+            fields,
+            RowKind.INSERT,
+        ))
+        writer.add_element(GenericRow([None], fields, RowKind.INSERT))
+        writer.add_element(
+            GenericRow([Blob.ARRAY_PLACE_HOLDER], fields, RowKind.INSERT)
+        )
+        writer.close()
+
+        with open(blob_file_path, 'rb') as blob_file:
+            self.assertEqual(
+                blob_file.read().hex(),
+                "cf114e58424342410100000000000000001d000000000000009bd49157"
+                "cf114e58424342410104000000696e6c696e6564657363726970746f72"
+                "0c0d0214040000003100000000000000d08307713a2863010400000001",
+            )
 
     def test_map_blob_golden_bytes(self):
         from pypaimon.write.blob_format_writer import BlobFormatWriter
