@@ -47,6 +47,7 @@ public class FMGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Close
     private final int maxPartitionTextLength;
     private final int maxPartitionRowCount;
     private final int sampleRate;
+    private final boolean storeVerificationValues;
     @Nullable private final BlockCompressionFactory compressionFactory;
     private final List<FMIndexFile.PartitionMeta> partitions = new ArrayList<>();
 
@@ -68,11 +69,13 @@ public class FMGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Close
             int maxPartitionTextLength,
             int maxPartitionRowCount,
             int sampleRate,
+            boolean storeVerificationValues,
             @Nullable BlockCompressionFactory compressionFactory) {
         this.fileWriter = fileWriter;
         this.maxPartitionTextLength = maxPartitionTextLength;
         this.maxPartitionRowCount = maxPartitionRowCount;
         this.sampleRate = sampleRate;
+        this.storeVerificationValues = storeVerificationValues;
         this.compressionFactory = compressionFactory;
     }
 
@@ -93,12 +96,14 @@ public class FMGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Close
                     "FM index expects BinaryString values, but found %s.",
                     key.getClass().getName());
             bytes = ((BinaryString) key).toBytes();
-            Preconditions.checkArgument(
-                    bytes.length
-                            <= FMIndexFile.MAX_VERIFICATION_BLOCK_UNCOMPRESSED_LENGTH
-                                    - Integer.BYTES,
-                    "A value exceeds the FM index exact-fallback block limit (%s bytes).",
-                    FMIndexFile.MAX_VERIFICATION_BLOCK_UNCOMPRESSED_LENGTH);
+            if (storeVerificationValues) {
+                Preconditions.checkArgument(
+                        bytes.length
+                                <= FMIndexFile.MAX_VERIFICATION_BLOCK_UNCOMPRESSED_LENGTH
+                                        - Integer.BYTES,
+                        "A value exceeds the FM index exact-fallback block limit (%s bytes).",
+                        FMIndexFile.MAX_VERIFICATION_BLOCK_UNCOMPRESSED_LENGTH);
+            }
         }
         long encodedLength = (bytes == null ? 0L : bytes.length) + 1L;
         Preconditions.checkArgument(
@@ -148,7 +153,12 @@ public class FMGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Close
                     FMIndexFile.writeContainerDirectory(
                             stream, output, indexMeta, compressionFactory);
             FMIndexFile.writeContainerFooter(
-                    output, directory, firstRowId, totalRowCount, partitions.size());
+                    output,
+                    directory,
+                    firstRowId,
+                    totalRowCount,
+                    partitions.size(),
+                    storeVerificationValues);
             closeOutput();
             return Collections.singletonList(new ResultEntry(fileName, totalRowCount, indexMeta));
         } catch (IOException e) {
@@ -258,7 +268,9 @@ public class FMGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Close
                     FMIndexFile.writeBitVector(
                             stream, output, boundaryWords, symbols.length, compressionFactory);
             List<FMIndexFile.VerificationPageMeta> verificationPages =
-                    writeVerificationPages(stream, output, symbols, alphabet.symbolToByte);
+                    storeVerificationValues
+                            ? writeVerificationPages(stream, output, symbols, alphabet.symbolToByte)
+                            : Collections.emptyList();
             FMIndexFile.Directory directory =
                     new FMIndexFile.Directory(
                             partitionRowCount,
@@ -283,7 +295,8 @@ public class FMGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Close
                     partitionFirstRowId,
                     partitionRowCount,
                     symbols.length,
-                    sampleRate);
+                    sampleRate,
+                    storeVerificationValues);
             partitions.add(
                     new FMIndexFile.PartitionMeta(
                             partitionStart,

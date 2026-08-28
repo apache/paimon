@@ -57,6 +57,13 @@ public final class FMGlobalIndexOptions {
                     .defaultValue(1)
                     .withDescription("Compression level used by codecs which support levels.");
 
+    public static final ConfigOption<Boolean> STORE_VERIFICATION_VALUES =
+            ConfigOptions.key("fm-index.store-verification-values")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to store exact values for dense-query fallback. Disabling this reduces index size; dense contains predicates then fall back to scanning source data.");
+
     public static final ConfigOption<MemorySize> READ_CACHE_SIZE =
             ConfigOptions.key("fm-index.read-cache-size")
                     .memoryType()
@@ -76,7 +83,7 @@ public final class FMGlobalIndexOptions {
                     .doubleType()
                     .defaultValue(0.001d)
                     .withDescription(
-                            "Maximum estimated SA-locate work divided by exact stored-value scan bytes before falling back to verification.");
+                            "Maximum estimated SA-locate work divided by source text bytes before using exact stored values or declining index evaluation.");
 
     private FMGlobalIndexOptions() {}
 }

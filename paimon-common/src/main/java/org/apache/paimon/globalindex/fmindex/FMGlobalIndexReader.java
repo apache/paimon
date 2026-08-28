@@ -181,6 +181,22 @@ final class FMGlobalIndexReader implements ContainsRefiningGlobalIndexReader {
                                     current.footer.firstRowId + current.footer.rowCount)) {
                 return exactEmptyResult();
             }
+            boolean hasNonEmptyNeedle = false;
+            for (byte[] needle : needles) {
+                hasNonEmptyNeedle |= needle.length > 0;
+            }
+            if (hasNonEmptyNeedle && !readContext.supportsLocate()) {
+                if (current.directory.verificationPages.isEmpty()) {
+                    return Optional.empty();
+                }
+                return Optional.of(
+                        GlobalIndexResult.create(
+                                verifyRows(
+                                        input,
+                                        current,
+                                        needles,
+                                        candidates == null ? null : candidates.results())));
+            }
             // Enumerate selective intervals and use the stored-value path when occurrence-level
             // SA location would cost more than Milvus' count-first guard permits.
             List<SearchInterval> intervals = new ArrayList<>(needles.size());
@@ -201,6 +217,9 @@ final class FMGlobalIndexReader implements ContainsRefiningGlobalIndexReader {
                 RoaringNavigableMap64 effectiveCandidates =
                         result != null ? result : candidates == null ? null : candidates.results();
                 if (!shouldLocate(current, interval, effectiveCandidates)) {
+                    if (current.directory.verificationPages.isEmpty()) {
+                        return Optional.empty();
+                    }
                     denseNeedles.add(interval.needle);
                     continue;
                 }
@@ -273,9 +292,12 @@ final class FMGlobalIndexReader implements ContainsRefiningGlobalIndexReader {
             Metadata metadata,
             SearchInterval interval,
             @Nullable RoaringNavigableMap64 candidates) {
+        if (!readContext.supportsLocate()) {
+            return false;
+        }
         FMIndexFile.Directory directory = metadata.directory;
         double locateCost = (double) interval.size() * directory.sampleRate;
-        if (candidates != null) {
+        if (candidates != null && !directory.verificationPages.isEmpty()) {
             long verificationBytes = 0;
             for (FMIndexFile.VerificationPageMeta page : directory.verificationPages) {
                 if (pageSelected(metadata.footer.firstRowId, page, candidates)) {
@@ -788,9 +810,13 @@ final class FMGlobalIndexReader implements ContainsRefiningGlobalIndexReader {
     private RoaringNavigableMap64 nullRows(
             SeekableInputStream input, Metadata metadata, boolean selectNulls) throws IOException {
         RoaringNavigableMap64 result = new RoaringNavigableMap64();
-        for (int row = 0; row < metadata.directory.rowCount; row++) {
-            if (bit(input, metadata.directory.nullRows, row) == selectNulls) {
-                result.add(metadata.footer.firstRowId + row);
+        FMIndexFile.BitVectorMeta nullRows = metadata.directory.nullRows;
+        for (FMIndexFile.BitBlockMeta meta : nullRows.blocks) {
+            FMIndexFile.BitBlock block = bitBlock(input, nullRows, meta);
+            for (int local = 0; local < meta.bitCount; local++) {
+                if (block.get(local) == selectNulls) {
+                    result.add(metadata.footer.firstRowId + meta.firstBit + local);
+                }
             }
         }
         return result;
@@ -808,9 +834,12 @@ final class FMGlobalIndexReader implements ContainsRefiningGlobalIndexReader {
                 Preconditions.checkState(
                         containerLoader != null && partition != null,
                         "Missing FM index container metadata.");
-                containerLoader.validate(input);
+                FMIndexFile.ContainerFooter containerFooter = containerLoader.validate(input);
                 FMIndexFile.Footer footer =
                         FMIndexFile.readFooter(input, partition, file.fileSize());
+                Preconditions.checkState(
+                        footer.featureFlags == containerFooter.featureFlags,
+                        "FM index partition and container feature flags do not match.");
                 FMIndexFile.Directory directory =
                         FMIndexFile.readDirectory(input, footer, file.fileSize());
                 current = new Metadata(footer, directory);
@@ -979,25 +1008,27 @@ final class FMGlobalIndexReader implements ContainsRefiningGlobalIndexReader {
     static final class ContainerMetadataLoader {
         private final GlobalIndexIOMeta file;
         private final FMIndexFile.IndexMeta expected;
-        private boolean validated;
+        @Nullable private FMIndexFile.ContainerFooter footer;
 
         ContainerMetadataLoader(GlobalIndexIOMeta file, FMIndexFile.IndexMeta expected) {
             this.file = file;
             this.expected = expected;
         }
 
-        synchronized void validate(SeekableInputStream input) throws IOException {
-            if (validated) {
-                return;
+        synchronized FMIndexFile.ContainerFooter validate(SeekableInputStream input)
+                throws IOException {
+            if (footer != null) {
+                return footer;
             }
-            FMIndexFile.ContainerFooter footer =
+            FMIndexFile.ContainerFooter current =
                     FMIndexFile.readContainerFooter(input, file.fileSize());
             FMIndexFile.IndexMeta actual =
-                    FMIndexFile.readContainerDirectory(input, footer, file.fileSize());
+                    FMIndexFile.readContainerDirectory(input, current, file.fileSize());
             Preconditions.checkState(
                     expected.sameLayout(actual),
                     "FM index manifest metadata does not match the container directory.");
-            validated = true;
+            footer = current;
+            return current;
         }
     }
 

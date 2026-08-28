@@ -348,6 +348,13 @@ public class FMGlobalIndexTest {
     }
 
     @Test
+    public void testV1ChecksumUsesIeeeCrc32Contract() {
+        byte[] bytes = "123456789".getBytes(StandardCharsets.US_ASCII);
+        assertThat(FMIndexFile.crc32(bytes, 0, bytes.length, BlockCompressionType.NONE))
+                .isEqualTo(0x00C49E49);
+    }
+
+    @Test
     public void testDefaultLz4IsPersistedPerCompressibleBlock() throws Exception {
         String repeated = String.join("", Collections.nCopies(20_000, "compressible-value-"));
         List<GlobalIndexIOMeta> files = writeData(Collections.singletonList(str(repeated)), 0);
@@ -467,6 +474,102 @@ public class FMGlobalIndexTest {
         assertThatThrownBy(() -> new FMGlobalIndexer(dataField, invalidPageSize))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("demand page size");
+    }
+
+    @Test
+    public void testZeroReadCacheDeclinesLocateInsteadOfRereadingBlocks() throws Exception {
+        Options options = new Options();
+        options.set(FMGlobalIndexOptions.PARTITION_ROW_COUNT, 10);
+        options.set(FMGlobalIndexOptions.SA_SAMPLE_RATE, 1024);
+        options.set(FMGlobalIndexOptions.COMPRESSION, "none");
+        options.set(FMGlobalIndexOptions.READ_CACHE_SIZE, MemorySize.ofBytes(0));
+        options.set(FMGlobalIndexOptions.LOCATE_COST_RATIO, 1d);
+        indexer = new FMGlobalIndexer(dataField, options);
+        String value = String.join("", Collections.nCopies(3_000, "x")) + "unique-needle";
+        List<GlobalIndexIOMeta> files = writeData(Collections.singletonList(str(value)), 0);
+        GlobalIndexIOMeta file = files.get(0);
+        long sampleBlockOffset;
+        try (SeekableInputStream input = fileIO.newInputStream(file.filePath())) {
+            FMIndexFile.Footer footer = FMIndexFile.readFooter(input, file.fileSize());
+            sampleBlockOffset =
+                    FMIndexFile.readDirectory(input, footer, file.fileSize())
+                            .sampleValues
+                            .blocks
+                            .get(0)
+                            .block
+                            .offset;
+        }
+        corruptByte(file, sampleBlockOffset);
+
+        try (GlobalIndexReader reader = createReader(files, 1)) {
+            // With sufficient cache this selective interval uses SA locate and observes the
+            // corrupted sample. A zero cache must take the exact-value path without LF rereads.
+            assertRows(reader.visitContains(fieldRef, str("unique-needle")).join(), 0L);
+        }
+    }
+
+    @Test
+    public void testZeroReadCacheScansNullBitmapOncePerBlock() throws Exception {
+        Options options = new Options();
+        options.set(FMGlobalIndexOptions.PARTITION_ROW_COUNT, 1_000);
+        options.set(FMGlobalIndexOptions.COMPRESSION, "none");
+        options.set(FMGlobalIndexOptions.READ_CACHE_SIZE, MemorySize.ofBytes(0));
+        indexer = new FMGlobalIndexer(dataField, options);
+        List<BinaryString> values = new ArrayList<>();
+        for (int row = 0; row < 1_000; row++) {
+            values.add((row & 1) == 0 ? null : str("value-" + row));
+        }
+        List<GlobalIndexIOMeta> files = writeData(values, 0);
+
+        AtomicInteger preadCalls = new AtomicInteger();
+        fileReader =
+                meta ->
+                        new CountingVectoredInput(
+                                fileIO.newInputStream(meta.filePath()), preadCalls);
+        try (GlobalIndexReader reader = createReader(files, values.size())) {
+            assertRows(
+                    reader.visitIsNull(fieldRef).join(),
+                    java.util.stream.LongStream.range(0, values.size())
+                            .filter(row -> (row & 1) == 0)
+                            .toArray());
+        }
+        assertThat(preadCalls.get()).isLessThan(20);
+    }
+
+    @Test
+    public void testVerificationValuesCanBeOmitted() throws Exception {
+        Options options = new Options();
+        options.set(FMGlobalIndexOptions.PARTITION_ROW_COUNT, 10);
+        options.set(FMGlobalIndexOptions.SA_SAMPLE_RATE, 4);
+        options.set(FMGlobalIndexOptions.COMPRESSION, "none");
+        options.set(FMGlobalIndexOptions.LOCATE_COST_RATIO, 1d);
+        options.set(FMGlobalIndexOptions.STORE_VERIFICATION_VALUES, false);
+        indexer = new FMGlobalIndexer(dataField, options);
+        List<GlobalIndexIOMeta> files = writeData(Arrays.asList(str("aaaa"), null, str("bbbb")), 0);
+        GlobalIndexIOMeta file = files.get(0);
+        try (SeekableInputStream input = fileIO.newInputStream(file.filePath())) {
+            FMIndexFile.Footer footer = FMIndexFile.readFooter(input, file.fileSize());
+            assertThat(footer.hasExactDenseFallback()).isFalse();
+            assertThat(FMIndexFile.readDirectory(input, footer, file.fileSize()).verificationPages)
+                    .isEmpty();
+        }
+
+        try (GlobalIndexReader reader = createReader(files, 3)) {
+            assertThat(reader.visitContains(fieldRef, str("a")).join()).isEmpty();
+            assertRows(reader.visitContains(fieldRef, str("missing")).join());
+            assertRows(reader.visitContains(fieldRef, str("")).join(), 0L, 2L);
+            org.apache.paimon.utils.RoaringNavigableMap64 candidates =
+                    new org.apache.paimon.utils.RoaringNavigableMap64();
+            candidates.add(2L);
+            assertRows(
+                    ((org.apache.paimon.globalindex.ContainsRefiningGlobalIndexReader) reader)
+                            .visitContainsConjunction(
+                                    fieldRef,
+                                    Collections.singletonList(str("bbbb")),
+                                    GlobalIndexResult.create(candidates))
+                            .join(),
+                    2L);
+        }
     }
 
     @Test

@@ -45,6 +45,7 @@ public class FMGlobalIndexer implements GlobalIndexer {
     private final int partitionTextLength;
     private final int partitionRowCount;
     private final int sampleRate;
+    private final boolean storeVerificationValues;
     @Nullable private final BlockCompressionFactory compressionFactory;
     private final FMIndexReadContext readContext;
     private final int demandPageSize;
@@ -68,6 +69,7 @@ public class FMGlobalIndexer implements GlobalIndexer {
         checkArgument(
                 sampleRate > 0 && sampleRate <= 1024 && (sampleRate & (sampleRate - 1)) == 0,
                 "FM index SA sample rate must be a power of two in [1, 1024].");
+        this.storeVerificationValues = options.get(FMGlobalIndexOptions.STORE_VERIFICATION_VALUES);
         CompressOptions compression =
                 new CompressOptions(
                         options.get(FMGlobalIndexOptions.COMPRESSION),
@@ -95,7 +97,12 @@ public class FMGlobalIndexer implements GlobalIndexer {
     @Override
     public FMGlobalIndexWriter createWriter(GlobalIndexFileWriter fileWriter) throws IOException {
         return new FMGlobalIndexWriter(
-                fileWriter, partitionTextLength, partitionRowCount, sampleRate, compressionFactory);
+                fileWriter,
+                partitionTextLength,
+                partitionRowCount,
+                sampleRate,
+                storeVerificationValues,
+                compressionFactory);
     }
 
     @Override
