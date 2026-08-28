@@ -154,9 +154,11 @@ public class FlinkFormatTableDataStreamSink {
                         if (commitMessages != null && shouldCommit) {
                             try {
                                 tableCommit.abort(commitMessages);
-                            } catch (Exception abortFailure) {
+                            } catch (Throwable abortFailure) {
                                 // Report the commit failure, not the cleanup that followed it.
-                                e.addSuppressed(abortFailure);
+                                if (abortFailure != e) {
+                                    e.addSuppressed(abortFailure);
+                                }
                             }
                         }
                         throw new RuntimeException(e);

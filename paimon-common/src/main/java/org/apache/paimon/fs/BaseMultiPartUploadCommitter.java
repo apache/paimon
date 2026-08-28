@@ -71,10 +71,19 @@ public abstract class BaseMultiPartUploadCommitter<T, C> implements TwoPhaseOutp
     @Override
     public void discard(FileIO fileIO) throws IOException {
         try {
-            MultiPartUploadStore<T, C> multiPartUploadStore = multiPartUploadStore(fileIO);
-            multiPartUploadStore.abortMultipartUpload(objectName, uploadId);
+            abortMultipartUpload(fileIO);
         } catch (Exception e) {
             LOG.warn("Failed to discard multipart upload with ID: {}", uploadId, e);
+        }
+    }
+
+    @Override
+    public void discardStaging(FileIO fileIO) throws IOException {
+        try {
+            // Aborting an upload never deletes a possibly completed object.
+            abortMultipartUpload(fileIO);
+        } catch (Exception e) {
+            throw new IOException("Failed to discard multipart upload with ID: " + uploadId, e);
         }
     }
 
@@ -90,6 +99,11 @@ public abstract class BaseMultiPartUploadCommitter<T, C> implements TwoPhaseOutp
 
     @Override
     public void clean(FileIO fileIO) throws IOException {}
+
+    private void abortMultipartUpload(FileIO fileIO) throws IOException {
+        MultiPartUploadStore<T, C> multiPartUploadStore = multiPartUploadStore(fileIO);
+        multiPartUploadStore.abortMultipartUpload(objectName, uploadId);
+    }
 
     private MultiPartUploadStore<T, C> multiPartUploadStore(FileIO fileIO) throws IOException {
         if (fileIO instanceof RESTTokenFileIO) {
