@@ -560,7 +560,7 @@ This section introduce all available spark procedures about paimon.
          To create global index files for a given column. The table must have <code>row-tracking.enabled=true</code>. Arguments:
             <li>table: the target table identifier. Cannot be empty.</li>
             <li>index_column: the name of the column to index. Cannot be empty.</li>
-            <li>index_type: type of the index to build, e.g. 'btree', 'bitmap', or 'fmindex'. Cannot be empty. The 'fmindex' index provides exact byte-oriented <code>CONTAINS</code> results for needles of any length using partitioned, demand-paged FM blocks.</li>
+            <li>index_type: type of the index to build, e.g. 'btree', 'bitmap', or 'fmindex'. Cannot be empty.</li>
             <li>partitions: partition filter to limit the partitions on which to build the index. The comma (",") represents "AND", the semicolon (";") represents "OR". Left empty for all partitions.</li>
             <li>options: additional dynamic options of the table. It prioritizes higher than original `tableProp` and lower than `procedureArg`.</li>
       </td>

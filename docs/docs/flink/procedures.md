@@ -1085,7 +1085,7 @@ All available procedures are listed below.
          To create a global index on a table for accelerating queries. Arguments:
             <li>table(required): the target table identifier.</li>
             <li>index_column(required): the column name to build index on.</li>
-            <li>index_type(required): the type of global index, supported types include 'btree', 'bitmap', 'fmindex', 'ivf-flat', 'ivf-pq', 'ivf-sq', 'ivf-rq', 'diskann', and 'full-text'. The 'fmindex' index provides exact byte-oriented <code>CONTAINS</code> results for needles of any length using partitioned, demand-paged FM blocks.</li>
+            <li>index_type(required): the type of global index, supported types include 'btree', 'bitmap', 'fmindex', 'ivf-flat', 'ivf-pq', 'ivf-sq', 'ivf-rq', 'diskann', and 'full-text'.</li>
             <li>partitions(optional): partition filter for selective index creation.</li>
             <li>options(optional): additional dynamic options for index creation.</li>
       </td>
