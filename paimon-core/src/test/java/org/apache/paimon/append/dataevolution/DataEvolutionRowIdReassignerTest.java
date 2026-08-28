@@ -977,6 +977,40 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
     }
 
     @Test
+    public void testReassignUsesConfiguredRetryBudget() throws Exception {
+        FileStoreTable table = createTableWithInterleavedPartitions();
+        Map<String, String> retryOptions = new HashMap<>();
+        retryOptions.put(CoreOptions.COMMIT_MAX_RETRIES.key(), "3");
+        retryOptions.put(CoreOptions.COMMIT_MIN_RETRY_WAIT.key(), "0ms");
+        retryOptions.put(CoreOptions.COMMIT_MAX_RETRY_WAIT.key(), "0ms");
+        FileStoreTable configured = table.copy(retryOptions);
+
+        AtomicInteger beforeCommits = new AtomicInteger();
+        DataEvolutionRowIdReassigner.Result result =
+                new DataEvolutionRowIdReassigner(
+                                configured,
+                                partitionPredicate(configured, "a"),
+                                () -> {
+                                    int attempt = beforeCommits.getAndIncrement();
+                                    if (attempt < 3) {
+                                        try {
+                                            writeOneRow(
+                                                    configured, "new-" + attempt, 100 + attempt);
+                                        } catch (Exception e) {
+                                            throw new RuntimeException(e);
+                                        }
+                                    }
+                                })
+                        .reassign("test-reassign-configured-retries");
+
+        assertThat(beforeCommits).hasValue(4);
+        assertThat(result.reassigned).isTrue();
+        assertThat(result.fileCount).isEqualTo(3L);
+        assertThat(result.rowCount).isEqualTo(3L);
+        assertThat(rowIdsByPartition(configured).get("pt=a/")).containsExactly(8L, 9L, 10L);
+    }
+
+    @Test
     public void testReassignPartitionFilterAfterConcurrentAppendOutsideFilter() throws Exception {
         FileStoreTable table = createTableWithInterleavedPartitions();
         Snapshot before = table.snapshotManager().latestSnapshot();
@@ -1285,6 +1319,43 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         List<String> afterManifestFiles = dataManifestFileNames(table);
         assertThat(afterManifestFiles).containsAll(unaffectedManifests);
         assertThat(afterManifestFiles).doesNotContainAnyElementsOf(affectedManifests);
+    }
+
+    @Test
+    public void testReassignDoesNotCompactManifests() throws Exception {
+        testReassignSkipsManifestOptimization(false);
+    }
+
+    @Test
+    public void testReassignDoesNotSortManifests() throws Exception {
+        testReassignSkipsManifestOptimization(true);
+    }
+
+    private void testReassignSkipsManifestOptimization(boolean manifestSortEnabled)
+            throws Exception {
+        FileStoreTable table = createTableWithPartiallyOverlappedPartitions();
+        Map<String, Set<String>> partitionsByManifest = currentPartitionsByManifest(table);
+        List<String> unaffectedManifests = new ArrayList<>();
+        for (Map.Entry<String, Set<String>> entry : partitionsByManifest.entrySet()) {
+            if (!entry.getValue().contains("pt=a/")) {
+                unaffectedManifests.add(entry.getKey());
+            }
+        }
+        assertThat(unaffectedManifests).isNotEmpty();
+
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.MANIFEST_SORT_ENABLED.key(), Boolean.toString(manifestSortEnabled));
+        options.put(CoreOptions.MANIFEST_MERGE_MIN_COUNT.key(), "1");
+        options.put(CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE.key(), "1B");
+        FileStoreTable configured = table.copy(options);
+
+        new DataEvolutionRowIdReassigner(configured)
+                .reassign(
+                        manifestSortEnabled
+                                ? "test-reassign-with-manifest-sort"
+                                : "test-reassign-with-manifest-compaction");
+
+        assertThat(dataManifestFileNames(configured)).containsAll(unaffectedManifests);
     }
 
     @Test
