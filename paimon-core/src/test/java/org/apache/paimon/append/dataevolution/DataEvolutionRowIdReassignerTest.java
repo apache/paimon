@@ -624,7 +624,7 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
 
         assertThat(result.reassigned).isTrue();
         assertThat(result.previousSnapshotId).isEqualTo(5L);
-        assertThat(result.newSnapshotId).isEqualTo(6L);
+        assertThat(result.newSnapshotId).isEqualTo(7L);
         assertThat(result.firstAssignedRowId).isEqualTo(5L);
         assertThat(result.nextRowId).isEqualTo(10L);
         assertThat(result.fileCount).isEqualTo(5L);
@@ -710,7 +710,7 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         assertThat(appended).isTrue();
         assertThat(result.reassigned).isTrue();
         assertThat(result.previousSnapshotId).isEqualTo(before.id() + 1);
-        assertThat(result.newSnapshotId).isEqualTo(before.id() + 2);
+        assertThat(result.newSnapshotId).isEqualTo(before.id() + 3);
         assertThat(result.firstAssignedRowId).isEqualTo(6L);
         assertThat(result.nextRowId).isEqualTo(11L);
         assertThat(result.fileCount).isEqualTo(5L);
@@ -745,7 +745,7 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                         .reassign("test-reassign-append-planned-partition");
 
         assertThat(result.previousSnapshotId).isEqualTo(before.id() + 1);
-        assertThat(result.newSnapshotId).isEqualTo(before.id() + 2);
+        assertThat(result.newSnapshotId).isEqualTo(before.id() + 3);
         assertThat(result.firstAssignedRowId).isEqualTo(6L);
         assertThat(result.nextRowId).isEqualTo(11L);
         assertThat(result.fileCount).isEqualTo(5L);
@@ -962,9 +962,9 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                                 })
                         .reassign("test-reassign-multiple-append-conflicts");
 
-        assertThat(beforeCommits).hasValue(3);
+        assertThat(beforeCommits).hasValue(4);
         assertThat(result.previousSnapshotId).isEqualTo(before.id() + 3);
-        assertThat(result.newSnapshotId).isEqualTo(before.id() + 4);
+        assertThat(result.newSnapshotId).isEqualTo(before.id() + 5);
         assertThat(result.firstAssignedRowId).isEqualTo(8L);
         assertThat(result.nextRowId).isEqualTo(13L);
         assertThat(result.fileCount).isEqualTo(5L);
@@ -974,6 +974,186 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                 .containsEntry("pt=b/", Arrays.asList(11L, 12L))
                 .containsEntry("pt=c/", Collections.singletonList(5L))
                 .containsEntry("pt=d/", Collections.singletonList(6L));
+    }
+
+    @Test
+    public void testReassignUsesConfiguredRetryBudget() throws Exception {
+        FileStoreTable table = createTableWithInterleavedPartitions();
+        Map<String, String> retryOptions = new HashMap<>();
+        retryOptions.put(CoreOptions.COMMIT_MAX_RETRIES.key(), "3");
+        retryOptions.put(CoreOptions.COMMIT_MIN_RETRY_WAIT.key(), "0ms");
+        retryOptions.put(CoreOptions.COMMIT_MAX_RETRY_WAIT.key(), "0ms");
+        FileStoreTable configured = table.copy(retryOptions);
+
+        AtomicInteger beforeCommits = new AtomicInteger();
+        DataEvolutionRowIdReassigner.Result result =
+                new DataEvolutionRowIdReassigner(
+                                configured,
+                                partitionPredicate(configured, "a"),
+                                () -> {
+                                    int attempt = beforeCommits.getAndIncrement();
+                                    if (attempt < 3) {
+                                        try {
+                                            writeOneRow(
+                                                    configured, "new-" + attempt, 100 + attempt);
+                                        } catch (Exception e) {
+                                            throw new RuntimeException(e);
+                                        }
+                                    }
+                                })
+                        .reassign("test-reassign-configured-retries");
+
+        assertThat(beforeCommits).hasValue(4);
+        assertThat(result.reassigned).isTrue();
+        assertThat(result.fileCount).isEqualTo(3L);
+        assertThat(result.rowCount).isEqualTo(3L);
+        assertThat(rowIdsByPartition(configured).get("pt=a/")).containsExactly(8L, 9L, 10L);
+    }
+
+    @Test
+    public void testLaterManifestGroupRebasesAcrossEarlierGroupRetry() throws Exception {
+        FileStoreTable originalTable = createTableWithThreeIndependentPartitions();
+        createBTreeIndex(originalTable);
+        List<String> originalManifestFiles = dataManifestFileNames(originalTable);
+        FileStoreTable table = withManifestMergeOnNextAppend(originalTable);
+        Snapshot before = table.snapshotManager().latestSnapshot();
+        AtomicBoolean updated = new AtomicBoolean();
+
+        DataEvolutionRowIdReassigner.Result result =
+                new DataEvolutionRowIdReassigner(
+                                table,
+                                null,
+                                () -> {
+                                    if (updated.compareAndSet(false, true)) {
+                                        try {
+                                            writePartialPayload(table, "b", 1L, "updated-1");
+                                            assertThat(dataManifestFileNames(table))
+                                                    .doesNotContainAnyElementsOf(
+                                                            originalManifestFiles);
+                                        } catch (Exception e) {
+                                            throw new RuntimeException(e);
+                                        }
+                                    }
+                                })
+                        .reassign("test-reassign-rebase-later-group");
+
+        assertThat(result.previousSnapshotId).isEqualTo(before.id() + 1);
+        assertThat(result.newSnapshotId).isEqualTo(before.id() + 4);
+        assertThat(result.firstAssignedRowId).isEqualTo(6L);
+        assertThat(result.nextRowId).isEqualTo(12L);
+        assertThat(result.fileCount).isEqualTo(7L);
+        assertThat(result.rowCount).isEqualTo(6L);
+        assertThat(result.indexFileCount).isEqualTo(6L);
+        assertThat(expandedRowIdsByPartition(table))
+                .containsEntry("pt=a/", Arrays.asList(6L, 7L))
+                .containsEntry("pt=b/", Arrays.asList(8L, 8L, 9L))
+                .containsEntry("pt=c/", Arrays.asList(10L, 11L));
+        assertThat(globalIndexRanges(table))
+                .containsExactly(
+                        new Range(6, 6),
+                        new Range(7, 7),
+                        new Range(8, 8),
+                        new Range(9, 9),
+                        new Range(10, 10),
+                        new Range(11, 11));
+        assertThat(readTableRows(table))
+                .containsExactly("0|a|v0", "1|b|updated-1", "2|c|v2", "3|a|v3", "4|b|v4", "5|c|v5");
+    }
+
+    @Test
+    public void testReassignCommitsIndependentManifestGroupsSeparately() throws Exception {
+        FileStoreTable table = createTableWithInterleavedPartitions();
+        Snapshot before = table.snapshotManager().latestSnapshot();
+
+        DataEvolutionRowIdReassigner.Result result =
+                new DataEvolutionRowIdReassigner(table)
+                        .reassign("test-reassign-independent-manifest-groups");
+
+        assertThat(result.previousSnapshotId).isEqualTo(before.id());
+        assertThat(result.newSnapshotId).isEqualTo(before.id() + 2);
+        assertThat(table.snapshotManager().snapshot(before.id() + 1).commitKind())
+                .isEqualTo(Snapshot.CommitKind.OVERWRITE);
+        assertThat(table.snapshotManager().snapshot(before.id() + 2).commitKind())
+                .isEqualTo(Snapshot.CommitKind.OVERWRITE);
+        assertThat(result.firstAssignedRowId).isEqualTo(5L);
+        assertThat(result.nextRowId).isEqualTo(10L);
+        assertThat(result.fileCount).isEqualTo(5L);
+        assertThat(result.rowCount).isEqualTo(5L);
+        assertThat(rowIdsByPartition(table))
+                .containsEntry("pt=a/", Arrays.asList(5L, 6L, 7L))
+                .containsEntry("pt=b/", Arrays.asList(8L, 9L));
+    }
+
+    @Test
+    public void testReassignCapsIndependentManifestGroupBatches() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        int partitionCount = DataEvolutionRowIdReassigner.MAX_ASSIGNMENT_BATCHES + 1;
+        for (int round = 0; round < 2; round++) {
+            for (int partition = 0; partition < partitionCount; partition++) {
+                writeOneRow(table, "p" + partition, round * partitionCount + partition);
+            }
+        }
+        Snapshot before = table.snapshotManager().latestSnapshot();
+
+        DataEvolutionRowIdReassigner.Result result =
+                new DataEvolutionRowIdReassigner(table)
+                        .reassign("test-reassign-capped-manifest-groups");
+
+        assertThat(result.previousSnapshotId).isEqualTo(before.id());
+        assertThat(result.newSnapshotId)
+                .isEqualTo(before.id() + DataEvolutionRowIdReassigner.MAX_ASSIGNMENT_BATCHES);
+        assertThat(result.firstAssignedRowId).isEqualTo(2L * partitionCount);
+        assertThat(result.nextRowId).isEqualTo(4L * partitionCount);
+        assertThat(result.fileCount).isEqualTo(2L * partitionCount);
+        assertThat(result.rowCount).isEqualTo(2L * partitionCount);
+
+        Map<String, List<Long>> reassignedRowIds = expandedRowIdsByPartition(table);
+        long expectedFirstRowId = result.firstAssignedRowId;
+        for (int partition = 0; partition < partitionCount; partition++) {
+            assertThat(reassignedRowIds.get("pt=p" + partition + "/"))
+                    .containsExactly(expectedFirstRowId, expectedFirstRowId + 1);
+            expectedFirstRowId += 2;
+        }
+    }
+
+    @Test
+    public void testReassignResumesAfterPartiallyCommittedBatches() throws Exception {
+        FileStoreTable table = createTableWithInterleavedPartitions();
+        AtomicInteger beforeCommits = new AtomicInteger();
+
+        assertThatThrownBy(
+                        () ->
+                                new DataEvolutionRowIdReassigner(
+                                                table,
+                                                null,
+                                                () -> {
+                                                    if (beforeCommits.getAndIncrement() == 1) {
+                                                        try {
+                                                            compactManifests(table);
+                                                        } catch (Exception e) {
+                                                            throw new RuntimeException(e);
+                                                        }
+                                                    }
+                                                })
+                                        .reassign("test-reassign-partial-batches"))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("completing 1 of 2 manifest-group batches")
+                .hasMessageContaining("COMPACT snapshot");
+
+        assertThat(rowIdsByPartition(table))
+                .containsEntry("pt=a/", Arrays.asList(5L, 6L, 7L))
+                .containsEntry("pt=b/", Arrays.asList(1L, 3L));
+
+        DataEvolutionRowIdReassigner.Result resumed =
+                new DataEvolutionRowIdReassigner(table)
+                        .reassign("test-reassign-resume-partial-batches");
+        assertThat(resumed.reassigned).isTrue();
+        assertThat(resumed.fileCount).isEqualTo(2L);
+        assertThat(resumed.rowCount).isEqualTo(2L);
+        assertThat(rowIdsByPartition(table))
+                .containsEntry("pt=a/", Arrays.asList(5L, 6L, 7L))
+                .containsEntry("pt=b/", Arrays.asList(8L, 9L));
     }
 
     @Test
@@ -1122,7 +1302,7 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                         .reassign("test-reassign-analyze-conflict");
 
         assertThat(result.previousSnapshotId).isEqualTo(before.id() + 1);
-        assertThat(result.newSnapshotId).isEqualTo(before.id() + 2);
+        assertThat(result.newSnapshotId).isEqualTo(before.id() + 3);
         assertThat(result.firstAssignedRowId).isEqualTo(5L);
         assertThat(result.nextRowId).isEqualTo(10L);
         assertThat(table.snapshotManager().latestSnapshot().statistics()).isNotNull();
@@ -1285,6 +1465,43 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         List<String> afterManifestFiles = dataManifestFileNames(table);
         assertThat(afterManifestFiles).containsAll(unaffectedManifests);
         assertThat(afterManifestFiles).doesNotContainAnyElementsOf(affectedManifests);
+    }
+
+    @Test
+    public void testReassignDoesNotCompactManifests() throws Exception {
+        testReassignSkipsManifestOptimization(false);
+    }
+
+    @Test
+    public void testReassignDoesNotSortManifests() throws Exception {
+        testReassignSkipsManifestOptimization(true);
+    }
+
+    private void testReassignSkipsManifestOptimization(boolean manifestSortEnabled)
+            throws Exception {
+        FileStoreTable table = createTableWithPartiallyOverlappedPartitions();
+        Map<String, Set<String>> partitionsByManifest = currentPartitionsByManifest(table);
+        List<String> unaffectedManifests = new ArrayList<>();
+        for (Map.Entry<String, Set<String>> entry : partitionsByManifest.entrySet()) {
+            if (!entry.getValue().contains("pt=a/")) {
+                unaffectedManifests.add(entry.getKey());
+            }
+        }
+        assertThat(unaffectedManifests).isNotEmpty();
+
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.MANIFEST_SORT_ENABLED.key(), Boolean.toString(manifestSortEnabled));
+        options.put(CoreOptions.MANIFEST_MERGE_MIN_COUNT.key(), "1");
+        options.put(CoreOptions.MANIFEST_FULL_COMPACTION_FILE_SIZE.key(), "1B");
+        FileStoreTable configured = table.copy(options);
+
+        new DataEvolutionRowIdReassigner(configured)
+                .reassign(
+                        manifestSortEnabled
+                                ? "test-reassign-with-manifest-sort"
+                                : "test-reassign-with-manifest-compaction");
+
+        assertThat(dataManifestFileNames(configured)).containsAll(unaffectedManifests);
     }
 
     @Test
@@ -1565,8 +1782,8 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
                 new DataEvolutionRowIdReassigner(table).reassign("test-reassign-row-id-index-2");
 
         assertThat(secondResult.reassigned).isFalse();
-        assertThat(secondResult.previousSnapshotId).isEqualTo(7L);
-        assertThat(secondResult.newSnapshotId).isEqualTo(7L);
+        assertThat(secondResult.previousSnapshotId).isEqualTo(8L);
+        assertThat(secondResult.newSnapshotId).isEqualTo(8L);
         assertThat(secondResult.firstAssignedRowId).isEqualTo(10L);
         assertThat(secondResult.nextRowId).isEqualTo(10L);
         assertThat(secondResult.fileCount).isEqualTo(0L);
@@ -1628,7 +1845,7 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
 
         assertThat(indexed).isTrue();
         assertThat(result.previousSnapshotId).isEqualTo(before.id() + 1);
-        assertThat(result.newSnapshotId).isEqualTo(before.id() + 2);
+        assertThat(result.newSnapshotId).isEqualTo(before.id() + 3);
         assertThat(result.firstAssignedRowId).isEqualTo(6L);
         assertThat(result.nextRowId).isEqualTo(11L);
         assertThat(result.indexFileCount).isEqualTo(5L);
@@ -1667,7 +1884,7 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         assertThat(result.reassigned).isTrue();
         assertThat(result.skipReason).isNull();
         assertThat(result.previousSnapshotId).isEqualTo(before.id());
-        assertThat(result.newSnapshotId).isEqualTo(before.id() + 1);
+        assertThat(result.newSnapshotId).isEqualTo(before.id() + 2);
         assertThat(result.firstAssignedRowId).isEqualTo(5L);
         assertThat(result.nextRowId).isEqualTo(10L);
         assertThat(result.fileCount).isEqualTo(5L);
@@ -1714,7 +1931,7 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
 
         assertThat(result.reassigned).isTrue();
         assertThat(result.previousSnapshotId).isEqualTo(before.id());
-        assertThat(result.newSnapshotId).isEqualTo(before.id() + 1);
+        assertThat(result.newSnapshotId).isEqualTo(before.id() + 4);
         assertThat(result.firstAssignedRowId).isEqualTo(scrambledNextRowId);
         assertThat(result.fileCount).isEqualTo(expectedFileCount);
         assertThat(result.rowCount).isEqualTo(expectedRows.size());
@@ -1831,6 +2048,18 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         writeOneRow(table, "a", 2);
         writeOneRow(table, "b", 3);
         writeOneRow(table, "a", 4);
+        return table;
+    }
+
+    private FileStoreTable createTableWithThreeIndependentPartitions() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        writeOneRow(table, "a", 0);
+        writeOneRow(table, "b", 1);
+        writeOneRow(table, "c", 2);
+        writeOneRow(table, "a", 3);
+        writeOneRow(table, "b", 4);
+        writeOneRow(table, "c", 5);
         return table;
     }
 

@@ -43,6 +43,7 @@ import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RetryWaiter;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -68,7 +69,7 @@ public class DataEvolutionRowIdReassigner {
 
     private static final Logger LOG = LoggerFactory.getLogger(DataEvolutionRowIdReassigner.class);
     private static final String COMMIT_USER_PREFIX = "reassign-row-id";
-    private static final int MAX_COMMIT_ATTEMPTS = 3;
+    @VisibleForTesting static final int MAX_ASSIGNMENT_BATCHES = 4;
 
     private final FileStoreTable table;
     private final @Nullable PartitionPredicate partitionPredicate;
@@ -126,76 +127,126 @@ public class DataEvolutionRowIdReassigner {
 
         ManifestFile manifestFile = table.store().manifestFileFactory().create();
         ManifestList manifestList = table.store().manifestListFactory().create();
-        Optional<AssignmentPlan> optionalPlan =
-                planAssignment(manifestList.readDataManifests(latest));
-        if (!optionalPlan.isPresent()) {
+        Snapshot planningSnapshot = latest;
+        List<AssignmentPlan> assignmentPlans =
+                planAssignments(manifestList.readDataManifests(latest));
+        if (assignmentPlans.isEmpty()) {
             LOG.info(
                     "Skip reassigning row IDs for table {} because no partition requires reassignment.",
                     table.name());
             return Result.skipped(
                     latest.id(), nextRowId, "no partition requires row-id reassignment");
         }
-        AssignmentPlan assignmentPlan = optionalPlan.get();
 
-        for (int attempt = 1; attempt <= MAX_COMMIT_ATTEMPTS; attempt++) {
-            Assignment assignment = assignmentPlan.createAssignment(latest);
-            CommitAssignmentResult commitResult =
-                    commitAssignment(assignment, manifestFile, manifestList, commitUser);
-            if (commitResult.success) {
-                LOG.info(
-                        "Reassigned row IDs for table {} from {} to {}, partitions={}, files={}, rows={}.",
-                        table.name(),
-                        assignment.firstAssignedRowId,
-                        assignment.nextRowId,
-                        assignment.rowIdMappings.size(),
-                        commitResult.fileCount,
-                        assignment.logicalRowCount());
-                return new Result(
-                        assignment.snapshot.id(),
-                        assignment.snapshot.id() + 1,
-                        commitResult.fileCount,
-                        assignment.logicalRowCount(),
-                        commitResult.indexFileCount,
-                        assignment.firstAssignedRowId,
-                        assignment.nextRowId);
-            }
-
-            if (attempt == MAX_COMMIT_ATTEMPTS) {
+        long previousSnapshotId = -1L;
+        long newSnapshotId = -1L;
+        long firstAssignedRowId = -1L;
+        long reassignedFileCount = 0L;
+        long reassignedRowCount = 0L;
+        long reassignedIndexFileCount = 0L;
+        long reassignedNextRowId = nextRowId;
+        Set<Long> committedSnapshotIds = new HashSet<>();
+        for (int batch = 0; batch < assignmentPlans.size(); batch++) {
+            CommittedAssignment committed;
+            try {
+                AssignmentPlan assignmentPlan = assignmentPlans.get(batch);
+                if (latest.id() > planningSnapshot.id()) {
+                    assignmentPlan =
+                            advanceAssignmentPlan(
+                                    assignmentPlan,
+                                    planningSnapshot,
+                                    latest,
+                                    manifestFile,
+                                    manifestList,
+                                    committedSnapshotIds);
+                }
+                committed =
+                        commitAssignmentWithRetry(
+                                assignmentPlan, latest, manifestFile, manifestList, commitUser);
+            } catch (RuntimeException e) {
+                if (batch == 0) {
+                    throw e;
+                }
                 throw new RuntimeException(
-                        "Failed to reassign row IDs because a newer snapshot has been committed.");
+                        String.format(
+                                "Failed to finish row-id reassignment after completing %s of %s manifest-group batches. Rerun the operation to continue: %s",
+                                batch, assignmentPlans.size(), e.getMessage()),
+                        e);
             }
 
-            Snapshot newLatest = table.snapshotManager().latestSnapshot();
-            checkState(newLatest != null, "Latest snapshot disappeared while reassigning row IDs.");
-            assignmentPlan =
-                    advanceAssignmentPlan(
-                            assignmentPlan, latest, newLatest, manifestFile, manifestList);
+            Assignment assignment = committed.assignment;
+            CommitAssignmentResult commitResult = committed.commitResult;
+            long committedSnapshotId = assignment.snapshot.id() + 1;
+            latest = table.snapshotManager().snapshot(committedSnapshotId);
+            if (batch == 0) {
+                previousSnapshotId = assignment.snapshot.id();
+                firstAssignedRowId = assignment.firstAssignedRowId;
+            }
+            newSnapshotId = committedSnapshotId;
+            committedSnapshotIds.add(committedSnapshotId);
+            reassignedFileCount = Math.addExact(reassignedFileCount, commitResult.fileCount);
+            reassignedRowCount = Math.addExact(reassignedRowCount, assignment.logicalRowCount());
+            reassignedIndexFileCount =
+                    Math.addExact(reassignedIndexFileCount, commitResult.indexFileCount);
+            reassignedNextRowId = assignment.nextRowId;
             LOG.info(
-                    "Failed to commit row-id reassignment for table {} based on snapshot {} because snapshot {} has been committed. Retrying {}/{} with the updated assignment plan.",
+                    "Reassigned row IDs for table {} in manifest-group batch {}/{} from {} to {}, partitions={}, files={}, rows={}.",
                     table.name(),
-                    latest.id(),
-                    newLatest.id(),
-                    attempt + 1,
-                    MAX_COMMIT_ATTEMPTS);
-            latest = newLatest;
+                    batch + 1,
+                    assignmentPlans.size(),
+                    assignment.firstAssignedRowId,
+                    assignment.nextRowId,
+                    assignment.rowIdMappings.size(),
+                    commitResult.fileCount,
+                    assignment.logicalRowCount());
         }
 
-        throw new IllegalStateException("Unreachable retry state while reassigning row IDs.");
+        return new Result(
+                previousSnapshotId,
+                newSnapshotId,
+                reassignedFileCount,
+                reassignedRowCount,
+                reassignedIndexFileCount,
+                firstAssignedRowId,
+                reassignedNextRowId);
     }
 
     private Optional<AssignmentPlan> planAssignment(List<ManifestFileMeta> manifestMetas) {
-        List<List<ManifestFileMeta>> manifestGroups = manifestGroupsByPartition(manifestMetas);
+        return createAssignmentPlan(manifestMetas, includedManifestGroups(manifestMetas));
+    }
+
+    private List<AssignmentPlan> planAssignments(List<ManifestFileMeta> manifestMetas) {
+        List<List<ManifestFileMeta>> manifestGroups = includedManifestGroups(manifestMetas);
+        int batchCount = Math.min(manifestGroups.size(), MAX_ASSIGNMENT_BATCHES);
+        List<AssignmentPlan> result = new ArrayList<>();
+        for (int batch = 0; batch < batchCount; batch++) {
+            int from = batch * manifestGroups.size() / batchCount;
+            int to = (batch + 1) * manifestGroups.size() / batchCount;
+            createAssignmentPlan(manifestMetas, manifestGroups.subList(from, to))
+                    .ifPresent(result::add);
+        }
+        return result;
+    }
+
+    private List<List<ManifestFileMeta>> includedManifestGroups(
+            List<ManifestFileMeta> manifestMetas) {
         List<List<ManifestFileMeta>> includedGroups = new ArrayList<>();
-        for (List<ManifestFileMeta> manifestGroup : manifestGroups) {
+        for (List<ManifestFileMeta> manifestGroup : manifestGroupsByPartition(manifestMetas)) {
             if (!skipManifestGroupByPartitionFilter(manifestGroup)) {
                 includedGroups.add(manifestGroup);
             }
         }
+        return includedGroups;
+    }
 
+    private Optional<AssignmentPlan> createAssignmentPlan(
+            List<ManifestFileMeta> manifestMetas,
+            List<List<ManifestFileMeta>> includedManifestGroups) {
         DataEvolutionRowIdAssignmentPlanner planner =
                 new DataEvolutionRowIdAssignmentPlanner(
                         table, partitionPredicate, new ArrayList<>(manifestMetas));
-        DataEvolutionRowIdAssignmentPlanner.Result compactPlan = planner.plan(includedGroups);
+        DataEvolutionRowIdAssignmentPlanner.Result compactPlan =
+                planner.plan(includedManifestGroups);
         if (compactPlan.isEmpty()) {
             return Optional.empty();
         }
@@ -358,6 +409,65 @@ public class DataEvolutionRowIdReassigner {
         return partitionPredicate != null;
     }
 
+    private CommittedAssignment commitAssignmentWithRetry(
+            AssignmentPlan initialAssignmentPlan,
+            Snapshot initialSnapshot,
+            ManifestFile manifestFile,
+            ManifestList manifestList,
+            String commitUser) {
+        AssignmentPlan assignmentPlan = initialAssignmentPlan;
+        Snapshot latest = initialSnapshot;
+        int retryCount = 0;
+        long startMillis = System.currentTimeMillis();
+        CoreOptions options = table.coreOptions();
+        RetryWaiter retryWaiter =
+                new RetryWaiter(options.commitMinRetryWait(), options.commitMaxRetryWait());
+
+        while (true) {
+            Snapshot observedLatest = table.snapshotManager().latestSnapshot();
+            checkState(
+                    observedLatest != null,
+                    "Latest snapshot disappeared while reassigning row IDs.");
+            if (observedLatest.id() > latest.id()) {
+                assignmentPlan =
+                        advanceAssignmentPlan(
+                                assignmentPlan, latest, observedLatest, manifestFile, manifestList);
+                latest = observedLatest;
+            }
+
+            Assignment assignment = assignmentPlan.createAssignment(latest);
+            CommitAssignmentResult commitResult =
+                    commitAssignment(assignment, manifestFile, manifestList, commitUser);
+            if (commitResult.success) {
+                return new CommittedAssignment(assignment, commitResult);
+            }
+
+            if (System.currentTimeMillis() - startMillis > options.commitTimeout()
+                    || retryCount >= options.commitMaxRetries()) {
+                throw new RuntimeException(
+                        String.format(
+                                "Failed to reassign row IDs after %s millis with %s retries because newer snapshots kept being committed.",
+                                System.currentTimeMillis() - startMillis, retryCount));
+            }
+
+            Snapshot newLatest = table.snapshotManager().latestSnapshot();
+            checkState(newLatest != null, "Latest snapshot disappeared while reassigning row IDs.");
+            assignmentPlan =
+                    advanceAssignmentPlan(
+                            assignmentPlan, latest, newLatest, manifestFile, manifestList);
+            LOG.info(
+                    "Failed to commit row-id reassignment for table {} based on snapshot {} because snapshot {} has been committed. Retrying {}/{} with the updated assignment plan.",
+                    table.name(),
+                    latest.id(),
+                    newLatest.id(),
+                    retryCount + 1,
+                    options.commitMaxRetries());
+            retryWaiter.retryWait(retryCount);
+            retryCount++;
+            latest = newLatest;
+        }
+    }
+
     private CommitAssignmentResult commitAssignment(
             Assignment assignment,
             ManifestFile manifestFile,
@@ -396,6 +506,22 @@ public class DataEvolutionRowIdReassigner {
             Snapshot latest,
             ManifestFile manifestFile,
             ManifestList manifestList) {
+        return advanceAssignmentPlan(
+                assignmentPlan,
+                previous,
+                latest,
+                manifestFile,
+                manifestList,
+                Collections.emptySet());
+    }
+
+    private AssignmentPlan advanceAssignmentPlan(
+            AssignmentPlan assignmentPlan,
+            Snapshot previous,
+            Snapshot latest,
+            ManifestFile manifestFile,
+            ManifestList manifestList,
+            Set<Long> allowedOverwriteSnapshotIds) {
         checkState(
                 latest.id() > previous.id(),
                 "Cannot advance row-id assignment from snapshot %s to %s.",
@@ -423,14 +549,18 @@ public class DataEvolutionRowIdReassigner {
                         e);
             }
 
+            boolean allowedOverwrite =
+                    snapshot.commitKind() == Snapshot.CommitKind.OVERWRITE
+                            && allowedOverwriteSnapshotIds.contains(snapshot.id());
             if (snapshot.commitKind() == Snapshot.CommitKind.COMPACT
-                    || snapshot.commitKind() == Snapshot.CommitKind.OVERWRITE) {
+                    || (snapshot.commitKind() == Snapshot.CommitKind.OVERWRITE
+                            && !allowedOverwrite)) {
                 throw new RuntimeException(
                         String.format(
                                 "Abort row-id reassignment because %s snapshot %s was committed after snapshot %s.",
                                 snapshot.commitKind(), snapshot.id(), previous.id()));
             }
-            if (snapshot.commitKind() == Snapshot.CommitKind.ANALYZE) {
+            if (snapshot.commitKind() == Snapshot.CommitKind.ANALYZE || allowedOverwrite) {
                 continue;
             }
             checkState(
@@ -556,15 +686,21 @@ public class DataEvolutionRowIdReassigner {
             Map<String, List<ManifestFileMeta>> rewrittenManifestMetas,
             ManifestList manifestList) {
         List<ManifestFileMeta> baseManifestMetas = new ArrayList<>();
+        Set<String> unmatchedReplacements = new HashSet<>(rewrittenManifestMetas.keySet());
         for (ManifestFileMeta manifestMeta : manifestMetas) {
             List<ManifestFileMeta> replacement =
                     rewrittenManifestMetas.get(manifestMeta.fileName());
             if (replacement == null) {
                 baseManifestMetas.add(manifestMeta);
             } else {
+                unmatchedReplacements.remove(manifestMeta.fileName());
                 baseManifestMetas.addAll(replacement);
             }
         }
+        checkState(
+                unmatchedReplacements.isEmpty(),
+                "Cannot replace planned manifests %s because they are not in the current manifest list.",
+                unmatchedReplacements);
         return manifestList.write(baseManifestMetas);
     }
 
@@ -857,6 +993,16 @@ public class DataEvolutionRowIdReassigner {
                 Map<String, List<ManifestFileMeta>> manifestMetas, long fileCount) {
             this.manifestMetas = manifestMetas;
             this.fileCount = fileCount;
+        }
+    }
+
+    private static class CommittedAssignment {
+        private final Assignment assignment;
+        private final CommitAssignmentResult commitResult;
+
+        private CommittedAssignment(Assignment assignment, CommitAssignmentResult commitResult) {
+            this.assignment = assignment;
+            this.commitResult = commitResult;
         }
     }
 

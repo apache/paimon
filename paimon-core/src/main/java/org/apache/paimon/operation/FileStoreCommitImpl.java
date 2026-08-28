@@ -1366,6 +1366,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 latest.nextRowId());
     }
 
+    /**
+     * Replaces the manifest lists exactly as supplied, without manifest compaction or sorting.
+     *
+     * <p>This is intended for metadata-only operations which have already produced their final
+     * manifest layout and must commit it without invoking {@link ManifestFileMerger}.
+     */
     public boolean replaceManifestList(
             Snapshot latest,
             long totalRecordCount,
