@@ -37,12 +37,12 @@ from pypaimon.catalog.catalog_exception import (
 )
 from pypaimon.common.options import Options
 from pypaimon.filesystem.pyarrow_file_io import LegacyOssDirectoryListingError
+from pypaimon.multimodal.arrow_utils import strict_arrow_table
 from pypaimon.multimodal.hdf5 import (
     _Hdf5SourceFileIO,
     _SnapshotRecorder,
     _normalize_source_path,
     _qualified_status_path,
-    _validate_nested_nullability,
     _validated_source_options,
 )
 from pypaimon.multimodal.table import _target_schema
@@ -278,45 +278,13 @@ def _relative_source_path(source_root, source_path):
 
 
 def _strict_lerobot_table(data, target_schema, source, batch_index):
-    if isinstance(data, pa.RecordBatch):
-        table = pa.Table.from_batches([data])
-    elif isinstance(data, pa.Table):
-        table = data
-    else:
-        raise ValueError(
-            "LeRobot transform must return an Arrow table or record batch.")
-
-    missing = [
-        name for name in target_schema.names if name not in table.column_names
-    ]
-    if missing:
-        raise ValueError(
-            "LeRobot batch %d from %s is missing columns: %s"
-            % (batch_index, source.path, missing))
-    extra = [
-        name for name in table.column_names if name not in target_schema.names
-    ]
-    if extra:
-        raise ValueError(
-            "LeRobot batch %d from %s has unexpected columns: %s"
-            % (batch_index, source.path, extra))
-    if table.column_names != target_schema.names:
-        raise ValueError(
-            "LeRobot batch %d from %s has columns in the wrong order: %s; "
-            "expected %s."
-            % (batch_index, source.path, table.column_names,
-               target_schema.names))
-    try:
-        _validate_nested_nullability(table, target_schema)
-        if table.schema.equals(target_schema, check_metadata=False):
-            return table
-        casted = table.cast(target_schema, safe=True)
-        _validate_nested_nullability(casted, target_schema)
-        return casted
-    except (ValueError, TypeError, NotImplementedError) as error:
-        raise ValueError(
-            "LeRobot batch %d from %s cannot be converted to the table "
-            "schema: %s" % (batch_index, source.path, error)) from error
+    return strict_arrow_table(
+        data,
+        target_schema,
+        source.path,
+        batch_index,
+        "LeRobot",
+    )
 
 
 def _require_v3(info, source):
