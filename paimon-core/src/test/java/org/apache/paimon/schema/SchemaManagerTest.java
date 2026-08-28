@@ -27,6 +27,7 @@ import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.iceberg.IcebergOptions;
+import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
@@ -77,6 +78,8 @@ import java.util.stream.Stream;
 
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_MODIFIABLE;
+import static org.apache.paimon.CoreOptions.IGNORE_DELETE;
+import static org.apache.paimon.CoreOptions.IGNORE_UPDATE_BEFORE;
 import static org.apache.paimon.utils.FailingFileIO.retryArtificialException;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -1557,5 +1560,27 @@ public class SchemaManagerTest {
                                 FileStoreTableFactory.create(LocalFileIO.create(), path, after)
                                         .newWrite("u"))
                 .doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testResetCannotWeakenAnOptionThatSetCannotWeaken() {
+        // Resetting an option puts it back to its default. For these three the default is the
+        // weaker value, so a reset is the same change that setting it explicitly already rejects.
+        for (ConfigOption<Boolean> option :
+                Arrays.asList(DELETION_VECTORS_ENABLED, IGNORE_DELETE, IGNORE_UPDATE_BEFORE)) {
+            Map<String, String> enabled = new HashMap<>();
+            enabled.put(option.key(), "true");
+            assertThatThrownBy(
+                            () -> SchemaManager.checkResetTableOption(enabled, option.key()),
+                            option.key())
+                    .isInstanceOf(UnsupportedOperationException.class);
+
+            // resetting an option that is already at its default changes nothing
+            Map<String, String> disabled = new HashMap<>();
+            disabled.put(option.key(), "false");
+            assertThatCode(() -> SchemaManager.checkResetTableOption(disabled, option.key()))
+                    .as("%s", option.key())
+                    .doesNotThrowAnyException();
+        }
     }
 }

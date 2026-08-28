@@ -1486,6 +1486,16 @@ public class SchemaManager implements Serializable {
                     DELETION_VECTORS_ENABLED.defaultValue().toString());
         }
 
+        if (IGNORE_DELETE.key().equals(key)) {
+            checkAlterTableOption(
+                    options, key, options.get(key), IGNORE_DELETE.defaultValue().toString());
+        }
+
+        if (IGNORE_UPDATE_BEFORE.key().equals(key)) {
+            checkAlterTableOption(
+                    options, key, options.get(key), IGNORE_UPDATE_BEFORE.defaultValue().toString());
+        }
+
         if (options.containsKey(PK_CLUSTERING_OVERRIDE.key())
                 && CLUSTERING_COLUMNS.key().equals(key)) {
             throw new UnsupportedOperationException(
