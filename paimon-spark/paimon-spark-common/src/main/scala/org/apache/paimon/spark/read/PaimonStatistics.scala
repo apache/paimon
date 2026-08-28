@@ -47,18 +47,35 @@ case class PaimonStatistics(
 
   lazy val numRows: OptionalLong = {
     if (scanRowCount.isPresent) {
-      // A catalog may report zero because it cannot tell "never measured" from "measured, and
-      // empty". Over real bytes leave it unknown; over zero bytes the scan really is empty.
-      if (scanRowCount.getAsLong > 0 || fileTotalSize == 0) {
+      val rowCount = scanRowCount.getAsLong
+      // A scan may use a non-positive row count for unknown. Only zero from a scan with no splits
+      // proves that the result is empty.
+      if (rowCount > 0 || (rowCount == 0 && splits.isEmpty)) {
         scanRowCount
       } else {
         OptionalLong.empty()
       }
-    } else if (splits.exists(_.rowCount() == -1)) {
-      OptionalLong.empty()
     } else {
-      OptionalLong.of(splits.map(_.rowCount()).sum)
+      sumSplitRowCounts
     }
+  }
+
+  private def sumSplitRowCounts: OptionalLong = {
+    var totalRowCount = 0L
+    var index = 0
+    while (index < splits.length) {
+      val rowCount = splits(index).rowCount()
+      if (rowCount <= 0) {
+        return OptionalLong.empty()
+      }
+      try {
+        totalRowCount = Math.addExact(totalRowCount, rowCount)
+      } catch {
+        case _: ArithmeticException => return OptionalLong.empty()
+      }
+      index += 1
+    }
+    OptionalLong.of(totalRowCount)
   }
 
   lazy val sizeInBytes: OptionalLong = {
