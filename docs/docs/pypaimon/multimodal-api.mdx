@@ -318,6 +318,41 @@ HDF5 core itself has no Ray dependency.
 provenance columns, maintain a source ledger, skip prior inputs, or detect
 source drift. Calling it again with the same input appends the rows again.
 
+## Load LeRobot Dataset v3
+
+`load_from_lerobot` converts a local LeRobot Dataset v3 to a normal Paimon
+table once. It derives the schema from `meta/info.json`, keeps one row per
+frame, preserves Episode/frame indices and task text, and commits all batches
+in one Snapshot.
+
+```shell
+pip install 'pypaimon[lerobot]'
+```
+
+```python
+result = conn.load_from_lerobot(
+    "robot_data",
+    "/data/lerobot_dataset",
+    batch_size=1024,
+)
+print(result.episode_count, result.row_count, result.snapshot_id)
+```
+
+An existing local directory is always used directly; another non-path string
+is passed to the official LeRobot API as a Hugging Face `repo_id`.
+
+If the target is absent, it is created from metadata. Existing targets use the
+same strict schema validation and append semantics as `load_from_hdf5`.
+One-dimensional numbers map to `VECTOR`; higher-rank values map to nested
+`ARRAY`; `image` and `video` map to `BLOB`. Images retain their compressed
+bytes. Videos are decoded once and stored as per-frame PNG BLOBs, so the shared
+MP4 is not repeated in every row.
+
+Use `feature_mapping={"observation.state": "state"}` for explicit renames. An
+optional `transform` receives each Arrow table and must preserve its row count
+and Episode/frame/index order. Version 2.x, `uint64`, language event
+structures, and depth-video semantics are not supported in this first version.
+
 ## Overwrite
 
 `overwrite` accepts the same input formats as `add` and replaces existing data
