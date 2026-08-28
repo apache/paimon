@@ -31,6 +31,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.CloseableIterator;
 
 import org.apache.flink.api.common.JobID;
+import org.apache.flink.api.common.JobStatus;
 import org.apache.flink.api.common.eventtime.Watermark;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.ReaderOutput;
@@ -121,6 +122,21 @@ public class CoordinatorCommitITCase {
         waitUntilWriterInputRecords(runningJob.jobId);
         waitUntilCoordinatorCommitMetricsRegistered(runningJob.jobId);
         assertThat(findGlobalCommitterMetricGroups(runningJob.jobId)).isEmpty();
+        waitUntilRowsCommitted(runningJob);
+        runningJob.cancel();
+
+        assertThat(readRowCount(runningJob.table)).isGreaterThan(0L);
+    }
+
+    @Timeout(value = 120, unit = TimeUnit.SECONDS)
+    @Test
+    public void testCoordinatorCommitWritesDataEvolutionTableWithUnalignedCheckpoints()
+            throws Exception {
+        RunningJob runningJob = startStreamingInsert(true, true, true);
+        assertThat(runningJob.table.coreOptions().dataEvolutionEnabled()).isTrue();
+        assertThat(runningJob.table.coreOptions().rowTrackingEnabled()).isTrue();
+        waitUntilWriterInputRecords(runningJob.jobId);
+        waitUntilCoordinatorCommitMetricsRegistered(runningJob.jobId);
         waitUntilRowsCommitted(runningJob);
         runningJob.cancel();
 
@@ -236,11 +252,30 @@ public class CoordinatorCommitITCase {
     }
 
     private RunningJob startStreamingInsert(boolean coordinatorCommitEnabled) throws Exception {
+        return startStreamingInsert(coordinatorCommitEnabled, false, false);
+    }
+
+    private RunningJob startStreamingInsert(
+            boolean coordinatorCommitEnabled,
+            boolean dataEvolutionEnabled,
+            boolean unalignedCheckpointsEnabled)
+            throws Exception {
         String tableName = coordinatorCommitEnabled ? "T_COORDINATOR_COMMIT" : "T_DEFAULT_COMMIT";
+        if (dataEvolutionEnabled) {
+            tableName += "_DATA_EVOLUTION";
+        }
         TableEnvironment tEnv =
                 TableEnvironment.create(
                         EnvironmentSettings.newInstance().inStreamingMode().build());
         tEnv.getConfig().getConfiguration().setString("execution.checkpointing.interval", "200 ms");
+        tEnv.getConfig()
+                .getConfiguration()
+                .setString(
+                        "execution.checkpointing.unaligned.enabled",
+                        Boolean.toString(unalignedCheckpointsEnabled));
+        if (unalignedCheckpointsEnabled) {
+            tEnv.getConfig().getConfiguration().setString("restart-strategy.type", "none");
+        }
 
         tEnv.executeSql(
                 "CREATE CATALOG mycat WITH ( 'type' = 'paimon', 'warehouse' = '"
@@ -251,12 +286,17 @@ public class CoordinatorCommitITCase {
                 coordinatorCommitEnabled
                         ? ", 'sink.coordinator-commit.enabled' = 'true', 'write-only' = 'true'"
                         : "";
+        String dataEvolutionOptions =
+                dataEvolutionEnabled
+                        ? ", 'row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true'"
+                        : "";
         tEnv.executeSql(
                 "CREATE TABLE "
                         + tableName
                         + " (id INT, data STRING) WITH ("
                         + "'bucket' = '-1'"
                         + coordinatorCommitOption
+                        + dataEvolutionOptions
                         + ")");
         tEnv.executeSql(
                 "CREATE TEMPORARY TABLE src (id INT, data STRING) WITH ("
@@ -402,6 +442,7 @@ public class CoordinatorCommitITCase {
     private void waitUntilRowsCommitted(RunningJob runningJob) throws Exception {
         long deadline = System.currentTimeMillis() + WAIT_TIMEOUT_MILLIS;
         while (System.currentTimeMillis() < deadline) {
+            runningJob.checkNotTerminated();
             if (readRowCount(runningJob.table) > 0) {
                 return;
             }
@@ -426,6 +467,14 @@ public class CoordinatorCommitITCase {
 
         private void cancel() throws Exception {
             client.cancel().get(30, TimeUnit.SECONDS);
+        }
+
+        private void checkNotTerminated() throws Exception {
+            JobStatus status = client.getJobStatus().get(30, TimeUnit.SECONDS);
+            if (status == JobStatus.FAILED) {
+                client.getJobExecutionResult().get(30, TimeUnit.SECONDS);
+            }
+            assertThat(status.isTerminalState()).describedAs("job status: %s", status).isFalse();
         }
     }
 
