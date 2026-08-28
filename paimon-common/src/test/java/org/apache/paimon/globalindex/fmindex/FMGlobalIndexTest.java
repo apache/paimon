@@ -526,7 +526,7 @@ public class FMGlobalIndexTest {
                             .filter(row -> (row & 1) == 0)
                             .toArray());
         }
-        assertThat(preadCalls.get()).isLessThan(20);
+        assertThat(preadCalls.get()).isLessThan(10);
     }
 
     @Test

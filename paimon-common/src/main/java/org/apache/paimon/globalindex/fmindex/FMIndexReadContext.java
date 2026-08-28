@@ -32,11 +32,15 @@ import java.util.function.Supplier;
 final class FMIndexReadContext {
 
     private static final int DEFAULT_MAX_CONCURRENT_FILE_READS = 8;
-    // A locate must at least be able to retain one decoded rank/sample block. Otherwise every
-    // lookup of the same block performs another physical read.
+    // A full decoded quaternary rank block contains packed words plus four rank-prefix integers
+    // per 64 words and one terminal prefix. It is larger than a bit-rank or sampled-value block.
+    private static final long QUAD_BLOCK_WORD_BYTES = FMIndexFile.BLOCK_WORDS * Long.BYTES;
+    private static final long QUAD_BLOCK_PREFIX_BYTES =
+            ((FMIndexFile.BLOCK_WORDS + 63L) / 64L + 1L) * 4L * Integer.BYTES;
+    // A locate must at least retain its largest decoded block; otherwise repeated access performs
+    // another physical read every time.
     private static final long MIN_LOCATE_CACHE_BYTES =
-            FMIndexFile.BLOCK_WORDS * Long.BYTES
-                    + ((((FMIndexFile.BLOCK_WORDS + 63L) / 64L) + 1L) * 4L * Integer.BYTES);
+            QUAD_BLOCK_WORD_BYTES + QUAD_BLOCK_PREFIX_BYTES;
 
     private final long cacheBudget;
     private final Semaphore fileReadPermits = new Semaphore(DEFAULT_MAX_CONCURRENT_FILE_READS);

@@ -175,7 +175,10 @@ final class FMGlobalIndexReader implements ContainsRefiningGlobalIndexReader {
             }
             boolean hasNonEmptyNeedle = false;
             for (byte[] needle : needles) {
-                hasNonEmptyNeedle |= needle.length > 0;
+                if (needle.length > 0) {
+                    hasNonEmptyNeedle = true;
+                    break;
+                }
             }
             if (hasNonEmptyNeedle && !readContext.supportsLocate()) {
                 return Optional.empty();
