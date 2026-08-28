@@ -19,6 +19,7 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.flink.procedure.ProcedureUtil;
+import org.apache.paimon.utils.ExceptionUtils;
 
 import org.apache.flink.table.catalog.AbstractCatalog;
 import org.apache.flink.table.catalog.Catalog;
@@ -71,13 +72,42 @@ public class FlinkGenericCatalog extends AbstractCatalog {
     @Override
     public void open() throws CatalogException {
         paimon.open();
-        flink.open();
+        boolean opened = false;
+        try {
+            flink.open();
+            opened = true;
+        } finally {
+            if (!opened) {
+                // the caller will not close a catalog that failed to open
+                closeQuietly(paimon);
+            }
+        }
     }
 
     @Override
     public void close() throws CatalogException {
-        paimon.close();
-        flink.close();
+        Throwable failure = null;
+        try {
+            paimon.close();
+        } catch (Throwable t) {
+            failure = t;
+        }
+        try {
+            flink.close();
+        } catch (Throwable t) {
+            failure = ExceptionUtils.firstOrSuppressed(t, failure);
+        }
+        if (null != failure) {
+            ExceptionUtils.rethrow(failure);
+        }
+    }
+
+    private static void closeQuietly(Catalog catalog) {
+        try {
+            catalog.close();
+        } catch (Throwable ignored) {
+            // the failure that is already on its way out is the one worth reporting
+        }
     }
 
     @Override

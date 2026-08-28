@@ -55,10 +55,16 @@ public class FlinkFormatTableDataStreamSink {
     }
 
     public DataStreamSink<?> sinkFrom(DataStream<RowData> dataStream) {
-        return dataStream.sinkTo(new FormatTableSink(table, overwrite, staticPartitions));
+        DataStreamSink<?> sink =
+                dataStream.sinkTo(new FormatTableSink(table, overwrite, staticPartitions));
+        if (overwrite) {
+            // Parallel overwrite commits could delete files produced by one another.
+            sink.setParallelism(1);
+        }
+        return sink;
     }
 
-    private static class FormatTableSink implements Sink<RowData>, LineageVertexProvider {
+    static class FormatTableSink implements Sink<RowData>, LineageVertexProvider {
 
         private final FormatTable table;
         private final boolean overwrite;
@@ -93,14 +99,17 @@ public class FlinkFormatTableDataStreamSink {
         }
 
         /** Sink writer for format tables using Flink v2 API. */
-        private static class FormatTableSinkWriter implements SinkWriter<RowData> {
+        static class FormatTableSinkWriter implements SinkWriter<RowData> {
 
+            private final boolean overwrite;
+            private boolean reachedEndOfInput;
             private transient BatchWriteBuilder writeBuilder;
             private transient FormatTableWrite tableWrite;
             private transient BatchTableCommit tableCommit;
 
             public FormatTableSinkWriter(
                     FormatTable table, boolean overwrite, Map<String, String> staticPartitions) {
+                this.overwrite = overwrite;
                 this.writeBuilder = table.newBatchWriteBuilder();
                 this.tableWrite = (FormatTableWrite) writeBuilder.newWrite();
                 if (overwrite) {
@@ -121,23 +130,32 @@ public class FlinkFormatTableDataStreamSink {
             }
 
             @Override
-            public void flush(boolean endOfInput) {}
+            public void flush(boolean endOfInput) {
+                if (endOfInput) {
+                    reachedEndOfInput = true;
+                }
+            }
 
             @Override
             public void close() throws Exception {
                 if (tableWrite != null) {
                     List<CommitMessage> commitMessages = null;
+                    boolean shouldCommit = false;
                     try {
                         // Prepare commit and commit the data
                         commitMessages = tableWrite.prepareCommit();
-                        if (!commitMessages.isEmpty()) {
+                        // A normally completed overwrite replaces its target even with no rows.
+                        shouldCommit =
+                                !commitMessages.isEmpty() || (overwrite && reachedEndOfInput);
+                        if (shouldCommit) {
                             tableCommit.commit(commitMessages);
                         }
                     } catch (Exception e) {
-                        if (commitMessages != null && !commitMessages.isEmpty()) {
+                        if (commitMessages != null && shouldCommit) {
                             try {
                                 tableCommit.abort(commitMessages);
                             } catch (Throwable abortFailure) {
+                                // Report the commit failure, not the cleanup that followed it.
                                 if (abortFailure != e) {
                                     e.addSuppressed(abortFailure);
                                 }

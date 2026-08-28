@@ -21,7 +21,7 @@ import pyarrow as pa
 
 from pypaimon.common.where_parser import parse_where_clause
 from pypaimon.multimodal.blob_read import fetch_blob_bodies
-from pypaimon.schema.data_types import is_blob_type
+from pypaimon.schema.data_types import is_blob_type, is_map_blob_type
 from pypaimon.table.special_fields import SpecialFields
 
 
@@ -140,14 +140,16 @@ class ScanQuery:
 
     def read_blobs(
             self, columns=None, *, parallelism: int = 64
-    ) -> Tuple[pa.Table, Dict[str, List[Optional[bytes]]]]:
-        """Materialise BLOB column(s) for the filtered rows with concurrent,
+    ) -> Tuple[pa.Table, Dict[str, List[Any]]]:
+        """Materialise BLOB or MAP BLOB column(s) for the filtered rows with concurrent,
         coalesced ranged reads. Reads via blob-as-descriptor to skip the slow
         row-by-row blob resolution on multi-group data-evolution splits.
 
         ``columns`` picks the BLOB column(s) (default: all, intersected with
-        ``select(...)``). Returns ``(scalar_arrow_table, {column: [bytes|None]})``,
-        row-aligned. Use :meth:`stream_blobs` for a memory-bounded read.
+        ``select(...)``). Scalar BLOB values are ``bytes|None``; MAP BLOB rows
+        are ``None`` or key-value pairs with ``bytes|None`` values. Returns a
+        row-aligned ``(scalar_arrow_table, blobs_by_column)`` tuple. Use
+        :meth:`stream_blobs` for a memory-bounded read.
 
         Unresolved blob-view columns are not supported and raise ``ValueError``.
         """
@@ -155,15 +157,16 @@ class ScanQuery:
         read_builder, file_io = self._blob_descriptor_read_builder(blob_cols)
         arrow = read_builder.new_read().to_arrow(
             read_builder.new_scan().plan().splits())
+        map_blob_cols = set(blob_cols) - set(self._all_blob_columns())
         bodies = self._fetch_bodies(
-            file_io, arrow.select(blob_cols).to_pydict(), blob_cols, parallelism)
+            file_io, arrow.select(blob_cols).to_pydict(), blob_cols,
+            parallelism, map_blob_cols)
         scalar = arrow.select(self._scalar_columns(arrow.column_names))
         return scalar, bodies
 
     def stream_blobs(self, columns=None, *, parallelism: int = 64):
-        """Memory-bounded streaming variant of :meth:`read_blobs`: yield
-        ``(scalar_batch, {column: [bytes|None]})`` per Arrow batch, so peak memory
-        is one batch rather than the whole result.
+        """Memory-bounded streaming variant of :meth:`read_blobs`, with the same
+        return shape per Arrow batch and one-batch peak memory.
         """
         # Validate eagerly so a bad column raises here, not on the first next().
         blob_cols = self._resolve_blob_columns(columns)
@@ -173,10 +176,12 @@ class ScanQuery:
     def _iter_blobs(self, read_builder, file_io, blob_cols, parallelism):
         reader = read_builder.new_read().to_arrow_batch_reader(
             read_builder.new_scan().plan().splits())
+        map_blob_cols = set(blob_cols) - set(self._all_blob_columns())
         try:
             for batch in reader:
                 bodies = self._fetch_bodies(
-                    file_io, batch.select(blob_cols).to_pydict(), blob_cols, parallelism)
+                    file_io, batch.select(blob_cols).to_pydict(), blob_cols,
+                    parallelism, map_blob_cols)
                 scalar = batch.select(self._scalar_columns(batch.schema.names))
                 yield scalar, bodies
         finally:
@@ -232,7 +237,8 @@ class ScanQuery:
         return read_builder, read_table.file_io
 
     @staticmethod
-    def _fetch_bodies(file_io, data, blob_cols, parallelism):
+    def _fetch_bodies(
+            file_io, data, blob_cols, parallelism, map_blob_cols=()):
         # Decode each descriptor to a (uri, offset, length) range and read them all in
         # one coalesced pass on ``file_io`` -- the read table's FileIO, which already
         # carries the merged DLF/OSS token. Going through Blob.from_bytes here would
@@ -240,7 +246,8 @@ class ScanQuery:
         # ``FileIO.get(uri, catalog_options)`` off the raw options (no merged token),
         # failing with "endpoint should be non-empty" / "Init credential failed" unless
         # the caller also passes fs.oss.* -- which users should not have to.
-        return fetch_blob_bodies(file_io, data, blob_cols, parallelism)
+        return fetch_blob_bodies(
+            file_io, data, blob_cols, parallelism, map_blob_cols)
 
     def _all_blob_columns(self) -> List[str]:
         return [
@@ -248,8 +255,14 @@ class ScanQuery:
             if is_blob_type(field.type)
         ]
 
+    def _readable_blob_columns(self) -> List[str]:
+        return [
+            field.name for field in self._table.fields
+            if is_blob_type(field.type) or is_map_blob_type(field.type)
+        ]
+
     def _resolve_blob_columns(self, columns) -> List[str]:
-        all_blob = self._all_blob_columns()
+        all_blob = self._readable_blob_columns()
         if columns is None:
             selected = all_blob
             if self._projection is not None:
@@ -270,7 +283,7 @@ class ScanQuery:
         # descriptors, then append the requested BLOB columns and every predicate
         # column -- including predicate columns that are themselves BLOB (read as
         # descriptor) -- so SplitRead keeps the row-level filter for where().
-        blob_set = set(self._all_blob_columns())
+        blob_set = set(self._readable_blob_columns())
         effective = self._effective_projection()
         if effective is None:
             base = [f.name for f in self._table.fields if f.name not in blob_set]
@@ -285,7 +298,7 @@ class ScanQuery:
         # Non-BLOB columns to expose, based on _effective_projection() so
         # with_row_id() is honoured; drop BLOBs and predicate-only helpers, and
         # skip unknown projected names to match to_arrow()'s silent drop.
-        blob_set = set(self._all_blob_columns())
+        blob_set = set(self._readable_blob_columns())
         effective = self._effective_projection()
         if effective is None:
             return [name for name in available if name not in blob_set]

@@ -137,6 +137,8 @@ jobs:
             else
               python -m pip install pyarrow==16.0.0 numpy==1.24.3 pandas==2.0.3 flake8==4.0.1
             fi
+            python -m pip install 'h5py>=3,<4'
+            python -c "import h5py; print('h5py', h5py.__version__)"
 
             if [[ "${{ matrix.python-version }}" == "3.11" ]]; then
               # Exercise the 0.4 API in one lane until its wheel is published.
@@ -308,6 +310,12 @@ jobs:
             tests="pypaimon/tests/ray_data_test.py::RayDataTest pypaimon/tests/ray_range_join_test.py::RayRangeJoinTest"
             if [ "$ray_version" = "2.50.1" ]; then
               tests="$tests pypaimon/tests/ray_update_by_row_id_test.py::RayUpdateByRowIdTest::test_empty_dataset_after_transform_is_noop"
+            fi
+            if [ "$ray_version" = "2.44.0" ]; then
+              tests="$tests pypaimon/tests/ray_partitioning_test.py::RayPartitioningTest::test_ray_legacy_map_batches_cardinality_is_unknown"
+            fi
+            if [ "$ray_version" = "2.53.0" ]; then
+              tests="$tests pypaimon/tests/ray_partitioning_test.py::RayPartitioningTest::test_ray_metadata_respects_transform_cardinality"
             fi
             python -m pytest $tests -v --tb=short || {
               echo "Tests failed for Ray $ray_version"; python -m pip uninstall -y ray; exit 1;

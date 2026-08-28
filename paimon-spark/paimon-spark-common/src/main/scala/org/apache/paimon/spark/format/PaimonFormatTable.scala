@@ -27,10 +27,11 @@ import org.apache.paimon.table.FormatTable
 import org.apache.paimon.table.format.FormatTablePartitionManager
 import org.apache.paimon.table.sink.BatchTableCommit
 import org.apache.paimon.types.RowType
-import org.apache.paimon.utils.PartitionPathUtils
+import org.apache.paimon.utils.{PartitionPathUtils, StringUtils}
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.{NoSuchPartitionException, NoSuchPartitionsException}
+import org.apache.spark.sql.catalyst.util.CharVarcharUtils
 import org.apache.spark.sql.connector.catalog.{SupportsRead, SupportsWrite, TableCapability, TableCatalog, TruncatableTable}
 import org.apache.spark.sql.connector.catalog.TableCapability.{BATCH_READ, BATCH_WRITE, OVERWRITE_BY_FILTER, OVERWRITE_DYNAMIC}
 import org.apache.spark.sql.connector.distributions.Distribution
@@ -39,7 +40,7 @@ import org.apache.spark.sql.connector.read.ScanBuilder
 import org.apache.spark.sql.connector.write._
 import org.apache.spark.sql.connector.write.streaming.StreamingWrite
 import org.apache.spark.sql.paimon.shims.SparkShimLoader
-import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.types.{StringType, StructType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import java.util
@@ -139,6 +140,8 @@ case class PaimonFormatTable(table: FormatTable)
       return true
     }
     val partitionKeys = table.partitionKeys().asScala.toSeq
+    idents.foreach(
+      ident => requireNameablePartitionValues("TRUNCATE PARTITION", ident, partitionKeys))
     val specs = idents.map {
       ident =>
         require(
@@ -205,6 +208,35 @@ case class PaimonFormatTable(table: FormatTable)
     requested.map(spec => registeredSpecs.contains(spec.asScala.toMap))
   }
 
+  /**
+   * Rejects partition values the table cannot name. An empty or whitespace-only string collapses to
+   * the default partition name on its way to the directory, the same name a `NULL` gets, so the
+   * spec describes the null partition rather than one of its own. Adding it registers a partition
+   * the value cannot round-trip to; dropping or truncating it hits the null partition instead.
+   *
+   * `NULL` itself keeps its defined encoding and stays on that path.
+   */
+  private def requireNameablePartitionValues(
+      operation: String,
+      row: InternalRow,
+      partitionNames: Seq[String]): Unit = {
+    val fields = partitionSchema.fields.map(field => field.name -> field).toMap
+    partitionNames.take(row.numFields).zipWithIndex.foreach {
+      case (name, index) =>
+        val dataType = CharVarcharUtils.replaceCharVarcharWithString(fields(name).dataType)
+        if (dataType == StringType && !row.isNullAt(index)) {
+          if (StringUtils.isNullOrWhitespaceOnly(row.getString(index))) {
+            val defaultPartitionName =
+              CoreOptions.fromMap(table.options()).partitionDefaultName()
+            throw new IllegalArgumentException(
+              s"$operation does not support an empty or whitespace-only string for partition " +
+                s"column $name of Format Table ${table.fullName()}. Such a value is written to " +
+                s"the partition named $defaultPartitionName, name it directly to address it.")
+          }
+        }
+    }
+  }
+
   private[spark] def createFormatTablePartitions(
       rows: Array[InternalRow],
       maps: Array[JMap[String, String]],
@@ -216,6 +248,7 @@ case class PaimonFormatTable(table: FormatTable)
     val onlyValueInPath =
       CoreOptions.fromMap(table.options()).formatTablePartitionOnlyValueInPath()
     val partitionKeys = table.partitionKeys().asScala.toSeq
+    rows.foreach(row => requireNameablePartitionValues("ADD PARTITION", row, partitionKeys))
     val specs = rows.map(row => toPaimonPartition(row, partitionKeys.take(row.numFields))).toSeq
     // Resolve (and path-safety validate) every directory before mutating anything.
     val partitionPaths =
@@ -238,6 +271,9 @@ case class PaimonFormatTable(table: FormatTable)
       partitionNames: Array[Array[String]],
       rows: Array[InternalRow]): Boolean = {
     val partitionKeyCount = table.partitionKeys().size()
+    rows.zip(partitionNames).foreach {
+      case (row, names) => requireNameablePartitionValues("DROP PARTITION", row, names.toSeq)
+    }
     val requested =
       rows.zip(partitionNames).map { case (row, names) => toPaimonPartition(row, names.toSeq) }
     val partitions = ArrayBuffer.empty[JMap[String, String]]

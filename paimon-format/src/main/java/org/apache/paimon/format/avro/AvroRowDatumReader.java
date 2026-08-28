@@ -36,7 +36,7 @@ public class AvroRowDatumReader implements DatumReader<InternalRow> {
     private final UriReader uriReader;
 
     private RowReader reader;
-    private boolean isUnion;
+    private int nullIndex;
 
     public AvroRowDatumReader(RowType projectedRowType) {
         this(projectedRowType, null);
@@ -49,10 +49,10 @@ public class AvroRowDatumReader implements DatumReader<InternalRow> {
 
     @Override
     public void setSchema(Schema schema) {
-        this.isUnion = false;
+        this.nullIndex = -1;
         if (schema.isUnion()) {
-            this.isUnion = true;
-            schema = schema.getTypes().get(1);
+            this.nullIndex = FieldReaderFactory.nullableUnionNullIndex(schema);
+            schema = schema.getTypes().get(1 - nullIndex);
         }
         this.reader =
                 new FieldReaderFactory(uriReader)
@@ -61,9 +61,9 @@ public class AvroRowDatumReader implements DatumReader<InternalRow> {
 
     @Override
     public InternalRow read(InternalRow reuse, Decoder in) throws IOException {
-        if (isUnion) {
+        if (nullIndex >= 0) {
             int index = in.readIndex();
-            if (index == 0) {
+            if (index == nullIndex) {
                 throw new RuntimeException("Cannot read a null row.");
             }
         }

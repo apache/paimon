@@ -36,6 +36,7 @@ import org.apache.paimon.flink.sink.WrappedManifestCommittableSerializer;
 import org.apache.paimon.manifest.WrappedManifestCommittable;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
@@ -55,6 +56,11 @@ import static org.apache.paimon.flink.utils.ParallelismUtils.forwardParallelism;
 
 /**
  * A {@link FlinkSink} which accepts {@link CdcRecord} and waits for a schema change if necessary.
+ *
+ * <p>When created with a database name, this sink partitions its input with {@link
+ * CdcMultiplexRecordChannelComputer} itself, so that records and the writer states of their buckets
+ * are routed to the same subtask. The compatibility constructor preserves the legacy behavior and
+ * expects its input to have already been partitioned.
  */
 public class FlinkCdcMultiTableSink implements Serializable {
 
@@ -69,9 +75,17 @@ public class FlinkCdcMultiTableSink implements Serializable {
     private final double commitCpuCores;
     @Nullable private final MemorySize commitHeapMemory;
     private final String commitUser;
+    @Nullable private final String databaseName;
     private boolean eagerInit = false;
     private TableFilter tableFilter;
 
+    /**
+     * @deprecated Use {@link #FlinkCdcMultiTableSink(CatalogLoader, String, double, MemorySize,
+     *     double, MemorySize, String, boolean, TableFilter)} instead. Without a database name,
+     *     every subtask restores all union writer state, unique bucket-state ownership is not
+     *     guaranteed after a restore, and the input must be partitioned by the caller.
+     */
+    @Deprecated
     public FlinkCdcMultiTableSink(
             CatalogLoader catalogLoader,
             double writeCpuCores,
@@ -82,6 +96,28 @@ public class FlinkCdcMultiTableSink implements Serializable {
             boolean eagerInit,
             TableFilter tableFilter) {
         this.catalogLoader = catalogLoader;
+        this.databaseName = null;
+        this.writeCpuCores = writeCpuCores;
+        this.writeHeapMemory = writeHeapMemory;
+        this.commitCpuCores = commitCpuCores;
+        this.commitHeapMemory = commitHeapMemory;
+        this.commitUser = commitUser;
+        this.eagerInit = eagerInit;
+        this.tableFilter = tableFilter;
+    }
+
+    public FlinkCdcMultiTableSink(
+            CatalogLoader catalogLoader,
+            String databaseName,
+            double writeCpuCores,
+            @Nullable MemorySize writeHeapMemory,
+            double commitCpuCores,
+            @Nullable MemorySize commitHeapMemory,
+            String commitUser,
+            boolean eagerInit,
+            TableFilter tableFilter) {
+        this.catalogLoader = catalogLoader;
+        this.databaseName = Preconditions.checkNotNull(databaseName);
         this.writeCpuCores = writeCpuCores;
         this.writeHeapMemory = writeHeapMemory;
         this.commitCpuCores = commitCpuCores;
@@ -107,25 +143,58 @@ public class FlinkCdcMultiTableSink implements Serializable {
     }
 
     public DataStreamSink<?> sinkFrom(DataStream<CdcMultiplexRecord> input) {
+        return sinkFrom(input, null);
+    }
+
+    /**
+     * @param parallelism parallelism of the writer and committer operators, or null to forward the
+     *     parallelism of {@code input}.
+     */
+    public DataStreamSink<?> sinkFrom(
+            DataStream<CdcMultiplexRecord> input, @Nullable Integer parallelism) {
         // This commitUser is valid only for new jobs.
         // After the job starts, this commitUser will be recorded into the states of write and
         // commit operators.
         // When the job restarts, commitUser will be recovered from states and this value is
         // ignored.
-        return sinkFrom(input, commitUser, createWriteProvider());
+        return sinkFrom(input, parallelism, commitUser, createWriteProvider());
     }
 
     public DataStreamSink<?> sinkFrom(
             DataStream<CdcMultiplexRecord> input,
             String commitUser,
             StoreSinkWrite.Provider sinkProvider) {
+        return sinkFrom(input, null, commitUser, sinkProvider);
+    }
+
+    public DataStreamSink<?> sinkFrom(
+            DataStream<CdcMultiplexRecord> input,
+            @Nullable Integer parallelism,
+            String commitUser,
+            StoreSinkWrite.Provider sinkProvider) {
         StreamExecutionEnvironment env = input.getExecutionEnvironment();
         assertStreamingConfiguration(env);
+        Preconditions.checkArgument(
+                databaseName != null || parallelism == null,
+                "Explicit parallelism is only supported by the constructor which takes a "
+                        + "database name.");
+
+        // Keep the old constructor's topology unchanged for compatibility. The database-aware
+        // constructor can shuffle by bucket itself and use the same formula to redistribute writer
+        // state on restore.
+        DataStream<CdcMultiplexRecord> shuffled =
+                databaseName == null
+                        ? input
+                        : FlinkStreamPartitioner.partition(
+                                input,
+                                new CdcMultiplexRecordChannelComputer(catalogLoader),
+                                parallelism);
+
         MultiTableCommittableTypeInfo typeInfo = new MultiTableCommittableTypeInfo();
         SingleOutputStreamOperator<MultiTableCommittable> written =
-                input.transform(
+                shuffled.transform(
                         WRITER_NAME, typeInfo, createWriteOperator(sinkProvider, commitUser));
-        forwardParallelism(written, input);
+        forwardParallelism(written, shuffled);
         configureSlotSharingGroup(written, writeCpuCores, writeHeapMemory);
 
         // shuffle committables by table
@@ -133,7 +202,7 @@ public class FlinkCdcMultiTableSink implements Serializable {
                 FlinkStreamPartitioner.partition(
                         written,
                         new MultiTableCommittableChannelComputer(),
-                        input.getParallelism());
+                        shuffled.getParallelism());
 
         SingleOutputStreamOperator<?> committed =
                 partitioned.transform(
@@ -145,13 +214,23 @@ public class FlinkCdcMultiTableSink implements Serializable {
                                 commitUser,
                                 createCommitterFactory(tableFilter),
                                 createCommittableStateManager()));
-        forwardParallelism(committed, input);
+        forwardParallelism(committed, shuffled);
         configureSlotSharingGroup(committed, commitCpuCores, commitHeapMemory);
         return committed.sinkTo(new DiscardingSink<>()).name("end").setParallelism(1);
     }
 
     protected OneInputStreamOperatorFactory<CdcMultiplexRecord, MultiTableCommittable>
             createWriteOperator(StoreSinkWrite.Provider writeProvider, String commitUser) {
+        return databaseName == null
+                ? createCompatibilityWriteOperator(writeProvider, commitUser)
+                : new CdcRecordStoreMultiWriteOperator.Factory(
+                        catalogLoader, writeProvider, commitUser, databaseName, new Options());
+    }
+
+    @SuppressWarnings("deprecation")
+    private OneInputStreamOperatorFactory<CdcMultiplexRecord, MultiTableCommittable>
+            createCompatibilityWriteOperator(
+                    StoreSinkWrite.Provider writeProvider, String commitUser) {
         return new CdcRecordStoreMultiWriteOperator.Factory(
                 catalogLoader, writeProvider, commitUser, new Options());
     }

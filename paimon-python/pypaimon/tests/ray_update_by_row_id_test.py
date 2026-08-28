@@ -15,6 +15,7 @@
 #  specific language governing permissions and limitations
 #  under the License.
 
+import inspect
 import os
 import shutil
 import tempfile
@@ -30,7 +31,7 @@ pypaimon = pytest.importorskip("pypaimon")
 ray = pytest.importorskip("ray")
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.ray import update_by_row_id
+from pypaimon.ray import read_paimon, update_by_row_id
 
 
 class RayUpdateByRowIdTest(unittest.TestCase):
@@ -167,13 +168,221 @@ class RayUpdateByRowIdTest(unittest.TestCase):
         captured = {}
 
         def fake_apply(update_ds, table, cols, *, num_partitions,
-                       ray_remote_args=None, base_snapshot_id=None):
+                       ray_remote_args=None, base_snapshot_id=None,
+                       estimated_size_bytes=None, estimated_num_rows=None,
+                       data_context=None):
             captured["base_snapshot_id"] = base_snapshot_id
+            captured["num_partitions"] = num_partitions
+            captured["estimated_size_bytes"] = estimated_size_bytes
+            captured["estimated_num_rows"] = estimated_num_rows
+            captured["data_context"] = data_context
             return [], 0, []
 
         with mock.patch.object(m, "distributed_update_apply", fake_apply):
             update_by_row_id(target, src, self.catalog_options, update_cols=["age"])
         self.assertEqual(captured["base_snapshot_id"], expected_sid)
+        self.assertIsNone(captured["num_partitions"])
+        self.assertGreater(captured["estimated_size_bytes"], 0)
+        self.assertEqual(captured["estimated_num_rows"], 1)
+        self.assertIsNotNone(captured["data_context"])
+
+    def test_transformed_paimon_source_adapts_partitions(self):
+        import pypaimon.ray.data_evolution_merge_join as merge_join
+
+        target = self._create()
+        for value in range(3):
+            self._write(target, pa.Table.from_pydict(
+                {"id": [value], "name": ["n{}".format(value)], "age": [0]},
+                schema=self.pa_schema,
+            ))
+
+        source = read_paimon(
+            target,
+            self.catalog_options,
+            projection=["_ROW_ID", "age"],
+        ).map_batches(
+            lambda batch: pa.table({
+                "_ROW_ID": batch.column("_ROW_ID"),
+                "age": pa.array([99] * batch.num_rows, type=pa.int32()),
+            }),
+            batch_format="pyarrow",
+        )
+        real_resolve = merge_join._resolve_row_id_num_partitions
+        resolved = []
+
+        def track_resolve(*args, **kwargs):
+            result = real_resolve(*args, **kwargs)
+            resolved.append((args, result))
+            return result
+
+        with mock.patch(
+            "ray.cluster_resources", return_value={"CPU": 320}
+        ), mock.patch.object(
+            merge_join,
+            "_resolve_row_id_num_partitions",
+            side_effect=track_resolve,
+        ):
+            stats = update_by_row_id(
+                target,
+                source,
+                self.catalog_options,
+                update_cols=["age"],
+            )
+
+        self.assertEqual(stats, {"num_updated": 3})
+        self.assertEqual([result for _, result in resolved], [3])
+        cardinality_parameter = inspect.signature(
+            ray.data.Dataset.map_batches
+        ).parameters.get("udf_modifying_row_count")
+        expected_num_rows = (
+            3
+            if cardinality_parameter is not None
+            and cardinality_parameter.default is False
+            else None
+        )
+        self.assertEqual(
+            resolved[0][0][1:], (None, expected_num_rows, 3)
+        )
+        self.assertEqual(self._read(target).column("age").to_pylist(), [99] * 3)
+
+    def test_expanding_transform_keeps_target_parallelism(self):
+        import pypaimon.ray.data_evolution_merge_join as merge_join
+
+        target = self._create()
+        for value in range(3):
+            self._write(target, pa.Table.from_pydict(
+                {"id": [value], "name": ["n{}".format(value)], "age": [0]},
+                schema=self.pa_schema,
+            ))
+
+        rows = read_paimon(
+            target,
+            self.catalog_options,
+            projection=["_ROW_ID"],
+        ).take_all()
+        row_ids = [row["_ROW_ID"] for row in rows]
+        map_kwargs = {"batch_format": "pyarrow"}
+        if "udf_modifying_row_count" in inspect.signature(
+            ray.data.Dataset.map_batches
+        ).parameters:
+            map_kwargs["udf_modifying_row_count"] = True
+        source = ray.data.from_arrow(pa.table({"seed": [0]})).map_batches(
+            lambda batch: pa.table({
+                "_ROW_ID": pa.array(row_ids, type=pa.int64()),
+                "age": pa.array([77] * len(row_ids), type=pa.int32()),
+            }),
+            **map_kwargs,
+        )
+        real_resolve = merge_join._resolve_row_id_num_partitions
+        resolved = []
+
+        def track_resolve(*args, **kwargs):
+            result = real_resolve(*args, **kwargs)
+            resolved.append((args, result))
+            return result
+
+        with mock.patch(
+            "ray.cluster_resources", return_value={"CPU": 320}
+        ), mock.patch.object(
+            merge_join,
+            "_resolve_row_id_num_partitions",
+            side_effect=track_resolve,
+        ):
+            stats = update_by_row_id(
+                target,
+                source,
+                self.catalog_options,
+                update_cols=["age"],
+            )
+
+        self.assertEqual(stats, {"num_updated": 3})
+        self.assertEqual(resolved, [((None, None, None, 3), 3)])
+        self.assertEqual(self._read(target).column("age").to_pylist(), [77] * 3)
+
+    def test_filtered_paimon_source_uses_ray_shuffle_default(self):
+        import pypaimon.ray.data_evolution_merge_join as merge_join
+
+        target = "default.u_{}".format(uuid.uuid4().hex[:8])
+        schema = pa.schema([
+            ("content_key", pa.string()),
+            ("clip_id", pa.int32()),
+            ("age", pa.int32()),
+        ])
+        options = dict(self.de_options)
+        options["target-file-row-num"] = "1"
+        self.catalog.create_table(
+            target,
+            Schema.from_pyarrow_schema(schema, options=options),
+            False,
+        )
+        matched_rows = 39
+        total_rows = 201
+        self._write(target, pa.Table.from_pydict({
+            "content_key": ["wanted"] * matched_rows
+            + ["other"] * (total_rows - matched_rows),
+            "clip_id": [7] * matched_rows
+            + [8] * (total_rows - matched_rows),
+            "age": [0] * total_rows,
+        }, schema=schema))
+
+        table = self.catalog.get_table(target)
+        predicates = table.new_read_builder().new_predicate_builder()
+        predicate = predicates.and_predicates([
+            predicates.equal("content_key", "wanted"),
+            predicates.equal("clip_id", 7),
+        ])
+        source = read_paimon(
+            target,
+            self.catalog_options,
+            filter=predicate,
+            projection=["_ROW_ID", "content_key", "clip_id", "age"],
+        ).map_batches(
+            lambda batch: pa.table({
+                "_ROW_ID": batch.column("_ROW_ID"),
+                "age": pa.array([88] * batch.num_rows, type=pa.int32()),
+            }),
+            batch_format="pyarrow",
+        )
+        real_resolve = merge_join._resolve_row_id_num_partitions
+        real_groupby = ray.data.Dataset.groupby
+        resolved = []
+        group_partitions = []
+
+        def track_resolve(*args, **kwargs):
+            with mock.patch(
+                "ray.cluster_resources", return_value={"CPU": 320}
+            ):
+                result = real_resolve(*args, **kwargs)
+            resolved.append((args, result))
+            return result
+
+        def run_small_groupby(dataset, key, num_partitions=None):
+            # Assert the requested value but keep the test execution small.
+            group_partitions.append(num_partitions)
+            return real_groupby(dataset, key, num_partitions=4)
+
+        with mock.patch.object(
+            merge_join,
+            "_resolve_row_id_num_partitions",
+            side_effect=track_resolve,
+        ), mock.patch.object(
+            ray.data.Dataset,
+            "groupby",
+            new=run_small_groupby,
+        ):
+            stats = update_by_row_id(
+                target,
+                source,
+                self.catalog_options,
+                update_cols=["age"],
+            )
+
+        self.assertEqual(stats, {"num_updated": matched_rows})
+        self.assertEqual(resolved, [((None, None, None, total_rows), 200)])
+        self.assertEqual(group_partitions, [200])
+        ages = self._read(target).column("age").to_pylist()
+        self.assertEqual(ages.count(88), matched_rows)
+        self.assertEqual(ages.count(0), total_rows - matched_rows)
 
     def test_new_commit_failure_preserves_pending_messages(self):
         err = RuntimeError("new_commit failed")

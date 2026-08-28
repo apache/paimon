@@ -36,14 +36,16 @@ scalar, text, vector, and blob data.
 Creating a multimodal table enables `row-tracking.enabled`,
 `data-evolution.enabled`, `deletion-vectors.enabled`, and
 `blob-as-descriptor` by default. Global index scans use full fallback coverage
-through `global-index.search-mode` set to `FULL`. Data files use Vortex by
-default through `file.format = vortex`, and vector columns are stored in
-dedicated Vortex files through `vector.file.format` set to `vortex`. Install
-the Vortex extra when writing or reading default multimodal tables from Python:
+through `global-index.search-mode` set to `FULL`. Data files use Paimon's
+default Parquet format, and vector columns are stored in dedicated Parquet
+files through `vector.file.format` set to `parquet`. These defaults require no
+file-format extra:
 
 ```shell
-pip install pypaimon[vortex]
+pip install pypaimon
 ```
+
+Vortex remains available as an optional format when explicitly configured.
 
 ## Connect
 
@@ -189,6 +191,132 @@ docs.add([
     }
 ])
 ```
+
+## Load HDF5
+
+`MultimodalConnection.load_from_hdf5` streams one or more local or remote HDF5
+files into an existing multimodal table. HDF5 loading requires Python 3.8 or
+newer. Install the optional dependency first:
+
+```shell
+pip install 'pypaimon[hdf5]'
+```
+
+The transform receives an open `h5py.File` and an `Hdf5File`. Its `path` is the
+resolved local `file://` URI or remote URI; `name` and `stem` provide convenient
+path components. For local sources, `local_path` returns a decoded `Path` that
+can be used to read sibling files, including paths containing spaces or Unicode;
+it is `None` for remote sources. The transform can return one Arrow table or
+record batch, or an iterable that yields multiple tables or batches:
+
+```python
+import pyarrow as pa
+
+EMBEDDING_VECTOR_TYPE = pa.list_(pa.float32(), 3)
+IMAGE_BLOB_TYPE = pa.large_binary()
+
+schema = pa.schema([
+    pa.field("episode_id", pa.string(), nullable=False),
+    pa.field("frame_index", pa.int32(), nullable=False),
+    # Arrow fixed-size lists map to Paimon VECTOR columns.
+    pa.field("embedding", EMBEDDING_VECTOR_TYPE, nullable=False),
+    # Arrow binary and large-binary values map to Paimon BLOB columns.
+    pa.field("image", IMAGE_BLOB_TYPE),
+])
+
+frames = conn.create_table("frames", schema=schema)
+
+
+def transform(h5, source):
+    episode_id = source.stem
+    for begin in range(0, len(h5["embedding"]), 128):
+        end = min(begin + 128, len(h5["embedding"]))
+        yield pa.RecordBatch.from_pydict({
+            "episode_id": [episode_id] * (end - begin),
+            "frame_index": list(range(begin, end)),
+            "embedding": h5["embedding"][begin:end].tolist(),
+            "image": [bytes(value) for value in h5["image"][begin:end]],
+        }, schema=schema)
+
+
+result = conn.load_from_hdf5(
+    "frames",
+    "/data/episodes",
+    transform=transform,
+)
+print(result.file_count)
+print(result.batch_count)
+print(result.row_count)
+print(result.snapshot_id)
+```
+
+A path can be one `.h5` or `.hdf5` file, an iterable of paths, or a directory.
+Directories are searched recursively. Before opening files, `load_from_hdf5`
+resolves every discovered path, removes duplicate files within that call, and
+sorts by the resolved path. Overlapping directory and file arguments therefore
+read a physical file once per call. Local paths and `file://`, `hdfs://`,
+`viewfs://`, `oss://`, `s3://`, and `gs://` URIs use PyPaimon's existing
+FileIO implementations.
+
+Remote credentials and endpoints belong to the HDF5 source, not necessarily
+the target warehouse. Pass standard FileIO settings through `source_options`;
+they are not inherited from the target table, written to table options, or
+retained after the call. This also applies to HDFS client settings: provide
+source-specific settings explicitly, while configuration discoverable by the
+underlying filesystem client can still come from its normal environment:
+
+```python
+remote_result = conn.load_from_hdf5(
+    "frames",
+    "oss://source-bucket/episodes",
+    transform=transform,
+    source_options={
+        "fs.oss.endpoint": "oss-cn-hangzhou.aliyuncs.com",
+        "fs.oss.accessKeyId": "SOURCE_ACCESS_KEY_ID",
+        "fs.oss.accessKeySecret": "SOURCE_ACCESS_KEY_SECRET",
+    },
+)
+```
+
+Because native HDFS Kerberos credentials use process-global ticket state, HDF5
+sources cannot run an explicit-keytab login in a shared process. Acquire the
+ticket in a process-isolated worker, omit the source principal/keytab options,
+and then call `load_from_hdf5` in that worker.
+
+HDF5 requires random access. `load_from_hdf5` passes the seekable stream returned
+by `FileIO.new_input_stream` directly to h5py and never downloads it to a local
+temporary file. A non-seekable stream fails before commit. Recursive directory
+discovery requires backend listing support; legacy OSS on PyArrow before 16
+must use explicit file paths, Jindo, or a newer PyArrow version. HDF5 performs
+many small seeks, so benchmark remote-object latency for large production
+inputs even though no full-file download is required.
+
+An empty path iterable or existing directory with no HDF5 files is a no-op. It
+returns zero file, batch, and row counts with `snapshot_id=None`, without
+creating a writer or snapshot. A nonexistent path or unsupported file suffix
+is still an error, as is a discovered file whose transform produces no rows.
+
+The target schema is strict. Each batch must contain exactly the target columns
+in target order and must be safely convertible to the target Arrow schema.
+Missing columns are not filled with null, extra columns are not discarded, and
+invalid nullability, incompatible types, or fixed-size vector lengths fail the
+whole call.
+
+One call uses one writer and one commit for all discovered files, and a
+successful non-empty call creates exactly one snapshot. Any failure before the
+commit aborts the writer and leaves no partial snapshot. An exception after the
+commit starts has Paimon's unknown-commit-result semantics: `load_from_hdf5` does
+not retry and does not abort files that a snapshot may already reference.
+
+For a future Ray integration, split HDF5 file descriptions across worker tasks,
+apply the same transform and strict batch contract in each task, and collect
+writer commit messages for one coordinator commit. Do not call `load_from_hdf5`
+independently in every task, because that would create one commit per task. The
+HDF5 core itself has no Ray dependency.
+
+`load_from_hdf5` is append-only and is **not retry-safe**. It does not add source
+provenance columns, maintain a source ledger, skip prior inputs, or detect
+source drift. Calling it again with the same input appends the rows again.
 
 ## Overwrite
 
@@ -337,8 +465,9 @@ result = (
 `scan().read_blobs(column)` bulk-fetches a BLOB column's bytes for the filtered
 rows using concurrent, same-file coalesced ranged reads. This is much faster than
 a per-row loop and avoids the slow row-by-row blob resolution on data-evolution
-tables. It returns `(scalar_table, {column: [bytes | None]})`, row-aligned; the
-scalar table drops all BLOB columns.
+tables. It returns `(scalar_table, {column: rows})`, row-aligned. Scalar BLOB
+rows are `bytes | None`; `MAP<K, BLOB>` rows are `None` or ordered lists of
+`(key, bytes | None)` pairs. The scalar table drops the readable BLOB columns.
 
 ```python
 scalar, blobs = (
@@ -360,10 +489,13 @@ scalar, blobs = docs.scan().where(f"id IN ({in_clause})").read_blobs("image")
 `where()` is a SQL string, so build the `IN (...)` clause only from trusted,
 already-escaped ids -- do not interpolate untrusted external input.
 
-Read several BLOB columns at once (fetched together, not column-by-column):
+Read several BLOB columns at once, including `MAP<K, BLOB>`:
 
 ```python
-scalar, blobs = docs.scan().where("category = 'lake'").read_blobs(["image", "audio"])
+scalar, blobs = docs.scan().where("category = 'lake'").read_blobs(
+    ["image", "audio", "renditions"]
+)
+renditions = [None if row is None else dict(row) for row in blobs["renditions"]]
 ```
 
 For a memory-bounded read (e.g. streaming into a trainer), `stream_blobs` yields

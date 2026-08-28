@@ -35,6 +35,7 @@ import java.nio.ByteBuffer;
  */
 public final class AvroRecordDecoder {
 
+    private final Schema writerSchema;
     private final Schema recordSchema;
     private final int recordBranch;
 
@@ -44,6 +45,7 @@ public final class AvroRecordDecoder {
     private int blockLength;
 
     AvroRecordDecoder(Schema writerSchema) {
+        this.writerSchema = writerSchema;
         if (writerSchema.getType() == Schema.Type.UNION) {
             int branchIndex = -1;
             Schema record = null;
@@ -69,6 +71,11 @@ public final class AvroRecordDecoder {
         } else {
             throw new IllegalArgumentException("Avro schema is not a record or record union.");
         }
+    }
+
+    /** Creates an independent decoder with the same writer schema and no current block. */
+    public AvroRecordDecoder copy() {
+        return new AvroRecordDecoder(writerSchema);
     }
 
     /** Returns the number of fields in the writer record. */

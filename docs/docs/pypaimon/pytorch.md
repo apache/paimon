@@ -57,7 +57,36 @@ for batch_idx, batch_data in enumerate(dataloader):
 When the `streaming` parameter is true, it will iteratively read;
 when it is false, it will read the full amount of data into memory.
 
-**`prefetch_concurrency`** (default: 1): When streaming is true, number of threads used for parallel prefetch within each DataLoader worker. Set to a value greater than 1 to partition splits across threads and increase read throughput. Has no effect when streaming is false.
+**`prefetch_concurrency`** (default: 1): In streaming row mode, controls
+reader threads per DataLoader worker. It has no effect in non-streaming mode.
+
+### Batch Streaming
+
+For batch-oriented training, make the streaming dataset yield batches directly:
+
+```python
+dataset = table_read.to_torch(
+    splits,
+    streaming=True,
+    batch_format="torch",
+    batch_size=1024,
+)
+dataloader = DataLoader(dataset, batch_size=None, num_workers=2)
+
+for batch in dataloader:
+    train(batch["features"], batch["label"])
+```
+
+`batch_format="pyarrow"` yields PyArrow `RecordBatch` objects instead;
+`batch_format="torch"` yields dictionaries of tensors. The default Tensor
+converter supports non-null numeric, boolean, and numeric fixed-size-list
+columns. Use `to_tensor_fn` for other types or custom conversion.
+
+Omit `batch_size` to preserve native reader batches. Otherwise, batches are
+combined or sliced to the requested size. Use `DataLoader(batch_size=None)` to
+disable a second batching step. Batch streaming does not support `shuffle=True`.
+Numeric tensors may share read-only Arrow buffers; clone them before in-place
+mutation. Batch formats currently require `prefetch_concurrency=1`.
 
 ## File Format Metadata Cache
 

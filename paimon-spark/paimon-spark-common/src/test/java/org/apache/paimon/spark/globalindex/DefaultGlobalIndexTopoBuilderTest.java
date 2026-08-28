@@ -42,6 +42,12 @@ public class DefaultGlobalIndexTopoBuilderTest {
     }
 
     @Test
+    void testFMIndexUsesDefaultTopologyBuilder() {
+        assertThat(GlobalIndexTopologyBuilderUtils.createTopoBuilder("fmindex"))
+                .isInstanceOf(DefaultGlobalIndexTopoBuilder.class);
+    }
+
+    @Test
     void testRowsPerShardUsesMergedBuildOptions() {
         Map<String, String> tableOptions = new HashMap<>();
         tableOptions.put(GLOBAL_INDEX_ROW_COUNT_PER_SHARD.key(), "1000");

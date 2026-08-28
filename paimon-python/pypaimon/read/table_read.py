@@ -18,7 +18,7 @@
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional
 
 import pandas
 import pyarrow
@@ -654,12 +654,79 @@ class TableRead:
         streaming: bool = False,
         prefetch_concurrency: int = 1,
         *,
+        batch_format: str = "row",
+        batch_size: Optional[int] = None,
+        to_tensor_fn: Optional[Callable] = None,
         shuffle: bool = False,
         seed: int = 0,
         buffer_size: int = 1000,
         max_buffer_input_splits: int = 10,
     ) -> "torch.utils.data.Dataset":
-        """Wrap Paimon table data to PyTorch Dataset."""
+        """Wrap Paimon table data in a PyTorch Dataset.
+
+        Args:
+            splits: Splits to read.
+            streaming: Whether to stream data.
+            prefetch_concurrency: Reader threads per DataLoader worker in row
+                format.
+            batch_format: ``"row"``, ``"pyarrow"``, or ``"torch"``. Batch
+                formats require streaming.
+            batch_size: Rows per batch; ``None`` preserves reader batches.
+            to_tensor_fn: Optional RecordBatch converter for Torch batches.
+            shuffle: Whether to shuffle rows; supported only in row format.
+        """
+        valid_batch_formats = {"row", "pyarrow", "torch"}
+        if batch_format not in valid_batch_formats:
+            raise ValueError(
+                "batch_format must be one of %s, got %r"
+                % (sorted(valid_batch_formats), batch_format)
+            )
+        if batch_size is not None and (
+            isinstance(batch_size, bool)
+            or not isinstance(batch_size, int)
+            or batch_size <= 0
+        ):
+            raise ValueError("batch_size must be a positive int or None")
+        if batch_format == "row":
+            if batch_size is not None:
+                raise ValueError(
+                    "batch_size requires batch_format='pyarrow' or 'torch'"
+                )
+            if to_tensor_fn is not None:
+                raise ValueError("to_tensor_fn requires batch_format='torch'")
+        else:
+            if not streaming:
+                raise ValueError(
+                    "batch_format=%r requires streaming=True" % batch_format
+                )
+            if shuffle:
+                raise ValueError(
+                    "shuffle=True only supports batch_format='row'"
+                )
+            if batch_format == "pyarrow" and to_tensor_fn is not None:
+                raise ValueError("to_tensor_fn requires batch_format='torch'")
+            if to_tensor_fn is not None and not callable(to_tensor_fn):
+                raise ValueError("to_tensor_fn must be callable")
+            if (
+                isinstance(prefetch_concurrency, bool)
+                or not isinstance(prefetch_concurrency, int)
+                or prefetch_concurrency != 1
+            ):
+                raise ValueError(
+                    "batch formats require prefetch_concurrency=1"
+                )
+
+            from pypaimon.read.datasource.torch_dataset import (
+                TorchBatchIterDataset,
+            )
+            return TorchBatchIterDataset(
+                self,
+                splits,
+                batch_format=batch_format,
+                batch_size=batch_size,
+                to_tensor_fn=to_tensor_fn,
+            )
+
         if shuffle:
             if not streaming:
                 raise ValueError("shuffle=True only supports streaming=True")

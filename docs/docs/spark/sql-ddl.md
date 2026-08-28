@@ -226,6 +226,12 @@ On a Format Table whose partitions are discovered from the filesystem, `ADD PART
 added partition before any data is written returns no rows. `DROP PARTITION` unregisters the
 partition and deletes its directory.
 
+A partition value that is empty or all whitespace is rejected by `ADD PARTITION`, `DROP PARTITION`
+and `TRUNCATE PARTITION`. Such a value is written to the partition named by
+`partition.default-name` (`__DEFAULT_PARTITION__` unless configured otherwise), the same partition
+a `NULL` is written to, so it names that partition rather than one of its own - name it directly
+instead. Writing one through `INSERT` is unaffected and still lands there.
+
 `ANALYZE TABLE` measures partitions. A Format Table has no snapshot to carry a table-level
 statistic and no column statistics, so `COMPUTE STATISTICS FOR COLUMNS` and `FOR ALL COLUMNS` are
 not supported on it; what the statement writes back to the catalog is the file count, byte size,

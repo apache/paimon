@@ -324,6 +324,60 @@ public class AvroFileFormatTest {
     }
 
     @Test
+    void testReadNullableUnionWithNullSecond() throws IOException {
+        Schema nullableInt =
+                Schema.createUnion(
+                        Arrays.asList(
+                                Schema.create(Schema.Type.INT), Schema.create(Schema.Type.NULL)));
+        Schema recordSchema =
+                SchemaBuilder.record("record")
+                        .fields()
+                        .name("skipped")
+                        .type(nullableInt)
+                        .noDefault()
+                        .name("value")
+                        .type(nullableInt)
+                        .noDefault()
+                        .endRecord();
+        Schema writerSchema =
+                Schema.createUnion(Arrays.asList(recordSchema, Schema.create(Schema.Type.NULL)));
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path file = new Path(new Path(tempPath.toUri()), UUID.randomUUID().toString());
+
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false);
+                DataFileWriter<GenericRecord> writer =
+                        new DataFileWriter<>(new GenericDatumWriter<>(writerSchema))) {
+            writer.create(writerSchema, out);
+            GenericRecord value = new GenericData.Record(recordSchema);
+            value.put("skipped", 100);
+            value.put("value", 42);
+            writer.append(value);
+            GenericRecord nullValue = new GenericData.Record(recordSchema);
+            nullValue.put("skipped", null);
+            nullValue.put("value", null);
+            writer.append(nullValue);
+        }
+
+        RowType tableType =
+                RowType.builder()
+                        .field("skipped", DataTypes.INT())
+                        .field("value", DataTypes.INT())
+                        .build();
+        RowType projectedType = RowType.builder().field("value", DataTypes.INT()).build();
+        List<Integer> values = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                fileFormat
+                        .createReaderFactory(tableType, projectedType, new ArrayList<>())
+                        .createReader(
+                                new FormatReaderContext(
+                                        fileIO, file, fileIO.getFileSize(file), null, null))) {
+            reader.forEachRemaining(row -> values.add(row.isNullAt(0) ? null : row.getInt(0)));
+        }
+
+        assertThat(values).containsExactly(42, null);
+    }
+
+    @Test
     void testReadsLargeZstdBlock() throws IOException {
         RowType rowType =
                 RowType.builder()
