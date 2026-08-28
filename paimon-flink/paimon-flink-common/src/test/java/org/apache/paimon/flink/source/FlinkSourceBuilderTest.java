@@ -28,6 +28,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataTypes;
 
@@ -116,6 +117,25 @@ public class FlinkSourceBuilderTest {
                                                 dataFile("file-1", 10L, 1L),
                                                 dataFile("file-2", 25L, 1000L)))
                                 .build());
+
+        assertThat(FlinkSourceBuilder.splitFileSizeOrRowCount(split)).isEqualTo(35L);
+    }
+
+    @Test
+    public void testSplitFileSizeOrRowCountUnwrapsQueryAuthSplit() {
+        DataSplit dataSplit =
+                DataSplit.builder()
+                        .withSnapshot(1L)
+                        .withPartition(org.apache.paimon.data.BinaryRow.EMPTY_ROW)
+                        .withBucket(0)
+                        .withBucketPath("bucket-0")
+                        .withDataFiles(
+                                Arrays.asList(
+                                        dataFile("file-1", 10L, 1L),
+                                        dataFile("file-2", 25L, 1000L)))
+                        .build();
+        FileStoreSourceSplit split =
+                new FileStoreSourceSplit("split-1", new QueryAuthSplit(dataSplit, null));
 
         assertThat(FlinkSourceBuilder.splitFileSizeOrRowCount(split)).isEqualTo(35L);
     }

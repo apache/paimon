@@ -37,6 +37,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.PostponeMergePlan;
 import org.apache.paimon.table.source.PostponeMergeReadBuilder;
+import org.apache.paimon.table.source.QueryAuthSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.SerializableFunction;
@@ -272,6 +273,9 @@ public class FlinkSourceBuilder {
     @VisibleForTesting
     static long splitFileSizeOrRowCount(FileStoreSourceSplit sourceSplit) {
         Split split = sourceSplit.split();
+        while (split instanceof QueryAuthSplit) {
+            split = ((QueryAuthSplit) split).split();
+        }
         if (split instanceof DataSplit) {
             return ((DataSplit) split)
                     .dataFiles().stream().mapToLong(file -> file.fileSize()).sum();
