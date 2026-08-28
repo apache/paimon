@@ -103,7 +103,7 @@ class PrimaryKeySortedIndexValidationTest {
 
         assertThatThrownBy(() -> validateTableSchema(schema(options)))
                 .hasMessageContaining(
-                        "Primary-key BTree, Bitmap, and Multivalue indexes require deletion-vectors.enabled = true");
+                        "Primary-key BTree, Bitmap, Multivalue, and FM indexes require deletion-vectors.enabled = true");
     }
 
     @Test
@@ -114,7 +114,7 @@ class PrimaryKeySortedIndexValidationTest {
 
         assertThatThrownBy(() -> validateTableSchema(schema(options, Collections.emptyList())))
                 .hasMessageContaining(
-                        "Primary-key BTree, Bitmap, and Multivalue indexes require a primary-key table");
+                        "Primary-key BTree, Bitmap, Multivalue, and FM indexes require a primary-key table");
     }
 
     @Test
@@ -125,7 +125,7 @@ class PrimaryKeySortedIndexValidationTest {
 
         assertThatThrownBy(() -> validateTableSchema(schema(options)))
                 .hasMessageContaining(
-                        "Primary-key BTree, Bitmap, and Multivalue indexes require fixed or postpone bucket mode");
+                        "Primary-key BTree, Bitmap, Multivalue, and FM indexes require fixed or postpone bucket mode");
     }
 
     @Test
@@ -145,7 +145,7 @@ class PrimaryKeySortedIndexValidationTest {
 
         assertThatThrownBy(() -> validateTableSchema(schema(options)))
                 .hasMessageContaining(
-                        "Primary-key BTree, Bitmap, and Multivalue indexes require deletion-vectors.merge-on-read = false");
+                        "Primary-key BTree, Bitmap, Multivalue, and FM indexes require deletion-vectors.merge-on-read = false");
     }
 
     @Test
@@ -157,7 +157,7 @@ class PrimaryKeySortedIndexValidationTest {
 
         assertThatThrownBy(() -> validateTableSchema(schema(options)))
                 .hasMessageContaining(
-                        "Primary-key BTree, Bitmap, and Multivalue indexes do not support pk-clustering-override");
+                        "Primary-key BTree, Bitmap, Multivalue, and FM indexes do not support pk-clustering-override");
     }
 
     @Test
