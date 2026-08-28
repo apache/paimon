@@ -112,7 +112,7 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual("true", options["blob-as-descriptor"])
         self.assertNotIn("data-evolution.row-sidecar.enabled", options)
         self.assertEqual("full", options["global-index.search-mode"])
-        self.assertEqual("vortex", options["vector.file.format"])
+        self.assertEqual("parquet", options["vector.file.format"])
         self.assertEqual("default.docs", self.conn.get_table("docs").identifier)
         self.assertEqual(["id", "content", "embedding", "payload"],
                          [field.name for field in table.raw_table.fields])

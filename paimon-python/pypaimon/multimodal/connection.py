@@ -34,7 +34,7 @@ _DEFAULT_OPTIONS = {
     "deletion-vectors.enabled": "true",
     "blob-as-descriptor": "true",
     "global-index.search-mode": "full",
-    "vector.file.format": "vortex",
+    "vector.file.format": "parquet",
 }
 
 _DEFAULT_DATABASE = Catalog.DEFAULT_DATABASE
