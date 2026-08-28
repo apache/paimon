@@ -103,8 +103,9 @@ public class FMGlobalIndexTest {
 
         Options options = new Options();
         options.set(FMGlobalIndexOptions.PARTITION_ROW_COUNT, 3);
-        options.set(FMGlobalIndexOptions.SA_SAMPLE_RATE, 4);
+        options.set(FMGlobalIndexOptions.SA_SAMPLE_RATE, 1);
         options.set(FMGlobalIndexOptions.COMPRESSION, "lz4");
+        options.set(FMGlobalIndexOptions.LOCATE_COST_RATIO, 1d);
         indexer = new FMGlobalIndexer(dataField, options);
     }
 
@@ -160,7 +161,9 @@ public class FMGlobalIndexTest {
         Options options = new Options();
         options.set(FMGlobalIndexOptions.PARTITION_ROW_COUNT, 2);
         options.set(FMGlobalIndexOptions.PARTITION_SIZE, MemorySize.ofKibiBytes(1));
+        options.set(FMGlobalIndexOptions.SA_SAMPLE_RATE, 1);
         options.set(FMGlobalIndexOptions.COMPRESSION, "none");
+        options.set(FMGlobalIndexOptions.LOCATE_COST_RATIO, 1d);
         indexer = new FMGlobalIndexer(dataField, options);
 
         List<GlobalIndexIOMeta> files =
@@ -206,7 +209,8 @@ public class FMGlobalIndexTest {
     public void testRandomizedExactnessAgainstByteScan() throws Exception {
         Options options = new Options();
         options.set(FMGlobalIndexOptions.PARTITION_ROW_COUNT, 17);
-        options.set(FMGlobalIndexOptions.SA_SAMPLE_RATE, 8);
+        options.set(FMGlobalIndexOptions.SA_SAMPLE_RATE, 1);
+        options.set(FMGlobalIndexOptions.LOCATE_COST_RATIO, 1d);
         indexer = new FMGlobalIndexer(dataField, options);
         Random random = new Random(99173);
         List<BinaryString> values = new ArrayList<>();
@@ -306,6 +310,7 @@ public class FMGlobalIndexTest {
         options.set(FMGlobalIndexOptions.PARTITION_ROW_COUNT, 100);
         options.set(FMGlobalIndexOptions.SA_SAMPLE_RATE, 4);
         options.set(FMGlobalIndexOptions.COMPRESSION, "none");
+        options.set(FMGlobalIndexOptions.LOCATE_COST_RATIO, 1d);
         indexer = new FMGlobalIndexer(dataField, options);
         List<GlobalIndexIOMeta> actualFiles =
                 writeData(
@@ -345,6 +350,13 @@ public class FMGlobalIndexTest {
             assertRows(reader.visitContains(fieldRef, str("banana")).join(), 0L, 2L);
             assertRows(reader.visitContains(fieldRef, str("")).join(), 0L, 2L, 3L);
         }
+    }
+
+    @Test
+    public void testV1ChecksumUsesIeeeCrc32Contract() {
+        byte[] bytes = "123456789".getBytes(StandardCharsets.US_ASCII);
+        assertThat(FMIndexFile.crc32(bytes, 0, bytes.length, BlockCompressionType.NONE))
+                .isEqualTo(0x00C49E49);
     }
 
     @Test
@@ -417,7 +429,11 @@ public class FMGlobalIndexTest {
     }
 
     @Test
-    public void testDenseOccurrenceGuardFallsBackToExactStoredValues() throws Exception {
+    public void testDenseOccurrenceGuardDeclinesIndexEvaluation() throws Exception {
+        Options options = new Options();
+        options.set(FMGlobalIndexOptions.SA_SAMPLE_RATE, 4);
+        options.set(FMGlobalIndexOptions.LOCATE_COST_RATIO, 1d);
+        indexer = new FMGlobalIndexer(dataField, options);
         String repeated = String.join("", Collections.nCopies(10_000, "a"));
         List<GlobalIndexIOMeta> files =
                 writeData(Arrays.asList(str(repeated + "b"), str(repeated)), 0);
@@ -437,9 +453,8 @@ public class FMGlobalIndexTest {
         corruptByte(file, sampleBlockOffset);
 
         try (GlobalIndexReader reader = createReader(files, 2)) {
-            // Locating every 'a' occurrence would read the corrupted SA samples. The count-first
-            // guard instead scans independently checksummed stored-value pages and remains exact.
-            assertRows(reader.visitContains(fieldRef, str("a")).join(), 0L, 1L);
+            // Dense intervals are left to the source scan, so the corrupted SA sample is not read.
+            assertThat(reader.visitContains(fieldRef, str("a")).join()).isEmpty();
             assertThatThrownBy(() -> reader.visitContains(fieldRef, str("b")).join())
                     .isInstanceOf(CompletionException.class)
                     .hasMessageContaining("block checksum mismatch");
@@ -450,7 +465,7 @@ public class FMGlobalIndexTest {
         conservative.set(FMGlobalIndexOptions.LOCATE_COST_RATIO, 0.0001d);
         indexer = new FMGlobalIndexer(dataField, conservative);
         try (GlobalIndexReader reader = createReader(files, 2)) {
-            assertRows(reader.visitContains(fieldRef, str("b")).join(), 0L);
+            assertThat(reader.visitContains(fieldRef, str("b")).join()).isEmpty();
         }
     }
 
@@ -470,7 +485,80 @@ public class FMGlobalIndexTest {
     }
 
     @Test
-    public void testCandidateAwareFallbackAvoidsOccurrenceLocation() throws Exception {
+    public void testZeroReadCacheDeclinesLocate() throws Exception {
+        Options options = new Options();
+        options.set(FMGlobalIndexOptions.PARTITION_ROW_COUNT, 10);
+        options.set(FMGlobalIndexOptions.SA_SAMPLE_RATE, 1024);
+        options.set(FMGlobalIndexOptions.COMPRESSION, "none");
+        options.set(FMGlobalIndexOptions.READ_CACHE_SIZE, MemorySize.ofBytes(0));
+        options.set(FMGlobalIndexOptions.LOCATE_COST_RATIO, 1d);
+        indexer = new FMGlobalIndexer(dataField, options);
+        String value = String.join("", Collections.nCopies(3_000, "x")) + "unique-needle";
+        List<GlobalIndexIOMeta> files = writeData(Collections.singletonList(str(value)), 0);
+
+        try (GlobalIndexReader reader = createReader(files, 1)) {
+            assertThat(reader.visitContains(fieldRef, str("unique-needle")).join()).isEmpty();
+        }
+    }
+
+    @Test
+    public void testZeroReadCacheScansNullBitmapOncePerBlock() throws Exception {
+        Options options = new Options();
+        options.set(FMGlobalIndexOptions.PARTITION_ROW_COUNT, 1_000);
+        options.set(FMGlobalIndexOptions.COMPRESSION, "none");
+        options.set(FMGlobalIndexOptions.READ_CACHE_SIZE, MemorySize.ofBytes(0));
+        indexer = new FMGlobalIndexer(dataField, options);
+        List<BinaryString> values = new ArrayList<>();
+        for (int row = 0; row < 1_000; row++) {
+            values.add((row & 1) == 0 ? null : str("value-" + row));
+        }
+        List<GlobalIndexIOMeta> files = writeData(values, 0);
+
+        AtomicInteger preadCalls = new AtomicInteger();
+        fileReader =
+                meta ->
+                        new CountingVectoredInput(
+                                fileIO.newInputStream(meta.filePath()), preadCalls);
+        try (GlobalIndexReader reader = createReader(files, values.size())) {
+            assertRows(
+                    reader.visitIsNull(fieldRef).join(),
+                    java.util.stream.LongStream.range(0, values.size())
+                            .filter(row -> (row & 1) == 0)
+                            .toArray());
+        }
+        assertThat(preadCalls.get()).isLessThan(10);
+    }
+
+    @Test
+    public void testDenseQueriesDeclineWithoutStoredValues() throws Exception {
+        Options options = new Options();
+        options.set(FMGlobalIndexOptions.PARTITION_ROW_COUNT, 10);
+        options.set(FMGlobalIndexOptions.SA_SAMPLE_RATE, 4);
+        options.set(FMGlobalIndexOptions.COMPRESSION, "none");
+        options.set(FMGlobalIndexOptions.LOCATE_COST_RATIO, 1d);
+        indexer = new FMGlobalIndexer(dataField, options);
+        List<GlobalIndexIOMeta> files = writeData(Arrays.asList(str("aaaa"), null, str("bbbb")), 0);
+
+        try (GlobalIndexReader reader = createReader(files, 3)) {
+            assertThat(reader.visitContains(fieldRef, str("a")).join()).isEmpty();
+            assertRows(reader.visitContains(fieldRef, str("missing")).join());
+            assertRows(reader.visitContains(fieldRef, str("")).join(), 0L, 2L);
+            org.apache.paimon.utils.RoaringNavigableMap64 candidates =
+                    new org.apache.paimon.utils.RoaringNavigableMap64();
+            candidates.add(2L);
+            assertRows(
+                    ((org.apache.paimon.globalindex.ContainsRefiningGlobalIndexReader) reader)
+                            .visitContainsConjunction(
+                                    fieldRef,
+                                    Collections.singletonList(str("bbbb")),
+                                    GlobalIndexResult.create(candidates))
+                            .join(),
+                    2L);
+        }
+    }
+
+    @Test
+    public void testDenseCandidateQueryDeclinesIndexEvaluation() throws Exception {
         Options options = new Options();
         options.set(FMGlobalIndexOptions.PARTITION_ROW_COUNT, 1_000);
         options.set(FMGlobalIndexOptions.SA_SAMPLE_RATE, 4);
@@ -478,20 +566,6 @@ public class FMGlobalIndexTest {
         indexer = new FMGlobalIndexer(dataField, options);
         List<GlobalIndexIOMeta> files =
                 writeData(new ArrayList<>(Collections.nCopies(200, str("aaaaa"))), 0);
-        GlobalIndexIOMeta file = files.get(0);
-        long sampleBlockOffset;
-        try (org.apache.paimon.fs.SeekableInputStream input =
-                fileIO.newInputStream(file.filePath())) {
-            FMIndexFile.Footer footer = FMIndexFile.readFooter(input, file.fileSize());
-            sampleBlockOffset =
-                    FMIndexFile.readDirectory(input, footer, file.fileSize())
-                            .sampleValues
-                            .blocks
-                            .get(0)
-                            .block
-                            .offset;
-        }
-        corruptByte(file, sampleBlockOffset);
 
         org.apache.paimon.utils.RoaringNavigableMap64 candidates =
                 new org.apache.paimon.utils.RoaringNavigableMap64();
@@ -499,21 +573,18 @@ public class FMGlobalIndexTest {
         try (GlobalIndexReader reader = createReader(files, 200)) {
             org.apache.paimon.globalindex.ContainsRefiningGlobalIndexReader refining =
                     (org.apache.paimon.globalindex.ContainsRefiningGlobalIndexReader) reader;
-            // The FM interval has only 1,000 occurrences, below the normal count-first guard. A
-            // one-row ANN/sibling candidate makes one sequential verification page cheaper than
-            // locating all occurrences, so the corrupted (and unused) samples must not be read.
-            assertRows(
-                    refining.visitContainsConjunction(
-                                    fieldRef,
-                                    Collections.singletonList(str("a")),
-                                    GlobalIndexResult.create(candidates))
-                            .join(),
-                    17L);
+            assertThat(
+                            refining.visitContainsConjunction(
+                                            fieldRef,
+                                            Collections.singletonList(str("a")),
+                                            GlobalIndexResult.create(candidates))
+                                    .join())
+                    .isEmpty();
         }
     }
 
     @Test
-    public void testMediumOccurrenceGuardUsesExactStoredValues() throws Exception {
+    public void testMediumOccurrenceGuardDeclinesIndexEvaluation() throws Exception {
         Options options = new Options();
         options.set(FMGlobalIndexOptions.PARTITION_ROW_COUNT, 1_000);
         options.set(FMGlobalIndexOptions.SA_SAMPLE_RATE, 32);
@@ -521,27 +592,9 @@ public class FMGlobalIndexTest {
         indexer = new FMGlobalIndexer(dataField, options);
         List<GlobalIndexIOMeta> files =
                 writeData(new ArrayList<>(Collections.nCopies(200, str("aaaaa"))), 0);
-        GlobalIndexIOMeta file = files.get(0);
-        long sampleBlockOffset;
-        try (org.apache.paimon.fs.SeekableInputStream input =
-                fileIO.newInputStream(file.filePath())) {
-            FMIndexFile.Footer footer = FMIndexFile.readFooter(input, file.fileSize());
-            sampleBlockOffset =
-                    FMIndexFile.readDirectory(input, footer, file.fileSize())
-                            .sampleValues
-                            .blocks
-                            .get(0)
-                            .block
-                            .offset;
-        }
-        corruptByte(file, sampleBlockOffset);
 
         try (GlobalIndexReader reader = createReader(files, 200)) {
-            // 1,000 occurrences are below the old unconditional 4,096 locate threshold, but
-            // locating them is much more expensive than scanning the checksummed value pages.
-            assertRows(
-                    reader.visitContains(fieldRef, str("a")).join(),
-                    java.util.stream.LongStream.range(0, 200).toArray());
+            assertThat(reader.visitContains(fieldRef, str("a")).join()).isEmpty();
         }
     }
 
@@ -549,7 +602,9 @@ public class FMGlobalIndexTest {
     public void testCandidatePartitionPruningSkipsUnrelatedWaveletData() throws Exception {
         Options options = new Options();
         options.set(FMGlobalIndexOptions.PARTITION_ROW_COUNT, 2);
+        options.set(FMGlobalIndexOptions.SA_SAMPLE_RATE, 1);
         options.set(FMGlobalIndexOptions.COMPRESSION, "none");
+        options.set(FMGlobalIndexOptions.LOCATE_COST_RATIO, 1d);
         indexer = new FMGlobalIndexer(dataField, options);
         List<GlobalIndexIOMeta> files =
                 writeData(
@@ -649,69 +704,6 @@ public class FMGlobalIndexTest {
     }
 
     @Test
-    public void testDenseFallbackCoalescesVerificationPages() throws Exception {
-        Options options = new Options();
-        options.set(FMGlobalIndexOptions.PARTITION_ROW_COUNT, 1_000);
-        options.set(FMGlobalIndexOptions.COMPRESSION, "none");
-        indexer = new FMGlobalIndexer(dataField, options);
-        List<BinaryString> values =
-                new ArrayList<>(
-                        Collections.nCopies(
-                                512, str(String.join("", Collections.nCopies(2_048, "a")))));
-        List<GlobalIndexIOMeta> files = writeData(values, 0);
-
-        AtomicInteger preadCalls = new AtomicInteger();
-        fileReader =
-                meta ->
-                        new CountingVectoredInput(
-                                fileIO.newInputStream(meta.filePath()),
-                                preadCalls,
-                                new AtomicLong());
-        try (GlobalIndexReader reader = createReader(files, values.size())) {
-            assertRows(
-                    reader.visitContains(fieldRef, str("a")).join(),
-                    java.util.stream.LongStream.range(0, values.size()).toArray());
-        }
-        assertThat(preadCalls.get()).isLessThanOrEqualTo(10);
-    }
-
-    @Test
-    public void testSparseFallbackReadsVerificationRangesConcurrently() throws Exception {
-        Options options = new Options();
-        options.set(FMGlobalIndexOptions.PARTITION_ROW_COUNT, 10);
-        options.set(FMGlobalIndexOptions.COMPRESSION, "none");
-        indexer = new FMGlobalIndexer(dataField, options);
-        BinaryString value = str(String.join("", Collections.nCopies(100_000, "a")));
-        List<GlobalIndexIOMeta> files =
-                writeData(new ArrayList<>(Collections.nCopies(6, value)), 0);
-
-        AtomicInteger concurrentPreads = new AtomicInteger();
-        fileReader =
-                meta ->
-                        new ConcurrentCountingVectoredInput(
-                                fileIO.newInputStream(meta.filePath()), concurrentPreads);
-        org.apache.paimon.utils.RoaringNavigableMap64 candidates =
-                new org.apache.paimon.utils.RoaringNavigableMap64();
-        candidates.add(0L);
-        candidates.add(2L);
-        candidates.add(4L);
-        try (GlobalIndexReader reader = createReader(files, 6)) {
-            org.apache.paimon.globalindex.ContainsRefiningGlobalIndexReader refining =
-                    (org.apache.paimon.globalindex.ContainsRefiningGlobalIndexReader) reader;
-            assertRows(
-                    refining.visitContainsConjunction(
-                                    fieldRef,
-                                    Collections.singletonList(str("a")),
-                                    GlobalIndexResult.create(candidates))
-                            .join(),
-                    0L,
-                    2L,
-                    4L);
-        }
-        assertThat(concurrentPreads.get()).isGreaterThanOrEqualTo(2);
-    }
-
-    @Test
     public void testDemandPagingDoesNotOutgrowReadCache() throws Exception {
         Options options = new Options();
         options.set(FMGlobalIndexOptions.PARTITION_SIZE, MemorySize.ofMebiBytes(1));
@@ -737,31 +729,6 @@ public class FMGlobalIndexTest {
             assertRows(reader.visitContains(fieldRef, BinaryString.fromBytes(needle)).join(), 0L);
         }
         assertThat(maximumPread.get()).isLessThanOrEqualTo(MemorySize.ofKibiBytes(64).getBytes());
-    }
-
-    @Test
-    public void testDenseExactFallbackVerificationCorruptionFailsClosed() throws Exception {
-        String repeated = String.join("", Collections.nCopies(10_000, "a"));
-        List<GlobalIndexIOMeta> files = writeData(Collections.singletonList(str(repeated)), 0);
-        GlobalIndexIOMeta file = files.get(0);
-        long verificationOffset;
-        try (org.apache.paimon.fs.SeekableInputStream input =
-                fileIO.newInputStream(file.filePath())) {
-            FMIndexFile.Footer footer = FMIndexFile.readFooter(input, file.fileSize());
-            verificationOffset =
-                    FMIndexFile.readDirectory(input, footer, file.fileSize())
-                            .verificationPages
-                            .get(0)
-                            .block
-                            .offset;
-        }
-        corruptByte(file, verificationOffset);
-
-        try (GlobalIndexReader reader = createReader(files, 1)) {
-            assertThatThrownBy(() -> reader.visitContains(fieldRef, str("a")).join())
-                    .isInstanceOf(CompletionException.class)
-                    .hasMessageContaining("block checksum mismatch");
-        }
     }
 
     private List<GlobalIndexIOMeta> writeData(List<BinaryString> values, long firstRowId)
@@ -887,38 +854,6 @@ public class FMGlobalIndexTest {
             preadCalls.incrementAndGet();
             maximumPread.accumulateAndGet(length, Math::max);
             return vectored.pread(position, buffer, offset, length);
-        }
-    }
-
-    private static final class ConcurrentCountingVectoredInput extends SeekableInputStreamWrapper
-            implements VectoredReadable {
-
-        private final VectoredReadable vectored;
-        private final AtomicInteger maximumConcurrentPreads;
-        private final AtomicInteger currentPreads = new AtomicInteger();
-
-        private ConcurrentCountingVectoredInput(
-                SeekableInputStream input, AtomicInteger maximumConcurrentPreads) {
-            super(input);
-            this.vectored = (VectoredReadable) input;
-            this.maximumConcurrentPreads = maximumConcurrentPreads;
-        }
-
-        @Override
-        public int pread(long position, byte[] buffer, int offset, int length) throws IOException {
-            int concurrent = currentPreads.incrementAndGet();
-            maximumConcurrentPreads.accumulateAndGet(concurrent, Math::max);
-            try {
-                try {
-                    Thread.sleep(10L);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    throw new IOException("Interrupted while observing vectored reads.", e);
-                }
-                return vectored.pread(position, buffer, offset, length);
-            } finally {
-                currentPreads.decrementAndGet();
-            }
         }
     }
 }

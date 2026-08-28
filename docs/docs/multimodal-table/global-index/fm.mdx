@@ -30,9 +30,10 @@ values do not match; empty needles follow the normal Paimon predicate semantics.
 
 The writer divides source rows into independent partitions and appends them to one checksummed
 container file. Each partition stores a compressed wavelet matrix, sampled suffix-array values,
-row boundaries, null rows, and exact verification pages. Reads demand-load bounded blocks instead
-of downloading the complete container. If locating matches would cost more than exact
-verification, the reader scans the relevant verification pages and still returns an exact result.
+row boundaries, and null rows. It does not duplicate the source values. Reads demand-load bounded
+blocks instead of downloading the complete container. If locating matches would cost too much, the
+index declines the predicate so the normal data path can scan the source values and preserve exact
+results.
 
 ## Create a Global FM Index
 
@@ -94,7 +95,7 @@ JSON object.
 | `fm-index.compression-level` | `1` | Compression level for codecs which support levels. |
 | `fm-index.read-cache-size` | `64 mb` | Maximum decoded rank and sample block cache per indexer. |
 | `fm-index.demand-page-size` | `512 kb` | Target contiguous range size when demand-loading blocks. |
-| `fm-index.locate-cost-ratio` | `0.001` | Maximum estimated suffix-array locate work relative to exact stored-value scan bytes before verification fallback. |
+| `fm-index.locate-cost-ratio` | `0.001` | Maximum estimated suffix-array locate work relative to source text bytes before declining index evaluation. |
 
 `fm-index.partition-size` and `fm-index.partition-row-count` bound build memory and the unit of
 independent reads. Smaller partitions reduce peak construction memory but increase the number of

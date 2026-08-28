@@ -19,10 +19,7 @@
 package org.apache.paimon.globalindex.fmindex;
 
 import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.fs.FileRange;
 import org.apache.paimon.fs.SeekableInputStream;
-import org.apache.paimon.fs.VectoredReadUtils;
-import org.apache.paimon.fs.VectoredReadable;
 import org.apache.paimon.globalindex.ContainsRefiningGlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexResult;
@@ -46,11 +43,6 @@ import java.util.function.ToIntFunction;
 
 /** Exact FM-index reader using blocked wavelet ranks and value-sampled suffix locations. */
 final class FMGlobalIndexReader implements ContainsRefiningGlobalIndexReader {
-
-    private static final int MAX_VERIFICATION_RANGE_SIZE = 4 * 1024 * 1024;
-    private static final int MAX_VERIFICATION_UNCOMPRESSED_RANGE_SIZE = 4 * 1024 * 1024;
-    private static final int MAX_VERIFICATION_RANGE_BATCH_SIZE = 8;
-    private static final int ESTIMATED_READ_REQUEST_BYTES = 64 * 1024;
 
     @Nullable private final GlobalIndexFileReader fileReader;
     @Nullable private final GlobalIndexIOMeta file;
@@ -181,8 +173,18 @@ final class FMGlobalIndexReader implements ContainsRefiningGlobalIndexReader {
                                     current.footer.firstRowId + current.footer.rowCount)) {
                 return exactEmptyResult();
             }
-            // Enumerate selective intervals and use the stored-value path when occurrence-level
-            // SA location would cost more than Milvus' count-first guard permits.
+            boolean hasNonEmptyNeedle = false;
+            for (byte[] needle : needles) {
+                if (needle.length > 0) {
+                    hasNonEmptyNeedle = true;
+                    break;
+                }
+            }
+            if (hasNonEmptyNeedle && !readContext.supportsLocate()) {
+                return Optional.empty();
+            }
+            // Like Milvus, decline index evaluation when occurrence-level SA location is too
+            // expensive. The caller can then scan the source values without duplicating them here.
             List<SearchInterval> intervals = new ArrayList<>(needles.size());
             for (byte[] needle : needles) {
                 if (needle.length > 0) {
@@ -196,13 +198,9 @@ final class FMGlobalIndexReader implements ContainsRefiningGlobalIndexReader {
             intervals.sort((left, right) -> Integer.compare(left.size(), right.size()));
 
             RoaringNavigableMap64 result = null;
-            List<byte[]> denseNeedles = new ArrayList<>();
             for (SearchInterval interval : intervals) {
-                RoaringNavigableMap64 effectiveCandidates =
-                        result != null ? result : candidates == null ? null : candidates.results();
-                if (!shouldLocate(current, interval, effectiveCandidates)) {
-                    denseNeedles.add(interval.needle);
-                    continue;
+                if (!shouldLocate(current, interval)) {
+                    return Optional.empty();
                 }
                 RoaringNavigableMap64 matches = locateRows(input, current, interval);
                 if (result == null) {
@@ -217,11 +215,7 @@ final class FMGlobalIndexReader implements ContainsRefiningGlobalIndexReader {
                     return exactEmptyResult();
                 }
             }
-            if (!denseNeedles.isEmpty()) {
-                RoaringNavigableMap64 verificationCandidates =
-                        result != null ? result : candidates == null ? null : candidates.results();
-                result = verifyRows(input, current, denseNeedles, verificationCandidates);
-            } else if (result == null) {
+            if (result == null) {
                 result = nullRows(input, current, false);
                 if (candidates != null) {
                     result.and(candidates.results());
@@ -259,216 +253,24 @@ final class FMGlobalIndexReader implements ContainsRefiningGlobalIndexReader {
         for (int i = needle.length - 1; i >= 0 && lower < upper; i--) {
             int symbol = directory.byteToSymbol[needle[i] & 0xFF];
             if (symbol < 0) {
-                return new SearchInterval(0, 0, needle);
+                return new SearchInterval(0, 0);
             }
             int cumulative = directory.cumulativeCounts[symbol];
             RankPair ranks = rankPair(input, directory, symbol, lower, upper);
             lower = cumulative + ranks.lower;
             upper = cumulative + ranks.upper;
         }
-        return new SearchInterval(lower, upper, needle);
+        return new SearchInterval(lower, upper);
     }
 
-    private boolean shouldLocate(
-            Metadata metadata,
-            SearchInterval interval,
-            @Nullable RoaringNavigableMap64 candidates) {
+    private boolean shouldLocate(Metadata metadata, SearchInterval interval) {
+        if (!readContext.supportsLocate()) {
+            return false;
+        }
         FMIndexFile.Directory directory = metadata.directory;
         double locateCost = (double) interval.size() * directory.sampleRate;
-        if (candidates != null) {
-            long verificationBytes = 0;
-            for (FMIndexFile.VerificationPageMeta page : directory.verificationPages) {
-                if (pageSelected(metadata.footer.firstRowId, page, candidates)) {
-                    verificationBytes += page.block.uncompressedLength;
-                }
-            }
-            if (locateCost >= locateCostRatio * verificationBytes) {
-                return false;
-            }
-        }
         long textBytes = (long) directory.textLength - directory.rowCount - 1;
         return locateCost < locateCostRatio * textBytes;
-    }
-
-    private RoaringNavigableMap64 verifyRows(
-            SeekableInputStream input,
-            Metadata metadata,
-            List<byte[]> needles,
-            @Nullable RoaringNavigableMap64 candidates)
-            throws IOException {
-        List<FMBytePattern> patterns = new ArrayList<>(needles.size());
-        for (byte[] needle : needles) {
-            patterns.add(new FMBytePattern(needle));
-        }
-        RoaringNavigableMap64 result = new RoaringNavigableMap64();
-        List<VerificationRange> ranges = verificationRanges(metadata, candidates);
-        for (int rangePosition = 0; rangePosition < ranges.size(); ) {
-            int rangeEnd = rangePosition;
-            long batchStoredBytes = 0;
-            while (rangeEnd < ranges.size()
-                    && rangeEnd - rangePosition < MAX_VERIFICATION_RANGE_BATCH_SIZE) {
-                VerificationRange range = ranges.get(rangeEnd);
-                if (rangeEnd > rangePosition
-                        && batchStoredBytes + range.storedLength > MAX_VERIFICATION_RANGE_SIZE) {
-                    break;
-                }
-                batchStoredBytes += range.storedLength;
-                rangeEnd++;
-            }
-            List<VerificationRange> batch = ranges.subList(rangePosition, rangeEnd);
-            byte[][] storedRanges = readVerificationRanges(input, batch);
-            for (int rangeIndex = 0; rangeIndex < batch.size(); rangeIndex++) {
-                VerificationRange range = batch.get(rangeIndex);
-                List<byte[]> pages =
-                        FMIndexFile.decodeVerificationBlockRange(
-                                storedRanges[rangeIndex], range.blocks);
-                for (int pageOffset = 0; pageOffset < pages.size(); pageOffset++) {
-                    verifyPage(
-                            metadata.footer.firstRowId,
-                            metadata.directory.verificationPages.get(range.pageStart + pageOffset),
-                            pages.get(pageOffset),
-                            patterns,
-                            candidates,
-                            result);
-                }
-            }
-            rangePosition = rangeEnd;
-        }
-        return result;
-    }
-
-    private List<VerificationRange> verificationRanges(
-            Metadata metadata, @Nullable RoaringNavigableMap64 candidates) {
-        List<FMIndexFile.VerificationPageMeta> pages = metadata.directory.verificationPages;
-        List<VerificationRange> ranges = new ArrayList<>();
-        int pagePosition = 0;
-        while (pagePosition < pages.size()) {
-            if (!pageSelected(metadata.footer.firstRowId, pages.get(pagePosition), candidates)) {
-                pagePosition++;
-                continue;
-            }
-            int pageStart = pagePosition;
-            List<FMIndexFile.BlockInfo> blocks = new ArrayList<>();
-            long storedBytes = 0;
-            long uncompressedBytes = 0;
-            long physicalEnd = -1;
-            while (pagePosition < pages.size()
-                    && pageSelected(
-                            metadata.footer.firstRowId, pages.get(pagePosition), candidates)) {
-                FMIndexFile.BlockInfo block = pages.get(pagePosition).block;
-                if (!blocks.isEmpty()
-                        && (block.offset != physicalEnd
-                                || storedBytes + block.storedLength > MAX_VERIFICATION_RANGE_SIZE
-                                || uncompressedBytes + block.uncompressedLength
-                                        > MAX_VERIFICATION_UNCOMPRESSED_RANGE_SIZE)) {
-                    break;
-                }
-                FMIndexFile.validateVerificationBlock(block, fileSize());
-                blocks.add(block);
-                storedBytes += block.storedLength;
-                uncompressedBytes += block.uncompressedLength;
-                physicalEnd = block.offset + block.storedLength;
-                pagePosition++;
-            }
-            ranges.add(new VerificationRange(pageStart, blocks, storedBytes));
-        }
-        return ranges;
-    }
-
-    private byte[][] readVerificationRanges(
-            SeekableInputStream input, List<VerificationRange> ranges) throws IOException {
-        byte[][] result = new byte[ranges.size()][];
-        if (ranges.size() == 1 || !(input instanceof VectoredReadable)) {
-            for (int i = 0; i < ranges.size(); i++) {
-                result[i] =
-                        FMIndexFile.readVerificationBlockRange(
-                                input, ranges.get(i).blocks, fileSize());
-            }
-            return result;
-        }
-
-        VectoredReadable readable = (VectoredReadable) input;
-        List<FileRange> fileRanges = new ArrayList<>(ranges.size());
-        for (VerificationRange range : ranges) {
-            fileRanges.add(
-                    FileRange.createFileRange(
-                            range.blocks.get(0).offset, (int) range.storedLength));
-        }
-        VectoredReadUtils.ReadOptions options =
-                VectoredReadUtils.ReadOptions.from(readable)
-                        .withMinSeekForVectorReads(ESTIMATED_READ_REQUEST_BYTES)
-                        .withSequentialReadFallback(false);
-        VectoredReadUtils.readVectored(readable, fileRanges, options);
-        for (int i = 0; i < fileRanges.size(); i++) {
-            try {
-                result[i] = fileRanges.get(i).getData().join();
-            } catch (CompletionException e) {
-                if (e.getCause() instanceof IOException) {
-                    throw (IOException) e.getCause();
-                }
-                throw e;
-            }
-        }
-        return result;
-    }
-
-    private static void verifyPage(
-            long firstRowId,
-            FMIndexFile.VerificationPageMeta page,
-            byte[] values,
-            List<FMBytePattern> patterns,
-            @Nullable RoaringNavigableMap64 candidates,
-            RoaringNavigableMap64 result) {
-        int offset = 0;
-        for (int row = 0; row < page.rowCount; row++) {
-            Preconditions.checkState(
-                    offset <= values.length - Integer.BYTES,
-                    "FM index verification page ended before its declared rows.");
-            int length = readInt(values, offset);
-            offset += Integer.BYTES;
-            Preconditions.checkState(
-                    length == -1 || (length >= 0 && length <= values.length - offset),
-                    "Invalid FM index verification value length.");
-            long rowId = firstRowId + page.firstRow + row;
-            if (length >= 0
-                    && (candidates == null || candidates.contains(rowId))
-                    && matchesAll(patterns, values, offset, length)) {
-                result.add(rowId);
-            }
-            if (length >= 0) {
-                offset += length;
-            }
-        }
-        Preconditions.checkState(
-                offset == values.length, "FM index verification page has trailing bytes.");
-    }
-
-    private static boolean pageSelected(
-            long firstRowId,
-            FMIndexFile.VerificationPageMeta page,
-            @Nullable RoaringNavigableMap64 candidates) {
-        if (candidates == null) {
-            return true;
-        }
-        long first = firstRowId + page.firstRow;
-        return candidates.intersects(first, first + page.rowCount);
-    }
-
-    private static boolean matchesAll(
-            List<FMBytePattern> patterns, byte[] value, int offset, int length) {
-        for (FMBytePattern pattern : patterns) {
-            if (!pattern.contains(value, offset, length)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private static int readInt(byte[] bytes, int offset) {
-        return ((bytes[offset] & 0xFF) << 24)
-                | ((bytes[offset + 1] & 0xFF) << 16)
-                | ((bytes[offset + 2] & 0xFF) << 8)
-                | (bytes[offset + 3] & 0xFF);
     }
 
     private RoaringNavigableMap64 locateRows(
@@ -788,9 +590,13 @@ final class FMGlobalIndexReader implements ContainsRefiningGlobalIndexReader {
     private RoaringNavigableMap64 nullRows(
             SeekableInputStream input, Metadata metadata, boolean selectNulls) throws IOException {
         RoaringNavigableMap64 result = new RoaringNavigableMap64();
-        for (int row = 0; row < metadata.directory.rowCount; row++) {
-            if (bit(input, metadata.directory.nullRows, row) == selectNulls) {
-                result.add(metadata.footer.firstRowId + row);
+        FMIndexFile.BitVectorMeta nullRows = metadata.directory.nullRows;
+        for (FMIndexFile.BitBlockMeta meta : nullRows.blocks) {
+            FMIndexFile.BitBlock block = bitBlock(input, nullRows, meta);
+            for (int local = 0; local < meta.bitCount; local++) {
+                if (block.get(local) == selectNulls) {
+                    result.add(metadata.footer.firstRowId + meta.firstBit + local);
+                }
             }
         }
         return result;
@@ -808,9 +614,12 @@ final class FMGlobalIndexReader implements ContainsRefiningGlobalIndexReader {
                 Preconditions.checkState(
                         containerLoader != null && partition != null,
                         "Missing FM index container metadata.");
-                containerLoader.validate(input);
+                FMIndexFile.ContainerFooter containerFooter = containerLoader.validate(input);
                 FMIndexFile.Footer footer =
                         FMIndexFile.readFooter(input, partition, file.fileSize());
+                Preconditions.checkState(
+                        footer.featureFlags == containerFooter.featureFlags,
+                        "FM index partition and container feature flags do not match.");
                 FMIndexFile.Directory directory =
                         FMIndexFile.readDirectory(input, footer, file.fileSize());
                 current = new Metadata(footer, directory);
@@ -823,11 +632,6 @@ final class FMGlobalIndexReader implements ContainsRefiningGlobalIndexReader {
     private SeekableInputStream inputStream() throws IOException {
         Preconditions.checkState(fileReader != null && file != null, "Missing FM index file.");
         return fileReader.getInputStream(file);
-    }
-
-    private long fileSize() {
-        Preconditions.checkState(file != null, "Missing FM index file.");
-        return file.fileSize();
     }
 
     @Nullable
@@ -923,28 +727,13 @@ final class FMGlobalIndexReader implements ContainsRefiningGlobalIndexReader {
     @Override
     public void close() {}
 
-    private static final class VerificationRange {
-        private final int pageStart;
-        private final List<FMIndexFile.BlockInfo> blocks;
-        private final long storedLength;
-
-        private VerificationRange(
-                int pageStart, List<FMIndexFile.BlockInfo> blocks, long storedLength) {
-            this.pageStart = pageStart;
-            this.blocks = blocks;
-            this.storedLength = storedLength;
-        }
-    }
-
     private static final class SearchInterval {
         private final int lower;
         private final int upper;
-        private final byte[] needle;
 
-        private SearchInterval(int lower, int upper, byte[] needle) {
+        private SearchInterval(int lower, int upper) {
             this.lower = lower;
             this.upper = upper;
-            this.needle = needle;
         }
 
         private boolean isEmpty() {
@@ -979,25 +768,27 @@ final class FMGlobalIndexReader implements ContainsRefiningGlobalIndexReader {
     static final class ContainerMetadataLoader {
         private final GlobalIndexIOMeta file;
         private final FMIndexFile.IndexMeta expected;
-        private boolean validated;
+        @Nullable private FMIndexFile.ContainerFooter footer;
 
         ContainerMetadataLoader(GlobalIndexIOMeta file, FMIndexFile.IndexMeta expected) {
             this.file = file;
             this.expected = expected;
         }
 
-        synchronized void validate(SeekableInputStream input) throws IOException {
-            if (validated) {
-                return;
+        synchronized FMIndexFile.ContainerFooter validate(SeekableInputStream input)
+                throws IOException {
+            if (footer != null) {
+                return footer;
             }
-            FMIndexFile.ContainerFooter footer =
+            FMIndexFile.ContainerFooter current =
                     FMIndexFile.readContainerFooter(input, file.fileSize());
             FMIndexFile.IndexMeta actual =
-                    FMIndexFile.readContainerDirectory(input, footer, file.fileSize());
+                    FMIndexFile.readContainerDirectory(input, current, file.fileSize());
             Preconditions.checkState(
                     expected.sameLayout(actual),
                     "FM index manifest metadata does not match the container directory.");
-            validated = true;
+            footer = current;
+            return current;
         }
     }
 

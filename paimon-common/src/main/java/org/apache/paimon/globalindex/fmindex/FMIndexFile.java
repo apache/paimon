@@ -25,8 +25,6 @@ import org.apache.paimon.compression.BlockDecompressor;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.VectoredReadable;
-import org.apache.paimon.memory.MemorySegment;
-import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
@@ -40,19 +38,18 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-
-import static org.apache.paimon.sst.SstFileUtils.crc32c;
+import java.util.zip.CRC32;
 
 /**
  * Portable V1 container layout for partitioned, demand-paged FM indexes.
  *
  * <p>Each physical index file contains one or more canonical, contiguous partitions followed by a
  * checksummed container directory and fixed footer. A partition contains dense-alphabet blocked
- * quaternary wavelet levels, sampled-SA mask and values, null mask, row-boundary mask,
- * exact-verification value pages, its directory, and a fixed footer. Every independently readable
- * block records its offset, stored and uncompressed lengths, compression ID and CRC32C. The reader
- * validates all physical ranges before allocating decoded buffers and verifies the stored checksum
- * before decompression.
+ * quaternary wavelet levels, sampled-SA mask and values, null mask, row-boundary mask, its
+ * directory, and a fixed footer. Every independently readable block records its offset, stored and
+ * uncompressed lengths, compression ID and CRC32 over the stored bytes followed by the compression
+ * ID byte. The reader validates all physical ranges before allocating decoded buffers and verifies
+ * the stored checksum before decompression.
  */
 final class FMIndexFile {
 
@@ -72,12 +69,8 @@ final class FMIndexFile {
     private static final int FEATURE_VALUE_SAMPLED_SA = 1;
     private static final int FEATURE_DENSE_QUAD_WAVELET = 1 << 1;
     private static final int FEATURE_SEPARATOR_ROW_IDS = 1 << 2;
-    private static final int FEATURE_EXACT_DENSE_FALLBACK = 1 << 3;
     private static final int FEATURE_FLAGS =
-            FEATURE_VALUE_SAMPLED_SA
-                    | FEATURE_DENSE_QUAD_WAVELET
-                    | FEATURE_SEPARATOR_ROW_IDS
-                    | FEATURE_EXACT_DENSE_FALLBACK;
+            FEATURE_VALUE_SAMPLED_SA | FEATURE_DENSE_QUAD_WAVELET | FEATURE_SEPARATOR_ROW_IDS;
 
     static final int BLOCK_WORDS = 4096;
     static final int BLOCK_BITS = BLOCK_WORDS * Long.SIZE;
@@ -90,9 +83,13 @@ final class FMIndexFile {
     static final int FOOTER_CHECKSUM_OFFSET = 60;
     static final int MAX_DIRECTORY_UNCOMPRESSED_LENGTH = 16 * 1024 * 1024;
     static final int MAX_DATA_BLOCK_UNCOMPRESSED_LENGTH = 64 * 1024;
-    static final int MAX_VERIFICATION_BLOCK_UNCOMPRESSED_LENGTH = 64 * 1024 * 1024;
 
     private FMIndexFile() {}
+
+    private static void validateFeatureFlags(int flags, String scope) {
+        Preconditions.checkState(
+                flags == FEATURE_FLAGS, "Unsupported FM index %s feature flags: %s.", scope, flags);
+    }
 
     static byte[] writeIndexMeta(long firstRowId, long rowCount, List<PartitionMeta> partitions) {
         Preconditions.checkArgument(firstRowId >= 0 && rowCount > 0, "Invalid FM index row range.");
@@ -211,8 +208,7 @@ final class FMIndexFile {
         }
         long offset = stream.getPos();
         out.write(stored, 0, storedLength);
-        int checksum =
-                crc32c(new MemorySlice(MemorySegment.wrap(stored), 0, storedLength), compression);
+        int checksum = crc32(stored, 0, storedLength, compression);
         return new BlockInfo(
                 offset, storedLength, uncompressed.length, compression.persistentId(), checksum);
     }
@@ -342,12 +338,6 @@ final class FMIndexFile {
         writeIntVectorMeta(data, directory.sampleValues);
         writeBitVectorMeta(data, directory.nullRows);
         writeBitVectorMeta(data, directory.rowBoundaries);
-        data.writeInt(directory.verificationPages.size());
-        for (VerificationPageMeta page : directory.verificationPages) {
-            data.writeInt(page.firstRow);
-            data.writeInt(page.rowCount);
-            writeBlockInfo(data, page.block);
-        }
         data.flush();
         byte[] uncompressed = bytes.toByteArray();
         Preconditions.checkState(
@@ -429,10 +419,8 @@ final class FMIndexFile {
                 "FM index container footer checksum mismatch: expected=%s, actual=%s.",
                 expectedChecksum,
                 actualChecksum);
-        Preconditions.checkState(
-                readInt(bytes, 44) == FEATURE_FLAGS,
-                "Unsupported FM index container feature flags: %s.",
-                readInt(bytes, 44));
+        int featureFlags = readInt(bytes, 44);
+        validateFeatureFlags(featureFlags, "container");
         Preconditions.checkState(
                 readInt(bytes, 48) == 0, "Invalid FM index container reserved field.");
 
@@ -456,7 +444,7 @@ final class FMIndexFile {
         Preconditions.checkState(
                 directory.offset + directory.storedLength == fileSize - CONTAINER_FOOTER_LENGTH,
                 "FM index container directory is not immediately before the footer.");
-        return new ContainerFooter(directory, firstRowId, rowCount, partitionCount);
+        return new ContainerFooter(directory, firstRowId, rowCount, partitionCount, featureFlags);
     }
 
     static IndexMeta readContainerDirectory(
@@ -497,10 +485,8 @@ final class FMIndexFile {
                 "FM index partition footer checksum mismatch: expected=%s, actual=%s.",
                 expectedChecksum,
                 actualChecksum);
-        Preconditions.checkState(
-                readInt(bytes, 44) == FEATURE_FLAGS,
-                "Unsupported FM index partition feature flags: %s.",
-                readInt(bytes, 44));
+        int featureFlags = readInt(bytes, 44);
+        validateFeatureFlags(featureFlags, "partition");
         Preconditions.checkState(
                 readInt(bytes, 48) == 0, "Invalid FM index partition reserved field.");
 
@@ -532,7 +518,8 @@ final class FMIndexFile {
                 textLength,
                 sampleRate,
                 partition.startOffset,
-                partition.endOffset);
+                partition.endOffset,
+                featureFlags);
     }
 
     static Footer readFooter(SeekableInputStream input, long fileSize) throws IOException {
@@ -647,34 +634,6 @@ final class FMIndexFile {
         Preconditions.checkState(
                 rowBoundaries.totalOnes == rowCount,
                 "FM index row-boundary cardinality does not match its row count.");
-        int verificationPageCount = data.readInt();
-        Preconditions.checkState(
-                verificationPageCount > 0 && verificationPageCount <= rowCount,
-                "Invalid FM index verification page count.");
-        List<VerificationPageMeta> verificationPages = new ArrayList<>(verificationPageCount);
-        int nextRow = 0;
-        for (int i = 0; i < verificationPageCount; i++) {
-            int firstRow = data.readInt();
-            int pageRowCount = data.readInt();
-            BlockInfo block = readBlockInfo(data);
-            Preconditions.checkState(
-                    firstRow == nextRow
-                            && pageRowCount > 0
-                            && pageRowCount <= rowCount - firstRow
-                            && block.uncompressedLength >= pageRowCount * Integer.BYTES
-                            && block.uncompressedLength
-                                    <= MAX_VERIFICATION_BLOCK_UNCOMPRESSED_LENGTH,
-                    "Invalid FM index verification page metadata.");
-            validateCanonicalBlock(
-                    block,
-                    expectedOffset,
-                    footer.directory.offset,
-                    MAX_VERIFICATION_BLOCK_UNCOMPRESSED_LENGTH);
-            verificationPages.add(new VerificationPageMeta(firstRow, pageRowCount, block));
-            nextRow += pageRowCount;
-        }
-        Preconditions.checkState(
-                nextRow == rowCount, "FM index verification pages do not cover all rows.");
         Preconditions.checkState(
                 expectedOffset[0] == footer.directory.offset,
                 "FM index payload blocks are not canonical and contiguous.");
@@ -693,13 +652,12 @@ final class FMIndexFile {
                 sampledRows,
                 sampleValues,
                 nullRows,
-                rowBoundaries,
-                verificationPages);
+                rowBoundaries);
     }
 
     static byte[] readBlock(SeekableInputStream input, BlockInfo block, long fileSize)
             throws IOException {
-        validateBlock(block, fileSize, MAX_VERIFICATION_BLOCK_UNCOMPRESSED_LENGTH, true);
+        validateBlock(block, fileSize, MAX_DIRECTORY_UNCOMPRESSED_LENGTH, true);
         byte[] stored = readAt(input, block.offset, block.storedLength);
         return decodeStoredBlock(stored, 0, block);
     }
@@ -731,52 +689,12 @@ final class FMIndexFile {
         return result;
     }
 
-    static byte[] readVerificationBlockRange(
-            SeekableInputStream input, List<BlockInfo> blocks, long fileSize) throws IOException {
-        Preconditions.checkArgument(
-                !blocks.isEmpty(), "FM verification range must contain blocks.");
-        long firstOffset = blocks.get(0).offset;
-        long nextOffset = firstOffset;
-        long totalStoredLength = 0;
-        for (BlockInfo block : blocks) {
-            validateVerificationBlock(block, fileSize);
-            Preconditions.checkState(
-                    block.offset == nextOffset,
-                    "FM verification blocks are not canonical and contiguous.");
-            totalStoredLength += block.storedLength;
-            Preconditions.checkState(
-                    totalStoredLength <= Integer.MAX_VALUE,
-                    "FM verification range exceeds the supported read size.");
-            nextOffset += block.storedLength;
-        }
-        return readAt(input, firstOffset, (int) totalStoredLength);
-    }
-
-    static List<byte[]> decodeVerificationBlockRange(byte[] stored, List<BlockInfo> blocks) {
-        List<byte[]> result = new ArrayList<>(blocks.size());
-        int offset = 0;
-        for (BlockInfo block : blocks) {
-            result.add(decodeStoredBlock(stored, offset, block));
-            offset += block.storedLength;
-        }
-        Preconditions.checkState(
-                offset == stored.length, "FM verification range contains trailing bytes.");
-        return result;
-    }
-
-    static void validateVerificationBlock(BlockInfo block, long fileSize) {
-        validateBlock(block, fileSize, MAX_VERIFICATION_BLOCK_UNCOMPRESSED_LENGTH, false);
-    }
-
     private static byte[] decodeStoredBlock(byte[] stored, int offset, BlockInfo block) {
         Preconditions.checkState(
                 offset >= 0 && block.storedLength <= stored.length - offset,
                 "FM demand-page block exceeds its stored bytes.");
         BlockCompressionType compression = compression(block.compressionId);
-        int checksum =
-                crc32c(
-                        new MemorySlice(MemorySegment.wrap(stored), offset, block.storedLength),
-                        compression);
+        int checksum = crc32(stored, offset, block.storedLength, compression);
         Preconditions.checkState(
                 checksum == block.checksum,
                 "FM index block checksum mismatch: expected=%s, actual=%s.",
@@ -1209,18 +1127,26 @@ final class FMIndexFile {
     }
 
     private static int footerChecksum(byte[] footer) {
-        return crc32c(
-                new MemorySlice(MemorySegment.wrap(footer), 0, FOOTER_CHECKSUM_OFFSET),
-                BlockCompressionType.NONE);
+        return crc32(footer, 0, FOOTER_CHECKSUM_OFFSET, BlockCompressionType.NONE);
     }
 
     private static int indexMetaChecksum(byte[] metadata) {
-        return crc32c(
-                new MemorySlice(
-                        MemorySegment.wrap(metadata),
-                        0,
-                        metadata.length - INDEX_META_CHECKSUM_LENGTH),
+        return crc32(
+                metadata,
+                0,
+                metadata.length - INDEX_META_CHECKSUM_LENGTH,
                 BlockCompressionType.NONE);
+    }
+
+    /** V1 checksum contract: IEEE CRC32 over stored bytes followed by the compression ID byte. */
+    static int crc32(byte[] stored, int offset, int length, BlockCompressionType compressionType) {
+        Preconditions.checkArgument(
+                offset >= 0 && length >= 0 && length <= stored.length - offset,
+                "Invalid FM checksum byte range.");
+        CRC32 crc = new CRC32();
+        crc.update(stored, offset, length);
+        crc.update(compressionType.persistentId() & 0xFF);
+        return (int) crc.getValue();
     }
 
     private static byte[] readAt(SeekableInputStream input, long offset, int length)
@@ -1482,7 +1408,6 @@ final class FMIndexFile {
         final IntVectorMeta sampleValues;
         final BitVectorMeta nullRows;
         final BitVectorMeta rowBoundaries;
-        final List<VerificationPageMeta> verificationPages;
 
         Directory(
                 int rowCount,
@@ -1497,8 +1422,7 @@ final class FMIndexFile {
                 BitVectorMeta sampledRows,
                 IntVectorMeta sampleValues,
                 BitVectorMeta nullRows,
-                BitVectorMeta rowBoundaries,
-                List<VerificationPageMeta> verificationPages) {
+                BitVectorMeta rowBoundaries) {
             this.rowCount = rowCount;
             this.textLength = textLength;
             this.sampleRate = sampleRate;
@@ -1513,19 +1437,6 @@ final class FMIndexFile {
             this.sampleValues = sampleValues;
             this.nullRows = nullRows;
             this.rowBoundaries = rowBoundaries;
-            this.verificationPages = verificationPages;
-        }
-    }
-
-    static final class VerificationPageMeta {
-        final int firstRow;
-        final int rowCount;
-        final BlockInfo block;
-
-        VerificationPageMeta(int firstRow, int rowCount, BlockInfo block) {
-            this.firstRow = firstRow;
-            this.rowCount = rowCount;
-            this.block = block;
         }
     }
 
@@ -1537,6 +1448,7 @@ final class FMIndexFile {
         final int sampleRate;
         final long partitionStartOffset;
         final long partitionEndOffset;
+        final int featureFlags;
 
         Footer(
                 BlockInfo directory,
@@ -1545,7 +1457,8 @@ final class FMIndexFile {
                 int textLength,
                 int sampleRate,
                 long partitionStartOffset,
-                long partitionEndOffset) {
+                long partitionEndOffset,
+                int featureFlags) {
             this.directory = directory;
             this.firstRowId = firstRowId;
             this.rowCount = rowCount;
@@ -1553,6 +1466,7 @@ final class FMIndexFile {
             this.sampleRate = sampleRate;
             this.partitionStartOffset = partitionStartOffset;
             this.partitionEndOffset = partitionEndOffset;
+            this.featureFlags = featureFlags;
         }
     }
 
@@ -1561,13 +1475,19 @@ final class FMIndexFile {
         final long firstRowId;
         final long rowCount;
         final int partitionCount;
+        final int featureFlags;
 
         private ContainerFooter(
-                BlockInfo directory, long firstRowId, long rowCount, int partitionCount) {
+                BlockInfo directory,
+                long firstRowId,
+                long rowCount,
+                int partitionCount,
+                int featureFlags) {
             this.directory = directory;
             this.firstRowId = firstRowId;
             this.rowCount = rowCount;
             this.partitionCount = partitionCount;
+            this.featureFlags = featureFlags;
         }
     }
 
