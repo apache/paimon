@@ -22,8 +22,10 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.fs.BaseMultiPartUploadCommitter;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
+import org.apache.paimon.fs.MultiPartUploadStore;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.RenamingTwoPhaseOutputStream;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
@@ -397,6 +399,113 @@ class FormatTableCommitTest {
         verify(partitionManager, never())
                 .createPartitions(anyList(), eq(true), any(), anyBoolean());
         assertThat(fileIO.exists(targetPath)).isFalse();
+    }
+
+    @Test
+    void testOverwriteMultipartCompletionResponseLossPreservesReplacementAndReportsAbortFailure()
+            throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(new Path(tempDir.toUri()), "multipart-response-loss");
+        Path partitionPath = new Path(tablePath, "part=p");
+        Path oldPath = new Path(partitionPath, "data-old.csv");
+        Path targetPath = new Path(partitionPath, "data-new.csv");
+        Path stagingPath =
+                new Path(new Path(tempDir.toUri()), "multipart-staging/upload-in-progress");
+        fileIO.writeFile(oldPath, "old", false);
+        fileIO.writeFile(stagingPath, "staged", false);
+
+        @SuppressWarnings("unchecked")
+        MultiPartUploadStore<String, String> uploadStore = mock(MultiPartUploadStore.class);
+        doAnswer(
+                        invocation -> {
+                            fileIO.writeFile(targetPath, "replacement", false);
+                            throw new IOException("multipart completion response lost");
+                        })
+                .when(uploadStore)
+                .completeMultipartUpload(
+                        eq("part=p/data-new.csv"),
+                        eq("upload-id"),
+                        eq(Collections.singletonList("etag")),
+                        eq(1L));
+        doAnswer(
+                        invocation -> {
+                            fileIO.delete(stagingPath, false);
+                            throw new IOException("multipart abort response lost");
+                        })
+                .when(uploadStore)
+                .abortMultipartUpload(eq("part=p/data-new.csv"), eq("upload-id"));
+        TwoPhaseOutputStream.Committer committer =
+                new BaseMultiPartUploadCommitter<String, String>(
+                        "upload-id",
+                        Collections.singletonList("etag"),
+                        "part=p/data-new.csv",
+                        1L,
+                        targetPath) {
+                    @Override
+                    protected MultiPartUploadStore<String, String> multiPartUploadStore(
+                            FileIO ignored, Path ignoredTarget) {
+                        return uploadStore;
+                    }
+                };
+
+        Throwable failure =
+                catchThrowable(
+                        () ->
+                                staticPartitionOverwriteCommit(tablePath, fileIO, 1)
+                                        .commit(
+                                                Collections.singletonList(
+                                                        new TwoPhaseCommitMessage(committer))));
+
+        assertThat(getRootCause(failure)).hasMessage("multipart completion response lost");
+        assertThat(failureTree(failure))
+                .extracting(Throwable::getMessage)
+                .contains(
+                        "Failed to discard multipart upload with ID: upload-id",
+                        "multipart abort response lost");
+        assertThat(fileIO.exists(oldPath)).isFalse();
+        assertThat(fileIO.exists(targetPath)).isTrue();
+        assertThat(fileIO.exists(stagingPath)).isFalse();
+    }
+
+    @Test
+    void testOverwritePostPublishCleanFailurePreservesReplacementAndRetriesStagingCleanup()
+            throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(new Path(tempDir.toUri()), "post-publish-clean-failure");
+        Path partitionPath = new Path(tablePath, "part=p");
+        Path oldPath = new Path(partitionPath, "data-old.csv");
+        Path targetPath = new Path(partitionPath, "data-new.csv");
+        Path stagingPath = new Path(new Path(tempDir.toUri()), "clean-failure-staging/data.tmp");
+        fileIO.writeFile(oldPath, "old", false);
+        fileIO.writeFile(stagingPath, "staged", false);
+        AtomicBoolean failFirstClean = new AtomicBoolean(true);
+        StagedFileCommitter committer =
+                new StagedFileCommitter(targetPath, stagingPath) {
+                    @Override
+                    public void commit(FileIO committingFileIO) throws IOException {
+                        publish(committingFileIO);
+                    }
+
+                    @Override
+                    public void clean(FileIO cleaningFileIO) throws IOException {
+                        if (failFirstClean.compareAndSet(true, false)) {
+                            throw new IOException("staging cleanup failed");
+                        }
+                        super.clean(cleaningFileIO);
+                    }
+                };
+
+        assertThatThrownBy(
+                        () ->
+                                staticPartitionOverwriteCommit(tablePath, fileIO, 1)
+                                        .commit(
+                                                Collections.singletonList(
+                                                        new TwoPhaseCommitMessage(committer))))
+                .hasRootCauseMessage("staging cleanup failed");
+
+        assertThat(fileIO.exists(oldPath)).isFalse();
+        assertThat(fileIO.exists(targetPath)).isTrue();
+        assertThat(fileIO.exists(stagingPath)).isFalse();
     }
 
     @Test
@@ -1210,6 +1319,60 @@ class FormatTableCommitTest {
     }
 
     @Test
+    void testOverwritePartialParallelPublishFailurePreservesReplacementAndCleansStaging()
+            throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(new Path(tempDir.toUri()), "partial-parallel-publish");
+        Path partitionPath = new Path(tablePath, "part=p");
+        Path oldPath = new Path(partitionPath, "data-old.csv");
+        Path successfulTarget = new Path(partitionPath, "data-success.csv");
+        Path failedTarget = new Path(partitionPath, "data-failed.csv");
+        Path successfulStaging = new Path(new Path(tempDir.toUri()), "partial-staging/success.tmp");
+        Path failedStaging = new Path(new Path(tempDir.toUri()), "partial-staging/failed.tmp");
+        fileIO.writeFile(oldPath, "old", false);
+        fileIO.writeFile(successfulStaging, "staged", false);
+        fileIO.writeFile(failedStaging, "staged", false);
+
+        CountDownLatch bothPublishesStarted = new CountDownLatch(2);
+        CountDownLatch replacementPublished = new CountDownLatch(1);
+        StagedFileCommitter successfulCommitter =
+                new StagedFileCommitter(successfulTarget, successfulStaging) {
+                    @Override
+                    public void commit(FileIO committingFileIO) throws IOException {
+                        bothPublishesStarted.countDown();
+                        awaitLatch(bothPublishesStarted, "both overwrite publications to start");
+                        publish(committingFileIO);
+                        replacementPublished.countDown();
+                    }
+                };
+        StagedFileCommitter failingCommitter =
+                new StagedFileCommitter(failedTarget, failedStaging) {
+                    @Override
+                    public void commit(FileIO committingFileIO) throws IOException {
+                        bothPublishesStarted.countDown();
+                        awaitLatch(bothPublishesStarted, "both overwrite publications to start");
+                        awaitLatch(replacementPublished, "the parallel replacement publication");
+                        publish(committingFileIO);
+                        throw new IOException("parallel publish failed");
+                    }
+                };
+        List<CommitMessage> messages =
+                Arrays.asList(
+                        new TwoPhaseCommitMessage(successfulCommitter),
+                        new TwoPhaseCommitMessage(failingCommitter));
+
+        assertThatThrownBy(
+                        () -> staticPartitionOverwriteCommit(tablePath, fileIO, 2).commit(messages))
+                .hasRootCauseMessage("parallel publish failed");
+
+        assertThat(fileIO.exists(oldPath)).isFalse();
+        assertThat(fileIO.exists(successfulTarget)).isTrue();
+        assertThat(fileIO.exists(failedTarget)).isTrue();
+        assertThat(fileIO.exists(successfulStaging)).isFalse();
+        assertThat(fileIO.exists(failedStaging)).isFalse();
+    }
+
+    @Test
     void testPublishConcurrencyIsGatedToCatalogManagedPartitionedTables() throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         Path tablePath = new Path(tempDir.toUri());
@@ -1872,6 +2035,25 @@ class FormatTableCommitTest {
                 /* cleanupThreadNum */ 1);
     }
 
+    private FormatTableCommit staticPartitionOverwriteCommit(
+            Path tableLocation, FileIO fileIO, int publishThreadNum) {
+        return new FormatTableCommit(
+                tableLocation.toString(),
+                Collections.singletonList("part"),
+                fileIO,
+                false,
+                PARTITION_DEFAULT_NAME.defaultValue(),
+                true,
+                Identifier.create("overwrite_db", "overwrite_table"),
+                Collections.singletonMap("part", "p"),
+                null,
+                null,
+                null,
+                /* dynamicPartitionOverwrite */ true,
+                /* cleanupThreadNum */ 1,
+                publishThreadNum);
+    }
+
     private void assertOverwriteCleanupSpansPartitions(boolean dynamicPartitionOverwrite)
             throws Exception {
         ParallelDeleteFileIO fileIO = new ParallelDeleteFileIO(4);
@@ -2041,6 +2223,17 @@ class FormatTableCommitTest {
         }
     }
 
+    private static void awaitLatch(CountDownLatch latch, String description) throws IOException {
+        try {
+            if (!latch.await(10, TimeUnit.SECONDS)) {
+                throw new IOException("Timed out waiting for " + description);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while waiting for " + description, e);
+        }
+    }
+
     private static List<Throwable> failureTree(Throwable throwable) {
         List<Throwable> failures = new ArrayList<>();
         collectFailures(throwable, failures);
@@ -2056,6 +2249,41 @@ class FormatTableCommitTest {
             collectFailures(suppressed, failures);
         }
         collectFailures(throwable.getCause(), failures);
+    }
+
+    private abstract static class StagedFileCommitter implements TwoPhaseOutputStream.Committer {
+
+        private static final long serialVersionUID = 1L;
+
+        private final Path targetPath;
+        private final Path stagingPath;
+
+        private StagedFileCommitter(Path targetPath, Path stagingPath) {
+            this.targetPath = targetPath;
+            this.stagingPath = stagingPath;
+        }
+
+        protected void publish(FileIO fileIO) throws IOException {
+            fileIO.writeFile(targetPath, "replacement", false);
+        }
+
+        @Override
+        public void discard(FileIO fileIO) {
+            fileIO.deleteQuietly(targetPath);
+            fileIO.deleteQuietly(stagingPath);
+        }
+
+        @Override
+        public Path targetPath() {
+            return targetPath;
+        }
+
+        @Override
+        public void clean(FileIO fileIO) throws IOException {
+            if (!fileIO.delete(stagingPath, false) && fileIO.exists(stagingPath)) {
+                throw new IOException("Failed to clean staging file " + stagingPath);
+            }
+        }
     }
 
     private static class PostRegistrationFailingHiveCatalog extends FileSystemCatalog {

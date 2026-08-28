@@ -229,6 +229,7 @@ public class FormatTableCommit implements BatchTableCommit {
 
             Set<Map<String, String>> partitionSpecs = new HashSet<>();
             Set<Path> clearedPartitionPaths = new HashSet<>();
+            Path staticPartitionPath = null;
 
             if (staticPartitions != null && !staticPartitions.isEmpty()) {
                 Path partitionPath =
@@ -237,6 +238,7 @@ public class FormatTableCommit implements BatchTableCommit {
                                 staticPartitions,
                                 formatTablePartitionOnlyValueInPath,
                                 partitionKeys);
+                staticPartitionPath = partitionPath;
                 if (staticPartitions.size() == partitionKeys.size()) {
                     partitionSpecs.add(staticPartitions);
                 }
@@ -248,9 +250,6 @@ public class FormatTableCommit implements BatchTableCommit {
                                     Collections.singletonList(partitionPath),
                                     partitionKeys.size() - staticPartitions.size(),
                                     cleanupThreadNum));
-                }
-                if (!fileIO.exists(partitionPath)) {
-                    fileIO.mkdirs(partitionPath);
                 }
             } else if (overwrite) {
                 if (replacesOnlyWrittenPartitions()) {
@@ -270,6 +269,14 @@ public class FormatTableCommit implements BatchTableCommit {
                     clearedPartitionPaths.addAll(
                             deletePreviousDataFiles(tableDataDirectories(), 0, cleanupThreadNum));
                 }
+            }
+            if (overwrite) {
+                // Old data is now permanently gone. Preserve any replacement that may become
+                // visible, while abort still cleans its staging resources.
+                markPublishedTargetsToPreserveOnAbort(messages);
+            }
+            if (staticPartitionPath != null && !fileIO.exists(staticPartitionPath)) {
+                fileIO.mkdirs(staticPartitionPath);
             }
 
             boolean registersPartitions =
@@ -307,7 +314,6 @@ public class FormatTableCommit implements BatchTableCommit {
             }
             if (reportsStatistics && overwrite) {
                 reportPartitions(
-                        messages,
                         partitionSpecs,
                         statisticsByPartition,
                         clearedPartitionPaths,
@@ -319,7 +325,6 @@ public class FormatTableCommit implements BatchTableCommit {
                 // attempt and leave any completed batches as harmless empty partition entries.
                 partitionManager.createPartitions(new ArrayList<>(partitionSpecs), true);
             }
-            boolean hiveMutationStarted = false;
             for (Map<String, String> partitionSpec : partitionSpecs) {
                 if (hiveCatalog != null) {
                     try {
@@ -328,10 +333,6 @@ public class FormatTableCommit implements BatchTableCommit {
                         }
                         Method hiveCreatePartitionsInHmsMethod =
                                 getHiveCreatePartitionsInHmsMethod();
-                        if (overwrite && !hiveMutationStarted) {
-                            markPublishedTargetsToPreserveOnAbort(messages);
-                            hiveMutationStarted = true;
-                        }
                         hiveCreatePartitionsInHmsMethod.invoke(
                                 hiveCatalog,
                                 tableIdentifier,
@@ -350,7 +351,6 @@ public class FormatTableCommit implements BatchTableCommit {
                 if (reportsStatistics && !statisticsByPartition.isEmpty()) {
                     try {
                         reportPartitions(
-                                messages,
                                 partitionSpecs,
                                 statisticsByPartition,
                                 clearedPartitionPaths,
@@ -439,7 +439,6 @@ public class FormatTableCommit implements BatchTableCommit {
      * reports every partition it emptied.
      */
     private void reportPartitions(
-            List<TwoPhaseCommitMessage> messages,
             Set<Map<String, String>> writtenPartitionSpecs,
             Map<Map<String, String>, PartitionStatistics> statisticsByPartition,
             Set<Path> clearedPartitionPaths,
@@ -458,11 +457,6 @@ public class FormatTableCommit implements BatchTableCommit {
         specs.addAll(statisticsByPartition.keySet());
         if (specs.isEmpty()) {
             return;
-        }
-        // A commit that replaced what the partitions held reports a total; an appending one saw
-        // only its own files, so its numbers are an increment.
-        if (replaceStatistics) {
-            markPublishedTargetsToPreserveOnAbort(messages);
         }
         partitionManager.createPartitions(
                 new ArrayList<>(specs),
@@ -623,15 +617,21 @@ public class FormatTableCommit implements BatchTableCommit {
             }
 
             TwoPhaseCommitMessage twoPhaseCommitMessage = (TwoPhaseCommitMessage) commitMessage;
-            if (twoPhaseCommitMessage.shouldPreservePublishedTargetOnAbort()) {
-                continue;
-            }
-
             TwoPhaseOutputStream.Committer committer = twoPhaseCommitMessage.getCommitter();
+            boolean preservePublishedTarget =
+                    twoPhaseCommitMessage.shouldPreservePublishedTargetOnAbort();
             try {
-                committer.discard(fileIO);
+                if (preservePublishedTarget) {
+                    committer.discardStaging(fileIO);
+                } else {
+                    committer.discard(fileIO);
+                }
             } catch (Throwable discardFailure) {
                 failure = firstOrSuppressed(discardFailure, failure);
+            }
+
+            if (preservePublishedTarget) {
+                continue;
             }
 
             // FormatTableSingleFileWriter opens every target with overwrite=false. The target is
@@ -966,7 +966,6 @@ public class FormatTableCommit implements BatchTableCommit {
             // too, so the catalog stops describing files that are gone.
             try {
                 reportPartitions(
-                        Collections.emptyList(),
                         Collections.emptySet(),
                         emptied,
                         clearedPartitionPaths,
