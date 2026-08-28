@@ -29,7 +29,9 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestFile;
+import org.apache.paimon.manifest.ManifestAvroWriter;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ManifestEntrySerializer;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
@@ -665,32 +667,50 @@ public class DataEvolutionRowIdReassigner {
     private RewrittenDataManifest rewriteDataManifest(
             Assignment assignment, ManifestFile manifestFile, ManifestFileMeta manifestMeta) {
         beforeManifestRewrite.accept(manifestMeta);
-        List<ManifestEntry> entries =
-                manifestFile.read(manifestMeta.fileName(), manifestMeta.fileSize());
+        ManifestEntrySerializer serializer = new ManifestEntrySerializer();
+        ManifestAvroWriter writer = manifestFile.createAvroWriter();
         long reassignedAddFileCount = 0L;
         boolean hasRewrittenEntry = false;
-        for (int i = 0; i < entries.size(); i++) {
-            ManifestEntry entry = entries.get(i);
-            RowRangeMappingIndex mapping = assignment.rowIdMappings.get(entry.partition());
-            if (mapping == null) {
-                continue;
-            }
-            Optional<Range> reassignedRange = mapping.map(entry.file().nonNullRowIdRange());
-            if (reassignedRange.isPresent()) {
-                validatePlanningEntry(entry);
-                entries.set(i, entry.assignFirstRowId(reassignedRange.get().from));
-                hasRewrittenEntry = true;
-                if (entry.kind() == FileKind.ADD) {
-                    reassignedAddFileCount++;
+        List<ManifestFileMeta> replacements;
+        try (CloseableIterator<ProjectedManifestEntry> entries =
+                manifestFile.scan(
+                        manifestMeta.fileName(), ProjectedManifestEntry.fullProjection())) {
+            while (entries.hasNext()) {
+                ProjectedManifestEntry entry = entries.next();
+                ManifestEntry output = entry;
+                RowRangeMappingIndex mapping = assignment.rowIdMappings.get(entry.partition());
+                if (mapping != null) {
+                    Optional<Range> reassignedRange = mapping.map(entry.file().nonNullRowIdRange());
+                    if (reassignedRange.isPresent()) {
+                        validatePlanningEntry(entry);
+                        output =
+                                serializer
+                                        .fromRow(entry.fullRow())
+                                        .assignFirstRowId(reassignedRange.get().from);
+                        hasRewrittenEntry = true;
+                        if (entry.kind() == FileKind.ADD) {
+                            reassignedAddFileCount++;
+                        }
+                    }
                 }
+                writer.write(output);
             }
+            checkState(
+                    hasRewrittenEntry,
+                    "Cannot find entries to reassign in planned manifest %s.",
+                    manifestMeta.fileName());
+            writer.close();
+            replacements = writer.result();
+        } catch (RuntimeException | Error failure) {
+            writer.abort(failure);
+            throw failure;
+        } catch (Exception failure) {
+            writer.abort(failure);
+            throw new RuntimeException(
+                    "Failed to stream manifest file " + manifestMeta.fileName(), failure);
         }
-        checkState(
-                hasRewrittenEntry,
-                "Cannot find entries to reassign in planned manifest %s.",
-                manifestMeta.fileName());
         return new RewrittenDataManifest(
-                manifestMeta.fileName(), manifestFile.write(entries), reassignedAddFileCount);
+                manifestMeta.fileName(), replacements, reassignedAddFileCount);
     }
 
     private void validatePlanningEntry(ManifestEntry entry) {
