@@ -35,7 +35,9 @@ FEATURE_STATS_TABLE = "feature_stats_agilex"
 DEFAULT_STATISTICS_VERSION = "robomind-agilex-joint-position@1"
 
 TABLE_OPTIONS = {
+    "deletion-vectors.enabled": "true",
     "blob-as-descriptor": "false",
+    "vector.file.format": "vortex",
 }
 
 NUMERIC_FIELDS = (
