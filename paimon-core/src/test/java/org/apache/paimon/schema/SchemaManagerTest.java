@@ -177,6 +177,102 @@ public class SchemaManagerTest {
     }
 
     @Test
+    public void testIcebergMetadataRefusesNanosecondTimestamps() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "-1");
+        options.put(IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "table-location");
+        Schema nanos =
+                new Schema(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(1, "ts", DataTypes.TIMESTAMP(9))),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        "");
+
+        assertThatThrownBy(() -> retryArtificialException(() -> manager.createTable(nanos)))
+                .hasStackTraceContaining("Timestamp columns with a precision above 6");
+    }
+
+    @Test
+    public void testIcebergMetadataAllowsMicrosecondTimestamps() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "-1");
+        options.put(IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "table-location");
+        Schema micros =
+                new Schema(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(1, "ts", DataTypes.TIMESTAMP(6))),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        "");
+
+        assertThatCode(() -> retryArtificialException(() -> manager.createTable(micros)))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testEnablingIcebergMetadataRefusesNanosecondTimestamps() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "-1");
+        Schema nanos =
+                new Schema(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(1, "ts", DataTypes.TIMESTAMP(9))),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        "");
+        retryArtificialException(() -> manager.createTable(nanos));
+
+        assertThatThrownBy(
+                        () ->
+                                retryArtificialException(
+                                        () ->
+                                                manager.commitChanges(
+                                                        SchemaChange.setOption(
+                                                                IcebergOptions
+                                                                        .METADATA_ICEBERG_STORAGE
+                                                                        .key(),
+                                                                "table-location"))))
+                .hasStackTraceContaining("Timestamp columns with a precision above 6");
+    }
+
+    @Test
+    public void testEnableIcebergMetadataValidatesHistoricalNanosecondSchemas() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "-1");
+        Schema nanos =
+                new Schema(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(1, "ts", DataTypes.TIMESTAMP(9))),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        "");
+
+        retryArtificialException(() -> manager.createTable(nanos));
+        retryArtificialException(() -> manager.commitChanges(SchemaChange.dropColumn("ts")));
+
+        assertThatThrownBy(
+                        () ->
+                                retryArtificialException(
+                                        () ->
+                                                manager.commitChanges(
+                                                        SchemaChange.setOption(
+                                                                IcebergOptions
+                                                                        .METADATA_ICEBERG_STORAGE
+                                                                        .key(),
+                                                                "table-location"))))
+                .hasStackTraceContaining("Timestamp columns with a precision above 6");
+    }
+
+    @Test
     public void testEnableIcebergMetadataValidatesHistoricalGeospatialSchemas() throws Exception {
         Map<String, String> geospatialOptions = new HashMap<>();
         geospatialOptions.put(CoreOptions.BUCKET.key(), "-1");

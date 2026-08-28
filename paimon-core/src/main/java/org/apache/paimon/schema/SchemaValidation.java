@@ -123,6 +123,9 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 /** Validation utilities for {@link TableSchema}. */
 public class SchemaValidation {
 
+    /** Above this precision Iceberg would need timestamp_ns, which Paimon does not write. */
+    private static final int MAX_ICEBERG_TIMESTAMP_PRECISION = 6;
+
     public static final List<Class<? extends DataType>> PRIMARY_KEY_UNSUPPORTED_LOGICAL_TYPES =
             Arrays.asList(
                     MapType.class,
@@ -234,6 +237,7 @@ public class SchemaValidation {
                 FileFormat.fromIdentifier(options.formatType(), new Options(schema.options()));
         RowType tableRowType = new RowType(schema.fields());
         validateGeospatialTypes(schema, options, tableRowType);
+        validateIcebergNanosecondTimestamps(tableRowType, options);
         validateBlobFields(tableRowType, options);
         Set<String> blobDescriptorFields = validateBlobDescriptorFields(tableRowType, options);
         Set<String> blobViewFields =
@@ -532,6 +536,36 @@ public class SchemaValidation {
     }
 
     /** Validate geospatial types in a schema that will be published as Iceberg metadata. */
+    /**
+     * Refuses nanosecond-precision timestamps while Iceberg metadata is enabled: Paimon writes them
+     * as Parquet INT96, which Iceberg reads as a microsecond zoned timestamp rather than the {@code
+     * timestamp_ns} the emitted metadata declares, so the two disagree about the data.
+     */
+    public static void validateIcebergNanosecondTimestamps(DataType dataType, CoreOptions options) {
+        if (options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                == IcebergOptions.StorageType.DISABLED) {
+            return;
+        }
+        checkArgument(
+                !containsType(dataType, SchemaValidation::isNanosecondTimestamp),
+                "Timestamp columns with a precision above %s are not supported when Iceberg metadata "
+                        + "is enabled: Paimon writes them as Parquet INT96, which Iceberg cannot read "
+                        + "back as the 'timestamp_ns' the metadata declares. Use a precision of %s or "
+                        + "less, or disable '%s'.",
+                MAX_ICEBERG_TIMESTAMP_PRECISION,
+                MAX_ICEBERG_TIMESTAMP_PRECISION,
+                IcebergOptions.METADATA_ICEBERG_STORAGE.key());
+    }
+
+    private static boolean isNanosecondTimestamp(DataType dataType) {
+        if (dataType instanceof TimestampType) {
+            return ((TimestampType) dataType).getPrecision() > MAX_ICEBERG_TIMESTAMP_PRECISION;
+        }
+        return dataType instanceof LocalZonedTimestampType
+                && ((LocalZonedTimestampType) dataType).getPrecision()
+                        > MAX_ICEBERG_TIMESTAMP_PRECISION;
+    }
+
     public static void validateIcebergGeospatialTypes(DataType dataType, CoreOptions options) {
         boolean hasGeospatial =
                 containsType(

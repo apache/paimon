@@ -1217,13 +1217,13 @@ public class SchemaManager implements Serializable {
     @VisibleForTesting
     public boolean commit(TableSchema newSchema) throws Exception {
         SchemaValidation.validateTableSchema(newSchema);
-        validateHistoricalIcebergGeospatialTypes(newSchema);
+        validateHistoricalIcebergTypes(newSchema);
         SchemaValidation.validateFallbackBranch(this, newSchema);
         Path schemaPath = toSchemaPath(newSchema.id());
         return fileIO.tryToWriteAtomic(schemaPath, newSchema.toString());
     }
 
-    private void validateHistoricalIcebergGeospatialTypes(TableSchema newSchema) {
+    private void validateHistoricalIcebergTypes(TableSchema newSchema) {
         CoreOptions options = new CoreOptions(newSchema.options());
         IcebergOptions.StorageType storage =
                 options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE);
@@ -1231,8 +1231,10 @@ public class SchemaManager implements Serializable {
             return;
         }
 
+        // the mirror emits historical schemas too, so enabling it has to judge all of them
         for (TableSchema schema : listAll()) {
             SchemaValidation.validateIcebergGeospatialTypes(schema.logicalRowType(), options);
+            SchemaValidation.validateIcebergNanosecondTimestamps(schema.logicalRowType(), options);
         }
     }
 
