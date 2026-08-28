@@ -38,18 +38,21 @@ import java.io.DataOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.sst.SstFileUtils.crc32c;
 
 /**
- * Portable V1 layout for partitioned, demand-paged FM indexes.
+ * Portable V1 container layout for partitioned, demand-paged FM indexes.
  *
- * <p>The payload is canonical and contiguous: dense-alphabet blocked quaternary wavelet levels,
- * sampled-SA mask and values, null mask, row-boundary mask, exact-verification value pages,
- * directory, then a fixed footer. Every independently readable block records its offset, stored and
- * uncompressed lengths, compression ID and CRC32C. The reader validates all physical ranges before
- * allocating decoded buffers and verifies the stored checksum before decompression.
+ * <p>Each physical index file contains one or more canonical, contiguous partitions followed by a
+ * checksummed container directory and fixed footer. A partition contains dense-alphabet blocked
+ * quaternary wavelet levels, sampled-SA mask and values, null mask, row-boundary mask,
+ * exact-verification value pages, its directory, and a fixed footer. Every independently readable
+ * block records its offset, stored and uncompressed lengths, compression ID and CRC32C. The reader
+ * validates all physical ranges before allocating decoded buffers and verifies the stored checksum
+ * before decompression.
  */
 final class FMIndexFile {
 
@@ -58,12 +61,14 @@ final class FMIndexFile {
     static final int FIRST_BYTE_SYMBOL = 2;
     static final int MAX_ALPHABET_SIZE = 258;
 
-    private static final int MAGIC = 0x464D4958;
+    private static final int PARTITION_MAGIC = 0x464D4950;
+    private static final int CONTAINER_MAGIC = 0x464D4958;
     private static final int VERSION = 1;
     private static final int INDEX_META_MAGIC = 0x464D4D45;
     private static final int INDEX_META_VERSION = 1;
-    private static final int INDEX_META_LENGTH = 24;
-    private static final int INDEX_META_CHECKSUM_OFFSET = 20;
+    private static final int INDEX_META_HEADER_LENGTH = 28;
+    private static final int INDEX_META_PARTITION_LENGTH = 28;
+    private static final int INDEX_META_CHECKSUM_LENGTH = Integer.BYTES;
     private static final int FEATURE_VALUE_SAMPLED_SA = 1;
     private static final int FEATURE_DENSE_QUAD_WAVELET = 1 << 1;
     private static final int FEATURE_SEPARATOR_ROW_IDS = 1 << 2;
@@ -80,7 +85,8 @@ final class FMIndexFile {
     static final int QUAD_BLOCK_VALUES = BLOCK_WORDS * QUAD_VALUES_PER_WORD;
     static final int VALUE_BLOCK_INTS = 8192;
     static final int BLOCK_INFO_LENGTH = 24;
-    static final int FOOTER_LENGTH = 64;
+    static final int PARTITION_FOOTER_LENGTH = 64;
+    static final int CONTAINER_FOOTER_LENGTH = 64;
     static final int FOOTER_CHECKSUM_OFFSET = 60;
     static final int MAX_DIRECTORY_UNCOMPRESSED_LENGTH = 16 * 1024 * 1024;
     static final int MAX_DATA_BLOCK_UNCOMPRESSED_LENGTH = 64 * 1024;
@@ -88,39 +94,99 @@ final class FMIndexFile {
 
     private FMIndexFile() {}
 
-    static byte[] writeIndexMeta(long firstRowId, int rowCount) {
+    static byte[] writeIndexMeta(long firstRowId, long rowCount, List<PartitionMeta> partitions) {
         Preconditions.checkArgument(firstRowId >= 0 && rowCount > 0, "Invalid FM index row range.");
         Preconditions.checkArgument(
                 firstRowId <= Long.MAX_VALUE - rowCount,
                 "FM index row range overflows the supported row ID space.");
-        byte[] bytes = new byte[INDEX_META_LENGTH];
+        Preconditions.checkArgument(!partitions.isEmpty(), "FM index must contain partitions.");
+        long encodedLength =
+                INDEX_META_HEADER_LENGTH
+                        + (long) partitions.size() * INDEX_META_PARTITION_LENGTH
+                        + INDEX_META_CHECKSUM_LENGTH;
+        Preconditions.checkArgument(
+                encodedLength <= MAX_DIRECTORY_UNCOMPRESSED_LENGTH,
+                "FM index partition directory exceeds the supported size.");
+        byte[] bytes = new byte[(int) encodedLength];
         writeInt(bytes, 0, INDEX_META_MAGIC);
         writeInt(bytes, 4, INDEX_META_VERSION);
         writeLong(bytes, 8, firstRowId);
-        writeInt(bytes, 16, rowCount);
-        writeInt(bytes, INDEX_META_CHECKSUM_OFFSET, indexMetaChecksum(bytes));
+        writeLong(bytes, 16, rowCount);
+        writeInt(bytes, 24, partitions.size());
+        int offset = INDEX_META_HEADER_LENGTH;
+        for (PartitionMeta partition : partitions) {
+            writeLong(bytes, offset, partition.startOffset);
+            writeLong(bytes, offset + 8, partition.endOffset);
+            writeLong(bytes, offset + 16, partition.firstRowId);
+            writeInt(bytes, offset + 24, partition.rowCount);
+            offset += INDEX_META_PARTITION_LENGTH;
+        }
+        writeInt(bytes, offset, indexMetaChecksum(bytes));
+        // Validate writer-produced metadata through the same canonical parser used by readers.
+        readIndexMeta(bytes);
         return bytes;
     }
 
     static IndexMeta readIndexMeta(byte[] bytes) {
         Preconditions.checkState(
-                bytes.length == INDEX_META_LENGTH, "Invalid FM index manifest metadata length.");
+                bytes.length >= INDEX_META_HEADER_LENGTH + INDEX_META_CHECKSUM_LENGTH
+                        && bytes.length <= MAX_DIRECTORY_UNCOMPRESSED_LENGTH,
+                "Invalid FM index manifest metadata length.");
         Preconditions.checkState(
                 readInt(bytes, 0) == INDEX_META_MAGIC, "Invalid FM index manifest metadata magic.");
         Preconditions.checkState(
                 readInt(bytes, 4) == INDEX_META_VERSION,
                 "Unsupported FM index manifest metadata version: %s.",
                 readInt(bytes, 4));
+        int partitionCount = readInt(bytes, 24);
+        Preconditions.checkState(partitionCount > 0, "FM index must contain partitions.");
+        long expectedLength =
+                INDEX_META_HEADER_LENGTH
+                        + (long) partitionCount * INDEX_META_PARTITION_LENGTH
+                        + INDEX_META_CHECKSUM_LENGTH;
         Preconditions.checkState(
-                readInt(bytes, INDEX_META_CHECKSUM_OFFSET) == indexMetaChecksum(bytes),
+                expectedLength == bytes.length, "Invalid FM index manifest metadata length.");
+        Preconditions.checkState(
+                readInt(bytes, bytes.length - INDEX_META_CHECKSUM_LENGTH)
+                        == indexMetaChecksum(bytes),
                 "FM index manifest metadata checksum mismatch.");
         long firstRowId = readLong(bytes, 8);
-        int rowCount = readInt(bytes, 16);
+        long rowCount = readLong(bytes, 16);
         Preconditions.checkState(firstRowId >= 0 && rowCount > 0, "Invalid FM index row range.");
         Preconditions.checkState(
                 firstRowId <= Long.MAX_VALUE - rowCount,
                 "FM index row range overflows the supported row ID space.");
-        return new IndexMeta(firstRowId, rowCount);
+        List<PartitionMeta> partitions = new ArrayList<>(partitionCount);
+        long expectedOffset = 0;
+        long expectedRowId = firstRowId;
+        int offset = INDEX_META_HEADER_LENGTH;
+        for (int i = 0; i < partitionCount; i++) {
+            long startOffset = readLong(bytes, offset);
+            long endOffset = readLong(bytes, offset + 8);
+            long partitionFirstRowId = readLong(bytes, offset + 16);
+            int partitionRowCount = readInt(bytes, offset + 24);
+            Preconditions.checkState(
+                    startOffset == expectedOffset
+                            && endOffset > startOffset
+                            && endOffset - startOffset >= PARTITION_FOOTER_LENGTH,
+                    "FM index partitions are not canonical and contiguous.");
+            Preconditions.checkState(
+                    partitionFirstRowId == expectedRowId && partitionRowCount > 0,
+                    "FM index partition row ranges are not canonical and contiguous.");
+            Preconditions.checkState(
+                    expectedRowId <= Long.MAX_VALUE - partitionRowCount,
+                    "FM index partition row range overflows the supported row ID space.");
+            partitions.add(
+                    new PartitionMeta(
+                            startOffset, endOffset, partitionFirstRowId, partitionRowCount));
+            expectedOffset = endOffset;
+            expectedRowId += partitionRowCount;
+            offset += INDEX_META_PARTITION_LENGTH;
+        }
+        Preconditions.checkState(
+                expectedRowId == firstRowId + rowCount,
+                "FM index partition row counts do not match the file row count.");
+        return new IndexMeta(firstRowId, rowCount, partitions);
     }
 
     static BlockInfo writeBlock(
@@ -299,7 +365,7 @@ final class FMIndexFile {
             int textLength,
             int sampleRate)
             throws IOException {
-        byte[] bytes = new byte[FOOTER_LENGTH];
+        byte[] bytes = new byte[PARTITION_FOOTER_LENGTH];
         writeBlockInfo(bytes, 0, directory);
         writeLong(bytes, 24, firstRowId);
         writeInt(bytes, 32, rowCount);
@@ -307,34 +373,136 @@ final class FMIndexFile {
         writeInt(bytes, 40, sampleRate);
         writeInt(bytes, 44, FEATURE_FLAGS);
         writeInt(bytes, 52, VERSION);
-        writeInt(bytes, 56, MAGIC);
+        writeInt(bytes, 56, PARTITION_MAGIC);
         writeInt(bytes, FOOTER_CHECKSUM_OFFSET, footerChecksum(bytes));
         out.write(bytes);
         out.flush();
     }
 
-    static Footer readFooter(SeekableInputStream input, long fileSize) throws IOException {
+    static BlockInfo writeContainerDirectory(
+            PositionOutputStream stream,
+            DataOutputStream out,
+            byte[] indexMeta,
+            @Nullable BlockCompressionFactory compressionFactory)
+            throws IOException {
+        return writeBlock(stream, out, indexMeta, compressionFactory);
+    }
+
+    static void writeContainerFooter(
+            DataOutputStream out,
+            BlockInfo directory,
+            long firstRowId,
+            long rowCount,
+            int partitionCount)
+            throws IOException {
+        byte[] bytes = new byte[CONTAINER_FOOTER_LENGTH];
+        writeBlockInfo(bytes, 0, directory);
+        writeLong(bytes, 24, firstRowId);
+        writeLong(bytes, 32, rowCount);
+        writeInt(bytes, 40, partitionCount);
+        writeInt(bytes, 44, FEATURE_FLAGS);
+        writeInt(bytes, 52, VERSION);
+        writeInt(bytes, 56, CONTAINER_MAGIC);
+        writeInt(bytes, FOOTER_CHECKSUM_OFFSET, footerChecksum(bytes));
+        out.write(bytes);
+        out.flush();
+    }
+
+    static ContainerFooter readContainerFooter(SeekableInputStream input, long fileSize)
+            throws IOException {
         Preconditions.checkState(
-                fileSize >= FOOTER_LENGTH, "Invalid FM index file size: %s.", fileSize);
-        byte[] bytes = readAt(input, fileSize - FOOTER_LENGTH, FOOTER_LENGTH);
+                fileSize >= CONTAINER_FOOTER_LENGTH,
+                "Invalid FM index container size: %s.",
+                fileSize);
+        byte[] bytes = readAt(input, fileSize - CONTAINER_FOOTER_LENGTH, CONTAINER_FOOTER_LENGTH);
         Preconditions.checkState(
-                readInt(bytes, 56) == MAGIC, "File is not an FM index (bad footer magic).");
+                readInt(bytes, 56) == CONTAINER_MAGIC,
+                "File is not an FM index container (bad footer magic).");
         Preconditions.checkState(
                 readInt(bytes, 52) == VERSION,
-                "Unsupported FM index version: %s.",
+                "Unsupported FM index container version: %s.",
                 readInt(bytes, 52));
         int expectedChecksum = readInt(bytes, FOOTER_CHECKSUM_OFFSET);
         int actualChecksum = footerChecksum(bytes);
         Preconditions.checkState(
                 expectedChecksum == actualChecksum,
-                "FM index footer checksum mismatch: expected=%s, actual=%s.",
+                "FM index container footer checksum mismatch: expected=%s, actual=%s.",
                 expectedChecksum,
                 actualChecksum);
         Preconditions.checkState(
                 readInt(bytes, 44) == FEATURE_FLAGS,
-                "Unsupported FM index feature flags: %s.",
+                "Unsupported FM index container feature flags: %s.",
                 readInt(bytes, 44));
-        Preconditions.checkState(readInt(bytes, 48) == 0, "Invalid FM index reserved field.");
+        Preconditions.checkState(
+                readInt(bytes, 48) == 0, "Invalid FM index container reserved field.");
+
+        DataInputStream data = new DataInputStream(new ByteArrayInputStream(bytes));
+        BlockInfo directory = readBlockInfo(data);
+        long firstRowId = data.readLong();
+        long rowCount = data.readLong();
+        int partitionCount = data.readInt();
+        Preconditions.checkState(firstRowId >= 0 && rowCount > 0, "Invalid FM index row range.");
+        Preconditions.checkState(
+                firstRowId <= Long.MAX_VALUE - rowCount,
+                "FM index row range overflows the supported row ID space.");
+        Preconditions.checkState(
+                partitionCount > 0 && partitionCount <= rowCount,
+                "Invalid FM index partition count.");
+        validateBlock(
+                directory,
+                fileSize - CONTAINER_FOOTER_LENGTH,
+                MAX_DIRECTORY_UNCOMPRESSED_LENGTH,
+                false);
+        Preconditions.checkState(
+                directory.offset + directory.storedLength == fileSize - CONTAINER_FOOTER_LENGTH,
+                "FM index container directory is not immediately before the footer.");
+        return new ContainerFooter(directory, firstRowId, rowCount, partitionCount);
+    }
+
+    static IndexMeta readContainerDirectory(
+            SeekableInputStream input, ContainerFooter footer, long fileSize) throws IOException {
+        IndexMeta metadata = readIndexMeta(readBlock(input, footer.directory, fileSize));
+        Preconditions.checkState(
+                metadata.firstRowId == footer.firstRowId
+                        && metadata.rowCount == footer.rowCount
+                        && metadata.partitions.size() == footer.partitionCount,
+                "FM index container footer and directory metadata do not match.");
+        Preconditions.checkState(
+                metadata.partitions.get(metadata.partitions.size() - 1).endOffset
+                        == footer.directory.offset,
+                "FM index partitions do not exactly cover the container payload.");
+        return metadata;
+    }
+
+    static Footer readFooter(SeekableInputStream input, PartitionMeta partition, long fileSize)
+            throws IOException {
+        Preconditions.checkState(
+                partition.startOffset >= 0
+                        && partition.endOffset <= fileSize
+                        && partition.endOffset - partition.startOffset >= PARTITION_FOOTER_LENGTH,
+                "Invalid FM index partition range.");
+        long footerOffset = partition.endOffset - PARTITION_FOOTER_LENGTH;
+        byte[] bytes = readAt(input, footerOffset, PARTITION_FOOTER_LENGTH);
+        Preconditions.checkState(
+                readInt(bytes, 56) == PARTITION_MAGIC,
+                "File is not an FM index partition (bad footer magic).");
+        Preconditions.checkState(
+                readInt(bytes, 52) == VERSION,
+                "Unsupported FM index partition version: %s.",
+                readInt(bytes, 52));
+        int expectedChecksum = readInt(bytes, FOOTER_CHECKSUM_OFFSET);
+        int actualChecksum = footerChecksum(bytes);
+        Preconditions.checkState(
+                expectedChecksum == actualChecksum,
+                "FM index partition footer checksum mismatch: expected=%s, actual=%s.",
+                expectedChecksum,
+                actualChecksum);
+        Preconditions.checkState(
+                readInt(bytes, 44) == FEATURE_FLAGS,
+                "Unsupported FM index partition feature flags: %s.",
+                readInt(bytes, 44));
+        Preconditions.checkState(
+                readInt(bytes, 48) == 0, "Invalid FM index partition reserved field.");
 
         DataInputStream data = new DataInputStream(new ByteArrayInputStream(bytes));
         BlockInfo directory = readBlockInfo(data);
@@ -349,17 +517,38 @@ final class FMIndexFile {
         Preconditions.checkState(
                 textLength >= rowCount + 1L, "Invalid FM index encoded text length.");
         validateSampleRate(sampleRate);
-        validateBlock(
-                directory, fileSize - FOOTER_LENGTH, MAX_DIRECTORY_UNCOMPRESSED_LENGTH, false);
+        validateBlock(directory, footerOffset, MAX_DIRECTORY_UNCOMPRESSED_LENGTH, false);
         Preconditions.checkState(
-                directory.offset + directory.storedLength == fileSize - FOOTER_LENGTH,
-                "FM index directory is not immediately before the footer.");
-        return new Footer(directory, firstRowId, rowCount, textLength, sampleRate);
+                directory.offset >= partition.startOffset
+                        && directory.offset + directory.storedLength == footerOffset,
+                "FM index partition directory is not immediately before its footer.");
+        Preconditions.checkState(
+                firstRowId == partition.firstRowId && rowCount == partition.rowCount,
+                "FM index partition footer and container directory metadata do not match.");
+        return new Footer(
+                directory,
+                firstRowId,
+                rowCount,
+                textLength,
+                sampleRate,
+                partition.startOffset,
+                partition.endOffset);
+    }
+
+    static Footer readFooter(SeekableInputStream input, long fileSize) throws IOException {
+        ContainerFooter containerFooter = readContainerFooter(input, fileSize);
+        IndexMeta metadata = readContainerDirectory(input, containerFooter, fileSize);
+        return readFooter(input, metadata.partitions.get(0), fileSize);
     }
 
     static Directory readDirectory(SeekableInputStream input, Footer footer, long fileSize)
             throws IOException {
-        byte[] bytes = readBlock(input, footer.directory, fileSize);
+        Preconditions.checkState(
+                footer.partitionStartOffset >= 0
+                        && footer.partitionEndOffset <= fileSize
+                        && footer.partitionStartOffset < footer.partitionEndOffset,
+                "Invalid FM index partition range.");
+        byte[] bytes = readBlock(input, footer.directory, footer.partitionEndOffset);
         DataInputStream data = new DataInputStream(new ByteArrayInputStream(bytes));
         int rowCount = data.readInt();
         int textLength = data.readInt();
@@ -420,7 +609,7 @@ final class FMIndexFile {
             }
         }
 
-        long[] expectedOffset = {0L};
+        long[] expectedOffset = {footer.partitionStartOffset};
         int[][] digitStarts = new int[levelCount][4];
         QuadVectorMeta[] wavelets = new QuadVectorMeta[levelCount];
         for (int i = 0; i < wavelets.length; i++) {
@@ -1027,7 +1216,10 @@ final class FMIndexFile {
 
     private static int indexMetaChecksum(byte[] metadata) {
         return crc32c(
-                new MemorySlice(MemorySegment.wrap(metadata), 0, INDEX_META_CHECKSUM_OFFSET),
+                new MemorySlice(
+                        MemorySegment.wrap(metadata),
+                        0,
+                        metadata.length - INDEX_META_CHECKSUM_LENGTH),
                 BlockCompressionType.NONE);
     }
 
@@ -1343,27 +1535,92 @@ final class FMIndexFile {
         final int rowCount;
         final int textLength;
         final int sampleRate;
+        final long partitionStartOffset;
+        final long partitionEndOffset;
 
-        Footer(BlockInfo directory, long firstRowId, int rowCount, int textLength, int sampleRate) {
+        Footer(
+                BlockInfo directory,
+                long firstRowId,
+                int rowCount,
+                int textLength,
+                int sampleRate,
+                long partitionStartOffset,
+                long partitionEndOffset) {
             this.directory = directory;
             this.firstRowId = firstRowId;
             this.rowCount = rowCount;
             this.textLength = textLength;
             this.sampleRate = sampleRate;
+            this.partitionStartOffset = partitionStartOffset;
+            this.partitionEndOffset = partitionEndOffset;
         }
     }
 
-    static final class IndexMeta {
+    static final class ContainerFooter {
+        final BlockInfo directory;
+        final long firstRowId;
+        final long rowCount;
+        final int partitionCount;
+
+        private ContainerFooter(
+                BlockInfo directory, long firstRowId, long rowCount, int partitionCount) {
+            this.directory = directory;
+            this.firstRowId = firstRowId;
+            this.rowCount = rowCount;
+            this.partitionCount = partitionCount;
+        }
+    }
+
+    static final class PartitionMeta {
+        final long startOffset;
+        final long endOffset;
         final long firstRowId;
         final int rowCount;
 
-        private IndexMeta(long firstRowId, int rowCount) {
+        PartitionMeta(long startOffset, long endOffset, long firstRowId, int rowCount) {
+            this.startOffset = startOffset;
+            this.endOffset = endOffset;
             this.firstRowId = firstRowId;
             this.rowCount = rowCount;
         }
 
         long lastRowId() {
             return firstRowId + rowCount - 1L;
+        }
+    }
+
+    static final class IndexMeta {
+        final long firstRowId;
+        final long rowCount;
+        final List<PartitionMeta> partitions;
+
+        private IndexMeta(long firstRowId, long rowCount, List<PartitionMeta> partitions) {
+            this.firstRowId = firstRowId;
+            this.rowCount = rowCount;
+            this.partitions = Collections.unmodifiableList(new ArrayList<>(partitions));
+        }
+
+        long lastRowId() {
+            return firstRowId + rowCount - 1L;
+        }
+
+        boolean sameLayout(IndexMeta that) {
+            if (firstRowId != that.firstRowId
+                    || rowCount != that.rowCount
+                    || partitions.size() != that.partitions.size()) {
+                return false;
+            }
+            for (int i = 0; i < partitions.size(); i++) {
+                PartitionMeta left = partitions.get(i);
+                PartitionMeta right = that.partitions.get(i);
+                if (left.startOffset != right.startOffset
+                        || left.endOffset != right.endOffset
+                        || left.firstRowId != right.firstRowId
+                        || left.rowCount != right.rowCount) {
+                    return false;
+                }
+            }
+            return true;
         }
     }
 

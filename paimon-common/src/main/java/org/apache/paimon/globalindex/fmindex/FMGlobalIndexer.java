@@ -117,36 +117,32 @@ public class FMGlobalIndexer implements GlobalIndexer {
         FMGlobalIndexReader.FileSetRowCountValidator validator =
                 new FMGlobalIndexReader.FileSetRowCountValidator(files.size(), totalRowCount);
         FMIndexFile.IndexMeta[] indexMetas = new FMIndexFile.IndexMeta[files.size()];
-        boolean allIndexMetasPresent = true;
         for (int i = 0; i < files.size(); i++) {
             byte[] metadata = files.get(i).metadata();
-            if (metadata == null || metadata.length == 0) {
-                allIndexMetasPresent = false;
-                break;
-            }
+            checkArgument(
+                    metadata != null && metadata.length > 0,
+                    "FM index container metadata is missing for %s.",
+                    files.get(i).filePath());
             indexMetas[i] = FMIndexFile.readIndexMeta(metadata);
+            validator.validate(
+                    i, indexMetas[i].rowCount, indexMetas[i].firstRowId, indexMetas[i].lastRowId());
         }
-        if (allIndexMetasPresent) {
-            for (int i = 0; i < indexMetas.length; i++) {
-                FMIndexFile.IndexMeta metadata = indexMetas[i];
-                validator.validate(i, metadata.rowCount, metadata.firstRowId, metadata.lastRowId());
-            }
-        } else {
-            java.util.Arrays.fill(indexMetas, null);
-        }
-        List<GlobalIndexReader> readers = new ArrayList<>(files.size());
+        List<GlobalIndexReader> readers = new ArrayList<>();
         for (int i = 0; i < files.size(); i++) {
-            readers.add(
-                    new FMGlobalIndexReader(
-                            fileReader,
-                            files.get(i),
-                            executor,
-                            readContext,
-                            validator,
-                            indexMetas[i],
-                            i,
-                            demandPageSize,
-                            locateCostRatio));
+            FMGlobalIndexReader.ContainerMetadataLoader container =
+                    new FMGlobalIndexReader.ContainerMetadataLoader(files.get(i), indexMetas[i]);
+            for (FMIndexFile.PartitionMeta partition : indexMetas[i].partitions) {
+                readers.add(
+                        new FMGlobalIndexReader(
+                                fileReader,
+                                files.get(i),
+                                executor,
+                                readContext,
+                                container,
+                                partition,
+                                demandPageSize,
+                                locateCostRatio));
+            }
         }
         return readers.size() == 1 ? readers.get(0) : new UnionGlobalIndexReader(readers);
     }

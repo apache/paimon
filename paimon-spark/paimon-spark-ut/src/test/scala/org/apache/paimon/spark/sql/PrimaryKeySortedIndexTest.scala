@@ -31,7 +31,7 @@ import scala.collection.JavaConverters._
 /** End-to-end Spark SQL tests for source-backed primary-key sorted indexes. */
 class PrimaryKeySortedIndexTest extends PaimonSparkTestBase {
 
-  test("primary-key FM index supports exact contains with multiple payloads") {
+  test("primary-key FM index supports exact contains with partitioned container") {
     withTable("t") {
       spark.sql("""
                   |CREATE TABLE t (id INT, content STRING)
@@ -62,7 +62,7 @@ class PrimaryKeySortedIndexTest extends PaimonSparkTestBase {
         .map(_.indexFile)
         .filter(meta => meta.globalIndexMeta != null && meta.globalIndexMeta.sourceMeta != null)
       assert(sourceIndexes.map(_.indexType).toSet == Set("fmindex"))
-      assert(sourceIndexes.size == 3)
+      assert(sourceIndexes.size == 1)
 
       val predicateBuilder = new PredicateBuilder(loadTable("t").rowType())
       val indexedQuery = "SELECT id FROM t WHERE content LIKE '%needle%'"

@@ -34,6 +34,7 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 /** Streaming, bounded-partition writer for an exact byte-oriented FM index. */
@@ -47,10 +48,15 @@ public class FMGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Close
     private final int maxPartitionRowCount;
     private final int sampleRate;
     @Nullable private final BlockCompressionFactory compressionFactory;
-    private final List<ResultEntry> results = new ArrayList<>();
+    private final List<FMIndexFile.PartitionMeta> partitions = new ArrayList<>();
 
     private CharBuilder text = new CharBuilder();
     private boolean[] nullRows = new boolean[128];
+    @Nullable private String fileName;
+    @Nullable private PositionOutputStream stream;
+    @Nullable private DataOutputStream output;
+    private long firstRowId;
+    private long totalRowCount;
     private long partitionFirstRowId;
     private int partitionRowCount;
     private long lastRowId;
@@ -105,6 +111,9 @@ public class FMGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Close
             flushPartition();
         }
 
+        if (!hasLastRowId) {
+            firstRowId = relativeRowId;
+        }
         if (partitionRowCount == 0) {
             partitionFirstRowId = relativeRowId;
         }
@@ -117,6 +126,7 @@ public class FMGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Close
         }
         text.add(FMIndexFile.SEPARATOR);
         partitionRowCount++;
+        totalRowCount = Math.addExact(totalRowCount, 1L);
         lastRowId = relativeRowId;
         hasLastRowId = true;
     }
@@ -125,13 +135,35 @@ public class FMGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Close
     public List<ResultEntry> finish() {
         Preconditions.checkState(!finished, "FM index writer is already finished.");
         finished = true;
-        flushPartition();
-        return new ArrayList<>(results);
+        try {
+            flushPartition();
+            if (partitions.isEmpty()) {
+                return Collections.emptyList();
+            }
+            Preconditions.checkState(
+                    stream != null && output != null && fileName != null,
+                    "FM index container output is missing.");
+            byte[] indexMeta = FMIndexFile.writeIndexMeta(firstRowId, totalRowCount, partitions);
+            FMIndexFile.BlockInfo directory =
+                    FMIndexFile.writeContainerDirectory(
+                            stream, output, indexMeta, compressionFactory);
+            FMIndexFile.writeContainerFooter(
+                    output, directory, firstRowId, totalRowCount, partitions.size());
+            closeOutput();
+            return Collections.singletonList(new ResultEntry(fileName, totalRowCount, indexMeta));
+        } catch (IOException e) {
+            closeOutputQuietly();
+            throw new RuntimeException("Failed to finish FM global index container.", e);
+        } catch (RuntimeException e) {
+            closeOutputQuietly();
+            throw e;
+        }
     }
 
     @Override
     public void close() {
         finished = true;
+        closeOutputQuietly();
         text = new CharBuilder();
         partitionRowCount = 0;
     }
@@ -141,6 +173,10 @@ public class FMGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Close
             return;
         }
         try {
+            ensureOutput();
+            Preconditions.checkState(
+                    stream != null && output != null, "FM index container output is missing.");
+            long partitionStart = stream.getPos();
             text.add(FMIndexFile.TERMINATOR);
             char[] symbols = text.toArray();
             text = new CharBuilder();
@@ -168,102 +204,124 @@ public class FMGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Close
             int levelCount = FMIndexFile.levelsForAlphabet(alphabet.alphabetSize);
             int[][] digitStarts = new int[levelCount][4];
             FMIndexFile.QuadVectorMeta[] wavelets = new FMIndexFile.QuadVectorMeta[levelCount];
-            String fileName = fileWriter.newFileName("fmindex");
-            try (PositionOutputStream stream = fileWriter.newOutputStream(fileName)) {
-                DataOutputStream output = new DataOutputStream(stream);
-                short[] current = bwt;
-                short[] reordered = new short[bwt.length];
-                for (int level = 0; level < levelCount; level++) {
-                    int shift = (levelCount - level - 1) * 2;
-                    long[] quads = new long[FMIndexFile.wordsForQuads(current.length)];
-                    int[] counts = new int[4];
-                    for (int i = 0; i < current.length; i++) {
-                        int digit = ((current[i] & 0xFFFF) >>> shift) & 3;
-                        counts[digit]++;
-                        quads[i >>> 5] |= (long) digit << ((i & 31) * 2);
-                    }
-                    int next = 0;
-                    for (int digit = 0; digit < 4; digit++) {
-                        digitStarts[level][digit] = next;
-                        next += counts[digit];
-                    }
-                    int[] positions = java.util.Arrays.copyOf(digitStarts[level], 4);
-                    for (short encoded : current) {
-                        int symbol = encoded & 0xFFFF;
-                        int digit = (symbol >>> shift) & 3;
-                        reordered[positions[digit]++] = encoded;
-                    }
-                    wavelets[level] =
-                            FMIndexFile.writeQuadVector(
-                                    stream, output, quads, current.length, compressionFactory);
-                    short[] swap = current;
-                    current = reordered;
-                    reordered = swap;
+            short[] current = bwt;
+            short[] reordered = new short[bwt.length];
+            for (int level = 0; level < levelCount; level++) {
+                int shift = (levelCount - level - 1) * 2;
+                long[] quads = new long[FMIndexFile.wordsForQuads(current.length)];
+                int[] counts = new int[4];
+                for (int i = 0; i < current.length; i++) {
+                    int digit = ((current[i] & 0xFFFF) >>> shift) & 3;
+                    counts[digit]++;
+                    quads[i >>> 5] |= (long) digit << ((i & 31) * 2);
                 }
-
-                FMIndexFile.BitVectorMeta sampled =
-                        FMIndexFile.writeBitVector(
-                                stream, output, sampledWords, symbols.length, compressionFactory);
-                FMIndexFile.IntVectorMeta samples =
-                        FMIndexFile.writeIntVector(
-                                stream, output, sampleValues, compressionFactory);
-                long[] nullWords = new long[wordsForBits(partitionRowCount)];
-                for (int i = 0; i < partitionRowCount; i++) {
-                    if (nullRows[i]) {
-                        nullWords[i >>> 6] |= 1L << (i & 63);
-                    }
+                int next = 0;
+                for (int digit = 0; digit < 4; digit++) {
+                    digitStarts[level][digit] = next;
+                    next += counts[digit];
                 }
-                FMIndexFile.BitVectorMeta nullVector =
-                        FMIndexFile.writeBitVector(
-                                stream, output, nullWords, partitionRowCount, compressionFactory);
-                long[] boundaryWords = new long[wordsForBits(symbols.length)];
-                for (int i = 0; i < symbols.length; i++) {
-                    if (symbols[i] == FMIndexFile.SEPARATOR) {
-                        boundaryWords[i >>> 6] |= 1L << (i & 63);
-                    }
+                int[] positions = java.util.Arrays.copyOf(digitStarts[level], 4);
+                for (short encoded : current) {
+                    int symbol = encoded & 0xFFFF;
+                    int digit = (symbol >>> shift) & 3;
+                    reordered[positions[digit]++] = encoded;
                 }
-                FMIndexFile.BitVectorMeta rowBoundaries =
-                        FMIndexFile.writeBitVector(
-                                stream, output, boundaryWords, symbols.length, compressionFactory);
-                List<FMIndexFile.VerificationPageMeta> verificationPages =
-                        writeVerificationPages(stream, output, symbols, alphabet.symbolToByte);
-                FMIndexFile.Directory directory =
-                        new FMIndexFile.Directory(
-                                partitionRowCount,
-                                symbols.length,
-                                sampleRate,
-                                levelCount,
-                                alphabet.alphabetSize,
-                                alphabet.byteToSymbol,
-                                cumulative,
-                                digitStarts,
-                                wavelets,
-                                sampled,
-                                samples,
-                                nullVector,
-                                rowBoundaries,
-                                verificationPages);
-                FMIndexFile.BlockInfo directoryBlock =
-                        FMIndexFile.writeDirectory(stream, output, directory, compressionFactory);
-                FMIndexFile.writeFooter(
-                        output,
-                        directoryBlock,
-                        partitionFirstRowId,
-                        partitionRowCount,
-                        symbols.length,
-                        sampleRate);
+                wavelets[level] =
+                        FMIndexFile.writeQuadVector(
+                                stream, output, quads, current.length, compressionFactory);
+                short[] swap = current;
+                current = reordered;
+                reordered = swap;
             }
-            results.add(
-                    new ResultEntry(
-                            fileName,
+
+            FMIndexFile.BitVectorMeta sampled =
+                    FMIndexFile.writeBitVector(
+                            stream, output, sampledWords, symbols.length, compressionFactory);
+            FMIndexFile.IntVectorMeta samples =
+                    FMIndexFile.writeIntVector(stream, output, sampleValues, compressionFactory);
+            long[] nullWords = new long[wordsForBits(partitionRowCount)];
+            for (int i = 0; i < partitionRowCount; i++) {
+                if (nullRows[i]) {
+                    nullWords[i >>> 6] |= 1L << (i & 63);
+                }
+            }
+            FMIndexFile.BitVectorMeta nullVector =
+                    FMIndexFile.writeBitVector(
+                            stream, output, nullWords, partitionRowCount, compressionFactory);
+            long[] boundaryWords = new long[wordsForBits(symbols.length)];
+            for (int i = 0; i < symbols.length; i++) {
+                if (symbols[i] == FMIndexFile.SEPARATOR) {
+                    boundaryWords[i >>> 6] |= 1L << (i & 63);
+                }
+            }
+            FMIndexFile.BitVectorMeta rowBoundaries =
+                    FMIndexFile.writeBitVector(
+                            stream, output, boundaryWords, symbols.length, compressionFactory);
+            List<FMIndexFile.VerificationPageMeta> verificationPages =
+                    writeVerificationPages(stream, output, symbols, alphabet.symbolToByte);
+            FMIndexFile.Directory directory =
+                    new FMIndexFile.Directory(
                             partitionRowCount,
-                            FMIndexFile.writeIndexMeta(partitionFirstRowId, partitionRowCount)));
+                            symbols.length,
+                            sampleRate,
+                            levelCount,
+                            alphabet.alphabetSize,
+                            alphabet.byteToSymbol,
+                            cumulative,
+                            digitStarts,
+                            wavelets,
+                            sampled,
+                            samples,
+                            nullVector,
+                            rowBoundaries,
+                            verificationPages);
+            FMIndexFile.BlockInfo directoryBlock =
+                    FMIndexFile.writeDirectory(stream, output, directory, compressionFactory);
+            FMIndexFile.writeFooter(
+                    output,
+                    directoryBlock,
+                    partitionFirstRowId,
+                    partitionRowCount,
+                    symbols.length,
+                    sampleRate);
+            partitions.add(
+                    new FMIndexFile.PartitionMeta(
+                            partitionStart,
+                            stream.getPos(),
+                            partitionFirstRowId,
+                            partitionRowCount));
         } catch (IOException e) {
             throw new RuntimeException("Failed to write FM global index.", e);
         } finally {
             text = new CharBuilder();
             Arrays.fill(nullRows, 0, partitionRowCount, false);
             partitionRowCount = 0;
+        }
+    }
+
+    private void ensureOutput() throws IOException {
+        if (output != null) {
+            return;
+        }
+        fileName = fileWriter.newFileName("fmindex");
+        stream = fileWriter.newOutputStream(fileName);
+        output = new DataOutputStream(stream);
+    }
+
+    private void closeOutput() throws IOException {
+        if (output != null) {
+            DataOutputStream current = output;
+            output = null;
+            stream = null;
+            current.close();
+        }
+    }
+
+    private void closeOutputQuietly() {
+        try {
+            closeOutput();
+        } catch (IOException ignored) {
+            // Best effort; the build owner deletes unpublished output on failure.
         }
     }
 

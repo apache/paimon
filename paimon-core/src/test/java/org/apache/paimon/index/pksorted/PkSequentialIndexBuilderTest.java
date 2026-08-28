@@ -63,7 +63,7 @@ class PkSequentialIndexBuilderTest {
         PkSortedIndexFile capturingFile =
                 new PkSortedIndexFile(LocalFileIO.create(), pathFactory()) {
                     @Override
-                    public List<IndexFileMeta> buildAll(
+                    public IndexFileMeta build(
                             int dataLevel,
                             List<PrimaryKeyIndexSourceFile> sourceFiles,
                             DataField indexField,
@@ -72,7 +72,7 @@ class PkSequentialIndexBuilderTest {
                             Iterator<Entry> entries) {
                         capturedSources.addAll(sourceFiles);
                         entries.forEachRemaining(capturedEntries::add);
-                        return Collections.singletonList(ignoredPayload());
+                        return ignoredPayload();
                     }
                 };
 

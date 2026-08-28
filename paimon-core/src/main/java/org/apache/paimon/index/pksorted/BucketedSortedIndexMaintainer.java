@@ -21,6 +21,7 @@ package org.apache.paimon.index.pksorted;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.pk.PrimaryKeyIndexLevels;
 import org.apache.paimon.index.pk.PrimaryKeyIndexSourceFile;
+import org.apache.paimon.index.pk.PrimaryKeyIndexSourceMeta;
 import org.apache.paimon.index.pk.PrimaryKeyIndexSourcePolicy;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
@@ -100,28 +101,6 @@ public class BucketedSortedIndexMaintainer {
                         definitionPayloads);
         groups.addAll(restoredState.groups());
         pendingRestoredDeletions.addAll(restoredState.rejectedPayloads());
-    }
-
-    public static BucketedSortedIndexMaintainer withMultiplePayloads(
-            int fieldId,
-            String indexType,
-            PkSortedIndexFile indexFile,
-            PayloadBuildFunction buildFunction,
-            List<DataFileMeta> restoredDataFiles,
-            List<IndexFileMeta> restoredPayloads,
-            ExecutorService executor) {
-        return new MultiplePayloadMaintainer(
-                fieldId,
-                indexType,
-                indexFile,
-                buildFunction,
-                restoredDataFiles,
-                restoredPayloads,
-                executor);
-    }
-
-    List<IndexFileMeta> buildPayloads(List<DataFileMeta> sourceFiles) throws Exception {
-        return Collections.singletonList(buildFunction.build(sourceFiles));
     }
 
     public synchronized SortedIndexCommit prepareCommit(
@@ -284,9 +263,9 @@ public class BucketedSortedIndexMaintainer {
         }
         PendingBuild completed = pendingBuild;
         try {
-            List<IndexFileMeta> payloads = completed.get();
+            IndexFileMeta payload = completed.get();
             pendingBuild = null;
-            return Optional.of(new CompletedBuild(completed.plan, payloads));
+            return Optional.of(new CompletedBuild(completed.plan, payload));
         } catch (CancellationException e) {
             pendingBuild = null;
             throw e;
@@ -306,7 +285,7 @@ public class BucketedSortedIndexMaintainer {
     private void acceptOrDelete(
             CompletedBuild completed, List<IndexFileMeta> created, List<IndexFileMeta> removed) {
         if (!levels.isCurrent(completed.plan, activeSourceFiles)) {
-            deleteGenerated(completed.payloads);
+            deleteGenerated(completed.payload);
             return;
         }
         List<PrimaryKeyIndexSourceFile> sources = new ArrayList<>();
@@ -327,26 +306,38 @@ public class BucketedSortedIndexMaintainer {
                 break;
             }
         }
-        if (!sourcesStillActive || !inputsStillPresent || outputOverlapsRetainedGroup) {
-            deleteGenerated(completed.payloads);
+        PrimaryKeyIndexSourceMeta outputSourceMeta;
+        try {
+            outputSourceMeta = PrimaryKeyIndexSourceMeta.fromIndexFile(completed.payload);
+        } catch (RuntimeException e) {
+            deleteGenerated(completed.payload);
+            return;
+        }
+        if (!sourcesStillActive
+                || !inputsStillPresent
+                || outputOverlapsRetainedGroup
+                || outputSourceMeta.dataLevel() != completed.plan.dataLevel()
+                || !outputSourceMeta.sourceFiles().equals(sources)) {
+            deleteGenerated(completed.payload);
             return;
         }
         Optional<PkSortedIndexGroup> group;
         try {
-            group = PkSortedIndexGroup.create(fieldId, indexType, sources, completed.payloads);
+            group =
+                    PkSortedIndexGroup.create(
+                            fieldId,
+                            indexType,
+                            sources,
+                            Collections.singletonList(completed.payload));
         } catch (RuntimeException e) {
-            deleteGenerated(completed.payloads);
+            deleteGenerated(completed.payload);
             throw new IllegalStateException(
                     "Primary-key " + indexType + " index build produced invalid metadata.", e);
         }
         if (!group.isPresent()) {
-            deleteGenerated(completed.payloads);
+            deleteGenerated(completed.payload);
             throw new IllegalStateException(
                     "Primary-key " + indexType + " index build produced an incomplete group.");
-        }
-        if (group.get().dataLevel() != completed.plan.dataLevel()) {
-            deleteGenerated(completed.payloads);
-            return;
         }
         replaceInputGroups(completed.inputGroups, group, created, removed);
     }
@@ -377,14 +368,6 @@ public class BucketedSortedIndexMaintainer {
             indexFile.delete(payload);
         } catch (RuntimeException e) {
             LOG.warn("Failed to delete unpublished primary-key scalar index payload.", e);
-        }
-    }
-
-    private void deleteGenerated(List<IndexFileMeta> payloads) {
-        for (IndexFileMeta payload : payloads) {
-            if (payload != null) {
-                deleteGenerated(payload);
-            }
         }
     }
 
@@ -433,8 +416,8 @@ public class BucketedSortedIndexMaintainer {
         private final PrimaryKeyIndexLevels.Plan<PkSortedIndexGroup> plan;
         private final List<DataFileMeta> sourceFiles;
         private final List<PkSortedIndexGroup> inputGroups;
-        @Nullable private List<IndexFileMeta> result;
-        @Nullable private Future<List<IndexFileMeta>> future;
+        @Nullable private IndexFileMeta result;
+        @Nullable private Future<IndexFileMeta> future;
         private boolean cancelled;
 
         private PendingBuild(PrimaryKeyIndexLevels.Plan<PkSortedIndexGroup> plan) {
@@ -447,28 +430,22 @@ public class BucketedSortedIndexMaintainer {
             future =
                     executor.submit(
                             () -> {
-                                List<IndexFileMeta> payloads = buildWithRetries();
+                                IndexFileMeta payload = buildWithRetries();
                                 synchronized (PendingBuild.this) {
                                     if (!cancelled) {
-                                        result = payloads;
-                                        return payloads;
+                                        result = payload;
+                                        return payload;
                                     }
                                 }
-                                deleteGenerated(payloads);
+                                deleteGenerated(payload);
                                 throw new CancellationException();
                             });
         }
 
-        private List<IndexFileMeta> buildWithRetries() throws Exception {
+        private IndexFileMeta buildWithRetries() throws Exception {
             for (int attempt = 1; ; attempt++) {
                 try {
-                    List<IndexFileMeta> payloads =
-                            BucketedSortedIndexMaintainer.this.buildPayloads(sourceFiles);
-                    checkArgument(
-                            payloads != null && !payloads.isEmpty(),
-                            "Primary-key %s index build produced no payloads.",
-                            indexType);
-                    return new ArrayList<>(payloads);
+                    return buildFunction.build(sourceFiles);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     throw new CancellationException();
@@ -490,24 +467,24 @@ public class BucketedSortedIndexMaintainer {
             return future.isDone();
         }
 
-        private List<IndexFileMeta> get() throws InterruptedException, ExecutionException {
+        private IndexFileMeta get() throws InterruptedException, ExecutionException {
             return future.get();
         }
 
         private void cancel() {
-            Future<List<IndexFileMeta>> buildFuture;
-            List<IndexFileMeta> payloads;
+            Future<IndexFileMeta> buildFuture;
+            IndexFileMeta payload;
             synchronized (this) {
                 cancelled = true;
                 buildFuture = future;
-                payloads = result;
+                payload = result;
                 result = null;
             }
             if (buildFuture != null) {
                 buildFuture.cancel(true);
             }
-            if (payloads != null) {
-                deleteGenerated(payloads);
+            if (payload != null) {
+                deleteGenerated(payload);
             }
         }
     }
@@ -517,14 +494,14 @@ public class BucketedSortedIndexMaintainer {
         private final PrimaryKeyIndexLevels.Plan<PkSortedIndexGroup> plan;
         private final List<DataFileMeta> sourceFiles;
         private final List<PkSortedIndexGroup> inputGroups;
-        private final List<IndexFileMeta> payloads;
+        private final IndexFileMeta payload;
 
         private CompletedBuild(
-                PrimaryKeyIndexLevels.Plan<PkSortedIndexGroup> plan, List<IndexFileMeta> payloads) {
+                PrimaryKeyIndexLevels.Plan<PkSortedIndexGroup> plan, IndexFileMeta payload) {
             this.plan = plan;
             this.sourceFiles = plan.sourceFiles();
             this.inputGroups = plan.inputUnits();
-            this.payloads = payloads;
+            this.payload = payload;
         }
     }
 
@@ -552,44 +529,6 @@ public class BucketedSortedIndexMaintainer {
     public interface BuildFunction {
 
         IndexFileMeta build(List<DataFileMeta> sourceFiles) throws Exception;
-    }
-
-    /** Builds all payloads which together cover ordered physical source files. */
-    @FunctionalInterface
-    public interface PayloadBuildFunction {
-
-        List<IndexFileMeta> build(List<DataFileMeta> sourceFiles) throws Exception;
-    }
-
-    private static final class MultiplePayloadMaintainer extends BucketedSortedIndexMaintainer {
-
-        private final PayloadBuildFunction multipleBuildFunction;
-
-        private MultiplePayloadMaintainer(
-                int fieldId,
-                String indexType,
-                PkSortedIndexFile indexFile,
-                PayloadBuildFunction buildFunction,
-                List<DataFileMeta> restoredDataFiles,
-                List<IndexFileMeta> restoredPayloads,
-                ExecutorService executor) {
-            super(
-                    fieldId,
-                    indexType,
-                    indexFile,
-                    sourceFiles -> {
-                        throw new UnsupportedOperationException();
-                    },
-                    restoredDataFiles,
-                    restoredPayloads,
-                    executor);
-            this.multipleBuildFunction = buildFunction;
-        }
-
-        @Override
-        List<IndexFileMeta> buildPayloads(List<DataFileMeta> sourceFiles) throws Exception {
-            return multipleBuildFunction.build(sourceFiles);
-        }
     }
 
     /** Scalar-index changes for append and compact snapshot routing. */

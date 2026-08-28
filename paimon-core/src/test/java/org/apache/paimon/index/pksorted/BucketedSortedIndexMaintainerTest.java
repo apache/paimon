@@ -395,35 +395,6 @@ class BucketedSortedIndexMaintainerTest {
     }
 
     @Test
-    void testPublishesAllPayloadsFromOneBuildAtomically() throws Exception {
-        DataFileMeta source = dataFile("data-1", 5);
-        List<PrimaryKeyIndexSourceFile> sources =
-                Collections.singletonList(new PrimaryKeyIndexSourceFile("data-1", 5));
-        byte[] sourceMeta = new PrimaryKeyIndexSourceMeta(1, sources).serialize();
-        IndexFileMeta first = payload("fm-1", "fmindex", sourceMeta, 0, 2);
-        IndexFileMeta second = payload("fm-2", "fmindex", sourceMeta, 2, 3);
-        BucketedSortedIndexMaintainer maintainer =
-                BucketedSortedIndexMaintainer.withMultiplePayloads(
-                        7,
-                        "fmindex",
-                        new PkSortedIndexFile(LocalFileIO.create(), pathFactory()),
-                        sourceFiles -> Arrays.asList(first, second),
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        executor);
-
-        BucketedSortedIndexMaintainer.SortedIndexCommit commit =
-                maintainer.prepareCommit(
-                        DataIncrement.emptyIncrement(), compactAfter(source), true);
-
-        assertThat(commit.compactIncrement()).isPresent();
-        assertThat(commit.compactIncrement().get().newIndexFiles()).containsExactly(first, second);
-        assertThat(maintainer.state().groups())
-                .singleElement()
-                .satisfies(group -> assertThat(group.payloads()).containsExactly(first, second));
-    }
-
-    @Test
     void testNonBlockingBuildPublishesOnLaterCommit() throws Exception {
         DataFileMeta source = dataFile("data-1", 3);
         IndexFileMeta payload = payload("new", source, 3);

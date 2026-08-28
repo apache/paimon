@@ -172,7 +172,10 @@ public class FMGlobalIndexTest {
                                 null,
                                 str("needle-4")),
                         0);
-        assertThat(files).hasSize(3);
+        assertThat(files).hasSize(1);
+        FMIndexFile.IndexMeta metadata = FMIndexFile.readIndexMeta(files.get(0).metadata());
+        assertThat(metadata.rowCount).isEqualTo(5L);
+        assertThat(metadata.partitions).hasSize(3);
         try (GlobalIndexReader reader = createReader(files, 5)) {
             assertRows(reader.visitContains(fieldRef, str("needle")).join(), 0L, 2L, 4L);
         }
@@ -182,7 +185,7 @@ public class FMGlobalIndexTest {
     public void testFooterAndRankBlockCorruptionFailClosed() throws Exception {
         List<GlobalIndexIOMeta> files = writeData(Collections.singletonList(str("abcdef")), 0);
         GlobalIndexIOMeta file = files.get(0);
-        corruptByte(file, file.fileSize() - FMIndexFile.FOOTER_LENGTH + 8);
+        corruptByte(file, file.fileSize() - FMIndexFile.CONTAINER_FOOTER_LENGTH + 8);
         try (GlobalIndexReader reader = createReader(files, 1)) {
             assertThatThrownBy(() -> reader.visitContains(fieldRef, str("abc")).join())
                     .isInstanceOf(CompletionException.class)
@@ -334,7 +337,10 @@ public class FMGlobalIndexTest {
         java.nio.file.Path fixturePath = tempPath.resolve("fmindex-v1-golden.index");
         Files.write(fixturePath, fixture);
         GlobalIndexIOMeta fixtureMeta =
-                new GlobalIndexIOMeta(new Path(fixturePath.toUri()), fixture.length, null);
+                new GlobalIndexIOMeta(
+                        new Path(fixturePath.toUri()),
+                        fixture.length,
+                        actualFiles.get(0).metadata());
         try (GlobalIndexReader reader = createReader(Collections.singletonList(fixtureMeta), 4)) {
             assertRows(reader.visitContains(fieldRef, str("banana")).join(), 0L, 2L);
             assertRows(reader.visitContains(fieldRef, str("")).join(), 0L, 2L, 3L);
@@ -554,16 +560,23 @@ public class FMGlobalIndexTest {
                                 str("other-3"),
                                 str("needle-4")),
                         0);
-        assertThat(files).allMatch(file -> file.metadata() != null);
-        AtomicInteger unrelatedPartitionOpens = new AtomicInteger();
-        Path unrelatedPartition = files.get(0).filePath();
-        fileReader =
-                meta -> {
-                    if (meta.filePath().equals(unrelatedPartition)) {
-                        unrelatedPartitionOpens.incrementAndGet();
-                    }
-                    return fileIO.newInputStream(meta.filePath());
-                };
+        GlobalIndexIOMeta file = files.get(0);
+        FMIndexFile.IndexMeta indexMeta = FMIndexFile.readIndexMeta(file.metadata());
+        assertThat(indexMeta.partitions).hasSize(3);
+        long unrelatedWaveletOffset;
+        try (org.apache.paimon.fs.SeekableInputStream input =
+                fileIO.newInputStream(file.filePath())) {
+            FMIndexFile.Footer footer =
+                    FMIndexFile.readFooter(input, indexMeta.partitions.get(0), file.fileSize());
+            unrelatedWaveletOffset =
+                    FMIndexFile.readDirectory(input, footer, file.fileSize())
+                            .wavelets[0]
+                            .blocks
+                            .get(0)
+                            .block
+                            .offset;
+        }
+        corruptByte(file, unrelatedWaveletOffset);
 
         org.apache.paimon.utils.RoaringNavigableMap64 candidates =
                 new org.apache.paimon.utils.RoaringNavigableMap64();
@@ -580,7 +593,6 @@ public class FMGlobalIndexTest {
                             .join(),
                     4L);
         }
-        assertThat(unrelatedPartitionOpens).hasValue(0);
         assertThat(executor.submittedTasks).hasValue(1);
     }
 
@@ -590,13 +602,10 @@ public class FMGlobalIndexTest {
         options.set(FMGlobalIndexOptions.PARTITION_ROW_COUNT, 2);
         options.set(FMGlobalIndexOptions.COMPRESSION, "none");
         indexer = new FMGlobalIndexer(dataField, options);
-        List<GlobalIndexIOMeta> files =
-                writeData(
-                        Arrays.asList(
-                                str("needle-0"), str("other-1"), str("needle-2"), str("other-3")),
-                        0);
-        GlobalIndexIOMeta first = files.get(0);
-        GlobalIndexIOMeta second = files.get(1);
+        GlobalIndexIOMeta first =
+                writeData(Arrays.asList(str("needle-0"), str("other-1")), 0).get(0);
+        GlobalIndexIOMeta second =
+                writeData(Arrays.asList(str("needle-2"), str("other-3")), 2).get(0);
         List<GlobalIndexIOMeta> swapped =
                 Arrays.asList(
                         new GlobalIndexIOMeta(
@@ -618,7 +627,7 @@ public class FMGlobalIndexTest {
                                                     GlobalIndexResult.create(candidates))
                                             .join())
                     .isInstanceOf(CompletionException.class)
-                    .hasMessageContaining("row range changed");
+                    .hasMessageContaining("does not match the container directory");
         }
     }
 

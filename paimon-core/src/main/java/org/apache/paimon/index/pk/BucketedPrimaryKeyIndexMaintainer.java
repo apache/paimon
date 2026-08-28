@@ -558,7 +558,7 @@ public final class BucketedPrimaryKeyIndexMaintainer {
                     PkSequentialIndexBuilder builder =
                             new PkSequentialIndexBuilder(
                                     readerFactory, indexFile, field, indexType, options);
-                    return BucketedSortedIndexMaintainer.withMultiplePayloads(
+                    return new BucketedSortedIndexMaintainer(
                             field.id(),
                             indexType,
                             indexFile,

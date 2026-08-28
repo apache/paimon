@@ -68,7 +68,7 @@ public class PkSequentialIndexBuilder {
         this.options = options;
     }
 
-    public List<IndexFileMeta> build(List<DataFileMeta> dataFiles) throws IOException {
+    public IndexFileMeta build(List<DataFileMeta> dataFiles) throws IOException {
         checkArgument(!dataFiles.isEmpty(), "A sequential index build requires source files.");
         List<DataFileMeta> orderedDataFiles = new ArrayList<>(dataFiles);
         orderedDataFiles.sort(Comparator.comparing(DataFileMeta::fileName));
@@ -88,7 +88,7 @@ public class PkSequentialIndexBuilder {
 
         try (SourceEntryIterator entries = new SourceEntryIterator(orderedDataFiles)) {
             try {
-                return indexFile.buildAll(
+                return indexFile.build(
                         dataLevel, sourceFiles, indexField, indexType, options, entries);
             } catch (UncheckedIOException e) {
                 throw e.getCause();

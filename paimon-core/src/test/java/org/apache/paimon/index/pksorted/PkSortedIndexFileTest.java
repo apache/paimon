@@ -184,7 +184,7 @@ class PkSortedIndexFileTest {
     }
 
     @Test
-    void testBuildRejectsButBuildAllAcceptsMultiplePayloads() throws Exception {
+    void testBuildRejectsMultiplePayloadsAndDeletesThem() throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         PkSortedIndexFile indexFile =
                 new PkSortedIndexFile(fileIO, pathFactory(tempPath)) {
@@ -241,27 +241,6 @@ class PkSortedIndexFileTest {
         try (Stream<java.nio.file.Path> files = Files.list(tempPath)) {
             assertThat(files).isEmpty();
         }
-
-        List<IndexFileMeta> payloads =
-                indexFile.buildAll(
-                        1,
-                        Collections.singletonList(new PrimaryKeyIndexSourceFile("data-file", 2)),
-                        field(),
-                        "btree",
-                        options(),
-                        Arrays.asList(
-                                        new PkSortedIndexFile.Entry(10, 0),
-                                        new PkSortedIndexFile.Entry(20, 1))
-                                .iterator());
-
-        assertThat(payloads).hasSize(2);
-        assertThat(payloads)
-                .extracting(payload -> payload.globalIndexMeta().rowRangeStart())
-                .containsExactly(0L, 1L);
-        assertThat(payloads)
-                .extracting(payload -> payload.globalIndexMeta().rowRangeEnd())
-                .containsExactly(0L, 1L);
-        assertThat(payloads).allMatch(indexFile::exists);
     }
 
     @Test
