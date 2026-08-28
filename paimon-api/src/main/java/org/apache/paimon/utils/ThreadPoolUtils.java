@@ -229,7 +229,7 @@ public class ThreadPoolUtils {
 
         private Iterator<T> activeResults = Collections.<T>emptyList().iterator();
         private T next;
-        private boolean closed;
+        private volatile boolean closed;
 
         private SequentialBatchIterator(
                 ExecutorService executor,
@@ -243,7 +243,7 @@ public class ThreadPoolUtils {
 
         @Override
         public boolean hasNext() {
-            if (!closed) {
+            if (!isClosed()) {
                 advanceIfNeeded();
             }
             return next != null;
@@ -257,6 +257,10 @@ public class ThreadPoolUtils {
             T result = next;
             next = null;
             return result;
+        }
+
+        private boolean isClosed() {
+            return closed;
         }
 
         private void advanceIfNeeded() {
@@ -286,7 +290,7 @@ public class ThreadPoolUtils {
         private void submitBatch(List<U> batch) {
             ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
             for (U input : batch) {
-                BatchTask<T, U> task = new BatchTask<>(processor, input, classLoader);
+                BatchTask<T, U> task = new BatchTask<>(this, processor, input, classLoader);
                 executor.execute(task);
                 activeTasks.add(task);
             }
@@ -343,6 +347,7 @@ public class ThreadPoolUtils {
         private static final int CANCELLED = 2;
         private static final int FINISHED = 3;
 
+        private final SequentialBatchIterator<T, U> iterator;
         private final Function<U, List<T>> processor;
         private final U input;
         private final ClassLoader classLoader;
@@ -354,7 +359,12 @@ public class ThreadPoolUtils {
         private Throwable failure;
         private volatile boolean failureReported;
 
-        private BatchTask(Function<U, List<T>> processor, U input, ClassLoader classLoader) {
+        private BatchTask(
+                SequentialBatchIterator<T, U> iterator,
+                Function<U, List<T>> processor,
+                U input,
+                ClassLoader classLoader) {
+            this.iterator = iterator;
             this.processor = processor;
             this.input = input;
             this.classLoader = classLoader;
@@ -363,7 +373,7 @@ public class ThreadPoolUtils {
         @Override
         public void run() {
             synchronized (this) {
-                if (state == CANCELLED) {
+                if (isCanceled()) {
                     state = FINISHED;
                     completion.countDown();
                     return;
@@ -384,6 +394,10 @@ public class ThreadPoolUtils {
                 }
                 completion.countDown();
             }
+        }
+
+        private boolean isCanceled() {
+            return state == CANCELLED || iterator.isClosed();
         }
 
         private synchronized void cancel() {
