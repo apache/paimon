@@ -70,6 +70,8 @@ _ACTION_RIGHT = "action_joint_position_right"
 _ACTION_COLUMN = "action"
 _ACTION_VECTOR_TYPE = pa.list_(pa.float32(), 14)
 _STANDARD_DEVIATION_FLOOR = 1e-2
+
+
 @dataclass(frozen=True)
 class EpisodeSource:
     """RoboMIND metadata derived without opening the HDF5 source."""
