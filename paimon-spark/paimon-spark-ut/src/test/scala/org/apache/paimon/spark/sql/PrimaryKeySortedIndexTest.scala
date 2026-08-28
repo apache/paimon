@@ -31,6 +31,62 @@ import scala.collection.JavaConverters._
 /** End-to-end Spark SQL tests for source-backed primary-key sorted indexes. */
 class PrimaryKeySortedIndexTest extends PaimonSparkTestBase {
 
+  test("primary-key FM index supports exact contains with partitioned container") {
+    withTable("t") {
+      spark.sql("""
+                  |CREATE TABLE t (id INT, content STRING)
+                  |TBLPROPERTIES (
+                  |  'primary-key' = 'id',
+                  |  'bucket' = '1',
+                  |  'deletion-vectors.enabled' = 'true',
+                  |  'pk-fm.index.columns' = 'content',
+                  |  'fields.content.pk-fm.index.options' =
+                  |    '{"partition-row-count":"2"}'
+                  |)
+                  |""".stripMargin)
+      spark.sql("""
+                  |INSERT INTO t VALUES
+                  |  (1, 'alpha needle omega'),
+                  |  (2, 'noise'),
+                  |  (3, 'needle at start')
+                  |""".stripMargin)
+      spark.sql("""
+                  |INSERT INTO t VALUES
+                  |  (4, 'unicode 你好 needle'),
+                  |  (5, CAST(NULL AS STRING)),
+                  |  (6, 'short e')
+                  |""".stripMargin)
+      spark.sql("CALL sys.compact(table => 't')")
+
+      val sourceIndexes = loadTable("t").store.newIndexFileHandler.scanEntries.asScala
+        .map(_.indexFile)
+        .filter(meta => meta.globalIndexMeta != null && meta.globalIndexMeta.sourceMeta != null)
+      assert(sourceIndexes.map(_.indexType).toSet == Set("fmindex"))
+      assert(sourceIndexes.size == 1)
+
+      val predicateBuilder = new PredicateBuilder(loadTable("t").rowType())
+      val indexedQuery = "SELECT id FROM t WHERE content LIKE '%needle%'"
+      val indexedScan = getPaimonScan(indexedQuery)
+      assert(
+        indexedScan.pushedDataFilters.contains(
+          predicateBuilder.contains(1, BinaryString.fromString("needle"))))
+      assert(indexedScan.inputSplits.exists(_.isInstanceOf[IndexedSplit]))
+      checkAnswer(spark.sql(indexedQuery), Seq(Row(1), Row(3), Row(4)))
+
+      spark.sql("UPDATE t SET content = 'updated needle' WHERE id = 2")
+      spark.sql("DELETE FROM t WHERE id = 3")
+      spark.sql("INSERT INTO t VALUES (7, 'new needle row')")
+
+      val mixedScan = getPaimonScan(indexedQuery)
+      assert(mixedScan.inputSplits.exists(_.isInstanceOf[IndexedSplit]))
+      assert(mixedScan.inputSplits.exists(_.isInstanceOf[DataSplit]))
+      checkAnswer(spark.sql(indexedQuery), Seq(Row(1), Row(2), Row(4), Row(7)))
+      checkAnswer(
+        spark.sql("SELECT id FROM t WHERE content LIKE '%e%'"),
+        Seq(Row(1), Row(2), Row(4), Row(6), Row(7)))
+    }
+  }
+
   test("Spark array predicates use multivalue index") {
     assume(gteqSpark3_3)
 

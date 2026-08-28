@@ -137,9 +137,7 @@ public final class PrimaryKeySortedIndexScan {
 
         List<PrimaryKeyIndexDefinition> scalarDefinitions = new ArrayList<>();
         for (PrimaryKeyIndexDefinition definition : definitions) {
-            if (definition.family() == PrimaryKeyIndexDefinition.Family.BTREE
-                    || definition.family() == PrimaryKeyIndexDefinition.Family.BITMAP
-                    || definition.family() == PrimaryKeyIndexDefinition.Family.MULTI_VALUE) {
+            if (definition.family().isScalar()) {
                 scalarDefinitions.add(definition);
             }
         }
@@ -242,9 +240,7 @@ public final class PrimaryKeySortedIndexScan {
             ReaderFactory readerFactory) {
         Map<Integer, PrimaryKeyIndexDefinition> definitionsByField = new LinkedHashMap<>();
         for (PrimaryKeyIndexDefinition definition : definitions) {
-            if (definition.family() == PrimaryKeyIndexDefinition.Family.BTREE
-                    || definition.family() == PrimaryKeyIndexDefinition.Family.BITMAP
-                    || definition.family() == PrimaryKeyIndexDefinition.Family.MULTI_VALUE) {
+            if (definition.family().isScalar()) {
                 definitionsByField.put(definition.fieldId(), definition);
             }
         }

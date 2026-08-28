@@ -56,9 +56,8 @@ final class FMGlobalIndexReader implements ContainsRefiningGlobalIndexReader {
     @Nullable private final GlobalIndexIOMeta file;
     private final ExecutorService executor;
     private final FMIndexReadContext readContext;
-    @Nullable private final FileSetRowCountValidator rowCountValidator;
-    @Nullable private final FMIndexFile.IndexMeta indexMeta;
-    private final int filePosition;
+    @Nullable private final ContainerMetadataLoader containerLoader;
+    @Nullable private final FMIndexFile.PartitionMeta partition;
     private final int demandPageSize;
     private final double locateCostRatio;
 
@@ -69,18 +68,16 @@ final class FMGlobalIndexReader implements ContainsRefiningGlobalIndexReader {
             GlobalIndexIOMeta file,
             ExecutorService executor,
             FMIndexReadContext readContext,
-            FileSetRowCountValidator rowCountValidator,
-            @Nullable FMIndexFile.IndexMeta indexMeta,
-            int filePosition,
+            ContainerMetadataLoader containerLoader,
+            FMIndexFile.PartitionMeta partition,
             int demandPageSize,
             double locateCostRatio) {
         this.fileReader = fileReader;
         this.file = file;
         this.executor = executor;
         this.readContext = readContext;
-        this.rowCountValidator = rowCountValidator;
-        this.indexMeta = indexMeta;
-        this.filePosition = filePosition;
+        this.containerLoader = containerLoader;
+        this.partition = partition;
         this.demandPageSize = readContext.effectiveDemandPageSize(demandPageSize);
         this.locateCostRatio = locateCostRatio;
     }
@@ -94,9 +91,8 @@ final class FMGlobalIndexReader implements ContainsRefiningGlobalIndexReader {
         this.file = null;
         this.executor = executor;
         this.readContext = readContext;
-        this.rowCountValidator = null;
-        this.indexMeta = null;
-        this.filePosition = -1;
+        this.containerLoader = null;
+        this.partition = null;
         this.demandPageSize = readContext.effectiveDemandPageSize(demandPageSize);
         this.locateCostRatio = locateCostRatio;
     }
@@ -239,11 +235,11 @@ final class FMGlobalIndexReader implements ContainsRefiningGlobalIndexReader {
 
     private boolean candidatesDisjointFromIndexMeta(@Nullable GlobalIndexResult candidates) {
         return candidates != null
-                && indexMeta != null
+                && partition != null
                 && !candidates
                         .results()
                         .intersects(
-                                indexMeta.firstRowId, indexMeta.firstRowId + indexMeta.rowCount);
+                                partition.firstRowId, partition.firstRowId + partition.rowCount);
     }
 
     private Optional<GlobalIndexResult> queryNullsUnchecked(boolean nulls) {
@@ -809,16 +805,14 @@ final class FMGlobalIndexReader implements ContainsRefiningGlobalIndexReader {
             current = metadata;
             if (current == null) {
                 Preconditions.checkState(file != null, "Missing FM index file.");
-                FMIndexFile.Footer footer = FMIndexFile.readFooter(input, file.fileSize());
+                Preconditions.checkState(
+                        containerLoader != null && partition != null,
+                        "Missing FM index container metadata.");
+                containerLoader.validate(input);
+                FMIndexFile.Footer footer =
+                        FMIndexFile.readFooter(input, partition, file.fileSize());
                 FMIndexFile.Directory directory =
                         FMIndexFile.readDirectory(input, footer, file.fileSize());
-                Preconditions.checkState(
-                        rowCountValidator != null, "Missing FM index row-count validator.");
-                rowCountValidator.validate(
-                        filePosition,
-                        footer.rowCount,
-                        footer.firstRowId,
-                        footer.firstRowId + footer.rowCount - 1L);
                 current = new Metadata(footer, directory);
                 metadata = current;
             }
@@ -979,6 +973,31 @@ final class FMGlobalIndexReader implements ContainsRefiningGlobalIndexReader {
         private Metadata(FMIndexFile.Footer footer, FMIndexFile.Directory directory) {
             this.footer = footer;
             this.directory = directory;
+        }
+    }
+
+    static final class ContainerMetadataLoader {
+        private final GlobalIndexIOMeta file;
+        private final FMIndexFile.IndexMeta expected;
+        private boolean validated;
+
+        ContainerMetadataLoader(GlobalIndexIOMeta file, FMIndexFile.IndexMeta expected) {
+            this.file = file;
+            this.expected = expected;
+        }
+
+        synchronized void validate(SeekableInputStream input) throws IOException {
+            if (validated) {
+                return;
+            }
+            FMIndexFile.ContainerFooter footer =
+                    FMIndexFile.readContainerFooter(input, file.fileSize());
+            FMIndexFile.IndexMeta actual =
+                    FMIndexFile.readContainerDirectory(input, footer, file.fileSize());
+            Preconditions.checkState(
+                    expected.sameLayout(actual),
+                    "FM index manifest metadata does not match the container directory.");
+            validated = true;
         }
     }
 

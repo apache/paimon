@@ -2990,6 +2990,13 @@ public class CoreOptions implements Serializable {
                             "Comma-separated character columns indexed by primary-key full-text indexes. "
                                     + "The first release supports exactly one column.");
 
+    public static final ConfigOption<String> PK_FM_INDEX_COLUMNS =
+            key("pk-fm.index.columns")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Comma-separated character columns indexed by primary-key FM indexes.");
+
     @Immutable
     public static final ConfigOption<Boolean> PK_CLUSTERING_OVERRIDE =
             key("pk-clustering-override")
@@ -4647,6 +4654,10 @@ public class CoreOptions implements Serializable {
         return options.getOptional(PK_FULL_TEXT_INDEX_COLUMNS).isPresent();
     }
 
+    public boolean primaryKeyFMIndexEnabled() {
+        return options.getOptional(PK_FM_INDEX_COLUMNS).isPresent();
+    }
+
     public List<String> primaryKeyVectorIndexColumns() {
         return primaryKeyIndexColumns(PK_VECTOR_INDEX_COLUMNS);
     }
@@ -4667,6 +4678,10 @@ public class CoreOptions implements Serializable {
         return primaryKeyIndexColumns(PK_FULL_TEXT_INDEX_COLUMNS);
     }
 
+    public List<String> primaryKeyFMIndexColumns() {
+        return primaryKeyIndexColumns(PK_FM_INDEX_COLUMNS);
+    }
+
     private List<String> primaryKeyIndexColumns(ConfigOption<String> option) {
         String columns = options.get(option);
         if (columns == null) {
@@ -4685,6 +4700,10 @@ public class CoreOptions implements Serializable {
 
     public Options primaryKeyMultiValueIndexOptions(String column) {
         return primaryKeySortedIndexOptions(column, "pk-multivalue", "multivalue-index.");
+    }
+
+    public Options primaryKeyFMIndexOptions(String column) {
+        return primaryKeySortedIndexOptions(column, "pk-fm", "fm-index.");
     }
 
     public Options primaryKeyFullTextIndexOptions(String column) {

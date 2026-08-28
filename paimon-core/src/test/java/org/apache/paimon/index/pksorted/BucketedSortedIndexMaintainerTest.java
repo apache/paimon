@@ -50,7 +50,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Tests bucket-local BTree/Bitmap source maintenance. */
+/** Tests bucket-local source-backed scalar-index maintenance. */
 class BucketedSortedIndexMaintainerTest {
 
     @TempDir java.nio.file.Path tempPath;
@@ -751,6 +751,27 @@ class BucketedSortedIndexMaintainerTest {
                         null,
                         new byte[] {1},
                         new PrimaryKeyIndexSourceMeta(dataLevel, sources).serialize()),
+                null);
+    }
+
+    private static IndexFileMeta payload(
+            String fileName,
+            String indexType,
+            byte[] sourceMeta,
+            long rowRangeStart,
+            long rowCount) {
+        return new IndexFileMeta(
+                indexType,
+                fileName,
+                1,
+                rowCount,
+                new GlobalIndexMeta(
+                        rowRangeStart,
+                        rowRangeStart + rowCount - 1,
+                        7,
+                        null,
+                        new byte[] {1},
+                        sourceMeta),
                 null);
     }
 

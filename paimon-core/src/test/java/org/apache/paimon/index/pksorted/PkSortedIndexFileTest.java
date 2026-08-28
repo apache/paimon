@@ -51,7 +51,7 @@ import java.util.stream.Stream;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Tests source-backed sorted index payload creation. */
+/** Tests source-backed scalar-index payload creation. */
 class PkSortedIndexFileTest {
 
     @TempDir java.nio.file.Path tempPath;
@@ -184,7 +184,7 @@ class PkSortedIndexFileTest {
     }
 
     @Test
-    void testRejectsMultiplePayloadsAndDeletesWholeGroup() throws Exception {
+    void testBuildRejectsMultiplePayloadsAndDeletesThem() throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         PkSortedIndexFile indexFile =
                 new PkSortedIndexFile(fileIO, pathFactory(tempPath)) {
@@ -214,7 +214,8 @@ class PkSortedIndexFileTest {
                                         throw new RuntimeException(e);
                                     }
                                     results.add(
-                                            new ResultEntry(fileName, rowCount, new byte[] {2}));
+                                            new ResultEntry(
+                                                    fileName, rowCount / 2, new byte[] {2}));
                                 }
                                 return results;
                             }
@@ -285,7 +286,7 @@ class PkSortedIndexFileTest {
                                         Collections.singletonList(
                                                         new PkSortedIndexFile.Entry(10, 1))
                                                 .iterator()))
-                .hasMessageContaining("outside sorted index group row range");
+                .hasMessageContaining("outside source-backed index group row range");
         assertThat(closed).isTrue();
     }
 
