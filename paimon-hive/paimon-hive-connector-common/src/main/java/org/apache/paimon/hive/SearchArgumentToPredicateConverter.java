@@ -158,6 +158,9 @@ public class SearchArgumentToPredicateConverter {
                                 .collect(Collectors.toList()));
             case BETWEEN:
                 List<Object> literalList = leaf.getLiteralList();
+                if (literalList == null || literalList.size() < 2) {
+                    throw new UnsupportedOperationException("BETWEEN literals are not available.");
+                }
                 return builder.between(
                         idx,
                         toLiteral(columnType, literalList.get(0)),
