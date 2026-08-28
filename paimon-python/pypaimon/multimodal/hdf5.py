@@ -493,36 +493,34 @@ def _require_seekable(stream, source):
         ) from error
 
 
-def _strict_arrow_table(
-        data, target_schema, source, batch_index, format_name="HDF5"):
+def _strict_arrow_table(data, target_schema, source, batch_index):
     if isinstance(data, pa.RecordBatch):
         table = pa.Table.from_batches([data])
     elif isinstance(data, pa.Table):
         table = data
     else:
         raise ValueError(
-            "%s transform must return Arrow data or an iterable of Arrow data."
-            % format_name)
+            "HDF5 transform must return Arrow data or an iterable of Arrow data.")
 
     missing = [
         name for name in target_schema.names if name not in table.column_names
     ]
     if missing:
         raise ValueError(
-            "%s batch %d from %s is missing columns: %s"
-            % (format_name, batch_index, source.path, missing))
+            "HDF5 batch %d from %s is missing columns: %s"
+            % (batch_index, source.path, missing))
     extra = [
         name for name in table.column_names if name not in target_schema.names
     ]
     if extra:
         raise ValueError(
-            "%s batch %d from %s has unexpected columns: %s"
-            % (format_name, batch_index, source.path, extra))
+            "HDF5 batch %d from %s has unexpected columns: %s"
+            % (batch_index, source.path, extra))
     if table.column_names != target_schema.names:
         raise ValueError(
-            "%s batch %d from %s has columns in the wrong order: %s; "
+            "HDF5 batch %d from %s has columns in the wrong order: %s; "
             "expected %s."
-            % (format_name, batch_index, source.path, table.column_names,
+            % (batch_index, source.path, table.column_names,
                target_schema.names))
     try:
         _validate_nested_nullability(table, target_schema)
@@ -533,8 +531,8 @@ def _strict_arrow_table(
         return casted
     except (ValueError, TypeError, NotImplementedError) as error:
         raise ValueError(
-            "%s batch %d from %s cannot be converted to the table schema: %s"
-            % (format_name, batch_index, source.path, error)) from error
+            "HDF5 batch %d from %s cannot be converted to the table schema: %s"
+            % (batch_index, source.path, error)) from error
 
 
 def _validate_nested_nullability(table, schema):
