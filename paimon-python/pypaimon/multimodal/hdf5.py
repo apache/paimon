@@ -72,10 +72,14 @@ class Hdf5File:
 
 @dataclass(frozen=True)
 class Hdf5LoadResult:
-    """Counts and optional snapshot for one ``load_from_hdf5`` call."""
+    """Counts and optional snapshot for one ``load_from_hdf5`` call.
+
+    ``batch_count`` is unavailable for Ray loads because counting lazy output
+    batches would execute the transform a second time.
+    """
 
     file_count: int
-    batch_count: int
+    batch_count: Optional[int]
     row_count: int
     snapshot_id: Optional[int]
 

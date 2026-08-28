@@ -177,6 +177,15 @@ def discover_episodes(input_root):
     episodes = []
     episode_ids = set()
     for path in paths:
+        resolved_path = path.resolve()
+        try:
+            resolved_path.relative_to(root)
+        except ValueError:
+            raise ValueError(
+                "RoboMIND trajectory path escapes input root: %s" % path)
+        if path.is_symlink():
+            raise ValueError(
+                "RoboMIND trajectory path must not be a symlink: %s" % path)
         source_key = path.relative_to(root).as_posix()
         split = _path_component(source_key, ("train", "val"), "split")
         status = _path_component(
@@ -186,7 +195,7 @@ def discover_episodes(input_root):
             raise ValueError("Duplicate RoboMIND episode_id %r." % episode_id)
         episode_ids.add(episode_id)
         episodes.append(EpisodeSource(
-            path=path,
+            path=resolved_path,
             source_key=source_key,
             episode_id=episode_id,
             split=split,
@@ -272,7 +281,8 @@ class RoboMindAgileXFrameTransform(_RoboMindAgileXTransform):
                         "%s: /%s contains NaN or Inf."
                         % (episode.source_key, hdf5_path)
                     )
-                columns[name] = values.tolist()
+                columns[name] = pa.FixedSizeListArray.from_arrays(
+                    pa.array(values.reshape(-1), type=pa.float64()), 7)
             yield pa.RecordBatch.from_pydict(columns, schema=frame_schema())
 
 
@@ -341,7 +351,7 @@ def ingest_ray(
     if concurrency is not None:
         concurrency = _positive_int(concurrency, "concurrency")
     episodes = discover_episodes(input_root)
-    _, episodes_table, frames_table = _create_tables(warehouse, database)
+    _create_tables(warehouse, database)
 
     try:
         import ray
@@ -369,25 +379,23 @@ def ingest_ray(
         catalog_options = {
             "warehouse": str(Path(warehouse).expanduser().resolve())}
         paths = [episode.path for episode in episodes]
-        load_from_hdf5(
+        episode_result = load_from_hdf5(
             "%s.%s" % (database, EPISODES_TABLE), paths, catalog_options,
             transform=RoboMindAgileXEpisodeTransform(episodes),
             concurrency=concurrency,
         )
-        load_from_hdf5(
+        frame_result = load_from_hdf5(
             "%s.%s" % (database, FRAMES_TABLE), paths, catalog_options,
             transform=RoboMindAgileXFrameTransform(
                 episodes, batch_size=batch_size),
             concurrency=concurrency,
         )
-        episode_rows = _read_raw(episodes_table.raw_table, ["episode_id"])
-        frame_rows = _read_raw(frames_table.raw_table, ["frame_index"])
         return IngestResult(
             mode="ray",
-            episode_count=episode_rows.num_rows,
-            frame_count=frame_rows.num_rows,
-            episodes_snapshot_id=_snapshot_id(episodes_table),
-            frames_snapshot_id=_snapshot_id(frames_table),
+            episode_count=episode_result.row_count,
+            frame_count=frame_result.row_count,
+            episodes_snapshot_id=episode_result.snapshot_id,
+            frames_snapshot_id=frame_result.snapshot_id,
         )
     finally:
         if initialized_here:
@@ -420,32 +428,6 @@ def build_canonical_action_backfill(source):
         "_ROW_ID": source["_ROW_ID"],
         _ACTION_COLUMN: pa.array(action.tolist(), type=_ACTION_VECTOR_TYPE),
     })
-
-
-def build_action_statistics(source, train_episode_ids):
-    """Compute train-only action population statistics."""
-    train_ids = set(train_episode_ids)
-    if not train_ids:
-        raise ValueError("Cannot compute action statistics without train episodes.")
-    episode_ids = np.asarray(source["episode_id"].to_pylist(), dtype=object)
-    frame_indices = np.asarray(source["frame_index"].to_pylist(), dtype=np.int64)
-    train = np.asarray([value in train_ids for value in episode_ids], dtype=bool)
-    if not train.any():
-        raise ValueError("No frame rows belong to the train episodes.")
-    action = np.asarray(source[_ACTION_COLUMN].to_pylist(), dtype=np.float64)
-    train_rows = sorted(
-        np.flatnonzero(train),
-        key=lambda index: (episode_ids[index], int(frame_indices[index])))
-    train_action = action[train_rows]
-    mean = train_action.mean(axis=0)
-    std = np.maximum(train_action.std(axis=0), _STANDARD_DEVIATION_FLOOR)
-    statistics = {
-        "frame_count": int(train.sum()),
-        "action_mean": mean.tolist(),
-        "action_std": std.tolist(),
-        "standard_deviation_floor": _STANDARD_DEVIATION_FLOOR,
-    }
-    return statistics
 
 
 def backfill_canonical_action(
@@ -585,6 +567,8 @@ def _update_canonical_action_batches(table):
     try:
         for source in _iter_raw(
                 table, [_ACTION_LEFT, _ACTION_RIGHT, "_ROW_ID"]):
+            if source.num_rows == 0:
+                continue
             updates = build_canonical_action_backfill(source)
             messages.extend(
                 builder.new_update()
@@ -599,13 +583,13 @@ def _update_canonical_action_batches(table):
 
 
 def _stream_action_statistics(table, train_episode_ids):
-    """Accumulate only fixed-size count/sum/sum-of-squares on the driver."""
+    """Accumulate fixed-size count, running mean, and M2 on the driver."""
     train_ids = set(train_episode_ids)
     if not train_ids:
         raise ValueError("Cannot compute action statistics without train episodes.")
     count = 0
-    total = np.zeros(14, dtype=np.float64)
-    total_square = np.zeros(14, dtype=np.float64)
+    mean = np.zeros(14, dtype=np.float64)
+    m2 = np.zeros(14, dtype=np.float64)
     for source in _iter_raw(table, ["episode_id", _ACTION_COLUMN]):
         selected = [
             index for index, value in enumerate(source["episode_id"].to_pylist())
@@ -617,13 +601,20 @@ def _stream_action_statistics(table, train_episode_ids):
             source[_ACTION_COLUMN].take(pa.array(selected)).to_pylist(),
             dtype=np.float64,
         )
-        count += len(action)
-        total += action.sum(axis=0)
-        total_square += np.square(action).sum(axis=0)
+        batch_count = len(action)
+        batch_mean = action.mean(axis=0)
+        batch_m2 = np.square(action - batch_mean).sum(axis=0)
+        delta = batch_mean - mean
+        combined_count = count + batch_count
+        mean += delta * batch_count / combined_count
+        m2 += (
+            batch_m2
+            + np.square(delta) * count * batch_count / combined_count
+        )
+        count = combined_count
     if count == 0:
         raise ValueError("No frame rows belong to the train episodes.")
-    mean = total / count
-    variance = np.maximum(total_square / count - np.square(mean), 0.0)
+    variance = np.maximum(m2 / count, 0.0)
     return {
         "frame_count": count,
         "action_mean": mean.tolist(),

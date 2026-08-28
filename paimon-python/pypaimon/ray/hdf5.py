@@ -28,13 +28,15 @@ def load_from_hdf5(
         transform,
         source_options: Optional[Mapping[str, object]] = None,
         concurrency: Optional[int] = None,
-        ray_remote_args: Optional[Dict[str, Any]] = None) -> None:
+        ray_remote_args: Optional[Dict[str, Any]] = None):
     """Transform complete HDF5 files on Ray and append them in one commit.
 
     The transform has the same ``(h5py.File, Hdf5File)`` contract as
     :meth:`MultimodalConnection.load_from_hdf5`. Discovery runs on the driver;
     workers open and transform complete files, and the Paimon Ray sink commits
-    all worker messages once.
+    all worker messages once. The result reports logical output rows and the
+    exact committed snapshot; its batch count is ``None`` because Ray does not
+    expose that count without re-executing the lazy transform.
     """
     if not callable(transform):
         raise ValueError("transform must be callable.")
@@ -42,6 +44,7 @@ def load_from_hdf5(
     from pypaimon.catalog.catalog_factory import CatalogFactory
     from pypaimon.common.options import Options
     from pypaimon.multimodal.hdf5 import (
+        Hdf5LoadResult,
         _Hdf5SourceFileIO,
         _discover_hdf5_files,
         _path_values,
@@ -61,7 +64,12 @@ def load_from_hdf5(
     finally:
         source_file_io.close()
     if not files:
-        return
+        return Hdf5LoadResult(
+            file_count=0,
+            batch_count=None,
+            row_count=0,
+            snapshot_id=None,
+        )
 
     table = CatalogFactory.create(catalog_options).get_table(table_identifier)
     target_schema = _target_schema(table)
@@ -81,12 +89,20 @@ def load_from_hdf5(
         concurrency=concurrency,
         **dict(ray_remote_args or {}),
     )
-    write_paimon(
+    write_result = write_paimon(
         transformed,
         table_identifier,
         catalog_options,
         concurrency=concurrency,
         ray_remote_args=ray_remote_args,
+    )
+    return Hdf5LoadResult(
+        file_count=len(files),
+        batch_count=None,
+        row_count=0 if write_result is None else write_result.row_count,
+        snapshot_id=(
+            None if write_result is None else write_result.snapshot_id
+        ),
     )
 
 

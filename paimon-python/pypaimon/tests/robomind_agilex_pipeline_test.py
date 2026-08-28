@@ -14,10 +14,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
 import importlib.util
+import json
 import subprocess
 import sys
+from unittest.mock import MagicMock
 
 import numpy as np
 import pyarrow as pa
@@ -154,6 +155,86 @@ def test_shared_transform_streams_complete_agilex_business_schema(
     ]
 
 
+def _consume_frame_transform(root, path):
+    episodes = agilex.discover_episodes(root)
+    transform = agilex.RoboMindAgileXFrameTransform(episodes)
+    with h5py.File(path, "r") as h5:
+        return list(transform(h5, pmm.Hdf5File(path=path.as_uri())))
+
+
+def test_discover_rejects_duplicate_episode_ids(tmp_path):
+    _write_episode(tmp_path / "task-a", "train", "duplicate", 0)
+    _write_episode(tmp_path / "task-b", "val", "duplicate", 10)
+
+    with pytest.raises(ValueError, match="Duplicate RoboMIND episode_id"):
+        agilex.discover_episodes(tmp_path)
+
+
+def test_discover_rejects_trajectory_symlink_outside_root(tmp_path):
+    target = _write_episode(tmp_path / "outside", "train", "target", 0)
+    root = tmp_path / "input"
+    link = (root / "success_episodes" / "train" / "linked"
+            / "data" / "trajectory.hdf5")
+    link.parent.mkdir(parents=True)
+    link.symlink_to(target)
+
+    with pytest.raises(ValueError, match="escapes input root"):
+        agilex.discover_episodes(root)
+
+
+@pytest.mark.parametrize("invalid_value", [np.nan, np.inf])
+def test_frame_transform_rejects_non_finite_numeric_values(
+        tmp_path, invalid_value):
+    path = _write_episode(tmp_path, "train", "invalid-action", 0)
+    with h5py.File(path, "r+") as h5:
+        h5["master/joint_position_left"][0, 0] = invalid_value
+
+    with pytest.raises(ValueError, match="contains NaN or Inf"):
+        _consume_frame_transform(tmp_path / "13_packbowl", path)
+
+
+def test_transform_rejects_invalid_numeric_dtype(tmp_path):
+    path = _write_episode(tmp_path, "train", "invalid-dtype", 0)
+    numeric_path = _NUMERIC_PATHS[0]
+    with h5py.File(path, "r+") as h5:
+        values = h5[numeric_path][...].astype(np.float32)
+        del h5[numeric_path]
+        h5.create_dataset(numeric_path, data=values)
+
+    with pytest.raises(ValueError, match="invalid /.+ dtype"):
+        _consume_frame_transform(tmp_path / "13_packbowl", path)
+
+
+def test_transform_rejects_missing_camera(tmp_path):
+    path = _write_episode(tmp_path, "train", "missing-camera", 0)
+    with h5py.File(path, "r+") as h5:
+        del h5[_IMAGE_PATHS[0]]
+
+    with pytest.raises(ValueError, match="invalid /observations/rgb_images"):
+        _consume_frame_transform(tmp_path / "13_packbowl", path)
+
+
+def test_transform_rejects_different_frame_lengths(tmp_path):
+    path = _write_episode(tmp_path, "train", "length-mismatch", 0)
+    image_path = _IMAGE_PATHS[0]
+    with h5py.File(path, "r+") as h5:
+        del h5[image_path]
+        h5.create_dataset(image_path, (2,), dtype=h5py.vlen_dtype(np.uint8))
+
+    with pytest.raises(ValueError, match="frame lengths differ"):
+        _consume_frame_transform(tmp_path / "13_packbowl", path)
+
+
+def test_transform_rejects_empty_episode_but_accepts_one_frame(tmp_path):
+    empty = _write_episode(tmp_path, "train", "empty", 0, frames=0)
+    with pytest.raises(ValueError, match="episode has no frames"):
+        _consume_frame_transform(tmp_path / "13_packbowl", empty)
+
+    one = _write_episode(tmp_path, "train", "one", 1, frames=1)
+    batches = _consume_frame_transform(tmp_path / "13_packbowl", one)
+    assert [batch.num_rows for batch in batches] == [1]
+
+
 @requires_vortex
 def test_local_ingest_and_backfill_materialize_only_canonical_action(
         agilex_input, tmp_path):
@@ -208,6 +289,12 @@ def test_local_ingest_and_backfill_materialize_only_canonical_action(
         assert "file.format" not in agilex.TABLE_OPTIONS
     assert "action" in frames.raw_table.field_names
     assert "act_action_normalized" not in frames.raw_table.field_names
+    assert frame_rows.num_rows == 12
+    frame_keys = list(zip(
+        frame_rows["episode_id"].to_pylist(),
+        frame_rows["frame_index"].to_pylist(),
+    ))
+    assert len(frame_keys) == len(set(frame_keys)) == 12
 
     ordered = frame_rows.select([
         "episode_id",
@@ -232,8 +319,15 @@ def test_local_ingest_and_backfill_materialize_only_canonical_action(
     assert stats_row["source_split"] == "train"
     assert stats_row["frame_count"] == 6
     assert stats_row["standard_deviation_floor"] == 0.01
-    assert len(stats_row["action_mean"]) == 14
-    assert len(stats_row["action_std"]) == 14
+    expected_mean = np.concatenate([
+        np.arange(1212, 1219),
+        np.arange(1312, 1319),
+    ])
+    expected_std = np.full(14, np.sqrt(173.0 / 3.0))
+    np.testing.assert_allclose(
+        stats_row["action_mean"], expected_mean, rtol=0, atol=1e-12)
+    np.testing.assert_allclose(
+        stats_row["action_std"], expected_std, rtol=1e-12, atol=1e-12)
 
     refreshed_snapshot = agilex.refresh_action_statistics(
         warehouse, statistics_version="synthetic-actions-refresh@1")
@@ -258,6 +352,8 @@ def test_ray_ingest_matches_local_schema_rows_and_backfill(
             root, ray_warehouse, batch_size=2, concurrency=2)
     finally:
         ray.shutdown()
+    assert ray_result.episodes_snapshot_id == 1
+    assert ray_result.frames_snapshot_id == 1
     ray_backfill = agilex.backfill_canonical_action(
         ray_warehouse, statistics_version="synthetic-actions@1")
 
@@ -278,26 +374,57 @@ def test_ray_ingest_matches_local_schema_rows_and_backfill(
             _logical_rows(ray_warehouse, table_name, schema))
 
 
-def test_action_statistics_are_independent_of_ingest_row_order():
+def test_stream_action_statistics_are_stable_and_order_independent(monkeypatch):
     frame_count = 257
-    base = np.linspace(-0.7, 1.3, frame_count * 14).reshape(
-        frame_count, 14)
-    values = base + np.sin(base * 17.0) * 0.003
+    row = np.arange(frame_count, dtype=np.float64).reshape(-1, 1)
+    feature = np.arange(14, dtype=np.float64).reshape(1, -1)
+    values = (
+        1e6 + row * 0.25 + feature * 0.5
+        + ((row % 7) - 3) * 0.125
+    ).astype(np.float32)
     source = pa.table({
         "episode_id": ["train-a"] * frame_count,
-        "frame_index": np.arange(frame_count, dtype=np.int32),
-        "action_joint_position_left": values[:, :7].tolist(),
-        "action_joint_position_right": values[:, 7:].tolist(),
-        "_ROW_ID": np.arange(frame_count, dtype=np.int64),
+        "action": pa.array(values.tolist(), type=pa.list_(pa.float32(), 14)),
     })
     reversed_source = source.take(
         pa.array(np.arange(frame_count - 1, -1, -1), type=pa.int64()))
 
-    expected = agilex.build_action_statistics(source.append_column(
-        "action", pa.array(values.astype(np.float32).tolist(),
-                           type=pa.list_(pa.float32(), 14))), ["train-a"])
-    actual = agilex.build_action_statistics(reversed_source.append_column(
-        "action", pa.array(values[::-1].astype(np.float32).tolist(),
-                           type=pa.list_(pa.float32(), 14))), ["train-a"])
+    def statistics(batches):
+        monkeypatch.setattr(
+            agilex, "_iter_raw", lambda table, columns: iter(batches))
+        return agilex._stream_action_statistics(object(), ["train-a"])
 
-    assert actual == expected
+    forward = statistics([source.slice(0, 100), source.slice(100)])
+    reverse = statistics([
+        reversed_source.slice(0, 57),
+        reversed_source.slice(57, 100),
+        reversed_source.slice(157),
+    ])
+    expected_mean = values.astype(np.float64).mean(axis=0)
+    expected_std = values.astype(np.float64).std(axis=0)
+
+    for actual in (forward, reverse):
+        assert actual["frame_count"] == frame_count
+        np.testing.assert_allclose(
+            actual["action_mean"], expected_mean, rtol=0, atol=1e-9)
+        np.testing.assert_allclose(
+            actual["action_std"], expected_std, rtol=0, atol=1e-9)
+
+
+def test_canonical_action_update_skips_empty_planned_split(monkeypatch):
+    empty = pa.table({
+        "action_joint_position_left": pa.array([], type=pa.list_(pa.float64(), 7)),
+        "action_joint_position_right": pa.array([], type=pa.list_(pa.float64(), 7)),
+        "_ROW_ID": pa.array([], type=pa.int64()),
+    })
+    table = MagicMock()
+    builder = table.new_batch_write_builder.return_value
+    commit = builder.new_commit.return_value
+    monkeypatch.setattr(
+        agilex, "_iter_raw", lambda raw_table, columns: iter([empty]))
+
+    assert agilex._update_canonical_action_batches(table) == 0
+
+    builder.new_update.assert_not_called()
+    commit.commit.assert_called_once_with([])
+    commit.close.assert_called_once_with()

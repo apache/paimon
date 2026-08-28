@@ -33,6 +33,7 @@ from pypaimon.common.predicate import Predicate
 
 if TYPE_CHECKING:
     import ray.data
+    from pypaimon.write.ray_datasink import PaimonWriteResult
 
 
 def _require_ray_data():
@@ -290,7 +291,7 @@ def write_paimon(
     concurrency: Optional[int] = None,
     ray_remote_args: Optional[Dict[str, Any]] = None,
     hash_fixed_precluster: str = "auto",
-) -> None:
+) -> "Optional[PaimonWriteResult]":
     """Write a Ray Dataset to a Paimon table.
 
     HASH_FIXED rows are assigned to the correct bucket by the Paimon
@@ -312,6 +313,10 @@ def write_paimon(
         hash_fixed_precluster: Pre-clustering mode. ``"auto"`` follows
             table options, ``"off"`` disables it, and ``"map_groups"``
             explicitly enables HASH_FIXED grouping.
+
+    Returns:
+        Metadata for the exact committed snapshot, or ``None`` when no
+        snapshot was committed.
     """
     _require_ray_data()
 
@@ -321,7 +326,7 @@ def write_paimon(
     catalog = CatalogFactory.create(catalog_options)
     table = catalog.get_table(table_identifier)
 
-    write_paimon_dataset(
+    return write_paimon_dataset(
         dataset,
         table,
         overwrite=overwrite,
