@@ -16,7 +16,7 @@
 # under the License.
 
 from collections import defaultdict
-from typing import Any, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import pyarrow
 import pyarrow as pa
@@ -165,6 +165,26 @@ class TableUpdate:
         return TableUpdateByRowId(
             self.table, self.commit_user, commit_identifier,
         ).update_columns(table, cols)
+
+    def _update_by_arrow_batches_with_row_id(
+            self, tables: Iterable[pa.Table], commit_identifier: int
+    ) -> List[CommitMessage]:
+        updater = None
+        try:
+            for table in tables:
+                cols = self.update_cols if self.update_cols is not None else [
+                    c for c in table.column_names
+                    if c != SpecialFields.ROW_ID.name
+                ]
+                if updater is None:
+                    updater = TableUpdateByRowId(
+                        self.table, self.commit_user, commit_identifier)
+                updater.update_columns(table, cols)
+            return [] if updater is None else updater.commit_messages
+        except Exception:
+            if updater is not None:
+                _abort_commit_messages(self.table, updater.commit_messages)
+            raise
 
     def _upsert_by_arrow_with_key(
             self,
@@ -623,6 +643,13 @@ class BatchTableUpdate(TableUpdate):
     def update_by_arrow_with_row_id(self, table: pa.Table) -> List[CommitMessage]:
         """Apply column updates keyed by ``_ROW_ID`` to existing rows."""
         return self._update_by_arrow_with_row_id(table, BATCH_COMMIT_IDENTIFIER)
+
+    def update_by_arrow_batches_with_row_id(
+            self, tables: Iterable[pa.Table]
+    ) -> List[CommitMessage]:
+        """Apply row-id updates from batches using one target-file index."""
+        return self._update_by_arrow_batches_with_row_id(
+            tables, BATCH_COMMIT_IDENTIFIER)
 
     def upsert_by_arrow_with_key(
             self, table: pa.Table, upsert_keys: List[str]

@@ -460,23 +460,24 @@ def materialize_canonical_action(warehouse, *, database=DEFAULT_DATABASE):
         options={"warehouse": str(Path(warehouse).expanduser().resolve())},
     )
     frames_table = connection.get_table(FRAMES_TABLE)
-    _validate_backfill_target(frames_table)
 
     from pypaimon.schema.data_types import AtomicType, VectorType
     from pypaimon.schema.schema_change import SchemaChange
 
-    connection.catalog.alter_table(
-        frames_table.identifier,
-        [SchemaChange.add_column(
-            _ACTION_COLUMN,
-            VectorType(True, AtomicType("FLOAT"), 14),
-            comment=(
-                "Canonical AgileX action: master joint position left "
-                "followed by right."),
-        )],
-        False,
-    )
-    frames_table = connection.get_table(FRAMES_TABLE)
+    action_type = VectorType(True, AtomicType("FLOAT"), 14)
+    if _validate_backfill_target(frames_table, action_type):
+        connection.catalog.alter_table(
+            frames_table.identifier,
+            [SchemaChange.add_column(
+                _ACTION_COLUMN,
+                action_type,
+                comment=(
+                    "Canonical AgileX action: master joint position left "
+                    "followed by right."),
+            )],
+            False,
+        )
+        frames_table = connection.get_table(FRAMES_TABLE)
     row_count = _update_canonical_action_batches(frames_table.raw_table)
     frames_table = connection.get_table(FRAMES_TABLE)
     frames_snapshot_id = _snapshot_id(frames_table)
@@ -549,35 +550,58 @@ def _create_tables(warehouse, database):
     return connection, episodes_table, frames_table
 
 
-def _validate_backfill_target(frames_table):
+def _validate_backfill_target(frames_table, action_type):
     missing = [
         name for name in (_ACTION_LEFT, _ACTION_RIGHT)
         if name not in frames_table.raw_table.field_names
     ]
     if missing:
         raise ValueError("Frames table is missing raw action columns: %s." % missing)
-    if _ACTION_COLUMN in frames_table.raw_table.field_names:
-        raise ValueError("Canonical action column already exists.")
+    action_field = next(
+        (field for field in frames_table.raw_table.table_schema.fields
+         if field.name == _ACTION_COLUMN),
+        None,
+    )
+    if action_field is None:
+        return True
+    if action_field.type != action_type:
+        raise ValueError(
+            "Canonical action column has incompatible type: %s."
+            % action_field.type)
+    return False
 
 
 def _update_canonical_action_batches(table):
     """Transform one planned Paimon split at a time and commit all updates once."""
     builder = table.new_batch_write_builder()
     commit = builder.new_commit()
-    messages = []
     row_count = 0
-    try:
+
+    def updates():
+        nonlocal row_count
         for source in _iter_raw(
                 table, [_ACTION_LEFT, _ACTION_RIGHT, "_ROW_ID"]):
             if source.num_rows == 0:
                 continue
-            updates = build_canonical_action_backfill(source)
-            messages.extend(
+            update = build_canonical_action_backfill(source)
+            row_count += len(update)
+            yield update
+
+    try:
+        update_batches = updates()
+        first = next(update_batches, None)
+        if first is None:
+            messages = []
+        else:
+            def all_updates():
+                yield first
+                yield from update_batches
+
+            messages = (
                 builder.new_update()
                 .with_update_type([_ACTION_COLUMN])
-                .update_by_arrow_with_row_id(updates)
+                .update_by_arrow_batches_with_row_id(all_updates())
             )
-            row_count += len(updates)
         commit.commit(messages)
     finally:
         commit.close()
@@ -673,7 +697,9 @@ def _validate_source(h5, source_key):
 
 
 def _instruction(h5, source_key):
-    if "language_raw" not in h5 or h5["language_raw"].shape != (1,):
+    if "language_raw" not in h5:
+        return None
+    if h5["language_raw"].shape != (1,):
         raise ValueError("%s: invalid /language_raw shape." % source_key)
     value = h5["language_raw"][0]
     if isinstance(value, bytes):
@@ -684,8 +710,9 @@ def _instruction(h5, source_key):
 
 
 def _instruction_embedding(h5, source_key):
-    if ("language_distilbert" not in h5
-            or h5["language_distilbert"].shape != (1, 1, 768)):
+    if "language_distilbert" not in h5:
+        return None
+    if h5["language_distilbert"].shape != (1, 1, 768):
         raise ValueError(
             "%s: invalid /language_distilbert shape." % source_key)
     values = np.asarray(h5["language_distilbert"][0, 0], dtype=np.float32)

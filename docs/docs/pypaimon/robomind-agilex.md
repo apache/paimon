@@ -45,11 +45,11 @@ normalization statistics.
 
 ## Run the local pipeline
 
-After downloading RoboMIND, install the HDF5 extra and provide the source and
-warehouse directories to one command:
+After downloading RoboMIND, use Python 3.11 or later, install the HDF5 and
+Vortex extras, and provide the source and warehouse directories to one command:
 
 ```bash
-pip install 'pypaimon[hdf5]'
+pip install 'pypaimon[hdf5,vortex]'
 python -m pypaimon.sample.robomind_agilex \
   --input /data/RoboMIND/h5_agilex_3rgb \
   --warehouse /data/warehouse
@@ -61,9 +61,14 @@ writes versioned train-split normalization statistics. It prints a JSON result
 with row counts and committed snapshot IDs. The input must already be present
 locally; the command does not download RoboMIND or contact Hugging Face.
 
-Use a new warehouse for each run. Ingestion is append-only, so repeating the
-same input against existing tables would create duplicate rows; a completed
-warehouse also rejects a second canonical-action backfill.
+Use a new warehouse for each ingestion run. Ingestion is append-only, so
+repeating the same input against existing tables would create duplicate rows.
+Canonical-action backfill is independently retryable after schema creation.
+
+The current Hugging Face example data includes `language_raw` and
+`language_distilbert`, but these datasets are not part of the published AgileX
+HDF5 schema. The episode transform therefore validates and stores them when
+present, and writes null instruction metadata when they are absent.
 
 Pytest generates several small HDF5 episodes with the real AgileX field names,
 shapes, dtypes, split layout, and success layout, so the default test needs no

@@ -162,6 +162,23 @@ def _consume_frame_transform(root, path):
         return list(transform(h5, pmm.Hdf5File(path=path.as_uri())))
 
 
+def test_episode_transform_accepts_published_shape_without_language(tmp_path):
+    path = _write_episode(tmp_path, "train", "no-language", 0)
+    with h5py.File(path, "r+") as h5:
+        del h5["language_raw"]
+        del h5["language_distilbert"]
+
+    episodes = agilex.discover_episodes(tmp_path / "13_packbowl")
+    transform = agilex.RoboMindAgileXEpisodeTransform(episodes)
+    with h5py.File(path, "r") as h5:
+        batches = list(
+            transform(h5, pmm.Hdf5File(path=path.as_uri())))
+
+    assert len(batches) == 1
+    assert batches[0]["instruction"].to_pylist() == [None]
+    assert batches[0]["instruction_embedding"].to_pylist() == [None]
+
+
 def test_discover_rejects_duplicate_episode_ids(tmp_path):
     _write_episode(tmp_path / "task-a", "train", "duplicate", 0)
     _write_episode(tmp_path / "task-b", "val", "duplicate", 10)
@@ -335,6 +352,41 @@ def test_local_ingest_and_backfill_materialize_only_canonical_action(
 
 
 @requires_vortex
+def test_canonical_action_backfill_resumes_after_schema_change(
+        agilex_input, tmp_path, monkeypatch):
+    root, _ = agilex_input
+    warehouse = tmp_path / "retry-warehouse"
+    agilex.ingest_local(root, warehouse)
+
+    original_update = agilex._update_canonical_action_batches
+
+    def fail_after_alter(table):
+        raise RuntimeError("injected update failure")
+
+    monkeypatch.setattr(
+        agilex, "_update_canonical_action_batches", fail_after_alter)
+    with pytest.raises(RuntimeError, match="injected update failure"):
+        agilex.materialize_canonical_action(warehouse)
+
+    monkeypatch.setattr(
+        agilex, "_update_canonical_action_batches", original_update)
+    row_count, snapshot_id = agilex.materialize_canonical_action(warehouse)
+
+    frames, rows = _read(
+        warehouse,
+        agilex.FRAMES_TABLE,
+        ["action_joint_position_left", "action_joint_position_right", "action"],
+    )
+    assert row_count == rows.num_rows == 12
+    assert snapshot_id == agilex._snapshot_id(frames)
+    for row in rows.to_pylist():
+        expected = np.asarray(
+            row["action_joint_position_left"]
+            + row["action_joint_position_right"], dtype=np.float32)
+        np.testing.assert_array_equal(row["action"], expected)
+
+
+@requires_vortex
 def test_ray_ingest_matches_local_schema_rows_and_backfill(
         agilex_input, tmp_path):
     ray = pytest.importorskip("ray")
@@ -428,3 +480,41 @@ def test_canonical_action_update_skips_empty_planned_split(monkeypatch):
     builder.new_update.assert_not_called()
     commit.commit.assert_called_once_with([])
     commit.close.assert_called_once_with()
+
+
+def test_canonical_action_update_reuses_one_row_id_updater(monkeypatch):
+    def source(row_id, offset):
+        return pa.table({
+            "action_joint_position_left": pa.array(
+                [[offset + value for value in range(7)]],
+                type=pa.list_(pa.float64(), 7),
+            ),
+            "action_joint_position_right": pa.array(
+                [[offset + value for value in range(7, 14)]],
+                type=pa.list_(pa.float64(), 7),
+            ),
+            "_ROW_ID": pa.array([row_id], type=pa.int64()),
+        })
+
+    sources = [source(0, 0), source(1, 100)]
+    table = MagicMock()
+    builder = table.new_batch_write_builder.return_value
+    update = builder.new_update.return_value
+    update.with_update_type.return_value = update
+    captured = []
+
+    def update_batches(batches):
+        captured.extend(batches)
+        return ["message"]
+
+    update.update_by_arrow_batches_with_row_id.side_effect = update_batches
+    monkeypatch.setattr(
+        agilex, "_iter_raw", lambda raw_table, columns: iter(sources))
+
+    assert agilex._update_canonical_action_batches(table) == 2
+
+    builder.new_update.assert_called_once_with()
+    assert len(captured) == 2
+    assert captured[0]["_ROW_ID"].to_pylist() == [0]
+    assert captured[1]["_ROW_ID"].to_pylist() == [1]
+    builder.new_commit.return_value.commit.assert_called_once_with(["message"])
