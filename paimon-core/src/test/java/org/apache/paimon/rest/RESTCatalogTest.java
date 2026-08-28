@@ -154,6 +154,7 @@ import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENABLED;
 import static org.apache.paimon.rest.auth.DLFToken.TOKEN_DATE_FORMATTER;
 import static org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMillis;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -3350,6 +3351,92 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThat(table.uuid()).isNotEqualTo(table.fullName());
         assertThat(table.rowType().getField("payload").type())
                 .isInstanceOf(org.apache.paimon.types.VariantType.class);
+    }
+
+    @Test
+    void testRejectedCreateLeavesNoExternalDirectory(@TempDir java.nio.file.Path path)
+            throws Exception {
+        Identifier identifier = Identifier.create("db_that_does_not_exist", "external_rejected");
+        java.nio.file.Path external = path.resolve("not-created-yet");
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.PATH.key(), external.toUri().toString());
+
+        Schema schema =
+                new Schema(
+                        Lists.newArrayList(new DataField(0, "k", DataTypes.INT())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        "");
+
+        assertThatThrownBy(() -> catalog.createTable(identifier, schema, false))
+                .isInstanceOf(Catalog.DatabaseNotExistException.class);
+        assertThat(external.toFile().exists()).isFalse();
+    }
+
+    @Test
+    void testCreatingAnExistingTableIsANoOpWhenItCannotBeRead() throws Exception {
+        Identifier identifier = Identifier.create("iceberg_mirror_db", "no_read");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        Map<String, String> options = new HashMap<>();
+        options.put("metadata.iceberg.storage", "table-location");
+        options.put(CoreOptions.FILE_FORMAT.key(), "parquet");
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        Lists.newArrayList(new DataField(0, "k", DataTypes.INT())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        ""),
+                false);
+        revokeTablePermission(identifier);
+
+        Schema unmirrorable =
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "k", DataTypes.INT()),
+                                new DataField(1, "payload", DataTypes.VARIANT())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        "");
+
+        assertThatCode(() -> catalog.createTable(identifier, unmirrorable, true))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void testCreateExistingTableWithUnmirrorableSchemaReportsAlreadyExists() throws Exception {
+        Identifier identifier = Identifier.create("iceberg_mirror_db", "t");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        Map<String, String> options = new HashMap<>();
+        options.put("metadata.iceberg.storage", "table-location");
+        options.put(CoreOptions.FILE_FORMAT.key(), "parquet");
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        Lists.newArrayList(new DataField(0, "k", DataTypes.INT())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        ""),
+                false);
+
+        Schema unmirrorable =
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "k", DataTypes.INT()),
+                                new DataField(1, "payload", DataTypes.VARIANT())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        "");
+
+        assertThatThrownBy(() -> catalog.createTable(identifier, unmirrorable, false))
+                .isInstanceOf(Catalog.TableAlreadyExistException.class);
+        assertThatCode(() -> catalog.createTable(identifier, unmirrorable, true))
+                .doesNotThrowAnyException();
     }
 
     @Test

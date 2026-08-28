@@ -20,6 +20,8 @@ package org.apache.paimon.iceberg;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
@@ -47,16 +49,21 @@ import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.SimpleFileEntry;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitCallback;
+import org.apache.paimon.table.sink.CommitPreCallback;
 import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
@@ -67,15 +74,22 @@ import org.apache.paimon.tag.Tag;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeDefaultVisitor;
+import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.ManifestReadThreadPool;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
+
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -85,10 +99,12 @@ import javax.annotation.Nullable;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -96,12 +112,12 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
@@ -110,7 +126,7 @@ import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETIO
  * A {@link CommitCallback} to create Iceberg compatible metadata, so Iceberg readers can read
  * Paimon's {@link RawFile}.
  */
-public class IcebergCommitCallback implements CommitCallback, TagCallback {
+public class IcebergCommitCallback implements CommitCallback, CommitPreCallback, TagCallback {
 
     private static final Logger LOG = LoggerFactory.getLogger(IcebergCommitCallback.class);
 
@@ -144,6 +160,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
     private final FileStorePathFactory fileStorePathFactory;
     private final IcebergManifestFile manifestFile;
     private final IcebergManifestList manifestList;
+    // see readManifestListWithFallback
+    private IcebergManifestList legacyManifestList;
     private final int formatVersion;
 
     private final IndexFileHandler indexFileHandler;
@@ -194,14 +212,389 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
         this.formatVersion =
                 table.coreOptions().toConfiguration().get(IcebergOptions.FORMAT_VERSION);
-        Preconditions.checkArgument(
-                formatVersion == IcebergMetadata.FORMAT_VERSION_V2
-                        || formatVersion == IcebergMetadata.FORMAT_VERSION_V3,
-                "Unsupported iceberg format version! Only version 2 or version 3 is valid, but current version is ",
-                formatVersion);
+        checkSupportedFormatVersion(formatVersion);
+        // schema and manifest-legacy config are checked in preflightSchemas, not here, so abort()
+        // (which emits no Iceberg metadata) is not blocked
 
         this.indexFileHandler = table.store().newIndexFileHandler();
         this.needAddDvToIceberg = needAddDvToIceberg();
+    }
+
+    /** Creates an instance for tag-only use ({@link #notifyCreation} / {@link #notifyDeletion}). */
+    public static IcebergCommitCallback forTagCallbacks(FileStoreTable table) {
+        return new IcebergCommitCallback(table, "");
+    }
+
+    /**
+     * Rejects a schema the Iceberg mirror could not represent. A no-op when compatibility is off.
+     */
+    public static void checkSchemaMirrorable(Options options, RowType rowType) {
+        if (options.get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                == IcebergOptions.StorageType.DISABLED) {
+            return;
+        }
+        // geospatial has its own rule upstream; the gates here reach paths it does not
+        SchemaValidation.validateIcebergGeospatialTypes(rowType, new CoreOptions(options.toMap()));
+        int formatVersion = options.get(IcebergOptions.FORMAT_VERSION);
+        checkSupportedFormatVersion(formatVersion);
+        Preconditions.checkArgument(
+                formatVersion < IcebergMetadata.FORMAT_VERSION_V3
+                        || !options.get(IcebergOptions.MANIFEST_LEGACY_VERSION),
+                "'%s' cannot be used with Iceberg format version 3: the legacy manifest "
+                        + "schema cannot carry the first_row_id field required by v3 row lineage.",
+                IcebergOptions.MANIFEST_LEGACY_VERSION.key());
+        checkFormatVersionSupportsSchema(formatVersion, rowType);
+        // the version rules say what is accepted; the conversion is the authority on what can be
+        // expressed at all (precisions out of range, blobs, vectors)
+        for (DataField field : rowType.getFields()) {
+            new IcebergDataField(field);
+        }
+    }
+
+    /**
+     * The newest schema this commit can publish: the latest one when it is representable, else the
+     * newest representable one below it. The snapshot is already durable here, so an unsupported
+     * schema that slipped past the pre-commit check degrades instead of failing the commit.
+     */
+    private int publishableSchemaId(SchemaCache schemaCache, long latestSchemaId) {
+        for (long id = latestSchemaId; id >= 0; id--) {
+            try {
+                schemaCache.getValidated(id);
+                return (int) id;
+            } catch (IllegalArgumentException | UnsupportedOperationException notRepresentable) {
+            }
+        }
+        throw new IllegalStateException(
+                "No schema of this table can be represented in Iceberg metadata; "
+                        + "Iceberg compatibility cannot mirror it.");
+    }
+
+    /**
+     * The schema a snapshot entry points at: always its own. Labelling its files with a different
+     * one would make Iceberg read them under fields they were never written with.
+     */
+    /**
+     * Refuses a snapshot whose own schema cannot be emitted, before any manifest is written:
+     * rejecting it after the writes would orphan them on every retry.
+     */
+    private void checkSnapshotSchemaEmittable(
+            SchemaCache schemaCache, long snapshotSchemaId, int emittedUpTo) {
+        boolean emittable = snapshotSchemaId <= emittedUpTo;
+        if (emittable) {
+            try {
+                schemaCache.getValidated(snapshotSchemaId);
+            } catch (IllegalArgumentException | UnsupportedOperationException notRepresentable) {
+                emittable = false;
+            }
+        }
+        Preconditions.checkState(
+                emittable,
+                "Snapshot schema %s cannot be represented in Iceberg metadata, so the snapshot "
+                        + "cannot be mirrored. Remove the unsupported fields, or disable Iceberg "
+                        + "compatibility for this table.",
+                snapshotSchemaId);
+    }
+
+    private static int provenanceSchemaId(List<IcebergSchema> emitted, int snapshotSchemaId) {
+        Preconditions.checkState(
+                emitted.stream().anyMatch(schema -> schema.schemaId() == snapshotSchemaId),
+                "Snapshot schema %s cannot be represented in Iceberg metadata, so the snapshot "
+                        + "cannot be mirrored. Remove the unsupported fields, or disable Iceberg "
+                        + "compatibility for this table.",
+                snapshotSchemaId);
+        return snapshotSchemaId;
+    }
+
+    /**
+     * Rejects a schema change the Iceberg mirror cannot represent before it is persisted. Under
+     * mirroring only what the change introduces is judged, so a table already carrying an
+     * unsupported field can evolve away from it; switching mirroring on judges the whole schema.
+     */
+    public static void checkSchemaChangeMirrorable(TableSchema oldSchema, TableSchema newSchema) {
+        checkSchemaChangeMirrorable(
+                Options.fromMap(oldSchema.options()),
+                oldSchema.fields(),
+                Options.fromMap(newSchema.options()),
+                newSchema.fields());
+    }
+
+    /** As above, for callers that hold the parts rather than a persisted {@link TableSchema}. */
+    public static void checkSchemaChangeMirrorable(
+            Options oldOptions,
+            List<DataField> oldSchemaFields,
+            Options newOptions,
+            List<DataField> newSchemaFields) {
+        if (newOptions.get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                == IcebergOptions.StorageType.DISABLED) {
+            return;
+        }
+        if (oldOptions.get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                == IcebergOptions.StorageType.DISABLED) {
+            // switching mirroring on starts mirroring every field, not only what changed
+            checkSchemaMirrorable(newOptions, new RowType(newSchemaFields));
+            return;
+        }
+        int formatVersion = newOptions.get(IcebergOptions.FORMAT_VERSION);
+        if (!Objects.equals(
+                        oldOptions.get(IcebergOptions.FORMAT_VERSION),
+                        newOptions.get(IcebergOptions.FORMAT_VERSION))
+                || !Objects.equals(
+                        oldOptions.get(IcebergOptions.MANIFEST_LEGACY_VERSION),
+                        newOptions.get(IcebergOptions.MANIFEST_LEGACY_VERSION))) {
+            checkSupportedFormatVersion(formatVersion);
+            Preconditions.checkArgument(
+                    formatVersion >= oldOptions.get(IcebergOptions.FORMAT_VERSION),
+                    "Iceberg format version cannot be lowered from %s to %s: metadata already "
+                            + "written at the higher version cannot be extended by a lower one.",
+                    oldOptions.get(IcebergOptions.FORMAT_VERSION),
+                    formatVersion);
+            Preconditions.checkArgument(
+                    formatVersion < IcebergMetadata.FORMAT_VERSION_V3
+                            || !newOptions.get(IcebergOptions.MANIFEST_LEGACY_VERSION),
+                    "'%s' cannot be used with Iceberg format version 3: the legacy manifest "
+                            + "schema cannot carry the first_row_id field required by v3 row lineage.",
+                    IcebergOptions.MANIFEST_LEGACY_VERSION.key());
+        }
+        Map<Integer, DataType> oldFields = new HashMap<>();
+        for (DataField field : oldSchemaFields) {
+            oldFields.put(field.id(), field.type());
+        }
+        List<DataField> introduced = new ArrayList<>();
+        for (DataField field : newSchemaFields) {
+            collectIntroduced(
+                    oldFields.get(field.id()), field.type(), field.name(), field.id(), introduced);
+        }
+        if (introduced.isEmpty()) {
+            return;
+        }
+        checkFormatVersionSupportsSchema(formatVersion, new RowType(introduced));
+        for (DataField field : introduced) {
+            new IcebergDataField(field);
+        }
+    }
+
+    /**
+     * The part of {@code updated} this change actually introduces, or null when it carries nothing
+     * new. Nested types are compared by field id, so adding a supported field next to an
+     * unsupported sibling does not drag the sibling back into validation.
+     */
+    /** As above, collecting into {@code introduced} rather than returning. */
+    private static void collectIntroduced(
+            @Nullable DataType existing,
+            DataType updated,
+            String path,
+            int id,
+            List<DataField> introduced) {
+        if (existing == null) {
+            introduced.add(new DataField(id, path, updated));
+            return;
+        }
+        if (existing.equals(updated)) {
+            return;
+        }
+        if (existing instanceof RowType && updated instanceof RowType) {
+            Map<Integer, DataType> existingFields = new HashMap<>();
+            for (DataField field : ((RowType) existing).getFields()) {
+                existingFields.put(field.id(), field.type());
+            }
+            for (DataField field : ((RowType) updated).getFields()) {
+                collectIntroduced(
+                        existingFields.get(field.id()),
+                        field.type(),
+                        path + "." + field.name(),
+                        field.id(),
+                        introduced);
+            }
+            return;
+        }
+        if (existing instanceof ArrayType && updated instanceof ArrayType) {
+            collectIntroduced(
+                    ((ArrayType) existing).getElementType(),
+                    ((ArrayType) updated).getElementType(),
+                    path + ".element",
+                    id,
+                    introduced);
+            return;
+        }
+        if (existing instanceof MultisetType && updated instanceof MultisetType) {
+            collectIntroduced(
+                    ((MultisetType) existing).getElementType(),
+                    ((MultisetType) updated).getElementType(),
+                    path + ".element",
+                    id,
+                    introduced);
+            return;
+        }
+        if (existing instanceof MapType && updated instanceof MapType) {
+            collectIntroduced(
+                    ((MapType) existing).getKeyType(),
+                    ((MapType) updated).getKeyType(),
+                    path + ".key",
+                    id,
+                    introduced);
+            collectIntroduced(
+                    ((MapType) existing).getValueType(),
+                    ((MapType) updated).getValueType(),
+                    path + ".value",
+                    id,
+                    introduced);
+            return;
+        }
+        introduced.add(new DataField(id, path, updated));
+    }
+
+    /**
+     * Refuses re-enabling mirroring at a format version below one this table already published: the
+     * metadata written back then cannot be extended by a lower version.
+     */
+    public static void checkNoFormatVersionRegression(
+            Options newOptions, List<TableSchema> history) {
+        if (newOptions.get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                == IcebergOptions.StorageType.DISABLED) {
+            return;
+        }
+        checkNoFormatVersionRegressionOnRestore(newOptions, history);
+    }
+
+    /**
+     * The same rule, applied even when the schema being installed disables mirroring: fast-forward
+     * and rollback delete the history that records what was published, so the evidence has to be
+     * checked before it is gone.
+     */
+    public static void checkNoFormatVersionRegressionOnRestore(
+            Options newOptions, List<TableSchema> history) {
+        int formatVersion = newOptions.get(IcebergOptions.FORMAT_VERSION);
+        for (TableSchema past : history) {
+            Options pastOptions = Options.fromMap(past.options());
+            if (pastOptions.get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                    == IcebergOptions.StorageType.DISABLED) {
+                continue;
+            }
+            Preconditions.checkArgument(
+                    formatVersion >= pastOptions.get(IcebergOptions.FORMAT_VERSION),
+                    "Iceberg format version cannot be lowered from %s to %s: metadata already "
+                            + "written at the higher version cannot be extended by a lower one.",
+                    pastOptions.get(IcebergOptions.FORMAT_VERSION),
+                    formatVersion);
+        }
+    }
+
+    static void checkSupportedFormatVersion(int formatVersion) {
+        Preconditions.checkArgument(
+                formatVersion == IcebergMetadata.FORMAT_VERSION_V2
+                        || formatVersion == IcebergMetadata.FORMAT_VERSION_V3,
+                "Unsupported iceberg format version! Only version 2 or version 3 is valid, but current version is %s.",
+                formatVersion);
+    }
+
+    static void checkFormatVersionSupportsSchema(int formatVersion, RowType rowType) {
+        RestrictedTypeCollector collector = new RestrictedTypeCollector();
+        rowType.accept(collector);
+        throwOnNanosecondTimestamps(collector.nanosTimestamps);
+        throwOnV3OnlyTypes(collector.v3OnlyTypes, formatVersion);
+    }
+
+    /**
+     * Collects the types the Iceberg mirror cannot emit, with the path of each offending field.
+     * Leaf types not named here are representable, or rejected later by the type conversion itself
+     * ({@link IcebergDataField#toTypeString}).
+     */
+    private static class RestrictedTypeCollector extends DataTypeDefaultVisitor<Void> {
+
+        private final Collection<String> nanosTimestamps = new LinkedHashSet<>();
+        private final Collection<String> v3OnlyTypes = new LinkedHashSet<>();
+        private final Deque<String> path = new ArrayDeque<>();
+
+        private Void descend(String name, DataType type) {
+            path.addLast(name);
+            type.accept(this);
+            path.removeLast();
+            return null;
+        }
+
+        private String currentPath(DataType type) {
+            return String.join(".", path) + ": " + type.asSQLString();
+        }
+
+        @Override
+        public Void visit(VariantType variantType) {
+            v3OnlyTypes.add(currentPath(variantType));
+            return null;
+        }
+
+        @Override
+        public Void visit(TimestampType timestampType) {
+            if (timestampType.getPrecision() >= IcebergDataField.MIN_NANOS_TIMESTAMP_PRECISION) {
+                nanosTimestamps.add(currentPath(timestampType));
+            }
+            return null;
+        }
+
+        @Override
+        public Void visit(LocalZonedTimestampType localZonedTimestampType) {
+            if (localZonedTimestampType.getPrecision()
+                    >= IcebergDataField.MIN_NANOS_TIMESTAMP_PRECISION) {
+                nanosTimestamps.add(currentPath(localZonedTimestampType));
+            }
+            return null;
+        }
+
+        @Override
+        public Void visit(ArrayType arrayType) {
+            return descend("element", arrayType.getElementType());
+        }
+
+        @Override
+        public Void visit(MultisetType multisetType) {
+            return descend("element", multisetType.getElementType());
+        }
+
+        @Override
+        public Void visit(VectorType vectorType) {
+            return descend("element", vectorType.getElementType());
+        }
+
+        @Override
+        public Void visit(MapType mapType) {
+            descend("key", mapType.getKeyType());
+            return descend("value", mapType.getValueType());
+        }
+
+        @Override
+        public Void visit(RowType rowType) {
+            for (DataField field : rowType.getFields()) {
+                descend(field.name(), field.type());
+            }
+            return null;
+        }
+
+        @Override
+        protected Void defaultMethod(DataType dataType) {
+            return null;
+        }
+    }
+
+    private static void throwOnNanosecondTimestamps(Collection<String> nanosTimestamps) {
+        // Paimon writes a nanosecond timestamp as Parquet INT96, which Iceberg reads as a
+        // microsecond zoned timestamp rather than timestamp_ns, so the metadata is unreadable.
+        Preconditions.checkArgument(
+                nanosTimestamps.isEmpty(),
+                "Nanosecond-precision timestamps %s are not supported by Iceberg compatibility "
+                        + "because Paimon writes them as Parquet INT96, which Iceberg cannot read "
+                        + "as timestamp_ns. Use a timestamp precision of 6 or less.",
+                nanosTimestamps);
+    }
+
+    // v3-only types stay rejected on every format version: the metadata emitted for format
+    // version 3 carries no row lineage yet, so such a table would not be a valid v3 table either
+    private static void throwOnV3OnlyTypes(Collection<String> v3OnlyTypes, int formatVersion) {
+        Preconditions.checkArgument(
+                v3OnlyTypes.isEmpty(),
+                "Data types %s are not supported by Iceberg compatibility: they need Iceberg "
+                        + "format version 3, whose row lineage this layer does not emit yet "
+                        + "(format version %s in use).",
+                v3OnlyTypes,
+                formatVersion);
     }
 
     public static Path catalogTableMetadataPath(FileStoreTable table) {
@@ -210,17 +603,24 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
     }
 
     public static Path catalogDatabasePath(FileStoreTable table) {
-        Path dbPath = table.location().getParent();
-        final String dbSuffix = ".db";
+        return catalogDatabasePath(table, resolveStorageLocation(table));
+    }
 
+    private static IcebergOptions.StorageLocation resolveStorageLocation(FileStoreTable table) {
         IcebergOptions.StorageType storageType =
                 table.coreOptions().toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE);
+        return table.coreOptions()
+                .toConfiguration()
+                .getOptional(IcebergOptions.METADATA_ICEBERG_STORAGE_LOCATION)
+                .orElse(inferDefaultMetadataLocation(storageType));
+    }
 
-        IcebergOptions.StorageLocation storageLocation =
-                table.coreOptions()
-                        .toConfiguration()
-                        .getOptional(IcebergOptions.METADATA_ICEBERG_STORAGE_LOCATION)
-                        .orElse(inferDefaultMetadataLocation(storageType));
+    private static Path catalogDatabasePath(
+            FileStoreTable table, IcebergOptions.StorageLocation storageLocation) {
+        Path dbPath = table.location().getParent();
+        final String dbSuffix = ".db";
+        IcebergOptions.StorageType storageType =
+                table.coreOptions().toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE);
 
         switch (storageLocation) {
             case TABLE_LOCATION:
@@ -279,6 +679,76 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
     }
 
     @Override
+    public void call(
+            List<SimpleFileEntry> baseFiles,
+            List<ManifestEntry> deltaFiles,
+            List<IndexManifestEntry> indexFiles,
+            Snapshot snapshot) {
+        preflightSchemas(snapshot, deltaFiles);
+    }
+
+    /**
+     * Validates the schema and partition spec this commit would emit, before the Paimon snapshot is
+     * published: throwing here aborts the commit, unlike the post-commit {@link #call(Context)},
+     * whose snapshot already exists and can only degrade.
+     */
+    private void preflightSchemas(Snapshot snapshot, List<ManifestEntry> deltaFiles) {
+        try {
+            Preconditions.checkArgument(
+                    formatVersion < IcebergMetadata.FORMAT_VERSION_V3
+                            || !table.coreOptions()
+                                    .toConfiguration()
+                                    .get(IcebergOptions.MANIFEST_LEGACY_VERSION),
+                    "'%s' cannot be used with Iceberg format version 3: the legacy manifest "
+                            + "schema cannot carry the first_row_id field required by v3 row lineage.",
+                    IcebergOptions.MANIFEST_LEGACY_VERSION.key());
+            // judge the base the post-commit rebuild mirrors from, not v(id-1)
+            long base = latestMirroredSnapshot(snapshot.id());
+            boolean hasUsableBase = false;
+            Path baseMetadataPath = pathFactory.toMetadataPath(base);
+            if (base >= Snapshot.FIRST_SNAPSHOT_ID && table.fileIO().exists(baseMetadataPath)) {
+                // an unreadable base is rebuilt by the post-commit callback; vetoing the data
+                // commit over mirror-only state would block writes on something else
+                IcebergMetadata baseMetadata = tryReadMetadata(baseMetadataPath);
+                if (baseMetadata != null && isSameFormatVersion(baseMetadata.formatVersion())) {
+                    hasUsableBase = true;
+                }
+            }
+            // gate the schema this commit's data uses: a concurrent ALTER installing an
+            // unsupported one must not veto a commit that does not use it yet
+            SchemaCache schemaCache = new SchemaCache();
+            schemaCache.getValidated(snapshot.schemaId());
+            // a file is mirrored under its own schema, which an ALTER between preparation
+            // and commit can make differ from the snapshot's
+            for (long fileSchemaId : addedFileSchemaIds(deltaFiles)) {
+                schemaCache.getValidated(fileSchemaId);
+            }
+            if (!hasUsableBase) {
+                // without a usable base the partition spec is derived from scratch, where a
+                // VARIANT partition key cannot be represented
+                checkNoVariantPartitionKeys(
+                        table.schema().partitionKeys(), schemaCache.get(snapshot.schemaId()));
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private Set<Long> addedFileSchemaIds(List<ManifestEntry> deltaFiles) {
+        // deletions are mirrored by file path and publish no schema, so removing files written
+        // under a since-dropped unsupported schema must not be vetoed
+        Set<Long> schemaIds = new LinkedHashSet<>();
+        for (ManifestEntry entry : deltaFiles) {
+            // only files that will actually be mirrored matter: a primary-key table publishes
+            // just the levels shouldAddFileToIceberg accepts
+            if (entry.kind() == FileKind.ADD && shouldAddFileToIceberg(entry.file())) {
+                schemaIds.add(entry.file().schemaId());
+            }
+        }
+        return schemaIds;
+    }
+
+    @Override
     public void retry(ManifestCommittable committable) {
         SnapshotManager snapshotManager = table.snapshotManager();
         Snapshot snapshot =
@@ -298,6 +768,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                                                         + table.name()
                                                         + ". This is unexpected."));
         long snapshotId = snapshot.id();
+        // no veto here: this snapshot is already durable, so an unsupported schema introduced
+        // meanwhile must degrade to the newest publishable one, not fail the repair
         createMetadata(
                 snapshot,
                 (removedFiles, addedFiles) ->
@@ -427,25 +899,52 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 }
             }
 
-            Path baseMetadataPath = pathFactory.toMetadataPath(snapshotId - 1);
-
-            if (table.fileIO().exists(baseMetadataPath)) {
-                createMetadataWithBase(
-                        fileChangesCollector,
-                        indexFiles.stream()
-                                .filter(
-                                        index ->
-                                                index.indexFile()
-                                                        .indexType()
-                                                        .equals(DELETION_VECTORS_INDEX))
-                                .collect(Collectors.toList()),
+            // mirror in snapshot order from the latest already-mirrored metadata: each vK
+            // derives its row ids from v(K-1), so no callback reads a stale watermark and two
+            // callbacks cannot hand out overlapping ranges
+            long base = latestMirroredSnapshot(snapshotId);
+            if (base >= Snapshot.FIRST_SNAPSHOT_ID) {
+                mirrorFrom(
+                        base,
                         snapshot,
-                        baseMetadataPath,
+                        fileChangesCollector,
+                        indexFiles,
                         abandonedLastColumnId,
                         abandonedNextRowId);
             } else {
-                createMetadataWithoutBase(
-                        snapshotId, abandonedUuid, abandonedLastColumnId, abandonedNextRowId);
+                // no surviving base: regenerating mints a fresh table uuid, so serialize it —
+                // two cold starts would otherwise publish independent chains — and recheck
+                // under the lock, since a base or a twin may have appeared meanwhile. Without
+                // a catalog lock this is best-effort.
+                String inheritUuid = abandonedUuid;
+                int lastColumnIdFloor = abandonedLastColumnId;
+                long nextRowIdFloor = abandonedNextRowId;
+                try (Lock lock = icebergLock()) {
+                    lock.runWithLock(
+                            () -> {
+                                if (table.fileIO().exists(pathFactory.toMetadataPath(snapshotId))
+                                        && metadataMatchesSnapshot(snapshotId, snapshot)) {
+                                    return null;
+                                }
+                                long rechecked = latestMirroredSnapshot(snapshotId);
+                                if (rechecked >= Snapshot.FIRST_SNAPSHOT_ID) {
+                                    mirrorFrom(
+                                            rechecked,
+                                            snapshot,
+                                            fileChangesCollector,
+                                            indexFiles,
+                                            lastColumnIdFloor,
+                                            nextRowIdFloor);
+                                } else if (!higherMirroredSnapshotExists(snapshotId)) {
+                                    createMetadataWithoutBase(
+                                            snapshotId,
+                                            inheritUuid,
+                                            lastColumnIdFloor,
+                                            nextRowIdFloor);
+                                }
+                                return null;
+                            });
+                }
             }
 
             if (retireSuffix) {
@@ -458,7 +957,161 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             }
         } catch (IOException e) {
             throw new UncheckedIOException(e);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
+    }
+
+    private void mirrorFrom(
+            long base,
+            Snapshot snapshot,
+            FileChangesCollector fileChangesCollector,
+            List<IndexManifestEntry> indexFiles,
+            int lastColumnIdFloor,
+            long nextRowIdFloor)
+            throws IOException {
+        long snapshotId = snapshot.id();
+        for (long id = base + 1; id <= snapshotId; id++) {
+            if (table.fileIO().exists(pathFactory.toMetadataPath(id))) {
+                // only a genuine twin of the target may be skipped; an abandoned twin is
+                // replaced at the write site, so readers keep a working file meanwhile
+                if (id == snapshotId
+                        ? metadataMatchesSnapshot(id, snapshot)
+                        : usableMirrorBase(id)) {
+                    continue;
+                }
+                if (id != snapshotId) {
+                    // a dead survivor mid-chain (its list is gone, or it sits on a rolled-back
+                    // timeline) blocks this walk and every future one
+                    table.fileIO().deleteQuietly(pathFactory.toMetadataPath(id));
+                }
+            }
+            long mirrorId = id;
+            Snapshot toMirror = id == snapshotId ? snapshot : table.snapshotManager().snapshot(id);
+            FileChangesCollector collector =
+                    id == snapshotId
+                            ? fileChangesCollector
+                            : (removed, added) -> collectFileChanges(mirrorId, removed, added);
+            // a replayed predecessor may sit past an expired base, so its dv state cannot be
+            // diffed against a predecessor scan; rebuild it from the snapshot's own live state
+            boolean replay = id != snapshotId;
+            createMetadataWithBase(
+                    collector,
+                    replay ? Collections.emptyList() : deletionVectorIndexes(indexFiles),
+                    toMirror,
+                    pathFactory.toMetadataPath(id - 1),
+                    lastColumnIdFloor,
+                    nextRowIdFloor,
+                    replay);
+        }
+    }
+
+    /** A lock serializing base-less regeneration, or an empty lock when the catalog has none. */
+    private Lock icebergLock() {
+        CatalogEnvironment env = table.catalogEnvironment();
+        CatalogLockFactory lockFactory = env.lockFactory();
+        if (lockFactory == null || env.identifier() == null) {
+            return Lock.empty();
+        }
+        return Lock.fromCatalog(lockFactory.createLock(env.lockContext()), env.identifier());
+    }
+
+    /**
+     * Whether a snapshot above {@code target} already has Iceberg metadata (a newer rebuilt chain).
+     */
+    private boolean higherMirroredSnapshotExists(long target) throws IOException {
+        Long latest = table.snapshotManager().latestSnapshotId();
+        if (latest == null) {
+            return false;
+        }
+        for (long k = latest; k > target; k--) {
+            if (table.fileIO().exists(pathFactory.toMetadataPath(k))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Highest snapshot {@code K < target} whose Iceberg metadata still exists and whose successors
+     * up to {@code target} still have Paimon snapshots to rebuild from, or {@code -1} when no such
+     * base chain survives (cold start, or history expired past what can be reconstructed).
+     */
+    private long latestMirroredSnapshot(long target) throws IOException {
+        SnapshotManager snapshotManager = table.snapshotManager();
+        // target is the snapshot being committed (preflight) or just committed (rebuild); it is
+        // always present, so only the snapshots strictly between the base and target need to exist
+        for (long k = target - 1; k >= Snapshot.FIRST_SNAPSHOT_ID; k--) {
+            if (usableMirrorBase(k)) {
+                for (long id = k + 1; id < target; id++) {
+                    if (!snapshotManager.snapshotExists(id)) {
+                        return -1;
+                    }
+                }
+                return k;
+            }
+            // json retention is separate from list expiry, so the highest survivor may be
+            // unreadable as a base; chaining from it would fail every retry
+            if (!snapshotManager.snapshotExists(k)) {
+                return -1;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Whether snapshot {@code k}'s metadata can serve as a mirror base: its json parses and the
+     * manifest list it points at still exists.
+     */
+    private boolean usableMirrorBase(long k) throws IOException {
+        if (!table.fileIO().exists(pathFactory.toMetadataPath(k))) {
+            return false;
+        }
+        IcebergMetadata metadata;
+        try {
+            metadata = IcebergMetadata.fromPath(table.fileIO(), pathFactory.toMetadataPath(k));
+        } catch (Exception e) {
+            // condemning a survivor takes positive evidence (absent, corrupt, wrong timeline);
+            // a transient read failure fails the walk instead of retiring a live base
+            if (transientReadFailure(e)) {
+                throw new IOException(e);
+            }
+            return false;
+        }
+        if (metadata.currentSnapshot() == null
+                || !table.fileIO().exists(new Path(metadata.currentSnapshot().manifestList()))) {
+            return false;
+        }
+        // a survivor from a rolled-back timeline must not seed the chain: while the live
+        // snapshot k is still around, the metadata has to carry its commit identity
+        if (table.snapshotManager().snapshotExists(k)) {
+            return metadataMatchesSnapshot(metadata, table.snapshotManager().snapshot(k));
+        }
+        // once snapshot k expired the identity is uncheckable: a pending-rollback marker means
+        // the survivor may sit on an abandoned timeline, so only a full rebuild is safe
+        return !table.fileIO()
+                .exists(new Path(pathFactory.metadataDirectory(), RETIRE_PENDING_FILENAME));
+    }
+
+    private static boolean transientReadFailure(Exception e) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof FileNotFoundException || t instanceof JsonProcessingException) {
+                return false;
+            }
+        }
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof IOException) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static List<IndexManifestEntry> deletionVectorIndexes(
+            List<IndexManifestEntry> indexFiles) {
+        return indexFiles.stream()
+                .filter(index -> index.indexFile().indexType().equals(DELETION_VECTORS_INDEX))
+                .collect(Collectors.toList());
     }
 
     // -------------------------------------------------------------------------------------
@@ -482,7 +1135,29 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             throws IOException {
         SnapshotReader snapshotReader = table.newSnapshotReader().withSnapshot(snapshotId);
         Snapshot paimonSnapshot = table.snapshotManager().snapshot(snapshotId);
+        // decide the schema story before any manifest is written: an ALTER between the
+        // preflight and this callback would otherwise orphan everything written meanwhile
         SchemaCache schemaCache = new SchemaCache();
+        int schemaId = publishableSchemaId(schemaCache, schemaCache.getLatestSchemaId());
+        checkSnapshotSchemaEmittable(schemaCache, paimonSnapshot.schemaId(), schemaId);
+        IcebergSchema icebergSchema = schemaCache.get(schemaId);
+        List<IcebergPartitionField> partitionFields =
+                getPartitionFields(table.schema().partitionKeys(), icebergSchema);
+        List<IcebergSchema> allSchemas = new ArrayList<>();
+        for (int id = 0; id <= schemaId; id++) {
+            if (id == schemaId) {
+                allSchemas.add(icebergSchema);
+                continue;
+            }
+            try {
+                allSchemas.add(schemaCache.getValidated(id));
+            } catch (IllegalArgumentException | UnsupportedOperationException notRepresentable) {
+                // only a representability verdict is evidence: any other failure (a missing or
+                // malformed schema file, a flaky read) must not be mistaken for a schema that
+                // was never mirrored, or the snapshot silently loses its schema provenance
+            }
+        }
+        int snapshotSchemaId = provenanceSchemaId(allSchemas, (int) paimonSnapshot.schemaId());
         List<IcebergManifestEntry> dataFileEntries = new ArrayList<>();
         List<IcebergManifestEntry> dvFileEntries = new ArrayList<>();
         SummaryMetrics metrics = new SummaryMetrics();
@@ -552,13 +1227,6 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         : snapshotFirstRowId + rowIdAssignment.assignedRows;
         String manifestListFileName = manifestList.writeWithoutRolling(allManifestFileMetas);
 
-        // current schema follows the latest; the snapshot entry records its own schema
-        int schemaId = (int) schemaCache.getLatestSchemaId();
-        int snapshotSchemaId = (int) paimonSnapshot.schemaId();
-        IcebergSchema icebergSchema = schemaCache.get(schemaId);
-        List<IcebergPartitionField> partitionFields =
-                getPartitionFields(table.schema().partitionKeys(), icebergSchema);
-
         IcebergSnapshotSummary snapshotSummary =
                 computeSnapshotSummary(
                         IcebergSnapshotSummary.APPEND.operation(), paimonSnapshot, metrics);
@@ -588,10 +1256,6 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         // and external catalogs keep refreshing the same table
         String tableUuid = inheritUuid != null ? inheritUuid : UUID.randomUUID().toString();
 
-        List<IcebergSchema> allSchemas =
-                IntStream.rangeClosed(0, schemaId)
-                        .mapToObj(schemaCache::get)
-                        .collect(Collectors.toList());
         IcebergMetadata metadata =
                 new IcebergMetadata(
                         formatVersion,
@@ -630,9 +1294,17 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             table.fileIO().deleteQuietly(metadataPath);
             written = table.fileIO().tryToWriteAtomic(metadataPath, metadata.toJson());
         }
-        if (!written && !metadataMatchesSnapshot(snapshotId, paimonSnapshot)) {
-            // no twin published this snapshot's metadata; fail so the commit retries
-            throw new IllegalStateException("Failed to replace Iceberg metadata " + metadataPath);
+        if (!written) {
+            // decided on one read, like the with-base path above
+            if (metadataMatchesSnapshot(snapshotId, paimonSnapshot)) {
+                // a concurrent callback published this version first; adopt it rather than hand
+                // a divergent twin to the external catalog, and leave expiry to the winner
+                metadata = IcebergMetadata.fromPath(table.fileIO(), metadataPath);
+            } else {
+                // no twin published this snapshot's metadata; fail so the commit retries
+                throw new IllegalStateException(
+                        "Failed to replace Iceberg metadata " + metadataPath);
+            }
         }
         // a delayed callback may still write its metadata (a newer commit extends it), but
         // only the current head may move the hint and the external catalog
@@ -643,9 +1315,11 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                             new Path(pathFactory.metadataDirectory(), VERSION_HINT_FILENAME),
                             String.valueOf(snapshotId));
             commitToExternalCatalog(metadata, metadataPath, null, null);
-            // cleanup only after the catalog serves the new head: a skipped or failed
-            // publication must not delete files an external pointer still references
-            expireAllBefore(snapshotId);
+            // cleanup only after the catalog serves the new head, and only by the writer: a
+            // skipped or failed publication must not delete files a pointer still references
+            if (written) {
+                expireAllBefore(snapshotId);
+            }
         }
     }
 
@@ -721,6 +1395,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
     private List<IcebergPartitionField> getPartitionFields(
             List<String> partitionKeys, IcebergSchema icebergSchema) {
+        checkNoVariantPartitionKeys(partitionKeys, icebergSchema);
+
         Map<String, IcebergDataField> fields = new HashMap<>();
         for (IcebergDataField field : icebergSchema.fields()) {
             fields.put(field.name(), field);
@@ -735,47 +1411,21 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         return result;
     }
 
-    /** VARIANT needs Iceberg row lineage, which Paimon Iceberg compatibility cannot publish. */
-    static void checkVariantNotPublishable(RowType rowType) {
-        Collection<String> variantFields = new LinkedHashSet<>();
-        for (DataField field : rowType.getFields()) {
-            collectVariantFields(field.name(), field.type(), variantFields);
+    // Iceberg's identity transform (the only transform Paimon partition values use) rejects
+    // VARIANT outright, so a VARIANT partition key can never be represented in Iceberg metadata
+    static void checkNoVariantPartitionKeys(
+            List<String> partitionKeys, IcebergSchema icebergSchema) {
+        Set<String> variantPartitionKeys = new LinkedHashSet<>();
+        for (IcebergDataField field : icebergSchema.fields()) {
+            if (partitionKeys.contains(field.name()) && field.dataType() instanceof VariantType) {
+                variantPartitionKeys.add(field.name());
+            }
         }
         Preconditions.checkArgument(
-                variantFields.isEmpty(),
-                "Columns %s use the VARIANT type, which Paimon Iceberg compatibility cannot "
-                        + "publish: it is an Iceberg format-version-3 type that requires row "
-                        + "lineage.",
-                variantFields);
-    }
-
-    private static void collectVariantFields(
-            String path, DataType type, Collection<String> variantFields) {
-        switch (type.getTypeRoot()) {
-            case VARIANT:
-                variantFields.add(path + ": " + type.asSQLString());
-                break;
-            case ARRAY:
-                collectVariantFields(
-                        path + ".element", ((ArrayType) type).getElementType(), variantFields);
-                break;
-            case MULTISET:
-                collectVariantFields(
-                        path + ".element", ((MultisetType) type).getElementType(), variantFields);
-                break;
-            case MAP:
-                collectVariantFields(path + ".key", ((MapType) type).getKeyType(), variantFields);
-                collectVariantFields(
-                        path + ".value", ((MapType) type).getValueType(), variantFields);
-                break;
-            case ROW:
-                for (DataField field : ((RowType) type).getFields()) {
-                    collectVariantFields(path + "." + field.name(), field.type(), variantFields);
-                }
-                break;
-            default:
-                break;
-        }
+                variantPartitionKeys.isEmpty(),
+                "Partition keys %s have type VARIANT, which Iceberg does not support as a "
+                        + "partition key.",
+                variantPartitionKeys);
     }
 
     // -------------------------------------------------------------------------------------
@@ -828,30 +1478,41 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
      * deletes anything, and cleared once a commit has listed and retired the leftovers.
      */
     public static void markRetirePendingForRollback(FileStoreTable table) {
-        if (table.coreOptions().toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
-                == IcebergOptions.StorageType.DISABLED) {
-            return;
-        }
-        try {
-            Path dir = catalogTableMetadataPath(table);
-            if (table.fileIO().exists(dir)) {
-                table.fileIO().overwriteFileUtf8(new Path(dir, RETIRE_PENDING_FILENAME), "");
+        // metadata left by an earlier enablement must learn about the rollback even while
+        // mirroring is off, or a later re-enable would trust an abandoned base
+        for (IcebergOptions.StorageLocation location : IcebergOptions.StorageLocation.values()) {
+            try {
+                Path dir =
+                        new Path(
+                                catalogDatabasePath(table, location),
+                                String.format("%s/metadata", table.location().getName()));
+                if (table.fileIO().exists(dir)) {
+                    table.fileIO().overwriteFileUtf8(new Path(dir, RETIRE_PENDING_FILENAME), "");
+                }
+            } catch (Exception e) {
+                // best-effort: the commit-time suspicion gate still covers the common cases
             }
-        } catch (Exception e) {
-            // best-effort: the commit-time suspicion gate still covers the common cases
         }
     }
 
     /** The version recorded in the hint file, or -1 when absent or unreadable. */
-    private long readVersionHint() {
+    private long readVersionHint() throws IOException {
+        // an absent or corrupt hint reads as -1 and is repaired by the next publication; a
+        // transient read failure must fail the caller instead of authorizing a stale publish
+        String hint;
         try {
-            return Long.parseLong(
+            hint =
                     table.fileIO()
                             .readFileUtf8(
                                     new Path(
-                                            pathFactory.metadataDirectory(), VERSION_HINT_FILENAME))
-                            .trim());
-        } catch (Exception e) {
+                                            pathFactory.metadataDirectory(),
+                                            VERSION_HINT_FILENAME));
+        } catch (FileNotFoundException e) {
+            return -1;
+        }
+        try {
+            return Long.parseLong(hint.trim());
+        } catch (NumberFormatException e) {
             return -1;
         }
     }
@@ -937,7 +1598,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             Snapshot snapshot,
             Path baseMetadataPath,
             int lastColumnIdFloor,
-            long nextRowIdFloor)
+            long nextRowIdFloor,
+            boolean rebuildDvFromLiveState)
             throws IOException {
         long snapshotId = snapshot.id();
         IcebergMetadata baseMetadata = IcebergMetadata.fromPath(table.fileIO(), baseMetadataPath);
@@ -986,10 +1648,11 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             return;
         }
 
-        // decide the schema story before any manifest is written
+        // decide the schema story before any manifest is written: rejecting later would
+        // orphan the manifests written meanwhile
         SchemaCache schemaCache = new SchemaCache();
-        int schemaId = (int) schemaCache.getLatestSchemaId();
-        int snapshotSchemaId = (int) snapshot.schemaId();
+        int schemaId = publishableSchemaId(schemaCache, schemaCache.getLatestSchemaId());
+        checkSnapshotSchemaEmittable(schemaCache, snapshot.schemaId(), schemaId);
         IcebergSchema icebergSchema = schemaCache.get(schemaId);
         // re-verified each commit: a rollback re-evolution can redefine an already
         // verified id while this callback only ever sees increasing snapshot ids
@@ -1032,7 +1695,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         }
 
         List<IcebergManifestFileMeta> baseManifestFileMetas =
-                manifestList.read(baseMetadata.currentSnapshot().manifestList());
+                readManifestListWithFallback(baseMetadata.currentSnapshot().manifestList());
 
         // base manifest file for data files
         List<IcebergManifestFileMeta> baseDataManifestFileMetas =
@@ -1062,6 +1725,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
         // duplicate.
         List<IcebergManifestFileMeta> newDataManifestFileMetas;
         String operation;
+
         if (isAddOnly) {
             // Fast case. We don't need to remove files from `baseMetadata`. We only need to append
             // new metadata files.
@@ -1084,16 +1748,16 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
         List<IcebergManifestFileMeta> newDVManifestFileMetas = new ArrayList<>();
         if (needAddDvToIceberg) {
-            if (!indexFiles.isEmpty()) {
-                // reconstruct the dv index
+            if (rebuildDvFromLiveState || !indexFiles.isEmpty()) {
+                // the dv set changed, or a replay cannot trust an empty incremental delta:
+                // rebuild from live state, which is empty when every dv was removed
                 newDVManifestFileMetas.addAll(createDvManifestFileMetas(snapshot));
             } else {
-                // no new dv index, reuse the old one
+                // unchanged: keep the base delete manifests
                 newDVManifestFileMetas.addAll(baseDVManifestFileMetas);
             }
         }
 
-        // compact data manifest file if needed
         newDataManifestFileMetas = compactMetadataIfNeeded(newDataManifestFileMetas, snapshotId);
 
         SummaryMetrics metrics = new SummaryMetrics();
@@ -1173,14 +1837,33 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             // append only ids the list does not already carry
             Set<Integer> knownSchemaIds =
                     schemas.stream().map(IcebergSchema::schemaId).collect(Collectors.toSet());
-            schemas = new ArrayList<>(schemas);
-            schemas.addAll(
-                    IntStream.rangeClosed(baseMetadata.currentSchemaId() + 1, schemaId)
-                            .filter(id -> !knownSchemaIds.contains(id))
-                            .mapToObj(schemaCache::get)
-                            .collect(Collectors.toList()));
+            List<IcebergSchema> added = new ArrayList<>();
+            for (int id = baseMetadata.currentSchemaId() + 1; id <= schemaId; id++) {
+                if (knownSchemaIds.contains(id)) {
+                    continue;
+                }
+                if (id == schemaId) {
+                    added.add(icebergSchema);
+                    continue;
+                }
+                try {
+                    added.add(schemaCache.getValidated(id));
+                } catch (IllegalArgumentException
+                        | UnsupportedOperationException notRepresentable) {
+                    // a pending schema that was vetoed at its introduction and since remedied
+                    // was never mirrored; leaving it out must not brick every later commit.
+                    // Only a representability verdict counts: a missing or malformed schema
+                    // file must surface instead of silently dropping a valid schema
+                }
+            }
+            if (!added.isEmpty()) {
+                schemas = new ArrayList<>(schemas);
+                schemas.addAll(added);
+            }
         }
         // a schema-pointer rollback (validated above): only the current pointer moves
+
+        int snapshotSchemaId = provenanceSchemaId(schemas, (int) snapshot.schemaId());
 
         List<IcebergSnapshot> snapshots = new ArrayList<>(baseMetadata.snapshots());
         snapshots.add(
@@ -1252,26 +1935,40 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
             table.fileIO().deleteQuietly(metadataPath);
             written = table.fileIO().tryToWriteAtomic(metadataPath, metadata.toJson());
         }
-        if (!written && !metadataMatchesSnapshot(snapshotId, snapshot)) {
-            // no twin published this snapshot's metadata; fail so the commit retries
-            throw new IllegalStateException("Failed to replace Iceberg metadata " + metadataPath);
+        if (!written) {
+            // decided on one read: a twin finishing between two reads would otherwise leave
+            // this callback publishing neither the file on disk nor a failure
+            if (metadataMatchesSnapshot(snapshotId, snapshot)) {
+                // a concurrent callback published this version first; later callbacks derive
+                // row ids from what is on disk, so adopt the winner wholesale instead of
+                // handing a divergent twin to the external catalog, and leave expiry to it
+                metadata = IcebergMetadata.fromPath(table.fileIO(), metadataPath);
+            } else {
+                // no twin published this snapshot's metadata; fail so the commit retries
+                throw new IllegalStateException(
+                        "Failed to replace Iceberg metadata " + metadataPath);
+            }
         }
-        // a delayed callback may still write its metadata (a newer commit extends it), but
-        // only the current head may move the hint and the external catalog
+        // the target publishes only as the live head (a rollback legitimately moves the hint
+        // back); a replayed catch-up step publishes only while the hint moves forward, so a
+        // stale callback cannot drag hint or catalog backwards
         Long latestAtPublish = table.snapshotManager().latestSnapshotId();
-        if (latestAtPublish != null && latestAtPublish == snapshotId) {
+        if ((latestAtPublish != null && latestAtPublish == snapshotId)
+                || (rebuildDvFromLiveState && snapshotId >= readVersionHint())) {
             table.fileIO()
                     .overwriteFileUtf8(
                             new Path(pathFactory.metadataDirectory(), VERSION_HINT_FILENAME),
                             String.valueOf(snapshotId));
             commitToExternalCatalog(metadata, metadataPath, baseMetadata, baseMetadataPath);
-            // cleanup only after the catalog serves the new head: a skipped or failed
-            // publication must not delete files an external pointer still references
-            deleteApplicableMetadataFiles(snapshotId);
-            for (int i = 0; i + 1 < toExpireExceptLast.size(); i++) {
-                expireManifestList(
-                        new Path(toExpireExceptLast.get(i).manifestList()).getName(),
-                        new Path(toExpireExceptLast.get(i + 1).manifestList()).getName());
+            // cleanup only after the catalog serves the new head, and only by the writer: a
+            // skipped or failed publication must not delete files a pointer still references
+            if (written) {
+                deleteApplicableMetadataFiles(snapshotId);
+                for (int i = 0; i + 1 < toExpireExceptLast.size(); i++) {
+                    expireManifestList(
+                            new Path(toExpireExceptLast.get(i).manifestList()).getName(),
+                            new Path(toExpireExceptLast.get(i + 1).manifestList()).getName());
+                }
             }
         }
     }
@@ -1576,15 +2273,64 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         - options.get(CoreOptions.SNAPSHOT_TIME_RETAINED).toMillis();
     }
 
-    private void expireManifestList(String toExpire, String next) {
-        // compare by physical path: a carried-over manifest may be re-listed with different
-        // list-level fields (e.g. an assigned first_row_id) while sharing the same file
-        Set<String> pathsInUse = new HashSet<>();
-        for (IcebergManifestFileMeta meta : manifestList.read(next)) {
-            pathsInUse.add(meta.manifestPath());
+    /**
+     * Reads a historical manifest list, falling back to the legacy (iceberg-1.4) reader for lists
+     * written while {@code manifest.legacy-version} was in effect: a table that upgrades to v3 has
+     * to turn the option off, so its older lists stay in the legacy schema. A genuine read failure
+     * still propagates, because the legacy reader fails too and the original error is rethrown.
+     */
+    private List<IcebergManifestFileMeta> readManifestListWithFallback(String listName) {
+        try {
+            return manifestList.read(listName);
+        } catch (RuntimeException primary) {
+            if (legacyManifestList == null) {
+                legacyManifestList =
+                        IcebergManifestList.create(
+                                table.copy(
+                                        Collections.singletonMap(
+                                                IcebergOptions.MANIFEST_LEGACY_VERSION.key(),
+                                                "true")),
+                                pathFactory);
+            }
+            try {
+                return legacyManifestList.read(listName);
+            } catch (RuntimeException notLegacy) {
+                throw primary;
+            }
         }
-        for (IcebergManifestFileMeta meta : manifestList.read(toExpire)) {
-            if (pathsInUse.contains(meta.manifestPath())) {
+    }
+
+    @VisibleForTesting
+    void expireManifestList(String toExpire, String next) {
+        Set<String> manifestPathsInUse;
+        try {
+            manifestPathsInUse =
+                    readManifestListWithFallback(next).stream()
+                            .map(IcebergManifestFileMeta::manifestPath)
+                            .collect(Collectors.toSet());
+        } catch (RuntimeException e) {
+            // without the surviving side there is no safe in-use set; leave this pair to a
+            // later expiry pass instead of failing a commit that already published
+            return;
+        }
+        List<IcebergManifestFileMeta> expiredMetas;
+        try {
+            expiredMetas = readManifestListWithFallback(toExpire);
+        } catch (RuntimeException e) {
+            if (transientReadFailure(e)) {
+                // deleting the list on a flaky read would orphan every manifest it still
+                // indexes; leave the pair to a later expiry pass
+                return;
+            }
+            // an aged base can retain entries whose list a newer, since-lost metadata already
+            // expired; nothing of such a list remains to expire
+            table.fileIO().deleteQuietly(pathFactory.toManifestListPath(toExpire));
+            return;
+        }
+        // compare by path: a reused manifest can reappear under different meta fields and
+        // must not be deleted
+        for (IcebergManifestFileMeta meta : expiredMetas) {
+            if (manifestPathsInUse.contains(meta.manifestPath())) {
                 continue;
             }
             table.fileIO().deleteQuietly(new Path(meta.manifestPath()));
@@ -1610,14 +2356,25 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 }
                 expiredManifestLists.add(listName);
 
-                // A retained metadata JSON can reference a list an earlier rebuild already
-                // deleted. Reading it must not fail: we only open it to delete what it
-                // points at, and that earlier pass already did so.
+                // a retained metadata json can reference a list an earlier rebuild deleted
                 if (!table.fileIO().exists(listPath)) {
                     continue;
                 }
-
-                for (IcebergManifestFileMeta meta : manifestList.read(listName)) {
+                List<IcebergManifestFileMeta> expiredMetas;
+                try {
+                    expiredMetas = readManifestListWithFallback(listName);
+                } catch (RuntimeException e) {
+                    if (transientReadFailure(e)) {
+                        // deleting the list on a flaky read would orphan every manifest it
+                        // still indexes; leave it to a later expiry pass
+                        continue;
+                    }
+                    // an aged metadata json can reference lists already expired by a newer,
+                    // since-lost metadata; nothing of such a list remains to expire
+                    table.fileIO().deleteQuietly(listPath);
+                    continue;
+                }
+                for (IcebergManifestFileMeta meta : expiredMetas) {
                     String metaName = new Path(meta.manifestPath()).getName();
                     if (expiredManifestFileMetas.contains(metaName)) {
                         continue;
@@ -2145,12 +2902,21 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                     schemaId,
                     id -> {
                         TableSchema schema = schemaManager.schema(id);
-                        // backstop: reject variant on each schema as it is emitted
-                        checkVariantNotPublishable(schema.logicalRowType());
+                        // the variant backstop that used to sit here is superseded by the type
+                        // gate: it judges the schemas a commit publishes, so history that can no
+                        // longer be represented degrades instead of bricking later commits
                         SchemaValidation.validateIcebergGeospatialTypes(
                                 schema.logicalRowType(), table.coreOptions());
                         return IcebergSchema.create(schema);
                     });
+        }
+
+        private IcebergSchema getValidated(long schemaId) {
+            // only schemas a commit newly publishes are gated; history already published
+            // must not brick later commits (e.g. after the offending column was dropped)
+            checkFormatVersionSupportsSchema(
+                    formatVersion, schemaManager.schema(schemaId).logicalRowType());
+            return get(schemaId);
         }
 
         private long getLatestSchemaId() {

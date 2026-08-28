@@ -592,9 +592,11 @@ public class RESTCatalog implements Catalog {
             // the effective options rather than only the explicit ones.
             validateCatalogManagedFormatTablePartitions(
                     identifier, schema.options(), schema.options().containsKey(PATH.key()));
-            createExternalTablePathIfNotExist(schema);
             Schema newSchema = inferSchemaIfExternalPaimonTable(schema);
             api.createTable(identifier, newSchema);
+            // the schema the server refuses is never stored, so the directory an external table
+            // would live in is created only once the table exists
+            createExternalTablePathIfNotExist(schema);
         } catch (AlreadyExistsException e) {
             if (!ignoreIfExists) {
                 throw new TableAlreadyExistException(identifier);
@@ -605,7 +607,7 @@ public class RESTCatalog implements Catalog {
             throw new DatabaseNotExistException(identifier.getDatabaseName());
         } catch (BadRequestException e) {
             throw new RuntimeException(new IllegalArgumentException(e.getMessage()));
-        } catch (IllegalArgumentException e) {
+        } catch (IllegalArgumentException | TableAlreadyExistException e) {
             throw e;
         } catch (Exception e) {
             throw new RuntimeException(e);
