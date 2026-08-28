@@ -157,8 +157,10 @@ class ScanQuery:
         read_builder, file_io = self._blob_descriptor_read_builder(blob_cols)
         arrow = read_builder.new_read().to_arrow(
             read_builder.new_scan().plan().splits())
+        map_blob_cols = set(blob_cols) - set(self._all_blob_columns())
         bodies = self._fetch_bodies(
-            file_io, arrow.select(blob_cols).to_pydict(), blob_cols, parallelism)
+            file_io, arrow.select(blob_cols).to_pydict(), blob_cols,
+            parallelism, map_blob_cols)
         scalar = arrow.select(self._scalar_columns(arrow.column_names))
         return scalar, bodies
 
@@ -174,10 +176,12 @@ class ScanQuery:
     def _iter_blobs(self, read_builder, file_io, blob_cols, parallelism):
         reader = read_builder.new_read().to_arrow_batch_reader(
             read_builder.new_scan().plan().splits())
+        map_blob_cols = set(blob_cols) - set(self._all_blob_columns())
         try:
             for batch in reader:
                 bodies = self._fetch_bodies(
-                    file_io, batch.select(blob_cols).to_pydict(), blob_cols, parallelism)
+                    file_io, batch.select(blob_cols).to_pydict(), blob_cols,
+                    parallelism, map_blob_cols)
                 scalar = batch.select(self._scalar_columns(batch.schema.names))
                 yield scalar, bodies
         finally:
@@ -233,7 +237,8 @@ class ScanQuery:
         return read_builder, read_table.file_io
 
     @staticmethod
-    def _fetch_bodies(file_io, data, blob_cols, parallelism):
+    def _fetch_bodies(
+            file_io, data, blob_cols, parallelism, map_blob_cols=()):
         # Decode each descriptor to a (uri, offset, length) range and read them all in
         # one coalesced pass on ``file_io`` -- the read table's FileIO, which already
         # carries the merged DLF/OSS token. Going through Blob.from_bytes here would
@@ -241,7 +246,8 @@ class ScanQuery:
         # ``FileIO.get(uri, catalog_options)`` off the raw options (no merged token),
         # failing with "endpoint should be non-empty" / "Init credential failed" unless
         # the caller also passes fs.oss.* -- which users should not have to.
-        return fetch_blob_bodies(file_io, data, blob_cols, parallelism)
+        return fetch_blob_bodies(
+            file_io, data, blob_cols, parallelism, map_blob_cols)
 
     def _all_blob_columns(self) -> List[str]:
         return [

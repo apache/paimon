@@ -18,7 +18,8 @@
 """Shared helpers for materialising multimodal BLOB descriptor columns."""
 
 
-def fetch_blob_bodies(file_io, data, blob_cols, parallelism):
+def fetch_blob_bodies(
+        file_io, data, blob_cols, parallelism, map_blob_cols=()):
     """Fetch scalar and MAP BLOB payload bytes.
 
     ``data`` is a ``dict`` mapping each BLOB column name to row-aligned cells.
@@ -32,8 +33,10 @@ def fetch_blob_bodies(file_io, data, blob_cols, parallelism):
     inline = {}
     targets = []
     bodies = {col: [] for col in blob_cols}
+    scalar_offsets = {}
+    map_blob_cols = set(map_blob_cols)
 
-    def queue_blob_fetch(value, target):
+    def queue_blob_fetch(value):
         index = len(ranges)
         if value is None:
             ranges.append(None)
@@ -51,27 +54,30 @@ def fetch_blob_bodies(file_io, data, blob_cols, parallelism):
             else:
                 ranges.append(None)
                 inline[index] = raw
-        targets.append((target, index))
+        return index
 
     for col in blob_cols:
+        if col not in map_blob_cols:
+            start = len(ranges)
+            for value in data[col]:
+                queue_blob_fetch(value)
+            scalar_offsets[col] = (start, len(ranges))
+            continue
+
         for value in data[col]:
             if value is None:
                 bodies[col].append(None)
                 continue
 
             entries = _map_entries(value)
-            if entries is None:
-                row_index = len(bodies[col])
-                bodies[col].append(None)
-                queue_blob_fetch(value, (col, row_index, None))
-            else:
-                row_index = len(bodies[col])
-                row = []
-                bodies[col].append(row)
-                for key, item in entries:
-                    entry_index = len(row)
-                    row.append((key, None))
-                    queue_blob_fetch(item, (col, row_index, entry_index))
+            row_index = len(bodies[col])
+            row = []
+            bodies[col].append(row)
+            for key, item in entries:
+                entry_index = len(row)
+                row.append((key, None))
+                range_index = queue_blob_fetch(item)
+                targets.append((col, row_index, entry_index, range_index))
 
     fetched = (
         file_io.read_ranges_coalesced(ranges, parallelism)
@@ -81,12 +87,11 @@ def fetch_blob_bodies(file_io, data, blob_cols, parallelism):
     for index, raw in inline.items():
         fetched[index] = raw
 
-    for (col, row_index, entry_index), index in targets:
-        if entry_index is None:
-            bodies[col][row_index] = fetched[index]
-        else:
-            key = bodies[col][row_index][entry_index][0]
-            bodies[col][row_index][entry_index] = (key, fetched[index])
+    for col, (start, end) in scalar_offsets.items():
+        bodies[col] = fetched[start:end]
+    for col, row_index, entry_index, index in targets:
+        key = bodies[col][row_index][entry_index][0]
+        bodies[col][row_index][entry_index] = (key, fetched[index])
     return bodies
 
 
