@@ -87,6 +87,11 @@ import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -1319,6 +1324,96 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         List<String> afterManifestFiles = dataManifestFileNames(table);
         assertThat(afterManifestFiles).containsAll(unaffectedManifests);
         assertThat(afterManifestFiles).doesNotContainAnyElementsOf(affectedManifests);
+    }
+
+    @Test
+    public void testReassignRewritesDataManifestsInParallel() throws Exception {
+        FileStoreTable originalTable = createTableWithInterleavedPartitions();
+        assertThat(dataManifestFileNames(originalTable)).hasSizeGreaterThan(1);
+        FileStoreTable table =
+                originalTable.copy(
+                        Collections.singletonMap(CoreOptions.SCAN_MANIFEST_PARALLELISM.key(), "2"));
+
+        CountDownLatch twoRewritesStarted = new CountDownLatch(2);
+        CountDownLatch releaseRewrites = new CountDownLatch(1);
+        AtomicInteger startedRewriteCount = new AtomicInteger();
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        Future<DataEvolutionRowIdReassigner.Result> future =
+                executor.submit(
+                        () ->
+                                new DataEvolutionRowIdReassigner(
+                                                table,
+                                                null,
+                                                () -> {},
+                                                ignored -> {
+                                                    startedRewriteCount.incrementAndGet();
+                                                    twoRewritesStarted.countDown();
+                                                    try {
+                                                        if (!releaseRewrites.await(
+                                                                30, TimeUnit.SECONDS)) {
+                                                            throw new AssertionError(
+                                                                    "Timed out waiting to release manifest rewrites.");
+                                                        }
+                                                    } catch (InterruptedException e) {
+                                                        Thread.currentThread().interrupt();
+                                                        throw new RuntimeException(e);
+                                                    }
+                                                })
+                                        .reassign("test-parallel-manifest-rewrite"));
+
+        boolean rewritesOverlapped;
+        int startedBeforeRelease;
+        try {
+            rewritesOverlapped = twoRewritesStarted.await(10, TimeUnit.SECONDS);
+            startedBeforeRelease = startedRewriteCount.get();
+        } finally {
+            releaseRewrites.countDown();
+        }
+
+        try {
+            DataEvolutionRowIdReassigner.Result result = future.get(30, TimeUnit.SECONDS);
+            assertThat(result.fileCount).isEqualTo(5L);
+            assertThat(rowIdsByPartition(table))
+                    .containsEntry("pt=a/", Arrays.asList(5L, 6L, 7L))
+                    .containsEntry("pt=b/", Arrays.asList(8L, 9L));
+        } finally {
+            executor.shutdownNow();
+        }
+        assertThat(rewritesOverlapped).isTrue();
+        assertThat(startedBeforeRelease).isEqualTo(2);
+    }
+
+    @Test
+    public void testReassignDoesNotCommitWhenParallelManifestRewriteFails() throws Exception {
+        FileStoreTable originalTable = createTableWithInterleavedPartitions();
+        FileStoreTable table =
+                originalTable.copy(
+                        Collections.singletonMap(CoreOptions.SCAN_MANIFEST_PARALLELISM.key(), "2"));
+        Snapshot before = table.snapshotManager().latestSnapshot();
+        AtomicBoolean failureInjected = new AtomicBoolean();
+
+        assertThatThrownBy(
+                        () ->
+                                new DataEvolutionRowIdReassigner(
+                                                table,
+                                                null,
+                                                () -> {},
+                                                ignored -> {
+                                                    if (failureInjected.compareAndSet(
+                                                            false, true)) {
+                                                        throw new IllegalStateException(
+                                                                "Injected manifest rewrite failure.");
+                                                    }
+                                                })
+                                        .reassign("test-failed-parallel-manifest-rewrite"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Injected manifest rewrite failure.");
+
+        assertThat(failureInjected).isTrue();
+        assertThat(table.snapshotManager().latestSnapshot().id()).isEqualTo(before.id());
+        assertThat(rowIdsByPartition(table))
+                .containsEntry("pt=a/", Arrays.asList(0L, 2L, 4L))
+                .containsEntry("pt=b/", Arrays.asList(1L, 3L));
     }
 
     @Test

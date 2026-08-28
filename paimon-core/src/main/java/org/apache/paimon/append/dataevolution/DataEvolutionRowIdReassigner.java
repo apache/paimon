@@ -44,6 +44,7 @@ import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RetryWaiter;
+import org.apache.paimon.utils.ThreadPoolUtils.CloseableBatchIterator;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -60,7 +61,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
+import java.util.function.Function;
 
+import static java.util.Collections.singletonList;
+import static org.apache.paimon.utils.ManifestReadThreadPool.sequentialBatchedExecuteCloseable;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -73,6 +78,7 @@ public class DataEvolutionRowIdReassigner {
     private final FileStoreTable table;
     private final @Nullable PartitionPredicate partitionPredicate;
     private final Runnable beforeCommit;
+    private final Consumer<ManifestFileMeta> beforeManifestRewrite;
 
     public DataEvolutionRowIdReassigner(FileStoreTable table) {
         this(table, null);
@@ -88,9 +94,19 @@ public class DataEvolutionRowIdReassigner {
             FileStoreTable table,
             @Nullable PartitionPredicate partitionPredicate,
             Runnable beforeCommit) {
+        this(table, partitionPredicate, beforeCommit, manifest -> {});
+    }
+
+    @VisibleForTesting
+    DataEvolutionRowIdReassigner(
+            FileStoreTable table,
+            @Nullable PartitionPredicate partitionPredicate,
+            Runnable beforeCommit,
+            Consumer<ManifestFileMeta> beforeManifestRewrite) {
         this.table = table;
         this.partitionPredicate = partitionPredicate;
         this.beforeCommit = beforeCommit;
+        this.beforeManifestRewrite = beforeManifestRewrite;
     }
 
     public Result reassign() {
@@ -612,37 +628,69 @@ public class DataEvolutionRowIdReassigner {
 
     private RewrittenDataManifests writeManifestReplacements(
             Assignment assignment, ManifestFile manifestFile) {
-        Map<String, List<ManifestFileMeta>> rewrittenManifestMetas = new HashMap<>();
-        long fileCount = 0L;
-        for (ManifestFileMeta manifestMeta : assignment.manifestMetasToRewrite) {
-            List<ManifestEntry> entries =
-                    manifestFile.read(manifestMeta.fileName(), manifestMeta.fileSize());
-            long reassignedAddFileCount = 0L;
-            boolean hasRewrittenEntry = false;
-            for (int i = 0; i < entries.size(); i++) {
-                ManifestEntry entry = entries.get(i);
-                RowRangeMappingIndex mapping = assignment.rowIdMappings.get(entry.partition());
-                if (mapping == null) {
-                    continue;
-                }
-                Optional<Range> reassignedRange = mapping.map(entry.file().nonNullRowIdRange());
-                if (reassignedRange.isPresent()) {
-                    validatePlanningEntry(entry);
-                    entries.set(i, entry.assignFirstRowId(reassignedRange.get().from));
-                    hasRewrittenEntry = true;
-                    if (entry.kind() == FileKind.ADD) {
-                        reassignedAddFileCount++;
-                    }
+        Integer parallelism = table.coreOptions().scanManifestParallelism();
+        List<RewrittenDataManifest> rewritten =
+                new ArrayList<>(assignment.manifestMetasToRewrite.size());
+        if (assignment.manifestMetasToRewrite.size() == 1
+                || (parallelism != null && parallelism == 1)) {
+            for (ManifestFileMeta manifestMeta : assignment.manifestMetasToRewrite) {
+                rewritten.add(rewriteDataManifest(assignment, manifestFile, manifestMeta));
+            }
+        } else {
+            Function<ManifestFileMeta, List<RewrittenDataManifest>> rewriter =
+                    manifestMeta ->
+                            singletonList(
+                                    rewriteDataManifest(
+                                            assignment,
+                                            table.store().manifestFileFactory().create(),
+                                            manifestMeta));
+            try (CloseableBatchIterator<RewrittenDataManifest> results =
+                    sequentialBatchedExecuteCloseable(
+                            rewriter, assignment.manifestMetasToRewrite, parallelism)) {
+                while (results.hasNext()) {
+                    rewritten.add(results.next());
                 }
             }
-            checkState(
-                    hasRewrittenEntry,
-                    "Cannot find entries to reassign in planned manifest %s.",
-                    manifestMeta.fileName());
-            rewrittenManifestMetas.put(manifestMeta.fileName(), manifestFile.write(entries));
-            fileCount += reassignedAddFileCount;
+        }
+
+        Map<String, List<ManifestFileMeta>> rewrittenManifestMetas = new LinkedHashMap<>();
+        long fileCount = 0L;
+        for (RewrittenDataManifest manifest : rewritten) {
+            rewrittenManifestMetas.put(manifest.originalFileName, manifest.replacements);
+            fileCount += manifest.reassignedAddFileCount;
         }
         return new RewrittenDataManifests(rewrittenManifestMetas, fileCount);
+    }
+
+    private RewrittenDataManifest rewriteDataManifest(
+            Assignment assignment, ManifestFile manifestFile, ManifestFileMeta manifestMeta) {
+        beforeManifestRewrite.accept(manifestMeta);
+        List<ManifestEntry> entries =
+                manifestFile.read(manifestMeta.fileName(), manifestMeta.fileSize());
+        long reassignedAddFileCount = 0L;
+        boolean hasRewrittenEntry = false;
+        for (int i = 0; i < entries.size(); i++) {
+            ManifestEntry entry = entries.get(i);
+            RowRangeMappingIndex mapping = assignment.rowIdMappings.get(entry.partition());
+            if (mapping == null) {
+                continue;
+            }
+            Optional<Range> reassignedRange = mapping.map(entry.file().nonNullRowIdRange());
+            if (reassignedRange.isPresent()) {
+                validatePlanningEntry(entry);
+                entries.set(i, entry.assignFirstRowId(reassignedRange.get().from));
+                hasRewrittenEntry = true;
+                if (entry.kind() == FileKind.ADD) {
+                    reassignedAddFileCount++;
+                }
+            }
+        }
+        checkState(
+                hasRewrittenEntry,
+                "Cannot find entries to reassign in planned manifest %s.",
+                manifestMeta.fileName());
+        return new RewrittenDataManifest(
+                manifestMeta.fileName(), manifestFile.write(entries), reassignedAddFileCount);
     }
 
     private void validatePlanningEntry(ManifestEntry entry) {
@@ -899,6 +947,21 @@ public class DataEvolutionRowIdReassigner {
                 Map<String, List<ManifestFileMeta>> manifestMetas, long fileCount) {
             this.manifestMetas = manifestMetas;
             this.fileCount = fileCount;
+        }
+    }
+
+    private static class RewrittenDataManifest {
+        private final String originalFileName;
+        private final List<ManifestFileMeta> replacements;
+        private final long reassignedAddFileCount;
+
+        private RewrittenDataManifest(
+                String originalFileName,
+                List<ManifestFileMeta> replacements,
+                long reassignedAddFileCount) {
+            this.originalFileName = originalFileName;
+            this.replacements = replacements;
+            this.reassignedAddFileCount = reassignedAddFileCount;
         }
     }
 
