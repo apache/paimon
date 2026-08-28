@@ -354,9 +354,10 @@ result = conn.load_from_lerobot(
 )
 ```
 
-The official LeRobot reader requires a local root. URI sources are therefore
-copied once to a temporary directory, imported, and removed. Each MP4 is copied
-once, not once per frame; ensure local temporary storage can hold the source.
+URI metadata and Parquet files are read directly through Paimon FileIO. The
+LeRobot 0.4 video decoder requires a local path, so only the active MP4 chunk
+for each video feature is cached temporarily and removed after import. Local
+space is bounded by the active video chunks, not the complete dataset.
 
 If the target is absent, it is created from metadata. Existing targets use the
 same strict schema validation and append semantics as `load_from_hdf5`.

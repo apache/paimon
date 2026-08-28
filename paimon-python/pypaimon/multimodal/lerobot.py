@@ -18,18 +18,18 @@
 
 import io
 import json
-import posixpath
 import shutil
 import sys
 import tempfile
+from bisect import bisect_right
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Callable, Mapping, Optional
-from urllib.parse import unquote, urlparse
 
 import pyarrow as pa
 import pyarrow.fs as pafs
+import pyarrow.parquet as pq
 
 from pypaimon.catalog.catalog_exception import (
     DatabaseNotExistException,
@@ -85,6 +85,14 @@ class _LeRobotSource:
     path: str
     root: Optional[Path]
     repo_id: str
+    file_io: object = None
+
+
+@dataclass(frozen=True)
+class _RemoteLeRobotMeta:
+    info: dict
+    episodes: list
+    tasks: list
 
 
 def load_from_lerobot(
@@ -120,41 +128,48 @@ def load_from_lerobot(
         if local_info is not None:
             _require_v3(local_info, resolved_source.path)
         LeRobotDataset = _import_lerobot_dataset()
-        dataset = _open_dataset(LeRobotDataset, resolved_source)
-        info = dict(dataset.meta.info)
-        _require_v3(info, resolved_source.path)
+        dataset = _open_resolved_dataset(
+            LeRobotDataset, resolved_source, local_info)
+        try:
+            info = dict(dataset.meta.info)
+            _require_v3(info, resolved_source.path)
 
-        source_schema, mapped_names = _schema_from_info(
-            info, feature_mapping, include_task=_has_tasks(dataset, info))
-        table = _get_or_create_table(
-            connection, table_name, source_schema, options)
-        target_schema = _target_schema(table.raw_table)
-        _strict_lerobot_table(
-            pa.Table.from_batches([], schema=source_schema),
-            target_schema,
-            resolved_source,
-            0,
-        )
-
-        episode_count = int(info.get("total_episodes", 0))
-        row_count = int(info.get("total_frames", len(dataset)))
-        if row_count == 0:
-            return LeRobotLoadResult(
-                episode_count=episode_count,
-                batch_count=0,
-                row_count=0,
-                snapshot_id=None,
+            source_schema, mapped_names = _schema_from_info(
+                info, feature_mapping,
+                include_task=_has_tasks(dataset, info))
+            table = _get_or_create_table(
+                connection, table_name, source_schema, options)
+            target_schema = _target_schema(table.raw_table)
+            _strict_lerobot_table(
+                pa.Table.from_batches([], schema=source_schema),
+                target_schema,
+                resolved_source,
+                0,
             )
-        return _write_dataset(
-            table,
-            dataset,
-            info,
-            resolved_source,
-            source_schema,
-            mapped_names,
-            transform,
-            batch_size,
-        )
+
+            episode_count = int(info.get("total_episodes", 0))
+            row_count = int(info.get("total_frames", len(dataset)))
+            if row_count == 0:
+                return LeRobotLoadResult(
+                    episode_count=episode_count,
+                    batch_count=0,
+                    row_count=0,
+                    snapshot_id=None,
+                )
+            return _write_dataset(
+                table,
+                dataset,
+                info,
+                resolved_source,
+                source_schema,
+                mapped_names,
+                transform,
+                batch_size,
+            )
+        finally:
+            close = getattr(dataset, "close", None)
+            if callable(close):
+                close()
 
 
 @contextmanager
@@ -183,12 +198,30 @@ def _resolved_source(source, source_options):
         return
 
     source_uri = _normalize_source_path(value).rstrip("/")
-    with tempfile.TemporaryDirectory(prefix="pypaimon_lerobot_source_") \
-            as temp_dir:
-        root = Path(temp_dir)
-        _materialize_remote_source(
-            source_uri, root, Options(source_options))
-        yield _local_source(root, source_uri)
+    source_file_io = _Hdf5SourceFileIO(Options(source_options))
+    try:
+        try:
+            status = source_file_io.get_file_status(source_uri)
+        except FileNotFoundError as error:
+            raise FileNotFoundError(
+                "LeRobot source directory does not exist: %s" % source_uri
+            ) from error
+        if status.type != pafs.FileType.Directory:
+            raise ValueError(
+                "LeRobot URI source must be a directory: %s" % source_uri)
+        info = _read_remote_json(
+            source_file_io, _remote_path(source_uri, "meta/info.json"))
+        yield (
+            _LeRobotSource(
+                path=source_uri,
+                root=None,
+                repo_id="",
+                file_io=source_file_io,
+            ),
+            info,
+        )
+    finally:
+        source_file_io.close()
 
 
 def _local_source(root, display_path=None):
@@ -212,69 +245,6 @@ def _local_source(root, display_path=None):
         ),
         info,
     )
-
-
-def _materialize_remote_source(source_uri, root, options):
-    source_file_io = _Hdf5SourceFileIO(options)
-    try:
-        try:
-            status = source_file_io.get_file_status(source_uri)
-        except FileNotFoundError as error:
-            raise FileNotFoundError(
-                "LeRobot source directory does not exist: %s" % source_uri
-            ) from error
-        if status.type != pafs.FileType.Directory:
-            raise ValueError(
-                "LeRobot URI source must be a directory: %s" % source_uri)
-        _copy_remote_directory(
-            source_file_io, source_uri, source_uri, root)
-    finally:
-        source_file_io.close()
-
-
-def _copy_remote_directory(source_file_io, source_root, directory, local_root):
-    try:
-        children = source_file_io.list_status(directory)
-    except LegacyOssDirectoryListingError as error:
-        raise ValueError(
-            "LeRobot URI directory listing is unavailable at %s; use "
-            "Jindo or upgrade PyArrow." % directory) from error
-    for status in children:
-        source_path = _qualified_status_path(directory, status)
-        relative_path = _relative_source_path(source_root, source_path)
-        local_path = local_root / PurePosixPath(relative_path)
-        if status.type == pafs.FileType.Directory:
-            local_path.mkdir(parents=True, exist_ok=True)
-            _copy_remote_directory(
-                source_file_io, source_root, source_path, local_root)
-        elif status.type == pafs.FileType.File:
-            local_path.parent.mkdir(parents=True, exist_ok=True)
-            stream = source_file_io.new_input_stream(source_path)
-            with closing(stream) as source_stream:
-                with local_path.open("wb") as output:
-                    shutil.copyfileobj(source_stream, output)
-        else:
-            raise ValueError(
-                "Unsupported LeRobot source status for path: %s"
-                % source_path)
-
-
-def _relative_source_path(source_root, source_path):
-    root_uri = urlparse(source_root)
-    path_uri = urlparse(source_path)
-    if (root_uri.scheme.lower(), root_uri.netloc) != (
-            path_uri.scheme.lower(), path_uri.netloc):
-        raise ValueError(
-            "LeRobot source entry is outside %s: %s"
-            % (source_root, source_path))
-    relative = posixpath.relpath(
-        unquote(path_uri.path), unquote(root_uri.path) or "/")
-    if relative in ("", ".") or relative == ".." \
-            or relative.startswith("../"):
-        raise ValueError(
-            "LeRobot source entry is outside %s: %s"
-            % (source_root, source_path))
-    return relative
 
 
 def _strict_lerobot_table(data, target_schema, source, batch_index):
@@ -319,6 +289,268 @@ def _open_dataset(LeRobotDataset, source):
         raise ValueError(
             "Cannot open LeRobot Dataset v3 source %s: %s"
             % (source.path, error)) from error
+
+
+def _open_resolved_dataset(LeRobotDataset, source, info):
+    if source.file_io is not None:
+        return _RemoteLeRobotDataset(source, info)
+    return _open_dataset(LeRobotDataset, source)
+
+
+class _RemoteLeRobotDataset:
+
+    def __init__(self, source, info):
+        self.source = source
+        self.root = source.path
+        self._file_io = source.file_io
+        self._episodes = self._load_episodes(info)
+        self._tasks = self._load_tasks(info)
+        self.meta = _RemoteLeRobotMeta(info, self._episodes, self._tasks)
+        self._episode_starts = [
+            int(episode["dataset_from_index"])
+            for episode in self._episodes
+        ]
+        self._episodes_by_index = {
+            int(episode["episode_index"]): episode
+            for episode in self._episodes
+        }
+        self._data_ranges = self._build_data_ranges(info)
+        self._cached_data_path = None
+        self._cached_data_table = None
+        self._video_cache = {}
+        self._video_temp_dir = None
+
+    def __len__(self):
+        return int(self.meta.info.get("total_frames", 0))
+
+    def close(self):
+        self._cached_data_table = None
+        self._video_cache.clear()
+        if self._video_temp_dir is not None:
+            self._video_temp_dir.cleanup()
+            self._video_temp_dir = None
+
+    def read_batch(self, begin, end):
+        episode = self._episode_for_range(begin, end)
+        relative_path = self._data_path(episode, self.meta.info)
+        source_path = _remote_path(self.source.path, relative_path)
+        if source_path != self._cached_data_path:
+            table = _read_remote_parquet(self._file_io, source_path)
+            expected_begin, expected_end = self._data_ranges[relative_path]
+            expected_rows = expected_end - expected_begin
+            if table.num_rows != expected_rows:
+                raise ValueError(
+                    "LeRobot data file %s has %d rows; metadata expects %d."
+                    % (source_path, table.num_rows, expected_rows))
+            self._cached_data_path = source_path
+            self._cached_data_table = table
+        file_begin = self._data_ranges[relative_path][0]
+        return self._cached_data_table.slice(begin - file_begin, end - begin)
+
+    def image_bytes(self, value):
+        if value is None:
+            raise ValueError("LeRobot image feature contains a null frame.")
+        if isinstance(value, (bytes, bytearray, memoryview)):
+            return bytes(value)
+        if isinstance(value, dict):
+            body = value.get("bytes")
+            if body is not None:
+                return bytes(body)
+            image_path = value.get("path")
+            if image_path:
+                source_path = image_path if "://" in image_path else \
+                    _remote_path(self.source.path, image_path)
+                return _read_remote_bytes(self._file_io, source_path)
+        return _encode_media_frame(value)
+
+    def read_video_values(self, name, raw):
+        episode_indices = raw.column("episode_index").to_pylist()
+        if not episode_indices or len(set(episode_indices)) != 1:
+            raise ValueError(
+                "LeRobot video batches must contain exactly one Episode.")
+        episode_index = int(_python_scalar(episode_indices[0]))
+        episode = self._episodes_by_index.get(episode_index)
+        if episode is None:
+            raise ValueError(
+                "LeRobot metadata is missing Episode %d." % episode_index)
+        info = self.meta.info
+        relative_path = info["video_path"].format(
+            video_key=name,
+            chunk_index=int(episode[
+                "videos/%s/chunk_index" % name]),
+            file_index=int(episode[
+                "videos/%s/file_index" % name]),
+        )
+        source_path = _remote_path(self.source.path, relative_path)
+        local_path = self._cached_video_path(name, source_path)
+        start = float(episode["videos/%s/from_timestamp" % name])
+        timestamps = [
+            start + float(_python_scalar(value))
+            for value in raw.column("timestamp").to_pylist()
+        ]
+        try:
+            from lerobot.datasets.video_utils import decode_video_frames
+        except ImportError as error:
+            raise ImportError(
+                "LeRobot video import requires the video dependencies from "
+                "'pypaimon[lerobot]'.") from error
+        frames = decode_video_frames(
+            local_path,
+            timestamps,
+            1e-4,
+            "pyav",
+        )
+        if len(frames) != len(timestamps):
+            raise ValueError(
+                "LeRobot video %s returned %d frames; expected %d."
+                % (source_path, len(frames), len(timestamps)))
+        return [_encode_media_frame(frame) for frame in frames]
+
+    def _load_episodes(self, info):
+        episode_count = int(info.get("total_episodes", 0))
+        if episode_count == 0:
+            return []
+        directory = _remote_path(self.source.path, "meta/episodes")
+        paths = _remote_parquet_files(self._file_io, directory)
+        rows = []
+        for path in paths:
+            rows.extend(_read_remote_parquet(
+                self._file_io, path).to_pylist())
+        rows.sort(key=lambda row: int(row["episode_index"]))
+        if len(rows) != episode_count:
+            raise ValueError(
+                "LeRobot metadata reports %d Episodes but %d were found."
+                % (episode_count, len(rows)))
+        return rows
+
+    def _load_tasks(self, info):
+        task_count = int(info.get("total_tasks", 0))
+        if task_count == 0:
+            return []
+        path = _remote_path(self.source.path, "meta/tasks.parquet")
+        rows = _read_remote_parquet(self._file_io, path).to_pylist()
+        tasks = [None] * task_count
+        for row in rows:
+            index = int(row["task_index"])
+            name = row.get("__index_level_0__")
+            if name is None:
+                name = row.get("task", row.get("name"))
+            if index < 0 or index >= task_count or name is None:
+                raise ValueError("LeRobot task metadata is invalid: %s" % row)
+            tasks[index] = str(name)
+        if any(task is None for task in tasks):
+            raise ValueError(
+                "LeRobot metadata reports %d tasks but %d were found."
+                % (task_count, len(rows)))
+        return tasks
+
+    def _build_data_ranges(self, info):
+        ranges = {}
+        for episode in self._episodes:
+            path = self._data_path(episode, info)
+            begin = int(episode["dataset_from_index"])
+            end = int(episode["dataset_to_index"])
+            if path in ranges:
+                previous_begin, previous_end = ranges[path]
+                if begin != previous_end:
+                    raise ValueError(
+                        "LeRobot data file %s has non-contiguous Episode "
+                        "ranges." % path)
+                ranges[path] = previous_begin, end
+            else:
+                ranges[path] = begin, end
+        return ranges
+
+    def _episode_for_range(self, begin, end):
+        index = bisect_right(self._episode_starts, begin) - 1
+        if index < 0:
+            raise ValueError("LeRobot frame range starts before Episode 0.")
+        episode = self._episodes[index]
+        episode_end = int(episode["dataset_to_index"])
+        if end > episode_end:
+            raise ValueError("LeRobot frame batch crosses an Episode boundary.")
+        return episode
+
+    @staticmethod
+    def _data_path(episode, info):
+        return info["data_path"].format(
+            chunk_index=int(episode["data/chunk_index"]),
+            file_index=int(episode["data/file_index"]),
+        )
+
+    def _cached_video_path(self, name, source_path):
+        cached = self._video_cache.get(name)
+        if cached is not None and cached[0] == source_path:
+            return cached[1]
+        if cached is not None:
+            try:
+                cached[1].unlink()
+            except FileNotFoundError:
+                pass
+        if self._video_temp_dir is None:
+            self._video_temp_dir = tempfile.TemporaryDirectory(
+                prefix="pypaimon_lerobot_video_")
+        output = tempfile.NamedTemporaryFile(
+            dir=self._video_temp_dir.name,
+            suffix=".mp4",
+            delete=False,
+        )
+        try:
+            stream = self._file_io.new_input_stream(source_path)
+            with closing(stream) as source_stream:
+                shutil.copyfileobj(source_stream, output)
+        finally:
+            output.close()
+        local_path = Path(output.name)
+        self._video_cache[name] = source_path, local_path
+        return local_path
+
+
+def _remote_path(root, relative_path):
+    return "%s/%s" % (root.rstrip("/"), relative_path.lstrip("/"))
+
+
+def _read_remote_bytes(source_file_io, path):
+    stream = source_file_io.new_input_stream(path)
+    with closing(stream) as source_stream:
+        return source_stream.read()
+
+
+def _read_remote_json(source_file_io, path):
+    try:
+        return json.loads(_read_remote_bytes(
+            source_file_io, path).decode("utf-8"))
+    except (OSError, UnicodeError, ValueError) as error:
+        raise ValueError(
+            "Cannot read LeRobot metadata %s: %s" % (path, error)) from error
+
+
+def _read_remote_parquet(source_file_io, path):
+    stream = source_file_io.new_input_stream(path)
+    with closing(stream) as source_stream:
+        try:
+            return pq.read_table(source_stream)
+        except (OSError, ValueError, pa.ArrowException) as error:
+            raise ValueError(
+                "Cannot read LeRobot Parquet file %s: %s"
+                % (path, error)) from error
+
+
+def _remote_parquet_files(source_file_io, directory):
+    try:
+        statuses = source_file_io.list_status(directory)
+    except LegacyOssDirectoryListingError as error:
+        raise ValueError(
+            "LeRobot URI directory listing is unavailable at %s; use "
+            "Jindo or upgrade PyArrow." % directory) from error
+    paths = []
+    for status in statuses:
+        path = _qualified_status_path(directory, status)
+        if status.type == pafs.FileType.Directory:
+            paths.extend(_remote_parquet_files(source_file_io, path))
+        elif status.type == pafs.FileType.File and path.endswith(".parquet"):
+            paths.append(path)
+    return sorted(paths)
 
 
 def _has_tasks(dataset, info):
@@ -558,7 +790,11 @@ def _episode_batches(dataset, info, batch_size):
 
 
 def _read_batch(dataset, info, begin, end, schema, mapped_names):
-    raw = dataset.hf_dataset.with_format("arrow")[begin:end]
+    read_batch = getattr(dataset, "read_batch", None)
+    if callable(read_batch):
+        raw = read_batch(begin, end)
+    else:
+        raw = dataset.hf_dataset.with_format("arrow")[begin:end]
     if isinstance(raw, pa.RecordBatch):
         raw = pa.Table.from_batches([raw])
     elif not isinstance(raw, pa.Table):
@@ -566,12 +802,20 @@ def _read_batch(dataset, info, begin, end, schema, mapped_names):
     features = info["features"]
     video_names = [name for name, feature in features.items()
                    if feature["dtype"] == "video"]
-    video_values = {name: [] for name in video_names}
-    if video_names:
-        for index in range(begin, end):
-            item = dataset[index]
-            for name in video_names:
-                video_values[name].append(_encode_media_frame(item[name]))
+    remote_video_reader = getattr(dataset, "read_video_values", None)
+    if callable(remote_video_reader):
+        video_values = {
+            name: remote_video_reader(name, raw)
+            for name in video_names
+        }
+    else:
+        video_values = {name: [] for name in video_names}
+        if video_names:
+            for index in range(begin, end):
+                item = dataset[index]
+                for name in video_names:
+                    video_values[name].append(
+                        _encode_media_frame(item[name]))
 
     arrays = []
     fields = []
@@ -587,8 +831,12 @@ def _read_batch(dataset, info, begin, end, schema, mapped_names):
                     "LeRobot data is missing metadata feature %s." % source_name)
             values = raw.column(source_name).to_pylist()
             if dtype == "image":
-                values = [_image_bytes(value, dataset.root)
-                          for value in values]
+                image_reader = getattr(dataset, "image_bytes", None)
+                if callable(image_reader):
+                    values = [image_reader(value) for value in values]
+                else:
+                    values = [_image_bytes(value, dataset.root)
+                              for value in values]
             else:
                 values = [_normalize_value(value, feature, source_name)
                           for value in values]

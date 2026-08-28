@@ -365,7 +365,45 @@ class LeRobotImportTest(unittest.TestCase):
         mp4 = next(self.video_source.rglob("*.mp4")).read_bytes()
         self.assertTrue(all(body != mp4 for body in bodies))
 
-    def test_oss_source_uses_explicit_options_and_copies_each_file_once(self):
+    def test_oss_source_streams_parquet_and_preserves_episodes(self):
+        source = "oss://source-bucket/robot-images"
+        source_file_io = _RemoteLeRobotFileIO(self.image_source, source)
+
+        with patch(
+                "pypaimon.multimodal.lerobot._Hdf5SourceFileIO",
+                return_value=source_file_io):
+            result = self.connection.load_from_lerobot(
+                "oss_images",
+                source,
+                batch_size=2,
+            )
+
+        self.assertEqual(2, result.episode_count)
+        self.assertEqual(5, result.row_count)
+        table = self.connection.get_table("oss_images")
+        rows = table.scan().select([
+            "episode_index", "frame_index", "index", "task"
+        ]).to_arrow().sort_by("index").to_pylist()
+        self.assertEqual([0, 0, 1, 1, 1], [
+            row["episode_index"] for row in rows
+        ])
+        self.assertEqual([0, 1, 0, 1, 2], [
+            row["frame_index"] for row in rows
+        ])
+        self.assertEqual(
+            ["pick", "pick", "place", "place", "place"],
+            [row["task"] for row in rows],
+        )
+        self.assertFalse(any(
+            path.endswith("meta/stats.json")
+            for path in source_file_io.opened_paths
+        ))
+        self.assertEqual(1, len([
+            path for path in source_file_io.opened_paths
+            if "/data/" in path and path.endswith(".parquet")
+        ]))
+
+    def test_oss_video_uses_explicit_options_and_one_file_cache(self):
         source = "oss://source-bucket/robot-video"
         source_file_io = _RemoteLeRobotFileIO(self.video_source, source)
         source_options = {
@@ -399,6 +437,10 @@ class LeRobotImportTest(unittest.TestCase):
             len(source_file_io.opened_paths),
             len(set(source_file_io.opened_paths)),
         )
+        self.assertFalse(any(
+            path.endswith("meta/stats.json")
+            for path in source_file_io.opened_paths
+        ))
         table = self.connection.get_table("oss_video")
         unused_scalar, blobs = table.scan().select([
             "index", "observation.video"
