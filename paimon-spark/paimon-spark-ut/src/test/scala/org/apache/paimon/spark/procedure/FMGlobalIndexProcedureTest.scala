@@ -84,4 +84,56 @@ class FMGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest {
         Seq(Row(0), Row(1), Row(3)))
     }
   }
+
+  test("create fm global index after deletion-vector deletes") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT, content STRING)
+                  |TBLPROPERTIES (
+                  |  'bucket' = '-1',
+                  |  'global-index.row-count-per-shard' = '10000',
+                  |  'row-tracking.enabled' = 'true',
+                  |  'data-evolution.enabled' = 'true',
+                  |  'deletion-vectors.enabled' = 'true')
+                  |""".stripMargin)
+      spark.sql("""
+                  |INSERT INTO T VALUES
+                  |  (0, 'keep-prefix'),
+                  |  (1, 'deleted-middle'),
+                  |  (2, 'needle-middle'),
+                  |  (3, NULL),
+                  |  (4, 'keep-tail'),
+                  |  (5, 'needle-tail'),
+                  |  (6, 'deleted-tail')
+                  |""".stripMargin)
+      spark.sql("DELETE FROM T WHERE id IN (1, 6)")
+
+      val output = spark
+        .sql(
+          "CALL sys.create_global_index(" +
+            "table => 'test.T', index_column => 'content', index_type => 'fmindex', " +
+            "options => 'fm-index.partition-row-count=2')")
+        .collect()
+        .head
+      assert(output.getBoolean(0))
+
+      val entries = loadTable("T")
+        .store()
+        .newIndexFileHandler()
+        .scanEntries()
+        .asScala
+        .map(_.indexFile())
+        .filter(_.indexType() == "fmindex")
+      assert(entries.nonEmpty)
+      // The index retains the stable physical row-id range, including rows hidden by DVs.
+      assert(entries.map(_.rowCount()).sum == 7L)
+
+      checkAnswer(
+        spark.table("T").where(col("content").contains("needle")).select("id"),
+        Seq(Row(2), Row(5)))
+      checkAnswer(
+        spark.table("T").where(col("content").contains("deleted")).select("id"),
+        Seq.empty)
+    }
+  }
 }

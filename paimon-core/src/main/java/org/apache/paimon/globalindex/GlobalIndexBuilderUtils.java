@@ -546,6 +546,9 @@ public class GlobalIndexBuilderUtils {
             return;
         }
 
+        // Deliberately omit deletion files. Global indexes cover the stable physical row-id
+        // range, while query-side live-row filtering applies deletion vectors for the pinned
+        // snapshot. Passing deletion files here would create row-id gaps in index writers.
         DataSplit dataSplit =
                 DataSplit.builder()
                         .withPartition(partition)
