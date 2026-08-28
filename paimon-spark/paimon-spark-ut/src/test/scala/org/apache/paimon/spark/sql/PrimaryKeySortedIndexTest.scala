@@ -33,6 +33,7 @@ class PrimaryKeySortedIndexTest extends PaimonSparkTestBase {
 
   test("primary-key FM index supports exact contains with partitioned container") {
     withTable("t") {
+      // Force this tiny fixture through FM locate; production defaults may prefer a source scan.
       spark.sql("""
                   |CREATE TABLE t (id INT, content STRING)
                   |TBLPROPERTIES (
@@ -41,7 +42,7 @@ class PrimaryKeySortedIndexTest extends PaimonSparkTestBase {
                   |  'deletion-vectors.enabled' = 'true',
                   |  'pk-fm.index.columns' = 'content',
                   |  'fields.content.pk-fm.index.options' =
-                  |    '{"partition-row-count":"2"}'
+                  |    '{"partition-row-count":"2","sa-sample-rate":"1","locate-cost-ratio":"1"}'
                   |)
                   |""".stripMargin)
       spark.sql("""

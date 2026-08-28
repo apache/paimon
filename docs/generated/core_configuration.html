@@ -1297,6 +1297,12 @@ For an internal format table in a REST catalog, it also makes the catalog own th
             <td>Enables clustering by non-primary key fields. When set to true, the physical sort order of data files is determined by the configured 'clustering.columns' instead of the primary key, optimizing query performance for non-PK columns.</td>
         </tr>
         <tr>
+            <td><h5>pk-fm.index.columns</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Comma-separated character columns indexed by primary-key FM indexes.</td>
+        </tr>
+        <tr>
             <td><h5>pk-full-text.index.columns</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
