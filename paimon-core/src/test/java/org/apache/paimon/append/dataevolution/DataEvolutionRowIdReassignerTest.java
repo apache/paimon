@@ -49,6 +49,7 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.operation.FileStoreCommitImpl;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -68,6 +69,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
@@ -1414,6 +1416,40 @@ public class DataEvolutionRowIdReassignerTest extends TableTestBase {
         assertThat(rowIdsByPartition(table))
                 .containsEntry("pt=a/", Arrays.asList(0L, 2L, 4L))
                 .containsEntry("pt=b/", Arrays.asList(1L, 3L));
+    }
+
+    @Test
+    public void testReassignStreamsManifestRewritesWithoutPopulatingCache() throws Exception {
+        FileStoreTable originalTable = createTableWithInterleavedPartitions();
+        FileStoreTable table =
+                originalTable.copy(
+                        Collections.singletonMap(CoreOptions.SCAN_MANIFEST_PARALLELISM.key(), "2"));
+        List<String> originalManifestFiles = dataManifestFileNames(table);
+        assertThat(originalManifestFiles).hasSizeGreaterThan(1);
+        SegmentsCache<Path> manifestCache =
+                new SegmentsCache<>(1024, MemorySize.ofMebiBytes(64), Long.MAX_VALUE, null, false);
+        table.setManifestCache(manifestCache);
+
+        DataEvolutionRowIdReassigner.Result result =
+                new DataEvolutionRowIdReassigner(table)
+                        .reassign("test-streaming-manifest-rewrite-with-cache");
+
+        Set<String> currentManifestFiles = new HashSet<>(dataManifestFileNames(table));
+        List<String> replacedManifestFiles = new ArrayList<>();
+        for (String fileName : originalManifestFiles) {
+            if (!currentManifestFiles.contains(fileName)) {
+                replacedManifestFiles.add(fileName);
+                assertThat(
+                                manifestCache.getIfPresents(
+                                        table.store().pathFactory().toManifestFilePath(fileName)))
+                        .isNull();
+            }
+        }
+        assertThat(replacedManifestFiles).isNotEmpty();
+        assertThat(result.fileCount).isEqualTo(5L);
+        assertThat(rowIdsByPartition(table))
+                .containsEntry("pt=a/", Arrays.asList(5L, 6L, 7L))
+                .containsEntry("pt=b/", Arrays.asList(8L, 9L));
     }
 
     @Test
