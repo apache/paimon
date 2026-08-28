@@ -1487,7 +1487,8 @@ public class RESTApi {
             throw new NoSuchResourceException(
                     ErrorResponse.RESOURCE_TYPE_FUNCTION,
                     identifier.getObjectName(),
-                    "Invalid function name: " + identifier.getObjectName());
+                    "Invalid function name: %s",
+                    identifier.getObjectName());
         }
         return client.get(
                 resourcePaths.function(identifier.getDatabaseName(), identifier.getObjectName()),

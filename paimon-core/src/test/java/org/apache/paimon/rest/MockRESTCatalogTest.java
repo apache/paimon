@@ -85,6 +85,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.catalog.Catalog.TABLE_DEFAULT_OPTION_PREFIX;
 import static org.apache.paimon.rest.RESTApi.HEADER_PREFIX;
 import static org.apache.paimon.rest.RESTApi.READ_VIA_HEADER;
@@ -140,6 +141,19 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         options.set(CatalogOptions.METASTORE, RESTCatalogFactory.IDENTIFIER);
         assertThatThrownBy(() -> new RESTCatalog(CatalogContext.create(options)))
                 .isInstanceOf(NotAuthorizedException.class);
+    }
+
+    @Test
+    void testRejectedSystemTablePatternKeepsWhatRaisedIt() {
+        // the message is the argument, never the format, and the cause is what says where it
+        // came from -- the caller sees only what this exception carries
+        assertThatThrownBy(
+                        () ->
+                                catalog.listTablesPaged(
+                                        SYSTEM_DATABASE_NAME, null, null, "a%b", null))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("prefix sql like pattern")
+                .hasCauseInstanceOf(IllegalArgumentException.class);
     }
 
     @Test

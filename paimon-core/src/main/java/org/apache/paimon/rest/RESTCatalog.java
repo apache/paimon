@@ -322,7 +322,7 @@ public class RESTCatalog implements Catalog {
             return SystemTableLoader.loadGlobalTableNamesPaged(
                     context.options(), maxResults, pageToken, tableNamePattern, tableType);
         } catch (IllegalArgumentException e) {
-            throw new BadRequestException(e.getMessage());
+            throw new BadRequestException(e, "%s", e.getMessage());
         }
     }
 
