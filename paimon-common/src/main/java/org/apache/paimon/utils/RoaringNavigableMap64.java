@@ -59,6 +59,20 @@ public class RoaringNavigableMap64 implements Iterable<Long>, Serializable {
         return roaring64NavigableMap.contains(x);
     }
 
+    /** Returns whether this bitmap contains a value in {@code [fromInclusive, toExclusive)}. */
+    public boolean intersects(long fromInclusive, long toExclusive) {
+        Preconditions.checkArgument(
+                fromInclusive >= 0 && toExclusive >= fromInclusive,
+                "Invalid non-negative bitmap range [%s, %s).",
+                fromInclusive,
+                toExclusive);
+        if (fromInclusive == toExclusive || roaring64NavigableMap.isEmpty()) {
+            return false;
+        }
+        long before = fromInclusive == 0 ? 0 : roaring64NavigableMap.rankLong(fromInclusive - 1);
+        return roaring64NavigableMap.rankLong(toExclusive - 1) > before;
+    }
+
     public void add(long x) {
         roaring64NavigableMap.add(x);
     }

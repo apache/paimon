@@ -29,6 +29,22 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class RoaringNavigableMap64Test {
 
     @Test
+    public void testIntersectsHalfOpenRange() {
+        RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
+        bitmap.add(2);
+        bitmap.add(7);
+        bitmap.add(Long.MAX_VALUE - 1);
+
+        assertThat(bitmap.intersects(0, 2)).isFalse();
+        assertThat(bitmap.intersects(2, 3)).isTrue();
+        assertThat(bitmap.intersects(3, 7)).isFalse();
+        assertThat(bitmap.intersects(3, 8)).isTrue();
+        assertThat(bitmap.intersects(Long.MAX_VALUE - 1, Long.MAX_VALUE)).isTrue();
+        assertThat(bitmap.intersects(8, Long.MAX_VALUE - 1)).isFalse();
+        assertThat(bitmap.intersects(7, 7)).isFalse();
+    }
+
+    @Test
     public void testAddRangeBasic() {
         RoaringNavigableMap64 bitmap = new RoaringNavigableMap64();
         bitmap.addRange(new Range(5, 10));

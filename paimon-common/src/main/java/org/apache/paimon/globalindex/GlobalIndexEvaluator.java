@@ -19,6 +19,7 @@
 package org.apache.paimon.globalindex;
 
 import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.Contains;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.IsNaN;
 import org.apache.paimon.predicate.IsNotNull;
@@ -42,6 +43,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -174,6 +176,13 @@ public class GlobalIndexEvaluator implements Closeable {
             CompoundPredicate predicate) {
         List<Predicate> children =
                 pruneRedundantIsNotNullForAnd(flattenChildren(predicate), predicate);
+        if (!(predicate.function() instanceof Or)) {
+            CompletableFuture<Optional<Evaluation>> refined =
+                    visitAndWithContainsRefinement(children, predicate);
+            if (refined != null) {
+                return refined;
+            }
+        }
         List<CompletableFuture<Optional<Evaluation>>> childFutures =
                 new ArrayList<>(children.size());
         for (Predicate child : children) {
@@ -189,6 +198,252 @@ public class GlobalIndexEvaluator implements Closeable {
                             }
                             return combineResults(results, predicate);
                         });
+    }
+
+    @Nullable
+    private CompletableFuture<Optional<Evaluation>> visitAndWithContainsRefinement(
+            List<Predicate> children, CompoundPredicate predicate) {
+        Map<Integer, ContainsGroup> groups = new LinkedHashMap<>();
+        List<Predicate> remaining = new ArrayList<>();
+        int containsCount = 0;
+        for (Predicate child : children) {
+            ContainsLeaf contains = containsLeaf(child);
+            if (contains == null) {
+                remaining.add(child);
+                continue;
+            }
+            containsCount++;
+            ContainsGroup group = groups.get(contains.fieldId);
+            if (group == null) {
+                group = new ContainsGroup(contains.fieldId, contains.fieldRef, contains.readers);
+                groups.put(contains.fieldId, group);
+            }
+            group.literals.add(contains.literal);
+        }
+        if (containsCount == 0 || children.size() == 1) {
+            return null;
+        }
+
+        List<CompletableFuture<Optional<Evaluation>>> remainingFutures =
+                new ArrayList<>(remaining.size());
+        for (Predicate child : remaining) {
+            remainingFutures.add(visitAsync(child));
+        }
+        // A completed index task may still own a SemaphoredDelegatingExecutor permit while its
+        // completion callbacks run. Cross the phase boundary asynchronously before submitting the
+        // next index tasks so a single-permit executor cannot deadlock on nested submission.
+        return CompletableFuture.allOf(remainingFutures.toArray(new CompletableFuture[0]))
+                .thenComposeAsync(
+                        ignored -> {
+                            List<Optional<Evaluation>> remainingResults = new ArrayList<>();
+                            for (CompletableFuture<Optional<Evaluation>> future :
+                                    remainingFutures) {
+                                remainingResults.add(future.join());
+                            }
+                            Optional<Evaluation> remainingEvaluation =
+                                    combineResults(remainingResults, predicate);
+                            GlobalIndexResult candidates =
+                                    remainingEvaluation.isPresent()
+                                            ? remainingEvaluation.get().result()
+                                            : null;
+                            Set<Integer> emptyResultFields = new HashSet<>();
+                            if (remainingEvaluation.isPresent()) {
+                                emptyResultFields.addAll(
+                                        remainingEvaluation.get().contributingFieldIds());
+                                if (candidates.results().isEmpty()) {
+                                    return CompletableFuture.completedFuture(
+                                            Optional.of(
+                                                    new Evaluation(
+                                                            GlobalIndexResult.createEmpty(),
+                                                            emptyResultFields)));
+                                }
+                            }
+                            List<ContainsGroup> groupedContains = new ArrayList<>(groups.values());
+                            List<CompletableFuture<Optional<GlobalIndexResult>>> coarseFutures =
+                                    new ArrayList<>(groupedContains.size());
+                            for (ContainsGroup group : groupedContains) {
+                                coarseFutures.add(visitContainsCandidates(group, candidates));
+                            }
+                            GlobalIndexResult initialCandidates = candidates;
+                            // Keep the coarse-to-exact boundary outside the task which completes
+                            // the last coarse future for the same single-permit executor case.
+                            return CompletableFuture.allOf(
+                                            coarseFutures.toArray(new CompletableFuture[0]))
+                                    .thenComposeAsync(
+                                            coarseIgnored -> {
+                                                GlobalIndexResult refinedCandidates =
+                                                        initialCandidates;
+                                                for (int i = 0; i < coarseFutures.size(); i++) {
+                                                    Optional<GlobalIndexResult> coarse =
+                                                            coarseFutures.get(i).join();
+                                                    if (!coarse.isPresent()) {
+                                                        continue;
+                                                    }
+                                                    refinedCandidates =
+                                                            refinedCandidates == null
+                                                                    ? coarse.get()
+                                                                    : refinedCandidates.and(
+                                                                            coarse.get());
+                                                    emptyResultFields.add(
+                                                            groupedContains.get(i).fieldId);
+                                                    if (refinedCandidates.results().isEmpty()) {
+                                                        return CompletableFuture.completedFuture(
+                                                                Optional.of(
+                                                                        new Evaluation(
+                                                                                GlobalIndexResult
+                                                                                        .createEmpty(),
+                                                                                emptyResultFields)));
+                                                    }
+                                                }
+
+                                                List<CompletableFuture<Optional<Evaluation>>>
+                                                        exactFutures =
+                                                                new ArrayList<>(groups.size());
+                                                for (ContainsGroup group : groups.values()) {
+                                                    exactFutures.add(
+                                                            visitContainsConjunction(
+                                                                    group, refinedCandidates));
+                                                }
+                                                return CompletableFuture.allOf(
+                                                                exactFutures.toArray(
+                                                                        new CompletableFuture[0]))
+                                                        .thenApply(
+                                                                exactIgnored -> {
+                                                                    List<Optional<Evaluation>>
+                                                                            results =
+                                                                                    new ArrayList<>(
+                                                                                            exactFutures
+                                                                                                            .size()
+                                                                                                    + 1);
+                                                                    if (remainingEvaluation
+                                                                            .isPresent()) {
+                                                                        results.add(
+                                                                                remainingEvaluation);
+                                                                    }
+                                                                    for (CompletableFuture<
+                                                                                    Optional<
+                                                                                            Evaluation>>
+                                                                            future : exactFutures) {
+                                                                        results.add(future.join());
+                                                                    }
+                                                                    return combineResults(
+                                                                            results, predicate);
+                                                                });
+                                            });
+                        });
+    }
+
+    @Nullable
+    private ContainsLeaf containsLeaf(Predicate predicate) {
+        if (!(predicate instanceof LeafPredicate)) {
+            return null;
+        }
+        LeafPredicate leaf = (LeafPredicate) predicate;
+        if (!(leaf.function() instanceof Contains) || !leaf.fieldRefOptional().isPresent()) {
+            return null;
+        }
+        FieldRef fieldRef = leaf.fieldRefOptional().get();
+        int fieldId = rowType.getField(fieldRef.name()).id();
+        Collection<GlobalIndexReader> readers =
+                indexReadersCache.computeIfAbsent(fieldId, readersFunction::apply);
+        if (readers.isEmpty()) {
+            return null;
+        }
+        for (GlobalIndexReader reader : readers) {
+            if (!(reader instanceof ContainsRefiningGlobalIndexReader)) {
+                return null;
+            }
+        }
+        return new ContainsLeaf(fieldId, fieldRef, leaf.literals().get(0), readers);
+    }
+
+    private CompletableFuture<Optional<GlobalIndexResult>> visitContainsCandidates(
+            ContainsGroup group, @Nullable GlobalIndexResult candidates) {
+        List<CompletableFuture<Optional<GlobalIndexResult>>> futures =
+                new ArrayList<>(group.readers.size());
+        for (GlobalIndexReader reader : group.readers) {
+            futures.add(
+                    ((ContainsRefiningGlobalIndexReader) reader)
+                            .visitContainsCandidates(group.fieldRef, group.literals, candidates));
+        }
+        return intersectReaderResults(futures);
+    }
+
+    private CompletableFuture<Optional<Evaluation>> visitContainsConjunction(
+            ContainsGroup group, @Nullable GlobalIndexResult candidates) {
+        List<CompletableFuture<Optional<GlobalIndexResult>>> futures =
+                new ArrayList<>(group.readers.size());
+        for (GlobalIndexReader reader : group.readers) {
+            futures.add(
+                    ((ContainsRefiningGlobalIndexReader) reader)
+                            .visitContainsConjunction(group.fieldRef, group.literals, candidates));
+        }
+        return intersectReaderResults(futures)
+                .thenApply(
+                        result ->
+                                result.map(
+                                        value ->
+                                                new Evaluation(
+                                                        value,
+                                                        Collections.singleton(group.fieldId))));
+    }
+
+    private CompletableFuture<Optional<GlobalIndexResult>> intersectReaderResults(
+            List<CompletableFuture<Optional<GlobalIndexResult>>> futures) {
+        return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                .thenApply(
+                        ignored -> {
+                            Optional<GlobalIndexResult> result = Optional.empty();
+                            for (CompletableFuture<Optional<GlobalIndexResult>> future : futures) {
+                                Optional<GlobalIndexResult> current = future.join();
+                                if (!current.isPresent()) {
+                                    continue;
+                                }
+                                result =
+                                        Optional.of(
+                                                result.isPresent()
+                                                        ? result.get().and(current.get())
+                                                        : current.get());
+                                if (result.get().results().isEmpty()) {
+                                    break;
+                                }
+                            }
+                            return result;
+                        });
+    }
+
+    private static final class ContainsLeaf {
+
+        private final int fieldId;
+        private final FieldRef fieldRef;
+        private final Object literal;
+        private final Collection<GlobalIndexReader> readers;
+
+        private ContainsLeaf(
+                int fieldId,
+                FieldRef fieldRef,
+                Object literal,
+                Collection<GlobalIndexReader> readers) {
+            this.fieldId = fieldId;
+            this.fieldRef = fieldRef;
+            this.literal = literal;
+            this.readers = readers;
+        }
+    }
+
+    private static final class ContainsGroup {
+
+        private final int fieldId;
+        private final FieldRef fieldRef;
+        private final Collection<GlobalIndexReader> readers;
+        private final List<Object> literals = new ArrayList<>();
+
+        private ContainsGroup(
+                int fieldId, FieldRef fieldRef, Collection<GlobalIndexReader> readers) {
+            this.fieldId = fieldId;
+            this.fieldRef = fieldRef;
+            this.readers = readers;
+        }
     }
 
     private Optional<Evaluation> combineResults(
