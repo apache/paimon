@@ -15,6 +15,7 @@
 # limitations under the License.
 
 import json
+import importlib.util
 import subprocess
 import sys
 
@@ -27,6 +28,11 @@ from pypaimon.sample import robomind_agilex as agilex
 
 
 h5py = pytest.importorskip("h5py")
+
+requires_vortex = pytest.mark.skipif(
+    importlib.util.find_spec("vortex") is None,
+    reason="RoboMIND ingestion uses Vortex, which requires Python >= 3.11",
+)
 
 
 _NUMERIC_PATHS = [path for _, path in agilex.NUMERIC_FIELDS]
@@ -79,6 +85,7 @@ def customer_agilex_input(request):
     return value
 
 
+@requires_vortex
 def test_explicit_customer_input_uses_downloaded_episodes(
         customer_agilex_input, tmp_path):
     episodes = agilex.discover_episodes(customer_agilex_input)
@@ -147,6 +154,7 @@ def test_shared_transform_streams_complete_agilex_business_schema(
     ]
 
 
+@requires_vortex
 def test_local_ingest_and_backfill_materialize_only_canonical_action(
         agilex_input, tmp_path):
     root, paths = agilex_input
@@ -232,6 +240,7 @@ def test_local_ingest_and_backfill_materialize_only_canonical_action(
     assert refreshed_snapshot > backfill["statistics_snapshot_id"]
 
 
+@requires_vortex
 def test_ray_ingest_matches_local_schema_rows_and_backfill(
         agilex_input, tmp_path):
     ray = pytest.importorskip("ray")
