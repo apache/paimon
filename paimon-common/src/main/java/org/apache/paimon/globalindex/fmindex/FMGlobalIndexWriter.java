@@ -28,7 +28,6 @@ import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
 
-import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -40,14 +39,10 @@ import java.util.List;
 /** Streaming, bounded-partition writer for an exact byte-oriented FM index. */
 public class FMGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Closeable {
 
-    private static final int VERIFICATION_PAGE_ROW_COUNT = 128;
-    private static final int TARGET_VERIFICATION_PAGE_SIZE = 64 * 1024;
-
     private final GlobalIndexFileWriter fileWriter;
     private final int maxPartitionTextLength;
     private final int maxPartitionRowCount;
     private final int sampleRate;
-    private final boolean storeVerificationValues;
     @Nullable private final BlockCompressionFactory compressionFactory;
     private final List<FMIndexFile.PartitionMeta> partitions = new ArrayList<>();
 
@@ -69,13 +64,11 @@ public class FMGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Close
             int maxPartitionTextLength,
             int maxPartitionRowCount,
             int sampleRate,
-            boolean storeVerificationValues,
             @Nullable BlockCompressionFactory compressionFactory) {
         this.fileWriter = fileWriter;
         this.maxPartitionTextLength = maxPartitionTextLength;
         this.maxPartitionRowCount = maxPartitionRowCount;
         this.sampleRate = sampleRate;
-        this.storeVerificationValues = storeVerificationValues;
         this.compressionFactory = compressionFactory;
     }
 
@@ -96,14 +89,6 @@ public class FMGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Close
                     "FM index expects BinaryString values, but found %s.",
                     key.getClass().getName());
             bytes = ((BinaryString) key).toBytes();
-            if (storeVerificationValues) {
-                Preconditions.checkArgument(
-                        bytes.length
-                                <= FMIndexFile.MAX_VERIFICATION_BLOCK_UNCOMPRESSED_LENGTH
-                                        - Integer.BYTES,
-                        "A value exceeds the FM index exact-fallback block limit (%s bytes).",
-                        FMIndexFile.MAX_VERIFICATION_BLOCK_UNCOMPRESSED_LENGTH);
-            }
         }
         long encodedLength = (bytes == null ? 0L : bytes.length) + 1L;
         Preconditions.checkArgument(
@@ -153,12 +138,7 @@ public class FMGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Close
                     FMIndexFile.writeContainerDirectory(
                             stream, output, indexMeta, compressionFactory);
             FMIndexFile.writeContainerFooter(
-                    output,
-                    directory,
-                    firstRowId,
-                    totalRowCount,
-                    partitions.size(),
-                    storeVerificationValues);
+                    output, directory, firstRowId, totalRowCount, partitions.size());
             closeOutput();
             return Collections.singletonList(new ResultEntry(fileName, totalRowCount, indexMeta));
         } catch (IOException e) {
@@ -267,10 +247,6 @@ public class FMGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Close
             FMIndexFile.BitVectorMeta rowBoundaries =
                     FMIndexFile.writeBitVector(
                             stream, output, boundaryWords, symbols.length, compressionFactory);
-            List<FMIndexFile.VerificationPageMeta> verificationPages =
-                    storeVerificationValues
-                            ? writeVerificationPages(stream, output, symbols, alphabet.symbolToByte)
-                            : Collections.emptyList();
             FMIndexFile.Directory directory =
                     new FMIndexFile.Directory(
                             partitionRowCount,
@@ -285,8 +261,7 @@ public class FMGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Close
                             sampled,
                             samples,
                             nullVector,
-                            rowBoundaries,
-                            verificationPages);
+                            rowBoundaries);
             FMIndexFile.BlockInfo directoryBlock =
                     FMIndexFile.writeDirectory(stream, output, directory, compressionFactory);
             FMIndexFile.writeFooter(
@@ -295,8 +270,7 @@ public class FMGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Close
                     partitionFirstRowId,
                     partitionRowCount,
                     symbols.length,
-                    sampleRate,
-                    storeVerificationValues);
+                    sampleRate);
             partitions.add(
                     new FMIndexFile.PartitionMeta(
                             partitionStart,
@@ -349,68 +323,6 @@ public class FMGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Close
         return counts;
     }
 
-    private List<FMIndexFile.VerificationPageMeta> writeVerificationPages(
-            PositionOutputStream stream,
-            DataOutputStream output,
-            char[] symbols,
-            int[] symbolToByte)
-            throws IOException {
-        List<FMIndexFile.VerificationPageMeta> pages = new ArrayList<>();
-        int row = 0;
-        int symbolPosition = 0;
-        while (row < partitionRowCount) {
-            int firstRow = row;
-            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-            DataOutputStream values = new DataOutputStream(bytes);
-            int pageRows = 0;
-            while (row < partitionRowCount) {
-                int separator = symbolPosition;
-                while (separator < symbols.length && symbols[separator] != FMIndexFile.SEPARATOR) {
-                    separator++;
-                }
-                Preconditions.checkState(
-                        separator < symbols.length,
-                        "FM index encoded text is missing a row separator.");
-                int valueLength = separator - symbolPosition;
-                long recordLength = Integer.BYTES + (nullRows[row] ? 0L : valueLength);
-                if (pageRows > 0
-                        && (pageRows >= VERIFICATION_PAGE_ROW_COUNT
-                                || bytes.size() + recordLength > TARGET_VERIFICATION_PAGE_SIZE)) {
-                    break;
-                }
-                Preconditions.checkState(
-                        bytes.size() + recordLength
-                                <= FMIndexFile.MAX_VERIFICATION_BLOCK_UNCOMPRESSED_LENGTH,
-                        "FM index verification value exceeds the supported block size.");
-                if (nullRows[row]) {
-                    Preconditions.checkState(
-                            valueLength == 0, "FM index null row contains encoded bytes.");
-                    values.writeInt(-1);
-                } else {
-                    values.writeInt(valueLength);
-                    for (int i = symbolPosition; i < separator; i++) {
-                        values.writeByte(symbolToByte[symbols[i]]);
-                    }
-                }
-                symbolPosition = separator + 1;
-                row++;
-                pageRows++;
-            }
-            values.flush();
-            pages.add(
-                    new FMIndexFile.VerificationPageMeta(
-                            firstRow,
-                            pageRows,
-                            FMIndexFile.writeBlock(
-                                    stream, output, bytes.toByteArray(), compressionFactory)));
-        }
-        Preconditions.checkState(
-                symbolPosition == symbols.length - 1
-                        && symbols[symbolPosition] == FMIndexFile.TERMINATOR,
-                "FM index verification rows do not cover the encoded text.");
-        return pages;
-    }
-
     private static DenseAlphabet densify(char[] symbols) {
         boolean[] present = new boolean[256];
         for (char symbol : symbols) {
@@ -426,18 +338,12 @@ public class FMGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Close
                 byteToSymbol[value] = alphabetSize++;
             }
         }
-        int[] symbolToByte = new int[alphabetSize];
-        for (int value = 0; value < byteToSymbol.length; value++) {
-            if (byteToSymbol[value] >= 0) {
-                symbolToByte[byteToSymbol[value]] = value;
-            }
-        }
         for (int i = 0; i < symbols.length; i++) {
             if (symbols[i] >= FMIndexFile.FIRST_BYTE_SYMBOL) {
                 symbols[i] = (char) byteToSymbol[symbols[i] - FMIndexFile.FIRST_BYTE_SYMBOL];
             }
         }
-        return new DenseAlphabet(alphabetSize, byteToSymbol, symbolToByte);
+        return new DenseAlphabet(alphabetSize, byteToSymbol);
     }
 
     private void ensureNullCapacity(int capacity) {
@@ -455,12 +361,10 @@ public class FMGlobalIndexWriter implements GlobalIndexSingleColumnWriter, Close
     private static final class DenseAlphabet {
         private final int alphabetSize;
         private final int[] byteToSymbol;
-        private final int[] symbolToByte;
 
-        private DenseAlphabet(int alphabetSize, int[] byteToSymbol, int[] symbolToByte) {
+        private DenseAlphabet(int alphabetSize, int[] byteToSymbol) {
             this.alphabetSize = alphabetSize;
             this.byteToSymbol = byteToSymbol;
-            this.symbolToByte = symbolToByte;
         }
     }
 
