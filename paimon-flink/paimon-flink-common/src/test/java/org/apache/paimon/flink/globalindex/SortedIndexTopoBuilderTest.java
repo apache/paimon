@@ -63,6 +63,7 @@ public class SortedIndexTopoBuilderTest {
         assertThat(SortedIndexTopoBuilder.supports("bitmap")).isTrue();
         assertThat(SortedIndexTopoBuilder.supports("btree")).isTrue();
         assertThat(SortedIndexTopoBuilder.supports("multivalue")).isTrue();
+        assertThat(SortedIndexTopoBuilder.supports("fmindex")).isFalse();
         assertThat(SortedIndexTopoBuilder.supports("inverted")).isFalse();
     }
 
