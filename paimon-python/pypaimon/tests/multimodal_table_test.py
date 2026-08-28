@@ -842,6 +842,82 @@ class MultimodalTableTest(unittest.TestCase):
         _, blobs3 = obs.scan().where("clip = 'c1'").read_blobs(["img", "img"])
         self.assertEqual({"img"}, set(blobs3))
 
+    def test_scan_read_and_stream_map_blobs(self):
+        map_blob_type = pa.map_(pa.string(), pa.large_binary())
+        schema = _schema({
+            "id": pa.int32(),
+            "preview": pa.large_binary(),
+            "assets": map_blob_type,
+        })
+        obs = self.conn.create_table(
+            "map_blobs",
+            schema=schema,
+            options=_PARQUET_OPTIONS,
+        )
+        obs.add(pa.Table.from_pydict({
+            "id": [1, 2, 3, 4],
+            "preview": [b"preview-1", None, b"preview-3", b"preview-4"],
+            "assets": pa.array(
+                [
+                    [
+                        ("thumb", b"thumb-1"),
+                        ("empty", b""),
+                        ("missing", None),
+                    ],
+                    None,
+                    [],
+                    [("original", b"original-4")],
+                ],
+                type=map_blob_type,
+            ),
+        }, schema=schema))
+
+        scalar, blobs = obs.scan().read_blobs(
+            ["preview", "assets"], parallelism=2
+        )
+        ids = scalar.column("id").to_pylist()
+        self.assertNotIn("assets", scalar.column_names)
+        self.assertEqual(
+            {
+                1: b"preview-1",
+                2: None,
+                3: b"preview-3",
+                4: b"preview-4",
+            },
+            dict(zip(ids, blobs["preview"])),
+        )
+        self.assertEqual(
+            {
+                1: {"thumb": b"thumb-1", "empty": b"", "missing": None},
+                2: None,
+                3: {},
+                4: {"original": b"original-4"},
+            },
+            {
+                row_id: None if values is None else dict(values)
+                for row_id, values in zip(ids, blobs["assets"])
+            },
+        )
+
+        streamed = {}
+        for scalar_batch, blob_batch in obs.scan().stream_blobs("assets"):
+            for row_id, values in zip(
+                    scalar_batch.column("id").to_pylist(),
+                    blob_batch["assets"]):
+                streamed[row_id] = None if values is None else dict(values)
+        self.assertEqual(
+            {
+                1: {"thumb": b"thumb-1", "empty": b"", "missing": None},
+                2: None,
+                3: {},
+                4: {"original": b"original-4"},
+            },
+            streamed,
+        )
+
+        _, selected = obs.scan().select(["id", "assets"]).read_blobs()
+        self.assertEqual({"assets"}, set(selected))
+
     def test_scan_read_blobs_filter_column_not_selected(self):
         # The row filter must apply even when its column is not in select().
         obs = self.conn.create_table(

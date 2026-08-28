@@ -463,8 +463,9 @@ result = (
 `scan().read_blobs(column)` bulk-fetches a BLOB column's bytes for the filtered
 rows using concurrent, same-file coalesced ranged reads. This is much faster than
 a per-row loop and avoids the slow row-by-row blob resolution on data-evolution
-tables. It returns `(scalar_table, {column: [bytes | None]})`, row-aligned; the
-scalar table drops all BLOB columns.
+tables. It returns `(scalar_table, {column: rows})`, row-aligned. Scalar BLOB
+rows are `bytes | None`; `MAP<K, BLOB>` rows are `None` or ordered lists of
+`(key, bytes | None)` pairs. The scalar table drops the readable BLOB columns.
 
 ```python
 scalar, blobs = (
@@ -486,10 +487,13 @@ scalar, blobs = docs.scan().where(f"id IN ({in_clause})").read_blobs("image")
 `where()` is a SQL string, so build the `IN (...)` clause only from trusted,
 already-escaped ids -- do not interpolate untrusted external input.
 
-Read several BLOB columns at once (fetched together, not column-by-column):
+Read several BLOB columns at once, including `MAP<K, BLOB>`:
 
 ```python
-scalar, blobs = docs.scan().where("category = 'lake'").read_blobs(["image", "audio"])
+scalar, blobs = docs.scan().where("category = 'lake'").read_blobs(
+    ["image", "audio", "renditions"]
+)
+renditions = [None if row is None else dict(row) for row in blobs["renditions"]]
 ```
 
 For a memory-bounded read (e.g. streaming into a trainer), `stream_blobs` yields
