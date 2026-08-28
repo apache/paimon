@@ -26,6 +26,7 @@ from unittest.mock import patch
 import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
+import pyarrow.fs as pafs
 
 import pypaimon.multimodal as pmm
 from pypaimon.multimodal.lerobot import (
@@ -109,6 +110,50 @@ class LeRobotValidationTest(unittest.TestCase):
                 connection.load_from_lerobot("frames", temp_dir)
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+class _RemoteLeRobotFileIO:
+
+    def __init__(self, local_root, remote_root):
+        self.local_root = Path(local_root)
+        self.remote_root = remote_root.rstrip("/")
+        self.opened_paths = []
+        self.close_count = 0
+
+    def _local_path(self, remote_path):
+        prefix = self.remote_root + "/"
+        if remote_path == self.remote_root:
+            return self.local_root
+        if not remote_path.startswith(prefix):
+            raise FileNotFoundError(remote_path)
+        return self.local_root / remote_path[len(prefix):]
+
+    def _status(self, local_path):
+        relative = local_path.relative_to(self.local_root).as_posix()
+        remote_path = self.remote_root
+        if relative != ".":
+            remote_path += "/" + relative
+        native_path = remote_path.split("://", 1)[1]
+        file_type = pafs.FileType.Directory if local_path.is_dir() \
+            else pafs.FileType.File
+        return pafs.FileInfo(native_path, file_type)
+
+    def get_file_status(self, remote_path):
+        local_path = self._local_path(remote_path)
+        if not local_path.exists():
+            raise FileNotFoundError(remote_path)
+        return self._status(local_path)
+
+    def list_status(self, remote_path):
+        return [self._status(path) for path in sorted(
+            self._local_path(remote_path).iterdir())]
+
+    def new_input_stream(self, remote_path):
+        self.opened_paths.append(remote_path)
+        return self._local_path(remote_path).open("rb")
+
+    def close(self):
+        self.close_count += 1
 
 
 @unittest.skipUnless(
@@ -319,6 +364,49 @@ class LeRobotImportTest(unittest.TestCase):
                             for body in bodies))
         mp4 = next(self.video_source.rglob("*.mp4")).read_bytes()
         self.assertTrue(all(body != mp4 for body in bodies))
+
+    def test_oss_source_uses_explicit_options_and_copies_each_file_once(self):
+        source = "oss://source-bucket/robot-video"
+        source_file_io = _RemoteLeRobotFileIO(self.video_source, source)
+        source_options = {
+            "fs.oss.endpoint": "oss-cn-test.example.com",
+            "fs.oss.accessKeyId": "source-key",
+            "fs.oss.accessKeySecret": "source-secret",
+        }
+
+        with patch(
+                "pypaimon.multimodal.lerobot._Hdf5SourceFileIO",
+                return_value=source_file_io) as source_file_io_class:
+            result = self.connection.load_from_lerobot(
+                "oss_video",
+                source,
+                source_options=source_options,
+            )
+
+        self.assertEqual(3, result.row_count)
+        self.assertEqual(1, result.snapshot_id)
+        self.assertEqual(1, source_file_io.close_count)
+        self.assertEqual(
+            source_options,
+            source_file_io_class.call_args.args[0].to_map(),
+        )
+        self.assertEqual(
+            1,
+            len([path for path in source_file_io.opened_paths
+                 if path.endswith(".mp4")]),
+        )
+        self.assertEqual(
+            len(source_file_io.opened_paths),
+            len(set(source_file_io.opened_paths)),
+        )
+        table = self.connection.get_table("oss_video")
+        unused_scalar, blobs = table.scan().select([
+            "index", "observation.video"
+        ]).read_blobs()
+        self.assertTrue(all(
+            body.startswith(b"\x89PNG\r\n\x1a\n")
+            for body in blobs["observation.video"]
+        ))
 
     def test_existing_incompatible_schema_fails_without_snapshot(self):
         info = json.loads((self.image_source / "meta" / "info.json").read_text())

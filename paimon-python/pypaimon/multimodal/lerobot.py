@@ -18,20 +18,32 @@
 
 import io
 import json
+import posixpath
+import shutil
 import sys
+import tempfile
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Callable, Mapping, Optional
+from urllib.parse import unquote, urlparse
 
 import pyarrow as pa
+import pyarrow.fs as pafs
 
 from pypaimon.catalog.catalog_exception import (
     DatabaseNotExistException,
     TableNotExistException,
 )
+from pypaimon.common.options import Options
+from pypaimon.filesystem.pyarrow_file_io import LegacyOssDirectoryListingError
 from pypaimon.multimodal.hdf5 import (
+    _Hdf5SourceFileIO,
     _SnapshotRecorder,
+    _normalize_source_path,
+    _qualified_status_path,
     _strict_arrow_table,
+    _validated_source_options,
 )
 from pypaimon.multimodal.table import _target_schema
 
@@ -83,12 +95,14 @@ def load_from_lerobot(
         transform: Optional[Callable] = None,
         feature_mapping: Optional[Mapping[str, str]] = None,
         batch_size: int = 1024,
-        options: Optional[Mapping[str, object]] = None):
+        options: Optional[Mapping[str, object]] = None,
+        source_options: Optional[Mapping[str, object]] = None):
     """Import one LeRobot Dataset v3 and commit all frames once.
 
     A missing target table is created from LeRobot metadata. An existing table
     receives the same strict schema validation and append semantics as
-    :meth:`MultimodalConnection.load_from_hdf5`.
+    :meth:`MultimodalConnection.load_from_hdf5`. FileIO URI credentials come
+    only from ``source_options`` and are not inherited from the target Catalog.
     """
     if sys.version_info < (3, 10):
         raise RuntimeError(
@@ -100,86 +114,168 @@ def load_from_lerobot(
             or batch_size <= 0:
         raise ValueError("batch_size must be a positive integer.")
 
-    resolved_source, local_info = _resolve_source(source)
-    if local_info is not None:
-        _require_v3(local_info, resolved_source.path)
-    LeRobotDataset = _import_lerobot_dataset()
-    dataset = _open_dataset(LeRobotDataset, resolved_source)
-    info = dict(dataset.meta.info)
-    _require_v3(info, resolved_source.path)
+    validated_source_options = _validated_source_options(source_options)
+    with _resolved_source(source, validated_source_options) as (
+            resolved_source, local_info):
+        if local_info is not None:
+            _require_v3(local_info, resolved_source.path)
+        LeRobotDataset = _import_lerobot_dataset()
+        dataset = _open_dataset(LeRobotDataset, resolved_source)
+        info = dict(dataset.meta.info)
+        _require_v3(info, resolved_source.path)
 
-    source_schema, mapped_names = _schema_from_info(
-        info, feature_mapping, include_task=_has_tasks(dataset, info))
-    table = _get_or_create_table(
-        connection, table_name, source_schema, options)
-    target_schema = _target_schema(table.raw_table)
-    _strict_arrow_table(
-        pa.Table.from_batches([], schema=source_schema),
-        target_schema,
-        resolved_source,
-        0,
-        format_name="LeRobot",
-    )
-
-    episode_count = int(info.get("total_episodes", 0))
-    row_count = int(info.get("total_frames", len(dataset)))
-    if row_count == 0:
-        return LeRobotLoadResult(
-            episode_count=episode_count,
-            batch_count=0,
-            row_count=0,
-            snapshot_id=None,
+        source_schema, mapped_names = _schema_from_info(
+            info, feature_mapping, include_task=_has_tasks(dataset, info))
+        table = _get_or_create_table(
+            connection, table_name, source_schema, options)
+        target_schema = _target_schema(table.raw_table)
+        _strict_arrow_table(
+            pa.Table.from_batches([], schema=source_schema),
+            target_schema,
+            resolved_source,
+            0,
+            format_name="LeRobot",
         )
-    return _write_dataset(
-        table,
-        dataset,
-        info,
-        resolved_source,
-        source_schema,
-        mapped_names,
-        transform,
-        batch_size,
-    )
+
+        episode_count = int(info.get("total_episodes", 0))
+        row_count = int(info.get("total_frames", len(dataset)))
+        if row_count == 0:
+            return LeRobotLoadResult(
+                episode_count=episode_count,
+                batch_count=0,
+                row_count=0,
+                snapshot_id=None,
+            )
+        return _write_dataset(
+            table,
+            dataset,
+            info,
+            resolved_source,
+            source_schema,
+            mapped_names,
+            transform,
+            batch_size,
+        )
 
 
-def _resolve_source(source):
+@contextmanager
+def _resolved_source(source, source_options):
     if isinstance(source, Path):
         root = source.expanduser().resolve()
         if not root.is_dir():
-            raise FileNotFoundError("LeRobot source directory does not exist: %s" % root)
-        return _local_source(root)
+            raise FileNotFoundError(
+                "LeRobot source directory does not exist: %s" % root)
+        yield _local_source(root)
+        return
     if not isinstance(source, str) or not source.strip():
-        raise ValueError("source must be a local directory or Hugging Face repo_id.")
+        raise ValueError(
+            "source must be a local directory or Hugging Face repo_id.")
 
     value = source.strip()
     candidate = Path(value).expanduser()
     if candidate.is_dir():
-        return _local_source(candidate.resolve())
+        yield _local_source(candidate.resolve())
+        return
     if candidate.is_absolute() or value.startswith((".", "~")):
         raise FileNotFoundError(
             "LeRobot source directory does not exist: %s" % candidate)
-    return _LeRobotSource(path=value, root=None, repo_id=value), None
+    if "://" not in value:
+        yield _LeRobotSource(path=value, root=None, repo_id=value), None
+        return
+
+    source_uri = _normalize_source_path(value).rstrip("/")
+    with tempfile.TemporaryDirectory(prefix="pypaimon_lerobot_source_") \
+            as temp_dir:
+        root = Path(temp_dir)
+        _materialize_remote_source(
+            source_uri, root, Options(source_options))
+        yield _local_source(root, source_uri)
 
 
-def _local_source(root):
+def _local_source(root, display_path=None):
     info_path = root / "meta" / "info.json"
     if not info_path.is_file():
         raise ValueError(
-            "LeRobot source is missing meta/info.json: %s" % root)
+            "LeRobot source is missing meta/info.json: %s"
+            % (display_path or root))
     try:
         with info_path.open("r", encoding="utf-8") as file:
             info = json.load(file)
     except (OSError, ValueError) as error:
         raise ValueError(
-            "Cannot read LeRobot metadata %s: %s" % (info_path, error)) from error
+            "Cannot read LeRobot metadata %s: %s"
+            % (info_path, error)) from error
     return (
         _LeRobotSource(
-            path=str(root),
+            path=str(display_path or root),
             root=root,
             repo_id="local/pypaimon-import",
         ),
         info,
     )
+
+
+def _materialize_remote_source(source_uri, root, options):
+    source_file_io = _Hdf5SourceFileIO(options)
+    try:
+        try:
+            status = source_file_io.get_file_status(source_uri)
+        except FileNotFoundError as error:
+            raise FileNotFoundError(
+                "LeRobot source directory does not exist: %s" % source_uri
+            ) from error
+        if status.type != pafs.FileType.Directory:
+            raise ValueError(
+                "LeRobot URI source must be a directory: %s" % source_uri)
+        _copy_remote_directory(
+            source_file_io, source_uri, source_uri, root)
+    finally:
+        source_file_io.close()
+
+
+def _copy_remote_directory(source_file_io, source_root, directory, local_root):
+    try:
+        children = source_file_io.list_status(directory)
+    except LegacyOssDirectoryListingError as error:
+        raise ValueError(
+            "LeRobot URI directory listing is unavailable at %s; use "
+            "Jindo or upgrade PyArrow." % directory) from error
+    for status in children:
+        source_path = _qualified_status_path(directory, status)
+        relative_path = _relative_source_path(source_root, source_path)
+        local_path = local_root / PurePosixPath(relative_path)
+        if status.type == pafs.FileType.Directory:
+            local_path.mkdir(parents=True, exist_ok=True)
+            _copy_remote_directory(
+                source_file_io, source_root, source_path, local_root)
+        elif status.type == pafs.FileType.File:
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            stream = source_file_io.new_input_stream(source_path)
+            with closing(stream) as source_stream:
+                with local_path.open("wb") as output:
+                    shutil.copyfileobj(source_stream, output)
+        else:
+            raise ValueError(
+                "Unsupported LeRobot source status for path: %s"
+                % source_path)
+
+
+def _relative_source_path(source_root, source_path):
+    root_uri = urlparse(source_root)
+    path_uri = urlparse(source_path)
+    if (root_uri.scheme.lower(), root_uri.netloc) != (
+            path_uri.scheme.lower(), path_uri.netloc):
+        raise ValueError(
+            "LeRobot source entry is outside %s: %s"
+            % (source_root, source_path))
+    relative = posixpath.relpath(
+        unquote(path_uri.path), unquote(root_uri.path) or "/")
+    if relative in ("", ".") or relative == ".." \
+            or relative.startswith("../"):
+        raise ValueError(
+            "LeRobot source entry is outside %s: %s"
+            % (source_root, source_path))
+    return relative
 
 
 def _require_v3(info, source):

@@ -320,10 +320,10 @@ source drift. Calling it again with the same input appends the rows again.
 
 ## Load LeRobot Dataset v3
 
-`load_from_lerobot` converts a local LeRobot Dataset v3 to a normal Paimon
-table once. It derives the schema from `meta/info.json`, keeps one row per
-frame, preserves Episode/frame indices and task text, and commits all batches
-in one Snapshot.
+`load_from_lerobot` converts a LeRobot Dataset v3 from a local directory,
+FileIO URI, or Hugging Face repository to a normal Paimon table once. It
+derives the schema from `meta/info.json`, keeps one row per frame, preserves
+Episode/frame indices and task text, and commits all batches in one Snapshot.
 
 ```shell
 pip install 'pypaimon[lerobot]'
@@ -333,13 +333,30 @@ pip install 'pypaimon[lerobot]'
 result = conn.load_from_lerobot(
     "robot_data",
     "/data/lerobot_dataset",
-    batch_size=1024,
 )
 print(result.episode_count, result.row_count, result.snapshot_id)
 ```
 
-An existing local directory is always used directly; another non-path string
-is passed to the official LeRobot API as a Hugging Face `repo_id`.
+An existing local directory is always used directly. FileIO-supported directory
+URIs such as `oss://bucket/lerobot_dataset` use credentials from the explicit
+`source_options` argument, never from the target Catalog. Another non-path
+string is passed to the official LeRobot API as a Hugging Face `repo_id`.
+
+```python
+result = conn.load_from_lerobot(
+    "robot_data",
+    "oss://source-bucket/lerobot_dataset",
+    source_options={
+        "fs.oss.endpoint": "oss-cn-hangzhou.aliyuncs.com",
+        "fs.oss.accessKeyId": "SOURCE_ACCESS_KEY_ID",
+        "fs.oss.accessKeySecret": "SOURCE_ACCESS_KEY_SECRET",
+    },
+)
+```
+
+The official LeRobot reader requires a local root. URI sources are therefore
+copied once to a temporary directory, imported, and removed. Each MP4 is copied
+once, not once per frame; ensure local temporary storage can hold the source.
 
 If the target is absent, it is created from metadata. Existing targets use the
 same strict schema validation and append semantics as `load_from_hdf5`.

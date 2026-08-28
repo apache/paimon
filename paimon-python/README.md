@@ -33,8 +33,9 @@ The command will install the package and core dependencies to your local Python 
 
 # LeRobot Dataset v3 to multimodal tables
 
-Install the optional dependency, then import a local v3 dataset once. The
-target table is created from `meta/info.json` when absent; later calls append.
+Install the optional dependency, then import a local, FileIO URI, or Hugging
+Face v3 dataset once. The target table is created from `meta/info.json` when
+absent; later calls append.
 
 ```commandline
 pip install 'pypaimon[lerobot]'
@@ -47,7 +48,6 @@ connection = pmm.connect(options={"warehouse": "/tmp/warehouse"})
 result = connection.load_from_lerobot(
     "robot_data",
     "/data/lerobot_dataset",
-    batch_size=1024,
 )
 print(result.row_count, result.snapshot_id)
 ```

@@ -125,7 +125,8 @@ class MultimodalConnection:
             transform=None,
             feature_mapping=None,
             batch_size: int = 1024,
-            options=None):
+            options=None,
+            source_options=None):
         """Import one LeRobot Dataset v3 in a single append commit."""
         from pypaimon.multimodal.lerobot import load_from_lerobot
         return load_from_lerobot(
@@ -136,6 +137,7 @@ class MultimodalConnection:
             feature_mapping=feature_mapping,
             batch_size=batch_size,
             options=options,
+            source_options=source_options,
         )
 
     def drop_table(self, name: str, ignore_if_not_exists: bool = False):
