@@ -21,13 +21,14 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from urllib.parse import urlparse
 
 import pyarrow.fs as pafs
 
 from pypaimon.common.file_io import create_temp_path
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
-from pypaimon.filesystem.local_file_io import LocalFileIO
+from pypaimon.filesystem.local_file_io import LocalFileIO, _file_uri_path
 from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO, _pyarrow_lt_7
 
 
@@ -54,6 +55,22 @@ class FileIOTest(unittest.TestCase):
         # Test bucket and path
         self.assertEqual(file_io.to_filesystem_path("s3://my-bucket/path/to/file.txt"),
                          "my-bucket/path/to/file.txt")
+        self.assertEqual(
+            file_io.to_filesystem_path(
+                "s3://my-bucket/path/episode%23copy%3F1.h5"),
+            "my-bucket/path/episode%23copy%3F1.h5",
+        )
+        self.assertEqual(
+            file_io.to_filesystem_path(
+                "s3://my-bucket/path/episode%2523copy.h5"),
+            "my-bucket/path/episode%2523copy.h5",
+        )
+        self.assertEqual(
+            file_io.to_filesystem_path(
+                "s3://my-bucket/t/p=a%2Fb/data.parquet"),
+            "my-bucket/t/p=a%2Fb/data.parquet",
+        )
+
         self.assertEqual(file_io.to_filesystem_path("oss://my-bucket/path/to/file.txt"),
                          "my-bucket/path/to/file.txt")
 
@@ -167,6 +184,11 @@ class FileIOTest(unittest.TestCase):
                          "/tmp/path/to/file.txt")
         self.assertEqual(file_io.to_filesystem_path("file:///path/to/file.txt"),
                          "/path/to/file.txt")
+        self.assertEqual(
+            file_io.to_filesystem_path(
+                "file:///tmp/episode%20%E4%B8%AD%E6%96%87.h5"),
+            "/tmp/episode 中文.h5",
+        )
 
         # Test empty paths
         self.assertEqual(file_io.to_filesystem_path("file://"), ".")
@@ -208,6 +230,25 @@ class FileIOTest(unittest.TestCase):
         s3_file_io = PyArrowFileIO("s3://bucket/warehouse", Options({}))
         self.assertEqual(s3_file_io.to_filesystem_path("C:\\path\\to\\file.txt"),
                          "C:\\path\\to\\file.txt")
+
+    def test_standard_windows_and_unc_file_uris_round_trip(self):
+        self.assertEqual(
+            r"C:\data set\episode.h5",
+            _file_uri_path(
+                urlparse("file:///C:/data%20set/episode.h5"), windows=True),
+        )
+        self.assertEqual(
+            r"\\server\share\episode.h5",
+            _file_uri_path(
+                urlparse("file://server/share/episode.h5"), windows=True),
+        )
+
+    def test_local_directory_listing_propagates_permission_errors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            file_io = LocalFileIO(directory, Options({}))
+            with patch.object(Path, "iterdir", side_effect=PermissionError):
+                with self.assertRaises(PermissionError):
+                    file_io.list_status(directory)
 
     def test_path_normalization(self):
         """Test path normalization (multiple slashes)."""
