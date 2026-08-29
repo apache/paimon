@@ -52,7 +52,14 @@ class TableMergeIntoTest(BatchModeMixin, DataEvolutionTestBase, unittest.TestCas
 
         with patch.dict("sys.modules", {"datafusion": None}):
             with self.assertRaisesRegex(
-                    ImportError, r"pip install pypaimon\[datafusion\]"):
+                    ImportError, r"pip install 'pypaimon\[datafusion\]'"):
+                _load_datafusion()
+
+    def test_datafusion_conditions_require_python_310(self):
+        from pypaimon.ray.merge_condition import _load_datafusion
+
+        with patch("sys.version_info", (3, 9)):
+            with self.assertRaisesRegex(ImportError, "Python 3.10 or newer"):
                 _load_datafusion()
 
     def _read_sorted(self, table):

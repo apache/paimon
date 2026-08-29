@@ -426,8 +426,9 @@ docs.merge("id") \
 ```
 
 Clause predicates use `where` for update and delete clauses. Refer to source
-rows with `source.<column>` and target rows with `target.<column>`. Install
-`pypaimon[datafusion]` when using merge clause predicates.
+rows with `source.<column>` and target rows with `target.<column>`. Merge clause
+predicates require Python 3.10 or newer and
+`pip install 'pypaimon[datafusion]'`.
 
 When source and target key names differ, pass a mapping from target column to
 source column:

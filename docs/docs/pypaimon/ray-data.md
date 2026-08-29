@@ -487,7 +487,8 @@ merge_into(
 Conditions use SQL-style expressions with `s.` (source) and `t.` (target)
 column prefixes. `WhenNotMatched` conditions may only reference source
 columns (`s.*`). Condition evaluation uses the PyPaimon DataFusion extra.
-Install it before using conditions: `pip install pypaimon[datafusion]`.
+Python 3.10 or newer is required. Install it with
+`pip install 'pypaimon[datafusion]'`.
 
 - `update` / `delete` / `insert`: `WhenMatched.update(...)` updates matched
   rows, `WhenMatched.delete()` deletes matched rows, and
