@@ -69,6 +69,7 @@ import org.apache.paimon.tag.SuccessFileTagCallback;
 import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.tag.TagPreview;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.ChainTableUtils;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -311,6 +312,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         if (tableRollback != null) {
             rollback = new CommitRollback(tableRollback);
         }
+        List<CommitCallback> commitCallbacks = createCommitCallbacks(commitUser, table);
         return new FileStoreCommitImpl(
                 snapshotCommit,
                 fileIO,
@@ -327,8 +329,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 this::newScan,
                 newStatsFileHandler(),
                 bucketMode(),
-                createCommitPreCallbacks(table),
-                createCommitCallbacks(commitUser, table),
+                createCommitPreCallbacks(table, commitCallbacks),
+                commitCallbacks,
                 conflictDetectFactory,
                 rollback);
     }
@@ -392,11 +394,17 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.legacyPartitionName());
     }
 
-    private List<CommitPreCallback> createCommitPreCallbacks(FileStoreTable table) {
+    private List<CommitPreCallback> createCommitPreCallbacks(
+            FileStoreTable table, List<CommitCallback> commitCallbacks) {
         List<CommitPreCallback> callbacks = new ArrayList<>();
         if (options.isChainTable()) {
             callbacks.add(new ChainTableCommitPreCallback(table));
         }
+        // reuse the same Iceberg callback instance: it validates before the commit too
+        commitCallbacks.stream()
+                .filter(callback -> callback instanceof IcebergCommitCallback)
+                .map(callback -> (IcebergCommitCallback) callback)
+                .forEach(callbacks::add);
         return callbacks;
     }
 
@@ -428,8 +436,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
             }
         }
 
-        if (options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
-                != IcebergOptions.StorageType.DISABLED) {
+        if (mirrorsToIceberg()) {
             callbacks.add(new IcebergCommitCallback(table, commitUser));
         }
 
@@ -592,11 +599,21 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         if (options.tagCreateSuccessFile()) {
             callbacks.add(new SuccessFileTagCallback(fileIO, newTagManager().tagDirectory()));
         }
-        if (options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
-                != IcebergOptions.StorageType.DISABLED) {
-            callbacks.add(new IcebergCommitCallback(table, ""));
+        if (mirrorsToIceberg()) {
+            callbacks.add(IcebergCommitCallback.forTagCallbacks(table));
         }
         return callbacks;
+    }
+
+    /**
+     * A branch has no Iceberg counterpart: its metadata would land in the table-wide location,
+     * publishing branch-only state as the head every Iceberg reader sees.
+     */
+    private boolean mirrorsToIceberg() {
+        return options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                        != IcebergOptions.StorageType.DISABLED
+                // a blank branch reads and writes main everywhere else, so it mirrors too
+                && BranchManager.isMainBranch(BranchManager.normalizeBranch(options.branch()));
     }
 
     @Override

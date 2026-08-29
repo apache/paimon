@@ -63,6 +63,9 @@ import java.util.stream.Collectors;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class IcebergDataField {
 
+    /** Minimum precision mapped to the v3-only nanosecond types (timestamp[tz]_ns). */
+    public static final int MIN_NANOS_TIMESTAMP_PRECISION = 7;
+
     private static final String FIELD_ID = "id";
     private static final String FIELD_NAME = "name";
     private static final String FIELD_REQUIRED = "required";
@@ -190,13 +193,17 @@ public class IcebergDataField {
                 Preconditions.checkArgument(
                         timestampPrecision >= 3 && timestampPrecision <= 9,
                         "Paimon Iceberg compatibility only support timestamp type with precision from 3 to 9.");
-                return timestampPrecision >= 7 ? "timestamp_ns" : "timestamp";
+                return timestampPrecision >= MIN_NANOS_TIMESTAMP_PRECISION
+                        ? "timestamp_ns"
+                        : "timestamp";
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 int timestampLtzPrecision = ((LocalZonedTimestampType) dataType).getPrecision();
                 Preconditions.checkArgument(
                         timestampLtzPrecision >= 3 && timestampLtzPrecision <= 9,
                         "Paimon Iceberg compatibility only support timestamp type with precision from 3 to 9.");
-                return timestampLtzPrecision >= 7 ? "timestamptz_ns" : "timestamptz";
+                return timestampLtzPrecision >= MIN_NANOS_TIMESTAMP_PRECISION
+                        ? "timestamptz_ns"
+                        : "timestamptz";
             case VARIANT:
                 return "variant";
             case GEOMETRY:

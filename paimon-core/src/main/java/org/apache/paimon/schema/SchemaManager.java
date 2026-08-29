@@ -19,13 +19,16 @@
 package org.apache.paimon.schema;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.TableType;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.iceberg.IcebergCommitCallback;
 import org.apache.paimon.iceberg.IcebergOptions;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.ColumnDirectiveUtils.ConvertedColumn;
 import org.apache.paimon.schema.SchemaChange.AddColumn;
 import org.apache.paimon.schema.SchemaChange.DropColumn;
@@ -197,6 +200,8 @@ public class SchemaManager implements Serializable {
                 TableSchema latestSchema = latest.get();
                 if (externalTable) {
                     checkSchemaForExternalTable(latestSchema.toSchema(), schema);
+                    // registration persists nothing, so a table an older release left with an
+                    // unmirrorable schema stays registrable and readable
                     return latestSchema;
                 } else {
                     throw new IllegalStateException(
@@ -1219,6 +1224,40 @@ public class SchemaManager implements Serializable {
         SchemaValidation.validateTableSchema(newSchema);
         validateHistoricalIcebergGeospatialTypes(newSchema);
         SchemaValidation.validateFallbackBranch(this, newSchema);
+        // whatever produced this schema, it must be representable in Iceberg metadata if this
+        // table is mirrored, or every write that follows would be vetoed. Branches are not
+        // mirrored, so they evolve freely and are judged in fast-forward instead.
+        Options newOptions = Options.fromMap(newSchema.options());
+        TableType tableType = newOptions.get(CoreOptions.TYPE);
+        if (DEFAULT_MAIN_BRANCH.equals(branch)
+                && (tableType.equals(TableType.TABLE)
+                        || tableType.equals(TableType.MATERIALIZED_TABLE))) {
+            Optional<TableSchema> previous = latest();
+            try {
+                if (!previous.isPresent()) {
+                    IcebergCommitCallback.checkSchemaMirrorable(
+                            newOptions, newSchema.logicalRowType());
+                } else if (previous.get().id() < newSchema.id()) {
+                    // a schema id another writer already took is a lost race, reported by the
+                    // atomic write below; judging it here would turn that into a failure
+                    IcebergCommitCallback.checkSchemaChangeMirrorable(previous.get(), newSchema);
+                    if (Options.fromMap(previous.get().options())
+                                    .get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                            == IcebergOptions.StorageType.DISABLED) {
+                        // mirroring is being switched back on: the version it published before
+                        // the pause still bounds what can be published now
+                        IcebergCommitCallback.checkNoFormatVersionRegression(newOptions, listAll());
+                    }
+                }
+            } catch (RuntimeException notRepresentable) {
+                // this judged a state another writer has already replaced; report the lost race
+                // instead, so the caller retries and judges what is actually there now
+                if (!latest().map(current -> current.id() >= newSchema.id()).orElse(false)) {
+                    throw notRepresentable;
+                }
+                return false;
+            }
+        }
         Path schemaPath = toSchemaPath(newSchema.id());
         return fileIO.tryToWriteAtomic(schemaPath, newSchema.toString());
     }
@@ -1304,6 +1343,15 @@ public class SchemaManager implements Serializable {
             ChangelogManager changelogManager)
             throws IOException {
         checkArgument(schemaExists(targetSchemaId), "Schema %s does not exist.", targetSchemaId);
+
+        // rollback installs an older schema without passing through commit(), so the same rules
+        // apply here: writes stamped with the restored schema would otherwise be vetoed
+        if (DEFAULT_MAIN_BRANCH.equals(branch)) {
+            TableSchema target = schema(targetSchemaId);
+            Options targetOptions = Options.fromMap(target.options());
+            IcebergCommitCallback.checkSchemaMirrorable(targetOptions, target.logicalRowType());
+            IcebergCommitCallback.checkNoFormatVersionRegressionOnRestore(targetOptions, listAll());
+        }
 
         // Collect all schemaIds referenced by snapshots, tags, and changelogs
         Set<Long> usedSchemaIds = new HashSet<>();

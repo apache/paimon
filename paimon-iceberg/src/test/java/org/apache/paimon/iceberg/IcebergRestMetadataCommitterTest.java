@@ -69,6 +69,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -1067,24 +1068,12 @@ public class IcebergRestMetadataCommitterTest {
         assertThat(getIcebergResult())
                 .containsExactlyInAnyOrder("Record(1, 10)", "Record(3, 30)", "Record(4, 40)");
 
-        org.apache.paimon.iceberg.metadata.IcebergMetadata localMetadata =
-                org.apache.paimon.iceberg.metadata.IcebergMetadata.fromPath(
-                        table.fileIO(),
-                        new org.apache.paimon.fs.Path(
-                                IcebergCommitCallback.catalogTableMetadataPath(table),
-                                "v3.metadata.json"));
-        String localIdentity =
-                localMetadata.snapshots().stream()
-                        .filter(snap -> snap.snapshotId() == 2)
-                        .findFirst()
-                        .get()
-                        .summary()
-                        .get("paimon-commit-identity");
+        String liveIdentity = table.snapshotManager().snapshot(2).uuid();
         Table icebergTable = restCatalog.loadTable(TableIdentifier.of("mydb", "t"));
         org.apache.iceberg.Snapshot catalogSnapshot2 = icebergTable.snapshot(2);
         if (catalogSnapshot2 != null) {
             assertThat(catalogSnapshot2.summary().get("paimon-commit-identity"))
-                    .isEqualTo(localIdentity);
+                    .isEqualTo(liveIdentity);
         }
     }
 
@@ -1194,7 +1183,7 @@ public class IcebergRestMetadataCommitterTest {
                         "Record(6, 60)");
         icebergTable = restCatalog.loadTable(TableIdentifier.of("mydb", "t"));
         assertThat(icebergTable.currentSnapshot().snapshotId()).isEqualTo(7);
-        assertThat(ImmutableList.copyOf(icebergTable.snapshots()).size()).isEqualTo(2);
+        assertThat(ImmutableList.copyOf(icebergTable.snapshots()).size()).isEqualTo(7);
 
         write.write(GenericRow.of(4, 41));
         write.compact(BinaryRow.EMPTY_ROW, 0, true);
@@ -1874,5 +1863,99 @@ public class IcebergRestMetadataCommitterTest {
         } catch (ReflectiveOperationException e) {
             throw new IllegalStateException(e);
         }
+    }
+
+    private static List<String> readAllRecords(Table icebergTable) throws IOException {
+        List<String> records = new ArrayList<>();
+        try (CloseableIterable<Record> result = IcebergGenerics.read(icebergTable).build()) {
+            for (Record record : result) {
+                records.add(record.toString());
+            }
+        }
+        return records;
+    }
+
+    @Test
+    public void testReenableAfterDisableMirrorsAllSnapshots() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        1,
+                        randomFormat(),
+                        Collections.emptyMap());
+
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(1, 10));
+        write.write(GenericRow.of(2, 20));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        write.write(GenericRow.of(1, 11));
+        write.write(GenericRow.of(3, 30));
+        write.compact(BinaryRow.EMPTY_ROW, 0, true);
+        commit.commit(2, write.prepareCommit(true, 2));
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder("Record(1, 11)", "Record(2, 20)", "Record(3, 30)");
+        Table icebergTable = restCatalog.loadTable(TableIdentifier.of("mydb", "t"));
+        assertThat(icebergTable.currentSnapshot().snapshotId()).isEqualTo(3);
+
+        Map<String, String> options = new HashMap<>();
+        options.put(IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "disabled");
+        table = table.copy(options);
+        write.close();
+        write = table.newWrite(commitUser);
+        commit.close();
+        commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(4, 40));
+        write.write(GenericRow.of(5, 50));
+        write.compact(BinaryRow.EMPTY_ROW, 0, true);
+        commit.commit(3, write.prepareCommit(true, 3));
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(5L);
+
+        options.put(IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "rest-catalog");
+        table = table.copy(options);
+        write.close();
+        write = table.newWrite(commitUser);
+        commit.close();
+        commit = table.newCommit(commitUser);
+
+        write.write(GenericRow.of(6, 60));
+        write.compact(BinaryRow.EMPTY_ROW, 0, true);
+        commit.commit(4, write.prepareCommit(true, 4));
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(7L);
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder(
+                        "Record(1, 11)",
+                        "Record(2, 20)",
+                        "Record(3, 30)",
+                        "Record(4, 40)",
+                        "Record(5, 50)",
+                        "Record(6, 60)");
+        icebergTable = restCatalog.loadTable(TableIdentifier.of("mydb", "t"));
+        assertThat(icebergTable.currentSnapshot().snapshotId()).isEqualTo(7);
+        assertThat(ImmutableList.copyOf(icebergTable.snapshots()).size()).isEqualTo(7);
+
+        write.write(GenericRow.of(4, 41));
+        write.compact(BinaryRow.EMPTY_ROW, 0, true);
+        commit.commit(5, write.prepareCommit(true, 5));
+        assertThat(getIcebergResult())
+                .containsExactlyInAnyOrder(
+                        "Record(1, 11)",
+                        "Record(2, 20)",
+                        "Record(3, 30)",
+                        "Record(4, 41)",
+                        "Record(5, 50)",
+                        "Record(6, 60)");
+
+        write.close();
+        commit.close();
     }
 }

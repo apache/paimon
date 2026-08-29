@@ -24,6 +24,8 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.utils.Pair;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -50,21 +52,19 @@ public class CommitCleaner {
             Pair<String, Long> changelogManifestList,
             String oldIndexManifest,
             String newIndexManifest) {
-        if (deltaManifestList != null) {
-            for (ManifestFileMeta manifest : manifestList.read(deltaManifestList.getKey())) {
-                manifestFile.delete(manifest.fileName());
-            }
-            manifestList.delete(deltaManifestList.getKey());
-        }
-
-        if (changelogManifestList != null) {
-            for (ManifestFileMeta manifest : manifestList.read(changelogManifestList.getKey())) {
-                manifestFile.delete(manifest.fileName());
-            }
-            manifestList.delete(changelogManifestList.getKey());
-        }
-
+        cleanUpManifestList(deltaManifestList);
+        cleanUpManifestList(changelogManifestList);
         cleanIndexManifest(oldIndexManifest, newIndexManifest);
+    }
+
+    /** Deletes a manifest list and every manifest file it references. */
+    public void cleanUpManifestList(@Nullable Pair<String, Long> list) {
+        if (list != null) {
+            for (ManifestFileMeta manifest : manifestList.read(list.getKey())) {
+                manifestFile.delete(manifest.fileName());
+            }
+            manifestList.delete(list.getKey());
+        }
     }
 
     public void cleanUpNoReuseTmpManifests(
