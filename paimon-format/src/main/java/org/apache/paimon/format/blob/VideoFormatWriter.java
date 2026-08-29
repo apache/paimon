@@ -238,6 +238,7 @@ public class VideoFormatWriter implements FileAwareFormatWriter {
                 return BlobFormatWriter.NULL_LENGTH;
             }
             BlobDescriptor written = writeBlobData(source);
+            checkArgument(written.length() > 0, "Encoded video payload must not be empty.");
             recordSuccess(written.length());
             return written.length();
         }

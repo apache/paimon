@@ -168,6 +168,15 @@ public class VideoFileFormatTest {
     }
 
     @Test
+    public void testRejectEmptyVideoPayload() throws IOException {
+        Blob empty = sourceFrame("empty.mp4", new byte[0], 0);
+
+        assertThatThrownBy(() -> write(empty))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Encoded video payload must not be empty");
+    }
+
+    @Test
     public void testIndependentFormatRegistrationAndClassification() {
         assertThat(FileFormat.fromIdentifier("video", new Options()))
                 .isInstanceOf(VideoFileFormat.class);
