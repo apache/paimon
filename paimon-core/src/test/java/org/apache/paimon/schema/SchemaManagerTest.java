@@ -247,6 +247,68 @@ public class SchemaManagerTest {
     }
 
     @ParameterizedTest
+    @ValueSource(ints = {4, 6, 9})
+    public void testIcebergMetadataRefusesUnsupportedTimePrecisions(int precision)
+            throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "-1");
+        options.put(IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "table-location");
+
+        assertThatThrownBy(
+                        () ->
+                                retryArtificialException(
+                                        () -> manager.createTable(timeSchema(options, precision))))
+                .hasStackTraceContaining("precision of 3 or less");
+
+        assertThatCode(
+                        () ->
+                                retryArtificialException(
+                                        () -> manager.createTable(timeSchema(options, 3))))
+                .doesNotThrowAnyException();
+    }
+
+    private Schema timeSchema(Map<String, String> options, int precision) {
+        return new Schema(
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "t", DataTypes.TIME(precision))),
+                Collections.emptyList(),
+                Collections.emptyList(),
+                options,
+                "");
+    }
+
+    @Test
+    public void testEnableIcebergMetadataValidatesHistoricalTimePrecisions() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "-1");
+        Schema micros =
+                new Schema(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(1, "t", DataTypes.TIME(6))),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        "");
+
+        retryArtificialException(() -> manager.createTable(micros));
+        retryArtificialException(() -> manager.commitChanges(SchemaChange.dropColumn("t")));
+
+        assertThatThrownBy(
+                        () ->
+                                retryArtificialException(
+                                        () ->
+                                                manager.commitChanges(
+                                                        SchemaChange.setOption(
+                                                                IcebergOptions
+                                                                        .METADATA_ICEBERG_STORAGE
+                                                                        .key(),
+                                                                "table-location"))))
+                .hasStackTraceContaining("precision of 3 or less");
+    }
+
+    @ParameterizedTest
     @ValueSource(ints = {2, 9})
     public void testEnableIcebergMetadataValidatesHistoricalTimestampPrecisions(int precision)
             throws Exception {
