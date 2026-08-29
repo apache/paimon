@@ -34,7 +34,7 @@ public class BlobFileContext {
 
     private final Set<String> blobDescriptorFields;
     private final Set<String> blobInlineFields;
-    private final @Nullable String videoFrameField;
+    private final Set<String> videoFrameFields;
     private final boolean writeNullOnMissingFile;
     private final boolean writeNullOnFetchFailure;
     private final int copyBufferSize;
@@ -45,13 +45,13 @@ public class BlobFileContext {
     private BlobFileContext(
             Set<String> blobDescriptorFields,
             Set<String> blobInlineFields,
-            @Nullable String videoFrameField,
+            Set<String> videoFrameFields,
             boolean writeNullOnMissingFile,
             boolean writeNullOnFetchFailure,
             int copyBufferSize) {
         this.blobDescriptorFields = blobDescriptorFields;
         this.blobInlineFields = blobInlineFields;
-        this.videoFrameField = videoFrameField;
+        this.videoFrameFields = videoFrameFields;
         this.writeNullOnMissingFile = writeNullOnMissingFile;
         this.writeNullOnFetchFailure = writeNullOnFetchFailure;
         this.copyBufferSize = copyBufferSize;
@@ -77,7 +77,7 @@ public class BlobFileContext {
         return new BlobFileContext(
                 descriptorFields,
                 inlineFields,
-                options.videoFrameField().orElse(null),
+                options.videoFrameFields(),
                 options.blobWriteNullOnMissingFile(),
                 options.blobWriteNullOnFetchFailure(),
                 options.blobCopyBufferSize());
@@ -109,8 +109,8 @@ public class BlobFileContext {
         return blobInlineFields;
     }
 
-    public @Nullable String videoFrameField() {
-        return videoFrameField;
+    public Set<String> videoFrameFields() {
+        return videoFrameFields;
     }
 
     @Nullable

@@ -51,6 +51,20 @@ public class DataEvolutionSplitGeneratorTest {
         assertThat(splits.size()).isEqualTo(1);
     }
 
+    @Test
+    public void testSpanningBlobDoesNotCollapseNormalRanges() {
+        DataFileMeta normal1 = newFile("file1.parquet", 0L, 5L, 10L);
+        DataFileMeta normal2 = newFile("file2.parquet", 5L, 5L, 10L);
+        DataFileMeta video = newFile("camera.video", 0L, 10L, 100L);
+
+        DataEvolutionSplitGenerator generator = new DataEvolutionSplitGenerator(1L, 1L, false);
+        List<SplitGenerator.SplitGroup> splits =
+                generator.splitForBatch(Arrays.asList(normal1, video, normal2));
+
+        assertThat(splits).hasSize(2);
+        assertThat(splits).allSatisfy(split -> assertThat(split.files).contains(video));
+    }
+
     private static DataFileMeta newFile(
             String name, long firstRowId, long rowCount, long fileSize) {
         return DataFileMeta.create(

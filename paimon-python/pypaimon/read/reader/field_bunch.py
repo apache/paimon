@@ -171,8 +171,14 @@ class BlobBunch(_SpecialFieldBunch):
         physical_row_count = sum(row_range.count() for row_range in merged)
         if self.expected_row_range is not None:
             for row_range in merged:
-                if (row_range.from_ < self.expected_row_range.from_
-                        or row_range.to > self.expected_row_range.to):
+                if self.row_id_push_down:
+                    if not row_range.overlaps(self.expected_row_range):
+                        raise ValueError(
+                            f"Blob file range {row_range} should intersect normal "
+                            f"file range {self.expected_row_range}."
+                        )
+                elif (row_range.from_ < self.expected_row_range.from_
+                      or row_range.to > self.expected_row_range.to):
                     raise ValueError(
                         f"Blob file range {row_range} should be within normal "
                         f"file range {self.expected_row_range}."

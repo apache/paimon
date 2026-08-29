@@ -21,12 +21,16 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.format.blob.BlobFileFormat;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.utils.BinPacking;
-import org.apache.paimon.utils.RangeHelper;
 
 import java.util.Collection;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+
+import static org.apache.paimon.utils.DataEvolutionUtils.groupByNormalFileRange;
 
 /** Append data evolution table split generator, which implementation of {@link SplitGenerator}. */
 public class DataEvolutionSplitGenerator implements SplitGenerator {
@@ -49,8 +53,15 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
 
     @Override
     public List<SplitGroup> splitForBatch(List<DataFileMeta> input) {
-        RangeHelper<DataFileMeta> rangeHelper = new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
-        List<List<DataFileMeta>> ranges = rangeHelper.mergeOverlappingRanges(input);
+        List<List<DataFileMeta>> ranges = groupByNormalFileRange(input, Function.identity());
+        Set<DataFileMeta> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+        boolean hasSpanningSidecar =
+                ranges.stream().flatMap(Collection::stream).anyMatch(file -> !seen.add(file));
+        if (hasSpanningSidecar) {
+            return ranges.stream()
+                    .map(SplitGroup::nonRawConvertibleGroup)
+                    .collect(Collectors.toList());
+        }
         Function<List<DataFileMeta>, Long> weightFunc =
                 file ->
                         Math.max(

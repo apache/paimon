@@ -393,8 +393,7 @@ def _validate_blob_fields(
 
     descriptor_fields = core_options.blob_descriptor_fields()
     view_fields = core_options.blob_view_fields()
-    video_field = core_options.video_frame_field()
-    video_fields = {video_field} if video_field is not None else set()
+    video_fields = core_options.video_frame_fields()
     non_scalar_video_fields = video_fields.difference(scalar_blob_field_names)
     if non_scalar_video_fields:
         raise ValueError(

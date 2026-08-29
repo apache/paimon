@@ -197,6 +197,22 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertTrue(descriptors[0].uri.endswith(".video"))
         self.assertEqual(2, len({d.payload_descriptor for d in descriptors}))
 
+    def test_add_video_requires_column_when_multiple_video_fields_configured(self):
+        table = self.conn.create_table(
+            "multi_video_frames",
+            schema=_schema({
+                "episode_id": pa.int64(),
+                "camera_a": pa.large_binary(),
+                "camera_b": pa.large_binary(),
+            }),
+            options=dict(_PARQUET_OPTIONS, **{
+                "video-frame-field": "camera_a,camera_b",
+            }),
+        )
+
+        with self.assertRaisesRegex(ValueError, "video_column is required"):
+            table.add_video(None, [])
+
     def test_normal_update_preserves_video_descriptors(self):
         from pypaimon.table.row.blob import Blob
 

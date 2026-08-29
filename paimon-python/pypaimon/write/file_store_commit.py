@@ -1244,9 +1244,23 @@ class FileStoreCommit:
         if not commit_entries:
             return commit_entries, first_row_id_start
 
-        row_id_assigned = []
         start = first_row_id_start
-        blob_start_default = first_row_id_start
+        normal_starts = {}
+        for entry in commit_entries:
+            write_cols = entry.file.write_cols
+            contains_row_id = (
+                write_cols is not None
+                and SpecialFields.ROW_ID.name in write_cols
+            )
+            if (entry.file.file_source == 0
+                    and entry.file.first_row_id is None
+                    and not contains_row_id
+                    and not DataFileMeta.is_blob_file(entry.file.file_name)
+                    and not DataFileMeta.is_vector_file(entry.file.file_name)):
+                normal_starts[id(entry)] = start
+                start += entry.file.row_count
+
+        row_id_assigned = []
         blob_starts = {}
         vector_store_start = first_row_id_start
 
@@ -1267,7 +1281,7 @@ class FileStoreCommit:
 
                 if DataFileMeta.is_blob_file(entry.file.file_name):
                     blob_field_name = entry.file.write_cols[0]
-                    blob_start = blob_starts.get(blob_field_name, blob_start_default)
+                    blob_start = blob_starts.get(blob_field_name, first_row_id_start)
                     if blob_start >= start:
                         raise RuntimeError(
                             f"This is a bug, blobStart {blob_start} should be less than "
@@ -1286,10 +1300,8 @@ class FileStoreCommit:
                     vector_store_start += row_count
 
                 else:
-                    row_id_assigned.append(entry.assign_first_row_id(start))
-                    blob_start_default = start
-                    blob_starts.clear()
-                    start += row_count
+                    row_id_assigned.append(
+                        entry.assign_first_row_id(normal_starts[id(entry)]))
             else:
                 row_id_assigned.append(entry)
 

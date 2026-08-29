@@ -17,9 +17,11 @@
 
 """Utilities for data-evolution tables."""
 
-from typing import Callable, Iterable, TypeVar
+from typing import Callable, Iterable, List, TypeVar
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
+from pypaimon.utils.range import Range
+from pypaimon.utils.range_helper import RangeHelper
 
 T = TypeVar("T")
 
@@ -49,3 +51,47 @@ def retrieve_anchor_file(
         )
 
     return anchor
+
+
+def group_by_normal_file_range(
+    files: List[DataFileMeta],
+    range_func: Callable[[DataFileMeta], Range],
+) -> List[List[DataFileMeta]]:
+    """Attach each sidecar to every normal-file range group it intersects."""
+    normal = [
+        file for file in files
+        if (not DataFileMeta.is_blob_file(file.file_name)
+            and not DataFileMeta.is_vector_file(file.file_name))
+    ]
+    if not normal:
+        return RangeHelper(range_func).merge_overlapping_ranges(files)
+
+    normal_ids = {id(file) for file in normal}
+    groups = RangeHelper(range_func).merge_overlapping_ranges(normal)
+    group_ranges = [
+        Range(
+            min(range_func(file).from_ for file in group),
+            max(range_func(file).to for file in group),
+        )
+        for group in groups
+    ]
+
+    unanchored = []
+    for sidecar in files:
+        if id(sidecar) in normal_ids:
+            continue
+        sidecar_range = range_func(sidecar)
+        attached = False
+        for index, group_range in enumerate(group_ranges):
+            if group_range.overlaps(sidecar_range):
+                groups[index].append(sidecar)
+                attached = True
+        if not attached:
+            unanchored.append(sidecar)
+
+    groups.extend(RangeHelper(range_func).merge_overlapping_ranges(unanchored))
+    original_order = {id(file): index for index, file in enumerate(files)}
+    for group in groups:
+        group.sort(key=lambda file: original_order[id(file)])
+    groups.sort(key=lambda group: min(range_func(file).from_ for file in group))
+    return groups

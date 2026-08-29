@@ -20,11 +20,11 @@ from typing import List, Optional, Tuple
 
 from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.utils.range import Range
-from pypaimon.utils.range_helper import RangeHelper
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.read.scanner.split_generator import AbstractSplitGenerator
 from pypaimon.read.split import DataSplit, Split
+from pypaimon.utils.data_evolution_utils import group_by_normal_file_range
 
 
 class DataEvolutionSplitGenerator(AbstractSplitGenerator):
@@ -63,9 +63,6 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
             # Filter files by Row ID range
             partitioned_files = self._filter_files_by_row_ranges(partitioned_files, slice_row_ranges)
 
-        def weight_func(file_list: List[DataFileMeta]) -> int:
-            return max(sum(f.file_size for f in file_list), self.open_file_cost)
-
         splits = []
         for key, entries_list in partitioned_files.items():
             if not entries_list:
@@ -80,15 +77,27 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                     group for group in split_by_row_id
                     if self.group_stats_filter.may_match(group)
                 ]
+
+            file_ids = [id(file) for group in split_by_row_id for file in group]
+            has_spanning_sidecar = len(file_ids) != len(set(file_ids))
+            if self.group_stats_filter is not None:
                 split_by_row_id = [
                     [file.copy_without_stats() for file in group]
                     for group in split_by_row_id
                 ]
 
-            # Pack the split groups for optimal split sizes
-            packed_files = self._pack_for_ordered(
-                split_by_row_id, weight_func, self.target_split_size
-            )
+            if has_spanning_sidecar:
+                # A spanning sidecar is shared by metadata. Keep each anchor
+                # range separate so it is not added twice to one DataSplit.
+                packed_files = [[group] for group in split_by_row_id]
+            else:
+                packed_files = self._pack_for_ordered(
+                    split_by_row_id,
+                    lambda group: max(
+                        sum(file.file_size for file in group), self.open_file_cost
+                    ),
+                    self.target_split_size,
+                )
 
             # Flatten the packed files and build splits
             flatten_packed_files: List[List[DataFileMeta]] = [
@@ -96,9 +105,15 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                 for pack in packed_files
             ]
 
-            splits += self._build_split_from_pack_for_data_evolution(
+            new_splits = self._build_split_from_pack_for_data_evolution(
                 flatten_packed_files, packed_files, entries_list
             )
+            if has_spanning_sidecar and slice_row_ranges is None and self.row_ranges is None:
+                new_splits = [
+                    IndexedSplit(split, [self._normal_range(split)])
+                    for split in new_splits
+                ]
+            splits += new_splits
 
         # merge slice_row_ranges and self.row_ranges
         if slice_row_ranges is None:
@@ -111,6 +126,23 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
             splits = self._wrap_to_indexed_splits(splits, slice_row_ranges)
 
         return splits
+
+    @staticmethod
+    def _normal_range(split: DataSplit) -> Range:
+        normal_ranges = [
+            file.row_id_range()
+            for file in split.files
+            if (not DataFileMeta.is_blob_file(file.file_name)
+                and not DataFileMeta.is_vector_file(file.file_name))
+        ]
+        if not normal_ranges:
+            raise ValueError(
+                "Expected at least one normal-file row range."
+            )
+        return Range(
+            min(row_range.from_ for row_range in normal_ranges),
+            max(row_range.to for row_range in normal_ranges),
+        )
 
     def _build_split_from_pack_for_data_evolution(
         self,
@@ -302,9 +334,10 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
 
     @staticmethod
     def _split_by_row_id(files: List[DataFileMeta]) -> List[List[DataFileMeta]]:
-        """Group data-evolution files with overlapping row-id ranges (an original file and its
-        column deltas) via the shared RangeHelper; fails fast on a file missing first_row_id."""
-        return RangeHelper(lambda f: f.non_null_row_id_range()).merge_overlapping_ranges(files)
+        """Group sidecars by the normal-file ranges they intersect."""
+        return group_by_normal_file_range(
+            files, lambda file: file.non_null_row_id_range()
+        )
 
     def _wrap_to_indexed_splits(self, splits: List[Split], row_ranges: List[Range]) -> List[Split]:
         """
@@ -313,7 +346,15 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
         indexed_splits = []
         for split in splits:
             # Calculate file ranges for this split
-            file_ranges = [file.row_id_range() for file in split.files]
+            normal_ranges = [
+                file.row_id_range()
+                for file in split.files
+                if (not DataFileMeta.is_blob_file(file.file_name)
+                    and not DataFileMeta.is_vector_file(file.file_name))
+            ]
+            file_ranges = normal_ranges or [
+                file.row_id_range() for file in split.files
+            ]
 
             if not file_ranges:
                 # No row IDs, keep original split

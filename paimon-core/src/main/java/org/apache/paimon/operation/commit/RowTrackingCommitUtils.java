@@ -24,6 +24,7 @@ import org.apache.paimon.table.SpecialFields;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -76,9 +77,24 @@ public class RowTrackingCommitUtils {
         if (deltaFiles.isEmpty()) {
             return firstRowIdStart;
         }
-        // assign row id for new files
+        // Normal files own the appended row range. Assign them first so independently rolling
+        // Blob files may span any number of normal files without depending on metadata order.
         long start = firstRowIdStart;
-        long blobStartDefault = firstRowIdStart;
+        Map<ManifestEntry, Long> normalStarts = new IdentityHashMap<>();
+        for (ManifestEntry entry : deltaFiles) {
+            List<String> writeCols = entry.file().writeCols();
+            boolean containsRowId =
+                    writeCols != null && writeCols.contains(SpecialFields.ROW_ID.name());
+            if (entry.file().fileSource().orElse(null) == FileSource.APPEND
+                    && entry.file().firstRowId() == null
+                    && !containsRowId
+                    && !isBlobFile(entry.file().fileName())
+                    && !isVectorStoreFile(entry.file().fileName())) {
+                normalStarts.put(entry, start);
+                start += entry.file().rowCount();
+            }
+        }
+
         Map<String, Long> blobStarts = new HashMap<>();
         long vectorStoreStart = firstRowIdStart;
         for (ManifestEntry entry : deltaFiles) {
@@ -95,7 +111,7 @@ public class RowTrackingCommitUtils {
                 long rowCount = entry.file().rowCount();
                 if (isBlobFile(entry.file().fileName())) {
                     String blobFieldName = entry.file().writeCols().get(0);
-                    long blobStart = blobStarts.getOrDefault(blobFieldName, blobStartDefault);
+                    long blobStart = blobStarts.getOrDefault(blobFieldName, firstRowIdStart);
                     if (blobStart >= start) {
                         throw new IllegalStateException(
                                 String.format(
@@ -114,10 +130,7 @@ public class RowTrackingCommitUtils {
                     rowIdAssigned.add(entry.assignFirstRowId(vectorStoreStart));
                     vectorStoreStart += rowCount;
                 } else {
-                    rowIdAssigned.add(entry.assignFirstRowId(start));
-                    blobStartDefault = start;
-                    blobStarts.clear();
-                    start += rowCount;
+                    rowIdAssigned.add(entry.assignFirstRowId(normalStarts.get(entry)));
                 }
             } else {
                 // for compact file, do not assign first row id.

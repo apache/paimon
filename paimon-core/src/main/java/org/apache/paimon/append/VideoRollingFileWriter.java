@@ -46,8 +46,9 @@ class VideoRollingFileWriter<R> extends RollingFileWriterImpl<InternalRow, R> {
 
     VideoRollingFileWriter(
             Supplier<? extends SingleFileWriter<InternalRow, R>> writerFactory,
-            long targetFileSize) {
-        super(writerFactory, targetFileSize, Long.MAX_VALUE);
+            long targetFileSize,
+            long targetFileRowNum) {
+        super(writerFactory, targetFileSize, targetFileRowNum);
     }
 
     @Override

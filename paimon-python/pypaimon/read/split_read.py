@@ -80,7 +80,8 @@ from pypaimon.read.sliced_split import SlicedSplit
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.special_fields import SpecialFields
 from pypaimon.globalindex.indexed_split import IndexedSplit
-from pypaimon.utils.data_evolution_utils import retrieve_anchor_file
+from pypaimon.utils.data_evolution_utils import (
+    group_by_normal_file_range, retrieve_anchor_file)
 
 KEY_PREFIX = "_KEY_"
 KEY_FIELD_ID_START = 1000000
@@ -485,8 +486,8 @@ class SplitRead(ABC):
     def _read_blob_as_descriptor(self, field_names: List[str]) -> bool:
         if CoreOptions.blob_as_descriptor(self.table.options):
             return True
-        video_field = CoreOptions.video_frame_field(self.table.options)
-        if video_field in field_names:
+        video_fields = CoreOptions.video_frame_fields(self.table.options)
+        if video_fields.intersection(field_names):
             return True
         deferred_fields = getattr(self, '_deferred_blob_fields', set())
         return any(field_name in deferred_fields for field_name in field_names)
@@ -1274,49 +1275,26 @@ class DataEvolutionSplitRead(SplitRead):
         return prescan_read._create_raw_reader()
 
     def _split_by_row_id(self, files: List[DataFileMeta]) -> List[List[DataFileMeta]]:
-        """Split files by firstRowId for data evolution."""
+        """Group sidecars by every normal-file range they intersect."""
+        files_without_row_id = [file for file in files if file.first_row_id is None]
+        ranged_files = [file for file in files if file.first_row_id is not None]
+        groups = [[file] for file in files_without_row_id]
+        groups.extend(group_by_normal_file_range(
+            ranged_files, lambda file: file.row_id_range()))
 
-        # Sort files by firstRowId and then by maxSequenceNumber
-        def sort_key(file: DataFileMeta) -> tuple:
-            first_row_id = file.first_row_id if file.first_row_id is not None else float('-inf')
-            is_special = 1 if (DataFileMeta.is_blob_file(file.file_name)
-                               or DataFileMeta.is_vector_file(file.file_name)) else 0
-            max_seq = file.max_sequence_number
-            return (first_row_id, is_special, -max_seq)
-
-        sorted_files = sorted(files, key=sort_key)
-
-        # Split files by firstRowId
-        split_by_row_id = []
-        last_row_id = -1
-        check_row_id_start = 0
-        current_split = []
-
-        for file in sorted_files:
-            first_row_id = file.first_row_id
-            if first_row_id is None:
-                split_by_row_id.append([file])
-                continue
-
-            if (not DataFileMeta.is_blob_file(file.file_name)
-                    and not DataFileMeta.is_vector_file(file.file_name)
-                    and first_row_id != last_row_id):
-                if current_split:
-                    split_by_row_id.append(current_split)
-                if first_row_id < check_row_id_start:
-                    raise ValueError(
-                        f"There are overlapping files in the split: {files}, "
-                        f"the wrong file is: {file}"
-                    )
-                current_split = []
-                last_row_id = first_row_id
-                check_row_id_start = first_row_id + file.row_count
-            current_split.append(file)
-
-        if current_split:
-            split_by_row_id.append(current_split)
-
-        return split_by_row_id
+        for group in groups:
+            group.sort(key=lambda file: (
+                1 if DataFileMeta.is_blob_file(file.file_name)
+                else 2 if DataFileMeta.is_vector_file(file.file_name)
+                else 0,
+                file.first_row_id,
+                -file.max_sequence_number,
+            ))
+        groups.sort(key=lambda group: min(
+            file.first_row_id if file.first_row_id is not None else float('-inf')
+            for file in group
+        ))
+        return groups
 
     def _create_union_reader(self, need_merge_files: List[DataFileMeta], deletion_vector=None) -> RecordReader:
         """Create a DataEvolutionFileReader for merging multiple files."""

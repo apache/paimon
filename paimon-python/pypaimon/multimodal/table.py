@@ -171,13 +171,18 @@ class MultimodalTable:
         return self.add_batches(frame_batches())
 
     def _resolve_video_frame_column(self, requested):
-        configured = self.raw_table.options.video_frame_field()
-        if configured is None:
+        configured = self.raw_table.options.video_frame_fields()
+        if not configured:
             raise ValueError(
                 "add_video requires table option 'video-frame-field'."
             )
-        column = requested or configured
-        if column != configured:
+        if requested is None and len(configured) > 1:
+            raise ValueError(
+                "video_column is required when 'video-frame-field' configures "
+                "multiple fields."
+            )
+        column = requested or next(iter(configured))
+        if column not in configured:
             raise ValueError(
                 "Video column %r is not configured by 'video-frame-field'."
                 % column
@@ -254,13 +259,14 @@ class MultimodalTable:
         return self
 
     def update(self, where, values):
-        video_column = self.raw_table.options.video_frame_field()
+        video_columns = self.raw_table.options.video_frame_fields()
         if isinstance(values, Mapping):
-            if video_column is not None and video_column in values:
+            assigned_video_columns = video_columns.intersection(values)
+            if assigned_video_columns:
                 raise ValueError(
                     "update() cannot write video-frame-field %r; use "
                     "replace_video() with a complete encoded video."
-                    % video_column
+                    % sorted(assigned_video_columns)[0]
                 )
         query = self.scan().where(where)
         predicate = query._predicate

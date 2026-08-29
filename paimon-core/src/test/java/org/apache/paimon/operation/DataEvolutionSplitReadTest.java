@@ -145,6 +145,23 @@ class DataEvolutionSplitReadTest {
     }
 
     @Test
+    public void testSpanningBlobFileIsAttachedToEachNormalRange() {
+        DataFileMeta normal1 = createFile("file1.parquet", 0L, 5, 1);
+        DataFileMeta normal2 = createFile("file2.parquet", 5L, 5, 1);
+        DataFileMeta spanning = createFile("camera-a.video", 0L, 10, 100);
+        DataFileMeta cameraB1 = createFile("camera-b1.video", 0L, 3, 30);
+        DataFileMeta cameraB2 = createFile("camera-b2.video", 3L, 7, 70);
+
+        List<List<DataFileMeta>> result =
+                DataEvolutionSplitRead.mergeRangesAndSort(
+                        Arrays.asList(normal1, spanning, cameraB1, normal2, cameraB2));
+
+        assertEquals(2, result.size());
+        assertEquals(Arrays.asList(normal1, spanning, cameraB1, cameraB2), result.get(0));
+        assertEquals(Arrays.asList(normal2, spanning, cameraB2), result.get(1));
+    }
+
+    @Test
     public void testSplitWithMultipleVectorStoreFilesPerGroup() {
         DataFileMeta file1 = createFile("file1.parquet", 1L, 10, 1);
         DataFileMeta file2 = createFile("file2.vector.json", 1L, 1, 1);

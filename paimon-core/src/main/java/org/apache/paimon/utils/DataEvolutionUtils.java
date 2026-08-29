@@ -32,6 +32,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -200,5 +201,108 @@ public class DataEvolutionUtils {
                 "Data evolution compact files",
                 merged);
         return merged.get(0);
+    }
+
+    /**
+     * Groups data-evolution files by normal-file row ranges.
+     *
+     * <p>Blob and vector files may span several adjacent normal files. Such sidecar files are
+     * included in every anchor group they intersect, so each group can select just its normal-file
+     * range without duplicating the physical sidecar.
+     */
+    public static <T> List<List<T>> groupByNormalFileRange(
+            List<T> entries, Function<T, DataFileMeta> fileMetaFunc) {
+        Map<T, Integer> originalOrder = new IdentityHashMap<>();
+        List<T> normal = new ArrayList<>();
+        List<T> sidecars = new ArrayList<>();
+        for (int i = 0; i < entries.size(); i++) {
+            T entry = entries.get(i);
+            originalOrder.put(entry, i);
+            DataFileMeta file = fileMetaFunc.apply(entry);
+            if (isBlobFile(file.fileName()) || isVectorStoreFile(file.fileName())) {
+                sidecars.add(entry);
+            } else {
+                normal.add(entry);
+            }
+        }
+
+        if (normal.isEmpty()) {
+            return new RangeHelper<T>(entry -> fileMetaFunc.apply(entry).nonNullRowIdRange())
+                    .mergeOverlappingRanges(entries);
+        }
+
+        normal.sort(
+                Comparator.<T>comparingLong(entry -> fileMetaFunc.apply(entry).nonNullFirstRowId())
+                        .thenComparingLong(
+                                entry -> fileMetaFunc.apply(entry).nonNullRowIdRange().to));
+        List<List<T>> groups = new ArrayList<>();
+        List<Range> groupRanges = new ArrayList<>();
+        for (T entry : normal) {
+            Range range = fileMetaFunc.apply(entry).nonNullRowIdRange();
+            if (groups.isEmpty() || !range.equals(groupRanges.get(groupRanges.size() - 1))) {
+                if (!groupRanges.isEmpty()) {
+                    Range previous = groupRanges.get(groupRanges.size() - 1);
+                    checkArgument(
+                            !previous.hasIntersection(range),
+                            "Normal data files have overlapping but different row ranges: %s and %s.",
+                            previous,
+                            range);
+                }
+                groups.add(new ArrayList<>());
+                groupRanges.add(range);
+            }
+            groups.get(groups.size() - 1).add(entry);
+        }
+
+        List<T> unanchored = new ArrayList<>();
+        for (T sidecar : sidecars) {
+            Range sidecarRange = fileMetaFunc.apply(sidecar).nonNullRowIdRange();
+            int first = firstRangeEndingAtOrAfter(groupRanges, sidecarRange.from);
+            boolean attached = false;
+            for (int i = first;
+                    i < groupRanges.size() && groupRanges.get(i).from <= sidecarRange.to;
+                    i++) {
+                if (groupRanges.get(i).hasIntersection(sidecarRange)) {
+                    groups.get(i).add(sidecar);
+                    attached = true;
+                }
+            }
+            if (!attached) {
+                unanchored.add(sidecar);
+            }
+        }
+
+        if (!unanchored.isEmpty()) {
+            groups.addAll(
+                    new RangeHelper<T>(entry -> fileMetaFunc.apply(entry).nonNullRowIdRange())
+                            .mergeOverlappingRanges(unanchored));
+            groups.sort(
+                    Comparator.comparingLong(
+                            group ->
+                                    group.stream()
+                                            .map(fileMetaFunc)
+                                            .map(DataFileMeta::nonNullRowIdRange)
+                                            .mapToLong(range -> range.from)
+                                            .min()
+                                            .orElse(Long.MAX_VALUE)));
+        }
+        for (List<T> group : groups) {
+            group.sort(Comparator.comparingInt(originalOrder::get));
+        }
+        return groups;
+    }
+
+    private static int firstRangeEndingAtOrAfter(List<Range> ranges, long rowId) {
+        int low = 0;
+        int high = ranges.size();
+        while (low < high) {
+            int middle = (low + high) >>> 1;
+            if (ranges.get(middle).to < rowId) {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+        return low;
     }
 }

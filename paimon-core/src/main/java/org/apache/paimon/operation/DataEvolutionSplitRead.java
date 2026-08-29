@@ -93,6 +93,7 @@ import static org.apache.paimon.predicate.PredicateVisitor.collectFieldNames;
 import static org.apache.paimon.table.SpecialFields.rowTypeWithRowTracking;
 import static org.apache.paimon.types.BlobType.isBlobFileField;
 import static org.apache.paimon.types.VectorType.isVectorStoreFile;
+import static org.apache.paimon.utils.DataEvolutionUtils.groupByNormalFileRange;
 import static org.apache.paimon.utils.DataEvolutionUtils.retrieveAnchorFile;
 import static org.apache.paimon.utils.ListUtils.isNullOrEmpty;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -236,6 +237,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
         List<List<DataFileMeta>> splitByRowId = mergeRangesAndSort(files);
         for (List<DataFileMeta> needMergeFiles : splitByRowId) {
+            List<Range> effectiveRowRanges = anchoredRowRanges(needMergeFiles, rowRanges);
             if (needMergeFiles.size() == 1 || readRowType.getFields().isEmpty()) {
                 // No need to merge fields, just create a single file reader
                 suppliers.add(
@@ -247,7 +249,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                     dataFilePathFactory,
                                     needMergeFiles.get(0),
                                     filters,
-                                    rowRanges,
+                                    effectiveRowRanges,
                                     readRowType,
                                     deletionVector);
                         });
@@ -265,7 +267,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                     partition,
                                     dataFilePathFactory,
                                     formatBuilder,
-                                    rowRanges,
+                                    effectiveRowRanges,
                                     readRowType,
                                     deletionVector);
                         });
@@ -1107,11 +1109,20 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             List<Range> merged = Range.sortAndMergeOverlap(ranges, true);
             if (expectedRowRange != null) {
                 for (Range range : merged) {
-                    Preconditions.checkState(
-                            range.from >= expectedRowRange.from && range.to <= expectedRowRange.to,
-                            "Blob file range %s should be within normal file range %s.",
-                            range,
-                            expectedRowRange);
+                    if (rowIdPushdown) {
+                        Preconditions.checkState(
+                                range.hasIntersection(expectedRowRange),
+                                "Blob file range %s should intersect normal file range %s.",
+                                range,
+                                expectedRowRange);
+                    } else {
+                        Preconditions.checkState(
+                                range.from >= expectedRowRange.from
+                                        && range.to <= expectedRowRange.to,
+                                "Blob file range %s should be within normal file range %s.",
+                                range,
+                                expectedRowRange);
+                    }
                 }
                 return expectedRowRange.count();
             }
@@ -1231,7 +1242,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         // group by row id range
         ToLongFunction<DataFileMeta> maxSeqF = DataFileMeta::maxSequenceNumber;
         RangeHelper<DataFileMeta> rangeHelper = new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
-        List<List<DataFileMeta>> result = rangeHelper.mergeOverlappingRanges(files);
+        List<List<DataFileMeta>> result = groupByNormalFileRange(files, Function.identity());
 
         // in group, sort by blob/vector-store file and max_seq
         for (List<DataFileMeta> group : result) {
@@ -1274,6 +1285,51 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         }
 
         return result;
+    }
+
+    private static List<Range> anchoredRowRanges(
+            List<DataFileMeta> files, @Nullable List<Range> requestedRanges) {
+        Range anchor = null;
+        for (DataFileMeta file : files) {
+            if (!isBlobFile(file.fileName()) && !isVectorStoreFile(file.fileName())) {
+                Range range = file.nonNullRowIdRange();
+                if (anchor == null) {
+                    anchor = range;
+                } else {
+                    checkArgument(
+                            anchor.equals(range),
+                            "Normal data files should have the same row range: %s and %s.",
+                            anchor,
+                            range);
+                }
+            }
+        }
+        if (anchor == null) {
+            return requestedRanges;
+        }
+        if (requestedRanges == null) {
+            Range anchorRange = anchor;
+            boolean hasSpanningSidecar =
+                    files.stream()
+                            .filter(
+                                    file ->
+                                            isBlobFile(file.fileName())
+                                                    || isVectorStoreFile(file.fileName()))
+                            .map(DataFileMeta::nonNullRowIdRange)
+                            .anyMatch(
+                                    range ->
+                                            range.from < anchorRange.from
+                                                    || range.to > anchorRange.to);
+            return hasSpanningSidecar ? Collections.singletonList(anchorRange) : null;
+        }
+        List<Range> intersections = new ArrayList<>();
+        for (Range requested : requestedRanges) {
+            Range intersection = Range.intersection(anchor, requested);
+            if (intersection != null) {
+                intersections.add(intersection);
+            }
+        }
+        return intersections;
     }
 
     static final class VectorStoreBunchKey implements Comparable<VectorStoreBunchKey> {
