@@ -635,7 +635,8 @@ public class ExpireSnapshotsTest {
                         blockingSnapshotManager,
                         changelogManager,
                         store.newSnapshotDeletion(),
-                        store.newTagManager());
+                        store.newTagManager(),
+                        store.options().scanManifestParallelism());
 
         expire.expireUntil(1, latestSnapshotId);
 
@@ -961,7 +962,8 @@ public class ExpireSnapshotsTest {
                         failingSnapshotManager,
                         changelogManager,
                         store.newSnapshotDeletion(),
-                        store.newTagManager());
+                        store.newTagManager(),
+                        store.options().scanManifestParallelism());
         expire.config(config);
         expire.setCurrentTimeMillis(() -> 6000L);
 
@@ -1217,7 +1219,11 @@ public class ExpireSnapshotsTest {
             SnapshotManager snapshotManager,
             SnapshotDeletion snapshotDeletion) {
         return new ExpireSnapshotsImpl(
-                snapshotManager, store.changelogManager(), snapshotDeletion, store.newTagManager());
+                snapshotManager,
+                store.changelogManager(),
+                snapshotDeletion,
+                store.newTagManager(),
+                store.options().scanManifestParallelism());
     }
 
     private void rewriteSnapshotTime(long snapshotId, long newTimeMillis) throws IOException {
@@ -1353,7 +1359,8 @@ public class ExpireSnapshotsTest {
                     store.newStatsFileHandler(),
                     store.options().changelogProducer() != CoreOptions.ChangelogProducer.NONE,
                     store.options().cleanEmptyDirectories(),
-                    store.options().fileOperationThreadNum());
+                    store.options().fileOperationThreadNum(),
+                    store.options().scanManifestParallelism());
             this.minBlockedSnapshotId = minBlockedSnapshotId;
             this.maxBlockedSnapshotId = maxBlockedSnapshotId;
         }
@@ -1426,7 +1433,8 @@ public class ExpireSnapshotsTest {
                     store.newStatsFileHandler(),
                     store.options().changelogProducer() != CoreOptions.ChangelogProducer.NONE,
                     store.options().cleanEmptyDirectories(),
-                    store.options().fileOperationThreadNum());
+                    store.options().fileOperationThreadNum(),
+                    store.options().scanManifestParallelism());
         }
 
         @Override

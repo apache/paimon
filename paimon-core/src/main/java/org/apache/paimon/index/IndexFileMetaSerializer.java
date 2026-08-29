@@ -50,8 +50,7 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
                                         ? null
                                         : new GenericArray(globalIndexMeta.extraFieldIds()),
                                 globalIndexMeta.indexMeta(),
-                                globalIndexMeta.sourceMeta(),
-                                globalIndexMeta.buildSchemaId());
+                                globalIndexMeta.sourceMeta());
         return GenericRow.of(
                 fromString(record.indexType()),
                 fromString(record.fileName()),
@@ -59,14 +58,15 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
                 record.rowCount(),
                 dvMetasToRowArrayData(record.dvRanges()),
                 fromString(record.externalPath()),
-                globalIndexRow);
+                globalIndexRow,
+                record.schemaId());
     }
 
     @Override
     public IndexFileMeta fromRow(InternalRow row) {
         GlobalIndexMeta globalIndexMeta = null;
         if (!row.isNullAt(6)) {
-            InternalRow globalIndexRow = row.getRow(6, GlobalIndexMeta.SCHEMA.getFieldCount());
+            InternalRow globalIndexRow = row.getRow(6, 6);
             Long rowRangeStart = globalIndexRow.getLong(0);
             Long rowRangeEnd = globalIndexRow.getLong(1);
             Integer indexFieldId = globalIndexRow.getInt(2);
@@ -74,7 +74,6 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
                     globalIndexRow.isNullAt(3) ? null : globalIndexRow.getArray(3).toIntArray();
             byte[] indexMeta = globalIndexRow.isNullAt(4) ? null : globalIndexRow.getBinary(4);
             byte[] sourceMeta = globalIndexRow.isNullAt(5) ? null : globalIndexRow.getBinary(5);
-            Long buildSchemaId = globalIndexRow.isNullAt(6) ? null : globalIndexRow.getLong(6);
             globalIndexMeta =
                     new GlobalIndexMeta(
                             rowRangeStart,
@@ -82,8 +81,7 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
                             indexFieldId,
                             extralFields,
                             indexMeta,
-                            sourceMeta,
-                            buildSchemaId);
+                            sourceMeta);
         }
         return new IndexFileMeta(
                 row.getString(0).toString(),
@@ -92,7 +90,8 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
                 row.getLong(3),
                 row.isNullAt(4) ? null : rowArrayDataToDvMetas(row.getArray(4)),
                 row.isNullAt(5) ? null : row.getString(5).toString(),
-                globalIndexMeta);
+                globalIndexMeta,
+                row.isNullAt(7) ? null : row.getLong(7));
     }
 
     public static InternalArray dvMetasToRowArrayData(

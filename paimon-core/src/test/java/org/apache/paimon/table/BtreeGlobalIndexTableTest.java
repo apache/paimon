@@ -592,8 +592,7 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                         "source-backed-index",
                         0,
                         10,
-                        new GlobalIndexMeta(
-                                0, 9, 1, null, null, new byte[] {1}, table.schema().id()),
+                        new GlobalIndexMeta(0, 9, 1, null, null, new byte[] {1}),
                         null);
 
         assertThat(
@@ -624,7 +623,7 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                         "ordinary-index",
                         0,
                         5,
-                        new GlobalIndexMeta(0, 4, 1, null, null, null, table.schema().id()),
+                        new GlobalIndexMeta(0, 4, 1, null, null),
                         null));
         mixedIndexes.add(
                 new IndexFileMeta(
@@ -632,8 +631,7 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                         "source-backed-index",
                         0,
                         5,
-                        new GlobalIndexMeta(
-                                5, 9, 1, null, null, new byte[] {1}, table.schema().id()),
+                        new GlobalIndexMeta(5, 9, 1, null, null, new byte[] {1}),
                         null));
 
         DataEvolutionGlobalIndexCoverage coverage =

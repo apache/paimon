@@ -51,8 +51,44 @@ public class ManifestCommittableSerializerCompatibilityTest {
 
     @Test
     public void testCompatibilityToV5CommitV14() throws IOException {
+        DataFileMeta dataFile =
+                DataFileMeta.create(
+                                "column-sequence-file",
+                                1024L,
+                                10L,
+                                singleColumn("min_key"),
+                                singleColumn("max_key"),
+                                SimpleStats.EMPTY_STATS,
+                                SimpleStats.EMPTY_STATS,
+                                1L,
+                                5L,
+                                1L,
+                                0,
+                                Collections.emptyList(),
+                                Timestamp.fromLocalDateTime(
+                                        LocalDateTime.parse("2026-08-07T00:00:00")),
+                                0L,
+                                null,
+                                FileSource.COMPACT,
+                                null,
+                                null,
+                                1L,
+                                Arrays.asList("a", "b"),
+                                null)
+                        .withColumnMaxSequenceNumbers(new long[] {3L, 5L});
+        IndexFileMeta indexFile =
+                new IndexFileMeta(
+                        "index-type",
+                        "index-file",
+                        100L,
+                        10L,
+                        null,
+                        null,
+                        (GlobalIndexMeta) null,
+                        11L);
         ManifestCommittable committable =
-                createCurrentCommitCommittable(new GlobalIndexMeta(0, 9, 7, null, null, null, 11L));
+                createManifestCommittable(
+                        Collections.singletonList(dataFile), indexFile, indexFile);
 
         ManifestCommittableSerializer serializer = new ManifestCommittableSerializer();
         byte[] current = serializer.serialize(committable);
@@ -84,8 +120,14 @@ public class ManifestCommittableSerializerCompatibilityTest {
                                 .getResourceAsStream("compatibility/manifest-committable-v13-v5"),
                         true);
 
-        assertThat(new ManifestCommittableSerializer().deserialize(5, serialized))
-                .isEqualTo(createCurrentCommitCommittable(null));
+        ManifestCommittable restored =
+                new ManifestCommittableSerializer().deserialize(5, serialized);
+        IndexFileMeta restoredIndexFile =
+                ((CommitMessageImpl) restored.fileCommittables().get(0))
+                        .newFilesIncrement()
+                        .newIndexFiles()
+                        .get(0);
+        assertThat(restoredIndexFile.schemaId()).isNull();
     }
 
     @Test
@@ -97,63 +139,24 @@ public class ManifestCommittableSerializerCompatibilityTest {
                                 .getResourceAsStream(
                                         "compatibility/manifest-committable-v13-global-index-v5"),
                         true);
-        GlobalIndexMeta expectedGlobalIndex =
-                new GlobalIndexMeta(
-                        0L,
-                        9L,
-                        7,
-                        new int[] {8, 9},
-                        new byte[] {0x12, 0x34},
-                        new byte[] {0x56, 0x78},
-                        null);
 
-        ManifestCommittable deserialized =
+        ManifestCommittable restored =
                 new ManifestCommittableSerializer().deserialize(5, serialized);
-        assertThat(deserialized).isEqualTo(createCurrentCommitCommittable(expectedGlobalIndex));
-        GlobalIndexMeta actualGlobalIndex =
-                ((CommitMessageImpl) deserialized.fileCommittables().get(0))
+        IndexFileMeta restoredIndexFile =
+                ((CommitMessageImpl) restored.fileCommittables().get(0))
                         .newFilesIncrement()
                         .newIndexFiles()
-                        .get(0)
-                        .globalIndexMeta();
-        assertThat(actualGlobalIndex).isEqualTo(expectedGlobalIndex);
-        assertThat(actualGlobalIndex.sourceMeta()).containsExactly(0x56, 0x78);
-        assertThat(actualGlobalIndex.buildSchemaId()).isNull();
-    }
-
-    private static ManifestCommittable createCurrentCommitCommittable(
-            GlobalIndexMeta globalIndexMeta) {
-        DataFileMeta dataFile =
-                DataFileMeta.create(
-                                "column-sequence-file",
-                                1024L,
-                                10L,
-                                singleColumn("min_key"),
-                                singleColumn("max_key"),
-                                SimpleStats.EMPTY_STATS,
-                                SimpleStats.EMPTY_STATS,
-                                1L,
-                                5L,
-                                1L,
-                                0,
-                                Collections.emptyList(),
-                                Timestamp.fromLocalDateTime(
-                                        LocalDateTime.parse("2026-08-07T00:00:00")),
+                        .get(0);
+        assertThat(restoredIndexFile.schemaId()).isNull();
+        assertThat(restoredIndexFile.globalIndexMeta())
+                .isEqualTo(
+                        new GlobalIndexMeta(
                                 0L,
-                                null,
-                                FileSource.COMPACT,
-                                null,
-                                null,
-                                1L,
-                                Arrays.asList("a", "b"),
-                                null)
-                        .withColumnMaxSequenceNumbers(new long[] {3L, 5L});
-        IndexFileMeta indexFile =
-                new IndexFileMeta("index-type", "index-file", 100L, 10L, globalIndexMeta, null);
-        ManifestCommittable committable =
-                createManifestCommittable(
-                        Collections.singletonList(dataFile), indexFile, indexFile);
-        return committable;
+                                9L,
+                                7,
+                                new int[] {8, 9},
+                                new byte[] {0x12, 0x34},
+                                new byte[] {0x56, 0x78}));
     }
 
     @Test

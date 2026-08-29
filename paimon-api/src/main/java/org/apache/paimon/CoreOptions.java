@@ -50,6 +50,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -2654,6 +2655,29 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("Format table commit hive sync uri.");
 
+    public static final ConfigOption<Integer> FORMAT_TABLE_COMMIT_CLEANUP_THREAD_NUM =
+            key("format-table.commit.cleanup-thread-num")
+                    .intType()
+                    .defaultValue(64)
+                    .withDescription(
+                            "The maximum number of concurrent deletions of old data files during "
+                                    + "overwrite commits for an internal Format Table with "
+                                    + "catalog-managed partitions. Supported values are 1 through "
+                                    + "64. Other Format Tables use serial cleanup. This limit uses "
+                                    + "a separate thread pool and is independent of "
+                                    + "file-operation.thread-num, so the total file-operation "
+                                    + "concurrency in one process may be the sum of both limits.");
+
+    public static final ConfigOption<Integer> FORMAT_TABLE_COMMIT_PUBLISH_THREAD_NUM =
+            key("format-table.commit.publish-thread-num")
+                    .intType()
+                    .defaultValue(64)
+                    .withDescription(
+                            "The maximum number of concurrent file publications during commits "
+                                    + "for a partitioned Format Table with catalog-managed "
+                                    + "partitions. Supported values are 1 through 64. Other Format "
+                                    + "Tables publish serially.");
+
     @Immutable
     public static final ConfigOption<String> BLOB_FIELD =
             key("blob-field")
@@ -2662,8 +2686,20 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Specifies column names that should be stored as blob type. "
                                     + "This is used when you want to treat a BYTES column as a BLOB. "
-                                    + "Fields listed in blob-descriptor-field or blob-view-field "
-                                    + "are also treated as BLOB fields.");
+                                    + "Fields listed in blob-descriptor-field, blob-view-field, "
+                                    + "or video-frame-field are also treated as BLOB fields.");
+
+    @Immutable
+    public static final ConfigOption<String> VIDEO_FRAME_FIELD =
+            key("video-frame-field")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Specifies one scalar BLOB field whose logical rows are video frames. "
+                                    + "Complete encoded videos and embedded frame-run indexes are "
+                                    + "packed into '.video' files. The first version supports "
+                                    + "append-only data-evolution tables and exact "
+                                    + "VideoFrameDescriptor input.");
 
     @Immutable
     public static final ConfigOption<String> BLOB_DESCRIPTOR_FIELD =
@@ -2966,6 +3002,13 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Comma-separated character columns indexed by primary-key full-text indexes. "
                                     + "The first release supports exactly one column.");
+
+    public static final ConfigOption<String> PK_FM_INDEX_COLUMNS =
+            key("pk-fm.index.columns")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Comma-separated character columns indexed by primary-key FM indexes.");
 
     @Immutable
     public static final ConfigOption<Boolean> PK_CLUSTERING_OVERRIDE =
@@ -3302,6 +3345,26 @@ public class CoreOptions implements Serializable {
         return options.get(FORMAT_TABLE_COMMIT_HIVE_SYNC_URI);
     }
 
+    public int formatTableCommitCleanupThreadNum() {
+        int threadNum = options.get(FORMAT_TABLE_COMMIT_CLEANUP_THREAD_NUM);
+        checkArgument(
+                threadNum >= 1 && threadNum <= 64,
+                "Option %s must be between 1 and 64, but was %s.",
+                FORMAT_TABLE_COMMIT_CLEANUP_THREAD_NUM.key(),
+                threadNum);
+        return threadNum;
+    }
+
+    public int formatTableCommitPublishThreadNum() {
+        int threadNum = options.get(FORMAT_TABLE_COMMIT_PUBLISH_THREAD_NUM);
+        checkArgument(
+                threadNum >= 1 && threadNum <= 64,
+                "Option %s must be between 1 and 64, but was %s.",
+                FORMAT_TABLE_COMMIT_PUBLISH_THREAD_NUM.key(),
+                threadNum);
+        return threadNum;
+    }
+
     public MemorySize fileReaderAsyncThreshold() {
         return options.get(FILE_READER_ASYNC_THRESHOLD);
     }
@@ -3533,6 +3596,11 @@ public class CoreOptions implements Serializable {
      */
     public Set<String> blobDescriptorField() {
         return parseCommaSeparatedSet(BLOB_DESCRIPTOR_FIELD);
+    }
+
+    /** Resolve the scalar BLOB field stored as frame runs in video pack files. */
+    public Set<String> videoFrameField() {
+        return parseCommaSeparatedSet(VIDEO_FRAME_FIELD);
     }
 
     /**
@@ -3903,12 +3971,20 @@ public class CoreOptions implements Serializable {
     }
 
     public static List<String> blobField(Map<String, String> options) {
-        String string = options.get(BLOB_FIELD.key());
-        if (string == null) {
-            return Collections.emptyList();
-        }
+        Set<String> fields = new LinkedHashSet<>();
+        addCommaSeparatedFields(fields, options.get(BLOB_FIELD.key()));
+        addCommaSeparatedFields(fields, options.get(VIDEO_FRAME_FIELD.key()));
+        return new ArrayList<>(fields);
+    }
 
-        return Arrays.stream(string.split(",")).map(String::trim).collect(Collectors.toList());
+    private static void addCommaSeparatedFields(Set<String> fields, @Nullable String configured) {
+        if (configured == null) {
+            return;
+        }
+        Arrays.stream(configured.split(","))
+                .map(String::trim)
+                .filter(field -> !field.isEmpty())
+                .forEach(fields::add);
     }
 
     public static List<String> blobViewField(Map<String, String> options) {
@@ -4604,6 +4680,10 @@ public class CoreOptions implements Serializable {
         return options.getOptional(PK_FULL_TEXT_INDEX_COLUMNS).isPresent();
     }
 
+    public boolean primaryKeyFMIndexEnabled() {
+        return options.getOptional(PK_FM_INDEX_COLUMNS).isPresent();
+    }
+
     public List<String> primaryKeyVectorIndexColumns() {
         return primaryKeyIndexColumns(PK_VECTOR_INDEX_COLUMNS);
     }
@@ -4624,6 +4704,10 @@ public class CoreOptions implements Serializable {
         return primaryKeyIndexColumns(PK_FULL_TEXT_INDEX_COLUMNS);
     }
 
+    public List<String> primaryKeyFMIndexColumns() {
+        return primaryKeyIndexColumns(PK_FM_INDEX_COLUMNS);
+    }
+
     private List<String> primaryKeyIndexColumns(ConfigOption<String> option) {
         String columns = options.get(option);
         if (columns == null) {
@@ -4642,6 +4726,10 @@ public class CoreOptions implements Serializable {
 
     public Options primaryKeyMultiValueIndexOptions(String column) {
         return primaryKeySortedIndexOptions(column, "pk-multivalue", "multivalue-index.");
+    }
+
+    public Options primaryKeyFMIndexOptions(String column) {
+        return primaryKeySortedIndexOptions(column, "pk-fm", "fm-index.");
     }
 
     public Options primaryKeyFullTextIndexOptions(String column) {

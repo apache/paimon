@@ -23,7 +23,10 @@ import pyarrow as pa
 from pyarrow import RecordBatch
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
-from pypaimon.read.reader.format_blob_reader import BlobRecordIterator
+from pypaimon.read.reader.format_blob_reader import (
+    BlobRecordIterator,
+    VideoFrameRecordIterator,
+)
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.row.blob import Blob
@@ -588,23 +591,39 @@ class BlobFallbackBatchReader(RecordBatchReader):
             return {}
 
         try:
-            blob_lengths = [reader.blob_lengths[pos] for pos, _ in positions_and_row_ids]
-            blob_offsets = [reader.blob_offsets[pos] for pos, _ in positions_and_row_ids]
-            iterator = BlobRecordIterator(
-                reader._file_io,
-                reader.file_path,
-                blob_lengths,
-                blob_offsets,
-                self._data_field,
-                reader._input_stream,
-                blob_as_descriptor=(
-                    self._blob_as_descriptor or self._blob_parallelism > 1
-                ),
-            )
-
-            blobs = []
-            for row in iterator:
-                blobs.append(row.values[0])
+            if getattr(reader, "_is_video", False):
+                iterator = VideoFrameRecordIterator(
+                    reader._file_io,
+                    reader.file_path,
+                    reader._video_meta,
+                    self._data_field,
+                )
+                blobs = []
+                for position, _ in positions_and_row_ids:
+                    iterator.current_position = position
+                    blobs.append(next(iterator).values[0])
+            else:
+                blob_lengths = [
+                    reader.blob_lengths[pos]
+                    for pos, _ in positions_and_row_ids
+                ]
+                blob_offsets = [
+                    reader.blob_offsets[pos]
+                    for pos, _ in positions_and_row_ids
+                ]
+                iterator = BlobRecordIterator(
+                    reader._file_io,
+                    reader.file_path,
+                    blob_lengths,
+                    blob_offsets,
+                    self._data_field,
+                    reader._input_stream,
+                    blob_as_descriptor=(
+                        self._blob_as_descriptor
+                        or self._blob_parallelism > 1
+                    ),
+                )
+                blobs = [row.values[0] for row in iterator]
             return {
                 row_id: blob
                 for (_, row_id), blob in zip(positions_and_row_ids, blobs)
@@ -647,7 +666,11 @@ class BlobFallbackBatchReader(RecordBatchReader):
         if reader is None:
             state.reader_initialized = True
             return None
-        actual_rows = len(reader.blob_lengths)
+        actual_rows = (
+            reader.record_count
+            if hasattr(reader, "record_count")
+            else len(reader.blob_lengths)
+        )
         expected_rows = state.selected_count
         if actual_rows != expected_rows:
             reader.close()

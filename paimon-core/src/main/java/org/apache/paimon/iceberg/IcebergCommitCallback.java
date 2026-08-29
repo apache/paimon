@@ -294,6 +294,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                                                         + commitUser
                                                         + " and identifier "
                                                         + committable.identifier()
+                                                        + " for table "
+                                                        + table.name()
                                                         + ". This is unexpected."));
         long snapshotId = snapshot.id();
         createMetadata(
@@ -2135,7 +2137,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
     private class SchemaCache {
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = table.schemaManager();
         Map<Long, IcebergSchema> schemas = new HashMap<>();
 
         private IcebergSchema get(long schemaId) {
@@ -2146,6 +2148,8 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         // backstop: reject variant on each schema as it is emitted
                         checkVariantNotPublishable(schema.logicalRowType());
                         SchemaValidation.validateIcebergGeospatialTypes(
+                                schema.logicalRowType(), table.coreOptions());
+                        SchemaValidation.validateIcebergTimestampPrecisions(
                                 schema.logicalRowType(), table.coreOptions());
                         return IcebergSchema.create(schema);
                     });

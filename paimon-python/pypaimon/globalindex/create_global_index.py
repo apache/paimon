@@ -502,6 +502,7 @@ def _to_index_manifest_entries(
                 partition=partition,
                 bucket=0,
                 index_file=index_file,
+                schema_id=table.table_schema.id,
             )
         )
     return entries

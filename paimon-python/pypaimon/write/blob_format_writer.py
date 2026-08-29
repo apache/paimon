@@ -31,7 +31,13 @@ from pypaimon.schema.data_types import (
     is_blob_file_type,
     is_map_blob_type,
 )
-from pypaimon.table.row.blob import Blob, BlobData, BlobDescriptor, BlobConsumer
+from pypaimon.table.row.blob import (
+    Blob,
+    BlobConsumer,
+    BlobData,
+    BlobDescriptor,
+    VideoFrameDescriptor,
+)
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 
 
@@ -129,8 +135,7 @@ class BlobFormatWriter:
 
         # Write length (8 bytes, little endian)
         length_bytes = struct.pack('<Q', bin_length)
-        self.output_stream.write(length_bytes)
-        self.position += 8
+        crc32 = self._write_with_crc(length_bytes, crc32)
 
         # Write CRC32 (4 bytes, little endian)
         crc_bytes = struct.pack('<I', crc32 & 0xffffffff)
@@ -195,8 +200,7 @@ class BlobFormatWriter:
 
         bin_length = self.position - previous_pos + self.METADATA_SIZE
         self.lengths.append(bin_length)
-        self.output_stream.write(struct.pack('<Q', bin_length))
-        self.position += 8
+        crc32 = self._write_with_crc(struct.pack('<Q', bin_length), crc32)
         self.output_stream.write(struct.pack('<I', crc32 & 0xffffffff))
         self.position += 4
 
@@ -349,6 +353,12 @@ class BlobFormatWriter:
         if isinstance(col_data, Blob):
             return col_data
         if isinstance(col_data, bytes):
+            if VideoFrameDescriptor.is_video_frame_descriptor(col_data):
+                if uri_reader_factory is None:
+                    raise RuntimeError("uri_reader_factory is required for descriptor bytes.")
+                descriptor = VideoFrameDescriptor.deserialize(col_data)
+                uri_reader = uri_reader_factory.create(descriptor.uri)
+                return Blob.from_descriptor(uri_reader, descriptor)
             if BlobDescriptor.is_blob_descriptor(col_data):
                 if uri_reader_factory is None:
                     raise RuntimeError("uri_reader_factory is required for BlobDescriptor bytes.")

@@ -19,12 +19,16 @@ import os
 import shutil
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import pyarrow as pa
 from parameterized import parameterized
+import torch
 from torch.utils.data import DataLoader
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.multimodal.table import MultimodalTable
 
 from pypaimon.table.file_store_table import FileStoreTable
 
@@ -143,6 +147,328 @@ class TorchReadTest(unittest.TestCase):
         self.assertEqual(sorted_user_ids, expected_user_ids)
         self.assertEqual(sorted_behaviors, expected_behaviors)
 
+    def test_torch_streaming_pyarrow_batches(self):
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema, partition_keys=['user_id']
+        )
+        self.catalog.create_table(
+            'default.test_torch_pyarrow_batches', schema, False
+        )
+        table = self.catalog.get_table(
+            'default.test_torch_pyarrow_batches'
+        )
+        self._write_test_table(table)
+
+        read_builder = table.new_read_builder().with_projection(
+            ['user_id', 'behavior']
+        )
+        splits = read_builder.new_scan().plan().splits()
+        dataset = read_builder.new_read().to_torch(
+            splits,
+            streaming=True,
+            batch_format='pyarrow',
+            batch_size=3,
+        )
+        dataloader = DataLoader(
+            dataset,
+            batch_size=None,
+            num_workers=2,
+            shuffle=False,
+        )
+
+        batches = list(dataloader)
+        self.assertTrue(batches)
+        self.assertTrue(
+            all(isinstance(batch, pa.RecordBatch) for batch in batches)
+        )
+        self.assertTrue(all(0 < batch.num_rows <= 3 for batch in batches))
+        result = pa.Table.from_batches(batches).sort_by('user_id').to_pydict()
+        self.assertEqual(result['user_id'], list(range(1, 9)))
+        self.assertEqual(result['behavior'], list('abcdefgh'))
+
+    def test_torch_streaming_tensor_batches(self):
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema, partition_keys=['user_id']
+        )
+        self.catalog.create_table(
+            'default.test_torch_tensor_batches', schema, False
+        )
+        table = self.catalog.get_table(
+            'default.test_torch_tensor_batches'
+        )
+        self._write_test_table(table)
+
+        read_builder = table.new_read_builder().with_projection(
+            ['user_id', 'item_id']
+        )
+        splits = read_builder.new_scan().plan().splits()
+        dataset = read_builder.new_read().to_torch(
+            splits,
+            streaming=True,
+            batch_format='torch',
+            batch_size=3,
+        )
+
+        batches = list(dataset)
+        self.assertEqual([len(batch['user_id']) for batch in batches], [3, 3, 2])
+        self.assertTrue(
+            all(batch['user_id'].dtype == torch.int32 for batch in batches)
+        )
+        self.assertTrue(
+            all(batch['item_id'].dtype == torch.int64 for batch in batches)
+        )
+        user_ids = torch.cat(
+            [batch['user_id'] for batch in batches]
+        ).sort().values.tolist()
+        self.assertEqual(user_ids, list(range(1, 9)))
+
+    def test_torch_streaming_batches_respect_limit(self):
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema, partition_keys=['user_id']
+        )
+        self.catalog.create_table(
+            'default.test_torch_batch_limit', schema, False
+        )
+        table = self.catalog.get_table('default.test_torch_batch_limit')
+        self._write_test_table(table)
+
+        read_builder = table.new_read_builder().with_projection(
+            ['user_id']
+        ).with_limit(5)
+        splits = read_builder.new_scan().plan().splits()
+        dataset = read_builder.new_read().to_torch(
+            splits,
+            streaming=True,
+            batch_format='pyarrow',
+            batch_size=3,
+        )
+        batches = list(dataset)
+        self.assertEqual([batch.num_rows for batch in batches], [3, 2])
+
+    def test_torch_streaming_batches_respect_limit_with_workers(self):
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema, partition_keys=['user_id']
+        )
+        self.catalog.create_table(
+            'default.test_torch_batch_worker_limit', schema, False
+        )
+        table = self.catalog.get_table(
+            'default.test_torch_batch_worker_limit'
+        )
+        self._write_test_table(table)
+
+        predicate = (
+            table.new_read_builder().new_predicate_builder()
+            .greater_than('item_id', 0)
+        )
+        read_builder = (
+            table.new_read_builder()
+            .with_filter(predicate)
+            .with_projection(['user_id'])
+            .with_limit(5)
+        )
+        splits = read_builder.new_scan().plan().splits()
+        self.assertGreater(len(splits), 1)
+        dataset = read_builder.new_read().to_torch(
+            splits,
+            streaming=True,
+            batch_format='pyarrow',
+            batch_size=3,
+        )
+        self.assertEqual(
+            dataset._worker_splits(SimpleNamespace(id=1, num_workers=2)),
+            [],
+        )
+        batches = list(DataLoader(
+            dataset, batch_size=None, num_workers=2
+        ))
+        user_ids = [
+            value
+            for batch in batches
+            for value in batch.column('user_id').to_pylist()
+        ]
+        self.assertEqual(len(user_ids), 5)
+        self.assertEqual(len(set(user_ids)), 5)
+
+    def test_non_binding_limit_preserves_worker_splits(self):
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema, partition_keys=['user_id']
+        )
+        self.catalog.create_table(
+            'default.test_torch_non_binding_limit', schema, False
+        )
+        table = self.catalog.get_table(
+            'default.test_torch_non_binding_limit'
+        )
+        self._write_test_table(table)
+
+        read_builder = table.new_read_builder().with_limit(1000)
+        splits = read_builder.new_scan().plan().splits()
+        self.assertGreater(len(splits), 1)
+        table_read = read_builder.new_read()
+
+        for batch_format in ['row', 'pyarrow']:
+            dataset = table_read.to_torch(
+                splits,
+                streaming=True,
+                batch_format=batch_format,
+            )
+            assigned = [
+                dataset._worker_splits(
+                    SimpleNamespace(id=worker_id, num_workers=2)
+                )
+                for worker_id in range(2)
+            ]
+            self.assertTrue(all(assigned))
+            self.assertCountEqual(
+                [id(split) for group in assigned for split in group],
+                [id(split) for split in splits],
+            )
+
+    def test_non_binding_limit_uses_merged_row_counts(self):
+        from pypaimon.read.datasource.torch_dataset import TorchIterDataset
+
+        table_read = SimpleNamespace(limit=8, read_type=[])
+        splits = [
+            SimpleNamespace(row_count=10, merged_row_count=lambda: 4),
+            SimpleNamespace(row_count=10, merged_row_count=lambda: 4),
+        ]
+        dataset = TorchIterDataset(table_read, splits)
+
+        assigned = [
+            dataset._worker_splits(
+                SimpleNamespace(id=worker_id, num_workers=2)
+            )
+            for worker_id in range(2)
+        ]
+        self.assertTrue(all(assigned))
+        self.assertCountEqual(
+            [id(split) for group in assigned for split in group],
+            [id(split) for split in splits],
+        )
+
+    def test_torch_batch_sizing_respects_arrow_offset_limit(self):
+        from pypaimon.read.datasource.torch_dataset import (
+            _sized_record_batches)
+
+        batches = iter([
+            pa.record_batch([pa.array(['aaaa'])], names=['value']),
+            pa.record_batch([pa.array(['bbbb'])], names=['value']),
+        ])
+        with patch(
+            'pypaimon.read.datasource.torch_dataset._MAX_ARROW_OFFSET', 4
+        ):
+            actual = list(_sized_record_batches(batches, batch_size=2))
+
+        self.assertEqual(
+            [batch.column('value').to_pylist() for batch in actual],
+            [['aaaa'], ['bbbb']],
+        )
+
+    def test_default_tensor_converter_supports_fixed_size_list(self):
+        from pypaimon.read.datasource.torch_dataset import _default_to_tensor
+
+        values = pa.array([1, 2, 3, 4, 5, 6], type=pa.int32())
+        features = pa.FixedSizeListArray.from_arrays(values, 3)
+        batch = pa.RecordBatch.from_arrays([features], ['features'])
+
+        result = _default_to_tensor(batch)
+
+        self.assertEqual(result['features'].dtype, torch.int32)
+        self.assertEqual(result['features'].tolist(), [[1, 2, 3], [4, 5, 6]])
+
+    def test_torch_streaming_custom_tensor_conversion(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema)
+        self.catalog.create_table(
+            'default.test_torch_custom_tensor_batch', schema, False
+        )
+        table = self.catalog.get_table(
+            'default.test_torch_custom_tensor_batch'
+        )
+        self._write_test_table(table)
+
+        read_builder = table.new_read_builder().with_projection(
+            ['user_id', 'behavior']
+        )
+        splits = read_builder.new_scan().plan().splits()
+
+        def to_tensor(batch):
+            return {
+                'user_id': torch.from_numpy(
+                    batch.column('user_id').to_numpy(zero_copy_only=False)
+                ),
+                'behavior': batch.column('behavior').to_pylist(),
+            }
+
+        dataset = read_builder.new_read().to_torch(
+            splits,
+            streaming=True,
+            batch_format='torch',
+            batch_size=5,
+            to_tensor_fn=to_tensor,
+        )
+        batches = list(dataset)
+        self.assertEqual([len(batch['user_id']) for batch in batches], [5, 3])
+        self.assertEqual(
+            sorted(value for batch in batches for value in batch['behavior']),
+            list('abcdefgh'),
+        )
+
+        default_dataset = read_builder.new_read().to_torch(
+            splits,
+            streaming=True,
+            batch_format='torch',
+        )
+        with self.assertRaisesRegex(ValueError, "batch_format='pyarrow'"):
+            next(iter(default_dataset))
+
+    def test_torch_batch_options_validation(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema)
+        self.catalog.create_table(
+            'default.test_torch_batch_validation', schema, False
+        )
+        table = self.catalog.get_table(
+            'default.test_torch_batch_validation'
+        )
+        self._write_test_table(table)
+        read_builder = table.new_read_builder().with_projection(['user_id'])
+        splits = read_builder.new_scan().plan().splits()
+        table_read = read_builder.new_read()
+
+        with self.assertRaisesRegex(ValueError, 'batch_format must be one of'):
+            table_read.to_torch(
+                splits, streaming=True, batch_format='numpy'
+            )
+        with self.assertRaisesRegex(ValueError, 'requires streaming=True'):
+            table_read.to_torch(splits, batch_format='pyarrow')
+        with self.assertRaisesRegex(ValueError, 'batch_size must be'):
+            table_read.to_torch(
+                splits,
+                streaming=True,
+                batch_format='torch',
+                batch_size=0,
+            )
+        with self.assertRaisesRegex(ValueError, 'batch_size requires'):
+            table_read.to_torch(splits, streaming=True, batch_size=2)
+        with self.assertRaisesRegex(ValueError, 'only supports batch_format'):
+            table_read.to_torch(
+                splits,
+                streaming=True,
+                batch_format='torch',
+                shuffle=True,
+            )
+        for invalid in [0, -1, 1.9, True, 2]:
+            with self.subTest(prefetch_concurrency=invalid):
+                with self.assertRaisesRegex(
+                    ValueError, 'prefetch_concurrency'
+                ):
+                    table_read.to_torch(
+                        splits,
+                        streaming=True,
+                        batch_format='pyarrow',
+                        prefetch_concurrency=invalid,
+                    )
+
     def test_blob_torch_read(self):
         """Test end-to-end blob functionality using blob descriptors."""
         import random
@@ -253,6 +579,59 @@ class TorchReadTest(unittest.TestCase):
         self.assertEqual(read_blob_data, blob_data, "Blob data content should match original")
 
         print(f"✓ Blob torch read test passed: Successfully read and verified {len(blob_data)} bytes of blob data")
+
+    def test_video_frame_rows_through_streaming_dataloader(self):
+        from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
+
+        pa_schema = pa.schema([
+            ('episode_id', pa.int64()),
+            ('video', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'video-frame-field': 'video',
+                # ScanQuery.to_torch must override this read setting.
+                'blob-as-descriptor': 'false',
+            },
+        )
+        identifier = 'default.test_shared_video_torch_read'
+        self.catalog.create_table(identifier, schema, False)
+        raw_table = self.catalog.get_table(identifier)
+        table = MultimodalTable(self.catalog, identifier, raw_table)
+
+        video_path = os.path.join(self.tempdir, 'shared-video.mp4')
+        video_bytes = b'one-physical-video'
+        with open(video_path, 'wb') as output:
+            output.write(video_bytes)
+        video = Blob.from_local(video_path)
+        table.add_video(video, [{'episode_id': 7} for _ in range(8)])
+
+        dataset = table.scan().select([
+            'episode_id', 'video'
+        ]).to_torch(streaming=True)
+        rows = []
+        for batch in DataLoader(
+                dataset, batch_size=2, num_workers=2, shuffle=False):
+            rows.extend(zip(
+                batch['episode_id'].tolist(),
+                batch['video'],
+            ))
+
+        descriptors = [
+            VideoFrameDescriptor.deserialize(row[1])
+            for row in rows
+        ]
+        descriptors.sort(key=lambda value: value.frame_index)
+        self.assertEqual(list(range(8)), [d.frame_index for d in descriptors])
+        self.assertTrue(all(
+            value.payload_descriptor == descriptors[0].payload_descriptor
+            for value in descriptors
+        ))
+        self.assertTrue(descriptors[0].uri.endswith('.video'))
+        self.assertEqual(len(video_bytes), descriptors[0].length)
 
     def test_torch_read_pk_table(self):
         """Test torch read with primary key table."""

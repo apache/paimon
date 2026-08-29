@@ -132,6 +132,9 @@ public class BlobDescriptor implements Serializable {
         if (bytes == null || bytes.length < Byte.BYTES) {
             throw invalidPayload("too short");
         }
+        if (VideoFrameDescriptor.isVideoFrameDescriptor(bytes)) {
+            return VideoFrameDescriptor.deserialize(bytes);
+        }
 
         ByteBuffer buffer = ByteBuffer.wrap(bytes);
         buffer.order(ByteOrder.LITTLE_ENDIAN);

@@ -866,8 +866,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     || retryCount >= options.commitMaxRetries()) {
                 String message =
                         String.format(
-                                "Commit failed after %s millis with %s retries, there maybe exist commit conflicts between multiple jobs.",
-                                options.commitTimeout(), retryCount);
+                                "Commit failed for table %s after %s millis with %s retries, there maybe exist commit conflicts between multiple jobs.",
+                                tableName, options.commitTimeout(), retryCount);
                 throw new RuntimeException(message, retryResult.exception);
             }
 
@@ -1097,7 +1097,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         Snapshot newSnapshot;
         Pair<String, Long> baseManifestList = null;
         Pair<String, Long> deltaManifestList = null;
-        List<PartitionEntry> deltaStatistics;
+        List<PartitionEntry> deltaPartitionEntries;
         Pair<String, Long> changelogManifestList = null;
         String oldIndexManifest = null;
         String indexManifest = null;
@@ -1173,7 +1173,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             long totalRecordCount = previousTotalRecordCount + deltaRecordCount;
 
             // write new delta files into manifest files
-            deltaStatistics = new ArrayList<>(PartitionEntry.merge(deltaFiles));
+            deltaPartitionEntries = new ArrayList<>(PartitionEntry.merge(deltaFiles));
             deltaManifestList = manifestList.write(manifestFile.write(deltaFiles));
 
             // write changelog into manifest files
@@ -1250,9 +1250,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     baseManifestList, mergeBeforeManifests, mergeAfterManifests);
             throw new RuntimeException(
                     String.format(
-                            "Exception occurs when preparing snapshot #%d by user %s "
+                            "Exception occurs when preparing snapshot #%d for table %s by user %s "
                                     + "with hash %s and kind %s. Clean up.",
-                            newSnapshotId, commitUser, identifier, commitKind.name()),
+                            newSnapshotId, tableName, commitUser, identifier, commitKind.name()),
                     e);
         }
 
@@ -1263,20 +1263,26 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 callback ->
                         callback.call(finalBaseFiles, finalDeltaFiles, indexFiles, newSnapshot));
         try {
-            success = commitSnapshotImpl(latestSnapshot, newSnapshot, deltaStatistics);
+            success = commitSnapshotImpl(latestSnapshot, newSnapshot, deltaPartitionEntries);
         } catch (Exception e) {
             // commit exception, not sure about the situation and should not clean up the files
-            LOG.warn("Retry commit for exception.", e);
+            LOG.warn(
+                    "Retry commit for exception when committing snapshot #{} for table {} by user {}.",
+                    newSnapshotId,
+                    tableName,
+                    commitUser,
+                    e);
             return RetryCommitResult.forCommitFail(latestSnapshot, baseDataFiles, e, null);
         }
 
         if (!success) {
             long commitTime = (System.currentTimeMillis() - startMillis) / 1000;
             LOG.warn(
-                    "Atomic commit failed for snapshot #{} by user {} "
+                    "Atomic commit failed for snapshot #{} for table {} by user {} "
                             + "with identifier {} and kind {} after {} seconds. "
                             + "Skip clean up and try again.",
                     newSnapshotId,
+                    tableName,
                     commitUser,
                     identifier,
                     commitKind.name(),
@@ -1366,6 +1372,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 latest.nextRowId());
     }
 
+    /**
+     * Replaces the manifest lists exactly as supplied, without manifest compaction or sorting.
+     *
+     * <p>This is intended for metadata-only operations which have already produced their final
+     * manifest layout and must commit it without invoking {@link ManifestFileMerger}.
+     */
     public boolean replaceManifestList(
             Snapshot latest,
             long totalRecordCount,
@@ -1572,8 +1584,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     || retryCount >= options.commitMaxRetries()) {
                 throw new RuntimeException(
                         String.format(
-                                "Commit failed after %s millis with %s retries, there maybe exist commit conflicts between multiple jobs.",
-                                options.commitTimeout(), retryCount));
+                                "Commit failed for table %s after %s millis with %s retries, there maybe exist commit conflicts between multiple jobs.",
+                                tableName, options.commitTimeout(), retryCount));
             }
 
             retryWaiter.retryWait(retryCount);
@@ -1654,10 +1666,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private boolean commitSnapshotImpl(
             @Nullable Snapshot baseSnapshot,
             Snapshot newSnapshot,
-            List<PartitionEntry> deltaStatistics) {
+            List<PartitionEntry> deltaPartitionEntries) {
         try {
-            List<PartitionStatistics> statistics = new ArrayList<>(deltaStatistics.size());
-            for (PartitionEntry entry : deltaStatistics) {
+            List<PartitionStatistics> statistics = new ArrayList<>(deltaPartitionEntries.size());
+            for (PartitionEntry entry : deltaPartitionEntries) {
                 statistics.add(entry.toPartitionStatistics(partitionComputer));
             }
             return snapshotCommit.commit(
@@ -1670,10 +1682,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             // we cannot clean up because we can't determine the success
             throw new RuntimeException(
                     String.format(
-                            "Exception occurs when committing snapshot #%d by user %s "
+                            "Exception occurs when committing snapshot #%d for table %s by user %s "
                                     + "with identifier %s and kind %s. "
                                     + "Cannot clean up because we can't determine the success.",
                             newSnapshot.id(),
+                            tableName,
                             newSnapshot.commitUser(),
                             newSnapshot.commitIdentifier(),
                             newSnapshot.commitKind().name()),

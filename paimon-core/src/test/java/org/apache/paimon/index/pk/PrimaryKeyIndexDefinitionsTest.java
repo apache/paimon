@@ -100,6 +100,23 @@ class PrimaryKeyIndexDefinitionsTest {
     }
 
     @Test
+    void testCreatesFMDefinitionAndResolvesOptions() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.PK_FM_INDEX_COLUMNS.key(), "name");
+        options.put("fm-index.sa-sample-rate", "16");
+        options.put("fields.name.pk-fm.index.options", "{\"partition-row-count\":\"2\"}");
+
+        PrimaryKeyIndexDefinition definition =
+                PrimaryKeyIndexDefinitions.create(schema(options)).definitions().get(0);
+
+        assertThat(definition.column()).isEqualTo("name");
+        assertThat(definition.indexType()).isEqualTo("fmindex");
+        assertThat(definition.family()).isEqualTo(PrimaryKeyIndexDefinition.Family.FM);
+        assertThat(definition.options().get("fm-index.sa-sample-rate")).isEqualTo("16");
+        assertThat(definition.options().get("fm-index.partition-row-count")).isEqualTo("2");
+    }
+
+    @Test
     void testRejectsDuplicateColumnWithinFamily() {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.PK_BTREE_INDEX_COLUMNS.key(), "name,name");

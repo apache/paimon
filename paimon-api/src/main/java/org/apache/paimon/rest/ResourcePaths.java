@@ -19,6 +19,7 @@
 package org.apache.paimon.rest;
 
 import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.management.PermissionResource;
 import org.apache.paimon.options.Options;
 
 import org.apache.paimon.shade.guava30.com.google.common.base.Joiner;
@@ -44,6 +45,7 @@ public class ResourcePaths {
     protected static final String FUNCTIONS = "functions";
     protected static final String FUNCTION_DETAILS = "function-details";
     protected static final String PERMISSIONS = "permissions";
+    protected static final String POLICIES = "policies";
     protected static final String ID = "id";
 
     private static final Joiner SLASH = Joiner.on("/").skipNulls();
@@ -75,6 +77,19 @@ public class ResourcePaths {
     @Experimental
     public String revokePermission() {
         return SLASH.join(permissions(), "revoke");
+    }
+
+    /** Policy collection nested below its attachment resource. */
+    @Experimental
+    public String policies(PermissionResource resource) {
+        resource.validatePolicyAttachment();
+        return SLASH.join(table(resource.getDatabase(), resource.getTable()), POLICIES);
+    }
+
+    /** Action endpoint for dropping one policy from its attachment resource. */
+    @Experimental
+    public String dropPolicy(PermissionResource resource) {
+        return SLASH.join(policies(resource), "drop");
     }
 
     public String databases() {

@@ -38,7 +38,7 @@ import java.util.List;
 import static org.apache.paimon.index.IndexFileMetaSerializer.rowArrayDataToDvMetas;
 import static org.apache.paimon.utils.SerializationUtils.newStringType;
 
-/** Deserializer for {@link IndexFileMeta} in commit message versions 12 and 13. */
+/** Deserializer for {@link IndexFileMeta} before the schema ID was added. */
 public class IndexFileMetaV5Deserializer implements Serializable {
 
     private static final long serialVersionUID = 1L;

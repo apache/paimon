@@ -26,7 +26,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.source.Split;
@@ -202,7 +201,11 @@ final class CatalogSplitEnumerator extends SplitEnumerator {
     private OptionalLong rowCount(List<PartitionEntry> entries) {
         long rowCount = 0L;
         for (PartitionEntry entry : entries) {
-            if (!PartitionStatistics.isKnown(entry.recordCount())) {
+            // At this scan-estimation boundary, only positive catalog counts are trustworthy.
+            // Catalogs such as HMS overload non-positive values for unavailable statistics, so an
+            // entry carrying zero cannot safely prove that its partition is empty. An empty entry
+            // list still reaches the exact structural result of zero below.
+            if (entry.recordCount() <= 0) {
                 return OptionalLong.empty();
             }
             try {

@@ -18,6 +18,8 @@
 
 package org.apache.paimon.spark.copy;
 
+import org.apache.paimon.index.GlobalIndexMeta;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.stats.SimpleStats;
 
@@ -57,5 +59,20 @@ public class CopyFilesUtilTest {
         assertThat(copied.schemaId()).isEqualTo(6L);
         assertThat(copied.writeCols()).containsExactly("a", "b");
         assertThat(copied.columnMaxSequenceNumbers()).isNull();
+    }
+
+    @Test
+    void testPreserveGlobalIndexMetaAndRebindSchemaId() {
+        GlobalIndexMeta globalIndexMeta =
+                new GlobalIndexMeta(0L, 9L, 1, null, new byte[] {1, 2}, new byte[] {3, 4});
+        IndexFileMeta source =
+                new IndexFileMeta(
+                        "btree", "source.idx", 100L, 10L, null, null, globalIndexMeta, 5L);
+
+        IndexFileMeta copied = CopyFilesUtil.toNewIndexFileMeta(source, "copied.idx", 8L);
+
+        assertThat(copied.fileName()).isEqualTo("copied.idx");
+        assertThat(copied.globalIndexMeta()).isEqualTo(globalIndexMeta);
+        assertThat(copied.schemaId()).isEqualTo(8L);
     }
 }

@@ -73,7 +73,7 @@ public class GlobalIndexBuilderUtils {
             int indexFieldId,
             String indexType,
             List<ResultEntry> entries,
-            long buildSchemaId)
+            long schemaId)
             throws IOException {
         return toIndexFileMetas(
                 fileIO,
@@ -85,7 +85,7 @@ public class GlobalIndexBuilderUtils {
                 indexType,
                 entries,
                 null,
-                buildSchemaId);
+                schemaId);
     }
 
     /**
@@ -103,7 +103,7 @@ public class GlobalIndexBuilderUtils {
             String indexType,
             List<ResultEntry> entries,
             @Nullable byte[] sourceMeta,
-            long buildSchemaId)
+            long schemaId)
             throws IOException {
         return toIndexFileMetas(
                 fileIO,
@@ -115,7 +115,7 @@ public class GlobalIndexBuilderUtils {
                 indexType,
                 entries,
                 sourceMeta,
-                buildSchemaId);
+                schemaId);
     }
 
     public static List<Range> unindexedRowRanges(
@@ -550,6 +550,9 @@ public class GlobalIndexBuilderUtils {
             return;
         }
 
+        // Deliberately omit deletion files. Global indexes cover the stable physical row-id
+        // range, while query-side live-row filtering applies deletion vectors for the pinned
+        // snapshot. Passing deletion files here would create row-id gaps in index writers.
         DataSplit dataSplit =
                 DataSplit.builder()
                         .withPartition(partition)
@@ -574,7 +577,7 @@ public class GlobalIndexBuilderUtils {
             String indexType,
             List<ResultEntry> entries,
             @Nullable byte[] sourceMeta,
-            long buildSchemaId)
+            long schemaId)
             throws IOException {
         List<IndexFileMeta> results = new ArrayList<>();
         for (ResultEntry entry : entries) {
@@ -587,8 +590,7 @@ public class GlobalIndexBuilderUtils {
                             indexFieldId,
                             extraFieldIds,
                             entry.meta(),
-                            sourceMeta,
-                            buildSchemaId);
+                            sourceMeta);
 
             Path externalPathDir = options.globalIndexExternalPath();
             String externalPathString = null;
@@ -602,8 +604,10 @@ public class GlobalIndexBuilderUtils {
                             fileName,
                             fileSize,
                             entry.rowCount(),
+                            null,
+                            externalPathString,
                             globalIndexMeta,
-                            externalPathString);
+                            schemaId);
             results.add(indexFileMeta);
         }
         return results;

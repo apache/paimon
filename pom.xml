@@ -672,6 +672,8 @@ under the License.
                         <exclude>release/**</exclude>
                         <!-- antlr grammar files -->
                         <exclude>paimon-common/src/main/antlr4/**</exclude>
+                        <!-- Binary compatibility fixtures -->
+                        <exclude>paimon-common/src/test/resources/fmindex-v1-golden.base64</exclude>
                         <exclude>paimon-core/src/test/resources/compatibility/**</exclude>
                         <exclude>paimon-python/pypaimon/sample/data/**</exclude>
                         <exclude>**/*.proto</exclude>

@@ -28,6 +28,8 @@ import org.apache.paimon.io.PojoDataFileMeta;
 
 import org.apache.commons.io.IOUtils;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.Optional;
 
@@ -79,7 +81,8 @@ public class CopyFilesUtil {
                 null);
     }
 
-    public static IndexFileMeta toNewIndexFileMeta(IndexFileMeta oldFileMeta, String newFileName) {
+    public static IndexFileMeta toNewIndexFileMeta(
+            IndexFileMeta oldFileMeta, String newFileName, @Nullable Long newSchemaId) {
         String newExternalPath =
                 externalPathDir(oldFileMeta.externalPath())
                         .map(dir -> dir + "/" + newFileName)
@@ -90,7 +93,9 @@ public class CopyFilesUtil {
                 oldFileMeta.fileSize(),
                 oldFileMeta.rowCount(),
                 oldFileMeta.dvRanges(),
-                newExternalPath);
+                newExternalPath,
+                oldFileMeta.globalIndexMeta(),
+                newSchemaId);
     }
 
     public static Optional<String> externalPathDir(String externalPath) {

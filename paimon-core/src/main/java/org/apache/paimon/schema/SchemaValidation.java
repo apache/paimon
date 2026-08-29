@@ -33,6 +33,7 @@ import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexerFactory;
 import org.apache.paimon.globalindex.bitmap.MultiValueGlobalIndexerFactory;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
+import org.apache.paimon.globalindex.fmindex.FMGlobalIndexerFactory;
 import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
@@ -69,6 +70,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
@@ -121,6 +123,11 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Validation utilities for {@link TableSchema}. */
 public class SchemaValidation {
+
+    /** The precisions {@code IcebergDataField} maps to the Iceberg timestamp types. */
+    private static final int MIN_ICEBERG_TIMESTAMP_PRECISION = 3;
+
+    private static final int MAX_ICEBERG_TIMESTAMP_PRECISION = 6;
 
     public static final List<Class<? extends DataType>> PRIMARY_KEY_UNSUPPORTED_LOGICAL_TYPES =
             Arrays.asList(
@@ -233,10 +240,13 @@ public class SchemaValidation {
                 FileFormat.fromIdentifier(options.formatType(), new Options(schema.options()));
         RowType tableRowType = new RowType(schema.fields());
         validateGeospatialTypes(schema, options, tableRowType);
+        validateIcebergTimestampPrecisions(tableRowType, options);
         validateBlobFields(tableRowType, options);
         Set<String> blobDescriptorFields = validateBlobDescriptorFields(tableRowType, options);
         Set<String> blobViewFields =
                 validateBlobViewFields(tableRowType, options, blobDescriptorFields);
+        validateVideoFrameFields(
+                schema, tableRowType, options, blobDescriptorFields, blobViewFields);
         validatePrimaryKeyBlobKeyConfiguration(schema, options);
         validatePrimaryKeyBlobConfiguration(schema, options);
         Set<String> blobInlineFields = new HashSet<>(blobDescriptorFields);
@@ -528,6 +538,58 @@ public class SchemaValidation {
                 geospatialSequenceFields.isEmpty(),
                 "Geometry and geography columns cannot be sequence fields: %s.",
                 geospatialSequenceFields);
+    }
+
+    /**
+     * Refuses the timestamp precisions the Iceberg mirror cannot publish, matching the range {@link
+     * org.apache.paimon.iceberg.metadata.IcebergDataField} converts. A higher precision is written
+     * as Parquet INT96, which Iceberg reads as a microsecond zoned timestamp rather than the
+     * nanoseconds the column declares, so the two disagree about the data.
+     */
+    public static void validateIcebergTimestampPrecisions(DataType dataType, CoreOptions options) {
+        if (options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                == IcebergOptions.StorageType.DISABLED) {
+            return;
+        }
+        checkArgument(
+                !containsType(dataType, SchemaValidation::isUnpublishableTimestamp),
+                "Timestamp columns must have a precision from %s to %s when Iceberg metadata is "
+                        + "enabled, the only precisions Iceberg compatibility can publish. Use a "
+                        + "precision from %s to %s, or disable '%s'.",
+                MIN_ICEBERG_TIMESTAMP_PRECISION,
+                MAX_ICEBERG_TIMESTAMP_PRECISION,
+                MIN_ICEBERG_TIMESTAMP_PRECISION,
+                MAX_ICEBERG_TIMESTAMP_PRECISION,
+                IcebergOptions.METADATA_ICEBERG_STORAGE.key());
+    }
+
+    private static boolean isUnpublishableTimestamp(DataType dataType) {
+        if (dataType instanceof TimestampType) {
+            return isUnpublishablePrecision(((TimestampType) dataType).getPrecision());
+        }
+        return dataType instanceof LocalZonedTimestampType
+                && isUnpublishablePrecision(((LocalZonedTimestampType) dataType).getPrecision());
+    }
+
+    private static boolean isUnpublishablePrecision(int precision) {
+        return precision < MIN_ICEBERG_TIMESTAMP_PRECISION
+                || precision > MAX_ICEBERG_TIMESTAMP_PRECISION;
+    }
+
+    /**
+     * The mirror emits historical schemas too, so enabling it has to judge all of them. The history
+     * is read lazily, so a disabled mirror costs no listing.
+     */
+    public static void validateHistoricalIcebergTypes(
+            Supplier<List<TableSchema>> history, CoreOptions options) {
+        if (options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                == IcebergOptions.StorageType.DISABLED) {
+            return;
+        }
+        for (TableSchema schema : history.get()) {
+            validateIcebergGeospatialTypes(schema.logicalRowType(), options);
+            validateIcebergTimestampPrecisions(schema.logicalRowType(), options);
+        }
     }
 
     /** Validate geospatial types in a schema that will be published as Iceberg metadata. */
@@ -1220,6 +1282,7 @@ public class SchemaValidation {
         List<String> bitmapColumns = options.primaryKeyBitmapIndexColumns();
         List<String> multiValueColumns = options.primaryKeyMultiValueIndexColumns();
         List<String> fullTextColumns = options.primaryKeyFullTextIndexColumns();
+        List<String> fmColumns = options.primaryKeyFMIndexColumns();
         validateNoDuplicatePrimaryKeyIndexColumns(
                 vectorColumns, CoreOptions.PK_VECTOR_INDEX_COLUMNS.key());
         validateNoDuplicatePrimaryKeyIndexColumns(
@@ -1230,6 +1293,7 @@ public class SchemaValidation {
                 multiValueColumns, CoreOptions.PK_MULTIVALUE_INDEX_COLUMNS.key());
         validateNoDuplicatePrimaryKeyIndexColumns(
                 fullTextColumns, CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS.key());
+        validateNoDuplicatePrimaryKeyIndexColumns(fmColumns, CoreOptions.PK_FM_INDEX_COLUMNS.key());
 
         Set<String> indexedColumns = new HashSet<>();
         validateUniquePrimaryKeyIndexColumns(indexedColumns, vectorColumns);
@@ -1237,6 +1301,7 @@ public class SchemaValidation {
         validateUniquePrimaryKeyIndexColumns(indexedColumns, bitmapColumns);
         validateUniquePrimaryKeyIndexColumns(indexedColumns, multiValueColumns);
         validateUniquePrimaryKeyIndexColumns(indexedColumns, fullTextColumns);
+        validateUniquePrimaryKeyIndexColumns(indexedColumns, fmColumns);
     }
 
     private static void validateNoDuplicatePrimaryKeyIndexColumns(
@@ -1261,27 +1326,28 @@ public class SchemaValidation {
     private static void validatePrimaryKeySortedIndexes(TableSchema schema, CoreOptions options) {
         if (options.primaryKeyBTreeIndexColumns().isEmpty()
                 && options.primaryKeyBitmapIndexColumns().isEmpty()
-                && options.primaryKeyMultiValueIndexColumns().isEmpty()) {
+                && options.primaryKeyMultiValueIndexColumns().isEmpty()
+                && options.primaryKeyFMIndexColumns().isEmpty()) {
             return;
         }
 
         checkArgument(
                 options.deletionVectorsEnabled(),
-                "Primary-key BTree, Bitmap, and Multivalue indexes require deletion-vectors.enabled = true.");
+                "Primary-key BTree, Bitmap, Multivalue, and FM indexes require deletion-vectors.enabled = true.");
         checkArgument(
                 !schema.primaryKeys().isEmpty(),
-                "Primary-key BTree, Bitmap, and Multivalue indexes require a primary-key table.");
+                "Primary-key BTree, Bitmap, Multivalue, and FM indexes require a primary-key table.");
         checkArgument(
                 options.bucket() > 0 || options.bucket() == BucketMode.POSTPONE_BUCKET,
-                "Primary-key BTree, Bitmap, and Multivalue indexes require fixed or postpone bucket mode "
+                "Primary-key BTree, Bitmap, Multivalue, and FM indexes require fixed or postpone bucket mode "
                         + "(bucket > 0 or bucket = -2), but bucket is %s.",
                 options.bucket());
         checkArgument(
                 !options.deletionVectorsMergeOnRead(),
-                "Primary-key BTree, Bitmap, and Multivalue indexes require deletion-vectors.merge-on-read = false.");
+                "Primary-key BTree, Bitmap, Multivalue, and FM indexes require deletion-vectors.merge-on-read = false.");
         checkArgument(
                 !options.pkClusteringOverride(),
-                "Primary-key BTree, Bitmap, and Multivalue indexes do not support pk-clustering-override.");
+                "Primary-key BTree, Bitmap, Multivalue, and FM indexes do not support pk-clustering-override.");
 
         validatePrimaryKeySortedIndexColumns(
                 schema,
@@ -1295,6 +1361,8 @@ public class SchemaValidation {
                 schema,
                 options.primaryKeyMultiValueIndexColumns(),
                 CoreOptions.PK_MULTIVALUE_INDEX_COLUMNS.key());
+        validatePrimaryKeySortedIndexColumns(
+                schema, options.primaryKeyFMIndexColumns(), CoreOptions.PK_FM_INDEX_COLUMNS.key());
 
         Map<String, DataField> fields = schema.nameToFieldMap();
         for (String column : options.primaryKeyBTreeIndexColumns()) {
@@ -1314,6 +1382,12 @@ public class SchemaValidation {
                     MultiValueGlobalIndexerFactory.IDENTIFIER,
                     fields.get(column),
                     options.primaryKeyMultiValueIndexOptions(column));
+        }
+        for (String column : options.primaryKeyFMIndexColumns()) {
+            GlobalIndexer.create(
+                    FMGlobalIndexerFactory.IDENTIFIER,
+                    fields.get(column),
+                    options.primaryKeyFMIndexOptions(column));
         }
     }
 
@@ -1584,6 +1658,45 @@ public class SchemaValidation {
                     CoreOptions.BLOB_DESCRIPTOR_FIELD.key());
         }
         return configured;
+    }
+
+    private static void validateVideoFrameFields(
+            TableSchema schema,
+            RowType rowType,
+            CoreOptions options,
+            Set<String> blobDescriptorFields,
+            Set<String> blobViewFields) {
+        Set<String> configured = options.videoFrameField();
+        checkArgument(
+                configured.size() <= 1,
+                "'%s' currently supports exactly one field, but found %s.",
+                CoreOptions.VIDEO_FRAME_FIELD.key(),
+                configured);
+        for (String field : configured) {
+            checkArgument(
+                    rowType.containsField(field)
+                            && rowType.getTypeAt(rowType.getFieldIndex(field)).getTypeRoot()
+                                    == DataTypeRoot.BLOB,
+                    "Field '%s' in '%s' must be a scalar BLOB field in table schema.",
+                    field,
+                    CoreOptions.VIDEO_FRAME_FIELD.key());
+            checkArgument(
+                    !blobDescriptorFields.contains(field),
+                    "Field '%s' in '%s' can not also be in '%s'.",
+                    field,
+                    CoreOptions.VIDEO_FRAME_FIELD.key(),
+                    CoreOptions.BLOB_DESCRIPTOR_FIELD.key());
+            checkArgument(
+                    !blobViewFields.contains(field),
+                    "Field '%s' in '%s' can not also be in '%s'.",
+                    field,
+                    CoreOptions.VIDEO_FRAME_FIELD.key(),
+                    CoreOptions.BLOB_VIEW_FIELD.key());
+        }
+        checkArgument(
+                configured.isEmpty() || schema.primaryKeys().isEmpty(),
+                "'%s' only supports append-only tables.",
+                CoreOptions.VIDEO_FRAME_FIELD.key());
     }
 
     private static void validatePrimaryKeyBlobConfiguration(

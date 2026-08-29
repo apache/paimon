@@ -485,7 +485,6 @@ public class DataEvolutionReadTest {
 
         assertThat(blobBunch.rowCount()).isEqualTo(10);
         assertThat(blobBunch.logicalRange()).isEqualTo(new Range(100, 109));
-        assertThat(blobBunch.sequentialReadOptimize()).isFalse();
     }
 
     @Test

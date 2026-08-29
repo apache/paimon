@@ -69,6 +69,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.table.source.DeletionVectorTestUtils.commitDeletionVectors;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -1021,7 +1022,7 @@ public class FullTextSearchBuilderTest extends TableTestBase {
             FileStoreTable table,
             String[] documents,
             List<DataField> indexFields,
-            @Nullable Long buildSchemaId)
+            @Nullable Long schemaId)
             throws Exception {
         Options options = table.coreOptions().toConfiguration();
         DataField textField = table.rowType().getField(TEXT_FIELD_NAME);
@@ -1049,29 +1050,12 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                         TestFullTextGlobalIndexerFactory.IDENTIFIER,
                         entries,
                         null,
-                        buildSchemaId == null ? table.schema().id() : buildSchemaId);
-        if (buildSchemaId == null) {
-            List<IndexFileMeta> legacyIndexFiles = new ArrayList<>();
-            for (IndexFileMeta indexFile : indexFiles) {
-                GlobalIndexMeta globalIndex = indexFile.globalIndexMeta();
-                legacyIndexFiles.add(
-                        new IndexFileMeta(
-                                indexFile.indexType(),
-                                indexFile.fileName(),
-                                indexFile.fileSize(),
-                                indexFile.rowCount(),
-                                indexFile.dvRanges(),
-                                indexFile.externalPath(),
-                                new GlobalIndexMeta(
-                                        globalIndex.rowRangeStart(),
-                                        globalIndex.rowRangeEnd(),
-                                        globalIndex.indexFieldId(),
-                                        globalIndex.extraFieldIds(),
-                                        globalIndex.indexMeta(),
-                                        globalIndex.sourceMeta(),
-                                        null)));
-            }
-            indexFiles = legacyIndexFiles;
+                        schemaId == null ? table.schema().id() : schemaId);
+        if (schemaId == null) {
+            indexFiles =
+                    indexFiles.stream()
+                            .map(indexFile -> indexFile.withSchemaId(null))
+                            .collect(Collectors.toList());
         }
 
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
@@ -1150,15 +1134,16 @@ public class FullTextSearchBuilderTest extends TableTestBase {
                             indexFile.fileName(),
                             indexFile.fileSize(),
                             indexFile.rowCount(),
+                            indexFile.dvRanges(),
+                            indexFile.externalPath(),
                             new GlobalIndexMeta(
                                     meta.rowRangeStart(),
                                     meta.rowRangeEnd(),
                                     meta.indexFieldId(),
                                     meta.extraFieldIds(),
                                     meta.indexMeta(),
-                                    sourceMeta,
-                                    meta.buildSchemaId()),
-                            indexFile.externalPath()));
+                                    sourceMeta),
+                            indexFile.schemaId()));
         }
 
         CommitMessage message =

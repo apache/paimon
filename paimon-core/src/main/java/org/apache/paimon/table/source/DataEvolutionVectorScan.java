@@ -115,11 +115,11 @@ public class DataEvolutionVectorScan implements VectorScan {
                     return false;
                 };
 
+        List<IndexManifestEntry> indexEntries = indexFileHandler.scan(snapshot, indexFileFilter);
         List<IndexFileMeta> allIndexFiles =
-                indexFileHandler.scan(snapshot, indexFileFilter).stream()
+                GlobalIndexSchemaCompatibility.filterCompatible(table, indexEntries).stream()
                         .map(IndexManifestEntry::indexFile)
                         .collect(Collectors.toList());
-        allIndexFiles = GlobalIndexSchemaCompatibility.filterCompatible(table, allIndexFiles);
         String vectorIndexType = vectorIndexType(allIndexFiles);
         if (vectorIndexType == null) {
             vectorIndexType = configuredVectorIndexType();

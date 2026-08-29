@@ -483,6 +483,10 @@ final class ManifestFileBlockMerger {
                                 emittedDeletes,
                                 metadata,
                                 encodedRecordsCompatible);
+                    } catch (Throwable t) {
+                        throw new RuntimeException(
+                                "Failed to rewrite manifest file '" + manifest.fileName() + "'.",
+                                t);
                     }
                 }
             }

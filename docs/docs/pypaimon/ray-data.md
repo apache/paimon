@@ -486,8 +486,9 @@ merge_into(
 
 Conditions use SQL-style expressions with `s.` (source) and `t.` (target)
 column prefixes. `WhenNotMatched` conditions may only reference source
-columns (`s.*`). Condition evaluation uses DataFusion through the PyPaimon SQL
-extra. Install the extra before using conditions: `pip install pypaimon[sql]`.
+columns (`s.*`). Condition evaluation uses the PyPaimon DataFusion extra.
+Python 3.10 or newer is required. Install it with
+`pip install 'pypaimon[datafusion]'`.
 
 - `update` / `delete` / `insert`: `WhenMatched.update(...)` updates matched
   rows, `WhenMatched.delete()` deletes matched rows, and
@@ -544,8 +545,11 @@ source-target merges.
 - `on`: key columns, or `{target_col: source_col}` for renamed keys.
 - `read_columns`: columns passed to callable self-merge assignments. Required
   when an update mapping contains a callable; otherwise it must be omitted.
-- `num_partitions`: shuffle parallelism for the join and the write; defaults to
-  `max(1, cluster_cpus * 2)`. Raise it for large merges on big clusters.
+- `num_partitions`: shuffle parallelism for the join and the write. When input
+  in-memory byte-size metadata is reliable, the default targets Ray's maximum
+  block size. Otherwise it uses Ray's hash-shuffle default. A nonempty target
+  keeps that default as a lower bound, and cluster CPUs cap the result. Self-merge
+  keeps its CPU-based default. Set it explicitly to override the default.
 - `ray_remote_args`: Ray remote options applied to the merge's map/group
   tasks (update/delete transform, group write, insert transform).
 - `concurrency`: scheduling for the insert sink.
@@ -595,8 +599,9 @@ print(metrics)   # {"num_updated": 50}
   values are cast to the target column types. A table-name source is not accepted: a
   table's system `_ROW_ID` is its own and cannot address the target's rows.
 - `update_cols`: the non-blob columns to overwrite. Must be non-empty.
-- `num_partitions`: parallelism for grouping the update rows by target file;
-  defaults to `max(1, cluster_cpus * 2)`.
+- `num_partitions`: parallelism for grouping the update rows by target file.
+  The default uses reliable source metadata when available; otherwise it uses
+  Ray's hash-shuffle default. Target file count and cluster CPUs bound the result.
 - `ray_remote_args`: Ray remote options applied to the update tasks.
 
 **Returns:** `{"num_updated": <rows>}`.
@@ -646,8 +651,9 @@ ds = read_by_row_id(
   (resolved later with `map_with_blobs`), or `scan.snapshot-id` / `scan.tag-name` to read a
   specific snapshot. Options that flip table invariants (`data-evolution.enabled`,
   `row-tracking.enabled`, `deletion-vectors.enabled`) are rejected.
-- `num_partitions`: parallelism for grouping the row ids by target file; defaults to
-  `max(1, cluster_cpus * 2)`.
+- `num_partitions`: parallelism for grouping the row ids by target file. The
+  default uses reliable source metadata when available; otherwise it uses Ray's
+  hash-shuffle default. Target file count and cluster CPUs bound the result.
 - `ray_remote_args`: Ray remote options applied to the read tasks.
 
 **Returns:** a `ray.data.Dataset` of `(*projection, _ROW_ID)`.

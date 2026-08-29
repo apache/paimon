@@ -163,7 +163,7 @@ class GlobalIndexBuilderUtilsTest {
                         11L);
 
         assertThat(metas.get(0).globalIndexMeta().sourceMeta()).containsExactly(sourceMeta);
-        assertThat(metas.get(0).globalIndexMeta().buildSchemaId()).isEqualTo(11L);
+        assertThat(metas.get(0).schemaId()).isEqualTo(11L);
     }
 
     // Test: 3 columns (title + vec + id), primary column title is indexFieldId, rest in

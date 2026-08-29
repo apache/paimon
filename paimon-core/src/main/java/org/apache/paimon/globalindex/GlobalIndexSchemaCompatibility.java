@@ -19,7 +19,7 @@
 package org.apache.paimon.globalindex;
 
 import org.apache.paimon.index.GlobalIndexMeta;
-import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowType;
 
@@ -32,48 +32,49 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** Validates global indexes against the current table schema. */
+/** Validates global index manifest entries against the current table schema. */
 public final class GlobalIndexSchemaCompatibility {
 
-    public static List<IndexFileMeta> filterCompatible(
-            FileStoreTable table, Collection<IndexFileMeta> indexFiles) {
+    public static List<IndexManifestEntry> filterCompatible(
+            FileStoreTable table, Collection<IndexManifestEntry> entries) {
         RowType currentRowType = table.rowType();
-        Map<Long, RowType> buildRowTypes = new HashMap<>();
-        buildRowTypes.put(table.schema().id(), currentRowType);
+        Map<Long, RowType> historicalRowTypes = new HashMap<>();
+        historicalRowTypes.put(table.schema().id(), currentRowType);
         Set<Long> missingSchemaIds = new HashSet<>();
-        List<IndexFileMeta> compatible = new ArrayList<>();
-        for (IndexFileMeta indexFile : indexFiles) {
-            GlobalIndexMeta globalIndex = indexFile.globalIndexMeta();
-            if (globalIndex == null || globalIndex.buildSchemaId() == null) {
+        List<IndexManifestEntry> compatible = new ArrayList<>();
+        for (IndexManifestEntry entry : entries) {
+            GlobalIndexMeta globalIndex = entry.indexFile().globalIndexMeta();
+            Long schemaId = entry.schemaId();
+            if (globalIndex == null || schemaId == null) {
                 continue;
             }
 
-            long buildSchemaId = globalIndex.buildSchemaId();
-            RowType buildRowType = buildRowTypes.get(buildSchemaId);
-            if (buildRowType == null && !missingSchemaIds.contains(buildSchemaId)) {
+            RowType historicalRowType = historicalRowTypes.get(schemaId);
+            if (historicalRowType == null && !missingSchemaIds.contains(schemaId)) {
                 try {
-                    buildRowType =
-                            table.schemaManager().tryGetSchema(buildSchemaId).logicalRowType();
-                    buildRowTypes.put(buildSchemaId, buildRowType);
+                    historicalRowType =
+                            table.schemaManager().tryGetSchema(schemaId).logicalRowType();
+                    historicalRowTypes.put(schemaId, historicalRowType);
                 } catch (FileNotFoundException e) {
-                    missingSchemaIds.add(buildSchemaId);
+                    missingSchemaIds.add(schemaId);
                 }
             }
-            if (buildRowType != null
-                    && compatibleIndexedFields(globalIndex, buildRowType, currentRowType)) {
-                compatible.add(indexFile);
+            if (historicalRowType != null
+                    && compatibleIndexedFields(globalIndex, historicalRowType, currentRowType)) {
+                compatible.add(entry);
             }
         }
         return compatible;
     }
 
     private static boolean compatibleIndexedFields(
-            GlobalIndexMeta globalIndex, RowType buildRowType, RowType currentRowType) {
+            GlobalIndexMeta globalIndex, RowType historicalRowType, RowType currentRowType) {
         for (int fieldId : globalIndex.getIndexedFieldIds()) {
-            if (!buildRowType.containsField(fieldId) || !currentRowType.containsField(fieldId)) {
+            if (!historicalRowType.containsField(fieldId)
+                    || !currentRowType.containsField(fieldId)) {
                 return false;
             }
-            if (!buildRowType
+            if (!historicalRowType
                     .getField(fieldId)
                     .type()
                     .equalsIgnoreNullable(currentRowType.getField(fieldId).type())) {

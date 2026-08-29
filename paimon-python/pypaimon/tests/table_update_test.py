@@ -31,11 +31,45 @@ from pypaimon.tests.data_evolution_test_helpers import (
     DataEvolutionTestBase,
     StreamModeMixin,
 )
+from pypaimon.write.table_update import BatchTableUpdate
 
 
 # ======================================================================
 # Shared base for batch & stream table-update tests
 # ======================================================================
+
+
+def test_batch_row_id_update_batches_reuse_file_index():
+    table = mock.MagicMock()
+    table.field_names = ["value"]
+    batches = [
+        pa.table({"_ROW_ID": [0], "value": [10]}),
+        pa.table({"_ROW_ID": [1], "value": [20]}),
+    ]
+
+    with mock.patch(
+            "pypaimon.write.table_update.TableUpdateByRowId") as factory:
+        updater = factory.return_value
+        updater.commit_messages = []
+
+        def update_columns(batch, columns):
+            updater.commit_messages.append((batch, columns))
+            return updater.commit_messages
+
+        updater.update_columns.side_effect = update_columns
+        messages = (
+            BatchTableUpdate(table, "user")
+            .with_update_type(["value"])
+            .update_by_arrow_batches_with_row_id(iter(batches))
+        )
+
+    factory.assert_called_once()
+    assert updater.update_columns.call_count == 2
+    assert messages == [
+        (batches[0], ["value"]),
+        (batches[1], ["value"]),
+    ]
+
 
 class _TableUpdateTestBase(DataEvolutionTestBase):
     """Shared tests for ``TableUpdate.update_by_arrow_with_row_id``.

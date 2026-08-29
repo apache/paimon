@@ -56,6 +56,8 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -680,7 +682,11 @@ public class FileDeletionTest {
         // result: exist A & B (because of tag2)
         ExpireSnapshots expireSnapshots =
                 new ExpireSnapshotsImpl(
-                        snapshotManager, changelogManager, store.newSnapshotDeletion(), tagManager);
+                        snapshotManager,
+                        changelogManager,
+                        store.newSnapshotDeletion(),
+                        tagManager,
+                        store.options().scanManifestParallelism());
         expireSnapshots
                 .config(
                         ExpireConfig.builder()
@@ -748,11 +754,16 @@ public class FileDeletionTest {
                         store.newStatsFileHandler(),
                         store.options().changelogProducer() != CoreOptions.ChangelogProducer.NONE,
                         store.options().cleanEmptyDirectories(),
-                        store.options().fileOperationThreadNum());
+                        store.options().fileOperationThreadNum(),
+                        store.options().scanManifestParallelism());
 
         ExpireSnapshots expireSnapshots =
                 new ExpireSnapshotsImpl(
-                        snapshotManager, changelogManager, snapshotDeletion, tagManager);
+                        snapshotManager,
+                        changelogManager,
+                        snapshotDeletion,
+                        tagManager,
+                        store.options().scanManifestParallelism());
         snapshotDeletion.readMergedDataFilesThrowException = true;
         expireSnapshots
                 .config(
@@ -813,10 +824,15 @@ public class FileDeletionTest {
                         store.newStatsFileHandler(),
                         store.options().changelogProducer() != CoreOptions.ChangelogProducer.NONE,
                         store.options().cleanEmptyDirectories(),
-                        store.options().fileOperationThreadNum());
+                        store.options().fileOperationThreadNum(),
+                        store.options().scanManifestParallelism());
         ExpireSnapshots expireSnapshots =
                 new ExpireSnapshotsImpl(
-                        snapshotManager, changelogManager, snapshotDeletion, tagManager);
+                        snapshotManager,
+                        changelogManager,
+                        snapshotDeletion,
+                        tagManager,
+                        store.options().scanManifestParallelism());
         snapshotDeletion.manifestSkippingSetThrowException = true;
         expireSnapshots
                 .config(
@@ -952,7 +968,8 @@ public class FileDeletionTest {
                 StatsFileHandler statsFileHandler,
                 boolean produceChangelog,
                 boolean cleanEmptyDirectories,
-                int deleteFileThreadNum) {
+                int deleteFileThreadNum,
+                @Nullable Integer scanManifestParallelism) {
             super(
                     fileIO,
                     pathFactory,
@@ -962,7 +979,8 @@ public class FileDeletionTest {
                     statsFileHandler,
                     produceChangelog,
                     cleanEmptyDirectories,
-                    deleteFileThreadNum);
+                    deleteFileThreadNum,
+                    scanManifestParallelism);
         }
 
         @Override

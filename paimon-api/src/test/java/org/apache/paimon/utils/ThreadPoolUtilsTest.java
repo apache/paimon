@@ -30,6 +30,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -44,7 +45,7 @@ public class ThreadPoolUtilsTest {
 
     @Test
     public void testCloseableBatchReturnsInOrderAndBoundsSubmission() throws Exception {
-        ThreadPoolExecutor workers = (ThreadPoolExecutor) Executors.newFixedThreadPool(2);
+        CountingThreadPoolExecutor workers = new CountingThreadPoolExecutor(2);
         ExecutorService consumer = Executors.newSingleThreadExecutor();
         CountDownLatch firstStarted = new CountDownLatch(1);
         CountDownLatch secondFinished = new CountDownLatch(1);
@@ -74,7 +75,7 @@ public class ThreadPoolUtilsTest {
 
             assertThat(firstStarted.await(3, TimeUnit.SECONDS)).isTrue();
             assertThat(secondFinished.await(3, TimeUnit.SECONDS)).isTrue();
-            assertThat(workers.getTaskCount()).isEqualTo(2);
+            assertThat(workers.getSubmittedTaskCount()).isEqualTo(2);
             assertThat(firstResult.isDone()).isFalse();
 
             releaseFirst.countDown();
@@ -82,10 +83,10 @@ public class ThreadPoolUtilsTest {
             results.add(firstResult.get(3, TimeUnit.SECONDS));
             assertThat(iterator.hasNext()).isTrue();
             results.add(iterator.next());
-            assertThat(workers.getTaskCount()).isEqualTo(2);
+            assertThat(workers.getSubmittedTaskCount()).isEqualTo(2);
 
             assertThat(iterator.hasNext()).isTrue();
-            assertThat(workers.getTaskCount()).isEqualTo(4);
+            assertThat(workers.getSubmittedTaskCount()).isEqualTo(4);
             results.add(iterator.next());
             assertThat(iterator.hasNext()).isTrue();
             results.add(iterator.next());
@@ -233,6 +234,30 @@ public class ThreadPoolUtilsTest {
             } catch (InterruptedException e) {
                 interrupted.countDown();
             }
+        }
+    }
+
+    private static class CountingThreadPoolExecutor extends ThreadPoolExecutor {
+
+        private final AtomicInteger submittedTaskCount = new AtomicInteger();
+
+        private CountingThreadPoolExecutor(int threadCount) {
+            super(threadCount, threadCount, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>());
+        }
+
+        @Override
+        public void execute(Runnable command) {
+            submittedTaskCount.incrementAndGet();
+            try {
+                super.execute(command);
+            } catch (RuntimeException | Error failure) {
+                submittedTaskCount.decrementAndGet();
+                throw failure;
+            }
+        }
+
+        private int getSubmittedTaskCount() {
+            return submittedTaskCount.get();
         }
     }
 }

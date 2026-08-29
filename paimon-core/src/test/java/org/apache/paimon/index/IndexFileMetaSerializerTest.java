@@ -33,7 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class IndexFileMetaSerializerTest extends ObjectSerializerTestBase<IndexFileMeta> {
 
     @Test
-    void testGlobalIndexMetadataRoundTrip() {
+    void testGlobalIndexSourceMetaRoundTrip() {
         IndexFileMetaSerializer serializer = new IndexFileMetaSerializer();
         IndexFileMeta indexFile =
                 new IndexFileMeta(
@@ -41,16 +41,17 @@ public class IndexFileMetaSerializerTest extends ObjectSerializerTestBase<IndexF
                         "index-file",
                         100,
                         10,
-                        new GlobalIndexMeta(
-                                0, 9, 7, null, new byte[] {3, 4}, new byte[] {1, 2}, 11L),
-                        null);
+                        null,
+                        null,
+                        new GlobalIndexMeta(0, 9, 7, null, new byte[] {3, 4}, new byte[] {1, 2}),
+                        11L);
 
-        GlobalIndexMeta restored =
-                serializer.fromRow(serializer.toRow(indexFile)).globalIndexMeta();
+        IndexFileMeta restoredIndexFile = serializer.fromRow(serializer.toRow(indexFile));
+        GlobalIndexMeta restored = restoredIndexFile.globalIndexMeta();
 
         assertThat(restored.sourceMeta()).containsExactly(1, 2);
         assertThat(restored.indexMeta()).containsExactly(3, 4);
-        assertThat(restored.buildSchemaId()).isEqualTo(11L);
+        assertThat(restoredIndexFile.schemaId()).isEqualTo(11L);
     }
 
     @Test
@@ -67,16 +68,8 @@ public class IndexFileMetaSerializerTest extends ObjectSerializerTestBase<IndexF
                 globalIndexFile(
                         new GlobalIndexMeta(
                                 0, 9, 7, new int[] {8}, new byte[] {3}, new byte[] {2}));
-        IndexFileMeta differentBuildSchema =
-                globalIndexFile(
-                        new GlobalIndexMeta(
-                                0, 9, 7, new int[] {8}, new byte[] {3}, new byte[] {1}, 1L));
 
-        assertThat(first)
-                .isEqualTo(equal)
-                .hasSameHashCodeAs(equal)
-                .isNotEqualTo(different)
-                .isNotEqualTo(differentBuildSchema);
+        assertThat(first).isEqualTo(equal).hasSameHashCodeAs(equal).isNotEqualTo(different);
     }
 
     private static IndexFileMeta globalIndexFile(GlobalIndexMeta globalIndexMeta) {

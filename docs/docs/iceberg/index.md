@@ -96,8 +96,8 @@ Paimon Iceberg compatibility currently supports the following data types.
 | `DATE`         | `date`            |
 | `TIMESTAMP` (precision 3-6)   | `timestamp`       |
 | `TIMESTAMP_LTZ` (precision 3-6) | `timestamptz`     |
-| `TIMESTAMP` (precision 7-9)  | `timestamp_ns`    |
-| `TIMESTAMP_LTZ` (precision 7-9) | `timestamptz_ns`  |
+| `TIMESTAMP` (other precisions)  | not supported     |
+| `TIMESTAMP_LTZ` (other precisions) | not supported  |
 | `GEOMETRY(crs)` | `geometry(crs)` |
 | `GEOGRAPHY(crs, algorithm)` | `geography(crs, algorithm)` |
 | `ARRAY`        | `list`            |
@@ -108,7 +108,9 @@ Paimon Iceberg compatibility currently supports the following data types.
 
 **Note on Timestamp Types:**
 - `TIMESTAMP` and `TIMESTAMP_LTZ` types with precision from 3 to 6 are mapped to standard Iceberg timestamp types
-- `TIMESTAMP` and `TIMESTAMP_LTZ` types with precision from 7 to 9 use nanosecond precision and require Iceberg v3 format
+- Any other precision is rejected while Iceberg metadata is enabled. A precision above 6 is written
+  as Parquet INT96, which Iceberg reads as a microsecond zoned timestamp rather than the
+  nanoseconds the column declares. Use a precision from 3 to 6.
 
 **Note on Geospatial Types:**
 - `GEOMETRY` and `GEOGRAPHY` values use OGC Well-Known Binary (WKB). The default CRS is `OGC:CRS84`, and the default geography edge algorithm is `spherical`.

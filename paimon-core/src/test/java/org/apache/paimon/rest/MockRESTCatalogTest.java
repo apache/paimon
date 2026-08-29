@@ -28,6 +28,11 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.management.ListPermissionsRequest;
+import org.apache.paimon.management.PermissionAssignment;
+import org.apache.paimon.management.PermissionColumns;
+import org.apache.paimon.management.PermissionResource;
+import org.apache.paimon.management.ResourceType;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
@@ -46,20 +51,24 @@ import org.apache.paimon.rest.auth.DLFToken;
 import org.apache.paimon.rest.auth.DLFTokenLoader;
 import org.apache.paimon.rest.auth.DLFTokenLoaderFactory;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
+import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.exceptions.NotAuthorizedException;
 import org.apache.paimon.rest.exceptions.NotImplementedException;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.BlobDescriptorReaderFactory;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.format.FormatTablePartitionManager;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -76,6 +85,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.catalog.Catalog.TABLE_DEFAULT_OPTION_PREFIX;
 import static org.apache.paimon.rest.RESTApi.HEADER_PREFIX;
 import static org.apache.paimon.rest.RESTApi.READ_VIA_HEADER;
@@ -83,6 +93,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Test REST Catalog on Mocked REST server. */
 class MockRESTCatalogTest extends RESTCatalogTest {
@@ -130,6 +141,193 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         options.set(CatalogOptions.METASTORE, RESTCatalogFactory.IDENTIFIER);
         assertThatThrownBy(() -> new RESTCatalog(CatalogContext.create(options)))
                 .isInstanceOf(NotAuthorizedException.class);
+    }
+
+    @Test
+    void testRejectedSystemTablePatternKeepsWhatRaisedIt() {
+        // the message is the argument, never the format, and the cause is what says where it
+        // came from -- the caller sees only what this exception carries
+        assertThatThrownBy(
+                        () ->
+                                catalog.listTablesPaged(
+                                        SYSTEM_DATABASE_NAME, null, null, "a%b", null))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("prefix sql like pattern")
+                .hasCauseInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void testInvalidManagementDtoReturnsBadRequest() throws Exception {
+        String database = "invalid_management_dto";
+        Identifier identifier = Identifier.create(database, "orders");
+        catalog.createDatabase(database, false);
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .option(CoreOptions.QUERY_AUTH_ENABLED.key(), "true")
+                        .build(),
+                false);
+
+        BadRequestException error =
+                assertThrows(
+                        BadRequestException.class,
+                        () ->
+                                new HttpClient(restCatalogServer.getUrl())
+                                        .post(
+                                                new ResourcePaths("paimon").grantPermission(),
+                                                new InvalidColumnGrantRequest(identifier),
+                                                restCatalog.api().authFunction()));
+
+        assertThat(error).hasMessageContaining("columns is required for COLUMN resource");
+    }
+
+    @Test
+    void testCreateResourceRejectsDatabaseMismatch() throws Exception {
+        String pathDatabase = "path_database";
+        String bodyDatabase = MockRESTMessage.databaseName();
+        catalog.createDatabase(pathDatabase, true);
+        catalog.createDatabase(bodyDatabase, true);
+        HttpClient client = new HttpClient(restCatalogServer.getUrl());
+        ResourcePaths paths = new ResourcePaths("paimon");
+
+        BadRequestException tableError =
+                assertThrows(
+                        BadRequestException.class,
+                        () ->
+                                client.post(
+                                        paths.tables(pathDatabase),
+                                        MockRESTMessage.createTableRequest("orders"),
+                                        restCatalog.api().authFunction()));
+        BadRequestException viewError =
+                assertThrows(
+                        BadRequestException.class,
+                        () ->
+                                client.post(
+                                        paths.views(pathDatabase),
+                                        MockRESTMessage.createViewRequest("orders_view"),
+                                        restCatalog.api().authFunction()));
+
+        assertThat(tableError)
+                .hasMessageContaining(
+                        "The database in the table identifier must match the request path");
+        assertThat(viewError)
+                .hasMessageContaining(
+                        "The database in the view identifier must match the request path");
+        assertThat(catalog.listTables(bodyDatabase)).isEmpty();
+        assertThat(catalog.listViews(bodyDatabase)).isEmpty();
+    }
+
+    @Test
+    void testRenamePreservesHighestFieldIdForColumnPermissions() throws Exception {
+        String principal = "analyst";
+        Identifier source = Identifier.create("schema_lifecycle_db", "orders");
+        Identifier destination = Identifier.create("schema_lifecycle_db", "renamed_orders");
+        catalog.createDatabase(source.getDatabaseName(), false);
+        catalog.createTable(
+                source,
+                new Schema(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(1, "removed", DataTypes.STRING()),
+                                new DataField(2, "secret", DataTypes.STRING())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.singletonMap(CoreOptions.QUERY_AUTH_ENABLED.key(), "true"),
+                        null),
+                false);
+        restCatalogServer.registerManagementPrincipal(principal);
+        restCatalog
+                .permissionManagement()
+                .grantPermission(
+                        new PermissionAssignment(
+                                new PermissionResource(
+                                        ResourceType.COLUMN,
+                                        source.getDatabaseName(),
+                                        source.getTableName(),
+                                        null,
+                                        null),
+                                "SELECT",
+                                principal,
+                                new PermissionColumns(Collections.singletonList("id"), null),
+                                null));
+
+        catalog.alterTable(
+                source, Collections.singletonList(SchemaChange.dropColumn("removed")), false);
+        catalog.renameTable(source, destination, false);
+        catalog.alterTable(
+                destination,
+                Collections.singletonList(SchemaChange.addColumn("new_column", DataTypes.STRING())),
+                false);
+
+        assertThat(catalog.getTable(destination).rowType().getFields())
+                .extracting(DataField::id)
+                .containsExactly(0, 2, 3);
+    }
+
+    @Test
+    void testDropDatabaseRemovesViewsFunctionsAndAssignments() throws Exception {
+        String database = "cascade_management_db";
+        String principal = "analyst";
+        Identifier view = Identifier.create(database, "orders_view");
+        Identifier function = Identifier.create(database, "orders_function");
+        catalog.createDatabase(database, false);
+        catalog.createView(view, createView(view), false);
+        catalog.createFunction(function, MockRESTMessage.function(function), false);
+        restCatalogServer.registerManagementPrincipal(principal);
+        PermissionResource viewResource =
+                new PermissionResource(
+                        ResourceType.VIEW, database, null, null, view.getObjectName());
+        PermissionResource functionResource =
+                new PermissionResource(
+                        ResourceType.FUNCTION, database, null, function.getObjectName(), null);
+        restCatalog
+                .permissionManagement()
+                .grantPermission(new PermissionAssignment(viewResource, "SELECT", principal, null));
+        restCatalog
+                .permissionManagement()
+                .grantPermission(
+                        new PermissionAssignment(functionResource, "SELECT", principal, null));
+
+        catalog.dropDatabase(database, false, true);
+        catalog.createDatabase(database, false);
+
+        assertThat(catalog.listViews(database)).isEmpty();
+        assertThat(catalog.listFunctions(database)).isEmpty();
+        catalog.createView(view, createView(view), false);
+        catalog.createFunction(function, MockRESTMessage.function(function), false);
+        assertThat(
+                        restCatalog
+                                .permissionManagement()
+                                .listPermissions(
+                                        new ListPermissionsRequest(
+                                                ResourceType.VIEW,
+                                                database,
+                                                null,
+                                                null,
+                                                view.getObjectName(),
+                                                null,
+                                                null,
+                                                null,
+                                                null))
+                                .getElements())
+                .isEmpty();
+        assertThat(
+                        restCatalog
+                                .permissionManagement()
+                                .listPermissions(
+                                        new ListPermissionsRequest(
+                                                ResourceType.FUNCTION,
+                                                database,
+                                                null,
+                                                function.getObjectName(),
+                                                null,
+                                                null,
+                                                null,
+                                                null,
+                                                null))
+                                .getElements())
+                .isEmpty();
     }
 
     @Test
@@ -852,6 +1050,36 @@ class MockRESTCatalogTest extends RESTCatalogTest {
             options.set(entry.getKey(), entry.getValue());
         }
         return new RESTCatalog(CatalogContext.create(options));
+    }
+
+    private static class InvalidColumnGrantRequest implements RESTRequest {
+
+        private final PermissionResource resource;
+
+        private InvalidColumnGrantRequest(Identifier identifier) {
+            this.resource =
+                    new PermissionResource(
+                            ResourceType.COLUMN,
+                            identifier.getDatabaseName(),
+                            identifier.getTableName(),
+                            null,
+                            null);
+        }
+
+        @JsonGetter("resource")
+        public PermissionResource getResource() {
+            return resource;
+        }
+
+        @JsonGetter("access")
+        public String getAccess() {
+            return "SELECT";
+        }
+
+        @JsonGetter("principal")
+        public String getPrincipal() {
+            return "analyst";
+        }
     }
 
     private static String extractHost(String uri) {

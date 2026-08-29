@@ -448,8 +448,9 @@ messages = table_update.merge_into(
 
 Conditions use SQL-style expressions with `s.` (source) and `t.` (target)
 column prefixes. `WhenNotMatched` conditions may only reference source columns
-(`s.*`). Condition evaluation uses DataFusion through the PyPaimon SQL extra.
-Install the extra before using conditions: `pip install pypaimon[sql]`.
+(`s.*`). Condition evaluation uses the PyPaimon DataFusion extra.
+Python 3.10 or newer is required. Install it with
+`pip install 'pypaimon[datafusion]'`.
 
 ```python
 messages = table_update.merge_into(

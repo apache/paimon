@@ -21,11 +21,15 @@ Module to read a Paimon table into PyTorch Dataset.
 import queue
 import random
 import threading
-from typing import Iterator, List
+import warnings
+from typing import Any, Callable, Iterator, List, Optional
 
+import pyarrow as pa
 import torch
 from torch.utils.data import Dataset, IterableDataset
 
+from pypaimon.read.reader.concat_batch_reader import (
+    _MAX_ARROW_OFFSET, _batch_offset_usage)
 from pypaimon.read.split import Split
 from pypaimon.read.table_read import TableRead
 
@@ -100,9 +104,47 @@ class _BaseTorchIterDataset(IterableDataset):
             row_dict[field_name] = value
         return row_dict
 
+    def _limit_covers_all_splits(self) -> bool:
+        limit = self.table_read.limit
+        if limit is None:
+            return True
+        total_rows = 0
+        for split in self.splits:
+            physical_row_count = getattr(split, "row_count", None)
+            if (
+                isinstance(physical_row_count, bool)
+                or not isinstance(physical_row_count, int)
+                or physical_row_count < 0
+            ):
+                return False
+            row_count = physical_row_count
+            merged_row_count = getattr(split, "merged_row_count", None)
+            if callable(merged_row_count):
+                try:
+                    merged_row_count = merged_row_count()
+                except Exception:
+                    merged_row_count = None
+                if (
+                    not isinstance(merged_row_count, bool)
+                    and isinstance(merged_row_count, int)
+                    and 0 <= merged_row_count <= physical_row_count
+                ):
+                    row_count = merged_row_count
+            total_rows += row_count
+            if total_rows > limit:
+                return False
+        return True
+
     def _worker_splits(self, worker_info) -> List[Split]:
         if worker_info is None:
             return self.splits
+
+        # DataLoader workers cannot share a limit budget that may truncate.
+        if (
+            self.table_read.limit is not None
+            and not self._limit_covers_all_splits()
+        ):
+            return self.splits if worker_info.id == 0 else []
 
         worker_id = worker_info.id
         num_workers = worker_info.num_workers
@@ -228,6 +270,175 @@ class TorchIterDataset(_BaseTorchIterDataset):
             stop.set()
             for t in threads:
                 t.join(timeout=self._PREFETCH_JOIN_TIMEOUT_SEC)
+
+
+def _concat_record_batches(batches: List[pa.RecordBatch]) -> pa.RecordBatch:
+    if len(batches) == 1:
+        return batches[0]
+    return pa.RecordBatch.from_arrays(
+        [
+            pa.concat_arrays([batch.column(i) for batch in batches])
+            for i in range(batches[0].num_columns)
+        ],
+        schema=batches[0].schema,
+    )
+
+
+def _sized_record_batches(
+    batches: Iterator[pa.RecordBatch],
+    batch_size: Optional[int],
+) -> Iterator[pa.RecordBatch]:
+    if batch_size is None:
+        yield from batches
+        return
+
+    pending: List[pa.RecordBatch] = []
+    pending_rows = 0
+    offset_usage = {}
+    for batch in batches:
+        offset = 0
+        while offset < batch.num_rows:
+            take = min(batch_size - pending_rows, batch.num_rows - offset)
+            piece = batch.slice(offset, take)
+            piece_usage = _batch_offset_usage(piece)
+            if pending and any(
+                offset_usage.get(path, 0) + value > _MAX_ARROW_OFFSET
+                for path, value in piece_usage.items()
+            ):
+                yield _concat_record_batches(pending)
+                pending = []
+                pending_rows = 0
+                offset_usage = {}
+                continue
+
+            pending.append(piece)
+            pending_rows += take
+            offset += take
+            for path, value in piece_usage.items():
+                offset_usage[path] = offset_usage.get(path, 0) + value
+            if pending_rows == batch_size or any(
+                value >= _MAX_ARROW_OFFSET for value in offset_usage.values()
+            ):
+                yield _concat_record_batches(pending)
+                pending = []
+                pending_rows = 0
+                offset_usage = {}
+
+    if pending:
+        yield _concat_record_batches(pending)
+
+
+def _default_to_tensor(batch: pa.RecordBatch) -> dict:
+    tensors = {}
+    for name, array in zip(batch.schema.names, batch.columns):
+        if array.null_count:
+            raise ValueError(
+                "Torch tensor conversion does not support null values in "
+                "column %r; provide to_tensor_fn to handle them." % name
+            )
+
+        if pa.types.is_fixed_size_list(array.type):
+            value_type = array.type.value_type
+            if not (
+                pa.types.is_integer(value_type)
+                or pa.types.is_floating(value_type)
+                or pa.types.is_boolean(value_type)
+            ):
+                raise ValueError(
+                    "Torch tensor conversion does not support column %r with "
+                    "type %s; provide to_tensor_fn." % (name, array.type)
+                )
+            values = array.values.slice(
+                array.offset * array.type.list_size,
+                len(array) * array.type.list_size,
+            )
+            if values.null_count:
+                raise ValueError(
+                    "Torch tensor conversion does not support null list values "
+                    "in column %r; provide to_tensor_fn to handle them." % name
+                )
+            numpy_array = values.to_numpy(zero_copy_only=False).reshape(
+                len(array), array.type.list_size
+            )
+        elif (
+            pa.types.is_integer(array.type)
+            or pa.types.is_floating(array.type)
+            or pa.types.is_boolean(array.type)
+        ):
+            numpy_array = array.to_numpy(zero_copy_only=False)
+        else:
+            raise ValueError(
+                "Torch tensor conversion only supports numeric, boolean, and "
+                "fixed-size-list columns; column %r has type %s. Select "
+                "batch_format='pyarrow' or provide to_tensor_fn."
+                % (name, array.type)
+            )
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message="The given NumPy array is not writable",
+                category=UserWarning,
+            )
+            tensors[name] = torch.from_numpy(numpy_array)
+    return tensors
+
+
+class TorchBatchIterDataset(_BaseTorchIterDataset):
+    """Streaming IterableDataset which yields Arrow or Tensor batches."""
+
+    def __init__(
+        self,
+        table_read: TableRead,
+        splits: List[Split],
+        batch_format: str,
+        batch_size: Optional[int],
+        to_tensor_fn: Optional[Callable[[pa.RecordBatch], Any]] = None,
+    ):
+        super().__init__(table_read, splits)
+        self.batch_format = batch_format
+        self.batch_size = batch_size
+        self.to_tensor_fn = to_tensor_fn
+
+    def __iter__(self):
+        worker_info = torch.utils.data.get_worker_info()
+        splits_to_process = self._worker_splits(worker_info)
+        raw_batches = self._arrow_batches_for_splits(splits_to_process)
+
+        batches = _sized_record_batches(
+            self._limit_batches(raw_batches), self.batch_size
+        )
+        for batch in batches:
+            if self.batch_format == "torch":
+                converter = self.to_tensor_fn or _default_to_tensor
+                yield converter(batch)
+            else:
+                yield batch
+
+    def _arrow_batches_for_splits(
+        self, splits: List[Split]
+    ) -> Iterator[pa.RecordBatch]:
+        reader = self.table_read.to_arrow_batch_reader(splits)
+        try:
+            for batch in iter(reader.read_next_batch, None):
+                if batch.num_rows:
+                    yield batch
+        finally:
+            close = getattr(reader, "close", None)
+            if close is not None:
+                close()
+
+    def _limit_batches(
+        self, batches: Iterator[pa.RecordBatch]
+    ) -> Iterator[pa.RecordBatch]:
+        remaining = self.table_read.limit
+        for batch in batches:
+            if remaining is not None:
+                if remaining <= 0:
+                    return
+                if batch.num_rows > remaining:
+                    batch = batch.slice(0, remaining)
+                remaining -= batch.num_rows
+            yield batch
 
 
 class TorchShuffledIterDataset(_BaseTorchIterDataset):

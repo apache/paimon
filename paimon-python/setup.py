@@ -233,6 +233,10 @@ setup(
         ],
     },
     extras_require={
+        'hdf5': [
+            # HDF5 loading is explicitly guarded and documented as Python 3.8+.
+            'h5py>=3,<4; python_version>="3.8"',
+        ],
         'ray': [
             'ray>=2.10,<3; python_version>="3.8"',
         ],
@@ -275,6 +279,9 @@ setup(
         'hll-sketch': [
             'datasketches>=4,<5; python_version<"3.9"',
             'datasketches>=5,<6; python_version>="3.9"',
+        ],
+        'datafusion': [
+            'datafusion>=54,<55; python_version>="3.10"',
         ],
         'sql': [
             'pypaimon-rust>=0.3.0; python_version>="3.10"',

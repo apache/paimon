@@ -85,7 +85,9 @@ def boost_query(positive, negative, negative_boost):
 
 
 class _StubSchema:
-    def __init__(self):
+    def __init__(self, fields=None, schema_id=0):
+        self.id = schema_id
+        self.fields = list(fields or [])
         self.options = {}
 
 
@@ -97,7 +99,14 @@ class _StubTable:
         self.partition_keys_fields = partition_fields or []
         self.partition_keys: List[str] = [
             f.name for f in self.partition_keys_fields]
-        self.table_schema = _StubSchema()
+        self.table_schema = _StubSchema(fields)
+        self.schema_manager = types.SimpleNamespace(
+            get_schema=lambda schema_id: (
+                self.table_schema
+                if schema_id == self.table_schema.id
+                else None
+            )
+        )
         self.options = CoreOptions(Options.from_none())
         self.file_io = object()
         self._entries = entries
@@ -142,7 +151,7 @@ def _field(fid, name, dtype="INT"):
 
 
 def _entry(partition_row, field_id, index_type, file_name,
-           row_range_start, row_range_end, external_path=None):
+           row_range_start, row_range_end, external_path=None, schema_id=0):
     meta = GlobalIndexMeta(
         row_range_start=row_range_start,
         row_range_end=row_range_end,
@@ -157,8 +166,13 @@ def _entry(partition_row, field_id, index_type, file_name,
         global_index_meta=meta,
         external_path=external_path,
     )
-    return IndexManifestEntry(kind=0, partition=partition_row, bucket=0,
-                              index_file=index_file)
+    return IndexManifestEntry(
+        kind=0,
+        partition=partition_row,
+        bucket=0,
+        index_file=index_file,
+        schema_id=schema_id,
+    )
 
 
 def _bitmap(*row_ids):
@@ -932,6 +946,44 @@ class FullTextSearchBuilderDslTest(unittest.TestCase):
         self.assertFalse(any(isinstance(split, RawFullTextSearchSplit)
                              for split in splits))
 
+    def test_full_text_scan_falls_back_for_incompatible_index_schema(self):
+        from pypaimon.table.source.full_text_scan import DataEvolutionFullTextScan
+        from pypaimon.table.source.full_text_search_split import (
+            IndexFullTextSearchSplit,
+            RawFullTextSearchSplit,
+        )
+
+        text_field = _field(1, "content", "STRING")
+        entry = _entry(
+            None,
+            field_id=1,
+            index_type="full-text",
+            file_name="legacy-ft.index",
+            row_range_start=0,
+            row_range_end=9,
+            schema_id=1,
+        )
+        table = _StubTable(fields=[text_field], entries=[entry])
+        table.schema_manager = types.SimpleNamespace(
+            get_schema=lambda schema_id: _StubSchema(
+                [_field(1, "content", "VARCHAR(10)")], schema_id=1)
+            if schema_id == 1
+            else None
+        )
+        table.options = CoreOptions(Options({
+            "full-text-index.search-mode": "full",
+        }))
+        _patch_snapshot(
+            self, [entry], types.SimpleNamespace(id=1, next_row_id=10))
+
+        splits = DataEvolutionFullTextScan(table, [text_field]).scan().splits()
+
+        self.assertFalse(any(isinstance(s, IndexFullTextSearchSplit)
+                             for s in splits))
+        raw = [s for s in splits if isinstance(s, RawFullTextSearchSplit)]
+        self.assertEqual(1, len(raw))
+        self.assertEqual([Range(0, 9)], raw[0].row_ranges)
+
 
 class VectorSearchFilterTest(unittest.TestCase):
     """Non-partitioned wiring: scan + read + external_path plumbing."""
@@ -1035,6 +1087,54 @@ class VectorSearchFilterTest(unittest.TestCase):
         self.assertEqual(1, len(raw))
         self.assertEqual([Range(0, 9)], raw[0].row_ranges)
         self.assertEqual([], raw[0].scalar_index_files)
+
+    def test_vector_scan_falls_back_for_incompatible_index_schema(self):
+        from pypaimon.table.source.vector_search_split import (
+            IndexVectorSearchSplit,
+            RawVectorSearchSplit,
+        )
+
+        current_embedding = _field(1, "embedding", "DOUBLE")
+        entry = _entry(
+            None,
+            field_id=1,
+            index_type="lumina-vector-ann",
+            file_name="legacy-vector.index",
+            row_range_start=0,
+            row_range_end=9,
+            schema_id=1,
+        )
+        table = _StubTable(
+            fields=[self.id_field, current_embedding], entries=[entry])
+        table.schema_manager = types.SimpleNamespace(
+            get_schema=lambda schema_id: _StubSchema(
+                [self.id_field, _field(1, "embedding", "FLOAT")],
+                schema_id=1,
+            ) if schema_id == 1 else None
+        )
+        table.options = CoreOptions(Options({
+            "vector-index.search-mode": "full",
+        }))
+        self._scan_patch.stop()
+        self._travel_patch.stop()
+        _patch_snapshot(
+            self, [entry], types.SimpleNamespace(id=1, next_row_id=10))
+
+        splits = (
+            VectorSearchBuilderImpl(table)
+            .with_vector_column("embedding")
+            .with_query_vector([1.0, 0.0])
+            .with_limit(3)
+            .new_vector_search_scan()
+            .scan()
+            .splits()
+        )
+
+        self.assertFalse(any(isinstance(s, IndexVectorSearchSplit)
+                             for s in splits))
+        raw = [s for s in splits if isinstance(s, RawVectorSearchSplit)]
+        self.assertEqual(1, len(raw))
+        self.assertEqual([Range(0, 9)], raw[0].row_ranges)
 
     def test_read_threads_prefilter_bitmap_as_include_row_ids(self):
         """preFilter bitmap from scanner.scan(filter) must reach each split's
@@ -2322,6 +2422,54 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
 
         self.assertEqual([Range(5, 9)], result.results().to_range_list())
 
+    def test_scanner_ignores_incompatible_index_schema(self):
+        from pypaimon.globalindex.data_evolution_global_index_scanner import (
+            DataEvolutionGlobalIndexScanner,
+        )
+        from pypaimon.schema.data_types import ArrayType
+
+        current_field = DataField(
+            id=0,
+            name="numbers",
+            type=ArrayType(True, AtomicType("BIGINT")),
+        )
+        entry = _entry(
+            None,
+            field_id=0,
+            index_type="bitmap",
+            file_name="legacy-array.index",
+            row_range_start=0,
+            row_range_end=9,
+            schema_id=1,
+        )
+        table = _StubTable(fields=[current_field], entries=[entry])
+        historical_field = DataField(
+            id=0,
+            name="numbers",
+            type=ArrayType(True, AtomicType("INT")),
+        )
+        table.schema_manager = types.SimpleNamespace(
+            get_schema=lambda schema_id: _StubSchema(
+                [historical_field], schema_id=1)
+            if schema_id == 1
+            else None
+        )
+        snapshot = types.SimpleNamespace(id=1, next_row_id=10)
+        _patch_snapshot(self, [entry], snapshot)
+
+        scanner = DataEvolutionGlobalIndexScanner.create(
+            table,
+            predicate=Predicate(
+                method="equal",
+                index=0,
+                field="numbers",
+                literals=[[1]],
+            ),
+            snapshot=snapshot,
+        )
+
+        self.assertIsNone(scanner)
+
     def test_scanner_create_selects_extra_field_indexes(self):
         from pypaimon.globalindex.data_evolution_global_index_scanner import (
             DataEvolutionGlobalIndexScanner,
@@ -2338,7 +2486,7 @@ class VectorSearchMultiShardScalarTest(unittest.TestCase):
             fields=[name_field, id_field, emb_field],
             entries=[
                 IndexManifestEntry(kind=0, partition=None,
-                                   bucket=0, index_file=multi)
+                                   bucket=0, index_file=multi, schema_id=0)
             ],
         )
         _patch_snapshot(self, table._entries)

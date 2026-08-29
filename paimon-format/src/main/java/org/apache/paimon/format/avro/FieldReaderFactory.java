@@ -118,7 +118,24 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
 
     @Override
     public FieldReader visitUnion(Schema schema, @Nullable DataType type) {
-        return new NullableReader(visit(schema.getTypes().get(1), type));
+        int nullIndex = nullableUnionNullIndex(schema);
+        return new NullableReader(visit(schema.getTypes().get(1 - nullIndex), type), nullIndex);
+    }
+
+    static int nullableUnionNullIndex(Schema schema) {
+        List<Schema> types = schema.getTypes();
+        if (types.size() != 2) {
+            throw new IllegalArgumentException(
+                    "Only nullable Avro unions are supported: " + schema);
+        }
+
+        if (types.get(0).getType() == Schema.Type.NULL) {
+            return 0;
+        } else if (types.get(1).getType() == Schema.Type.NULL) {
+            return 1;
+        }
+
+        throw new IllegalArgumentException("Only nullable Avro unions are supported: " + schema);
     }
 
     @Override
@@ -227,21 +244,23 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
     private static class NullableReader implements FieldReader {
 
         private final FieldReader reader;
+        private final int nullIndex;
 
-        public NullableReader(FieldReader reader) {
+        public NullableReader(FieldReader reader, int nullIndex) {
             this.reader = reader;
+            this.nullIndex = nullIndex;
         }
 
         @Override
         public Object read(Decoder decoder, Object reuse) throws IOException {
             int index = decoder.readIndex();
-            return index == 0 ? null : reader.read(decoder, reuse);
+            return index == nullIndex ? null : reader.read(decoder, reuse);
         }
 
         @Override
         public void skip(Decoder decoder) throws IOException {
             int index = decoder.readIndex();
-            if (index == 1) {
+            if (index != nullIndex) {
                 reader.skip(decoder);
             }
         }

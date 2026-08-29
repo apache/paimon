@@ -223,6 +223,8 @@ class GlobalIndexBuildTest(
         entries = IndexFileHandler(table).scan(snapshot)
         self.assertEqual(2, len(entries))
         self.assertEqual({'btree'}, {e.index_file.index_type for e in entries})
+        self.assertEqual(
+            {table.table_schema.id}, {e.schema_id for e in entries})
         self.assertEqual({0}, {e.index_file.global_index_meta.row_range_start for e in entries})
         self.assertEqual({3}, {e.index_file.global_index_meta.row_range_end for e in entries})
 

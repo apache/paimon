@@ -34,7 +34,7 @@ _DEFAULT_OPTIONS = {
     "deletion-vectors.enabled": "true",
     "blob-as-descriptor": "true",
     "global-index.search-mode": "full",
-    "vector.file.format": "vortex",
+    "vector.file.format": "parquet",
 }
 
 _DEFAULT_DATABASE = Catalog.DEFAULT_DATABASE
@@ -94,6 +94,27 @@ class MultimodalConnection:
             self.catalog,
             identifier,
             raw_table,
+        )
+
+    def load_from_hdf5(
+            self,
+            table_name: str,
+            paths,
+            *,
+            transform,
+            source_options=None):
+        """Load HDF5 transforms into an existing table as one append commit.
+
+        Repeating a call appends the rows again. A commit exception has an
+        unknown result and is not safe to retry without checking table state.
+        Source filesystem options are isolated from the target warehouse.
+        """
+        from pypaimon.multimodal.hdf5 import load_from_hdf5
+        return load_from_hdf5(
+            self.get_table(table_name),
+            paths,
+            transform=transform,
+            source_options=source_options,
         )
 
     def drop_table(self, name: str, ignore_if_not_exists: bool = False):

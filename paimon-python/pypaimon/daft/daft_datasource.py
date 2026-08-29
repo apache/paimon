@@ -493,7 +493,8 @@ def _blob_native_covering_files(
     native reader, or ``None`` if the split must use the pypaimon fallback.
 
     A blob table stores each column bunch in its own file: scalar columns in
-    parquet, BLOB / ARRAY<BLOB> / MAP<X, BLOB> columns in ``.blob`` files, vector columns in
+    parquet, BLOB / ARRAY<BLOB> / MAP<X, BLOB> columns in ``.blob`` or
+    ``.video`` files, vector columns in
     ``.vector`` files, aligned by row id. Reading the base parquet files
     natively is only correct when every projected data column lives in parquet
     files that each fully cover the projection over disjoint row-id ranges --
@@ -512,7 +513,7 @@ def _blob_native_covering_files(
         name = f.file_name
         write_cols = set(f.write_cols or [])
         carried = write_cols & projected
-        if name.endswith(".blob") or ".vector." in name:
+        if name.endswith((".blob", ".video")) or ".vector." in name:
             if carried:
                 return None  # a projected column lives in a blob/vector bunch
             continue

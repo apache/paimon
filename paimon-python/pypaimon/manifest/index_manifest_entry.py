@@ -16,6 +16,7 @@
 # under the License.
 
 from dataclasses import dataclass
+from typing import Optional
 
 from pypaimon.index.index_file_meta import IndexFileMeta
 from pypaimon.table.row.generic_row import GenericRow
@@ -29,6 +30,7 @@ class IndexManifestEntry:
     partition: GenericRow
     bucket: int
     index_file: IndexFileMeta
+    schema_id: Optional[int] = None
 
     def __eq__(self, other):
         if not isinstance(other, IndexManifestEntry):
@@ -36,11 +38,12 @@ class IndexManifestEntry:
         return (self.kind == other.kind and
                 self.partition == other.partition and
                 self.bucket == other.bucket and
-                self.index_file == other.index_file)
+                self.index_file == other.index_file and
+                self.schema_id == other.schema_id)
 
     def __hash__(self):
         return hash((self.kind, tuple(self.partition.values),
-                     self.bucket, self.index_file))
+                     self.bucket, self.index_file, self.schema_id))
 
 
 INDEX_MANIFEST_ENTRY = {
@@ -57,6 +60,7 @@ INDEX_MANIFEST_ENTRY = {
         {"name": "_ROW_COUNT", "type": "long"},
         {"name": "_DELETIONS_VECTORS_RANGES", "type": {"type": "array", "elementType": "DeletionVectorMeta"}},
         {"name": "_EXTERNAL_PATH", "type": ["null", "string"]},
-        {"name": "_GLOBAL_INDEX", "type": "GlobalIndexMeta"}
+        {"name": "_GLOBAL_INDEX", "type": "GlobalIndexMeta"},
+        {"name": "_SCHEMA_ID", "type": ["null", "long"], "default": None}
     ]
 }

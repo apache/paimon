@@ -43,6 +43,7 @@ import org.apache.paimon.manifest.ProjectedManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.stats.StatsTestUtils;
+import org.apache.paimon.testutils.assertj.PaimonAssertions;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -294,7 +295,10 @@ class ManifestRewriteCleanupTest extends ManifestFileMetaTestBase {
                                         PARTITION_TYPE,
                                         1));
 
-        assertThat(thrown).isSameAs(primaryFailure);
+        assertThat(thrown)
+                .satisfies(
+                        PaimonAssertions.anyCauseMatches(
+                                primaryFailure.getClass(), primaryFailure.getMessage()));
         assertThat(thrown.getSuppressed())
                 .extracting(Throwable::getMessage)
                 .containsExactly("delete failure 1");

@@ -25,7 +25,6 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.schema.ColumnDirectiveUtils.ConvertedColumn;
 import org.apache.paimon.schema.SchemaChange.AddColumn;
 import org.apache.paimon.schema.SchemaChange.DropColumn;
@@ -1028,6 +1027,7 @@ public class SchemaManager implements Serializable {
                 || options.primaryKeyBTreeIndexColumns().contains(fieldName)
                 || options.primaryKeyBitmapIndexColumns().contains(fieldName)
                 || options.primaryKeyMultiValueIndexColumns().contains(fieldName)
+                || options.primaryKeyFMIndexColumns().contains(fieldName)
                 || options.primaryKeyFullTextIndexColumns().contains(fieldName)) {
             throw new UnsupportedOperationException(
                     String.format(
@@ -1216,23 +1216,11 @@ public class SchemaManager implements Serializable {
     @VisibleForTesting
     public boolean commit(TableSchema newSchema) throws Exception {
         SchemaValidation.validateTableSchema(newSchema);
-        validateHistoricalIcebergGeospatialTypes(newSchema);
+        SchemaValidation.validateHistoricalIcebergTypes(
+                this::listAll, new CoreOptions(newSchema.options()));
         SchemaValidation.validateFallbackBranch(this, newSchema);
         Path schemaPath = toSchemaPath(newSchema.id());
         return fileIO.tryToWriteAtomic(schemaPath, newSchema.toString());
-    }
-
-    private void validateHistoricalIcebergGeospatialTypes(TableSchema newSchema) {
-        CoreOptions options = new CoreOptions(newSchema.options());
-        IcebergOptions.StorageType storage =
-                options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE);
-        if (storage == IcebergOptions.StorageType.DISABLED) {
-            return;
-        }
-
-        for (TableSchema schema : listAll()) {
-            SchemaValidation.validateIcebergGeospatialTypes(schema.logicalRowType(), options);
-        }
     }
 
     /** Read schema for schema id. */
@@ -1484,6 +1472,16 @@ public class SchemaManager implements Serializable {
                     key,
                     options.get(key),
                     DELETION_VECTORS_ENABLED.defaultValue().toString());
+        }
+
+        if (IGNORE_DELETE.key().equals(key)) {
+            checkAlterTableOption(
+                    options, key, options.get(key), IGNORE_DELETE.defaultValue().toString());
+        }
+
+        if (IGNORE_UPDATE_BEFORE.key().equals(key)) {
+            checkAlterTableOption(
+                    options, key, options.get(key), IGNORE_UPDATE_BEFORE.defaultValue().toString());
         }
 
         if (options.containsKey(PK_CLUSTERING_OVERRIDE.key())

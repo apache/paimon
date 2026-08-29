@@ -18,34 +18,78 @@
 
 package org.apache.paimon.table.format;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.fs.BaseMultiPartUploadCommitter;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
+import org.apache.paimon.fs.MultiPartUploadStore;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.RenamingTwoPhaseOutputStream;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.PartitionPathUtils;
+import org.apache.paimon.utils.ReflectionUtils;
+
+import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 
+import javax.security.auth.Subject;
+
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.security.AccessController;
+import java.security.PrivilegedAction;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
+import java.util.function.Function;
 
 import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
+import static org.apache.paimon.shade.guava30.com.google.common.base.Throwables.getCausalChain;
+import static org.apache.paimon.shade.guava30.com.google.common.base.Throwables.getRootCause;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.assertj.core.api.Assertions.entry;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -58,7 +102,7 @@ class FormatTableCommitTest {
     @TempDir java.nio.file.Path tempDir;
 
     @Test
-    void testPartitionRegistrationFailureDiscardsTheFilesItWrote() throws Exception {
+    void testPartitionRegistrationFailureDeletesPublishedTarget() throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         Path tablePath = new Path(tempDir.toUri());
         Path targetPath = new Path(tablePath, "year=2025/month=10/data-1.csv");
@@ -69,10 +113,9 @@ class FormatTableCommitTest {
         FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
         RuntimeException registrationFailure =
                 new RuntimeException("Catalog partition registration unavailable");
-        doThrow(registrationFailure)
-                .when(partitionManager)
-                .createPartitions(anyList(), eq(true), any(), anyBoolean());
-
+        doThrow(registrationFailure).when(partitionManager).createPartitions(anyList(), eq(true));
+        Identifier identifier =
+                Identifier.create("catalog_partition_db", "catalog_partition_table");
         FormatTableCommit commit =
                 new FormatTableCommit(
                         tablePath.toString(),
@@ -81,22 +124,209 @@ class FormatTableCommitTest {
                         false,
                         PARTITION_DEFAULT_NAME.defaultValue(),
                         false,
-                        Identifier.create("catalog_partition_db", "catalog_partition_table"),
+                        identifier,
                         null,
                         null,
                         null,
                         partitionManager,
                         /* dynamicPartitionOverwrite */ true);
-        CommitMessage message = new TwoPhaseCommitMessage(committer);
+        TwoPhaseCommitMessage message = new TwoPhaseCommitMessage(committer);
+        List<CommitMessage> messages = Collections.singletonList(message);
+
+        assertThatThrownBy(() -> commit.commit(messages))
+                .isInstanceOf(RuntimeException.class)
+                .hasRootCauseMessage("Catalog partition registration unavailable");
+        assertThat(fileIO.exists(targetPath)).isFalse();
+        verify(partitionManager).createPartitions(anyList(), eq(true));
+        verify(partitionManager, never())
+                .createPartitions(anyList(), eq(true), any(), anyBoolean());
+    }
+
+    @Test
+    void testRegistrationResponseLossStillDeletesPublishedTarget() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        Path targetPath = new Path(tablePath, "part=p/data.csv");
+        Identifier identifier =
+                Identifier.create("catalog_partition_db", "catalog_partition_table");
+        Catalog catalog = mock(Catalog.class);
+        List<Map<String, String>> registeredPartitions = new ArrayList<>();
+        RuntimeException registrationFailure = new RuntimeException("registration response lost");
+        doAnswer(
+                        invocation -> {
+                            List<Map<String, String>> batch = invocation.getArgument(1);
+                            registeredPartitions.addAll(batch);
+                            throw registrationFailure;
+                        })
+                .when(catalog)
+                .createPartitions(eq(identifier), anyList(), eq(true), eq(null), eq(false));
+        FormatTablePartitionManager partitionManager =
+                FormatTablePartitionManager.create(
+                        identifier, Collections.singletonList("part"), () -> catalog);
+        RenamingTwoPhaseOutputStream outputStream =
+                new RenamingTwoPhaseOutputStream(fileIO, targetPath, false);
+        outputStream.write(1);
+        CommitMessage message = new TwoPhaseCommitMessage(outputStream.closeForCommit());
+        FormatTableCommit commit =
+                new FormatTableCommit(
+                        tablePath.toString(),
+                        Collections.singletonList("part"),
+                        fileIO,
+                        false,
+                        PARTITION_DEFAULT_NAME.defaultValue(),
+                        false,
+                        identifier,
+                        null,
+                        null,
+                        null,
+                        partitionManager,
+                        /* dynamicPartitionOverwrite */ true);
 
         assertThatThrownBy(() -> commit.commit(Collections.singletonList(message)))
                 .isInstanceOf(RuntimeException.class)
-                .hasRootCauseMessage("Catalog partition registration unavailable");
+                .hasRootCauseMessage("registration response lost");
 
-        // A failed write leaves nothing behind, whichever step failed: rerunning it converges,
-        // and an idempotent registration makes a partition that was registered anyway harmless.
+        // Registration without statistics is idempotent. Even if it took effect before the
+        // response was lost, deleting this attempt's unique file leaves a safe empty partition.
+        assertThat(registeredPartitions).containsExactly(Collections.singletonMap("part", "p"));
         assertThat(fileIO.exists(targetPath)).isFalse();
-        verify(partitionManager).createPartitions(anyList(), eq(true), any(), anyBoolean());
+        verify(catalog, never())
+                .createPartitions(eq(identifier), anyList(), eq(true), anyList(), eq(false));
+    }
+
+    @Test
+    void testHivePostRegistrationFailurePreservesOverwriteTarget() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        Path partitionPath = new Path(tablePath, "part=p");
+        Path oldPath = new Path(partitionPath, "data-old.csv");
+        Path targetPath = new Path(partitionPath, "data-new.csv");
+        fileIO.writeFile(oldPath, "old", false);
+        RenamingTwoPhaseOutputStream outputStream =
+                new RenamingTwoPhaseOutputStream(fileIO, targetPath, false);
+        outputStream.write(1);
+        TwoPhaseOutputStream.Committer committer = outputStream.closeForCommit();
+        Map<String, String> staticPartition = Collections.singletonMap("part", "p");
+        FormatTableCommit commit =
+                new FormatTableCommit(
+                        tablePath.toString(),
+                        Collections.singletonList("part"),
+                        fileIO,
+                        false,
+                        PARTITION_DEFAULT_NAME.defaultValue(),
+                        true,
+                        Identifier.create("hive_db", "hive_table"),
+                        staticPartition,
+                        null,
+                        null,
+                        null,
+                        /* dynamicPartitionOverwrite */ true);
+        PostRegistrationFailingHiveCatalog hiveCatalog =
+                new PostRegistrationFailingHiveCatalog(fileIO, tablePath);
+        ReflectionUtils.setPrivateFieldValue(commit, "hiveCatalog", hiveCatalog);
+        List<CommitMessage> messages =
+                Collections.singletonList(new TwoPhaseCommitMessage(committer));
+
+        assertThatThrownBy(() -> commit.commit(messages))
+                .isInstanceOf(RuntimeException.class)
+                .hasRootCauseMessage("Hive failed after partition registration");
+
+        // The replacement is the only remaining copy after Hive mutates and then fails.
+        assertThat(hiveCatalog.registeredPartitions).containsExactly(staticPartition);
+        assertThat(fileIO.exists(oldPath)).isFalse();
+        assertThat(fileIO.exists(targetPath)).isTrue();
+    }
+
+    @Test
+    void testHivePostRegistrationFailureDeletesAppendTarget() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        Path targetPath = new Path(tablePath, "part=p/data-new.csv");
+        RenamingTwoPhaseOutputStream outputStream =
+                new RenamingTwoPhaseOutputStream(fileIO, targetPath, false);
+        outputStream.write(1);
+        Map<String, String> staticPartition = Collections.singletonMap("part", "p");
+        FormatTableCommit commit =
+                new FormatTableCommit(
+                        tablePath.toString(),
+                        Collections.singletonList("part"),
+                        fileIO,
+                        false,
+                        PARTITION_DEFAULT_NAME.defaultValue(),
+                        false,
+                        Identifier.create("hive_db", "hive_table"),
+                        staticPartition,
+                        null,
+                        null,
+                        null,
+                        /* dynamicPartitionOverwrite */ true);
+        PostRegistrationFailingHiveCatalog hiveCatalog =
+                new PostRegistrationFailingHiveCatalog(fileIO, tablePath);
+        ReflectionUtils.setPrivateFieldValue(commit, "hiveCatalog", hiveCatalog);
+
+        assertThatThrownBy(
+                        () ->
+                                commit.commit(
+                                        Collections.singletonList(
+                                                new TwoPhaseCommitMessage(
+                                                        outputStream.closeForCommit()))))
+                .isInstanceOf(RuntimeException.class)
+                .hasRootCauseMessage("Hive failed after partition registration");
+
+        // Hive registration is idempotent and carries no file statistics. Its empty partition may
+        // remain, while removing this attempt's file makes a retry safe.
+        assertThat(hiveCatalog.registeredPartitions).containsExactly(staticPartition);
+        assertThat(fileIO.exists(targetPath)).isFalse();
+    }
+
+    @Test
+    void testSuccessfulHiveAppendSurvivesAbortAfterMessageRoundTrip() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        Path targetPath = new Path(tablePath, "part=p/data-new.csv");
+        RenamingTwoPhaseOutputStream outputStream =
+                new RenamingTwoPhaseOutputStream(fileIO, targetPath, false);
+        outputStream.write(1);
+        TwoPhaseCommitMessage message = new TwoPhaseCommitMessage(outputStream.closeForCommit());
+        Map<String, String> staticPartition = Collections.singletonMap("part", "p");
+        FormatTableCommit commit =
+                new FormatTableCommit(
+                        tablePath.toString(),
+                        Collections.singletonList("part"),
+                        fileIO,
+                        false,
+                        PARTITION_DEFAULT_NAME.defaultValue(),
+                        false,
+                        Identifier.create("hive_db", "hive_table"),
+                        staticPartition,
+                        null,
+                        null,
+                        null,
+                        /* dynamicPartitionOverwrite */ true);
+        RecordingHiveCatalog hiveCatalog = new RecordingHiveCatalog(fileIO, tablePath);
+        ReflectionUtils.setPrivateFieldValue(commit, "hiveCatalog", hiveCatalog);
+
+        commit.commit(Collections.singletonList(message));
+
+        TwoPhaseCommitMessage roundTripped = InstantiationUtil.clone(message);
+        FormatTableCommit abortCommit =
+                new FormatTableCommit(
+                        tablePath.toString(),
+                        Collections.singletonList("part"),
+                        fileIO,
+                        false,
+                        PARTITION_DEFAULT_NAME.defaultValue(),
+                        false,
+                        Identifier.create("hive_db", "hive_table"),
+                        staticPartition,
+                        null,
+                        null,
+                        null,
+                        /* dynamicPartitionOverwrite */ true);
+        abortCommit.abort(Collections.singletonList(roundTripped));
+
+        assertThat(hiveCatalog.registeredPartitions).containsExactly(staticPartition);
+        assertThat(fileIO.exists(targetPath)).isTrue();
     }
 
     @Test
@@ -129,6 +359,202 @@ class FormatTableCommitTest {
         verify(committer).discard(fileIO);
         verify(partitionManager, never())
                 .createPartitions(anyList(), eq(true), any(), anyBoolean());
+    }
+
+    @Test
+    void testStagingCleanupFailureDeletesPublishedFileBeforeMetadataMutation() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        Path targetPath = new Path(tablePath, "part=p/data.csv");
+        TwoPhaseOutputStream.Committer committer = mock(TwoPhaseOutputStream.Committer.class);
+        when(committer.targetPath()).thenReturn(targetPath);
+        doAnswer(
+                        ignored -> {
+                            fileIO.writeFile(targetPath, "published", false);
+                            return null;
+                        })
+                .when(committer)
+                .commit(fileIO);
+        doThrow(new IOException("staging cleanup failed")).when(committer).clean(fileIO);
+        FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
+        FormatTableCommit commit =
+                new FormatTableCommit(
+                        tablePath.toString(),
+                        Collections.singletonList("part"),
+                        fileIO,
+                        false,
+                        PARTITION_DEFAULT_NAME.defaultValue(),
+                        false,
+                        Identifier.create("catalog_partition_db", "catalog_partition_table"),
+                        null,
+                        null,
+                        null,
+                        partitionManager,
+                        /* dynamicPartitionOverwrite */ true);
+
+        assertThatThrownBy(
+                        () ->
+                                commit.commit(
+                                        Collections.singletonList(
+                                                new TwoPhaseCommitMessage(committer))))
+                .hasRootCauseMessage("staging cleanup failed");
+
+        verify(committer).discard(fileIO);
+        verify(partitionManager, never())
+                .createPartitions(anyList(), eq(true), any(), anyBoolean());
+        assertThat(fileIO.exists(targetPath)).isFalse();
+    }
+
+    @Test
+    void testOverwriteMultipartCompletionResponseLossPreservesReplacementAndReportsAbortFailure()
+            throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(new Path(tempDir.toUri()), "multipart-response-loss");
+        Path partitionPath = new Path(tablePath, "part=p");
+        Path oldPath = new Path(partitionPath, "data-old.csv");
+        Path targetPath = new Path(partitionPath, "data-new.csv");
+        Path stagingPath =
+                new Path(new Path(tempDir.toUri()), "multipart-staging/upload-in-progress");
+        fileIO.writeFile(oldPath, "old", false);
+        fileIO.writeFile(stagingPath, "staged", false);
+
+        @SuppressWarnings("unchecked")
+        MultiPartUploadStore<String, String> uploadStore = mock(MultiPartUploadStore.class);
+        doAnswer(
+                        invocation -> {
+                            fileIO.writeFile(targetPath, "replacement", false);
+                            throw new IOException("multipart completion response lost");
+                        })
+                .when(uploadStore)
+                .completeMultipartUpload(
+                        eq("part=p/data-new.csv"),
+                        eq("upload-id"),
+                        eq(Collections.singletonList("etag")),
+                        eq(1L));
+        doAnswer(
+                        invocation -> {
+                            fileIO.delete(stagingPath, false);
+                            throw new IOException("multipart abort response lost");
+                        })
+                .when(uploadStore)
+                .abortMultipartUpload(eq("part=p/data-new.csv"), eq("upload-id"));
+        TwoPhaseOutputStream.Committer committer =
+                new BaseMultiPartUploadCommitter<String, String>(
+                        "upload-id",
+                        Collections.singletonList("etag"),
+                        "part=p/data-new.csv",
+                        1L,
+                        targetPath) {
+                    @Override
+                    protected MultiPartUploadStore<String, String> multiPartUploadStore(
+                            FileIO ignored, Path ignoredTarget) {
+                        return uploadStore;
+                    }
+                };
+
+        Throwable failure =
+                catchThrowable(
+                        () ->
+                                staticPartitionOverwriteCommit(tablePath, fileIO, 1)
+                                        .commit(
+                                                Collections.singletonList(
+                                                        new TwoPhaseCommitMessage(committer))));
+
+        assertThat(getRootCause(failure)).hasMessage("multipart completion response lost");
+        assertThat(failureTree(failure))
+                .extracting(Throwable::getMessage)
+                .contains(
+                        "Failed to discard multipart upload with ID: upload-id",
+                        "multipart abort response lost");
+        assertThat(fileIO.exists(oldPath)).isFalse();
+        assertThat(fileIO.exists(targetPath)).isTrue();
+        assertThat(fileIO.exists(stagingPath)).isFalse();
+    }
+
+    @Test
+    void testOverwritePostPublishCleanFailurePreservesReplacementAndRetriesStagingCleanup()
+            throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(new Path(tempDir.toUri()), "post-publish-clean-failure");
+        Path partitionPath = new Path(tablePath, "part=p");
+        Path oldPath = new Path(partitionPath, "data-old.csv");
+        Path targetPath = new Path(partitionPath, "data-new.csv");
+        Path stagingPath = new Path(new Path(tempDir.toUri()), "clean-failure-staging/data.tmp");
+        fileIO.writeFile(oldPath, "old", false);
+        fileIO.writeFile(stagingPath, "staged", false);
+        AtomicBoolean failFirstClean = new AtomicBoolean(true);
+        StagedFileCommitter committer =
+                new StagedFileCommitter(targetPath, stagingPath) {
+                    @Override
+                    public void commit(FileIO committingFileIO) throws IOException {
+                        publish(committingFileIO);
+                    }
+
+                    @Override
+                    public void clean(FileIO cleaningFileIO) throws IOException {
+                        if (failFirstClean.compareAndSet(true, false)) {
+                            throw new IOException("staging cleanup failed");
+                        }
+                        super.clean(cleaningFileIO);
+                    }
+                };
+
+        assertThatThrownBy(
+                        () ->
+                                staticPartitionOverwriteCommit(tablePath, fileIO, 1)
+                                        .commit(
+                                                Collections.singletonList(
+                                                        new TwoPhaseCommitMessage(committer))))
+                .hasRootCauseMessage("staging cleanup failed");
+
+        assertThat(fileIO.exists(oldPath)).isFalse();
+        assertThat(fileIO.exists(targetPath)).isTrue();
+        assertThat(fileIO.exists(stagingPath)).isFalse();
+    }
+
+    @Test
+    void testAbortAttemptsEveryRollbackAndReportsDeleteFailure() throws Exception {
+        Path tablePath = new Path(tempDir.toUri());
+        Path refusedPath = new Path(tablePath, "part=p/data-refused.csv");
+        Path removablePath = new Path(tablePath, "part=p/data-removable.csv");
+        SelectiveRefusingDeleteFileIO fileIO = new SelectiveRefusingDeleteFileIO(refusedPath);
+        fileIO.writeFile(refusedPath, "published", false);
+        fileIO.writeFile(removablePath, "published", false);
+
+        TwoPhaseOutputStream.Committer first = mock(TwoPhaseOutputStream.Committer.class);
+        when(first.targetPath()).thenReturn(refusedPath);
+        doThrow(new IOException("discard failed")).when(first).discard(fileIO);
+        TwoPhaseOutputStream.Committer second = mock(TwoPhaseOutputStream.Committer.class);
+        when(second.targetPath()).thenReturn(removablePath);
+        List<CommitMessage> messages =
+                Arrays.asList(new TwoPhaseCommitMessage(first), new TwoPhaseCommitMessage(second));
+        FormatTableCommit commit =
+                new FormatTableCommit(
+                        tablePath.toString(),
+                        Collections.singletonList("part"),
+                        fileIO,
+                        false,
+                        PARTITION_DEFAULT_NAME.defaultValue(),
+                        false,
+                        Identifier.create("rollback_db", "rollback_table"),
+                        null,
+                        null,
+                        null,
+                        null,
+                        /* dynamicPartitionOverwrite */ true);
+
+        Throwable failure = catchThrowable(() -> commit.abort(messages));
+
+        assertThat(failure).isInstanceOf(RuntimeException.class);
+        assertThat(failureTree(failure))
+                .extracting(Throwable::getMessage)
+                .contains(
+                        "discard failed",
+                        "Failed to delete published Format Table file " + refusedPath);
+        verify(first).discard(fileIO);
+        verify(second).discard(fileIO);
+        assertThat(fileIO.exists(refusedPath)).isTrue();
+        assertThat(fileIO.exists(removablePath)).isFalse();
     }
 
     @Test
@@ -185,8 +611,6 @@ class FormatTableCommitTest {
         fileIO.writeFile(previousDataFile, "1", false);
         // A concurrent job is mid-write in this partition, under a magic committer's tree. Its
         // file carries an ordinary data file name; only the directories above it say otherwise.
-        // ('_temporary' is the other such tree, but this writer's own clean() still empties it -
-        //  covered once that is fixed separately.)
         Path stagingFile =
                 new Path(
                         partitionPath,
@@ -320,8 +744,9 @@ class FormatTableCommitTest {
     }
 
     @Test
-    void testPathNotMatchingThePartitionKeysFails() {
+    void testPathNotMatchingThePartitionKeysFails() throws Exception {
         Path tablePath = new Path(tempDir.toUri());
+        Path targetPath = new Path(tablePath, "year=2025/day=10/data-1.csv");
 
         // The message names the path and the declared keys, which is what tells a reader that
         // 'day' is not where 'month' was expected.
@@ -332,6 +757,7 @@ class FormatTableCommitTest {
                 .hasMessageContaining("year=2025/day=10")
                 .hasMessageContaining("catalog_partition_db.catalog_partition_table")
                 .hasMessageContaining("[year, month]");
+        assertThat(LocalFileIO.create().exists(targetPath)).isFalse();
     }
 
     @Test
@@ -632,6 +1058,1217 @@ class FormatTableCommitTest {
         assertThat(fileIO.exists(new Path(tablePath, "loose.csv"))).isTrue();
     }
 
+    @Test
+    void testLocalSideEffectRunnerPropagatesContextAndRestoresWorkerClassLoader() throws Exception {
+        ExecutorService workers = Executors.newSingleThreadExecutor();
+        try {
+            ClassLoader workerClassLoader =
+                    workers.submit(() -> Thread.currentThread().getContextClassLoader())
+                            .get(10, TimeUnit.SECONDS);
+            ClassLoader callerClassLoader = new ClassLoader(getClass().getClassLoader()) {};
+            Subject callerSubject = new Subject();
+            AtomicReference<ClassLoader> seenClassLoader = new AtomicReference<>();
+            AtomicReference<Subject> seenSubject = new AtomicReference<>();
+
+            ClassLoader originalClassLoader = Thread.currentThread().getContextClassLoader();
+            try {
+                Thread.currentThread().setContextClassLoader(callerClassLoader);
+                Subject.doAs(
+                        callerSubject,
+                        (PrivilegedAction<Void>)
+                                () -> {
+                                    try {
+                                        invokeSideEffectRunner(
+                                                workers,
+                                                value -> {
+                                                    seenClassLoader.set(
+                                                            Thread.currentThread()
+                                                                    .getContextClassLoader());
+                                                    seenSubject.set(
+                                                            Subject.getSubject(
+                                                                    AccessController.getContext()));
+                                                    return Collections.singletonList(value);
+                                                },
+                                                Collections.singletonList(1).iterator(),
+                                                1,
+                                                result -> assertThat(result).isOne());
+                                        return null;
+                                    } catch (Exception e) {
+                                        throw new RuntimeException(e);
+                                    }
+                                });
+            } finally {
+                Thread.currentThread().setContextClassLoader(originalClassLoader);
+            }
+
+            assertThat(seenClassLoader.get()).isSameAs(callerClassLoader);
+            assertThat(seenSubject.get()).isSameAs(callerSubject);
+            assertThat(
+                            workers.submit(() -> Thread.currentThread().getContextClassLoader())
+                                    .get(10, TimeUnit.SECONDS))
+                    .isSameAs(workerClassLoader);
+        } finally {
+            workers.shutdownNow();
+            assertThat(workers.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
+    @Test
+    void testLocalSideEffectRunnerCancelsAcceptedTaskWhichHasNotStarted() throws Exception {
+        ExecutorService workers = Executors.newSingleThreadExecutor();
+        ExecutorService caller = Executors.newSingleThreadExecutor();
+        ExecutorService withholdingExecutor = mock(ExecutorService.class);
+        CountDownLatch secondTaskAccepted = new CountDownLatch(1);
+        CountDownLatch releaseFirstTask = new CountDownLatch(1);
+        AtomicInteger submissions = new AtomicInteger();
+        AtomicReference<Runnable> withheldTask = new AtomicReference<>();
+        ConcurrentLinkedQueue<Integer> attemptedInputs = new ConcurrentLinkedQueue<>();
+        RuntimeException workerFailure = new RuntimeException("first side effect failed");
+        doAnswer(
+                        invocation -> {
+                            Runnable task = invocation.getArgument(0);
+                            if (submissions.getAndIncrement() == 0) {
+                                workers.execute(task);
+                            } else {
+                                withheldTask.set(task);
+                                secondTaskAccepted.countDown();
+                            }
+                            return null;
+                        })
+                .when(withholdingExecutor)
+                .execute(any(Runnable.class));
+
+        Future<?> result =
+                caller.submit(
+                        (Callable<Void>)
+                                () -> {
+                                    invokeSideEffectRunner(
+                                            withholdingExecutor,
+                                            input -> {
+                                                attemptedInputs.add(input);
+                                                if (input == 0) {
+                                                    try {
+                                                        if (!releaseFirstTask.await(
+                                                                10, TimeUnit.SECONDS)) {
+                                                            throw new RuntimeException(
+                                                                    "Timed out waiting to release "
+                                                                            + "the first side effect");
+                                                        }
+                                                    } catch (InterruptedException e) {
+                                                        Thread.currentThread().interrupt();
+                                                        throw new RuntimeException(e);
+                                                    }
+                                                    throw workerFailure;
+                                                }
+                                                return Collections.emptyList();
+                                            },
+                                            Arrays.asList(0, 1).iterator(),
+                                            2,
+                                            ignored -> {});
+                                    return null;
+                                });
+        try {
+            assertThat(secondTaskAccepted.await(10, TimeUnit.SECONDS)).isTrue();
+            releaseFirstTask.countDown();
+            assertThat(getRootCause(awaitFailure(result))).isSameAs(workerFailure);
+            Runnable cancelledTask = withheldTask.getAndSet(null);
+            assertThat(cancelledTask).isNotNull();
+            cancelledTask.run();
+            assertThat(attemptedInputs).containsExactly(0);
+        } finally {
+            releaseFirstTask.countDown();
+            Runnable pendingTask = withheldTask.getAndSet(null);
+            if (pendingTask != null) {
+                pendingTask.run();
+            }
+            caller.shutdownNow();
+            workers.shutdownNow();
+            assertThat(caller.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+            assertThat(workers.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
+    @Test
+    void testLocalSideEffectRunnerSkipsEarlierInputAfterLaterFailure() throws Exception {
+        ExecutorService workers = Executors.newSingleThreadExecutor();
+        ExecutorService reverseOrderExecutor = mock(ExecutorService.class);
+        AtomicReference<Runnable> firstTask = new AtomicReference<>();
+        ConcurrentLinkedQueue<Integer> attemptedInputs = new ConcurrentLinkedQueue<>();
+        ConcurrentLinkedQueue<Integer> consumedResults = new ConcurrentLinkedQueue<>();
+        RuntimeException workerFailure = new RuntimeException("later side effect failed");
+        doAnswer(
+                        invocation -> {
+                            Runnable task = invocation.getArgument(0);
+                            if (firstTask.compareAndSet(null, task)) {
+                                return null;
+                            }
+                            workers.execute(
+                                    () -> {
+                                        task.run();
+                                        firstTask.get().run();
+                                    });
+                            return null;
+                        })
+                .when(reverseOrderExecutor)
+                .execute(any(Runnable.class));
+
+        try {
+            Throwable failure =
+                    catchThrowable(
+                            () ->
+                                    invokeSideEffectRunner(
+                                            reverseOrderExecutor,
+                                            input -> {
+                                                attemptedInputs.add(input);
+                                                if (input == 1) {
+                                                    throw workerFailure;
+                                                }
+                                                return Collections.singletonList(input);
+                                            },
+                                            Arrays.asList(0, 1).iterator(),
+                                            2,
+                                            consumedResults::add));
+
+            assertThat(failure).isSameAs(workerFailure);
+            assertThat(attemptedInputs).containsExactly(1);
+            assertThat(consumedResults).isEmpty();
+        } finally {
+            workers.shutdownNow();
+            assertThat(workers.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
+    @Test
+    void testLocalSideEffectRunnerCompletesWhenContextClassLoaderChangesFail() throws Exception {
+        SecurityException setFailure = new SecurityException("set TCCL denied");
+        SecurityException restoreFailure = new SecurityException("restore TCCL denied");
+        AtomicBoolean denyContextClassLoaderChanges = new AtomicBoolean();
+        AtomicInteger setAttempts = new AtomicInteger();
+        AtomicBoolean processorCalled = new AtomicBoolean();
+        ExecutorService workers =
+                Executors.newSingleThreadExecutor(
+                        runnable ->
+                                new Thread(runnable, "format-table-denied-tccl-worker") {
+                                    @Override
+                                    public void setContextClassLoader(ClassLoader classLoader) {
+                                        if (denyContextClassLoaderChanges.get()) {
+                                            throw setAttempts.incrementAndGet() == 1
+                                                    ? setFailure
+                                                    : restoreFailure;
+                                        }
+                                        super.setContextClassLoader(classLoader);
+                                    }
+                                });
+        ExecutorService caller = Executors.newSingleThreadExecutor();
+        try {
+            workers.submit(() -> {}).get(10, TimeUnit.SECONDS);
+            denyContextClassLoaderChanges.set(true);
+
+            Future<Throwable> result =
+                    caller.submit(
+                            () ->
+                                    catchThrowable(
+                                            () ->
+                                                    invokeSideEffectRunner(
+                                                            workers,
+                                                            input -> {
+                                                                processorCalled.set(true);
+                                                                return Collections.singletonList(
+                                                                        input);
+                                                            },
+                                                            Collections.singletonList(1).iterator(),
+                                                            1,
+                                                            ignored -> {})));
+            Throwable failure = result.get(10, TimeUnit.SECONDS);
+
+            assertThat(failure).isSameAs(setFailure).hasSuppressedException(restoreFailure);
+            assertThat(setAttempts).hasValue(2);
+            assertThat(processorCalled).isFalse();
+        } finally {
+            denyContextClassLoaderChanges.set(false);
+            caller.shutdownNow();
+            workers.shutdownNow();
+            assertThat(caller.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+            assertThat(workers.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
+    @Test
+    void testLocalSideEffectRunnerPreservesDirectExecutorCallerInterrupt() throws Exception {
+        ExecutorService directExecutor = MoreExecutors.newDirectExecutorService();
+        List<Integer> consumedResults = new ArrayList<>();
+        Thread.currentThread().interrupt();
+        try {
+            invokeSideEffectRunner(
+                    directExecutor,
+                    Collections::singletonList,
+                    Collections.singletonList(1).iterator(),
+                    1,
+                    consumedResults::add);
+
+            assertThat(consumedResults).containsExactly(1);
+            assertThat(Thread.currentThread().isInterrupted()).isTrue();
+        } finally {
+            Thread.interrupted();
+            directExecutor.shutdownNow();
+        }
+    }
+
+    @Test
+    void testCatalogManagedBuilderUses64WayCleanupByDefault() throws Exception {
+        ParallelDeleteFileIO fileIO = new ParallelDeleteFileIO(64, true);
+        Path tablePath = new Path(tempDir.toUri());
+        Path partitionPath = new Path(tablePath, "part=p");
+        writeOldFiles(fileIO, partitionPath, 65);
+        FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
+        TwoPhaseOutputStream.Committer committer = mock(TwoPhaseOutputStream.Committer.class);
+        when(committer.targetPath()).thenReturn(new Path(partitionPath, "data-new.csv"));
+        doAnswer(
+                        invocation -> {
+                            assertThat(fileIO.activeDeletes()).isZero();
+                            return null;
+                        })
+                .when(committer)
+                .commit(fileIO);
+        FormatTableCommit commit =
+                builderOverwriteCommit(
+                        tablePath,
+                        fileIO,
+                        partitionManager,
+                        Collections.emptyMap(),
+                        Collections.singletonMap("part", "p"));
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> result =
+                    executor.submit(
+                            () ->
+                                    commit.commit(
+                                            Collections.singletonList(
+                                                    new TwoPhaseCommitMessage(committer))));
+
+            assertThat(fileIO.awaitFirstWave()).isTrue();
+            verify(committer, never()).commit(fileIO);
+
+            fileIO.releaseFirstWave();
+            result.get(10, TimeUnit.SECONDS);
+            assertThat(fileIO.deleteCalls()).isEqualTo(65);
+            assertThat(fileIO.maxConcurrentDeletes()).isEqualTo(64);
+            verify(committer).commit(fileIO);
+        } finally {
+            fileIO.releaseFirstWave();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void testCatalogManagedBuilderPublishesSamePartitionConcurrentlyAndWaitsForBarrier()
+            throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        Path partitionPath = new Path(tablePath, "part=p");
+        FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
+        CountDownLatch firstTwoStarted = new CountDownLatch(2);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        CountDownLatch releaseSecond = new CountDownLatch(1);
+        CountDownLatch thirdFinished = new CountDownLatch(1);
+        AtomicInteger activePublishes = new AtomicInteger();
+        AtomicInteger maxConcurrentPublishes = new AtomicInteger();
+        List<TwoPhaseOutputStream.Committer> committers = new ArrayList<>();
+        List<CommitMessage> messages = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            int index = i;
+            TwoPhaseOutputStream.Committer committer = mock(TwoPhaseOutputStream.Committer.class);
+            when(committer.targetPath()).thenReturn(new Path(partitionPath, "data-" + i + ".csv"));
+            doAnswer(
+                            invocation -> {
+                                int active = activePublishes.incrementAndGet();
+                                maxConcurrentPublishes.updateAndGet(
+                                        previous -> Math.max(previous, active));
+                                try {
+                                    if (index == 0) {
+                                        firstTwoStarted.countDown();
+                                        if (!releaseFirst.await(10, TimeUnit.SECONDS)) {
+                                            throw new IOException(
+                                                    "Timed out waiting to release first publication");
+                                        }
+                                    } else if (index == 1) {
+                                        firstTwoStarted.countDown();
+                                        if (!releaseSecond.await(10, TimeUnit.SECONDS)) {
+                                            throw new IOException(
+                                                    "Timed out waiting to release second publication");
+                                        }
+                                    }
+                                    return null;
+                                } catch (InterruptedException e) {
+                                    Thread.currentThread().interrupt();
+                                    throw new IOException("File publication was interrupted", e);
+                                } finally {
+                                    activePublishes.decrementAndGet();
+                                    if (index == 2) {
+                                        thirdFinished.countDown();
+                                    }
+                                }
+                            })
+                    .when(committer)
+                    .commit(fileIO);
+            committers.add(committer);
+            messages.add(new TwoPhaseCommitMessage(committer));
+        }
+        FormatTableCommit commit =
+                (FormatTableCommit)
+                        formatTable(
+                                        tablePath,
+                                        fileIO,
+                                        partitionManager,
+                                        Collections.singletonMap(
+                                                CoreOptions.FORMAT_TABLE_COMMIT_PUBLISH_THREAD_NUM
+                                                        .key(),
+                                                "2"))
+                                .newBatchWriteBuilder()
+                                .newCommit();
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        Future<?> result = executor.submit(() -> commit.commit(messages));
+        try {
+            assertThat(firstTwoStarted.await(3, TimeUnit.SECONDS)).isTrue();
+            assertThat(activePublishes).hasValue(2);
+
+            releaseFirst.countDown();
+            assertThat(thirdFinished.await(3, TimeUnit.SECONDS)).isTrue();
+            assertThat(activePublishes).hasValue(1);
+            verify(partitionManager, never())
+                    .createPartitions(anyList(), eq(true), any(), anyBoolean());
+            for (TwoPhaseOutputStream.Committer committer : committers) {
+                verify(committer, never()).clean(fileIO);
+            }
+
+            releaseSecond.countDown();
+            result.get(10, TimeUnit.SECONDS);
+
+            assertThat(maxConcurrentPublishes).hasValue(2);
+            for (TwoPhaseOutputStream.Committer committer : committers) {
+                verify(committer).clean(fileIO);
+            }
+            verify(partitionManager).createPartitions(anyList(), eq(true), any(), eq(false));
+        } finally {
+            releaseFirst.countDown();
+            releaseSecond.countDown();
+            if (!result.isDone()) {
+                result.get(10, TimeUnit.SECONDS);
+            }
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void testPublishFailureDrainsRunningWorkBeforeAbort() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        Path partitionPath = new Path(tablePath, "part=p");
+        FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
+        CountDownLatch secondStarted = new CountDownLatch(1);
+        CountDownLatch releaseSecond = new CountDownLatch(1);
+        AtomicInteger activePublishes = new AtomicInteger();
+        ConcurrentLinkedQueue<Integer> activePublishesAtDiscard = new ConcurrentLinkedQueue<>();
+        List<TwoPhaseOutputStream.Committer> committers = new ArrayList<>();
+        List<Path> targetPaths = new ArrayList<>();
+        List<CommitMessage> messages = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            TwoPhaseOutputStream.Committer committer = mock(TwoPhaseOutputStream.Committer.class);
+            Path targetPath = new Path(partitionPath, "data-" + i + ".csv");
+            when(committer.targetPath()).thenReturn(targetPath);
+            doAnswer(
+                            invocation -> {
+                                activePublishesAtDiscard.add(activePublishes.get());
+                                return null;
+                            })
+                    .when(committer)
+                    .discard(fileIO);
+            committers.add(committer);
+            targetPaths.add(targetPath);
+            messages.add(new TwoPhaseCommitMessage(committer));
+        }
+        doAnswer(
+                        invocation -> {
+                            activePublishes.incrementAndGet();
+                            try {
+                                if (!secondStarted.await(10, TimeUnit.SECONDS)) {
+                                    throw new IOException("The second publication did not start");
+                                }
+                                fileIO.writeFile(targetPaths.get(0), "published", false);
+                                throw new IOException("publish failed");
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                throw new IOException("File publication was interrupted", e);
+                            } finally {
+                                activePublishes.decrementAndGet();
+                            }
+                        })
+                .when(committers.get(0))
+                .commit(fileIO);
+        doAnswer(
+                        invocation -> {
+                            activePublishes.incrementAndGet();
+                            secondStarted.countDown();
+                            try {
+                                if (!releaseSecond.await(10, TimeUnit.SECONDS)) {
+                                    throw new IOException(
+                                            "Timed out waiting to release publication");
+                                }
+                                fileIO.writeFile(targetPaths.get(1), "published", false);
+                                return null;
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                throw new IOException("File publication was interrupted", e);
+                            } finally {
+                                activePublishes.decrementAndGet();
+                            }
+                        })
+                .when(committers.get(1))
+                .commit(fileIO);
+        FormatTableCommit commit =
+                (FormatTableCommit)
+                        formatTable(
+                                        tablePath,
+                                        fileIO,
+                                        partitionManager,
+                                        Collections.singletonMap(
+                                                CoreOptions.FORMAT_TABLE_COMMIT_PUBLISH_THREAD_NUM
+                                                        .key(),
+                                                "2"))
+                                .newBatchWriteBuilder()
+                                .newCommit();
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        Future<?> result = executor.submit(() -> commit.commit(messages));
+        try {
+            assertThat(secondStarted.await(10, TimeUnit.SECONDS)).isTrue();
+            assertThatThrownBy(() -> result.get(300, TimeUnit.MILLISECONDS))
+                    .isInstanceOf(TimeoutException.class);
+            for (TwoPhaseOutputStream.Committer committer : committers) {
+                verify(committer, never()).discard(fileIO);
+            }
+
+            releaseSecond.countDown();
+            assertThat(getRootCause(awaitFailure(result))).hasMessage("publish failed");
+
+            verify(committers.get(2), never()).commit(fileIO);
+            assertThat(activePublishesAtDiscard).containsExactly(0, 0, 0);
+            for (TwoPhaseOutputStream.Committer committer : committers) {
+                verify(committer).discard(fileIO);
+            }
+            assertThat(fileIO.exists(targetPaths.get(0))).isFalse();
+            assertThat(fileIO.exists(targetPaths.get(1))).isFalse();
+        } finally {
+            releaseSecond.countDown();
+            if (!result.isDone()) {
+                try {
+                    result.get(10, TimeUnit.SECONDS);
+                } catch (ExecutionException ignored) {
+                    // The test expects the first publication to fail.
+                }
+            }
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void testOverwritePartialParallelPublishFailurePreservesReplacementAndCleansStaging()
+            throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(new Path(tempDir.toUri()), "partial-parallel-publish");
+        Path partitionPath = new Path(tablePath, "part=p");
+        Path oldPath = new Path(partitionPath, "data-old.csv");
+        Path successfulTarget = new Path(partitionPath, "data-success.csv");
+        Path failedTarget = new Path(partitionPath, "data-failed.csv");
+        Path successfulStaging = new Path(new Path(tempDir.toUri()), "partial-staging/success.tmp");
+        Path failedStaging = new Path(new Path(tempDir.toUri()), "partial-staging/failed.tmp");
+        fileIO.writeFile(oldPath, "old", false);
+        fileIO.writeFile(successfulStaging, "staged", false);
+        fileIO.writeFile(failedStaging, "staged", false);
+
+        CountDownLatch bothPublishesStarted = new CountDownLatch(2);
+        CountDownLatch replacementPublished = new CountDownLatch(1);
+        StagedFileCommitter successfulCommitter =
+                new StagedFileCommitter(successfulTarget, successfulStaging) {
+                    @Override
+                    public void commit(FileIO committingFileIO) throws IOException {
+                        bothPublishesStarted.countDown();
+                        awaitLatch(bothPublishesStarted, "both overwrite publications to start");
+                        publish(committingFileIO);
+                        replacementPublished.countDown();
+                    }
+                };
+        StagedFileCommitter failingCommitter =
+                new StagedFileCommitter(failedTarget, failedStaging) {
+                    @Override
+                    public void commit(FileIO committingFileIO) throws IOException {
+                        bothPublishesStarted.countDown();
+                        awaitLatch(bothPublishesStarted, "both overwrite publications to start");
+                        awaitLatch(replacementPublished, "the parallel replacement publication");
+                        publish(committingFileIO);
+                        throw new IOException("parallel publish failed");
+                    }
+                };
+        List<CommitMessage> messages =
+                Arrays.asList(
+                        new TwoPhaseCommitMessage(successfulCommitter),
+                        new TwoPhaseCommitMessage(failingCommitter));
+
+        assertThatThrownBy(
+                        () -> staticPartitionOverwriteCommit(tablePath, fileIO, 2).commit(messages))
+                .hasRootCauseMessage("parallel publish failed");
+
+        assertThat(fileIO.exists(oldPath)).isFalse();
+        assertThat(fileIO.exists(successfulTarget)).isTrue();
+        assertThat(fileIO.exists(failedTarget)).isTrue();
+        assertThat(fileIO.exists(successfulStaging)).isFalse();
+        assertThat(fileIO.exists(failedStaging)).isFalse();
+    }
+
+    @Test
+    void testPublishConcurrencyIsGatedToCatalogManagedPartitionedTables() throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        Map<String, String> options =
+                Collections.singletonMap(
+                        CoreOptions.FORMAT_TABLE_COMMIT_PUBLISH_THREAD_NUM.key(), "64");
+
+        FormatTableCommit filesystemDiscovered =
+                (FormatTableCommit)
+                        formatTable(new Path(tablePath, "filesystem"), fileIO, null, options)
+                                .newBatchWriteBuilder()
+                                .newCommit();
+        assertPublishesOnCaller(
+                filesystemDiscovered, fileIO, new Path(tablePath, "filesystem/part=p"));
+
+        FormatTableCommit unpartitioned =
+                builderUnpartitionedOverwriteCommit(
+                        new Path(tablePath, "unpartitioned"),
+                        fileIO,
+                        mock(FormatTablePartitionManager.class),
+                        options);
+        assertPublishesOnCaller(unpartitioned, fileIO, new Path(tablePath, "unpartitioned"));
+    }
+
+    @Test
+    void testCatalogManagedBuilderHonorsConfiguredSerialCleanup() throws Exception {
+        SerialProbeFileIO fileIO = new SerialProbeFileIO();
+        Path tablePath = new Path(tempDir.toUri());
+        Path partitionPath = new Path(tablePath, "part=p");
+        writeOldFiles(fileIO, partitionPath, 3);
+        FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
+        TwoPhaseOutputStream.Committer committer = mock(TwoPhaseOutputStream.Committer.class);
+        when(committer.targetPath()).thenReturn(new Path(partitionPath, "data-new.csv"));
+        FormatTableCommit commit =
+                builderOverwriteCommit(
+                        tablePath,
+                        fileIO,
+                        partitionManager,
+                        Collections.singletonMap(
+                                CoreOptions.FORMAT_TABLE_COMMIT_CLEANUP_THREAD_NUM.key(), "1"),
+                        Collections.singletonMap("part", "p"));
+
+        commit.commit(Collections.singletonList(new TwoPhaseCommitMessage(committer)));
+
+        assertThat(fileIO.deleteCalls()).isEqualTo(3);
+        assertThat(fileIO.maxConcurrentDeletes()).isEqualTo(1);
+    }
+
+    @Test
+    void testCatalogManagedBuilderPropagatesConfiguredCleanupConcurrency() throws Exception {
+        ParallelDeleteFileIO fileIO = new ParallelDeleteFileIO(7, true);
+        Path tablePath = new Path(tempDir.toUri());
+        Path partitionPath = new Path(tablePath, "part=p");
+        writeOldFiles(fileIO, partitionPath, 8);
+        FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
+        FormatTableCommit commit =
+                builderOverwriteCommit(
+                        tablePath,
+                        fileIO,
+                        partitionManager,
+                        Collections.singletonMap(
+                                CoreOptions.FORMAT_TABLE_COMMIT_CLEANUP_THREAD_NUM.key(), "7"),
+                        Collections.singletonMap("part", "p"));
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> result = executor.submit(() -> commit.commit(Collections.emptyList()));
+
+            assertThat(fileIO.awaitFirstWave()).isTrue();
+            assertThat(fileIO.awaitUnexpectedExtraDelete()).isFalse();
+
+            fileIO.releaseFirstWave();
+            result.get(10, TimeUnit.SECONDS);
+            assertThat(fileIO.deleteCalls()).isEqualTo(8);
+            assertThat(fileIO.maxConcurrentDeletes()).isEqualTo(7);
+        } finally {
+            fileIO.releaseFirstWave();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void testFilesystemDiscoveredFormatTableCleanupRemainsSerial() throws Exception {
+        SerialProbeFileIO fileIO = new SerialProbeFileIO();
+        Path tablePath = new Path(tempDir.toUri());
+        Path partitionPath = new Path(tablePath, "part=p");
+        writeOldFiles(fileIO, partitionPath, 3);
+        TwoPhaseOutputStream.Committer committer = mock(TwoPhaseOutputStream.Committer.class);
+        when(committer.targetPath()).thenReturn(new Path(partitionPath, "data-new.csv"));
+        FormatTableCommit commit =
+                builderOverwriteCommit(
+                        tablePath,
+                        fileIO,
+                        null,
+                        Collections.singletonMap(
+                                CoreOptions.FORMAT_TABLE_COMMIT_CLEANUP_THREAD_NUM.key(), "64"),
+                        Collections.singletonMap("part", "p"));
+
+        commit.commit(Collections.singletonList(new TwoPhaseCommitMessage(committer)));
+
+        assertThat(fileIO.deleteCalls()).isEqualTo(3);
+        assertThat(fileIO.maxConcurrentDeletes()).isEqualTo(1);
+    }
+
+    @Test
+    void testCleanupIsAHardBarrierBeforePublishingNewFiles() throws Exception {
+        PartialBarrierDeleteFileIO fileIO = new PartialBarrierDeleteFileIO();
+        Path tablePath = new Path(tempDir.toUri());
+        Path partitionPath = new Path(tablePath, "part=p");
+        writeOldFiles(fileIO, partitionPath, 2);
+        TwoPhaseOutputStream.Committer committer = mock(TwoPhaseOutputStream.Committer.class);
+        when(committer.targetPath()).thenReturn(new Path(partitionPath, "data-new.csv"));
+        doAnswer(
+                        invocation -> {
+                            assertThat(fileIO.activeDeletes()).isZero();
+                            return null;
+                        })
+                .when(committer)
+                .commit(fileIO);
+        FormatTableCommit commit =
+                newCleanupCommit(tablePath, fileIO, null, Collections.singletonMap("part", "p"), 2);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> result =
+                    executor.submit(
+                            () ->
+                                    commit.commit(
+                                            Collections.singletonList(
+                                                    new TwoPhaseCommitMessage(committer))));
+
+            assertThat(fileIO.awaitBothDeletesStarted()).isTrue();
+            verify(committer, never()).commit(fileIO);
+
+            fileIO.releaseFirstDelete();
+            assertThat(fileIO.awaitFirstDeleteReturned()).isTrue();
+            assertThatThrownBy(() -> result.get(300, TimeUnit.MILLISECONDS))
+                    .isInstanceOf(TimeoutException.class);
+            verify(committer, never()).commit(fileIO);
+
+            fileIO.releaseSecondDelete();
+            result.get(10, TimeUnit.SECONDS);
+            verify(committer).commit(fileIO);
+        } finally {
+            fileIO.releaseFirstDelete();
+            fileIO.releaseSecondDelete();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void testUnpartitionedCatalogManagedFormatTableCleanupRemainsSerial() throws Exception {
+        SerialProbeFileIO fileIO = new SerialProbeFileIO();
+        Path tablePath = new Path(tempDir.toUri());
+        writeOldFiles(fileIO, tablePath, 3);
+        FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
+        TwoPhaseOutputStream.Committer committer = mock(TwoPhaseOutputStream.Committer.class);
+        when(committer.targetPath()).thenReturn(new Path(tablePath, "data-new.csv"));
+        FormatTableCommit commit =
+                builderUnpartitionedOverwriteCommit(
+                        tablePath,
+                        fileIO,
+                        partitionManager,
+                        Collections.singletonMap(
+                                CoreOptions.FORMAT_TABLE_COMMIT_CLEANUP_THREAD_NUM.key(), "64"));
+
+        commit.commit(Collections.singletonList(new TwoPhaseCommitMessage(committer)));
+
+        assertThat(fileIO.deleteCalls()).isEqualTo(3);
+        assertThat(fileIO.maxConcurrentDeletes()).isEqualTo(1);
+    }
+
+    @Test
+    void testCleanupFailureStopsNewSubmissionsAndDrainsTheAlreadyRunningDelete() throws Exception {
+        FailureDrainFileIO fileIO = new FailureDrainFileIO();
+        Path tablePath = new Path(tempDir.toUri());
+        Path partitionPath = new Path(tablePath, "part=p");
+        writeOldFiles(fileIO, partitionPath, 6);
+        TwoPhaseOutputStream.Committer committer = mock(TwoPhaseOutputStream.Committer.class);
+        when(committer.targetPath()).thenReturn(new Path(partitionPath, "data-new.csv"));
+        FormatTableCommit commit =
+                newCleanupCommit(tablePath, fileIO, null, Collections.singletonMap("part", "p"), 2);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> result =
+                    executor.submit(
+                            () ->
+                                    commit.commit(
+                                            Collections.singletonList(
+                                                    new TwoPhaseCommitMessage(committer))));
+
+            assertThat(fileIO.awaitFailureAttempted()).isTrue();
+            assertThatThrownBy(() -> result.get(300, TimeUnit.MILLISECONDS))
+                    .isInstanceOf(TimeoutException.class);
+            assertThat(fileIO.attemptedFiles())
+                    .containsExactlyInAnyOrder("data-000.csv", "data-001.csv");
+
+            fileIO.releaseSuccessfulSibling();
+            assertThat(getRootCause(awaitFailure(result)))
+                    .hasMessage("delete failed at input position 0");
+            assertThat(fileIO.attemptedFiles())
+                    .containsExactlyInAnyOrder("data-000.csv", "data-001.csv", "data-new.csv");
+            assertThat(fileIO.successfulFiles()).containsExactly("data-001.csv");
+            verify(committer, never()).commit(fileIO);
+        } finally {
+            fileIO.releaseSuccessfulSibling();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void testLaterPartitionListingFailureDrainsAcceptedDeletesBeforeAbort() throws Exception {
+        Path tablePath = new Path(new Path(tempDir.toUri()), "listing-failure");
+        Path firstPartition = new Path(tablePath, "part=p0");
+        Path failingPartition = new Path(tablePath, "part=p1");
+        LaterRootListingFailureFileIO fileIO =
+                new LaterRootListingFailureFileIO(failingPartition, 2);
+        writeOldFiles(fileIO, firstPartition, 2);
+        writeOldFiles(fileIO, failingPartition, 1);
+
+        AtomicInteger discardCalls = new AtomicInteger();
+        ConcurrentLinkedQueue<Integer> activeDeletesAtDiscard = new ConcurrentLinkedQueue<>();
+        List<CommitMessage> messages = new ArrayList<>();
+        List<TwoPhaseOutputStream.Committer> committers = new ArrayList<>();
+        for (Path partition : Arrays.asList(firstPartition, failingPartition)) {
+            TwoPhaseOutputStream.Committer committer = mock(TwoPhaseOutputStream.Committer.class);
+            when(committer.targetPath()).thenReturn(new Path(partition, "data-new.csv"));
+            doAnswer(
+                            invocation -> {
+                                activeDeletesAtDiscard.add(fileIO.activeDeletes());
+                                discardCalls.incrementAndGet();
+                                return null;
+                            })
+                    .when(committer)
+                    .discard(fileIO);
+            committers.add(committer);
+            messages.add(new TwoPhaseCommitMessage(committer));
+        }
+        FormatTableCommit commit = newCleanupCommit(tablePath, fileIO, null, null, 3);
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        Future<?> result = executor.submit(() -> commit.commit(messages));
+        try {
+            assertThat(fileIO.awaitListingFailure()).isTrue();
+            assertThatThrownBy(() -> result.get(300, TimeUnit.MILLISECONDS))
+                    .isInstanceOf(TimeoutException.class);
+            assertThat(discardCalls).hasValue(0);
+            for (TwoPhaseOutputStream.Committer committer : committers) {
+                verify(committer, never()).commit(fileIO);
+                verify(committer, never()).discard(fileIO);
+            }
+
+            fileIO.releaseFirstDelete();
+            assertThat(fileIO.awaitFirstDeleteReturned()).isTrue();
+            assertThatThrownBy(() -> result.get(300, TimeUnit.MILLISECONDS))
+                    .isInstanceOf(TimeoutException.class);
+            assertThat(discardCalls).hasValue(0);
+
+            fileIO.releaseSecondDelete();
+            assertThat(getRootCause(awaitFailure(result)))
+                    .hasMessage("Failed to list the later partition root.");
+            assertThat(discardCalls).hasValue(2);
+            assertThat(activeDeletesAtDiscard).containsExactly(0, 0);
+            for (TwoPhaseOutputStream.Committer committer : committers) {
+                verify(committer, never()).commit(fileIO);
+                verify(committer).discard(fileIO);
+            }
+        } finally {
+            fileIO.releaseFirstDelete();
+            fileIO.releaseSecondDelete();
+            try {
+                if (!result.isDone()) {
+                    try {
+                        result.get(10, TimeUnit.SECONDS);
+                    } catch (ExecutionException ignored) {
+                        // The test expects the listing failure above.
+                    }
+                }
+            } finally {
+                executor.shutdownNow();
+            }
+        }
+    }
+
+    @Test
+    void testCleanupSelectsLowestInputFailureAndSuppressesTheOtherFailure() throws Exception {
+        OrderedDualFailureFileIO fileIO = new OrderedDualFailureFileIO();
+        Path tablePath = new Path(tempDir.toUri());
+        Path partitionPath = new Path(tablePath, "part=p");
+        writeOldFiles(fileIO, partitionPath, 2);
+        FormatTableCommit commit =
+                newCleanupCommit(tablePath, fileIO, null, Collections.singletonMap("part", "p"), 2);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> result = executor.submit(() -> commit.commit(Collections.emptyList()));
+            assertThat(fileIO.awaitHigherPositionFailure()).isTrue();
+            assertThatThrownBy(() -> result.get(300, TimeUnit.MILLISECONDS))
+                    .isInstanceOf(TimeoutException.class);
+
+            fileIO.releaseLowerPositionFailure();
+            Throwable primary = getRootCause(awaitFailure(result));
+            assertThat(primary).hasMessage("delete failed at input position 0");
+            assertThat(primary.getSuppressed())
+                    .extracting(Throwable::getMessage)
+                    .containsExactly("delete failed at input position 1");
+        } finally {
+            fileIO.releaseLowerPositionFailure();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void testInterruptDrainsCleanupRestoresFlagAndNeverPublishes() throws Exception {
+        BlockingDeleteFileIO fileIO = new BlockingDeleteFileIO(2);
+        Path tablePath = new Path(tempDir.toUri());
+        Path partitionPath = new Path(tablePath, "part=p");
+        writeOldFiles(fileIO, partitionPath, 2);
+        TwoPhaseOutputStream.Committer committer = mock(TwoPhaseOutputStream.Committer.class);
+        when(committer.targetPath()).thenReturn(new Path(partitionPath, "data-new.csv"));
+        FormatTableCommit commit =
+                newCleanupCommit(tablePath, fileIO, null, Collections.singletonMap("part", "p"), 2);
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        AtomicBoolean interruptRestored = new AtomicBoolean();
+        CountDownLatch commitReturned = new CountDownLatch(1);
+        Thread commitThread =
+                new Thread(
+                        () -> {
+                            try {
+                                commit.commit(
+                                        Collections.singletonList(
+                                                new TwoPhaseCommitMessage(committer)));
+                            } catch (Throwable t) {
+                                failure.set(t);
+                            } finally {
+                                interruptRestored.set(Thread.currentThread().isInterrupted());
+                                commitReturned.countDown();
+                            }
+                        },
+                        "format-cleanup-interrupted-caller");
+
+        commitThread.start();
+        try {
+            assertThat(fileIO.awaitDeletesStarted()).isTrue();
+            commitThread.interrupt();
+            assertThat(commitReturned.await(300, TimeUnit.MILLISECONDS)).isFalse();
+
+            fileIO.releaseDeletes();
+            assertThat(commitReturned.await(10, TimeUnit.SECONDS)).isTrue();
+            assertThat(failure.get()).isNotNull();
+            assertThat(getCausalChain(failure.get()))
+                    .anyMatch(InterruptedException.class::isInstance);
+            assertThat(interruptRestored).isTrue();
+            assertThat(fileIO.interruptedDeletes()).isZero();
+            verify(committer, never()).commit(fileIO);
+        } finally {
+            fileIO.releaseDeletes();
+            commitThread.interrupt();
+            commitThread.join(TimeUnit.SECONDS.toMillis(10));
+        }
+        assertThat(commitThread.isAlive()).isFalse();
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    @Test
+    void testCleanupStatisticsClaimOnlyFilesDeletedByThisCommit() throws Exception {
+        MixedOwnershipFileIO fileIO = new MixedOwnershipFileIO();
+        Path tablePath = new Path(tempDir.toUri());
+        writeOldFiles(fileIO, new Path(tablePath, "year=2025/month=00"), 1);
+        writeOldFiles(fileIO, new Path(tablePath, "year=2025/month=01"), 1);
+        writeOldFiles(fileIO, new Path(tablePath, "year=2025/month=02"), 1);
+        FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
+        FormatTableCommit commit =
+                new FormatTableCommit(
+                        tablePath.toString(),
+                        Arrays.asList("year", "month"),
+                        fileIO,
+                        false,
+                        PARTITION_DEFAULT_NAME.defaultValue(),
+                        true,
+                        Identifier.create("cleanup_db", "cleanup_table"),
+                        Collections.singletonMap("year", "2025"),
+                        null,
+                        null,
+                        partitionManager,
+                        /* dynamicPartitionOverwrite */ true,
+                        /* cleanupThreadNum */ 2,
+                        /* publishThreadNum */ 1);
+
+        commit.commit(Collections.emptyList());
+
+        Map<String, String> owned = partitionSpec("2025", "00");
+        ArgumentCaptor<List<Map<String, String>>> specs =
+                ArgumentCaptor.forClass((Class) List.class);
+        ArgumentCaptor<List<PartitionStatistics>> statistics =
+                ArgumentCaptor.forClass((Class) List.class);
+        verify(partitionManager)
+                .createPartitions(specs.capture(), eq(true), statistics.capture(), eq(true));
+        assertThat(specs.getValue()).containsExactly(owned);
+        assertThat(statistics.getValue())
+                .singleElement()
+                .satisfies(
+                        stat -> {
+                            assertThat(stat.spec()).isEqualTo(owned);
+                            assertThat(stat.recordCount()).isZero();
+                            assertThat(stat.fileSizeInBytes()).isZero();
+                            assertThat(stat.fileCount()).isZero();
+                        });
+        assertThat(fileIO.exists(new Path(tablePath, "year=2025/month=00/data-000.csv"))).isFalse();
+        assertThat(fileIO.exists(new Path(tablePath, "year=2025/month=01/data-000.csv"))).isFalse();
+        assertThat(fileIO.exists(new Path(tablePath, "year=2025/month=02/data-000.csv"))).isFalse();
+    }
+
+    @Test
+    void testCleanupRejectsFalseWhenTheOldDataFileStillExists() throws Exception {
+        RefusingDeleteFileIO fileIO = new RefusingDeleteFileIO();
+        Path tablePath = new Path(tempDir.toUri());
+        Path partitionPath = new Path(tablePath, "part=p");
+        writeOldFiles(fileIO, partitionPath, 1);
+        TwoPhaseOutputStream.Committer committer = mock(TwoPhaseOutputStream.Committer.class);
+        when(committer.targetPath()).thenReturn(new Path(partitionPath, "data-new.csv"));
+        FormatTableCommit commit =
+                newCleanupCommit(tablePath, fileIO, null, Collections.singletonMap("part", "p"), 2);
+
+        assertThatThrownBy(
+                        () ->
+                                commit.commit(
+                                        Collections.singletonList(
+                                                new TwoPhaseCommitMessage(committer))))
+                .hasRootCauseMessage(
+                        "Failed to delete data file "
+                                + new Path(partitionPath, "data-000.csv")
+                                + " of table cleanup_db.cleanup_table.");
+        verify(committer, never()).commit(fileIO);
+        verify(committer).discard(fileIO);
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    @Test
+    void testConcurrentCleanupReportsCompleteStatisticsAfterBarrier() throws Exception {
+        ParallelDeleteFileIO fileIO = new ParallelDeleteFileIO(4);
+        Path tablePath = new Path(tempDir.toUri());
+        for (int month = 0; month < 8; month++) {
+            writeOldFiles(
+                    fileIO, new Path(tablePath, String.format("year=2025/month=%02d", month)), 1);
+        }
+        FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
+        doAnswer(
+                        invocation -> {
+                            assertThat(fileIO.activeDeletes()).isZero();
+                            return null;
+                        })
+                .when(partitionManager)
+                .createPartitions(anyList(), eq(true), anyList(), eq(true));
+        FormatTableCommit commit =
+                new FormatTableCommit(
+                        tablePath.toString(),
+                        Arrays.asList("year", "month"),
+                        fileIO,
+                        false,
+                        PARTITION_DEFAULT_NAME.defaultValue(),
+                        true,
+                        Identifier.create("cleanup_db", "cleanup_table"),
+                        Collections.singletonMap("year", "2025"),
+                        null,
+                        null,
+                        partitionManager,
+                        /* dynamicPartitionOverwrite */ true,
+                        /* cleanupThreadNum */ 4,
+                        /* publishThreadNum */ 1);
+
+        commit.commit(Collections.emptyList());
+
+        List<Map<String, String>> expectedSpecs = new ArrayList<>();
+        for (int month = 0; month < 8; month++) {
+            expectedSpecs.add(partitionSpec("2025", String.format("%02d", month)));
+        }
+        ArgumentCaptor<List<Map<String, String>>> specs =
+                ArgumentCaptor.forClass((Class) List.class);
+        ArgumentCaptor<List<PartitionStatistics>> statistics =
+                ArgumentCaptor.forClass((Class) List.class);
+        verify(partitionManager)
+                .createPartitions(specs.capture(), eq(true), statistics.capture(), eq(true));
+        assertThat(specs.getValue()).containsExactlyInAnyOrderElementsOf(expectedSpecs);
+        assertThat(statistics.getValue())
+                .hasSize(8)
+                .extracting(PartitionStatistics::spec)
+                .containsExactlyInAnyOrderElementsOf(expectedSpecs);
+        assertThat(statistics.getValue())
+                .allSatisfy(
+                        stat -> {
+                            assertThat(stat.recordCount()).isZero();
+                            assertThat(stat.fileSizeInBytes()).isZero();
+                            assertThat(stat.fileCount()).isZero();
+                        });
+    }
+
+    @Test
+    void testCatalogManagedOverwriteCleanupSpansPartitionDirectories() throws Exception {
+        assertOverwriteCleanupSpansPartitions(/* dynamicPartitionOverwrite */ true);
+        assertOverwriteCleanupSpansPartitions(/* dynamicPartitionOverwrite */ false);
+    }
+
+    @Test
+    void testCleanupDoesNotListEveryPartitionBeforeTheFirstDeleteWindowCompletes()
+            throws Exception {
+        Path tablePath = new Path(new Path(tempDir.toUri()), "lazy-root-listing");
+        Path firstPartition = new Path(tablePath, "part=p0");
+        Path deferredPartition = new Path(tablePath, "part=p1");
+        LazyRootListingFileIO fileIO = new LazyRootListingFileIO(2, deferredPartition);
+        writeOldFiles(fileIO, firstPartition, 2);
+        writeOldFiles(fileIO, deferredPartition, 2);
+
+        List<CommitMessage> messages = new ArrayList<>();
+        for (Path partition : Arrays.asList(firstPartition, deferredPartition)) {
+            TwoPhaseOutputStream.Committer committer = mock(TwoPhaseOutputStream.Committer.class);
+            when(committer.targetPath()).thenReturn(new Path(partition, "data-new.csv"));
+            messages.add(new TwoPhaseCommitMessage(committer));
+        }
+        Map<String, String> options = new LinkedHashMap<>();
+        options.put(CoreOptions.FORMAT_TABLE_COMMIT_CLEANUP_THREAD_NUM.key(), "2");
+        FormatTableCommit commit =
+                builderOverwriteCommit(
+                        tablePath,
+                        fileIO,
+                        mock(FormatTablePartitionManager.class),
+                        options,
+                        /* staticPartition */ null);
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        Future<?> result = null;
+        try {
+            result = executor.submit(() -> commit.commit(messages));
+            assertThat(fileIO.awaitFirstWave()).isTrue();
+            assertThat(fileIO.deferredRootListed()).isFalse();
+        } finally {
+            fileIO.releaseFirstWave();
+            if (result != null) {
+                result.get(10, TimeUnit.SECONDS);
+            }
+            executor.shutdownNow();
+        }
+
+        assertThat(fileIO.deferredRootListed()).isTrue();
+        assertThat(fileIO.deleteCalls()).isEqualTo(4);
+    }
+
+    @Test
+    void testBuilderCleanupConcurrencyDoesNotApplyToTruncateOperations() throws Exception {
+        SerialProbeFileIO tableFileIO = new SerialProbeFileIO();
+        Path tablePath = new Path(new Path(tempDir.toUri()), "truncate-table");
+        Path tablePartitionPath = new Path(tablePath, "part=p");
+        writeOldFiles(tableFileIO, tablePartitionPath, 3);
+        FormatTablePartitionManager tableManager = mock(FormatTablePartitionManager.class);
+        when(tableManager.listPartitions(Collections.emptyMap(), null))
+                .thenReturn(
+                        Collections.singletonList(
+                                new Partition(
+                                        Collections.singletonMap("part", "p"),
+                                        0,
+                                        0,
+                                        0,
+                                        0,
+                                        -1,
+                                        false)));
+        builderTruncateCommit(tablePath, tableFileIO, tableManager).truncateTable();
+
+        SerialProbeFileIO partitionFileIO = new SerialProbeFileIO();
+        Path partitionsPath = new Path(new Path(tempDir.toUri()), "truncate-partitions");
+        Path namedPartitionPath = new Path(partitionsPath, "part=p");
+        writeOldFiles(partitionFileIO, namedPartitionPath, 3);
+        FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
+        when(partitionManager.listPartitionsByNames(anyList()))
+                .thenReturn(
+                        Collections.singletonList(
+                                new Partition(
+                                        Collections.singletonMap("part", "p"),
+                                        0,
+                                        0,
+                                        0,
+                                        0,
+                                        -1,
+                                        false)));
+        builderTruncateCommit(partitionsPath, partitionFileIO, partitionManager)
+                .truncatePartitions(
+                        Collections.singletonList(Collections.singletonMap("part", "p")));
+
+        assertThat(tableFileIO.maxConcurrentDeletes()).isEqualTo(1);
+        assertThat(partitionFileIO.maxConcurrentDeletes()).isEqualTo(1);
+    }
+
+    @Test
+    void testAbortFailureDoesNotReplaceInterruptedCleanupFailure() throws Exception {
+        BlockingDeleteFileIO fileIO = new BlockingDeleteFileIO(2);
+        Path tablePath = new Path(new Path(tempDir.toUri()), "abort-failure");
+        Path partitionPath = new Path(tablePath, "part=p");
+        writeOldFiles(fileIO, partitionPath, 2);
+        TwoPhaseOutputStream.Committer committer = mock(TwoPhaseOutputStream.Committer.class);
+        when(committer.targetPath()).thenReturn(new Path(partitionPath, "data-new.csv"));
+        doThrow(new IOException("discard failed after cleanup interruption"))
+                .when(committer)
+                .discard(fileIO);
+        FormatTableCommit commit =
+                newCleanupCommit(tablePath, fileIO, null, Collections.singletonMap("part", "p"), 2);
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        AtomicBoolean interruptRestored = new AtomicBoolean();
+        Thread commitThread =
+                new Thread(
+                        () -> {
+                            try {
+                                commit.commit(
+                                        Collections.singletonList(
+                                                new TwoPhaseCommitMessage(committer)));
+                            } catch (Throwable t) {
+                                failure.set(t);
+                            } finally {
+                                interruptRestored.set(Thread.currentThread().isInterrupted());
+                            }
+                        },
+                        "format-cleanup-abort-failure-caller");
+
+        commitThread.start();
+        try {
+            assertThat(fileIO.awaitDeletesStarted()).isTrue();
+            commitThread.interrupt();
+            fileIO.releaseDeletes();
+            commitThread.join(TimeUnit.SECONDS.toMillis(10));
+        } finally {
+            fileIO.releaseDeletes();
+            commitThread.interrupt();
+            commitThread.join(TimeUnit.SECONDS.toMillis(10));
+        }
+
+        assertThat(commitThread.isAlive()).isFalse();
+        assertThat(failure.get()).isNotNull();
+        assertThat(getRootCause(failure.get())).isInstanceOf(InterruptedException.class);
+        assertThat(failureTree(failure.get()))
+                .extracting(Throwable::getMessage)
+                .contains("discard failed after cleanup interruption");
+        assertThat(interruptRestored).isTrue();
+        verify(committer).discard(fileIO);
+        verify(committer, never()).commit(fileIO);
+    }
+
     /**
      * An overwrite that names no partition: what INSERT OVERWRITE without a PARTITION clause is.
      */
@@ -653,6 +2290,737 @@ class FormatTableCommitTest {
                 null,
                 null,
                 dynamicPartitionOverwrite);
+    }
+
+    private FormatTableCommit staticPartitionOverwriteCommit(
+            Path tableLocation, FileIO fileIO, int publishThreadNum) {
+        return new FormatTableCommit(
+                tableLocation.toString(),
+                Collections.singletonList("part"),
+                fileIO,
+                false,
+                PARTITION_DEFAULT_NAME.defaultValue(),
+                true,
+                Identifier.create("overwrite_db", "overwrite_table"),
+                Collections.singletonMap("part", "p"),
+                null,
+                null,
+                null,
+                /* dynamicPartitionOverwrite */ true,
+                /* cleanupThreadNum */ 1,
+                publishThreadNum);
+    }
+
+    private void assertOverwriteCleanupSpansPartitions(boolean dynamicPartitionOverwrite)
+            throws Exception {
+        ParallelDeleteFileIO fileIO = new ParallelDeleteFileIO(4);
+        Path tablePath =
+                new Path(
+                        new Path(tempDir.toUri()),
+                        dynamicPartitionOverwrite ? "dynamic-roots" : "whole-roots");
+        FormatTablePartitionManager partitionManager = mock(FormatTablePartitionManager.class);
+        List<Partition> partitions = new ArrayList<>();
+        List<CommitMessage> messages = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            String value = "p" + i;
+            Path partitionPath = new Path(tablePath, "part=" + value);
+            writeOldFiles(fileIO, partitionPath, 1);
+            partitions.add(
+                    new Partition(Collections.singletonMap("part", value), 0, 0, 0, 0, -1, false));
+            if (dynamicPartitionOverwrite) {
+                TwoPhaseOutputStream.Committer committer =
+                        mock(TwoPhaseOutputStream.Committer.class);
+                when(committer.targetPath()).thenReturn(new Path(partitionPath, "data-new.csv"));
+                messages.add(new TwoPhaseCommitMessage(committer));
+            }
+        }
+        if (!dynamicPartitionOverwrite) {
+            when(partitionManager.listPartitions(Collections.emptyMap(), null))
+                    .thenReturn(partitions);
+        }
+        Map<String, String> options = new LinkedHashMap<>();
+        options.put(CoreOptions.FORMAT_TABLE_COMMIT_CLEANUP_THREAD_NUM.key(), "4");
+        options.put(
+                CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key(),
+                Boolean.toString(dynamicPartitionOverwrite));
+        FormatTableCommit commit =
+                builderOverwriteCommit(
+                        tablePath, fileIO, partitionManager, options, /* staticPartition */ null);
+
+        commit.commit(messages);
+
+        assertThat(fileIO.deleteCalls()).isEqualTo(4);
+        assertThat(fileIO.maxConcurrentDeletes()).isEqualTo(4);
+    }
+
+    private FormatTableCommit builderOverwriteCommit(
+            Path tablePath,
+            FileIO fileIO,
+            FormatTablePartitionManager partitionManager,
+            Map<String, String> options,
+            Map<String, String> staticPartition) {
+        FormatTable table = formatTable(tablePath, fileIO, partitionManager, options);
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        writeBuilder.withOverwrite(staticPartition);
+        return (FormatTableCommit) writeBuilder.newCommit();
+    }
+
+    private FormatTableCommit builderTruncateCommit(
+            Path tablePath, FileIO fileIO, FormatTablePartitionManager partitionManager) {
+        return (FormatTableCommit)
+                formatTable(tablePath, fileIO, partitionManager, Collections.emptyMap())
+                        .newBatchWriteBuilder()
+                        .newCommit();
+    }
+
+    private FormatTable formatTable(
+            Path tablePath,
+            FileIO fileIO,
+            FormatTablePartitionManager partitionManager,
+            Map<String, String> options) {
+        RowType rowType =
+                RowType.builder()
+                        .field("part", DataTypes.STRING())
+                        .field("id", DataTypes.INT())
+                        .build();
+        FormatTable table =
+                FormatTable.builder()
+                        .fileIO(fileIO)
+                        .identifier(Identifier.create("cleanup_db", "cleanup_table"))
+                        .rowType(rowType)
+                        .partitionKeys(Collections.singletonList("part"))
+                        .location(tablePath.toString())
+                        .format(FormatTable.Format.CSV)
+                        .options(options)
+                        .partitionManager(partitionManager)
+                        .build();
+        return table;
+    }
+
+    private FormatTableCommit builderUnpartitionedOverwriteCommit(
+            Path tablePath,
+            FileIO fileIO,
+            FormatTablePartitionManager partitionManager,
+            Map<String, String> options) {
+        FormatTable table =
+                FormatTable.builder()
+                        .fileIO(fileIO)
+                        .identifier(Identifier.create("cleanup_db", "cleanup_table"))
+                        .rowType(RowType.builder().field("id", DataTypes.INT()).build())
+                        .partitionKeys(Collections.emptyList())
+                        .location(tablePath.toString())
+                        .format(FormatTable.Format.CSV)
+                        .options(options)
+                        .partitionManager(partitionManager)
+                        .build();
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        writeBuilder.withOverwrite(null);
+        return (FormatTableCommit) writeBuilder.newCommit();
+    }
+
+    private FormatTableCommit newCleanupCommit(
+            Path tablePath,
+            FileIO fileIO,
+            FormatTablePartitionManager partitionManager,
+            Map<String, String> staticPartition,
+            int cleanupThreadNum) {
+        return new FormatTableCommit(
+                tablePath.toString(),
+                Collections.singletonList("part"),
+                fileIO,
+                false,
+                PARTITION_DEFAULT_NAME.defaultValue(),
+                true,
+                Identifier.create("cleanup_db", "cleanup_table"),
+                staticPartition,
+                null,
+                null,
+                partitionManager,
+                /* dynamicPartitionOverwrite */ true,
+                cleanupThreadNum,
+                /* publishThreadNum */ 1);
+    }
+
+    private static void writeOldFiles(LocalFileIO fileIO, Path partitionPath, int count)
+            throws IOException {
+        for (int i = 0; i < count; i++) {
+            fileIO.writeFile(
+                    new Path(partitionPath, String.format("data-%03d.csv", i)), "old", false);
+        }
+    }
+
+    private static void assertPublishesOnCaller(
+            FormatTableCommit commit, FileIO fileIO, Path parent) throws IOException {
+        Thread caller = Thread.currentThread();
+        ConcurrentLinkedQueue<Thread> publishThreads = new ConcurrentLinkedQueue<>();
+        List<CommitMessage> messages = new ArrayList<>();
+        for (int i = 0; i < 2; i++) {
+            TwoPhaseOutputStream.Committer committer = mock(TwoPhaseOutputStream.Committer.class);
+            when(committer.targetPath()).thenReturn(new Path(parent, "data-" + i + ".csv"));
+            doAnswer(
+                            invocation -> {
+                                publishThreads.add(Thread.currentThread());
+                                return null;
+                            })
+                    .when(committer)
+                    .commit(fileIO);
+            messages.add(new TwoPhaseCommitMessage(committer));
+        }
+
+        commit.commit(messages);
+
+        assertThat(publishThreads).containsExactly(caller, caller);
+    }
+
+    private static ExecutionException awaitFailure(Future<?> future) throws Exception {
+        try {
+            future.get(10, TimeUnit.SECONDS);
+            throw new AssertionError("Expected Format Table commit to fail");
+        } catch (ExecutionException expected) {
+            return expected;
+        }
+    }
+
+    private static <I, O> void invokeSideEffectRunner(
+            ExecutorService executor,
+            Function<I, List<O>> processor,
+            Iterator<I> input,
+            int maxConcurrency,
+            Consumer<O> resultConsumer)
+            throws Exception {
+        Method method =
+                FormatTableCommit.class.getDeclaredMethod(
+                        "executeSideEffects",
+                        ExecutorService.class,
+                        Function.class,
+                        Iterator.class,
+                        int.class,
+                        Consumer.class);
+        method.setAccessible(true);
+        try {
+            method.invoke(null, executor, processor, input, maxConcurrency, resultConsumer);
+        } catch (InvocationTargetException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof Exception) {
+                throw (Exception) cause;
+            }
+            if (cause instanceof Error) {
+                throw (Error) cause;
+            }
+            throw new RuntimeException(cause);
+        }
+    }
+
+    private static void awaitLatch(CountDownLatch latch, String description) throws IOException {
+        try {
+            if (!latch.await(10, TimeUnit.SECONDS)) {
+                throw new IOException("Timed out waiting for " + description);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while waiting for " + description, e);
+        }
+    }
+
+    private static List<Throwable> failureTree(Throwable throwable) {
+        List<Throwable> failures = new ArrayList<>();
+        collectFailures(throwable, failures);
+        return failures;
+    }
+
+    private static void collectFailures(Throwable throwable, List<Throwable> failures) {
+        if (throwable == null) {
+            return;
+        }
+        failures.add(throwable);
+        for (Throwable suppressed : throwable.getSuppressed()) {
+            collectFailures(suppressed, failures);
+        }
+        collectFailures(throwable.getCause(), failures);
+    }
+
+    private abstract static class StagedFileCommitter implements TwoPhaseOutputStream.Committer {
+
+        private static final long serialVersionUID = 1L;
+
+        private final Path targetPath;
+        private final Path stagingPath;
+
+        private StagedFileCommitter(Path targetPath, Path stagingPath) {
+            this.targetPath = targetPath;
+            this.stagingPath = stagingPath;
+        }
+
+        protected void publish(FileIO fileIO) throws IOException {
+            fileIO.writeFile(targetPath, "replacement", false);
+        }
+
+        @Override
+        public void discard(FileIO fileIO) {
+            fileIO.deleteQuietly(targetPath);
+            fileIO.deleteQuietly(stagingPath);
+        }
+
+        @Override
+        public Path targetPath() {
+            return targetPath;
+        }
+
+        @Override
+        public void clean(FileIO fileIO) throws IOException {
+            if (!fileIO.delete(stagingPath, false) && fileIO.exists(stagingPath)) {
+                throw new IOException("Failed to clean staging file " + stagingPath);
+            }
+        }
+    }
+
+    private static class PostRegistrationFailingHiveCatalog extends FileSystemCatalog {
+
+        private final List<Map<String, String>> registeredPartitions = new ArrayList<>();
+
+        private PostRegistrationFailingHiveCatalog(FileIO fileIO, Path warehouse) {
+            super(fileIO, warehouse);
+        }
+
+        public void createPartitionsUtil(
+                Identifier identifier,
+                List<Map<String, String>> partitions,
+                boolean partitionOnlyValueInPath) {
+            registeredPartitions.addAll(partitions);
+            throw new RuntimeException("Hive failed after partition registration");
+        }
+    }
+
+    private static class RecordingHiveCatalog extends FileSystemCatalog {
+
+        private final List<Map<String, String>> registeredPartitions = new ArrayList<>();
+
+        private RecordingHiveCatalog(FileIO fileIO, Path warehouse) {
+            super(fileIO, warehouse);
+        }
+
+        public void createPartitionsUtil(
+                Identifier identifier,
+                List<Map<String, String>> partitions,
+                boolean partitionOnlyValueInPath) {
+            registeredPartitions.addAll(partitions);
+        }
+    }
+
+    private static class SelectiveRefusingDeleteFileIO extends LocalFileIO {
+
+        private static final long serialVersionUID = 1L;
+
+        private final Path refusedPath;
+
+        private SelectiveRefusingDeleteFileIO(Path refusedPath) {
+            this.refusedPath = refusedPath;
+        }
+
+        @Override
+        public boolean delete(Path path, boolean recursive) throws IOException {
+            return path.equals(refusedPath) ? false : super.delete(path, recursive);
+        }
+    }
+
+    private static class ParallelDeleteFileIO extends LocalFileIO {
+
+        private final int firstWaveSize;
+        private final boolean holdFirstWave;
+        private final CountDownLatch firstWave;
+        private final CountDownLatch releaseFirstWave = new CountDownLatch(1);
+        private final CountDownLatch unexpectedExtraDelete = new CountDownLatch(1);
+        private final AtomicInteger deleteCalls = new AtomicInteger();
+        private final AtomicInteger activeDeletes = new AtomicInteger();
+        private final AtomicInteger maxConcurrentDeletes = new AtomicInteger();
+
+        private ParallelDeleteFileIO(int firstWaveSize) {
+            this(firstWaveSize, false);
+        }
+
+        private ParallelDeleteFileIO(int firstWaveSize, boolean holdFirstWave) {
+            this.firstWaveSize = firstWaveSize;
+            this.holdFirstWave = holdFirstWave;
+            this.firstWave = new CountDownLatch(firstWaveSize);
+        }
+
+        @Override
+        public boolean delete(Path path, boolean recursive) throws IOException {
+            int call = deleteCalls.incrementAndGet();
+            int active = activeDeletes.incrementAndGet();
+            maxConcurrentDeletes.updateAndGet(previous -> Math.max(previous, active));
+            try {
+                if (call <= firstWaveSize) {
+                    firstWave.countDown();
+                    if (!firstWave.await(10, TimeUnit.SECONDS)) {
+                        throw new IOException("Expected cleanup delete calls did not overlap");
+                    }
+                    if (holdFirstWave && !releaseFirstWave.await(10, TimeUnit.SECONDS)) {
+                        throw new IOException("Test did not release the first cleanup wave");
+                    }
+                } else {
+                    unexpectedExtraDelete.countDown();
+                }
+                return super.delete(path, recursive);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("Interrupted while observing cleanup concurrency", e);
+            } finally {
+                activeDeletes.decrementAndGet();
+            }
+        }
+
+        protected int deleteCalls() {
+            return deleteCalls.get();
+        }
+
+        private int maxConcurrentDeletes() {
+            return maxConcurrentDeletes.get();
+        }
+
+        private int activeDeletes() {
+            return activeDeletes.get();
+        }
+
+        protected boolean awaitFirstWave() throws InterruptedException {
+            return firstWave.await(10, TimeUnit.SECONDS);
+        }
+
+        private boolean awaitUnexpectedExtraDelete() throws InterruptedException {
+            return unexpectedExtraDelete.await(300, TimeUnit.MILLISECONDS);
+        }
+
+        protected void releaseFirstWave() {
+            releaseFirstWave.countDown();
+        }
+    }
+
+    private static class LazyRootListingFileIO extends ParallelDeleteFileIO {
+
+        private final Path deferredRoot;
+        private final AtomicBoolean deferredRootListed = new AtomicBoolean();
+
+        private LazyRootListingFileIO(int firstWaveSize, Path deferredRoot) {
+            super(firstWaveSize, true);
+            this.deferredRoot = deferredRoot;
+        }
+
+        @Override
+        public FileStatus[] listStatus(Path path) throws IOException {
+            if (deferredRoot.equals(path)) {
+                deferredRootListed.set(true);
+            }
+            return super.listStatus(path);
+        }
+
+        private boolean deferredRootListed() {
+            return deferredRootListed.get();
+        }
+    }
+
+    private static class SerialProbeFileIO extends LocalFileIO {
+
+        private final CountDownLatch secondDeleteStarted = new CountDownLatch(1);
+        private final AtomicInteger deleteCalls = new AtomicInteger();
+        private final AtomicInteger activeDeletes = new AtomicInteger();
+        private final AtomicInteger maxConcurrentDeletes = new AtomicInteger();
+
+        @Override
+        public boolean delete(Path path, boolean recursive) throws IOException {
+            int call = deleteCalls.incrementAndGet();
+            int active = activeDeletes.incrementAndGet();
+            maxConcurrentDeletes.updateAndGet(previous -> Math.max(previous, active));
+            try {
+                if (call == 1) {
+                    secondDeleteStarted.await(300, TimeUnit.MILLISECONDS);
+                } else {
+                    secondDeleteStarted.countDown();
+                }
+                return super.delete(path, recursive);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("Interrupted while probing serial cleanup", e);
+            } finally {
+                activeDeletes.decrementAndGet();
+            }
+        }
+
+        private int deleteCalls() {
+            return deleteCalls.get();
+        }
+
+        private int maxConcurrentDeletes() {
+            return maxConcurrentDeletes.get();
+        }
+    }
+
+    private static class PartialBarrierDeleteFileIO extends SortedLocalFileIO {
+
+        private final CountDownLatch bothDeletesStarted = new CountDownLatch(2);
+        private final CountDownLatch releaseFirstDelete = new CountDownLatch(1);
+        private final CountDownLatch releaseSecondDelete = new CountDownLatch(1);
+        private final CountDownLatch firstDeleteReturned = new CountDownLatch(1);
+        private final AtomicInteger activeDeletes = new AtomicInteger();
+
+        @Override
+        public boolean delete(Path path, boolean recursive) throws IOException {
+            activeDeletes.incrementAndGet();
+            bothDeletesStarted.countDown();
+            await(bothDeletesStarted, "both barrier delete calls");
+            try {
+                if ("data-000.csv".equals(path.getName())) {
+                    await(releaseFirstDelete, "first barrier delete release");
+                    return super.delete(path, recursive);
+                }
+                await(releaseSecondDelete, "second barrier delete release");
+                return super.delete(path, recursive);
+            } finally {
+                activeDeletes.decrementAndGet();
+                if ("data-000.csv".equals(path.getName())) {
+                    firstDeleteReturned.countDown();
+                }
+            }
+        }
+
+        private boolean awaitBothDeletesStarted() throws InterruptedException {
+            return bothDeletesStarted.await(10, TimeUnit.SECONDS);
+        }
+
+        private void releaseFirstDelete() {
+            releaseFirstDelete.countDown();
+        }
+
+        private void releaseSecondDelete() {
+            releaseSecondDelete.countDown();
+        }
+
+        private boolean awaitFirstDeleteReturned() throws InterruptedException {
+            return firstDeleteReturned.await(10, TimeUnit.SECONDS);
+        }
+
+        private int activeDeletes() {
+            return activeDeletes.get();
+        }
+    }
+
+    private static class BlockingDeleteFileIO extends LocalFileIO {
+
+        private final CountDownLatch deletesStarted;
+        private final CountDownLatch releaseDeletes = new CountDownLatch(1);
+        private final AtomicInteger interruptedDeletes = new AtomicInteger();
+
+        private BlockingDeleteFileIO(int deleteCount) {
+            this.deletesStarted = new CountDownLatch(deleteCount);
+        }
+
+        @Override
+        public boolean delete(Path path, boolean recursive) throws IOException {
+            deletesStarted.countDown();
+            try {
+                if (!releaseDeletes.await(10, TimeUnit.SECONDS)) {
+                    throw new IOException("Test did not release blocked cleanup deletes");
+                }
+                return super.delete(path, recursive);
+            } catch (InterruptedException e) {
+                interruptedDeletes.incrementAndGet();
+                Thread.currentThread().interrupt();
+                throw new IOException("Interrupted while blocking cleanup delete", e);
+            }
+        }
+
+        private boolean awaitDeletesStarted() throws InterruptedException {
+            return deletesStarted.await(10, TimeUnit.SECONDS);
+        }
+
+        private void releaseDeletes() {
+            releaseDeletes.countDown();
+        }
+
+        private int interruptedDeletes() {
+            return interruptedDeletes.get();
+        }
+    }
+
+    private abstract static class SortedLocalFileIO extends LocalFileIO {
+
+        @Override
+        public FileStatus[] listStatus(Path path) throws IOException {
+            FileStatus[] statuses = super.listStatus(path);
+            Arrays.sort(statuses, Comparator.comparing(status -> status.getPath().toString()));
+            return statuses;
+        }
+
+        protected static void await(CountDownLatch latch, String description) throws IOException {
+            try {
+                if (!latch.await(10, TimeUnit.SECONDS)) {
+                    throw new IOException("Timed out waiting for " + description);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("Interrupted while waiting for " + description, e);
+            }
+        }
+    }
+
+    private static class LaterRootListingFailureFileIO extends SortedLocalFileIO {
+
+        private final Path failingRoot;
+        private final CountDownLatch deletesStarted;
+        private final CountDownLatch listingFailure = new CountDownLatch(1);
+        private final CountDownLatch releaseFirstDelete = new CountDownLatch(1);
+        private final CountDownLatch releaseSecondDelete = new CountDownLatch(1);
+        private final CountDownLatch firstDeleteReturned = new CountDownLatch(1);
+        private final AtomicInteger activeDeletes = new AtomicInteger();
+
+        private LaterRootListingFailureFileIO(Path failingRoot, int deleteCount) {
+            this.failingRoot = failingRoot;
+            this.deletesStarted = new CountDownLatch(deleteCount);
+        }
+
+        @Override
+        public FileStatus[] listStatus(Path path) throws IOException {
+            if (failingRoot.equals(path)) {
+                await(deletesStarted, "accepted deletes before later-root listing failure");
+                listingFailure.countDown();
+                throw new IOException("Failed to list the later partition root.");
+            }
+            return super.listStatus(path);
+        }
+
+        @Override
+        public boolean delete(Path path, boolean recursive) throws IOException {
+            activeDeletes.incrementAndGet();
+            deletesStarted.countDown();
+            try {
+                if ("data-000.csv".equals(path.getName())) {
+                    await(releaseFirstDelete, "release of the first accepted delete");
+                } else {
+                    await(releaseSecondDelete, "release of the second accepted delete");
+                }
+                return super.delete(path, recursive);
+            } finally {
+                activeDeletes.decrementAndGet();
+                if ("data-000.csv".equals(path.getName())) {
+                    firstDeleteReturned.countDown();
+                }
+            }
+        }
+
+        private boolean awaitListingFailure() throws InterruptedException {
+            return listingFailure.await(10, TimeUnit.SECONDS);
+        }
+
+        private void releaseFirstDelete() {
+            releaseFirstDelete.countDown();
+        }
+
+        private boolean awaitFirstDeleteReturned() throws InterruptedException {
+            return firstDeleteReturned.await(10, TimeUnit.SECONDS);
+        }
+
+        private void releaseSecondDelete() {
+            releaseSecondDelete.countDown();
+        }
+
+        private int activeDeletes() {
+            return activeDeletes.get();
+        }
+    }
+
+    private static class FailureDrainFileIO extends SortedLocalFileIO {
+
+        private final CountDownLatch firstPairStarted = new CountDownLatch(2);
+        private final CountDownLatch failureAttempted = new CountDownLatch(1);
+        private final CountDownLatch releaseSuccessfulSibling = new CountDownLatch(1);
+        private final ConcurrentLinkedQueue<String> attemptedFiles = new ConcurrentLinkedQueue<>();
+        private final ConcurrentLinkedQueue<String> successfulFiles = new ConcurrentLinkedQueue<>();
+
+        @Override
+        public boolean delete(Path path, boolean recursive) throws IOException {
+            String name = path.getName();
+            attemptedFiles.add(name);
+            if ("data-000.csv".equals(name)) {
+                firstPairStarted.countDown();
+                await(firstPairStarted, "both initial deletes to start");
+                failureAttempted.countDown();
+                throw new IOException("delete failed at input position 0");
+            }
+            if ("data-001.csv".equals(name)) {
+                firstPairStarted.countDown();
+                await(firstPairStarted, "both initial deletes to start");
+                await(releaseSuccessfulSibling, "release of in-flight sibling");
+                boolean deleted = super.delete(path, recursive);
+                successfulFiles.add(name);
+                return deleted;
+            }
+            return super.delete(path, recursive);
+        }
+
+        private boolean awaitFailureAttempted() throws InterruptedException {
+            return failureAttempted.await(10, TimeUnit.SECONDS);
+        }
+
+        private void releaseSuccessfulSibling() {
+            releaseSuccessfulSibling.countDown();
+        }
+
+        private ConcurrentLinkedQueue<String> attemptedFiles() {
+            return attemptedFiles;
+        }
+
+        private ConcurrentLinkedQueue<String> successfulFiles() {
+            return successfulFiles;
+        }
+    }
+
+    private static class OrderedDualFailureFileIO extends SortedLocalFileIO {
+
+        private final CountDownLatch firstPairStarted = new CountDownLatch(2);
+        private final CountDownLatch higherPositionFailure = new CountDownLatch(1);
+        private final CountDownLatch releaseLowerPositionFailure = new CountDownLatch(1);
+
+        @Override
+        public boolean delete(Path path, boolean recursive) throws IOException {
+            firstPairStarted.countDown();
+            await(firstPairStarted, "both failing deletes to start");
+            if ("data-001.csv".equals(path.getName())) {
+                higherPositionFailure.countDown();
+                throw new IOException("delete failed at input position 1");
+            }
+            await(releaseLowerPositionFailure, "lower-position failure");
+            throw new IOException("delete failed at input position 0");
+        }
+
+        private boolean awaitHigherPositionFailure() throws InterruptedException {
+            return higherPositionFailure.await(10, TimeUnit.SECONDS);
+        }
+
+        private void releaseLowerPositionFailure() {
+            releaseLowerPositionFailure.countDown();
+        }
+    }
+
+    private static class MixedOwnershipFileIO extends SortedLocalFileIO {
+
+        @Override
+        public boolean delete(Path path, boolean recursive) throws IOException {
+            boolean deleted = super.delete(path, recursive);
+            if (path.toString().contains("month=01")) {
+                throw new FileNotFoundException("concurrently deleted " + path);
+            }
+            if (path.toString().contains("month=02")) {
+                return false;
+            }
+            return deleted;
+        }
+    }
+
+    private static class RefusingDeleteFileIO extends LocalFileIO {
+
+        @Override
+        public boolean delete(Path path, boolean recursive) {
+            return false;
+        }
     }
 
     private static Map<String, String> partitionSpec(String year, String month) {

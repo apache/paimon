@@ -27,6 +27,7 @@ import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.iceberg.IcebergOptions;
+import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
@@ -77,6 +78,8 @@ import java.util.stream.Stream;
 
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_MODIFIABLE;
+import static org.apache.paimon.CoreOptions.IGNORE_DELETE;
+import static org.apache.paimon.CoreOptions.IGNORE_UPDATE_BEFORE;
 import static org.apache.paimon.utils.FailingFileIO.retryArtificialException;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -171,6 +174,108 @@ public class SchemaManagerTest {
         Optional<TableSchema> latest = retryArtificialException(() -> manager.latest());
         assertThat(latest.isPresent()).isTrue();
         assertThat(latest.get().options()).containsEntry("new_k", "new_v");
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {2, 9})
+    public void testIcebergMetadataRefusesUnsupportedTimestampPrecisions(int precision)
+            throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "-1");
+        options.put(IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "table-location");
+        Schema nanos =
+                new Schema(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(1, "ts", DataTypes.TIMESTAMP(precision))),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        "");
+
+        assertThatThrownBy(() -> retryArtificialException(() -> manager.createTable(nanos)))
+                .hasStackTraceContaining("precision from 3 to 6");
+    }
+
+    @Test
+    public void testIcebergMetadataAllowsMicrosecondTimestamps() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "-1");
+        options.put(IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "table-location");
+        Schema micros =
+                new Schema(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(1, "ts", DataTypes.TIMESTAMP(6))),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        "");
+
+        assertThatCode(() -> retryArtificialException(() -> manager.createTable(micros)))
+                .doesNotThrowAnyException();
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {2, 9})
+    public void testEnablingIcebergMetadataRefusesUnsupportedTimestampPrecisions(int precision)
+            throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "-1");
+        Schema nanos =
+                new Schema(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(1, "ts", DataTypes.TIMESTAMP(precision))),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        "");
+        retryArtificialException(() -> manager.createTable(nanos));
+
+        assertThatThrownBy(
+                        () ->
+                                retryArtificialException(
+                                        () ->
+                                                manager.commitChanges(
+                                                        SchemaChange.setOption(
+                                                                IcebergOptions
+                                                                        .METADATA_ICEBERG_STORAGE
+                                                                        .key(),
+                                                                "table-location"))))
+                .hasStackTraceContaining("precision from 3 to 6");
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {2, 9})
+    public void testEnableIcebergMetadataValidatesHistoricalTimestampPrecisions(int precision)
+            throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "-1");
+        Schema nanos =
+                new Schema(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(1, "ts", DataTypes.TIMESTAMP(precision))),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options,
+                        "");
+
+        retryArtificialException(() -> manager.createTable(nanos));
+        retryArtificialException(() -> manager.commitChanges(SchemaChange.dropColumn("ts")));
+
+        assertThatThrownBy(
+                        () ->
+                                retryArtificialException(
+                                        () ->
+                                                manager.commitChanges(
+                                                        SchemaChange.setOption(
+                                                                IcebergOptions
+                                                                        .METADATA_ICEBERG_STORAGE
+                                                                        .key(),
+                                                                "table-location"))))
+                .hasStackTraceContaining("precision from 3 to 6");
     }
 
     @Test
@@ -405,6 +510,42 @@ public class SchemaManagerTest {
         options.put(CoreOptions.BUCKET.key(), "1");
         options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
         options.put(CoreOptions.PK_FULL_TEXT_INDEX_COLUMNS.key(), "content");
+        Schema schema =
+                new Schema(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT().notNull()),
+                                new DataField(1, "content", DataTypes.STRING())),
+                        Collections.emptyList(),
+                        Collections.singletonList("id"),
+                        options,
+                        "");
+        SchemaManager manager = new SchemaManager(LocalFileIO.create(), path);
+        manager.createTable(schema);
+
+        assertThatThrownBy(
+                        () ->
+                                manager.commitChanges(
+                                        SchemaChange.renameColumn(
+                                                new String[] {"content"}, "renamed_content")))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Cannot rename primary-key index column: [content]");
+        assertThatThrownBy(() -> manager.commitChanges(SchemaChange.dropColumn("content")))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Cannot drop primary-key index column: [content]");
+        assertThatThrownBy(
+                        () ->
+                                manager.commitChanges(
+                                        SchemaChange.updateColumnType("content", DataTypes.INT())))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Cannot update type of primary-key index column: [content]");
+    }
+
+    @Test
+    public void testRejectDestructivePrimaryKeyFMIndexColumnChanges() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        options.put(CoreOptions.PK_FM_INDEX_COLUMNS.key(), "content");
         Schema schema =
                 new Schema(
                         Arrays.asList(
@@ -1557,5 +1698,27 @@ public class SchemaManagerTest {
                                 FileStoreTableFactory.create(LocalFileIO.create(), path, after)
                                         .newWrite("u"))
                 .doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testResetCannotWeakenAnOptionThatSetCannotWeaken() {
+        // Resetting an option puts it back to its default. For these three the default is the
+        // weaker value, so a reset is the same change that setting it explicitly already rejects.
+        for (ConfigOption<Boolean> option :
+                Arrays.asList(DELETION_VECTORS_ENABLED, IGNORE_DELETE, IGNORE_UPDATE_BEFORE)) {
+            Map<String, String> enabled = new HashMap<>();
+            enabled.put(option.key(), "true");
+            assertThatThrownBy(
+                            () -> SchemaManager.checkResetTableOption(enabled, option.key()),
+                            option.key())
+                    .isInstanceOf(UnsupportedOperationException.class);
+
+            // resetting an option that is already at its default changes nothing
+            Map<String, String> disabled = new HashMap<>();
+            disabled.put(option.key(), "false");
+            assertThatCode(() -> SchemaManager.checkResetTableOption(disabled, option.key()))
+                    .as("%s", option.key())
+                    .doesNotThrowAnyException();
+        }
     }
 }

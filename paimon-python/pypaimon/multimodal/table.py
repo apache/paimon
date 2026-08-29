@@ -113,6 +113,129 @@ class MultimodalTable:
             table_commit.close()
         return self
 
+    def add_video(
+            self,
+            video,
+            frames,
+            *,
+            video_column=None,
+            first_frame=0):
+        """Append logical frame rows backed by one complete encoded video.
+
+        ``frames`` supplies every table column except the configured
+        ``video-frame-field``. Frame ordinals are generated from
+        ``first_frame`` and stored in the video descriptor, not in the normal
+        data file.
+        """
+        return self.add_videos(
+            [(video, frames, first_frame)], video_column=video_column
+        )
+
+    def add_videos(self, videos, *, video_column=None):
+        """Append several encoded videos with one writer and one commit.
+
+        Each item is ``(video, frames)`` or ``(video, frames, first_frame)``.
+        Keeping one writer open lets a single ``.video`` object pack multiple
+        complete encoded videos up to the configured rolling target.
+        """
+        column = self._resolve_video_frame_column(video_column)
+        target_schema = _target_schema(self.raw_table)
+
+        def frame_batches():
+            for item in videos:
+                try:
+                    item = tuple(item)
+                except TypeError as error:
+                    raise ValueError(
+                        "Each videos item must be (video, frames) or "
+                        "(video, frames, first_frame)."
+                    ) from error
+                if len(item) == 2:
+                    video, frames = item
+                    first_frame = 0
+                elif len(item) == 3:
+                    video, frames, first_frame = item
+                else:
+                    raise ValueError(
+                        "Each videos item must be (video, frames) or "
+                        "(video, frames, first_frame)."
+                    )
+                yield _video_frame_table(
+                    video,
+                    frames,
+                    column,
+                    first_frame,
+                    target_schema,
+                )
+
+        return self.add_batches(frame_batches())
+
+    def _resolve_video_frame_column(self, requested):
+        configured = self.raw_table.options.video_frame_fields()
+        if not configured:
+            raise ValueError(
+                "add_video requires table option 'video-frame-field'."
+            )
+        column = requested or next(iter(configured))
+        if column not in configured:
+            raise ValueError(
+                "Video column %r is not configured by 'video-frame-field'."
+                % column
+            )
+        return column
+
+    def add_batches(self, batches):
+        """Append an iterable of batches with one writer and one commit.
+
+        Keeping the writer open across batches also preserves video payload
+        groups and lets one ``.video`` file pack several encoded videos.
+        """
+        try:
+            iterator = iter(batches)
+        except TypeError as error:
+            raise ValueError("batches must be an iterable of input batches.") from error
+
+        target_schema = _target_schema(self.raw_table)
+        table_write = None
+        table_commit = None
+        commit_started = False
+        try:
+            for data in iterator:
+                arrow_table = _to_arrow_table(data, target_schema)
+                if arrow_table.num_rows == 0:
+                    continue
+                if table_write is None:
+                    write_builder = self.raw_table.new_batch_write_builder()
+                    table_write = write_builder.new_write()
+                    table_commit = write_builder.new_commit()
+                table_write.write_arrow(arrow_table)
+
+            close_iterator = getattr(iterator, "close", None)
+            iterator = None
+            if close_iterator is not None:
+                close_iterator()
+            if table_write is None:
+                return self
+            commit_messages = table_write.prepare_commit()
+            commit_started = True
+            table_commit.commit(commit_messages)
+            return self
+        except BaseException:
+            if table_write is not None and not commit_started:
+                table_write.abort()
+            raise
+        finally:
+            if iterator is not None:
+                close_iterator = getattr(iterator, "close", None)
+                if close_iterator is not None:
+                    close_iterator()
+            try:
+                if table_write is not None:
+                    table_write.close()
+            finally:
+                if table_commit is not None:
+                    table_commit.close()
+
     def overwrite(self, data, partition: Optional[Mapping[str, object]] = None):
         arrow_table = _to_arrow_table(data, _target_schema(self.raw_table))
         overwrite_partition = dict(partition) if partition is not None else None
@@ -131,6 +254,15 @@ class MultimodalTable:
         return self
 
     def update(self, where, values):
+        video_columns = self.raw_table.options.video_frame_fields()
+        if isinstance(values, Mapping):
+            updated_video_columns = video_columns.intersection(values)
+            if updated_video_columns:
+                raise ValueError(
+                    "update() cannot write video-frame-field %r; use "
+                    "replace_video() with a complete encoded video."
+                    % sorted(updated_video_columns)
+                )
         query = self.scan().where(where)
         predicate = query._predicate
         write_builder = self.raw_table.new_batch_write_builder()
@@ -138,6 +270,56 @@ class MultimodalTable:
         table_commit = write_builder.new_commit()
         try:
             messages = table_update.update_by_predicate(predicate, values)
+            table_commit.commit(messages)
+        finally:
+            table_commit.close()
+        return self
+
+    def replace_video(
+            self,
+            where,
+            video,
+            *,
+            video_column=None,
+            first_frame=0):
+        """Replace the video backing the logical frame rows matching ``where``.
+
+        Matching rows are ordered by ``_ROW_ID`` and assigned consecutive
+        frame ordinals starting at ``first_frame``. Only the configured video
+        column is updated; ordinary columns and the normal data files remain
+        untouched.
+        """
+        column = self._resolve_video_frame_column(video_column)
+        target_schema = _target_schema(self.raw_table)
+        payload, first_frame = _video_payload(video, first_frame)
+
+        row_ids = (
+            self.scan()
+            .where(where)
+            .select([])
+            .with_row_id()
+            .to_arrow()[SpecialFields.ROW_ID.name]
+            .to_pylist()
+        )
+        row_ids.sort()
+        if not row_ids:
+            return self
+
+        descriptors = _video_frame_descriptors(
+            payload, len(row_ids), first_frame)
+        update_data = pa.Table.from_arrays(
+            [
+                pa.array(row_ids, type=pa.int64()),
+                pa.array(descriptors, type=target_schema.field(column).type),
+            ],
+            names=[SpecialFields.ROW_ID.name, column],
+        )
+
+        write_builder = self.raw_table.new_batch_write_builder()
+        table_update = write_builder.new_update().with_update_type([column])
+        table_commit = write_builder.new_commit()
+        try:
+            messages = table_update.update_by_arrow_with_row_id(update_data)
             table_commit.commit(messages)
         finally:
             table_commit.close()
@@ -380,6 +562,8 @@ def _blob_columns(table):
 
 
 def _to_arrow_table(data, target_schema=None):
+    if target_schema is not None:
+        data = _serialize_blob_values(data, target_schema)
     if isinstance(data, pa.Table):
         table = data
     elif isinstance(data, pa.RecordBatch):
@@ -396,6 +580,91 @@ def _to_arrow_table(data, target_schema=None):
     if target_schema is None:
         return table
     return _align_to_schema(table, target_schema)
+
+
+def _serialize_blob_values(data, target_schema):
+    if isinstance(data, (pa.Table, pa.RecordBatch)):
+        return data
+    binary_fields = {
+        field.name: field.type
+        for field in target_schema
+        if _contains_binary(field.type)
+    }
+    if not binary_fields:
+        return data
+
+    if isinstance(data, list):
+        return [
+            {
+                name: _serialize_blob_value(value, binary_fields.get(name))
+                for name, value in row.items()
+            }
+            if isinstance(row, Mapping)
+            else row
+            for row in data
+        ]
+    if isinstance(data, dict):
+        converted = dict(data)
+        for name, arrow_type in binary_fields.items():
+            if name not in converted:
+                continue
+            column = converted[name]
+            if isinstance(column, (pa.Array, pa.ChunkedArray)):
+                column = column.to_pylist()
+            converted[name] = [
+                _serialize_blob_value(value, arrow_type)
+                for value in column
+            ]
+        return converted
+    if (
+        hasattr(data, "__dataframe__")
+        or data.__class__.__module__.startswith("pandas")
+    ):
+        converted = data.copy()
+        for name, arrow_type in binary_fields.items():
+            if name in converted.columns:
+                converted[name] = converted[name].map(
+                    lambda value: _serialize_blob_value(value, arrow_type)
+                )
+        return converted
+    return data
+
+
+def _contains_binary(arrow_type):
+    if pa.types.is_binary(arrow_type) or pa.types.is_large_binary(arrow_type):
+        return True
+    if pa.types.is_list(arrow_type) or pa.types.is_large_list(arrow_type):
+        return _contains_binary(arrow_type.value_type)
+    if pa.types.is_map(arrow_type):
+        return _contains_binary(arrow_type.item_type)
+    return False
+
+
+def _serialize_blob_value(value, arrow_type):
+    if value is None or arrow_type is None:
+        return value
+    if pa.types.is_binary(arrow_type) or pa.types.is_large_binary(arrow_type):
+        from pypaimon.table.row.blob import Blob, BlobDescriptor
+        if isinstance(value, BlobDescriptor):
+            return value.serialize()
+        if isinstance(value, Blob):
+            try:
+                return value.to_descriptor().serialize()
+            except RuntimeError:
+                return value.to_data()
+        return value
+    if pa.types.is_list(arrow_type) or pa.types.is_large_list(arrow_type):
+        return [
+            _serialize_blob_value(element, arrow_type.value_type)
+            for element in value
+        ]
+    if pa.types.is_map(arrow_type):
+        entries = value.items() if isinstance(value, Mapping) else value
+        return [
+            (key, _serialize_blob_value(element, arrow_type.item_type))
+            for key, element in entries
+        ]
+    return value
 
 
 def _coerce_row_ids(row_ids):
@@ -431,6 +700,73 @@ def _time_travel_table(table, snapshot_id=None, tag_name=None):
 
 def _target_schema(table):
     return PyarrowFieldParser.from_paimon_schema(table.table_schema.fields)
+
+
+def _video_payload(video, first_frame):
+    from pypaimon.table.row.blob import (
+        Blob,
+        BlobDescriptor,
+        VideoFrameDescriptor,
+    )
+
+    if isinstance(first_frame, bool) or not isinstance(first_frame, int):
+        raise ValueError("first_frame must be a non-negative int.")
+    if first_frame < 0:
+        raise ValueError("first_frame must be a non-negative int.")
+
+    if isinstance(video, str):
+        video = Blob.from_local(video)
+    if isinstance(video, Blob):
+        try:
+            payload = video.to_descriptor()
+        except RuntimeError as error:
+            raise ValueError(
+                "video must be descriptor-backed; inline video bytes are not "
+                "accepted by video write APIs."
+            ) from error
+    elif isinstance(video, BlobDescriptor):
+        payload = video
+    else:
+        raise ValueError(
+            "video must be a path, Blob, or BlobDescriptor, got %r."
+            % type(video)
+        )
+    if isinstance(payload, VideoFrameDescriptor):
+        payload = payload.payload_descriptor
+
+    return payload, first_frame
+
+
+def _video_frame_descriptors(payload, count, first_frame):
+    from pypaimon.table.row.blob import VideoFrameDescriptor
+
+    return [
+        VideoFrameDescriptor(
+            payload.uri,
+            payload.offset,
+            payload.length,
+            first_frame + index,
+        ).serialize()
+        for index in range(count)
+    ]
+
+
+def _video_frame_table(video, frames, video_column, first_frame, target_schema):
+    payload, first_frame = _video_payload(video, first_frame)
+
+    non_video_schema = pa.schema([
+        field for field in target_schema if field.name != video_column
+    ])
+    frame_table = _to_arrow_table(frames, non_video_schema)
+    descriptor_values = _video_frame_descriptors(
+        payload, frame_table.num_rows, first_frame)
+    arrays = []
+    for field in target_schema:
+        if field.name == video_column:
+            arrays.append(pa.array(descriptor_values, type=field.type))
+        else:
+            arrays.append(frame_table[field.name])
+    return pa.Table.from_arrays(arrays, schema=target_schema)
 
 
 def _align_to_schema(

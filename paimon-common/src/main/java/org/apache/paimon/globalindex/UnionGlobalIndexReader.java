@@ -23,6 +23,8 @@ import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.utils.IOUtils;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -35,7 +37,7 @@ import java.util.function.LongConsumer;
  * A {@link GlobalIndexReader} that combines results from multiple readers by performing a union
  * (OR) operation on their results.
  */
-public class UnionGlobalIndexReader implements GlobalIndexReader {
+public class UnionGlobalIndexReader implements ContainsRefiningGlobalIndexReader {
 
     private final List<GlobalIndexReader> readers;
     private final LongConsumer durationConsumer;
@@ -75,6 +77,36 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
     public CompletableFuture<Optional<GlobalIndexResult>> visitContains(
             FieldRef fieldRef, Object literal) {
         return unionAsync(reader -> reader.visitContains(fieldRef, literal));
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitContainsCandidates(
+            FieldRef fieldRef, List<Object> literals, @Nullable GlobalIndexResult candidates) {
+        if (candidates != null && candidates.results().isEmpty()) {
+            return CompletableFuture.completedFuture(Optional.of(GlobalIndexResult.createEmpty()));
+        }
+        return unionAsync(
+                reader ->
+                        reader instanceof ContainsRefiningGlobalIndexReader
+                                ? ((ContainsRefiningGlobalIndexReader) reader)
+                                        .visitContainsCandidates(fieldRef, literals, candidates)
+                                : visitContainsConjunctionFallback(
+                                        reader, fieldRef, literals, candidates));
+    }
+
+    @Override
+    public CompletableFuture<Optional<GlobalIndexResult>> visitContainsConjunction(
+            FieldRef fieldRef, List<Object> literals, @Nullable GlobalIndexResult candidates) {
+        if (candidates != null && candidates.results().isEmpty()) {
+            return CompletableFuture.completedFuture(Optional.of(GlobalIndexResult.createEmpty()));
+        }
+        return unionAsync(
+                reader ->
+                        reader instanceof ContainsRefiningGlobalIndexReader
+                                ? ((ContainsRefiningGlobalIndexReader) reader)
+                                        .visitContainsConjunction(fieldRef, literals, candidates)
+                                : visitContainsConjunctionFallback(
+                                        reader, fieldRef, literals, candidates));
     }
 
     @Override
@@ -230,6 +262,38 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
                     (ignored, throwable) -> durationConsumer.accept(System.nanoTime() - start));
         }
         return result;
+    }
+
+    private CompletableFuture<Optional<GlobalIndexResult>> visitContainsConjunctionFallback(
+            GlobalIndexReader reader,
+            FieldRef fieldRef,
+            List<Object> literals,
+            @Nullable GlobalIndexResult candidates) {
+        List<CompletableFuture<Optional<GlobalIndexResult>>> futures =
+                new ArrayList<>(literals.size());
+        for (Object literal : literals) {
+            futures.add(reader.visitContains(fieldRef, literal));
+        }
+        return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                .thenApply(
+                        ignored -> {
+                            Optional<GlobalIndexResult> result = Optional.empty();
+                            for (CompletableFuture<Optional<GlobalIndexResult>> future : futures) {
+                                Optional<GlobalIndexResult> current = future.join();
+                                if (!current.isPresent()) {
+                                    continue;
+                                }
+                                result =
+                                        Optional.of(
+                                                result.isPresent()
+                                                        ? result.get().and(current.get())
+                                                        : current.get());
+                            }
+                            if (result.isPresent() && candidates != null) {
+                                result = Optional.of(result.get().and(candidates));
+                            }
+                            return result;
+                        });
     }
 
     @Override

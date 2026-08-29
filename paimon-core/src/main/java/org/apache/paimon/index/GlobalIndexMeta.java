@@ -41,7 +41,6 @@ public class GlobalIndexMeta {
     public static final String EXTRA_FIELD_IDS = "_EXTRA_FIELD_IDS";
     public static final String INDEX_META = "_INDEX_META";
     public static final String SOURCE_META = "_SOURCE_META";
-    public static final String BUILD_SCHEMA_ID = "_BUILD_SCHEMA_ID";
 
     public static final RowType SCHEMA =
             new RowType(
@@ -52,8 +51,7 @@ public class GlobalIndexMeta {
                             new DataField(2, INDEX_FIELD_ID, new IntType(false)),
                             new DataField(3, EXTRA_FIELD_IDS, DataTypes.ARRAY(new IntType(false))),
                             new DataField(4, INDEX_META, DataTypes.BYTES()),
-                            new DataField(5, SOURCE_META, DataTypes.BYTES()),
-                            new DataField(6, BUILD_SCHEMA_ID, new BigIntType())));
+                            new DataField(5, SOURCE_META, DataTypes.BYTES())));
 
     private final long rowRangeStart;
     private final long rowRangeEnd;
@@ -61,7 +59,6 @@ public class GlobalIndexMeta {
     @Nullable private final int[] extraFieldIds;
     @Nullable private final byte[] indexMeta;
     @Nullable private final byte[] sourceMeta;
-    @Nullable private final Long buildSchemaId;
 
     public GlobalIndexMeta(
             long rowRangeStart,
@@ -79,24 +76,12 @@ public class GlobalIndexMeta {
             @Nullable int[] extraFieldIds,
             @Nullable byte[] indexMeta,
             @Nullable byte[] sourceMeta) {
-        this(rowRangeStart, rowRangeEnd, indexFieldId, extraFieldIds, indexMeta, sourceMeta, null);
-    }
-
-    public GlobalIndexMeta(
-            long rowRangeStart,
-            long rowRangeEnd,
-            int indexFieldId,
-            @Nullable int[] extraFieldIds,
-            @Nullable byte[] indexMeta,
-            @Nullable byte[] sourceMeta,
-            @Nullable Long buildSchemaId) {
         this.rowRangeStart = rowRangeStart;
         this.rowRangeEnd = rowRangeEnd;
         this.indexFieldId = indexFieldId;
         this.extraFieldIds = extraFieldIds;
         this.indexMeta = indexMeta;
         this.sourceMeta = sourceMeta;
-        this.buildSchemaId = buildSchemaId;
     }
 
     public long rowRangeStart() {
@@ -130,12 +115,6 @@ public class GlobalIndexMeta {
     @Nullable
     public byte[] sourceMeta() {
         return sourceMeta;
-    }
-
-    /** Schema used to build this global index. */
-    @Nullable
-    public Long buildSchemaId() {
-        return buildSchemaId;
     }
 
     /** All indexed field ids in order: the primary {@link #indexFieldId} followed by the rest. */
@@ -196,13 +175,12 @@ public class GlobalIndexMeta {
                 && indexFieldId == that.indexFieldId
                 && Arrays.equals(extraFieldIds, that.extraFieldIds)
                 && Arrays.equals(indexMeta, that.indexMeta)
-                && Arrays.equals(sourceMeta, that.sourceMeta)
-                && Objects.equals(buildSchemaId, that.buildSchemaId);
+                && Arrays.equals(sourceMeta, that.sourceMeta);
     }
 
     @Override
     public int hashCode() {
-        int result = Objects.hash(rowRangeStart, rowRangeEnd, indexFieldId, buildSchemaId);
+        int result = Objects.hash(rowRangeStart, rowRangeEnd, indexFieldId);
         result = 31 * result + Arrays.hashCode(extraFieldIds);
         result = 31 * result + Arrays.hashCode(indexMeta);
         result = 31 * result + Arrays.hashCode(sourceMeta);

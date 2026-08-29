@@ -64,8 +64,7 @@ public class IndexManifestEntrySerializer extends ObjectSerializer<IndexManifest
                                         ? null
                                         : new GenericArray(globalIndexMeta.extraFieldIds()),
                                 globalIndexMeta.indexMeta(),
-                                globalIndexMeta.sourceMeta(),
-                                globalIndexMeta.buildSchemaId());
+                                globalIndexMeta.sourceMeta());
         return GenericRow.of(
                 FORMAT_IDENTIFIER,
                 record.kind().toByteValue(),
@@ -77,7 +76,8 @@ public class IndexManifestEntrySerializer extends ObjectSerializer<IndexManifest
                 indexFile.rowCount(),
                 dvMetasToRowArrayData(indexFile.dvRanges()),
                 fromString(indexFile.externalPath()),
-                globalIndexRow);
+                globalIndexRow,
+                record.schemaId());
     }
 
     @Override
@@ -103,7 +103,6 @@ public class IndexManifestEntrySerializer extends ObjectSerializer<IndexManifest
                     globalIndexRow.isNullAt(3) ? null : globalIndexRow.getArray(3).toIntArray();
             byte[] indexMeta = globalIndexRow.isNullAt(4) ? null : globalIndexRow.getBinary(4);
             byte[] sourceMeta = globalIndexRow.isNullAt(5) ? null : globalIndexRow.getBinary(5);
-            Long buildSchemaId = globalIndexRow.isNullAt(6) ? null : globalIndexRow.getLong(6);
             globalIndexMeta =
                     new GlobalIndexMeta(
                             rowRangeStart,
@@ -111,10 +110,10 @@ public class IndexManifestEntrySerializer extends ObjectSerializer<IndexManifest
                             indexFieldId,
                             extralFields,
                             indexMeta,
-                            sourceMeta,
-                            buildSchemaId);
+                            sourceMeta);
         }
 
+        Long schemaId = row.getFieldCount() <= 10 || row.isNullAt(10) ? null : row.getLong(10);
         return new IndexManifestEntry(
                 FileKind.fromByteValue(row.getByte(0)),
                 deserializeBinaryRow(row.getBinary(1)),
@@ -126,7 +125,8 @@ public class IndexManifestEntrySerializer extends ObjectSerializer<IndexManifest
                         row.getLong(6),
                         row.isNullAt(7) ? null : rowArrayDataToDvMetas(row.getArray(7)),
                         row.isNullAt(8) ? null : row.getString(8).toString(),
-                        globalIndexMeta));
+                        globalIndexMeta),
+                schemaId);
     }
 
     public static Function<InternalRow, BinaryRow> partitionGetter() {

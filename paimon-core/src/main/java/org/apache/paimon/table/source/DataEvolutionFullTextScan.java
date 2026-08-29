@@ -116,14 +116,18 @@ public class DataEvolutionFullTextScan implements FullTextScan {
                             && supportsFullTextSearch(entry.indexFile().indexType());
                 };
 
+        List<IndexManifestEntry> discoveredEntries =
+                indexFileHandler.scan(snapshot, indexFileFilter);
         List<IndexFileMeta> discoveredIndexFiles =
-                indexFileHandler.scan(snapshot, indexFileFilter).stream()
+                discoveredEntries.stream()
                         .map(IndexManifestEntry::indexFile)
                         .collect(Collectors.toList());
         List<IndexRangeSelection> discoveredSelections =
                 chooseIndexRanges(discoveredIndexFiles, textColumnIds, idToColumn);
         List<IndexFileMeta> compatibleIndexFiles =
-                GlobalIndexSchemaCompatibility.filterCompatible(table, discoveredIndexFiles);
+                GlobalIndexSchemaCompatibility.filterCompatible(table, discoveredEntries).stream()
+                        .map(IndexManifestEntry::indexFile)
+                        .collect(Collectors.toList());
         List<IndexRangeSelection> compatibleSelections =
                 chooseIndexRanges(compatibleIndexFiles, textColumnIds, idToColumn);
 

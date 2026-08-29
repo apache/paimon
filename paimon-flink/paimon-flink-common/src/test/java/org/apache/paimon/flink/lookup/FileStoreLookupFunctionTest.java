@@ -404,7 +404,7 @@ public class FileStoreLookupFunctionTest {
     }
 
     @Test
-    public void testDebugLogRowsWithAppendedPrimaryKey() throws Exception {
+    public void testLookupProjectionWithAppendedPrimaryKey() throws Exception {
         table = createStringFileStoreTable();
         lookupFunction =
                 new FileStoreLookupFunction(table, new int[] {2, 1}, new int[] {1}, null, null);
@@ -419,8 +419,15 @@ public class FileStoreLookupFunctionTest {
 
         Appender appender = addLookupFunctionAppender(Level.INFO);
         try {
-            lookupFunction.lookup(
-                    new FlinkRowData(GenericRow.of(BinaryString.fromString("key-1"))));
+            List<RowData> rows =
+                    new ArrayList<>(
+                            lookupFunction.lookup(
+                                    new FlinkRowData(
+                                            GenericRow.of(BinaryString.fromString("key-1")))));
+            assertThat(rows).hasSize(1);
+            assertThat(rows.get(0).getArity()).isEqualTo(2);
+            assertThat(rows.get(0).getString(0).toString()).isEqualTo("value-1");
+            assertThat(rows.get(0).getString(1).toString()).isEqualTo("key-1");
             assertThat(((CollectingAppender) appender).messages)
                     .noneMatch(message -> message.contains("matched rows in lookup table"));
         } finally {

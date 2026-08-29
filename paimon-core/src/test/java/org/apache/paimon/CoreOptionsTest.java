@@ -271,6 +271,16 @@ public class CoreOptionsTest {
     }
 
     @Test
+    public void testVideoFrameFieldIsRecognizedAsBlobField() {
+        Options options = new Options();
+        options.set(CoreOptions.BLOB_FIELD, "image, video");
+        options.set(CoreOptions.VIDEO_FRAME_FIELD, "video");
+
+        assertThat(CoreOptions.blobField(options.toMap())).containsExactly("image", "video");
+        assertThat(new CoreOptions(options).videoFrameField()).containsExactly("video");
+    }
+
+    @Test
     public void testLocalKvDbBlockSize() {
         Options conf = new Options();
         assertThat(new CoreOptions(conf).localKvDbBlockSize()).isEqualTo(4 * 1024);
@@ -287,5 +297,55 @@ public class CoreOptionsTest {
         assertThatThrownBy(() -> new CoreOptions(conf).localKvDbBlockSize())
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("local-kv-db.block-size");
+    }
+
+    @Test
+    public void testFormatTableCommitCleanupThreadNumDefaultsTo64AndAcceptsBounds() {
+        Options conf = new Options();
+        assertThat(new CoreOptions(conf).formatTableCommitCleanupThreadNum()).isEqualTo(64);
+
+        conf.set(CoreOptions.FORMAT_TABLE_COMMIT_CLEANUP_THREAD_NUM, 1);
+        assertThat(new CoreOptions(conf).formatTableCommitCleanupThreadNum()).isEqualTo(1);
+
+        conf.set(CoreOptions.FORMAT_TABLE_COMMIT_CLEANUP_THREAD_NUM, 64);
+        assertThat(new CoreOptions(conf).formatTableCommitCleanupThreadNum()).isEqualTo(64);
+    }
+
+    @Test
+    public void testFormatTableCommitCleanupThreadNumRejectsValuesOutsideSupportedRange() {
+        for (int invalid : new int[] {0, -1, 65}) {
+            Options conf = new Options();
+            conf.set(CoreOptions.FORMAT_TABLE_COMMIT_CLEANUP_THREAD_NUM, invalid);
+            assertThatThrownBy(() -> new CoreOptions(conf).formatTableCommitCleanupThreadNum())
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("format-table.commit.cleanup-thread-num")
+                    .hasMessageContaining("1")
+                    .hasMessageContaining("64");
+        }
+    }
+
+    @Test
+    public void testFormatTableCommitPublishThreadNumDefaultsTo64AndAcceptsBounds() {
+        Options conf = new Options();
+        assertThat(new CoreOptions(conf).formatTableCommitPublishThreadNum()).isEqualTo(64);
+
+        conf.set(CoreOptions.FORMAT_TABLE_COMMIT_PUBLISH_THREAD_NUM, 1);
+        assertThat(new CoreOptions(conf).formatTableCommitPublishThreadNum()).isEqualTo(1);
+
+        conf.set(CoreOptions.FORMAT_TABLE_COMMIT_PUBLISH_THREAD_NUM, 64);
+        assertThat(new CoreOptions(conf).formatTableCommitPublishThreadNum()).isEqualTo(64);
+    }
+
+    @Test
+    public void testFormatTableCommitPublishThreadNumRejectsValuesOutsideSupportedRange() {
+        for (int invalid : new int[] {0, -1, 65}) {
+            Options conf = new Options();
+            conf.set(CoreOptions.FORMAT_TABLE_COMMIT_PUBLISH_THREAD_NUM, invalid);
+            assertThatThrownBy(() -> new CoreOptions(conf).formatTableCommitPublishThreadNum())
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("format-table.commit.publish-thread-num")
+                    .hasMessageContaining("1")
+                    .hasMessageContaining("64");
+        }
     }
 }
