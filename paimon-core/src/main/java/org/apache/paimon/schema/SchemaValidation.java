@@ -70,6 +70,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
@@ -535,7 +536,6 @@ public class SchemaValidation {
                 geospatialSequenceFields);
     }
 
-    /** Validate geospatial types in a schema that will be published as Iceberg metadata. */
     /**
      * Refuses nanosecond-precision timestamps while Iceberg metadata is enabled: Paimon writes them
      * as Parquet INT96, which Iceberg reads as a microsecond zoned timestamp rather than the {@code
@@ -566,6 +566,23 @@ public class SchemaValidation {
                         > MAX_ICEBERG_TIMESTAMP_PRECISION;
     }
 
+    /**
+     * The mirror emits historical schemas too, so enabling it has to judge all of them. The history
+     * is read lazily, so a disabled mirror costs no listing.
+     */
+    public static void validateHistoricalIcebergTypes(
+            Supplier<List<TableSchema>> history, CoreOptions options) {
+        if (options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                == IcebergOptions.StorageType.DISABLED) {
+            return;
+        }
+        for (TableSchema schema : history.get()) {
+            validateIcebergGeospatialTypes(schema.logicalRowType(), options);
+            validateIcebergNanosecondTimestamps(schema.logicalRowType(), options);
+        }
+    }
+
+    /** Validate geospatial types in a schema that will be published as Iceberg metadata. */
     public static void validateIcebergGeospatialTypes(DataType dataType, CoreOptions options) {
         boolean hasGeospatial =
                 containsType(

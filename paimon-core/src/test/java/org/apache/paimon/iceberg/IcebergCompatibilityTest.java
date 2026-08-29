@@ -1650,6 +1650,55 @@ public class IcebergCompatibilityTest {
         commit.close();
     }
 
+    @Test
+    public void testDynamicallyEnablingIcebergRefusesHistoricalNanosecondTimestamps()
+            throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path path = new Path(tempDir.toString());
+        Options options = new Options();
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.FILE_FORMAT, "parquet");
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.TIMESTAMP(9)},
+                        new String[] {"k", "ts"});
+        Schema schema =
+                new Schema(
+                        rowType.getFields(),
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        options.toMap(),
+                        "");
+
+        FileStoreTable table;
+        Identifier identifier = Identifier.create("mydb", "t");
+        try (FileSystemCatalog paimonCatalog = new FileSystemCatalog(fileIO, path)) {
+            paimonCatalog.createDatabase("mydb", false);
+            paimonCatalog.createTable(identifier, schema, false);
+            table = (FileStoreTable) paimonCatalog.getTable(identifier);
+
+            String commitUser = UUID.randomUUID().toString();
+            try (TableWriteImpl<?> write = table.newWrite(commitUser);
+                    TableCommitImpl commit = table.newCommit(commitUser)) {
+                write.write(GenericRow.of(1, Timestamp.fromEpochMillis(0)));
+                commit.commit(1, write.prepareCommit(false, 1));
+            }
+
+            paimonCatalog.alterTable(identifier, SchemaChange.dropColumn("ts"), false);
+            table = (FileStoreTable) paimonCatalog.getTable(identifier);
+        }
+
+        FileStoreTable currentTable = table;
+        assertThatThrownBy(
+                        () ->
+                                currentTable.copy(
+                                        Collections.singletonMap(
+                                                IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                                                IcebergOptions.StorageType.TABLE_LOCATION
+                                                        .toString())))
+                .hasMessageContaining("Timestamp columns with a precision above 6");
+    }
+
     /*
     Create snapshots
     Create tags

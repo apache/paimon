@@ -25,7 +25,6 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.schema.ColumnDirectiveUtils.ConvertedColumn;
 import org.apache.paimon.schema.SchemaChange.AddColumn;
 import org.apache.paimon.schema.SchemaChange.DropColumn;
@@ -1217,25 +1216,11 @@ public class SchemaManager implements Serializable {
     @VisibleForTesting
     public boolean commit(TableSchema newSchema) throws Exception {
         SchemaValidation.validateTableSchema(newSchema);
-        validateHistoricalIcebergTypes(newSchema);
+        SchemaValidation.validateHistoricalIcebergTypes(
+                this::listAll, new CoreOptions(newSchema.options()));
         SchemaValidation.validateFallbackBranch(this, newSchema);
         Path schemaPath = toSchemaPath(newSchema.id());
         return fileIO.tryToWriteAtomic(schemaPath, newSchema.toString());
-    }
-
-    private void validateHistoricalIcebergTypes(TableSchema newSchema) {
-        CoreOptions options = new CoreOptions(newSchema.options());
-        IcebergOptions.StorageType storage =
-                options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE);
-        if (storage == IcebergOptions.StorageType.DISABLED) {
-            return;
-        }
-
-        // the mirror emits historical schemas too, so enabling it has to judge all of them
-        for (TableSchema schema : listAll()) {
-            SchemaValidation.validateIcebergGeospatialTypes(schema.logicalRowType(), options);
-            SchemaValidation.validateIcebergNanosecondTimestamps(schema.logicalRowType(), options);
-        }
     }
 
     /** Read schema for schema id. */

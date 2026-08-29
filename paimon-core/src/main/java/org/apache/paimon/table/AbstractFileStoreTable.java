@@ -25,6 +25,7 @@ import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.iceberg.IcebergCommitCallback;
+import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -367,6 +368,15 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
         // validate schema with new options
         SchemaValidation.validateTableSchema(newTableSchema, dynamicOptions.keySet());
+        if (new CoreOptions(tableSchema.options())
+                        .toConfiguration()
+                        .get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                == IcebergOptions.StorageType.DISABLED) {
+            // turning the mirror on here publishes the schemas already on disk, which no commit
+            // has judged under these options
+            SchemaValidation.validateHistoricalIcebergTypes(
+                    () -> schemaManager().listAll(), new CoreOptions(newTableSchema.options()));
+        }
 
         return copy(newTableSchema);
     }
