@@ -444,6 +444,10 @@ public class OrcReaderFactory implements FormatReaderFactory {
                             .useZeroCopy(OrcConf.USE_ZEROCOPY.getBoolean(conf))
                             .skipCorruptRecords(OrcConf.SKIP_CORRUPT_DATA.getBoolean(conf))
                             .tolerateMissingSchema(OrcConf.TOLERATE_MISSING_SCHEMA.getBoolean(conf))
+                            .forcePositionalEvolution(
+                                    OrcConf.FORCE_POSITIONAL_EVOLUTION.getBoolean(conf))
+                            .positionalEvolutionLevel(
+                                    OrcConf.FORCE_POSITIONAL_EVOLUTION_LEVEL.getInt(conf))
                             .isSchemaEvolutionCaseAware(
                                     OrcConf.IS_SCHEMA_EVOLUTION_CASE_SENSITIVE.getBoolean(conf));
             if (!conjunctPredicates.isEmpty() && !deletionVectorsEnabled && selection == null) {
