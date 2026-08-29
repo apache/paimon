@@ -793,6 +793,10 @@ class TableUpdateByRowId:
                     0,
                     column_name,
                     self.table.options,
+                    video=(
+                        column_name
+                        in self.table.options.video_frame_fields()
+                    ),
                 )
                 blob_writers.append(blob_writer)
                 arrow_type = original_data.schema.field(column_name).type

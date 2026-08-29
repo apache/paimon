@@ -238,6 +238,8 @@ public class SchemaValidation {
         Set<String> blobDescriptorFields = validateBlobDescriptorFields(tableRowType, options);
         Set<String> blobViewFields =
                 validateBlobViewFields(tableRowType, options, blobDescriptorFields);
+        validateVideoFrameFields(
+                schema, tableRowType, options, blobDescriptorFields, blobViewFields);
         validatePrimaryKeyBlobKeyConfiguration(schema, options);
         validatePrimaryKeyBlobConfiguration(schema, options);
         Set<String> blobInlineFields = new HashSet<>(blobDescriptorFields);
@@ -1597,6 +1599,45 @@ public class SchemaValidation {
                     CoreOptions.BLOB_DESCRIPTOR_FIELD.key());
         }
         return configured;
+    }
+
+    private static void validateVideoFrameFields(
+            TableSchema schema,
+            RowType rowType,
+            CoreOptions options,
+            Set<String> blobDescriptorFields,
+            Set<String> blobViewFields) {
+        Set<String> configured = options.videoFrameField();
+        checkArgument(
+                configured.size() <= 1,
+                "'%s' currently supports exactly one field, but found %s.",
+                CoreOptions.VIDEO_FRAME_FIELD.key(),
+                configured);
+        for (String field : configured) {
+            checkArgument(
+                    rowType.containsField(field)
+                            && rowType.getTypeAt(rowType.getFieldIndex(field)).getTypeRoot()
+                                    == DataTypeRoot.BLOB,
+                    "Field '%s' in '%s' must be a scalar BLOB field in table schema.",
+                    field,
+                    CoreOptions.VIDEO_FRAME_FIELD.key());
+            checkArgument(
+                    !blobDescriptorFields.contains(field),
+                    "Field '%s' in '%s' can not also be in '%s'.",
+                    field,
+                    CoreOptions.VIDEO_FRAME_FIELD.key(),
+                    CoreOptions.BLOB_DESCRIPTOR_FIELD.key());
+            checkArgument(
+                    !blobViewFields.contains(field),
+                    "Field '%s' in '%s' can not also be in '%s'.",
+                    field,
+                    CoreOptions.VIDEO_FRAME_FIELD.key(),
+                    CoreOptions.BLOB_VIEW_FIELD.key());
+        }
+        checkArgument(
+                configured.isEmpty() || schema.primaryKeys().isEmpty(),
+                "'%s' only supports append-only tables.",
+                CoreOptions.VIDEO_FRAME_FIELD.key());
     }
 
     private static void validatePrimaryKeyBlobConfiguration(

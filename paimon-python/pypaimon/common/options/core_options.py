@@ -132,6 +132,7 @@ class CoreOptions:
         "data-evolution.enabled",
         "index-file-in-data-file-dir",
         "blob-field",
+        "video-frame-field",
         "blob-descriptor-field",
         "blob-view-field",
         "pk-clustering-override",
@@ -142,6 +143,7 @@ class CoreOptions:
     FILE_FORMAT_AVRO: str = "avro"
     FILE_FORMAT_PARQUET: str = "parquet"
     FILE_FORMAT_BLOB: str = "blob"
+    FILE_FORMAT_VIDEO: str = "video"
     FILE_FORMAT_LANCE: str = "lance"
     FILE_FORMAT_VORTEX: str = "vortex"
     FILE_FORMAT_ROW: str = "row"
@@ -397,6 +399,16 @@ class CoreOptions:
         .string_type()
         .no_default_value()
         .with_description("Comma-separated column names that should be stored as blob type.")
+    )
+
+    VIDEO_FRAME_FIELD: ConfigOption[str] = (
+        ConfigOptions.key("video-frame-field")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "One scalar BLOB field whose logical values are frames in encoded "
+            "videos packed into '.video' files."
+        )
     )
 
     BLOB_DESCRIPTOR_FIELD: ConfigOption[str] = (
@@ -1233,6 +1245,10 @@ class CoreOptions:
 
     def blob_field(self, default=None):
         value = self.options.get(CoreOptions.BLOB_FIELD, default)
+        return CoreOptions._parse_field_set(value)
+
+    def video_frame_fields(self, default=None):
+        value = self.options.get(CoreOptions.VIDEO_FRAME_FIELD, default)
         return CoreOptions._parse_field_set(value)
 
     def blob_view_resolve_enabled(self, default=True):

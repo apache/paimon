@@ -21,8 +21,15 @@ from typing import Optional
 import pyarrow as pa
 
 from pypaimon.write.blob_format_writer import BlobFormatWriter
+from pypaimon.write.video_format_writer import VideoFormatWriter
 from pypaimon.table.row.generic_row import GenericRow, RowKind
-from pypaimon.table.row.blob import Blob, BlobConsumer, BlobData, BlobDescriptor
+from pypaimon.table.row.blob import (
+    Blob,
+    BlobConsumer,
+    BlobData,
+    BlobDescriptor,
+    VideoFrameDescriptor,
+)
 from pypaimon.schema.data_types import (
     DataField,
     PyarrowFieldParser,
@@ -38,17 +45,28 @@ class BlobFileWriter:
     """
 
     def __init__(self, file_io, file_path: Path, blob_consumer: Optional[BlobConsumer] = None,
-                 copy_buffer_size: int = BlobFormatWriter.BUFFER_SIZE):
+                 copy_buffer_size: int = BlobFormatWriter.BUFFER_SIZE,
+                 video: bool = False):
         self.file_io = file_io
         self.file_path = file_path
         self._blob_consumer = blob_consumer
+        if video:
+            if blob_consumer is not None:
+                raise ValueError("BlobConsumer is not supported for video frame fields.")
         self.output_stream = file_io.new_output_stream(file_path)
-        self.writer = BlobFormatWriter(
-            self.output_stream,
-            blob_consumer=blob_consumer,
-            file_path=str(file_path),
-            copy_buffer_size=copy_buffer_size,
-        )
+        if video:
+            self.writer = VideoFormatWriter(
+                self.output_stream,
+                file_path=str(file_path),
+                copy_buffer_size=copy_buffer_size,
+            )
+        else:
+            self.writer = BlobFormatWriter(
+                self.output_stream,
+                blob_consumer=blob_consumer,
+                file_path=str(file_path),
+                copy_buffer_size=copy_buffer_size,
+            )
         self.row_count = 0
         self.closed = False
 
@@ -103,7 +121,11 @@ class BlobFileWriter:
             return col_data
 
         if isinstance(col_data, bytes):
-            if BlobDescriptor.is_blob_descriptor(col_data):
+            if VideoFrameDescriptor.is_video_frame_descriptor(col_data):
+                descriptor = VideoFrameDescriptor.deserialize(col_data)
+                uri_reader = self.file_io.uri_reader_factory.create(descriptor.uri)
+                return Blob.from_descriptor(uri_reader, descriptor)
+            elif BlobDescriptor.is_blob_descriptor(col_data):
                 descriptor = BlobDescriptor.deserialize(col_data)
                 uri_reader = self.file_io.uri_reader_factory.create(descriptor.uri)
                 return Blob.from_descriptor(uri_reader, descriptor)

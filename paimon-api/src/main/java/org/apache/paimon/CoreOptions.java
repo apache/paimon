@@ -50,6 +50,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -2685,8 +2686,20 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Specifies column names that should be stored as blob type. "
                                     + "This is used when you want to treat a BYTES column as a BLOB. "
-                                    + "Fields listed in blob-descriptor-field or blob-view-field "
-                                    + "are also treated as BLOB fields.");
+                                    + "Fields listed in blob-descriptor-field, blob-view-field, "
+                                    + "or video-frame-field are also treated as BLOB fields.");
+
+    @Immutable
+    public static final ConfigOption<String> VIDEO_FRAME_FIELD =
+            key("video-frame-field")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Specifies one scalar BLOB field whose logical rows are video frames. "
+                                    + "Complete encoded videos and embedded frame-run indexes are "
+                                    + "packed into '.video' files. The first version supports "
+                                    + "append-only data-evolution tables and exact "
+                                    + "VideoFrameDescriptor input.");
 
     @Immutable
     public static final ConfigOption<String> BLOB_DESCRIPTOR_FIELD =
@@ -3585,6 +3598,11 @@ public class CoreOptions implements Serializable {
         return parseCommaSeparatedSet(BLOB_DESCRIPTOR_FIELD);
     }
 
+    /** Resolve the scalar BLOB field stored as frame runs in video pack files. */
+    public Set<String> videoFrameField() {
+        return parseCommaSeparatedSet(VIDEO_FRAME_FIELD);
+    }
+
     /**
      * Resolve blob fields that should be stored as serialized view metadata in data files.
      *
@@ -3953,12 +3971,20 @@ public class CoreOptions implements Serializable {
     }
 
     public static List<String> blobField(Map<String, String> options) {
-        String string = options.get(BLOB_FIELD.key());
-        if (string == null) {
-            return Collections.emptyList();
-        }
+        Set<String> fields = new LinkedHashSet<>();
+        addCommaSeparatedFields(fields, options.get(BLOB_FIELD.key()));
+        addCommaSeparatedFields(fields, options.get(VIDEO_FRAME_FIELD.key()));
+        return new ArrayList<>(fields);
+    }
 
-        return Arrays.stream(string.split(",")).map(String::trim).collect(Collectors.toList());
+    private static void addCommaSeparatedFields(Set<String> fields, @Nullable String configured) {
+        if (configured == null) {
+            return;
+        }
+        Arrays.stream(configured.split(","))
+                .map(String::trim)
+                .filter(field -> !field.isEmpty())
+                .forEach(fields::add);
     }
 
     public static List<String> blobViewField(Map<String, String> options) {

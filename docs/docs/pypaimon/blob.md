@@ -76,6 +76,14 @@ write_builder.new_commit().commit(writer.prepare_commit())
 writer.close()
 ```
 
+For frame tables, configure `video-frame-field`. The high-level multimodal
+API creates `VideoFrameDescriptor` values, packs multiple complete videos in
+`.video` files, keeps frame ordinals out of the normal data file, and provides
+`add_video` / `add_videos` / `replace_video` for physical video writes.
+Ordinary frame-column updates and all reads continue to use the existing table
+and BLOB APIs. See
+[Video Frame Storage](./multimodal-api#video-frame-storage).
+
 ## Reading Blob Data
 
 ### Batch reading (recommended)
@@ -160,8 +168,9 @@ blob = Blob.from_bytes(descriptor_bytes, file_io)
 data = blob.to_data()
 ```
 
-The factory auto-dispatches based on the bytes content (BLOBDESC magic
-header). This mirrors Java's `Blob.fromBytes(...)`.
+The factory auto-dispatches based on the bytes content (`BLOBDESC`,
+`VIDEOFRM`, or blob-view magic header). This mirrors Java's
+`Blob.fromBytes(...)`.
 
 ## See Also
 
@@ -169,3 +178,5 @@ header). This mirrors Java's `Blob.fromBytes(...)`.
   SQL/Java API
 - [Data Evolution](./data-evolution) — required for
   blob tables
+- [Multimodal video frames](./multimodal-api#video-frame-storage) —
+  `.video` pack writing and PyTorch DataLoader decoding
