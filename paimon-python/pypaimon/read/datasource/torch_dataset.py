@@ -159,6 +159,14 @@ class _BaseTorchIterDataset(IterableDataset):
         self.rank, self.world_size = _resolve_distributed_context(auto_detect_rank)
         self._context_pid = os.getpid()
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        rank, world_size = _resolve_distributed_context(self.auto_detect_rank)
+        state["rank"] = rank
+        state["world_size"] = world_size
+        state["_context_pid"] = os.getpid()
+        return state
+
     def _distributed_context(self):
         rank, world_size = _resolve_distributed_context(
             self.auto_detect_rank

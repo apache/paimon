@@ -22,6 +22,7 @@ from types import SimpleNamespace
 
 import torch
 from torch.utils.data import DataLoader
+from torch.nn.parallel import DistributedDataParallel
 
 from pypaimon.read.datasource.torch_dataset import TorchIterDataset
 
@@ -42,24 +43,46 @@ class _TableRead:
         SimpleNamespace(name="worker"),
     ]
 
+    def __init__(self):
+        self.rank = None
+
     def to_iterator(self, splits):
         worker_info = torch.utils.data.get_worker_info()
         worker_id = worker_info.id if worker_info is not None else 0
-        rank = int(os.environ["RANK"])
         for split_id in splits:
-            yield _OffsetRow([split_id, rank, worker_id])
+            yield _OffsetRow([split_id, self.rank, worker_id])
 
 
 def main():
     output_dir = sys.argv[1]
+    rank_env = os.environ.pop("RANK")
+    world_size_env = os.environ.pop("WORLD_SIZE")
+    table_read = _TableRead()
+    dataset = TorchIterDataset(table_read, list(range(11)))
+    os.environ["RANK"] = rank_env
+    os.environ["WORLD_SIZE"] = world_size_env
     torch.distributed.init_process_group("gloo")
     rank = torch.distributed.get_rank()
     try:
-        dataset = TorchIterDataset(
-            _TableRead(),
-            list(range(11)),
+        table_read.rank = rank
+        os.environ.pop("RANK")
+        os.environ.pop("WORLD_SIZE")
+        loader = DataLoader(
+            dataset,
+            batch_size=None,
+            num_workers=2,
+            multiprocessing_context="spawn",
         )
-        rows = list(DataLoader(dataset, batch_size=None, num_workers=2))
+        model = DistributedDataParallel(torch.nn.Linear(1, 1))
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+        rows = []
+        with model.join():
+            for row in loader:
+                rows.append(row)
+                value = torch.tensor([[float(row["split_id"])]])
+                model(value).sum().backward()
+                optimizer.step()
+                optimizer.zero_grad()
         with open(
             os.path.join(output_dir, "rank-%d.json" % rank),
             "w",

@@ -169,7 +169,7 @@ class TorchDistributedShardingTest(unittest.TestCase):
         with patch(
             "pypaimon.read.datasource.torch_dataset."
             "_resolve_distributed_context",
-            return_value=(1, 2),
+            return_value=(0, 1),
         ):
             dataset = TorchIterDataset(self._table_read(), list(range(8)))
 
@@ -179,7 +179,12 @@ class TorchDistributedShardingTest(unittest.TestCase):
             target=_collect_spawned_worker_splits,
             args=(dataset, output),
         )
-        process.start()
+        with patch(
+            "pypaimon.read.datasource.torch_dataset."
+            "_resolve_distributed_context",
+            return_value=(1, 2),
+        ):
+            process.start()
         process.join(30)
         if process.is_alive():
             process.terminate()

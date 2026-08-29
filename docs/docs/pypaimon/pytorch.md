@@ -70,10 +70,16 @@ dataset = table_read.to_torch(
     streaming=True,
 )
 dataloader = DataLoader(dataset, batch_size=32, num_workers=2)
+
+with model.join():
+    for batch in dataloader:
+        train(batch)
 ```
 
 PyPaimon checks `torch.distributed`, then `RANK` and `WORLD_SIZE`. Detection is
 enabled by default; set `auto_detect_rank=False` to disable rank sharding.
+A rank may receive fewer rows because splits have different sizes; `join()`
+keeps DDP collectives aligned while preserving every row without duplication.
 A limit that may truncate the input is rejected when multiple ranks are active.
 
 ### Batch Streaming
