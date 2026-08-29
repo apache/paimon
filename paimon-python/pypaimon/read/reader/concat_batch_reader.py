@@ -666,7 +666,11 @@ class BlobFallbackBatchReader(RecordBatchReader):
         if reader is None:
             state.reader_initialized = True
             return None
-        actual_rows = len(reader.blob_lengths)
+        actual_rows = (
+            reader.record_count
+            if hasattr(reader, "record_count")
+            else len(reader.blob_lengths)
+        )
         expected_rows = state.selected_count
         if actual_rows != expected_rows:
             reader.close()

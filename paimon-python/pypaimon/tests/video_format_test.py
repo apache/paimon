@@ -126,6 +126,34 @@ class VideoFormatTest(unittest.TestCase):
         frames = [VideoFrameDescriptor.deserialize(value) for value in values]
         self.assertEqual([1, 3], [frame.frame_index for frame in frames])
 
+    def test_reader_exposes_record_count_without_blob_indexes(self):
+        target = (self.root / "record-count.video").as_uri()
+        writer = VideoFormatWriter(self.file_io.new_output_stream(target))
+        for frame_index in range(4):
+            frame = self._source_frame(
+                "record-count.mp4", b"video", frame_index
+            )
+            writer.add_element(
+                GenericRow([frame], [self.field], RowKind.INSERT)
+            )
+        writer.close()
+
+        reader = FormatBlobReader(
+            file_io=self.file_io,
+            file_path=target,
+            read_fields=["video"],
+            full_fields=[self.field],
+            push_down_predicate=None,
+            blob_as_descriptor=True,
+            row_indices=[1, 3],
+        )
+        try:
+            self.assertEqual(2, reader.record_count)
+            self.assertEqual([], reader.blob_lengths)
+            self.assertEqual([], reader.blob_offsets)
+        finally:
+            reader.close()
+
     def test_rejects_non_video_frame_input(self):
         target = (self.root / "reject.video").as_uri()
         writer = VideoFormatWriter(self.file_io.new_output_stream(target))

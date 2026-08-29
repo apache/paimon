@@ -305,16 +305,17 @@ class FormatBlobReader(RecordBatchReader):
             self._input_stream.close()
             self._input_stream = None
 
+    @property
+    def record_count(self) -> int:
+        if self._is_video:
+            return self._video_meta.record_count
+        return len(self.blob_lengths)
+
     def _read_index(self) -> None:
         if self._is_video:
             self._video_meta = VideoFileMeta(
                 self._input_stream, self._file_size
             )
-            # BlobFallbackBatchReader uses this public list for the selected
-            # logical row count. Video rows have no ordinary BLOB lengths, so
-            # retain count-only sentinels and let VideoFileMeta resolve them.
-            self.blob_lengths = [0] * self._video_meta.record_count
-            self.blob_offsets = [0] * self._video_meta.record_count
             return
 
         f = self._input_stream
@@ -359,8 +360,6 @@ class FormatBlobReader(RecordBatchReader):
 
         if self._is_video:
             self._video_meta.select(row_indices)
-            self.blob_lengths = [0] * self._video_meta.record_count
-            self.blob_offsets = [0] * self._video_meta.record_count
             return
 
         selected_lengths = []
