@@ -74,8 +74,7 @@ public class FileIndexProcessor {
         this.fileIO = table.fileIO();
         this.pathFactory = table.store().pathFactory();
         this.pathFactories = new DataFilePathFactories(pathFactory);
-        this.schemaInfoCache =
-                new SchemaCache(fileIndexOptions, new SchemaManager(fileIO, table.location()));
+        this.schemaInfoCache = new SchemaCache(fileIndexOptions, table.schemaManager());
         this.sizeInMeta = table.coreOptions().fileIndexInManifestThreshold();
     }
 
