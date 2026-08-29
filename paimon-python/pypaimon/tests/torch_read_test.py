@@ -16,6 +16,7 @@
 # under the License.
 
 import json
+import multiprocessing
 import os
 import pickle
 import shutil
@@ -39,6 +40,12 @@ from pypaimon.read.datasource.torch_dataset import (
     _resolve_distributed_context,
 )
 from pypaimon.table.file_store_table import FileStoreTable
+
+
+def _collect_spawned_worker_splits(dataset, output):
+    os.environ.pop("RANK", None)
+    os.environ.pop("WORLD_SIZE", None)
+    output.put(dataset._worker_splits(None))
 
 
 class TorchDistributedShardingTest(unittest.TestCase):
@@ -166,14 +173,35 @@ class TorchDistributedShardingTest(unittest.TestCase):
         ):
             dataset = TorchIterDataset(self._table_read(), list(range(8)))
 
+        context = multiprocessing.get_context("spawn")
+        output = context.Queue()
+        process = context.Process(
+            target=_collect_spawned_worker_splits,
+            args=(dataset, output),
+        )
+        process.start()
+        process.join(30)
+        if process.is_alive():
+            process.terminate()
+            process.join()
+        self.assertEqual(process.exitcode, 0)
+        self.assertEqual(output.get(timeout=5), [4, 5, 6, 7])
+        output.close()
+
+    def test_same_process_uses_latest_context(self):
+        with patch(
+            "pypaimon.read.datasource.torch_dataset."
+            "_resolve_distributed_context",
+            return_value=(1, 2),
+        ):
+            dataset = TorchIterDataset(self._table_read(), list(range(8)))
+
         with patch(
             "pypaimon.read.datasource.torch_dataset."
             "_resolve_distributed_context",
             return_value=(0, 1),
         ):
-            assigned = dataset._worker_splits(None)
-
-        self.assertEqual(assigned, [4, 5, 6, 7])
+            self.assertEqual(dataset._worker_splits(None), list(range(8)))
 
     def test_auto_falls_back_to_single_process(self):
         with patch.dict(os.environ, {}, clear=True), patch.object(

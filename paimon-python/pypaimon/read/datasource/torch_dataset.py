@@ -157,14 +157,21 @@ class _BaseTorchIterDataset(IterableDataset):
         self.field_names = [field.name for field in table_read.read_type]
         self.auto_detect_rank = auto_detect_rank
         self.rank, self.world_size = _resolve_distributed_context(auto_detect_rank)
+        self._context_pid = os.getpid()
 
     def _distributed_context(self):
         rank, world_size = _resolve_distributed_context(
             self.auto_detect_rank
         )
-        if world_size == 1 and self.world_size > 1:
+        current_pid = os.getpid()
+        if (
+            current_pid != self._context_pid
+            and world_size == 1
+            and self.world_size > 1
+        ):
             return self.rank, self.world_size
         self.rank, self.world_size = rank, world_size
+        self._context_pid = current_pid
         return rank, world_size
 
     def _row_to_dict(self, offset_row) -> dict:
