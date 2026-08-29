@@ -141,6 +141,7 @@ jobs:
             python -c "import h5py; print('h5py', h5py.__version__)"
 
             if [[ "${{ matrix.python-version }}" == "3.11" ]]; then
+              # Run the RoboMIND pipeline tests with synthetic local HDF5 data.
               # Exercise the 0.4 API in one lane until its wheel is published.
               python -m pip install "git+https://github.com/apache/paimon-rust.git@${PYPAIMON_RUST_REV}#subdirectory=bindings/python"
               python -m pip install "./paimon-python[sql]"

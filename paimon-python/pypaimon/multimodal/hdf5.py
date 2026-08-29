@@ -72,10 +72,14 @@ class Hdf5File:
 
 @dataclass(frozen=True)
 class Hdf5LoadResult:
-    """Counts and optional snapshot for one ``load_from_hdf5`` call."""
+    """Counts and optional snapshot for one ``load_from_hdf5`` call.
+
+    ``batch_count`` is unavailable for Ray loads because counting lazy output
+    batches would execute the transform a second time.
+    """
 
     file_count: int
-    batch_count: int
+    batch_count: Optional[int]
     row_count: int
     snapshot_id: Optional[int]
 
@@ -188,33 +192,17 @@ def _load_hdf5_files(table, files, transform, source_file_io, h5py):
         table_commit.add_commit_callback(snapshot_recorder)
 
         for source in files:
-            source_row_count = 0
-            with closing(source_file_io.new_input_stream(source.path)) as stream:
-                _require_seekable(stream, source)
-                with h5py.File(stream, "r") as h5:
-                    transformed = transform(h5, source)
-                    batches = None
-                    try:
-                        batches = _arrow_batches(transformed)
-                        for value in batches:
-                            arrow_table = _strict_arrow_table(
-                                value,
-                                target_schema,
-                                source,
-                                batch_count,
-                            )
-                            batch_count += 1
-                            row_count += arrow_table.num_rows
-                            source_row_count += arrow_table.num_rows
-                            if arrow_table.num_rows:
-                                table_write.write_arrow(arrow_table)
-                    finally:
-                        _close_transform_iterator(
-                            batches if batches is not None else transformed)
-
-            if source_row_count == 0:
-                raise ValueError(
-                    "HDF5 source %s produced no rows." % source.path)
+            for arrow_table in _transform_hdf5_file(
+                    source,
+                    transform,
+                    source_file_io,
+                    h5py,
+                    target_schema,
+                    batch_index=batch_count):
+                batch_count += 1
+                row_count += arrow_table.num_rows
+                if arrow_table.num_rows:
+                    table_write.write_arrow(arrow_table)
 
         commit_messages = table_write.prepare_commit()
         commit_started = True
@@ -239,6 +227,35 @@ def _load_hdf5_files(table, files, transform, source_file_io, h5py):
         finally:
             if table_commit is not None:
                 table_commit.close()
+
+
+def _transform_hdf5_file(
+        source,
+        transform,
+        source_file_io,
+        h5py,
+        target_schema,
+        *,
+        batch_index=0):
+    """Yield validated Arrow tables for one HDF5 source."""
+    produced_rows = 0
+    with closing(source_file_io.new_input_stream(source.path)) as stream:
+        _require_seekable(stream, source)
+        with h5py.File(stream, "r") as h5:
+            transformed = transform(h5, source)
+            batches = None
+            try:
+                batches = _arrow_batches(transformed)
+                for index, value in enumerate(batches, start=batch_index):
+                    arrow_table = _strict_arrow_table(
+                        value, target_schema, source, index)
+                    produced_rows += arrow_table.num_rows
+                    yield arrow_table
+            finally:
+                _close_transform_iterator(
+                    batches if batches is not None else transformed)
+    if produced_rows == 0:
+        raise ValueError("HDF5 source %s produced no rows." % source.path)
 
 
 def _discover_hdf5_files(paths, source_file_io):
