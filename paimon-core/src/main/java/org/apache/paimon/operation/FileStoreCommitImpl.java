@@ -1097,7 +1097,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         Snapshot newSnapshot;
         Pair<String, Long> baseManifestList = null;
         Pair<String, Long> deltaManifestList = null;
-        List<PartitionEntry> deltaStatistics;
+        List<PartitionEntry> deltaPartitionEntries;
         Pair<String, Long> changelogManifestList = null;
         String oldIndexManifest = null;
         String indexManifest = null;
@@ -1173,7 +1173,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             long totalRecordCount = previousTotalRecordCount + deltaRecordCount;
 
             // write new delta files into manifest files
-            deltaStatistics = new ArrayList<>(PartitionEntry.merge(deltaFiles));
+            deltaPartitionEntries = new ArrayList<>(PartitionEntry.merge(deltaFiles));
             deltaManifestList = manifestList.write(manifestFile.write(deltaFiles));
 
             // write changelog into manifest files
@@ -1263,7 +1263,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 callback ->
                         callback.call(finalBaseFiles, finalDeltaFiles, indexFiles, newSnapshot));
         try {
-            success = commitSnapshotImpl(latestSnapshot, newSnapshot, deltaStatistics);
+            success = commitSnapshotImpl(latestSnapshot, newSnapshot, deltaPartitionEntries);
         } catch (Exception e) {
             // commit exception, not sure about the situation and should not clean up the files
             LOG.warn(
@@ -1666,10 +1666,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private boolean commitSnapshotImpl(
             @Nullable Snapshot baseSnapshot,
             Snapshot newSnapshot,
-            List<PartitionEntry> deltaStatistics) {
+            List<PartitionEntry> deltaPartitionEntries) {
         try {
-            List<PartitionStatistics> statistics = new ArrayList<>(deltaStatistics.size());
-            for (PartitionEntry entry : deltaStatistics) {
+            List<PartitionStatistics> statistics = new ArrayList<>(deltaPartitionEntries.size());
+            for (PartitionEntry entry : deltaPartitionEntries) {
                 statistics.add(entry.toPartitionStatistics(partitionComputer));
             }
             return snapshotCommit.commit(
