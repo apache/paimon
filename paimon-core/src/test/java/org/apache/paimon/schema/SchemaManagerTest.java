@@ -36,6 +36,7 @@ import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.IntType;
@@ -195,6 +196,112 @@ public class SchemaManagerTest {
 
         assertThatThrownBy(() -> retryArtificialException(() -> manager.createTable(nanos)))
                 .hasStackTraceContaining("precision from 3 to 6");
+    }
+
+    @Test
+    public void testIcebergMetadataRefusesUnpublishableTypes() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "-1");
+        options.put(IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "table-location");
+
+        DataType vector = DataTypes.VECTOR(4, DataTypes.FLOAT());
+        assertThatThrownBy(
+                        () ->
+                                retryArtificialException(
+                                        () ->
+                                                manager.createTable(
+                                                        unpublishableSchema(options, vector))))
+                .hasStackTraceContaining("cannot be published as Iceberg metadata");
+
+        Map<String, String> disabled = new HashMap<>(options);
+        disabled.remove(IcebergOptions.METADATA_ICEBERG_STORAGE.key());
+        assertThatCode(
+                        () ->
+                                retryArtificialException(
+                                        () ->
+                                                manager.createTable(
+                                                        unpublishableSchema(disabled, vector))))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testIcebergMetadataRefusesVariantBelowFormatVersionThree() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "-1");
+        options.put(IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "table-location");
+
+        assertThatThrownBy(
+                        () ->
+                                retryArtificialException(
+                                        () ->
+                                                manager.createTable(
+                                                        unpublishableSchema(
+                                                                options, DataTypes.VARIANT()))))
+                .hasStackTraceContaining("require Iceberg format version 3");
+
+        Map<String, String> formatVersionThree = new HashMap<>(options);
+        formatVersionThree.put(IcebergOptions.FORMAT_VERSION.key(), "3");
+        assertThatCode(
+                        () ->
+                                retryArtificialException(
+                                        () ->
+                                                manager.createTable(
+                                                        unpublishableSchema(
+                                                                formatVersionThree,
+                                                                DataTypes.VARIANT()))))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testIcebergMetadataRefusesBlobColumns() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "-1");
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        options.put(IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "table-location");
+
+        assertThatThrownBy(
+                        () ->
+                                retryArtificialException(
+                                        () ->
+                                                manager.createTable(
+                                                        unpublishableSchema(
+                                                                options, DataTypes.BLOB()))))
+                .hasStackTraceContaining("cannot be published as Iceberg metadata");
+    }
+
+    @Test
+    public void testEnableIcebergMetadataValidatesHistoricalUnpublishableTypes() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.BUCKET.key(), "-1");
+        retryArtificialException(
+                () ->
+                        manager.createTable(
+                                unpublishableSchema(
+                                        options, DataTypes.VECTOR(4, DataTypes.FLOAT()))));
+        retryArtificialException(() -> manager.commitChanges(SchemaChange.dropColumn("payload")));
+
+        assertThatThrownBy(
+                        () ->
+                                retryArtificialException(
+                                        () ->
+                                                manager.commitChanges(
+                                                        SchemaChange.setOption(
+                                                                IcebergOptions
+                                                                        .METADATA_ICEBERG_STORAGE
+                                                                        .key(),
+                                                                "table-location"))))
+                .hasStackTraceContaining("cannot be published as Iceberg metadata");
+    }
+
+    private Schema unpublishableSchema(Map<String, String> options, DataType type) {
+        return new Schema(
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()), new DataField(1, "payload", type)),
+                Collections.emptyList(),
+                Collections.emptyList(),
+                options,
+                "");
     }
 
     @Test
