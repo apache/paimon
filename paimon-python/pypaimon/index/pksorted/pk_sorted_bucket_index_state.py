@@ -18,6 +18,7 @@ from dataclasses import dataclass
 
 from pypaimon.index.pk.primary_key_index_source_file import PrimaryKeyIndexSourceFile
 from pypaimon.index.pk.primary_key_index_source_meta import PrimaryKeyIndexSourceMeta
+from pypaimon.index.pk.primary_key_index_source_policy import should_read
 from pypaimon.index.pksorted.pk_sorted_index_group import PkSortedIndexGroup
 
 
@@ -32,7 +33,7 @@ class PkSortedBucketIndexState:
     def from_active_data_files(field_id, index_type, active_data_files, active_payloads):
         sources_by_level = {}
         for data_file in active_data_files:
-            if data_file.file_source != 1 or data_file.level <= 0:
+            if not should_read(data_file):
                 continue
             sources_by_level.setdefault(data_file.level, []).append(
                 PrimaryKeyIndexSourceFile(data_file.file_name, data_file.row_count))

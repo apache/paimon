@@ -23,6 +23,8 @@ from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.index.index_file_handler import IndexFileHandler
 from pypaimon.index.pk.primary_key_index_source_meta import (
     PrimaryKeyIndexSourceMeta)
+from pypaimon.index.pk.primary_key_index_source_policy import (
+    should_read as _should_read_source)
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.split import DataSplit
 from pypaimon.snapshot.time_travel_util import TimeTravelUtil
@@ -182,11 +184,6 @@ def _current_payloads(active_files, active_payloads):
         source_meta = PrimaryKeyIndexSourceMeta.from_index_file(payload)
         covered.update(source.file_name for source in source_meta.source_files)
     return current, covered
-
-
-def _should_read_source(data_file):
-    # FileSource.COMPACT = 1. Match Java PrimaryKeyIndexSourcePolicy.
-    return data_file.file_source == 1 and data_file.level > 0
 
 
 class PrimaryKeyFullTextScanPlan(FullTextScanPlan):

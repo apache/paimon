@@ -24,6 +24,7 @@ from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.data_evolution_global_index_scanner import _create_inner_readers
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.index.pk.primary_key_index_source_file import PrimaryKeyIndexSourceFile
+from pypaimon.index.pk.primary_key_index_source_policy import should_read
 from pypaimon.index.pksorted.pk_sorted_bucket_index_state import PkSortedBucketIndexState
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
@@ -79,7 +80,7 @@ def plan(snapshot_id, data_splits, definitions, index_entries):
         payloads = payloads_by_bucket.get(bucket, [])
         active_sources_by_level = {}
         for data_file in data_files:
-            if data_file.file_source == 1 and data_file.level > 0:
+            if should_read(data_file):
                 active_sources_by_level.setdefault(data_file.level, set()).add(
                     PrimaryKeyIndexSourceFile(
                         data_file.file_name, data_file.row_count))
