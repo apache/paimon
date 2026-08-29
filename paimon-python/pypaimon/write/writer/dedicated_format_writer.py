@@ -34,7 +34,6 @@ from pypaimon.schema.data_types import (
 from pypaimon.table.row.blob import (
     Blob,
     BlobConsumer,
-    BlobDescriptor,
     BlobRef,
     VideoFrameDescriptor,
 )
