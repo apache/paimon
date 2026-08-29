@@ -151,7 +151,9 @@ class TorchDistributedShardingTest(unittest.TestCase):
         self.assertEqual(context, (1, 3))
 
     def test_context_is_resolved_after_dataset_construction(self):
-        dataset = TorchIterDataset(self._table_read(), list(range(8)))
+        dataset = TorchIterDataset(
+            self._table_read(), list(range(8)), auto_detect_rank=True
+        )
         with patch.dict(
             os.environ, {"RANK": "2", "WORLD_SIZE": "4"}, clear=True
         ), patch.object(
@@ -171,7 +173,9 @@ class TorchDistributedShardingTest(unittest.TestCase):
             "_resolve_distributed_context",
             return_value=(0, 1),
         ):
-            dataset = TorchIterDataset(self._table_read(), list(range(8)))
+            dataset = TorchIterDataset(
+                self._table_read(), list(range(8)), auto_detect_rank=True
+            )
 
         context = multiprocessing.get_context("spawn")
         output = context.Queue()
@@ -199,7 +203,9 @@ class TorchDistributedShardingTest(unittest.TestCase):
             "_resolve_distributed_context",
             return_value=(1, 2),
         ):
-            dataset = TorchIterDataset(self._table_read(), list(range(8)))
+            dataset = TorchIterDataset(
+                self._table_read(), list(range(8)), auto_detect_rank=True
+            )
 
         with patch(
             "pypaimon.read.datasource.torch_dataset."
@@ -846,6 +852,7 @@ class TorchReadTest(unittest.TestCase):
                     streaming=True,
                     batch_format=batch_format,
                     shuffle=batch_format == 'row' and shuffle,
+                    auto_detect_rank=True,
                 )
                 for batch_format, shuffle in [
                     ('row', False),
@@ -858,6 +865,13 @@ class TorchReadTest(unittest.TestCase):
                 self.assertTrue(dataset.auto_detect_rank)
                 self.assertEqual(dataset._worker_splits(None), expected)
 
+        pre_sharded = splits[::2]
+        with patch.dict(
+            os.environ, {"RANK": "1", "WORLD_SIZE": "2"}, clear=True
+        ):
+            dataset = table_read.to_torch(pre_sharded, streaming=True)
+            self.assertFalse(dataset.auto_detect_rank)
+            self.assertEqual(dataset._worker_splits(None), pre_sharded)
         self.assertIsNotNone(table_read.to_torch(splits))
 
     def test_blob_torch_read(self):

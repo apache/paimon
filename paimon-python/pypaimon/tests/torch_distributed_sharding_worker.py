@@ -58,7 +58,11 @@ def main():
     rank_env = os.environ.pop("RANK")
     world_size_env = os.environ.pop("WORLD_SIZE")
     table_read = _TableRead()
-    dataset = TorchIterDataset(table_read, list(range(11)))
+    dataset = TorchIterDataset(
+        table_read,
+        list(range(11)),
+        auto_detect_rank=True,
+    )
     os.environ["RANK"] = rank_env
     os.environ["WORLD_SIZE"] = world_size_env
     torch.distributed.init_process_group("gloo")

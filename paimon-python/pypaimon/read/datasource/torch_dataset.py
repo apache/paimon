@@ -150,7 +150,7 @@ class _BaseTorchIterDataset(IterableDataset):
         self,
         table_read: TableRead,
         splits: List[Split],
-        auto_detect_rank: bool = True,
+        auto_detect_rank: bool = False,
     ):
         self.table_read = table_read
         self.splits = splits
@@ -264,7 +264,7 @@ class TorchIterDataset(_BaseTorchIterDataset):
         table_read: TableRead,
         splits: List[Split],
         prefetch_concurrency: int = 1,
-        auto_detect_rank: bool = True,
+        auto_detect_rank: bool = False,
     ):
         """
         Initialize TorchIterDataset.
@@ -479,7 +479,7 @@ class TorchBatchIterDataset(_BaseTorchIterDataset):
         batch_format: str,
         batch_size: Optional[int],
         to_tensor_fn: Optional[Callable[[pa.RecordBatch], Any]] = None,
-        auto_detect_rank: bool = True,
+        auto_detect_rank: bool = False,
     ):
         super().__init__(table_read, splits, auto_detect_rank)
         self.batch_format = batch_format
@@ -544,7 +544,7 @@ class TorchShuffledIterDataset(_BaseTorchIterDataset):
         seed: int = 0,
         buffer_size: int = 1000,
         max_buffer_input_splits: int = 10,
-        auto_detect_rank: bool = True,
+        auto_detect_rank: bool = False,
     ):
         super().__init__(table_read, splits, auto_detect_rank)
         self.seed = self._require_int(seed, "seed")

@@ -68,6 +68,7 @@ Streaming reads shard splits across DDP ranks and DataLoader workers:
 dataset = table_read.to_torch(
     splits,
     streaming=True,
+    auto_detect_rank=True,
 )
 dataloader = DataLoader(dataset, batch_size=32, num_workers=2)
 
@@ -76,8 +77,9 @@ with model.join():
         train(batch)
 ```
 
-PyPaimon checks `torch.distributed`, then `RANK` and `WORLD_SIZE`. Detection is
-enabled by default; set `auto_detect_rank=False` to disable rank sharding.
+Automatic rank sharding is opt-in. Enable it only when every rank receives the
+same ordered, complete splits from one snapshot; leave it disabled for splits
+already sharded by the application.
 A rank may receive fewer rows because splits have different sizes; `join()`
 keeps DDP collectives aligned while preserving every row without duplication.
 A limit that may truncate the input is rejected when multiple ranks are active.
