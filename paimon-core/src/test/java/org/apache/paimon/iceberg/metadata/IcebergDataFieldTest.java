@@ -226,38 +226,20 @@ class IcebergDataFieldTest {
         IcebergDataField icebergTimestampLtz = new IcebergDataField(timestampLtzField);
         assertThat(icebergTimestampLtz.type()).isEqualTo("timestamptz");
 
-        // Test timestamp_ns (precision 7)
-        DataField timestampNs7Field = new DataField(3, "timestamp_ns", new TimestampType(false, 7));
-        IcebergDataField icebergTimestampNs7 = new IcebergDataField(timestampNs7Field);
-        assertThat(icebergTimestampNs7.type()).isEqualTo("timestamp_ns");
+        for (int precision = 7; precision <= 9; precision++) {
+            DataField nanosField =
+                    new DataField(3, "timestamp_ns", new TimestampType(false, precision));
+            assertThatThrownBy(() -> new IcebergDataField(nanosField))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("nanosecond-precision");
 
-        // Test timestamp_ns (precision 8)
-        DataField timestampNs8Field = new DataField(4, "timestamp_ns", new TimestampType(false, 8));
-        IcebergDataField icebergTimestampNs8 = new IcebergDataField(timestampNs8Field);
-        assertThat(icebergTimestampNs8.type()).isEqualTo("timestamp_ns");
-
-        // Test timestamp_ns (precision 9)
-        DataField timestampNs9Field = new DataField(5, "timestamp_ns", new TimestampType(false, 9));
-        IcebergDataField icebergTimestampNs9 = new IcebergDataField(timestampNs9Field);
-        assertThat(icebergTimestampNs9.type()).isEqualTo("timestamp_ns");
-
-        // Test timestamptz_ns (precision 7)
-        DataField timestampLtzNs7Field =
-                new DataField(6, "timestamptz_ns", new LocalZonedTimestampType(false, 7));
-        IcebergDataField icebergTimestampLtzNs7 = new IcebergDataField(timestampLtzNs7Field);
-        assertThat(icebergTimestampLtzNs7.type()).isEqualTo("timestamptz_ns");
-
-        // Test timestamptz_ns (precision 8)
-        DataField timestampLtzNs8Field =
-                new DataField(7, "timestamptz_ns", new LocalZonedTimestampType(false, 8));
-        IcebergDataField icebergTimestampLtzNs8 = new IcebergDataField(timestampLtzNs8Field);
-        assertThat(icebergTimestampLtzNs8.type()).isEqualTo("timestamptz_ns");
-
-        // Test timestamptz_ns (precision 9)
-        DataField timestampLtzNs9Field =
-                new DataField(8, "timestamptz_ns", new LocalZonedTimestampType(false, 9));
-        IcebergDataField icebergTimestampLtzNs9 = new IcebergDataField(timestampLtzNs9Field);
-        assertThat(icebergTimestampLtzNs9.type()).isEqualTo("timestamptz_ns");
+            DataField nanosLtzField =
+                    new DataField(
+                            4, "timestamptz_ns", new LocalZonedTimestampType(false, precision));
+            assertThatThrownBy(() -> new IcebergDataField(nanosLtzField))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("nanosecond-precision");
+        }
     }
 
     @Test
@@ -268,43 +250,40 @@ class IcebergDataFieldTest {
                 new DataField(1, "timestamp", new TimestampType(false, 2));
         assertThatThrownBy(() -> new IcebergDataField(invalidTimestampField))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining(
-                        "Paimon Iceberg compatibility only support timestamp type with precision from 3 to 9");
+                .hasMessageContaining("precision from 3 to 6");
 
         // Test invalid precision (<= 3)
         DataField invalidTimestampField2 =
                 new DataField(2, "timestamp", new TimestampType(false, 2));
         assertThatThrownBy(() -> new IcebergDataField(invalidTimestampField2))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining(
-                        "Paimon Iceberg compatibility only support timestamp type with precision from 3 to 9");
+                .hasMessageContaining("precision from 3 to 6");
 
         // Test invalid local timezone timestamp precision (<= 3)
         DataField invalidTimestampLtzField =
                 new DataField(3, "timestamptz", new LocalZonedTimestampType(false, 2));
         assertThatThrownBy(() -> new IcebergDataField(invalidTimestampLtzField))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining(
-                        "Paimon Iceberg compatibility only support timestamp type with precision from 3 to 9");
+                .hasMessageContaining("precision from 3 to 6");
 
         // Test valid precision boundaries
         DataField validTimestamp4 = new DataField(4, "timestamp", new TimestampType(false, 4));
         IcebergDataField icebergTimestamp4 = new IcebergDataField(validTimestamp4);
         assertThat(icebergTimestamp4.type()).isEqualTo("timestamp");
 
-        DataField validTimestamp9 = new DataField(5, "timestamp", new TimestampType(false, 9));
-        IcebergDataField icebergTimestamp9 = new IcebergDataField(validTimestamp9);
-        assertThat(icebergTimestamp9.type()).isEqualTo("timestamp_ns");
+        DataField validTimestamp6 = new DataField(5, "timestamp", new TimestampType(false, 6));
+        IcebergDataField icebergTimestamp6 = new IcebergDataField(validTimestamp6);
+        assertThat(icebergTimestamp6.type()).isEqualTo("timestamp");
 
         DataField validTimestampLtz4 =
                 new DataField(6, "timestamptz", new LocalZonedTimestampType(false, 4));
         IcebergDataField icebergTimestampLtz4 = new IcebergDataField(validTimestampLtz4);
         assertThat(icebergTimestampLtz4.type()).isEqualTo("timestamptz");
 
-        DataField validTimestampLtz9 =
-                new DataField(7, "timestamptz", new LocalZonedTimestampType(false, 9));
-        IcebergDataField icebergTimestampLtz9 = new IcebergDataField(validTimestampLtz9);
-        assertThat(icebergTimestampLtz9.type()).isEqualTo("timestamptz_ns");
+        DataField validTimestampLtz6 =
+                new DataField(7, "timestamptz", new LocalZonedTimestampType(false, 6));
+        IcebergDataField icebergTimestampLtz6 = new IcebergDataField(validTimestampLtz6);
+        assertThat(icebergTimestampLtz6.type()).isEqualTo("timestamptz");
     }
 
     @Test

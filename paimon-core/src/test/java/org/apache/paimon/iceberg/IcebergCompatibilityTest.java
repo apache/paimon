@@ -49,7 +49,9 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
@@ -1697,6 +1699,65 @@ public class IcebergCompatibilityTest {
                                                 IcebergOptions.StorageType.TABLE_LOCATION
                                                         .toString())))
                 .hasMessageContaining("Timestamp columns with a precision above 6");
+    }
+
+    @Test
+    public void testExistingTableWithHistoricalNanosecondTimestampsRefusesToCommit()
+            throws Exception {
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path warehouse = new Path(tempDir.toString());
+        Options options = new Options();
+        options.set(CoreOptions.BUCKET, 1);
+        options.set(CoreOptions.FILE_FORMAT, "parquet");
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.TIMESTAMP(9)},
+                        new String[] {"k", "ts"});
+        Schema schema =
+                new Schema(
+                        rowType.getFields(),
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        options.toMap(),
+                        "");
+
+        Identifier identifier = Identifier.create("mydb", "t");
+        try (FileSystemCatalog paimonCatalog = new FileSystemCatalog(fileIO, warehouse)) {
+            paimonCatalog.createDatabase("mydb", false);
+            paimonCatalog.createTable(identifier, schema, false);
+            FileStoreTable table = (FileStoreTable) paimonCatalog.getTable(identifier);
+
+            String commitUser = UUID.randomUUID().toString();
+            try (TableWriteImpl<?> write = table.newWrite(commitUser);
+                    TableCommitImpl commit = table.newCommit(commitUser)) {
+                write.write(GenericRow.of(1, Timestamp.fromEpochMillis(0)));
+                commit.commit(1, write.prepareCommit(false, 1));
+            }
+
+            paimonCatalog.alterTable(identifier, SchemaChange.dropColumn("ts"), false);
+        }
+
+        Path tablePath = new Path(warehouse, "mydb.db/t");
+        TableSchema latest = new SchemaManager(fileIO, tablePath).latest().get();
+        Map<String, String> upgraded = new HashMap<>(latest.options());
+        upgraded.put(
+                IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                IcebergOptions.StorageType.TABLE_LOCATION.toString());
+        FileStoreTable table =
+                FileStoreTableFactory.create(fileIO, tablePath, latest.copy(upgraded));
+
+        String commitUser = UUID.randomUUID().toString();
+        assertThatThrownBy(
+                        () -> {
+                            try (TableWriteImpl<?> write = table.newWrite(commitUser);
+                                    TableCommitImpl commit = table.newCommit(commitUser)) {
+                                write.write(GenericRow.of(2));
+                                commit.commit(2, write.prepareCommit(false, 2));
+                            }
+                        })
+                .hasMessageContaining("Timestamp columns with a precision above 6");
+        assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(1L);
+        assertThat(fileIO.exists(new Path(tablePath, "metadata"))).isFalse();
     }
 
     /*
