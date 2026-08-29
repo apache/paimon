@@ -208,6 +208,43 @@ class CatalogManagedPartitionScanTest {
     }
 
     @Test
+    void testPlanRowCountStaysUnknownWhenCatalogReportsZero() throws Exception {
+        Catalog catalog = mock(Catalog.class);
+        Partition catalogPartition =
+                new Partition(partition("2025", "11").spec(), 0L, 1L, 1L, 0L, -1, false);
+        when(catalog.listPartitionsPaged(eq(IDENTIFIER), eq(1000), isNull(), isNull()))
+                .thenReturn(new PagedList<>(Collections.singletonList(catalogPartition), null));
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        writeDataFile(fileIO, tablePath, "year=2025/month=11");
+        FormatTable table = createTable(fileIO, tablePath, partitionManager(catalog), false);
+
+        FormatTableScan.Plan plan = new FormatTableScan(table, null, null).plan();
+
+        assertThat(plan.splits()).hasSize(1);
+        assertThat(plan.rowCount()).isEqualTo(OptionalLong.empty());
+    }
+
+    @Test
+    void testPlanRowCountStaysUnknownWhenOneCatalogPartitionReportsZero() throws Exception {
+        Catalog catalog = mock(Catalog.class);
+        Partition zero = new Partition(partition("2025", "10").spec(), 0L, 0L, 0L, 0L, -1, false);
+        Partition positive =
+                new Partition(partition("2025", "11").spec(), 3L, 1L, 1L, 0L, -1, false);
+        when(catalog.listPartitionsPaged(eq(IDENTIFIER), eq(1000), isNull(), isNull()))
+                .thenReturn(new PagedList<>(Arrays.asList(zero, positive), null));
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        writeDataFile(fileIO, tablePath, "year=2025/month=11");
+        FormatTable table = createTable(fileIO, tablePath, partitionManager(catalog), false);
+
+        FormatTableScan.Plan plan = new FormatTableScan(table, null, null).plan();
+
+        assertThat(plan.splits()).hasSize(1);
+        assertThat(plan.rowCount()).isEqualTo(OptionalLong.empty());
+    }
+
+    @Test
     void testPlanRowCountStaysUnknownWhenCatalogReportsNoStatistics() throws Exception {
         // Partitions as they come off the wire from a catalog that stores no statistics. Summing
         // them as zeros would tell Spark the table is empty and get a huge scan broadcast.
@@ -230,6 +267,21 @@ class CatalogManagedPartitionScanTest {
 
         assertThat(plan.splits()).hasSize(2);
         assertThat(plan.rowCount()).isEqualTo(OptionalLong.empty());
+    }
+
+    @Test
+    void testPlanRowCountIsZeroWhenCatalogReturnsNoPartitions() throws Exception {
+        Catalog catalog = mock(Catalog.class);
+        when(catalog.listPartitionsPaged(eq(IDENTIFIER), eq(1000), isNull(), isNull()))
+                .thenReturn(new PagedList<>(Collections.emptyList(), null));
+        LocalFileIO fileIO = LocalFileIO.create();
+        Path tablePath = new Path(tempDir.toUri());
+        FormatTable table = createTable(fileIO, tablePath, partitionManager(catalog), false);
+
+        FormatTableScan.Plan plan = new FormatTableScan(table, null, null).plan();
+
+        assertThat(plan.splits()).isEmpty();
+        assertThat(plan.rowCount()).isEqualTo(OptionalLong.of(0L));
     }
 
     @Test
