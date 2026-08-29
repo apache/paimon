@@ -36,6 +36,7 @@ import java.io.IOException;
 
 import static org.apache.paimon.rest.interceptor.LoggingInterceptor.DEFAULT_REQUEST_ID;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Test for {@link DefaultErrorHandler}. */
 public class DefaultErrorHandlerTest {
@@ -81,6 +82,25 @@ public class DefaultErrorHandlerTest {
         assertThrows(
                 ServiceUnavailableException.class,
                 () -> defaultErrorHandler.accept(generateErrorResponse(503), DEFAULT_REQUEST_ID));
+    }
+
+    @Test
+    public void testErrorMessageIsNotReadAsAFormatString() {
+        // a server message is data, and this one holds what java.util.Formatter reads as syntax
+        String message = "quota 80% exceeded";
+        for (int code : new int[] {400, 401, 403, 404, 405, 406, 409, 500, 501, 502, 503}) {
+            RESTException exception =
+                    assertThrows(
+                            RESTException.class,
+                            () ->
+                                    defaultErrorHandler.accept(
+                                            new ErrorResponse("table", "t", message, code),
+                                            DEFAULT_REQUEST_ID),
+                            "status " + code);
+            assertTrue(
+                    exception.getMessage().contains(message),
+                    "status " + code + " lost the message: " + exception.getMessage());
+        }
     }
 
     private ErrorResponse generateErrorResponse(int code) {
