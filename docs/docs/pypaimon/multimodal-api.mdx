@@ -179,7 +179,10 @@ vector or blob types.
 
 `add` accepts `pyarrow.Table`, `pyarrow.RecordBatch`, a list of dictionaries, a
 dictionary of arrays, or a pandas DataFrame. Input columns are aligned and cast
-to the Paimon table schema before writing.
+to the Paimon table schema before writing. For a BLOB column, list, dictionary,
+and pandas inputs may also contain `Blob` or `BlobDescriptor` objects. A
+descriptor-backed `Blob` is copied through its stream; it is not first loaded
+into Python memory.
 
 ```python
 docs.add([
@@ -191,6 +194,189 @@ docs.add([
     }
 ])
 ```
+
+## Video Frames Sharing One MP4
+
+For a frame table, keep the frame mapping in ordinary columns and store one
+shared BLOB descriptor in every row for the video. Set `blob-shared-field` to
+the video column when creating the table:
+
+```python
+import pyarrow as pa
+import pypaimon.multimodal as pm
+
+frames = conn.create_table(
+    "video_frames",
+    schema=pa.schema([
+        pa.field("episode_id", pa.int64()),
+        pa.field("frame_index", pa.int32()),
+        pa.field("frame_timestamp", pa.float64()),
+        pa.field("video", pa.large_binary()),
+    ]),
+    options={
+        "blob-shared-field": "video",
+    },
+)
+```
+
+Pass the same descriptor-backed `Blob` for consecutive rows belonging to one
+video. `Blob.from_local` creates a reference; `add` serializes that reference
+and the shared writer copies the MP4 once for the output file:
+
+```python
+video = pm.Blob.from_local("/data/episode-42.mp4")
+fps = 30.0
+
+frames.add([
+    {
+        "episode_id": 42,
+        "frame_index": frame_index,
+        "frame_timestamp": frame_index / fps,
+        "video": video,
+    }
+    for frame_index in range(1800)
+])
+```
+
+For larger ingestion jobs, `add_batches` accepts an iterable of any supported
+input form and keeps one writer plus one commit for the whole iterable:
+
+```python
+frames.add_batches(frame_batches)
+```
+
+This is the preferred path when one video's contiguous rows cross Arrow batch
+boundaries. An empty iterable is a no-op and does not create a snapshot. If an
+error occurs before commit begins, the open writer is aborted; a commit error
+has the usual unknown-result semantics and is not retried.
+
+Remote sources can use an explicit descriptor. Its URI must be readable with
+the table's configured `FileIO` credentials:
+
+```python
+video = pm.BlobDescriptor(
+    "oss://source-bucket/episode-43.mp4",
+    offset=0,
+    length=video_size,
+)
+frames.add([
+    {
+        "episode_id": 43,
+        "frame_index": frame_index,
+        "frame_timestamp": frame_index / fps,
+        "video": video,
+    }
+    for frame_index in range(frame_count)
+])
+```
+
+Keep each video's rows contiguous in the input. Deduplication is by exact
+descriptor identity within one `.shared-blob` file, and the writer delays a
+pending roll until the current contiguous descriptor group ends. A later call
+to `add`, a checkpoint, or a prior file roll can therefore create another
+physical copy of the same source video.
+
+### Read with PyTorch DataLoader
+
+Install the PyTorch extra, then convert the multimodal scan directly. Unlike a
+regular BLOB materialization, `ScanQuery.to_torch` always returns serialized
+descriptors for BLOB columns. DataLoader workers receive Paimon splits and open
+the selected video ranges themselves:
+
+```shell
+pip install 'pypaimon[torch]'
+```
+
+```python
+from torch.utils.data import DataLoader
+
+dataset = (
+    frames.scan()
+    .select(["episode_id", "frame_index", "frame_timestamp", "video"])
+    .to_torch(streaming=True)
+)
+
+loader = DataLoader(
+    dataset,
+    batch_size=32,
+    num_workers=4,
+    shuffle=False,
+)
+```
+
+The `video` value above is descriptor bytes, not repeated MP4 bytes. If the
+training step needs decoded frames, use `VideoFrameCollator`. It owns a bounded,
+process-local LRU cache keyed by exact descriptor, so consecutive frame rows
+reuse one decoder session in each DataLoader worker. The decoder is an adapter:
+`decoder_factory(stream)` opens any codec library, and
+`decode_fn(decoder, row)` locates the frame from `frame_index` or
+`frame_timestamp`.
+
+```python
+import av
+import torch
+import pypaimon.multimodal as pm
+from torch.utils.data import DataLoader
+
+
+class SequentialPyAvDecoder:
+    def __init__(self, stream):
+        self.container = av.open(stream)
+        self._reset()
+
+    def _reset(self):
+        self.frames = iter(self.container.decode(video=0))
+        self.next_index = 0
+
+    def frame(self, index):
+        if index < self.next_index:
+            self.container.seek(0)
+            self._reset()
+        while self.next_index <= index:
+            frame = next(self.frames)
+            self.next_index += 1
+        array = frame.to_ndarray(format="rgb24")
+        return torch.from_numpy(array).permute(2, 0, 1)
+
+    def close(self):
+        self.container.close()
+
+
+def decode_frame(decoder, row):
+    return decoder.frame(row["frame_index"])
+
+
+collator = pm.VideoFrameCollator(
+    frames,
+    video_column="video",
+    decoder_factory=SequentialPyAvDecoder,
+    decode_fn=decode_frame,
+    output_column="frame",
+    max_open_videos=4,
+)
+
+loader = DataLoader(
+    dataset,
+    batch_size=32,
+    num_workers=4,
+    shuffle=False,
+    collate_fn=collator,
+    persistent_workers=True,
+)
+
+for batch in loader:
+    # batch["frame"] is [N, C, H, W].
+    train(batch["frame"], batch["episode_id"])
+```
+
+The example decoder additionally requires `pip install av`; PyAV is not a
+PyPaimon dependency.
+
+Define the decoder class and function at module scope when DataLoader uses the
+`spawn` multiprocessing method. For sequential video decoding, keep
+`shuffle=False`; row-buffer shuffle can turn monotonic frame access into seeks
+and require more open decoder sessions. Paimon's worker sharding is split-level,
+so it does not duplicate a split across workers.
 
 ## Load HDF5
 

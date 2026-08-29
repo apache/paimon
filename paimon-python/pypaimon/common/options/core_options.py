@@ -132,6 +132,7 @@ class CoreOptions:
         "data-evolution.enabled",
         "index-file-in-data-file-dir",
         "blob-field",
+        "blob-shared-field",
         "blob-descriptor-field",
         "blob-view-field",
         "pk-clustering-override",
@@ -142,6 +143,7 @@ class CoreOptions:
     FILE_FORMAT_AVRO: str = "avro"
     FILE_FORMAT_PARQUET: str = "parquet"
     FILE_FORMAT_BLOB: str = "blob"
+    FILE_FORMAT_SHARED_BLOB: str = "shared-blob"
     FILE_FORMAT_LANCE: str = "lance"
     FILE_FORMAT_VORTEX: str = "vortex"
     FILE_FORMAT_ROW: str = "row"
@@ -397,6 +399,16 @@ class CoreOptions:
         .string_type()
         .no_default_value()
         .with_description("Comma-separated column names that should be stored as blob type.")
+    )
+
+    BLOB_SHARED_FIELD: ConfigOption[str] = (
+        ConfigOptions.key("blob-shared-field")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "A scalar BLOB field whose rows may share one physical payload in "
+            "'.shared-blob' files."
+        )
     )
 
     BLOB_DESCRIPTOR_FIELD: ConfigOption[str] = (
@@ -1233,6 +1245,10 @@ class CoreOptions:
 
     def blob_field(self, default=None):
         value = self.options.get(CoreOptions.BLOB_FIELD, default)
+        return CoreOptions._parse_field_set(value)
+
+    def blob_shared_fields(self, default=None):
+        value = self.options.get(CoreOptions.BLOB_SHARED_FIELD, default)
         return CoreOptions._parse_field_set(value)
 
     def blob_view_resolve_enabled(self, default=True):

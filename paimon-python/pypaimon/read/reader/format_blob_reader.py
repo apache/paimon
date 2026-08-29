@@ -42,6 +42,10 @@ from pypaimon.table.row.row_kind import RowKind
 class FormatBlobReader(RecordBatchReader):
     NULL_LENGTH = -1
     PLACE_HOLDER_LENGTH = -2
+    SHARED_BLOB_MAGIC_NUMBER = 0x4C424853
+    SHARED_BLOB_VERSION = 1
+    SHARED_BLOB_FOOTER_SIZE = 13
+    MIN_RECORD_LENGTH = 16
 
     def __init__(self, file_io: FileIO, file_path: str, read_fields: List[str],
                  full_fields: List[DataField], push_down_predicate: Any, blob_as_descriptor: bool,
@@ -290,6 +294,10 @@ class FormatBlobReader(RecordBatchReader):
             self._input_stream = None
 
     def _read_index(self) -> None:
+        if self.file_path.endswith('.shared-blob'):
+            self._read_shared_index()
+            return
+
         f = self._input_stream
 
         # Seek to header: last 5 bytes
@@ -325,6 +333,85 @@ class FormatBlobReader(RecordBatchReader):
                 offset += length
         self.blob_lengths = blob_lengths
         self.blob_offsets = blob_offsets
+
+    def _read_shared_index(self) -> None:
+        if self._file_size < self.SHARED_BLOB_FOOTER_SIZE:
+            raise IOError(
+                "Corrupt shared blob file: file is smaller than its footer."
+            )
+
+        f = self._input_stream
+        f.seek(self._file_size - self.SHARED_BLOB_FOOTER_SIZE)
+        footer = f.read(self.SHARED_BLOB_FOOTER_SIZE)
+        if len(footer) != self.SHARED_BLOB_FOOTER_SIZE:
+            raise IOError("Corrupt shared blob file: cannot read footer.")
+        physical_index_length, row_index_length, magic, version = struct.unpack(
+            '<IIIB', footer
+        )
+        if magic != self.SHARED_BLOB_MAGIC_NUMBER:
+            raise IOError(f"Corrupt shared blob file: invalid footer magic {magic}.")
+        if version != self.SHARED_BLOB_VERSION:
+            raise IOError(f"Unsupported shared blob file version: {version}")
+
+        data_and_index_length = self._file_size - self.SHARED_BLOB_FOOTER_SIZE
+        total_index_length = physical_index_length + row_index_length
+        if total_index_length > data_and_index_length:
+            raise IOError(
+                "Corrupt shared blob file: indexes exceed the file size."
+            )
+        physical_index_start = data_and_index_length - total_index_length
+        row_index_start = physical_index_start + physical_index_length
+
+        f.seek(physical_index_start)
+        physical_index = f.read(physical_index_length)
+        f.seek(row_index_start)
+        row_index = f.read(row_index_length)
+        if len(physical_index) != physical_index_length:
+            raise IOError("Corrupt shared blob file: cannot read physical index.")
+        if len(row_index) != row_index_length:
+            raise IOError("Corrupt shared blob file: cannot read row index.")
+        try:
+            physical_lengths = DeltaVarintCompressor.decompress(physical_index)
+            row_references = DeltaVarintCompressor.decompress(row_index)
+        except RuntimeError as error:
+            raise IOError("Corrupt shared blob file: invalid index.") from error
+
+        physical_offsets = []
+        offset = 0
+        for ordinal, length in enumerate(physical_lengths):
+            if length < self.MIN_RECORD_LENGTH:
+                raise IOError(
+                    "Corrupt shared blob file: invalid physical blob length "
+                    f"{length} at ordinal {ordinal}."
+                )
+            if length > physical_index_start - offset:
+                raise IOError(
+                    "Corrupt shared blob file: physical blob exceeds the data region."
+                )
+            physical_offsets.append(offset)
+            offset += length
+        if offset != physical_index_start:
+            raise IOError(
+                "Corrupt shared blob file: indexed blobs do not cover the data region."
+            )
+
+        logical_lengths = []
+        logical_offsets = []
+        for row, reference in enumerate(row_references):
+            if reference == self.NULL_LENGTH or reference == self.PLACE_HOLDER_LENGTH:
+                logical_lengths.append(reference)
+                logical_offsets.append(-1)
+            elif reference < 0 or reference >= len(physical_lengths):
+                raise IOError(
+                    f"Corrupt shared blob file: row {row} references physical blob "
+                    f"{reference}, but physical blob count is {len(physical_lengths)}."
+                )
+            else:
+                logical_lengths.append(physical_lengths[reference])
+                logical_offsets.append(physical_offsets[reference])
+
+        self.blob_lengths = logical_lengths
+        self.blob_offsets = logical_offsets
 
     def _apply_row_indices(self, row_indices: Optional[Any]) -> None:
         if row_indices is None:

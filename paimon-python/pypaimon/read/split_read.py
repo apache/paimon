@@ -264,6 +264,7 @@ class SplitRead(ABC):
         parquet_row_ranges = None
         if effective_row_ranges is not None:
             row_index_formats = (CoreOptions.FILE_FORMAT_BLOB,
+                                 CoreOptions.FILE_FORMAT_SHARED_BLOB,
                                  CoreOptions.FILE_FORMAT_VORTEX,
                                  CoreOptions.FILE_FORMAT_LANCE,
                                  CoreOptions.FILE_FORMAT_ROW)
@@ -329,7 +330,9 @@ class SplitRead(ABC):
                 list(name_to_field.values()),
                 read_arrow_predicate, batch_size=batch_size,
                 nested_name_paths=avro_nested_paths)
-        elif file_format == CoreOptions.FILE_FORMAT_BLOB:
+        elif file_format in (
+                CoreOptions.FILE_FORMAT_BLOB,
+                CoreOptions.FILE_FORMAT_SHARED_BLOB):
             if has_nested:
                 raise NotImplementedError(
                     "Nested-field projection is not supported on BLOB files")

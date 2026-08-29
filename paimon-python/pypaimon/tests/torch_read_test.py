@@ -28,6 +28,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.multimodal.table import MultimodalTable
 
 from pypaimon.table.file_store_table import FileStoreTable
 
@@ -578,6 +579,61 @@ class TorchReadTest(unittest.TestCase):
         self.assertEqual(read_blob_data, blob_data, "Blob data content should match original")
 
         print(f"✓ Blob torch read test passed: Successfully read and verified {len(blob_data)} bytes of blob data")
+
+    def test_shared_video_rows_through_streaming_dataloader(self):
+        from pypaimon.table.row.blob import Blob, BlobDescriptor
+
+        pa_schema = pa.schema([
+            ('episode_id', pa.int64()),
+            ('frame_index', pa.int32()),
+            ('video', pa.large_binary()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob-shared-field': 'video',
+                # ScanQuery.to_torch must override this read setting.
+                'blob-as-descriptor': 'false',
+            },
+        )
+        identifier = 'default.test_shared_video_torch_read'
+        self.catalog.create_table(identifier, schema, False)
+        raw_table = self.catalog.get_table(identifier)
+        table = MultimodalTable(self.catalog, identifier, raw_table)
+
+        video_path = os.path.join(self.tempdir, 'shared-video.mp4')
+        video_bytes = b'one-physical-video'
+        with open(video_path, 'wb') as output:
+            output.write(video_bytes)
+        video = Blob.from_local(video_path)
+        table.add([
+            {'episode_id': 7, 'frame_index': index, 'video': video}
+            for index in range(8)
+        ])
+
+        dataset = table.scan().select([
+            'episode_id', 'frame_index', 'video'
+        ]).to_torch(streaming=True)
+        rows = []
+        for batch in DataLoader(
+                dataset, batch_size=2, num_workers=2, shuffle=False):
+            rows.extend(zip(
+                batch['episode_id'].tolist(),
+                batch['frame_index'].tolist(),
+                batch['video'],
+            ))
+
+        rows.sort(key=lambda row: row[1])
+        self.assertEqual(list(range(8)), [row[1] for row in rows])
+        descriptors = [
+            BlobDescriptor.deserialize(row[2])
+            for row in rows
+        ]
+        self.assertTrue(all(value == descriptors[0] for value in descriptors))
+        self.assertTrue(descriptors[0].uri.endswith('.shared-blob'))
+        self.assertEqual(len(video_bytes), descriptors[0].length)
 
     def test_torch_read_pk_table(self):
         """Test torch read with primary key table."""

@@ -49,6 +49,12 @@ When you define a table with a Blob column, Paimon automatically separates the s
 1. **Normal Data Files** (e.g., `.parquet`, `.orc`): Store regular columns (INT, STRING, etc.)
 2. **Blob Data Files** (`.blob`): Store the actual blob data
 
+For append-only workloads in which many rows refer to the same large object, a scalar BLOB field
+can instead use **shared BLOB files** (`.shared-blob`). A shared file stores one physical payload
+for each exact `BlobDescriptor` and a compact row-reference index. For example, video-frame rows
+can all refer to one MP4 payload while `frame_index` or `timestamp` in the normal data file tells
+the decoder which frame to retrieve.
+
 For example, given a table with schema `(id INT, name STRING, picture BLOB)`:
 
 ```
@@ -104,6 +110,13 @@ Flink, Spark, and Python.
       </tr>
     </thead>
     <tbody>
+    <tr>
+      <td><h5>blob-shared-field</h5></td>
+      <td>No</td>
+      <td style={{wordWrap: "break-word"}}>-</td>
+      <td>String</td>
+      <td>Names one scalar BLOB field whose logical rows may share payloads in <code>.shared-blob</code> files. This first version supports append-only tables and exact descriptor-backed input only.</td>
+    </tr>
     <tr>
       <td><h5>blob-as-descriptor</h5></td>
       <td>No</td>
@@ -266,6 +279,65 @@ schema = Schema.from_pyarrow_schema(
 </TabItem>
 
 </Tabs>
+
+## Sharing One Video Across Frame Rows
+
+Use `blob-shared-field` when the table has one row per frame, but the source and storage unit is a
+whole video. The option also marks a SQL `BYTES` or `BINARY` column as a BLOB column, so a new
+comment directive and a change to the ordinary `.blob` format are not required.
+
+```sql
+CREATE TABLE video_frames (
+    episode_id BIGINT,
+    frame_index INT,
+    frame_timestamp DOUBLE,
+    video BYTES
+) WITH (
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true',
+    'blob-shared-field' = 'video'
+);
+
+-- Every row for this video uses the same serialized BlobDescriptor.
+INSERT INTO video_frames
+SELECT episode_id, frame_index, frame_timestamp,
+       sys.path_to_descriptor('file:///data/episode-42.mp4')
+FROM frame_metadata;
+```
+
+The normal data file holds `episode_id`, `frame_index`, and `frame_timestamp`. Its aligned
+`.shared-blob` file has two indexes: physical record lengths and logical-row-to-physical-record
+references. Several logical positions can therefore resolve to the same `(file, offset, length)`
+descriptor. Paimon does not parse MP4 containers or store an MP4 frame offset itself; the frame
+columns are interpreted by the application or video decoder.
+
+Deduplication uses exact descriptor identity (descriptor version, URI, offset, and length), not a
+content hash. It is local to each `.shared-blob` file: files are self-contained and never point at
+payloads owned by another data file. After a size or row-count target is reached, the rolling
+boundary is delayed until a contiguous descriptor group ends, so one video's consecutive frame
+rows stay together. This makes the target size soft for large videos. If the same descriptor is
+written again after a file has already rolled or a commit/checkpoint has closed the writer, another
+physical copy may be stored.
+
+Compaction reads descriptors, writes a new self-contained `.shared-blob` file, and rebuilds both
+indexes, so surviving rows again share one physical payload per exact descriptor in the output.
+The ordinary `.blob` format and its behavior are unchanged, and ordinary BLOB fields can coexist
+with the shared field in the same table.
+
+Current restrictions:
+
+- Append-only tables only; primary-key tables continue to use managed BLOB storage.
+- At most one `blob-shared-field` per table.
+- The field must be a scalar `BLOB`; `ARRAY<BLOB>` and `MAP<K, BLOB>` continue to use `.blob`.
+- Non-null writes must be exact descriptor-backed `BlobRef` values. Inline `BlobData` is rejected,
+  because it has no stable identity for sharing.
+- A `BlobConsumer` callback is not supported for the shared field.
+
+Set `blob-as-descriptor=true` when the consumer can decode the referenced MP4 itself. This avoids
+materializing the same large payload separately for every selected frame row.
+
+For Python ingestion and PyTorch `DataLoader` usage, including decoder-session reuse in workers,
+see [PyPaimon Multimodal API: Video Frames Sharing One MP4](../pypaimon/multimodal-api#video-frames-sharing-one-mp4).
 
 The comment directive format is `__DIRECTIVE; optional user comment`. Paimon converts `BYTES`/`BINARY` to `BLOB`, `ARRAY<BYTES>`/`ARRAY<BINARY>` to `ARRAY<BLOB>`, and `MAP<K, BYTES>`/`MAP<K, BINARY>` to `MAP<K, BLOB>`. It registers the field in the corresponding option and stores the text after `;` as the column's real comment.
 

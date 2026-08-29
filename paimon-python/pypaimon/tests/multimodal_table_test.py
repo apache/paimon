@@ -21,6 +21,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import pyarrow as pa
 import pypaimon.multimodal as pmm
@@ -116,6 +117,180 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertEqual("default.docs", self.conn.get_table("docs").identifier)
         self.assertEqual(["id", "content", "embedding", "payload"],
                          [field.name for field in table.raw_table.fields])
+
+    def test_add_accepts_descriptor_backed_blob_objects(self):
+        table = self.conn.create_table(
+            "video_frames",
+            schema=_schema({
+                "episode_id": pa.int64(),
+                "frame_index": pa.int32(),
+                "video": pa.large_binary(),
+            }),
+            options=dict(_PARQUET_OPTIONS, **{
+                "blob-shared-field": "video",
+                "blob-as-descriptor": "true",
+            }),
+        )
+        video_path = os.path.join(self.temp_dir, "episode-42.mp4")
+        video_bytes = b"fake-mp4-payload"
+        with open(video_path, "wb") as output:
+            output.write(video_bytes)
+        video = pmm.Blob.from_local(video_path)
+
+        table.add([
+            {"episode_id": 42, "frame_index": 0, "video": video},
+            {
+                "episode_id": 42,
+                "frame_index": 1,
+                "video": video.to_descriptor(),
+            },
+            {"episode_id": 42, "frame_index": 2, "video": video},
+        ])
+
+        rows = table.scan().select(
+            ["episode_id", "frame_index", "video"]
+        ).to_list()
+        self.assertEqual([0, 1, 2], [row["frame_index"] for row in rows])
+        descriptors = [
+            pmm.BlobDescriptor.deserialize(row["video"])
+            for row in rows
+        ]
+        self.assertEqual(descriptors[0], descriptors[1])
+        self.assertEqual(descriptors[0], descriptors[2])
+        self.assertTrue(descriptors[0].uri.endswith(".shared-blob"))
+        self.assertEqual(len(video_bytes), descriptors[0].length)
+
+    def test_add_batches_keeps_shared_video_group_in_one_commit(self):
+        from pypaimon.table.row.blob import Blob, BlobDescriptor
+
+        table = self.conn.create_table(
+            "batched_video_frames",
+            schema=_schema({
+                "episode_id": pa.int64(),
+                "frame_index": pa.int32(),
+                "video": pa.large_binary(),
+            }),
+            options=dict(_PARQUET_OPTIONS, **{
+                "blob-shared-field": "video",
+                "blob-as-descriptor": "true",
+            }),
+        )
+        video_path = os.path.join(self.temp_dir, "batched-episode.mp4")
+        video_bytes = b"batched-video"
+        with open(video_path, "wb") as output:
+            output.write(video_bytes)
+        video = Blob.from_local(video_path)
+
+        table.add_batches([
+            [
+                {"episode_id": 1, "frame_index": 0, "video": video},
+                {"episode_id": 1, "frame_index": 1, "video": video},
+            ],
+            {
+                "episode_id": [1, 1],
+                "frame_index": [2, 3],
+                "video": [video, video],
+            },
+        ])
+
+        snapshot = table.raw_table.snapshot_manager().get_latest_snapshot()
+        self.assertEqual(1, snapshot.id)
+        rows = table.scan().select(["frame_index", "video"]).to_list()
+        rows.sort(key=lambda row: row["frame_index"])
+        descriptors = [
+            BlobDescriptor.deserialize(row["video"])
+            for row in rows
+        ]
+        self.assertEqual(list(range(4)), [row["frame_index"] for row in rows])
+        self.assertTrue(all(value == descriptors[0] for value in descriptors))
+        self.assertEqual(len(video_bytes), descriptors[0].length)
+
+    def test_add_batches_aborts_before_commit_on_invalid_shared_blob(self):
+        from pypaimon.table.row.blob import Blob
+
+        table = self.conn.create_table(
+            "failed_batched_video_frames",
+            schema=_schema({
+                "frame_index": pa.int32(),
+                "video": pa.large_binary(),
+            }),
+            options=dict(_PARQUET_OPTIONS, **{
+                "blob-shared-field": "video",
+            }),
+        )
+        video_path = os.path.join(self.temp_dir, "valid-before-failure.mp4")
+        with open(video_path, "wb") as output:
+            output.write(b"valid-video")
+
+        with self.assertRaisesRegex(ValueError, "exact BlobRef"):
+            table.add_batches([
+                [{"frame_index": 0, "video": Blob.from_local(video_path)}],
+                [{"frame_index": 1, "video": b"inline-is-invalid"}],
+            ])
+
+        self.assertIsNone(
+            table.raw_table.snapshot_manager().get_latest_snapshot()
+        )
+
+    def test_add_batches_empty_iterable_is_noop(self):
+        table = self.conn.create_table(
+            "empty_batched_frames",
+            schema=_schema({"frame_index": pa.int32()}),
+            options=_PARQUET_OPTIONS,
+        )
+
+        self.assertIs(table, table.add_batches(iter(())))
+        self.assertIsNone(
+            table.raw_table.snapshot_manager().get_latest_snapshot()
+        )
+
+    def test_scan_to_torch_keeps_blob_descriptors(self):
+        table = self.conn.create_table(
+            "torch_video_frames",
+            schema=_schema({
+                "frame_index": pa.int32(),
+                "video": pa.large_binary(),
+            }),
+            options=dict(_PARQUET_OPTIONS, **{
+                "blob-shared-field": "video",
+                "blob-as-descriptor": "false",
+            }),
+        )
+        from pypaimon.table.row.blob import Blob
+        video_path = os.path.join(self.temp_dir, "torch-episode.mp4")
+        with open(video_path, "wb") as output:
+            output.write(b"fake-video")
+        table.add([{
+            "frame_index": 0,
+            "video": Blob.from_local(video_path),
+        }])
+        sentinel = object()
+        captured = {}
+
+        def fake_to_torch(table_read, splits, **kwargs):
+            captured["descriptor"] = table_read.table.options.blob_as_descriptor()
+            captured["splits"] = splits
+            captured["kwargs"] = kwargs
+            return sentinel
+
+        with patch(
+            "pypaimon.read.table_read.TableRead.to_torch",
+            autospec=True,
+            side_effect=fake_to_torch,
+        ):
+            result = table.scan().select(
+                ["frame_index", "video"]
+            ).to_torch(
+                streaming=True,
+                prefetch_concurrency=2,
+                shuffle=False,
+            )
+
+        self.assertIs(sentinel, result)
+        self.assertTrue(captured["descriptor"])
+        self.assertTrue(captured["splits"])
+        self.assertEqual(True, captured["kwargs"]["streaming"])
+        self.assertEqual(2, captured["kwargs"]["prefetch_concurrency"])
 
     def test_create_table_uses_options_and_partitioned(self):
         table = self.conn.create_table(

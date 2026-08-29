@@ -76,6 +76,12 @@ write_builder.new_commit().commit(writer.prepare_commit())
 writer.close()
 ```
 
+For frame tables in which many logical rows reference one MP4, configure
+`blob-shared-field` and write descriptor-backed `Blob` or `BlobDescriptor`
+values instead of raw bytes. The high-level multimodal API also provides
+single-commit `add_batches` ingestion. See
+[Video Frames Sharing One MP4](./multimodal-api#video-frames-sharing-one-mp4).
+
 ## Reading Blob Data
 
 ### Batch reading (recommended)
@@ -169,3 +175,5 @@ header). This mirrors Java's `Blob.fromBytes(...)`.
   SQL/Java API
 - [Data Evolution](./data-evolution) — required for
   blob tables
+- [Multimodal video frames](./multimodal-api#video-frames-sharing-one-mp4) —
+  shared MP4 writing and PyTorch DataLoader decoding

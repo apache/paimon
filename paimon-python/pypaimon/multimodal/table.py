@@ -113,6 +113,58 @@ class MultimodalTable:
             table_commit.close()
         return self
 
+    def add_batches(self, batches):
+        """Append an iterable of batches with one writer and one commit.
+
+        Keeping the writer open across batches also keeps a contiguous shared
+        BLOB descriptor group intact when it crosses an input batch boundary.
+        """
+        try:
+            iterator = iter(batches)
+        except TypeError as error:
+            raise ValueError("batches must be an iterable of input batches.") from error
+
+        target_schema = _target_schema(self.raw_table)
+        table_write = None
+        table_commit = None
+        commit_started = False
+        try:
+            for data in iterator:
+                arrow_table = _to_arrow_table(data, target_schema)
+                if arrow_table.num_rows == 0:
+                    continue
+                if table_write is None:
+                    write_builder = self.raw_table.new_batch_write_builder()
+                    table_write = write_builder.new_write()
+                    table_commit = write_builder.new_commit()
+                table_write.write_arrow(arrow_table)
+
+            close_iterator = getattr(iterator, "close", None)
+            iterator = None
+            if close_iterator is not None:
+                close_iterator()
+            if table_write is None:
+                return self
+            commit_messages = table_write.prepare_commit()
+            commit_started = True
+            table_commit.commit(commit_messages)
+            return self
+        except BaseException:
+            if table_write is not None and not commit_started:
+                table_write.abort()
+            raise
+        finally:
+            if iterator is not None:
+                close_iterator = getattr(iterator, "close", None)
+                if close_iterator is not None:
+                    close_iterator()
+            try:
+                if table_write is not None:
+                    table_write.close()
+            finally:
+                if table_commit is not None:
+                    table_commit.close()
+
     def overwrite(self, data, partition: Optional[Mapping[str, object]] = None):
         arrow_table = _to_arrow_table(data, _target_schema(self.raw_table))
         overwrite_partition = dict(partition) if partition is not None else None
@@ -380,6 +432,8 @@ def _blob_columns(table):
 
 
 def _to_arrow_table(data, target_schema=None):
+    if target_schema is not None:
+        data = _serialize_blob_values(data, target_schema)
     if isinstance(data, pa.Table):
         table = data
     elif isinstance(data, pa.RecordBatch):
@@ -396,6 +450,91 @@ def _to_arrow_table(data, target_schema=None):
     if target_schema is None:
         return table
     return _align_to_schema(table, target_schema)
+
+
+def _serialize_blob_values(data, target_schema):
+    if isinstance(data, (pa.Table, pa.RecordBatch)):
+        return data
+    binary_fields = {
+        field.name: field.type
+        for field in target_schema
+        if _contains_binary(field.type)
+    }
+    if not binary_fields:
+        return data
+
+    if isinstance(data, list):
+        return [
+            {
+                name: _serialize_blob_value(value, binary_fields.get(name))
+                for name, value in row.items()
+            }
+            if isinstance(row, Mapping)
+            else row
+            for row in data
+        ]
+    if isinstance(data, dict):
+        converted = dict(data)
+        for name, arrow_type in binary_fields.items():
+            if name not in converted:
+                continue
+            column = converted[name]
+            if isinstance(column, (pa.Array, pa.ChunkedArray)):
+                column = column.to_pylist()
+            converted[name] = [
+                _serialize_blob_value(value, arrow_type)
+                for value in column
+            ]
+        return converted
+    if (
+        hasattr(data, "__dataframe__")
+        or data.__class__.__module__.startswith("pandas")
+    ):
+        converted = data.copy()
+        for name, arrow_type in binary_fields.items():
+            if name in converted.columns:
+                converted[name] = converted[name].map(
+                    lambda value: _serialize_blob_value(value, arrow_type)
+                )
+        return converted
+    return data
+
+
+def _contains_binary(arrow_type):
+    if pa.types.is_binary(arrow_type) or pa.types.is_large_binary(arrow_type):
+        return True
+    if pa.types.is_list(arrow_type) or pa.types.is_large_list(arrow_type):
+        return _contains_binary(arrow_type.value_type)
+    if pa.types.is_map(arrow_type):
+        return _contains_binary(arrow_type.item_type)
+    return False
+
+
+def _serialize_blob_value(value, arrow_type):
+    if value is None or arrow_type is None:
+        return value
+    if pa.types.is_binary(arrow_type) or pa.types.is_large_binary(arrow_type):
+        from pypaimon.table.row.blob import Blob, BlobDescriptor
+        if isinstance(value, BlobDescriptor):
+            return value.serialize()
+        if isinstance(value, Blob):
+            try:
+                return value.to_descriptor().serialize()
+            except RuntimeError:
+                return value.to_data()
+        return value
+    if pa.types.is_list(arrow_type) or pa.types.is_large_list(arrow_type):
+        return [
+            _serialize_blob_value(element, arrow_type.value_type)
+            for element in value
+        ]
+    if pa.types.is_map(arrow_type):
+        entries = value.items() if isinstance(value, Mapping) else value
+        return [
+            (key, _serialize_blob_value(element, arrow_type.item_type))
+            for key, element in entries
+        ]
+    return value
 
 
 def _coerce_row_ids(row_ids):

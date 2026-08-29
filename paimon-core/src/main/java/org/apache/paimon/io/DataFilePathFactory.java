@@ -86,6 +86,10 @@ public class DataFilePathFactory {
         return newPathFromName(newFileName(dataFilePrefix, ".blob"));
     }
 
+    public Path newSharedBlobPath() {
+        return newPathFromName(newFileName(dataFilePrefix, ".shared-blob"));
+    }
+
     public Path newChangelogPath() {
         return newPath(changelogFilePrefix);
     }

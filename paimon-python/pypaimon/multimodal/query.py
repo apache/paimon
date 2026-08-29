@@ -72,8 +72,10 @@ class ScanQuery:
         plan = scan.plan()
         return read_builder.new_read().to_arrow(plan.splits())
 
-    def _configured_read_builder(self):
-        read_builder = self._table.new_read_builder()
+    def _configured_read_builder(self, table=None):
+        read_builder = (
+            self._table if table is None else table
+        ).new_read_builder()
         if self._predicate is not None:
             read_builder = read_builder.with_filter(self._predicate)
         projection = self._effective_projection()
@@ -105,6 +107,49 @@ class ScanQuery:
 
     def to_list(self) -> List[dict]:
         return self.to_arrow().to_pylist()
+
+    def to_torch(
+            self,
+            streaming: bool = True,
+            prefetch_concurrency: int = 1,
+            *,
+            batch_format: str = "row",
+            batch_size: Optional[int] = None,
+            to_tensor_fn: Optional[Callable] = None,
+            shuffle: bool = False,
+            seed: int = 0,
+            buffer_size: int = 1000,
+            max_buffer_input_splits: int = 10):
+        """Read this scan as a PyTorch Dataset.
+
+        BLOB columns stay as serialized descriptors so DataLoader workers can
+        open and decode the referenced payload without materialising it in the
+        planning process. Use :class:`VideoFrameCollator` as ``collate_fn`` to
+        reuse one decoder session across rows that reference the same video.
+        """
+        if self._result_factory is not None:
+            raise TypeError(
+                "to_torch is only supported on scan(), not search queries."
+            )
+
+        from pypaimon.common.options.core_options import CoreOptions
+        read_table = self._table.copy({
+            CoreOptions.BLOB_AS_DESCRIPTOR.key(): "true"
+        })
+        read_builder = self._configured_read_builder(read_table)
+        splits = read_builder.new_scan().plan().splits()
+        return read_builder.new_read().to_torch(
+            splits,
+            streaming=streaming,
+            prefetch_concurrency=prefetch_concurrency,
+            batch_format=batch_format,
+            batch_size=batch_size,
+            to_tensor_fn=to_tensor_fn,
+            shuffle=shuffle,
+            seed=seed,
+            buffer_size=buffer_size,
+            max_buffer_input_splits=max_buffer_input_splits,
+        )
 
     def to_ray(
             self,

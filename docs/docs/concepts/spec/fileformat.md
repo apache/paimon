@@ -930,4 +930,39 @@ Limitations:
 2. BLOB format does not support predicate pushdown.
 3. Statistics collection is not supported for BLOB columns.
 
+### Shared BLOB
+
+Shared BLOB is an independent, versioned format with the `.shared-blob` extension. It reuses the
+ordinary scalar BLOB entry encoding for its physical data region, but replaces the positional
+footer with two indexes:
+
+```
++-----------------------+
+| Physical Blob Entry 1 |  Ordinary scalar BLOB entry encoding
++-----------------------+
+| Physical Blob Entry 2 |
++-----------------------+
+| ...                   |
++-----------------------+
+| Physical Length Index |  Delta-Varint compressed record lengths
++-----------------------+
+| Row Reference Index   |  Delta-Varint compressed physical ordinals
++-----------------------+
+| Physical Index Length |  4 bytes (Little Endian)
+| Row Index Length      |  4 bytes (Little Endian)
+| Magic Number          |  4 bytes (0x4C424853, Little Endian)
+| Version               |  1 byte
++-----------------------+
+```
+
+Each non-negative row reference is an ordinal in the physical length index. Multiple logical rows
+may contain the same ordinal and therefore resolve to the same physical payload. `-1` represents a
+null field and `-2` represents a data-evolution placeholder. Readers validate footer bounds,
+physical record lengths, the complete data-region length, and every row-reference ordinal before
+returning records.
+
+Shared BLOB currently supports one scalar BLOB field per file. Physical sharing uses exact input
+`BlobDescriptor` identity and is file-local; the format does not contain cross-file references.
+Ordinary `.blob` files keep their existing version and layout.
+
 For usage details, configuration options, and examples, see [Blob Type](../../multimodal-table/blob).

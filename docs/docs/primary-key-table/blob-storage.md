@@ -37,6 +37,11 @@ This mode stores:
 
 For general BLOB concepts and read options, see [BLOB Storage](../multimodal-table/blob).
 
+The append-only `blob-shared-field` mode is deliberately separate from primary-key managed BLOB
+storage. It writes self-contained `.shared-blob` files whose logical rows can share a physical
+payload, and is not supported on primary-key tables. Enabling it does not change `.managed.blob`
+packs, `.blobref` ownership, or their garbage-collection behavior.
+
 ## Create a Table
 
 Use `blob-field` to mark scalar, array, or map fields whose payloads should be stored in managed BLOB files.

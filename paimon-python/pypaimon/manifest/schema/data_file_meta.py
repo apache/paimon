@@ -175,7 +175,7 @@ class DataFileMeta:
 
     @staticmethod
     def is_blob_file(file_name: str) -> bool:
-        return file_name.endswith(".blob")
+        return file_name.endswith(".blob") or file_name.endswith(".shared-blob")
 
     @staticmethod
     def is_vector_file(file_name: str) -> bool:

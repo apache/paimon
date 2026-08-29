@@ -31,7 +31,7 @@ from pypaimon.schema.data_types import (
     is_blob_file_field,
     is_blob_type,
 )
-from pypaimon.table.row.blob import BlobConsumer
+from pypaimon.table.row.blob import Blob, BlobConsumer, BlobDescriptor, BlobRef
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.write.row_utils import (
     require_columns,
@@ -49,7 +49,7 @@ class DedicatedFormatWriter(DataWriter):
 
     Splits incoming data three ways:
     - Normal columns → standard data files (.parquet / .orc / .vortex / …)
-    - Blob columns (large_binary) → .blob files
+    - Blob columns (large_binary) → .blob or .shared-blob files
     - Vector columns (when vector.file.format is configured) → .vector.<format> files
 
     This mirrors Java's DedicatedFormatRollingFileWriter.
@@ -71,7 +71,14 @@ class DedicatedFormatWriter(DataWriter):
         self.blob_column_names = self._get_blob_columns_from_schema()
         self.blob_descriptor_fields = CoreOptions.blob_descriptor_fields(self.options)
         self.blob_view_fields = CoreOptions.blob_view_fields(self.options)
+        self.shared_blob_fields = CoreOptions.blob_shared_fields(self.options)
         self.blob_inline_fields = self.blob_descriptor_fields.union(self.blob_view_fields)
+
+        if len(self.shared_blob_fields) > 1:
+            raise ValueError("'blob-shared-field' currently supports exactly one field.")
+        self.shared_blob_column = (
+            next(iter(self.shared_blob_fields)) if self.shared_blob_fields else None
+        )
 
         unknown_descriptor_fields = self.blob_descriptor_fields.difference(
             set(self.blob_column_names)
@@ -92,7 +99,7 @@ class DedicatedFormatWriter(DataWriter):
                 f"Invalid inline blob fields: {sorted(inline_nested_blob_fields)}"
             )
 
-        # Blob fields that should still be written to `.blob` files.
+        # Blob fields that should still be written to dedicated BLOB files.
         self.blob_file_column_names = [
             col for col in self.blob_column_names if col not in self.blob_inline_fields
         ]
@@ -125,6 +132,8 @@ class DedicatedFormatWriter(DataWriter):
             self.normal_column_names = [
                 col for col in all_column_names if col not in dedicated_set
             ]
+        if self.shared_blob_column not in self.blob_file_column_names:
+            self.shared_blob_column = None
         normal_name_set = set(self.normal_column_names)
         self.normal_columns = [
             field for field in self.table.table_schema.fields if field.name in normal_name_set
@@ -134,6 +143,8 @@ class DedicatedFormatWriter(DataWriter):
         # State management for blob writer
         self.record_count = 0
         self.closed = False
+        self._current_shared_blob_group = None
+        self._pending_shared_group_roll = False
 
         # Normal columns are buffered separately from the blob and vector
         # columns, which their own writers own.
@@ -156,6 +167,7 @@ class DedicatedFormatWriter(DataWriter):
                 blob_column=blob_column,
                 options=options,
                 blob_consumer=blob_consumer,
+                shared=blob_column in self.shared_blob_fields,
             )
 
         # Initialize vector writer when vector.file.format is configured.
@@ -210,6 +222,15 @@ class DedicatedFormatWriter(DataWriter):
         # writer, or the unfinished flush would lose its chance to be retried.
         self._require_finished_flush()
         try:
+            if self.shared_blob_column is not None:
+                for index in range(data.num_rows):
+                    row = data.slice(index, 1)
+                    next_group = self._shared_descriptor_from_batch(row)
+                    self._roll_before_shared_group(next_group)
+                    self._current_shared_blob_group = next_group
+                    self._write_batch(row)
+                return
+
             offset = 0
             # _write_batch keeps normal/blob/vector pending rows in lockstep
             # and closes all writers when the shared row limit is reached.
@@ -253,8 +274,7 @@ class DedicatedFormatWriter(DataWriter):
 
         # Check if normal data rolling is needed
         if self._should_roll_normal():
-            # When normal data rolls, close both writers and fetch blob metadata
-            self._close_current_writers()
+            self._roll_or_defer_for_shared_group()
 
     def write_row(self, row):
         self._require_finished_flush()
@@ -267,6 +287,11 @@ class DedicatedFormatWriter(DataWriter):
                 + list(self.vector_write_columns)
             )
             require_columns(values_by_name, required_columns, "write_row")
+
+            if self.shared_blob_column is not None:
+                next_group = self._shared_descriptor(values_by_name[self.shared_blob_column])
+                self._roll_before_shared_group(next_group)
+                self._current_shared_blob_group = next_group
 
             if self.normal_column_names:
                 normal_values = dict(values_by_name)
@@ -299,7 +324,7 @@ class DedicatedFormatWriter(DataWriter):
 
             self.record_count += 1
             if self._should_roll_normal():
-                self._close_current_writers()
+                self._roll_or_defer_for_shared_group()
 
         except Exception as e:
             logger.error("Exception occurs when writing row. Cleaning up.", exc_info=e)
@@ -485,6 +510,44 @@ class DedicatedFormatWriter(DataWriter):
         # Check if normal data exceeds target size
         return self._normal_buffer.nbytes > self.target_file_size
 
+    def _roll_or_defer_for_shared_group(self):
+        if (
+            self.shared_blob_column is not None
+            and self._current_shared_blob_group is not None
+        ):
+            self._pending_shared_group_roll = True
+        else:
+            self._close_current_writers()
+
+    def _roll_before_shared_group(self, next_group):
+        if (
+            self._pending_shared_group_roll
+            and self._current_shared_blob_group != next_group
+        ):
+            self._close_current_writers()
+
+    def _shared_descriptor_from_batch(self, data: pa.RecordBatch):
+        column_index = data.schema.get_field_index(self.shared_blob_column)
+        if column_index < 0:
+            raise KeyError(
+                f"Column '{self.shared_blob_column}' was not found in the record batch."
+            )
+        return self._shared_descriptor(data.column(column_index)[0])
+
+    @staticmethod
+    def _shared_descriptor(value):
+        if hasattr(value, 'as_py'):
+            value = value.as_py()
+        if value is None or value is Blob.PLACE_HOLDER:
+            return None
+        if type(value) is BlobRef:
+            return value.to_descriptor()
+        if isinstance(value, (bytes, bytearray)):
+            raw = bytes(value)
+            if BlobDescriptor.is_blob_descriptor(raw):
+                return BlobDescriptor.deserialize(raw)
+        return None
+
     @property
     def pending_row_count(self) -> int:
         # Overrides the base property, which reads a buffer this writer never
@@ -555,6 +618,8 @@ class DedicatedFormatWriter(DataWriter):
 
         self._pending_normal_meta = None
         self.record_count = 0
+        self._current_shared_blob_group = None
+        self._pending_shared_group_roll = False
 
         if normal_meta is not None or blob_metas or vector_metas:
             normal_name = normal_meta.file_name if normal_meta is not None else '<none>'

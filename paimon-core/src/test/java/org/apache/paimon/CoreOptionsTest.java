@@ -271,6 +271,16 @@ public class CoreOptionsTest {
     }
 
     @Test
+    public void testSharedBlobFieldIsRecognizedAsBlobField() {
+        Options options = new Options();
+        options.set(CoreOptions.BLOB_FIELD, "image, video");
+        options.set(CoreOptions.BLOB_SHARED_FIELD, "video");
+
+        assertThat(CoreOptions.blobField(options.toMap())).containsExactly("image", "video");
+        assertThat(new CoreOptions(options).blobSharedField()).containsExactly("video");
+    }
+
+    @Test
     public void testLocalKvDbBlockSize() {
         Options conf = new Options();
         assertThat(new CoreOptions(conf).localKvDbBlockSize()).isEqualTo(4 * 1024);

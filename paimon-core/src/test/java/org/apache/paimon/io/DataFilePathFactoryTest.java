@@ -97,6 +97,24 @@ public class DataFilePathFactoryTest {
     }
 
     @Test
+    public void testSharedBlobPathAndFormatIdentifier() {
+        DataFilePathFactory pathFactory =
+                new DataFilePathFactory(
+                        new Path(tempDir + "/bucket-123"),
+                        CoreOptions.FILE_FORMAT.defaultValue(),
+                        CoreOptions.DATA_FILE_PREFIX.defaultValue(),
+                        CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
+                        CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
+                        CoreOptions.FILE_COMPRESSION.defaultValue(),
+                        null);
+
+        Path sharedBlob = pathFactory.newSharedBlobPath();
+        assertThat(sharedBlob.getName()).endsWith(".shared-blob");
+        assertThat(DataFilePathFactory.formatIdentifier(sharedBlob.getName()))
+                .isEqualTo("shared-blob");
+    }
+
+    @Test
     public void testEntropyInjectWithNoPartition() {
         EntropyInjectExternalPathProvider externalPathProvider =
                 createExternalPathProvider(new Path(tempDir.toString()), "bucket-123");

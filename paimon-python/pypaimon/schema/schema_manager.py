@@ -393,6 +393,19 @@ def _validate_blob_fields(
 
     descriptor_fields = core_options.blob_descriptor_fields()
     view_fields = core_options.blob_view_fields()
+    shared_fields = core_options.blob_shared_fields()
+
+    if len(shared_fields) > 1:
+        raise ValueError(
+            "'blob-shared-field' currently supports exactly one field, but found "
+            f"{sorted(shared_fields)}."
+        )
+    non_scalar_shared_fields = shared_fields.difference(scalar_blob_field_names)
+    if non_scalar_shared_fields:
+        raise ValueError(
+            "Fields in 'blob-shared-field' must be scalar BLOB fields in schema. "
+            f"Invalid fields: {sorted(non_scalar_shared_fields)}"
+        )
 
     all_inline_fields = descriptor_fields.union(view_fields)
     non_blob_inline_fields = all_inline_fields.difference(scalar_blob_field_names)
@@ -419,6 +432,15 @@ def _validate_blob_fields(
         raise ValueError(
             "Fields in 'blob-descriptor-field' and 'blob-view-field' must not overlap. "
             "Overlapping fields: {}".format(sorted(overlapping_inline_fields))
+        )
+
+    overlapping_shared_fields = shared_fields.intersection(all_inline_fields)
+    if overlapping_shared_fields:
+        raise ValueError(
+            "Fields in 'blob-shared-field' must not also use descriptor-only or "
+            "blob-view storage. Overlapping fields: {}".format(
+                sorted(overlapping_shared_fields)
+            )
         )
 
     if blob_field_names:

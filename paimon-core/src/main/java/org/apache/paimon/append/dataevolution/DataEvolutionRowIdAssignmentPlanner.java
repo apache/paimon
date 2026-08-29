@@ -77,6 +77,8 @@ final class DataEvolutionRowIdAssignmentPlanner {
     private static final BinaryString ROW_ID_FIELD =
             BinaryString.fromString(SpecialFields.ROW_ID.name());
     private static final BinaryString BLOB_FILE_SUFFIX = BinaryString.fromString(".blob");
+    private static final BinaryString SHARED_BLOB_FILE_SUFFIX =
+            BinaryString.fromString(".shared-blob");
     private static final BinaryString VECTOR_FILE_MARKER = BinaryString.fromString(".vector.");
     private static final Projection ADD_IDENTIFIER_PROJECTION =
             manifestProjection(
@@ -455,7 +457,7 @@ final class DataEvolutionRowIdAssignmentPlanner {
     }
 
     private static int fileOrder(BinaryString fileName) {
-        if (fileName.endsWith(BLOB_FILE_SUFFIX)) {
+        if (fileName.endsWith(BLOB_FILE_SUFFIX) || fileName.endsWith(SHARED_BLOB_FILE_SUFFIX)) {
             return 1;
         }
         if (fileName.contains(VECTOR_FILE_MARKER)) {

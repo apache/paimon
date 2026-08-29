@@ -18,7 +18,6 @@
 
 package org.apache.paimon.format.blob;
 
-import org.apache.paimon.data.BlobConsumer;
 import org.apache.paimon.data.BlobFetchMetricReporter;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.EmptyStatsExtractor;
@@ -34,7 +33,7 @@ import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
-import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Preconditions;
@@ -47,8 +46,8 @@ import java.util.Optional;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** {@link FileFormat} for blob file. */
-public class BlobFileFormat extends FileFormat {
+/** File format in which logical rows may share one physical BLOB payload. */
+public class SharedBlobFileFormat extends FileFormat {
 
     private final boolean blobAsDescriptor;
     private final int copyBufferSize;
@@ -56,17 +55,10 @@ public class BlobFileFormat extends FileFormat {
     private boolean writeNullOnFetchFailure;
     private BlobFetchMetricReporter blobFetchMetricReporter = BlobFetchMetricReporter.NOOP;
 
-    @Nullable public BlobConsumer writeConsumer;
-
-    public BlobFileFormat(boolean blobAsDescriptor, int copyBufferSize) {
-        super(BlobFileFormatFactory.IDENTIFIER);
+    public SharedBlobFileFormat(boolean blobAsDescriptor, int copyBufferSize) {
+        super(SharedBlobFileFormatFactory.IDENTIFIER);
         this.blobAsDescriptor = blobAsDescriptor;
         this.copyBufferSize = copyBufferSize;
-    }
-
-    public static boolean isBlobFile(String fileName) {
-        return fileName.endsWith("." + BlobFileFormatFactory.IDENTIFIER)
-                || fileName.endsWith("." + SharedBlobFileFormatFactory.IDENTIFIER);
     }
 
     public void setWriteNullOnMissingFile(boolean writeNullOnMissingFile) {
@@ -75,10 +67,6 @@ public class BlobFileFormat extends FileFormat {
 
     public void setWriteNullOnFetchFailure(boolean writeNullOnFetchFailure) {
         this.writeNullOnFetchFailure = writeNullOnFetchFailure;
-    }
-
-    public void setWriteConsumer(@Nullable BlobConsumer writeConsumer) {
-        this.writeConsumer = writeConsumer;
     }
 
     public void setBlobFetchMetricReporter(BlobFetchMetricReporter blobFetchMetricReporter) {
@@ -90,43 +78,41 @@ public class BlobFileFormat extends FileFormat {
             RowType dataSchemaRowType,
             RowType projectedRowType,
             @Nullable List<Predicate> filters) {
-        return new BlobFormatReaderFactory(blobAsDescriptor, projectedRowType);
+        return new SharedBlobFormatReaderFactory(blobAsDescriptor, projectedRowType);
     }
 
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
-        return new BlobFormatWriterFactory(type);
+        validateDataFields(type);
+        return new SharedBlobFormatWriterFactory(type);
     }
 
     @Override
     public void validateDataFields(RowType rowType) {
-        checkArgument(rowType.getFieldCount() == 1, "BlobFileFormat only support one field.");
         checkArgument(
-                BlobElementSerializerFactory.supports(rowType.getField(0).type()),
-                "BlobFileFormat only supports BLOB, ARRAY<BLOB>, or supported MAP<X, BLOB> types.");
+                rowType.getFieldCount() == 1
+                        && rowType.getTypeAt(0).getTypeRoot() == DataTypeRoot.BLOB,
+                "SharedBlobFileFormat only supports one scalar BLOB field.");
     }
 
     @Override
     public Optional<SimpleStatsExtractor> createStatsExtractor(
             RowType type, SimpleColStatsCollector.Factory[] statsCollectors) {
-        // return a empty stats extractor to avoid stats calculation
         return Optional.of(new EmptyStatsExtractor());
     }
 
-    private class BlobFormatWriterFactory implements FormatWriterFactory {
+    private class SharedBlobFormatWriterFactory implements FormatWriterFactory {
 
         private final RowType type;
 
-        private BlobFormatWriterFactory(RowType type) {
-            checkArgument(type.getFieldCount() == 1, "BlobFormatWriter only support one field.");
+        private SharedBlobFormatWriterFactory(RowType type) {
             this.type = type;
         }
 
         @Override
         public FormatWriter create(PositionOutputStream out, String compression) {
-            return new BlobFormatWriter(
+            return new SharedBlobFormatWriter(
                     out,
-                    writeConsumer,
                     type,
                     writeNullOnMissingFile,
                     writeNullOnFetchFailure,
@@ -135,21 +121,19 @@ public class BlobFileFormat extends FileFormat {
         }
     }
 
-    private static class BlobFormatReaderFactory implements FormatReaderFactory {
+    private static class SharedBlobFormatReaderFactory implements FormatReaderFactory {
 
         private final boolean blobAsDescriptor;
         private final int fieldCount;
         private final int blobIndex;
-        private final DataType blobFieldType;
 
-        public BlobFormatReaderFactory(boolean blobAsDescriptor, RowType projectedRowType) {
+        private SharedBlobFormatReaderFactory(boolean blobAsDescriptor, RowType projectedRowType) {
             this.blobAsDescriptor = blobAsDescriptor;
             this.fieldCount = projectedRowType.getFieldCount();
             this.blobIndex = findBlobFieldIndex(projectedRowType);
             Preconditions.checkState(
-                    this.blobIndex >= 0,
-                    "Read type of a blob format does not contain any blob field.");
-            this.blobFieldType = projectedRowType.getTypeAt(this.blobIndex);
+                    blobIndex >= 0,
+                    "Read type of a shared blob format does not contain a scalar BLOB field.");
         }
 
         @Override
@@ -157,28 +141,20 @@ public class BlobFileFormat extends FileFormat {
             FileIO fileIO = context.fileIO();
             Path filePath = context.filePath();
             SeekableInputStream in = fileIO.newInputStream(filePath);
-            BlobFileMeta fileMeta;
+            SharedBlobFileMeta fileMeta;
             try {
-                fileMeta = new BlobFileMeta(in, context.fileSize(), context.selection());
+                fileMeta = new SharedBlobFileMeta(in, context.fileSize(), context.selection());
             } catch (Exception e) {
                 IOUtils.closeQuietly(in);
                 throw e;
             }
-
-            return new BlobFormatReader(
-                    fileIO,
-                    filePath,
-                    fileMeta,
-                    in,
-                    fieldCount,
-                    blobIndex,
-                    blobFieldType,
-                    blobAsDescriptor);
+            return new SharedBlobFormatReader(
+                    fileIO, filePath, fileMeta, in, fieldCount, blobIndex, blobAsDescriptor);
         }
 
         private static int findBlobFieldIndex(RowType rowType) {
             for (int i = 0; i < rowType.getFieldCount(); i++) {
-                if (BlobElementSerializerFactory.supports(rowType.getTypeAt(i))) {
+                if (rowType.getTypeAt(i).getTypeRoot() == DataTypeRoot.BLOB) {
                     return i;
                 }
             }
