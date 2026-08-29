@@ -683,6 +683,8 @@ class TableRead:
                 "batch_format must be one of %s, got %r"
                 % (sorted(valid_batch_formats), batch_format)
             )
+        if auto_detect_rank and not streaming:
+            raise ValueError("auto_detect_rank=True requires streaming=True")
         if batch_size is not None and (
             isinstance(batch_size, bool)
             or not isinstance(batch_size, int)

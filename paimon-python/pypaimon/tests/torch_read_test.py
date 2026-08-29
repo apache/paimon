@@ -798,6 +798,8 @@ class TorchReadTest(unittest.TestCase):
             )
         with self.assertRaisesRegex(ValueError, 'requires streaming=True'):
             table_read.to_torch(splits, batch_format='pyarrow')
+        with self.assertRaisesRegex(ValueError, 'requires streaming=True'):
+            table_read.to_torch(splits, auto_detect_rank=True)
         with self.assertRaisesRegex(ValueError, 'batch_size must be'):
             table_read.to_torch(
                 splits,
