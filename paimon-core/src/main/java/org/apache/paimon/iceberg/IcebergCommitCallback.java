@@ -2149,7 +2149,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         checkVariantNotPublishable(schema.logicalRowType());
                         SchemaValidation.validateIcebergGeospatialTypes(
                                 schema.logicalRowType(), table.coreOptions());
-                        SchemaValidation.validateIcebergNanosecondTimestamps(
+                        SchemaValidation.validateIcebergTimestampPrecisions(
                                 schema.logicalRowType(), table.coreOptions());
                         return IcebergSchema.create(schema);
                     });

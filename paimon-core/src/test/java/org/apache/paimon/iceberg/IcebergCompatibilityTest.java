@@ -80,6 +80,8 @@ import org.apache.iceberg.hadoop.HadoopCatalog;
 import org.apache.iceberg.io.CloseableIterable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.File;
 import java.math.BigDecimal;
@@ -1652,8 +1654,9 @@ public class IcebergCompatibilityTest {
         commit.close();
     }
 
-    @Test
-    public void testDynamicallyEnablingIcebergRefusesHistoricalNanosecondTimestamps()
+    @ParameterizedTest
+    @ValueSource(ints = {2, 9})
+    public void testDynamicallyEnablingIcebergRefusesHistoricalTimestampPrecisions(int precision)
             throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         Path path = new Path(tempDir.toString());
@@ -1662,7 +1665,7 @@ public class IcebergCompatibilityTest {
         options.set(CoreOptions.FILE_FORMAT, "parquet");
         RowType rowType =
                 RowType.of(
-                        new DataType[] {DataTypes.INT(), DataTypes.TIMESTAMP(9)},
+                        new DataType[] {DataTypes.INT(), DataTypes.TIMESTAMP(precision)},
                         new String[] {"k", "ts"});
         Schema schema =
                 new Schema(
@@ -1698,11 +1701,12 @@ public class IcebergCompatibilityTest {
                                                 IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
                                                 IcebergOptions.StorageType.TABLE_LOCATION
                                                         .toString())))
-                .hasMessageContaining("Timestamp columns with a precision above 6");
+                .hasMessageContaining("precision from 3 to 6");
     }
 
-    @Test
-    public void testExistingTableWithHistoricalNanosecondTimestampsRefusesToCommit()
+    @ParameterizedTest
+    @ValueSource(ints = {2, 9})
+    public void testExistingTableWithUnpublishableHistoricalTimestampsRefusesToCommit(int precision)
             throws Exception {
         LocalFileIO fileIO = LocalFileIO.create();
         Path warehouse = new Path(tempDir.toString());
@@ -1711,7 +1715,7 @@ public class IcebergCompatibilityTest {
         options.set(CoreOptions.FILE_FORMAT, "parquet");
         RowType rowType =
                 RowType.of(
-                        new DataType[] {DataTypes.INT(), DataTypes.TIMESTAMP(9)},
+                        new DataType[] {DataTypes.INT(), DataTypes.TIMESTAMP(precision)},
                         new String[] {"k", "ts"});
         Schema schema =
                 new Schema(
@@ -1755,7 +1759,7 @@ public class IcebergCompatibilityTest {
                                 commit.commit(2, write.prepareCommit(false, 2));
                             }
                         })
-                .hasMessageContaining("Timestamp columns with a precision above 6");
+                .hasMessageContaining("precision from 3 to 6");
         assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(1L);
         assertThat(fileIO.exists(new Path(tablePath, "metadata"))).isFalse();
     }

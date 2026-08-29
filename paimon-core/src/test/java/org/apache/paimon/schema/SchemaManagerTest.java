@@ -176,8 +176,10 @@ public class SchemaManagerTest {
         assertThat(latest.get().options()).containsEntry("new_k", "new_v");
     }
 
-    @Test
-    public void testIcebergMetadataRefusesNanosecondTimestamps() throws Exception {
+    @ParameterizedTest
+    @ValueSource(ints = {2, 9})
+    public void testIcebergMetadataRefusesUnsupportedTimestampPrecisions(int precision)
+            throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "-1");
         options.put(IcebergOptions.METADATA_ICEBERG_STORAGE.key(), "table-location");
@@ -185,14 +187,14 @@ public class SchemaManagerTest {
                 new Schema(
                         Arrays.asList(
                                 new DataField(0, "id", DataTypes.INT()),
-                                new DataField(1, "ts", DataTypes.TIMESTAMP(9))),
+                                new DataField(1, "ts", DataTypes.TIMESTAMP(precision))),
                         Collections.emptyList(),
                         Collections.emptyList(),
                         options,
                         "");
 
         assertThatThrownBy(() -> retryArtificialException(() -> manager.createTable(nanos)))
-                .hasStackTraceContaining("Timestamp columns with a precision above 6");
+                .hasStackTraceContaining("precision from 3 to 6");
     }
 
     @Test
@@ -214,15 +216,17 @@ public class SchemaManagerTest {
                 .doesNotThrowAnyException();
     }
 
-    @Test
-    public void testEnablingIcebergMetadataRefusesNanosecondTimestamps() throws Exception {
+    @ParameterizedTest
+    @ValueSource(ints = {2, 9})
+    public void testEnablingIcebergMetadataRefusesUnsupportedTimestampPrecisions(int precision)
+            throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "-1");
         Schema nanos =
                 new Schema(
                         Arrays.asList(
                                 new DataField(0, "id", DataTypes.INT()),
-                                new DataField(1, "ts", DataTypes.TIMESTAMP(9))),
+                                new DataField(1, "ts", DataTypes.TIMESTAMP(precision))),
                         Collections.emptyList(),
                         Collections.emptyList(),
                         options,
@@ -239,18 +243,20 @@ public class SchemaManagerTest {
                                                                         .METADATA_ICEBERG_STORAGE
                                                                         .key(),
                                                                 "table-location"))))
-                .hasStackTraceContaining("Timestamp columns with a precision above 6");
+                .hasStackTraceContaining("precision from 3 to 6");
     }
 
-    @Test
-    public void testEnableIcebergMetadataValidatesHistoricalNanosecondSchemas() throws Exception {
+    @ParameterizedTest
+    @ValueSource(ints = {2, 9})
+    public void testEnableIcebergMetadataValidatesHistoricalTimestampPrecisions(int precision)
+            throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.BUCKET.key(), "-1");
         Schema nanos =
                 new Schema(
                         Arrays.asList(
                                 new DataField(0, "id", DataTypes.INT()),
-                                new DataField(1, "ts", DataTypes.TIMESTAMP(9))),
+                                new DataField(1, "ts", DataTypes.TIMESTAMP(precision))),
                         Collections.emptyList(),
                         Collections.emptyList(),
                         options,
@@ -269,7 +275,7 @@ public class SchemaManagerTest {
                                                                         .METADATA_ICEBERG_STORAGE
                                                                         .key(),
                                                                 "table-location"))))
-                .hasStackTraceContaining("Timestamp columns with a precision above 6");
+                .hasStackTraceContaining("precision from 3 to 6");
     }
 
     @Test
