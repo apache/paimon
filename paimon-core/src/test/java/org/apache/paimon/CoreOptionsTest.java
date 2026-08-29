@@ -271,6 +271,16 @@ public class CoreOptionsTest {
     }
 
     @Test
+    public void testVideoFrameFieldIsRecognizedAsBlobField() {
+        Options options = new Options();
+        options.set(CoreOptions.BLOB_FIELD, "image, video");
+        options.set(CoreOptions.VIDEO_FRAME_FIELD, "video");
+
+        assertThat(CoreOptions.blobField(options.toMap())).containsExactly("image", "video");
+        assertThat(new CoreOptions(options).videoFrameField()).containsExactly("video");
+    }
+
+    @Test
     public void testLocalKvDbBlockSize() {
         Options conf = new Options();
         assertThat(new CoreOptions(conf).localKvDbBlockSize()).isEqualTo(4 * 1024);

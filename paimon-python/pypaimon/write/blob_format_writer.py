@@ -31,7 +31,13 @@ from pypaimon.schema.data_types import (
     is_blob_file_type,
     is_map_blob_type,
 )
-from pypaimon.table.row.blob import Blob, BlobData, BlobDescriptor, BlobConsumer
+from pypaimon.table.row.blob import (
+    Blob,
+    BlobConsumer,
+    BlobData,
+    BlobDescriptor,
+    VideoFrameDescriptor,
+)
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 
 
@@ -347,6 +353,12 @@ class BlobFormatWriter:
         if isinstance(col_data, Blob):
             return col_data
         if isinstance(col_data, bytes):
+            if VideoFrameDescriptor.is_video_frame_descriptor(col_data):
+                if uri_reader_factory is None:
+                    raise RuntimeError("uri_reader_factory is required for descriptor bytes.")
+                descriptor = VideoFrameDescriptor.deserialize(col_data)
+                uri_reader = uri_reader_factory.create(descriptor.uri)
+                return Blob.from_descriptor(uri_reader, descriptor)
             if BlobDescriptor.is_blob_descriptor(col_data):
                 if uri_reader_factory is None:
                     raise RuntimeError("uri_reader_factory is required for BlobDescriptor bytes.")

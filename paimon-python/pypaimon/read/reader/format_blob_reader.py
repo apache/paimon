@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import bisect
 import struct
 from typing import List, Optional, Any, Iterator, BinaryIO
 
@@ -25,6 +26,7 @@ from pyarrow import RecordBatch
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.map_blob_key_serializer import create_map_blob_key_serializer
+from pypaimon.common.uri_reader import UriReader
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import (
     DataField,
@@ -34,7 +36,7 @@ from pypaimon.schema.data_types import (
     is_array_blob_type,
     is_map_blob_type,
 )
-from pypaimon.table.row.blob import Blob
+from pypaimon.table.row.blob import Blob, VideoFrameDescriptor
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.row_kind import RowKind
 
@@ -53,6 +55,8 @@ class FormatBlobReader(RecordBatchReader):
         self._blob_as_descriptor = blob_as_descriptor
         self._batch_size = batch_size
         self._blob_parallelism = blob_parallelism
+        self._is_video = file_path.endswith('.video')
+        self._video_meta = None
 
         # Initialize the low-level blob format reader
         self.file_path = file_path
@@ -96,7 +100,11 @@ class FormatBlobReader(RecordBatchReader):
             if (
                 not self._is_array_blob
                 and not self._is_map_blob
-                and (self._blob_as_descriptor or self._blob_parallelism > 1)
+                and (
+                    self._is_video
+                    or self._blob_as_descriptor
+                    or self._blob_parallelism > 1
+                )
             ):
                 self._input_stream.close()
                 self._input_stream = None
@@ -113,13 +121,21 @@ class FormatBlobReader(RecordBatchReader):
             if self.returned:
                 return None
             self.returned = True
-            batch_iterator = BlobRecordIterator(
-                self._file_io, self.file_path, self.blob_lengths,
-                self.blob_offsets, self._data_field, self._input_stream,
-                blob_as_descriptor=(
-                    self._blob_as_descriptor or self._blob_parallelism > 1
+            if self._is_video:
+                batch_iterator = VideoFrameRecordIterator(
+                    self._file_io,
+                    self.file_path,
+                    self._video_meta,
+                    self._data_field,
                 )
-            )
+            else:
+                batch_iterator = BlobRecordIterator(
+                    self._file_io, self.file_path, self.blob_lengths,
+                    self.blob_offsets, self._data_field, self._input_stream,
+                    blob_as_descriptor=(
+                        self._blob_as_descriptor or self._blob_parallelism > 1
+                    )
+                )
             self._blob_iterator = iter(batch_iterator)
         read_size = self._batch_size
         if start_idx is not None and end_idx is not None:
@@ -167,7 +183,7 @@ class FormatBlobReader(RecordBatchReader):
                             raise RuntimeError(
                                 "Blob placeholder is not supported by FormatBlobReader yet."
                             )
-                        elif self._blob_as_descriptor:
+                        elif self._is_video or self._blob_as_descriptor:
                             pydict_data[field_name].append(blob.to_descriptor().serialize())
                         elif self._blob_parallelism > 1:
                             idx = len(pydict_data[field_name])
@@ -289,7 +305,19 @@ class FormatBlobReader(RecordBatchReader):
             self._input_stream.close()
             self._input_stream = None
 
+    @property
+    def record_count(self) -> int:
+        if self._is_video:
+            return self._video_meta.record_count
+        return len(self.blob_lengths)
+
     def _read_index(self) -> None:
+        if self._is_video:
+            self._video_meta = VideoFileMeta(
+                self._input_stream, self._file_size
+            )
+            return
+
         f = self._input_stream
 
         # Seek to header: last 5 bytes
@@ -330,6 +358,10 @@ class FormatBlobReader(RecordBatchReader):
         if row_indices is None:
             return
 
+        if self._is_video:
+            self._video_meta.select(row_indices)
+            return
+
         selected_lengths = []
         selected_offsets = []
         record_count = len(self.blob_lengths)
@@ -345,6 +377,178 @@ class FormatBlobReader(RecordBatchReader):
 
         self.blob_lengths = selected_lengths
         self.blob_offsets = selected_offsets
+
+
+class VideoFileMeta:
+    """Validated embedded index of a ``.video`` file."""
+
+    VERSION = 1
+    MAGIC_NUMBER = 0x4F454449
+    FOOTER_SIZE = 21
+    NULL_REFERENCE = -1
+    PLACE_HOLDER_REFERENCE = -2
+
+    def __init__(self, stream, file_size: int):
+        if file_size < self.FOOTER_SIZE:
+            raise IOError(
+                "Corrupt video file: file is smaller than its footer."
+            )
+        footer_start = file_size - self.FOOTER_SIZE
+        stream.seek(footer_start)
+        footer = stream.read(self.FOOTER_SIZE)
+        if len(footer) != self.FOOTER_SIZE:
+            raise IOError("Corrupt video file: cannot read footer.")
+        lengths = struct.unpack('<IIIIIB', footer)
+        index_lengths = lengths[:4]
+        magic, version = lengths[4:]
+        if magic != self.MAGIC_NUMBER:
+            raise IOError(
+                "Corrupt video file: invalid footer magic %s." % magic
+            )
+        if version != self.VERSION:
+            raise IOError("Unsupported video format version: %s" % version)
+
+        total_index_length = sum(index_lengths)
+        if total_index_length > footer_start:
+            raise IOError("Corrupt video file: indexes exceed the file size.")
+        index_start = footer_start - total_index_length
+        indexes = []
+        offset = index_start
+        for name, length in zip(
+                ("physical video", "run length", "run reference", "first frame"),
+                index_lengths):
+            stream.seek(offset)
+            raw = stream.read(length)
+            if len(raw) != length:
+                raise IOError(
+                    "Corrupt video file: cannot read %s index." % name
+                )
+            indexes.append(DeltaVarintCompressor.decompress(raw))
+            offset += length
+
+        physical_lengths, run_lengths, references, first_frames = indexes
+        physical_offsets = []
+        payload_offset = 0
+        for ordinal, length in enumerate(physical_lengths):
+            if length <= 0 or length > index_start - payload_offset:
+                raise IOError(
+                    "Corrupt video file: invalid physical video length %s "
+                    "at ordinal %s." % (length, ordinal)
+                )
+            physical_offsets.append(payload_offset)
+            payload_offset += length
+        if payload_offset != index_start:
+            raise IOError(
+                "Corrupt video file: indexed videos use %s bytes, but payload "
+                "region contains %s bytes." % (payload_offset, index_start)
+            )
+
+        if not (len(run_lengths) == len(references) == len(first_frames)):
+            raise IOError(
+                "Corrupt video file: run indexes have different counts."
+            )
+        run_ends = []
+        row_count = 0
+        for run, (length, reference, first_frame) in enumerate(zip(
+                run_lengths, references, first_frames)):
+            if length <= 0:
+                raise IOError(
+                    "Corrupt video file: invalid run length %s at run %s."
+                    % (length, run)
+                )
+            if (
+                reference not in (
+                    self.NULL_REFERENCE, self.PLACE_HOLDER_REFERENCE
+                )
+                and (reference < 0 or reference >= len(physical_lengths))
+            ):
+                raise IOError(
+                    "Corrupt video file: run %s references physical video %s, "
+                    "but physical video count is %s."
+                    % (run, reference, len(physical_lengths))
+                )
+            if reference >= 0 and first_frame < 0:
+                raise IOError(
+                    "Corrupt video file: run %s has negative first frame %s."
+                    % (run, first_frame)
+                )
+            row_count += length
+            run_ends.append(row_count)
+
+        self.physical_lengths = physical_lengths
+        self.physical_offsets = physical_offsets
+        self.run_ends = run_ends
+        self.references = references
+        self.first_frames = first_frames
+        self.row_count = row_count
+        self.selected_positions = None
+
+    @property
+    def record_count(self) -> int:
+        return (
+            self.row_count
+            if self.selected_positions is None
+            else len(self.selected_positions)
+        )
+
+    def select(self, row_indices) -> None:
+        selected = []
+        for value in row_indices:
+            position = int(value)
+            if position < 0 or position >= self.row_count:
+                raise IndexError(
+                    "Video row index %s is out of range, record count: %s."
+                    % (position, self.row_count)
+                )
+            selected.append(position)
+        self.selected_positions = selected
+
+    def logical_position(self, returned_row: int) -> int:
+        if self.selected_positions is None:
+            return returned_row
+        return self.selected_positions[returned_row]
+
+    def frame(self, returned_row: int):
+        logical = self.logical_position(returned_row)
+        run = bisect.bisect_left(self.run_ends, logical + 1)
+        reference = self.references[run]
+        if reference == self.NULL_REFERENCE:
+            return None
+        if reference == self.PLACE_HOLDER_REFERENCE:
+            return Blob.PLACE_HOLDER
+        run_start = 0 if run == 0 else self.run_ends[run - 1]
+        return (
+            self.physical_offsets[reference],
+            self.physical_lengths[reference],
+            self.first_frames[run] + logical - run_start,
+        )
+
+
+class VideoFrameRecordIterator:
+
+    def __init__(self, file_io, file_path, meta, field):
+        self.file_io = file_io
+        self.file_path = file_path
+        self.meta = meta
+        self.field = field
+        self.current_position = 0
+        self._uri_reader = UriReader.from_file(file_io)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.current_position >= self.meta.record_count:
+            raise StopIteration
+        value = self.meta.frame(self.current_position)
+        if isinstance(value, tuple):
+            offset, length, frame_index = value
+            descriptor = VideoFrameDescriptor(
+                self.file_path, offset, length, frame_index
+            )
+            value = Blob.from_descriptor(self._uri_reader, descriptor)
+        self.current_position += 1
+        return GenericRow([value], [self.field], RowKind.INSERT)
 
 
 class BlobRecordIterator:

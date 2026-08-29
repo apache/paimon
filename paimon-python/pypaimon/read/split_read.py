@@ -264,6 +264,7 @@ class SplitRead(ABC):
         parquet_row_ranges = None
         if effective_row_ranges is not None:
             row_index_formats = (CoreOptions.FILE_FORMAT_BLOB,
+                                 CoreOptions.FILE_FORMAT_VIDEO,
                                  CoreOptions.FILE_FORMAT_VORTEX,
                                  CoreOptions.FILE_FORMAT_LANCE,
                                  CoreOptions.FILE_FORMAT_ROW)
@@ -329,7 +330,9 @@ class SplitRead(ABC):
                 list(name_to_field.values()),
                 read_arrow_predicate, batch_size=batch_size,
                 nested_name_paths=avro_nested_paths)
-        elif file_format == CoreOptions.FILE_FORMAT_BLOB:
+        elif file_format in (
+                CoreOptions.FILE_FORMAT_BLOB,
+                CoreOptions.FILE_FORMAT_VIDEO):
             if has_nested:
                 raise NotImplementedError(
                     "Nested-field projection is not supported on BLOB files")
@@ -481,6 +484,9 @@ class SplitRead(ABC):
 
     def _read_blob_as_descriptor(self, field_names: List[str]) -> bool:
         if CoreOptions.blob_as_descriptor(self.table.options):
+            return True
+        video_fields = CoreOptions.video_frame_fields(self.table.options)
+        if any(field_name in video_fields for field_name in field_names):
             return True
         deferred_fields = getattr(self, '_deferred_blob_fields', set())
         return any(field_name in deferred_fields for field_name in field_names)

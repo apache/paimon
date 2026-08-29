@@ -23,7 +23,9 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
+import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.blob.BlobFileFormat;
+import org.apache.paimon.format.blob.VideoFileFormat;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.FileWriter;
@@ -128,7 +130,11 @@ public class DataEvolutionBlobCompactTask extends DataEvolutionCompactTask {
             RowType blobWriteType,
             String blobFieldName,
             DataFilePathFactory pathFactory) {
-        BlobFileFormat blobFileFormat = new BlobFileFormat(false, options.blobCopyBufferSize());
+        boolean video = options.videoFrameField().contains(blobFieldName);
+        FileFormat blobFileFormat =
+                video
+                        ? new VideoFileFormat(options.blobCopyBufferSize())
+                        : new BlobFileFormat(false, options.blobCopyBufferSize());
         return new RowDataFileWriter(
                 table.fileIO(),
                 RollingFileWriter.createFileWriterContext(
@@ -136,7 +142,7 @@ public class DataEvolutionBlobCompactTask extends DataEvolutionCompactTask {
                         blobWriteType,
                         new SimpleColStatsCollector.Factory[] {NoneSimpleColStatsCollector::new},
                         "none"),
-                pathFactory.newBlobPath(),
+                video ? pathFactory.newVideoPath() : pathFactory.newBlobPath(),
                 blobWriteType,
                 table.schema().id(),
                 () -> new LongCounter(0),

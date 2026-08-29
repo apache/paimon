@@ -460,6 +460,60 @@ class SchemaValidationTest {
     }
 
     @Test
+    public void testVideoFrameFieldValidation() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "video", DataTypes.BLOB()),
+                        new DataField(2, "other_video", DataTypes.BLOB()));
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "-1");
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        options.put(CoreOptions.VIDEO_FRAME_FIELD.key(), "video");
+
+        TableSchema schema = new TableSchema(1, fields, 10, emptyList(), emptyList(), options, "");
+        assertThatCode(() -> validateTableSchema(schema)).doesNotThrowAnyException();
+
+        options.put(CoreOptions.VIDEO_FRAME_FIELD.key(), "video,other_video");
+        assertThatThrownBy(() -> validateTableSchema(schema))
+                .hasMessageContaining("currently supports exactly one field");
+
+        options.put(CoreOptions.VIDEO_FRAME_FIELD.key(), "video");
+        options.put(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "video");
+        assertThatThrownBy(() -> validateTableSchema(schema))
+                .hasMessageContaining("video-frame-field")
+                .hasMessageContaining("blob-descriptor-field");
+    }
+
+    @Test
+    public void testVideoFrameRejectsNestedAndPrimaryKeyFields() {
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "-1");
+        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        options.put(CoreOptions.VIDEO_FRAME_FIELD.key(), "video");
+        List<DataField> nestedFields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "video", DataTypes.ARRAY(DataTypes.BLOB())));
+        TableSchema nested =
+                new TableSchema(1, nestedFields, 10, emptyList(), emptyList(), options, "");
+        assertThatThrownBy(() -> validateTableSchema(nested))
+                .hasMessageContaining("must be a scalar BLOB field");
+
+        options.put(BUCKET.key(), "1");
+        List<DataField> scalarFields =
+                Arrays.asList(
+                        new DataField(0, "id", DataTypes.INT()),
+                        new DataField(1, "video", DataTypes.BLOB()));
+        TableSchema primaryKey =
+                new TableSchema(1, scalarFields, 10, emptyList(), singletonList("id"), options, "");
+        assertThatThrownBy(() -> validateTableSchema(primaryKey))
+                .hasMessageContaining("only supports append-only tables");
+    }
+
+    @Test
     public void testPrimaryKeyInlineBlobDoesNotTriggerManagedRestrictions() {
         // Partial-update supports scalar blob-descriptor-field, managed blob-field, and
         // blob-view-field on primary-key tables.

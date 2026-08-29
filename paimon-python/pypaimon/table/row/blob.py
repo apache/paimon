@@ -65,6 +65,13 @@ class BlobDescriptor:
 
     @classmethod
     def deserialize(cls, data: bytes) -> 'BlobDescriptor':
+        video_type = globals().get('VideoFrameDescriptor')
+        if (
+            cls is BlobDescriptor
+            and video_type is not None
+            and video_type.is_video_frame_descriptor(data)
+        ):
+            return video_type.deserialize(data)
         if len(data) < 5:
             raise ValueError("Invalid BlobDescriptor data: too short")
 
@@ -161,6 +168,117 @@ class BlobDescriptor:
     def __repr__(self) -> str:
         """Detailed representation of BlobDescriptor."""
         return self.__str__()
+
+
+class VideoFrameDescriptor(BlobDescriptor):
+    """Descriptor for one logical frame in an encoded video payload.
+
+    The URI range identifies the complete encoded video. ``frame_index`` is a
+    zero-based presentation-order frame ordinal interpreted by the decoder.
+    """
+
+    CURRENT_VERSION = 1
+    MAGIC = 0x564944454F46524D  # "VIDEOFRM"
+    _FIXED_LENGTH = 1 + 8 + 4 + 8 + 8 + 8
+
+    def __init__(self, uri: str, offset: int, length: int, frame_index: int):
+        if isinstance(frame_index, bool) or not isinstance(frame_index, int):
+            raise TypeError("Video frame index must be an int.")
+        if frame_index < 0:
+            raise ValueError(
+                "Video frame index must be non-negative, but was %s."
+                % frame_index
+            )
+        super().__init__(uri, offset, length)
+        self._frame_index = frame_index
+
+    @property
+    def frame_index(self) -> int:
+        return self._frame_index
+
+    @property
+    def payload_descriptor(self) -> BlobDescriptor:
+        """Physical video identity without the logical frame locator."""
+        return BlobDescriptor(self.uri, self.offset, self.length)
+
+    def serialize(self) -> bytes:
+        uri_bytes = self.uri.encode('utf-8')
+        return (
+            struct.pack('<BQI', self.CURRENT_VERSION, self.MAGIC, len(uri_bytes))
+            + uri_bytes
+            + struct.pack(
+                '<qqq', self.offset, self.length, self.frame_index
+            )
+        )
+
+    @classmethod
+    def deserialize(cls, data: bytes) -> 'VideoFrameDescriptor':
+        if not isinstance(data, (bytes, bytearray)):
+            raise TypeError(
+                "VideoFrameDescriptor.deserialize expects bytes, got %s"
+                % type(data)
+            )
+        raw = bytes(data)
+        if len(raw) < cls._FIXED_LENGTH:
+            raise ValueError("Invalid VideoFrameDescriptor data: too short")
+
+        version, magic, uri_length = struct.unpack('<BQI', raw[:13])
+        if version != cls.CURRENT_VERSION:
+            raise ValueError(
+                "Expecting VideoFrameDescriptor version to be %s, but found %s."
+                % (cls.CURRENT_VERSION, version)
+            )
+        if magic != cls.MAGIC:
+            raise ValueError(
+                "Invalid VideoFrameDescriptor data: missing magic header"
+            )
+        expected_length = cls._FIXED_LENGTH + uri_length
+        if len(raw) != expected_length:
+            message = (
+                "trailing bytes"
+                if len(raw) > expected_length
+                else "invalid URI length: %s" % uri_length
+            )
+            raise ValueError("Invalid VideoFrameDescriptor data: " + message)
+
+        uri_end = 13 + uri_length
+        uri = raw[13:uri_end].decode('utf-8')
+        offset, length, frame_index = struct.unpack(
+            '<qqq', raw[uri_end:uri_end + 24]
+        )
+        try:
+            return cls(uri, offset, length, frame_index)
+        except ValueError as error:
+            raise ValueError(
+                "Invalid VideoFrameDescriptor data: negative frame index: %s"
+                % frame_index
+            ) from error
+
+    @classmethod
+    def is_video_frame_descriptor(cls, data: bytes) -> bool:
+        if not isinstance(data, (bytes, bytearray)) or len(data) < 9:
+            return False
+        raw = bytes(data)
+        return (
+            raw[0] == cls.CURRENT_VERSION
+            and struct.unpack('<Q', raw[1:9])[0] == cls.MAGIC
+        )
+
+    def __eq__(self, other) -> bool:
+        return (
+            isinstance(other, VideoFrameDescriptor)
+            and self.payload_descriptor == other.payload_descriptor
+            and self.frame_index == other.frame_index
+        )
+
+    def __hash__(self) -> int:
+        return hash((self.payload_descriptor, self.frame_index))
+
+    def __str__(self) -> str:
+        return (
+            "VideoFrameDescriptor(payload=%s, frame_index=%s)"
+            % (self.payload_descriptor, self.frame_index)
+        )
 
 
 class BlobViewStruct:
@@ -401,13 +519,18 @@ class Blob(ABC):
         data = bytes(data)
         if BlobViewStruct.is_blob_view_struct(data):
             return Blob.from_view(BlobViewStruct.deserialize(data))
-        is_descriptor = BlobDescriptor.is_blob_descriptor(data)
+        is_video_frame = VideoFrameDescriptor.is_video_frame_descriptor(data)
+        is_descriptor = is_video_frame or BlobDescriptor.is_blob_descriptor(data)
         if not allow_blob_data and not is_descriptor:
             raise ValueError(
                 "Expected BlobDescriptor bytes, got raw bytes (allow_blob_data=False)"
             )
         if is_descriptor:
-            descriptor = BlobDescriptor.deserialize(data)
+            descriptor = (
+                VideoFrameDescriptor.deserialize(data)
+                if is_video_frame
+                else BlobDescriptor.deserialize(data)
+            )
             if uri_reader_factory is None:
                 if file_io is None:
                     raise ValueError("file_io is required to resolve BlobDescriptor bytes")

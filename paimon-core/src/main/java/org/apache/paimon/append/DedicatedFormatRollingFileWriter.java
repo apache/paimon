@@ -18,7 +18,11 @@
 
 package org.apache.paimon.append;
 
+import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.VideoFrameDescriptor;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
@@ -50,6 +54,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -110,6 +115,7 @@ public class DedicatedFormatRollingFileWriter
             vectorStoreWriterFactory;
     private final long targetFileSize;
     private final long targetFileRowNum;
+    private final int videoFrameFieldIndex;
 
     // State management
     private final List<FileWriterAbortExecutor> closedWriters;
@@ -123,6 +129,8 @@ public class DedicatedFormatRollingFileWriter
             vectorStoreWriter;
     private long recordCount = 0;
     private long currentFileRecordCount = 0;
+    private @Nullable BlobDescriptor currentVideoGroup;
+    private boolean pendingGroupAwareRoll;
     private boolean closed = false;
 
     public DedicatedFormatRollingFileWriter(
@@ -150,6 +158,7 @@ public class DedicatedFormatRollingFileWriter
                 targetFileRowNum);
         this.targetFileSize = targetFileSize;
         this.targetFileRowNum = targetFileRowNum;
+        this.videoFrameFieldIndex = videoFrameFieldIndex(writeSchema, context);
         this.results = new ArrayList<>();
         this.closedWriters = new ArrayList<>();
 
@@ -207,6 +216,7 @@ public class DedicatedFormatRollingFileWriter
                                     blobTargetFileSize,
                                     context.blobConsumer(),
                                     context.blobInlineFields(),
+                                    context.videoFrameFields(),
                                     context.writeNullOnMissingFile(),
                                     context.writeNullOnFetchFailure(),
                                     context.blobFetchMetricReporter(),
@@ -346,6 +356,10 @@ public class DedicatedFormatRollingFileWriter
     @Override
     public void write(InternalRow row) throws IOException {
         try {
+            BlobDescriptor nextVideoGroup = videoPayloadDescriptor(row);
+            if (pendingGroupAwareRoll && !Objects.equals(currentVideoGroup, nextVideoGroup)) {
+                closeCurrentWriter();
+            }
             if (writerFactory != null && currentWriter == null) {
                 currentWriter = writerFactory.get();
             }
@@ -366,9 +380,14 @@ public class DedicatedFormatRollingFileWriter
             }
             recordCount++;
             currentFileRecordCount++;
+            currentVideoGroup = nextVideoGroup;
 
             if (rollingFile()) {
-                closeCurrentWriter();
+                if (nextVideoGroup == null) {
+                    closeCurrentWriter();
+                } else {
+                    pendingGroupAwareRoll = true;
+                }
             }
         } catch (Throwable e) {
             handleWriteException(e);
@@ -478,6 +497,31 @@ public class DedicatedFormatRollingFileWriter
         // Reset current writer
         currentWriter = null;
         currentFileRecordCount = 0;
+        currentVideoGroup = null;
+        pendingGroupAwareRoll = false;
+    }
+
+    private static int videoFrameFieldIndex(
+            RowType writeSchema, @Nullable BlobFileContext context) {
+        if (context == null || context.videoFrameFields().isEmpty()) {
+            return -1;
+        }
+        String field = context.videoFrameFields().iterator().next();
+        return writeSchema.containsField(field) ? writeSchema.getFieldIndex(field) : -1;
+    }
+
+    private @Nullable BlobDescriptor videoPayloadDescriptor(InternalRow row) {
+        if (videoFrameFieldIndex < 0 || row.isNullAt(videoFrameFieldIndex)) {
+            return null;
+        }
+        Blob blob = row.getBlob(videoFrameFieldIndex);
+        if (blob == null || blob.getClass() != BlobRef.class) {
+            return null;
+        }
+        BlobDescriptor descriptor = blob.toDescriptor();
+        return descriptor instanceof VideoFrameDescriptor
+                ? ((VideoFrameDescriptor) descriptor).payloadDescriptor()
+                : null;
     }
 
     /** Closes the main writer and returns its metadata. */

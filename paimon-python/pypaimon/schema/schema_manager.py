@@ -393,6 +393,19 @@ def _validate_blob_fields(
 
     descriptor_fields = core_options.blob_descriptor_fields()
     view_fields = core_options.blob_view_fields()
+    video_fields = core_options.video_frame_fields()
+
+    if len(video_fields) > 1:
+        raise ValueError(
+            "'video-frame-field' currently supports exactly one field, but found "
+            f"{sorted(video_fields)}."
+        )
+    non_scalar_video_fields = video_fields.difference(scalar_blob_field_names)
+    if non_scalar_video_fields:
+        raise ValueError(
+            "Fields in 'video-frame-field' must be scalar BLOB fields in schema. "
+            f"Invalid fields: {sorted(non_scalar_video_fields)}"
+        )
 
     all_inline_fields = descriptor_fields.union(view_fields)
     non_blob_inline_fields = all_inline_fields.difference(scalar_blob_field_names)
@@ -419,6 +432,15 @@ def _validate_blob_fields(
         raise ValueError(
             "Fields in 'blob-descriptor-field' and 'blob-view-field' must not overlap. "
             "Overlapping fields: {}".format(sorted(overlapping_inline_fields))
+        )
+
+    overlapping_video_fields = video_fields.intersection(all_inline_fields)
+    if overlapping_video_fields:
+        raise ValueError(
+            "Fields in 'video-frame-field' must not also use descriptor-only or "
+            "blob-view storage. Overlapping fields: {}".format(
+                sorted(overlapping_video_fields)
+            )
         )
 
     if blob_field_names:

@@ -25,7 +25,7 @@ import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.uri_reader import FileUriReader
-from pypaimon.table.row.blob import Blob
+from pypaimon.table.row.blob import Blob, BlobDescriptor, VideoFrameDescriptor
 
 
 class DataEvolutionRowRollingTest(unittest.TestCase):
@@ -195,6 +195,60 @@ class DataEvolutionRowRollingTest(unittest.TestCase):
         self.assertEqual([1, 3, 3], data_rows)
         self.assertEqual([1, 3, 3], blob_rows)
         self.assertEqual(list(range(7)), self._read_ids(table))
+
+    def test_video_writer_rolls_between_payload_groups(self):
+        first = os.path.join(self.tempdir, 'first.mp4')
+        second = os.path.join(self.tempdir, 'second.mp4')
+        with open(first, 'wb') as output:
+            output.write(b'first-video')
+        with open(second, 'wb') as output:
+            output.write(b'second-video')
+        first_descriptor = BlobDescriptor(first, 0, len(b'first-video'))
+        second_descriptor = BlobDescriptor(second, 0, len(b'second-video'))
+
+        table = self._create_with_schema(
+            self.blob_schema,
+            {
+                **self.de_options,
+                'target-file-row-num': '1',
+                'video-frame-field': 'payload',
+            },
+        )
+        data = pa.Table.from_pydict(
+            {
+                'id': list(range(5)),
+                'payload': [
+                    VideoFrameDescriptor(
+                        first_descriptor.uri,
+                        first_descriptor.offset,
+                        first_descriptor.length,
+                        frame,
+                    ).serialize()
+                    for frame in range(3)
+                ] + [
+                    VideoFrameDescriptor(
+                        second_descriptor.uri,
+                        second_descriptor.offset,
+                        second_descriptor.length,
+                        frame,
+                    ).serialize()
+                    for frame in range(2)
+                ],
+            },
+            schema=self.blob_schema,
+        )
+
+        files = self._write_files(table, data)
+
+        video_rows = sorted(
+            f.row_count for f in files if f.file_name.endswith('.video')
+        )
+        normal_rows = sorted(
+            f.row_count for f in files if not f.file_name.endswith('.video')
+        )
+        self.assertEqual([2, 3], video_rows)
+        self.assertEqual([2, 3], normal_rows)
+        self.assertEqual(list(range(5)), self._read_ids(table))
 
     def test_blob_consumer_descriptors_survive_abort_after_rolling(self):
         table = self._create_with_schema(

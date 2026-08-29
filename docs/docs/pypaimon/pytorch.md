@@ -88,6 +88,25 @@ disable a second batching step. Batch streaming does not support `shuffle=True`.
 Numeric tensors may share read-only Arrow buffers; clone them before in-place
 mutation. Batch formats currently require `prefetch_concurrency=1`.
 
+## Video frame descriptors
+
+For a multimodal frame table, use the higher-level scan API:
+
+```python
+dataset = (
+    frames.scan()
+    .select(["episode_id", "state", "action", "video"])
+    .to_torch(streaming=True)
+)
+```
+
+The `.video` column yields serialized `VideoFrameDescriptor` values whose
+embedded frame ordinals keep frame mapping out of the normal data file. Use
+`pypaimon.multimodal.VideoFrameCollator` as the DataLoader `collate_fn` to open
+physical video ranges and cache decoder sessions per worker. See
+[Multimodal API: Video Frame Storage](multimodal-api#video-frame-storage)
+for the write path and a complete decoder example.
+
 ## File Format Metadata Cache
 
 Reusable PyArrow Dataset metadata is cached across reads. Configure its estimated

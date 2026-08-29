@@ -49,6 +49,11 @@ When you define a table with a Blob column, Paimon automatically separates the s
 1. **Normal Data Files** (e.g., `.parquet`, `.orc`): Store regular columns (INT, STRING, etc.)
 2. **Blob Data Files** (`.blob`): Store the actual blob data
 
+For append-only video-frame workloads, one scalar BLOB field can instead use the independent
+**video pack format** (`.video`). A video pack concatenates several complete encoded videos and
+embeds a compact frame-run index. The frame ordinal lives in `VideoFrameDescriptor`; it does not
+need a `frame_index` or `frame_timestamp` column in the normal data file.
+
 For example, given a table with schema `(id INT, name STRING, picture BLOB)`:
 
 ```
@@ -104,6 +109,13 @@ Flink, Spark, and Python.
       </tr>
     </thead>
     <tbody>
+    <tr>
+      <td><h5>video-frame-field</h5></td>
+      <td>No</td>
+      <td style={{wordWrap: "break-word"}}>-</td>
+      <td>String</td>
+      <td>Names one scalar BLOB field whose logical values are frames in complete encoded videos packed into <code>.video</code> files. This first version supports append-only tables and exact <code>VideoFrameDescriptor</code>-backed input only.</td>
+    </tr>
     <tr>
       <td><h5>blob-as-descriptor</h5></td>
       <td>No</td>
@@ -266,6 +278,61 @@ schema = Schema.from_pyarrow_schema(
 </TabItem>
 
 </Tabs>
+
+## Video Frame Storage
+
+Use `video-frame-field` when the logical table has one row per frame while the physical storage
+and decoding unit is a complete encoded video. The option also marks a SQL `BYTES` or `BINARY`
+column as a BLOB column. It selects an independent `.video` format; the ordinary `.blob` version
+and layout are not changed.
+
+```sql
+CREATE TABLE video_frames (
+    episode_id BIGINT,
+    video BYTES
+) WITH (
+    'row-tracking.enabled' = 'true',
+    'data-evolution.enabled' = 'true',
+    'video-frame-field' = 'video'
+);
+```
+
+Each logical value is a `VideoFrameDescriptor`: its URI range identifies one complete encoded
+video and its frame ordinal selects a frame inside that video. On write, a `.video` data region
+concatenates raw video payloads without ordinary BLOB entry wrappers. Four embedded delta-varint
+indexes record physical video lengths, logical run lengths, run-to-video references, and the first
+frame ordinal of each run. Consecutive frames therefore need one run entry rather than one index
+entry per row. NULL and data-evolution placeholders use negative run references.
+
+Physical reuse uses exact payload descriptor identity (URI, offset, and length), not a content
+hash. It is local to each `.video` file: every pack is self-contained and never points at payloads
+owned by another Paimon data file. A pack can contain multiple MP4 payloads. After a size or row
+target is reached, rolling waits for the current physical video group to end, making the target
+soft for large videos. A later commit or an earlier roll can store another physical copy of the
+same source video.
+
+Compaction byte-copies the complete encoded-video ranges into a new self-contained `.video` pack
+and rebuilds the embedded indexes; it does not decode or re-encode frames. The aligned normal data
+file contains only application columns such as `episode_id`, state, and action. Paimon stores the
+frame mapping in the `.video` descriptor/index path.
+
+Current restrictions:
+
+- Append-only tables only; primary-key tables continue to use managed BLOB storage.
+- At most one `video-frame-field` per table.
+- The field must be a scalar `BLOB`; `ARRAY<BLOB>` and `MAP<K, BLOB>` continue to use `.blob`.
+- Non-null writes must be exact descriptor-backed `BlobRef` values containing a
+  `VideoFrameDescriptor`. Inline bytes and ordinary `BlobDescriptor` values are rejected.
+- Version 1 addresses frames by zero-based presentation-order ordinal with stride one. It does not
+  store PTS values or parse codec/container metadata.
+- A `BlobConsumer` callback is not supported for the video field.
+
+Reads of a `.video` field return serialized `VideoFrameDescriptor` values even when
+`blob-as-descriptor` is false. Materializing the complete MP4 once per logical frame would defeat
+the format's purpose.
+
+For Python ingestion and PyTorch `DataLoader` usage, including decoder-session reuse in workers,
+see [PyPaimon Multimodal API: Video Frame Storage](../pypaimon/multimodal-api#video-frame-storage).
 
 The comment directive format is `__DIRECTIVE; optional user comment`. Paimon converts `BYTES`/`BINARY` to `BLOB`, `ARRAY<BYTES>`/`ARRAY<BINARY>` to `ARRAY<BLOB>`, and `MAP<K, BYTES>`/`MAP<K, BINARY>` to `MAP<K, BLOB>`. It registers the field in the corresponding option and stores the text after `;` as the column's real comment.
 
