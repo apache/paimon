@@ -32,6 +32,7 @@ import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.predicate.SortValue;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.IOUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -68,7 +69,14 @@ public class FileIndexPredicate implements Closeable {
     }
 
     public FileIndexPredicate(SeekableInputStream inputStream, RowType fileRowType) {
-        this.reader = FileIndexFormat.createReader(inputStream, fileRowType);
+        try {
+            this.reader = FileIndexFormat.createReader(inputStream, fileRowType);
+        } catch (RuntimeException e) {
+            // nothing else holds a reference to inputStream yet, so this is the only chance to
+            // release it: createReader rejects a file whose magic or version does not match.
+            IOUtils.closeQuietly(inputStream);
+            throw e;
+        }
     }
 
     public FileIndexResult evaluate(@Nullable Predicate predicate) {
