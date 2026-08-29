@@ -49,6 +49,10 @@ from pypaimon.sample import robomind_agilex as agilex
 h5py = pytest.importorskip("h5py")
 
 
+def test_default_fetch_group_covers_eight_logical_batches():
+    assert BenchmarkConfig().fetch_batches == 8
+
+
 def test_sequence_dataset_forwards_plural_access():
     class BatchDataset:
         def __getitems__(self, indices):

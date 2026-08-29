@@ -61,8 +61,8 @@ materializing episodes in memory.
 
 The logical training batch remains unchanged, while `fetch_batches` controls
 how many consecutive logical batches are requested from the Dataset together.
-The default of four lets Paimon coalesce eight samples when the logical batch
-size is two, then yields the original four ordered batches. The transient
+The default of eight lets Paimon coalesce 16 samples when the logical batch
+size is two, then yields the original eight ordered batches. The transient
 buffer is discarded after that physical fetch; checkpoint recovery resumes
 from the next logical-batch cursor and reconstructs it. Larger values trade
 fewer Paimon reads for higher per-process memory.

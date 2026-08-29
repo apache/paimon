@@ -54,7 +54,7 @@ class BenchmarkConfig:
     weight_decay: float = 1e-4
     warmup_batches: int = 1
     loader_batches: int = 4
-    fetch_batches: int = 4
+    fetch_batches: int = 8
     rounds: int = 3
 
     def __post_init__(self):
