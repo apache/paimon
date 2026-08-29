@@ -29,6 +29,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.iceberg.IcebergCommitCallback;
 import org.apache.paimon.iceberg.IcebergOptions;
+import org.apache.paimon.iceberg.IcebergPreCommitValidation;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.manifest.ManifestFile;
@@ -396,6 +397,10 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         List<CommitPreCallback> callbacks = new ArrayList<>();
         if (options.isChainTable()) {
             callbacks.add(new ChainTableCommitPreCallback(table));
+        }
+        if (options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                != IcebergOptions.StorageType.DISABLED) {
+            callbacks.add(new IcebergPreCommitValidation(table));
         }
         return callbacks;
     }

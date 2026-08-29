@@ -70,6 +70,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
@@ -122,6 +123,11 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Validation utilities for {@link TableSchema}. */
 public class SchemaValidation {
+
+    /** The precisions {@code IcebergDataField} maps to the Iceberg timestamp types. */
+    private static final int MIN_ICEBERG_TIMESTAMP_PRECISION = 3;
+
+    private static final int MAX_ICEBERG_TIMESTAMP_PRECISION = 6;
 
     public static final List<Class<? extends DataType>> PRIMARY_KEY_UNSUPPORTED_LOGICAL_TYPES =
             Arrays.asList(
@@ -234,6 +240,7 @@ public class SchemaValidation {
                 FileFormat.fromIdentifier(options.formatType(), new Options(schema.options()));
         RowType tableRowType = new RowType(schema.fields());
         validateGeospatialTypes(schema, options, tableRowType);
+        validateIcebergTimestampPrecisions(tableRowType, options);
         validateBlobFields(tableRowType, options);
         Set<String> blobDescriptorFields = validateBlobDescriptorFields(tableRowType, options);
         Set<String> blobViewFields =
@@ -529,6 +536,58 @@ public class SchemaValidation {
                 geospatialSequenceFields.isEmpty(),
                 "Geometry and geography columns cannot be sequence fields: %s.",
                 geospatialSequenceFields);
+    }
+
+    /**
+     * Refuses the timestamp precisions the Iceberg mirror cannot publish, matching the range {@link
+     * org.apache.paimon.iceberg.metadata.IcebergDataField} converts. A higher precision is written
+     * as Parquet INT96, which Iceberg reads as a microsecond zoned timestamp rather than the
+     * nanoseconds the column declares, so the two disagree about the data.
+     */
+    public static void validateIcebergTimestampPrecisions(DataType dataType, CoreOptions options) {
+        if (options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                == IcebergOptions.StorageType.DISABLED) {
+            return;
+        }
+        checkArgument(
+                !containsType(dataType, SchemaValidation::isUnpublishableTimestamp),
+                "Timestamp columns must have a precision from %s to %s when Iceberg metadata is "
+                        + "enabled, the only precisions Iceberg compatibility can publish. Use a "
+                        + "precision from %s to %s, or disable '%s'.",
+                MIN_ICEBERG_TIMESTAMP_PRECISION,
+                MAX_ICEBERG_TIMESTAMP_PRECISION,
+                MIN_ICEBERG_TIMESTAMP_PRECISION,
+                MAX_ICEBERG_TIMESTAMP_PRECISION,
+                IcebergOptions.METADATA_ICEBERG_STORAGE.key());
+    }
+
+    private static boolean isUnpublishableTimestamp(DataType dataType) {
+        if (dataType instanceof TimestampType) {
+            return isUnpublishablePrecision(((TimestampType) dataType).getPrecision());
+        }
+        return dataType instanceof LocalZonedTimestampType
+                && isUnpublishablePrecision(((LocalZonedTimestampType) dataType).getPrecision());
+    }
+
+    private static boolean isUnpublishablePrecision(int precision) {
+        return precision < MIN_ICEBERG_TIMESTAMP_PRECISION
+                || precision > MAX_ICEBERG_TIMESTAMP_PRECISION;
+    }
+
+    /**
+     * The mirror emits historical schemas too, so enabling it has to judge all of them. The history
+     * is read lazily, so a disabled mirror costs no listing.
+     */
+    public static void validateHistoricalIcebergTypes(
+            Supplier<List<TableSchema>> history, CoreOptions options) {
+        if (options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                == IcebergOptions.StorageType.DISABLED) {
+            return;
+        }
+        for (TableSchema schema : history.get()) {
+            validateIcebergGeospatialTypes(schema.logicalRowType(), options);
+            validateIcebergTimestampPrecisions(schema.logicalRowType(), options);
+        }
     }
 
     /** Validate geospatial types in a schema that will be published as Iceberg metadata. */
