@@ -30,7 +30,7 @@ import numpy as np
 import torch
 import torch.nn.functional as functional
 from PIL import Image
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import Dataset, default_collate
 
 
 CAMERA_KEYS = (
@@ -54,6 +54,7 @@ class BenchmarkConfig:
     weight_decay: float = 1e-4
     warmup_batches: int = 1
     loader_batches: int = 4
+    fetch_batches: int = 4
     rounds: int = 3
 
     def __post_init__(self):
@@ -65,6 +66,7 @@ class BenchmarkConfig:
             "image_width",
             "warmup_batches",
             "loader_batches",
+            "fetch_batches",
         )
         for name in positive_ints:
             value = getattr(self, name)
@@ -288,25 +290,30 @@ def run_backend(
     train_dataset, validation_dataset = dataset_factory()
     dataset_build_s = time.monotonic() - dataset_started
 
-    loader_sequence = _SequenceDataset(train_dataset, plan.loader_indices)
-    loader = DataLoader(
-        loader_sequence,
-        batch_size=config.batch_size,
-        shuffle=False,
-        num_workers=0,
+    warmup_sample_count = config.warmup_batches * config.batch_size
+    warmup_iterator = _iter_logical_batches(
+        train_dataset,
+        plan.loader_indices[:warmup_sample_count],
+        logical_batch_size=config.batch_size,
+        fetch_batches=1,
     )
-    iterator = iter(loader)
     first_batch_started = time.monotonic()
-    first_batch = next(iterator)
+    first_batch = next(warmup_iterator)
     first_batch_s = time.monotonic() - first_batch_started
     validate_act_batch(first_batch, config)
     for _ in range(config.warmup_batches - 1):
-        validate_act_batch(next(iterator), config)
+        validate_act_batch(next(warmup_iterator), config)
 
+    loader_iterator = _iter_logical_batches(
+        train_dataset,
+        plan.loader_indices[warmup_sample_count:],
+        logical_batch_size=config.batch_size,
+        fetch_batches=config.fetch_batches,
+    )
     loader_started = time.monotonic()
     loader_sample_count = 0
     for _ in range(config.loader_batches):
-        batch = next(iterator)
+        batch = next(loader_iterator)
         validate_act_batch(batch, config)
         loader_sample_count += len(batch["sample_id"])
     loader_seconds = time.monotonic() - loader_started
@@ -322,15 +329,14 @@ def run_backend(
         weight_decay=config.weight_decay,
     )
     policy.train()
-    training_loader = DataLoader(
-        _SequenceDataset(train_dataset, plan.train_indices),
-        batch_size=config.batch_size,
-        shuffle=False,
-        num_workers=0,
-    )
     train_started = time.monotonic()
     losses = []
-    for step, batch in enumerate(training_loader, 1):
+    for step, batch in enumerate(_iter_logical_batches(
+            train_dataset,
+            plan.train_indices,
+            logical_batch_size=config.batch_size,
+            fetch_batches=config.fetch_batches,
+    ), 1):
         step_started = time.monotonic()
         model_batch = build_lerobot_batch(batch, config)
         optimizer.zero_grad(set_to_none=True)
@@ -360,12 +366,12 @@ def run_backend(
     # but disable gradients and parameter updates below.
     policy.train()
     _seed_everything(config.seed + 4)
-    validation_batch = next(iter(DataLoader(
-        _SequenceDataset(validation_dataset, plan.validation_indices),
-        batch_size=config.batch_size,
-        shuffle=False,
-        num_workers=0,
-    )))
+    validation_batch = next(_iter_logical_batches(
+        validation_dataset,
+        plan.validation_indices,
+        logical_batch_size=config.batch_size,
+        fetch_batches=config.fetch_batches,
+    ))
     with torch.no_grad():
         validation_loss, _ = policy(build_lerobot_batch(
             validation_batch, config))
@@ -405,13 +411,15 @@ def _measure_python_peak(dataset_factory, plan, config):
     tracemalloc.start()
     try:
         train_dataset, _ = dataset_factory()
-        indices = plan.loader_indices[:config.batch_size]
-        next(iter(DataLoader(
-            _SequenceDataset(train_dataset, indices),
-            batch_size=config.batch_size,
-            shuffle=False,
-            num_workers=0,
-        )))
+        indices = plan.loader_indices[
+            :config.batch_size * config.fetch_batches
+        ]
+        next(_iter_logical_batches(
+            train_dataset,
+            indices,
+            logical_batch_size=config.batch_size,
+            fetch_batches=config.fetch_batches,
+        ))
         _, peak = tracemalloc.get_traced_memory()
         return peak
     finally:
@@ -468,3 +476,23 @@ class _SequenceDataset(Dataset):
         if getitems is not None:
             return getitems(source_indices)
         return [self._dataset[index] for index in source_indices]
+
+
+def _iter_logical_batches(
+        dataset, indices, *, logical_batch_size, fetch_batches):
+    logical_batch_size = _positive_int(
+        logical_batch_size, "logical_batch_size")
+    fetch_batches = _positive_int(fetch_batches, "fetch_batches")
+    if len(indices) % logical_batch_size:
+        raise ValueError("indices must contain complete logical batches.")
+    physical_size = logical_batch_size * fetch_batches
+    getitems = getattr(dataset, "__getitems__", None)
+    for offset in range(0, len(indices), physical_size):
+        physical_indices = list(indices[offset:offset + physical_size])
+        if getitems is None:
+            samples = [dataset[index] for index in physical_indices]
+        else:
+            samples = getitems(physical_indices)
+        for logical_offset in range(0, len(samples), logical_batch_size):
+            yield default_collate(
+                samples[logical_offset:logical_offset + logical_batch_size])

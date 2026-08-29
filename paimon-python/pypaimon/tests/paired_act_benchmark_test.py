@@ -25,6 +25,8 @@ import torch
 from PIL import Image
 
 import pypaimon.multimodal as pmm
+import pypaimon.benchmark.act_harness as act_harness
+import pypaimon.benchmark.paired_act as paired_act
 from pypaimon.benchmark.paired_act import (
     IMAGE_COLUMNS,
     BenchmarkConfig,
@@ -55,6 +57,44 @@ def test_sequence_dataset_forwards_plural_access():
     dataset = _SequenceDataset(BatchDataset(), (7, 3, 5))
 
     assert dataset.__getitems__([0, 2]) == ["sample-7", "sample-5"]
+
+
+def test_logical_batches_coalesce_one_physical_fetch():
+    class BatchDataset:
+        def __init__(self):
+            self.calls = []
+
+        def __getitems__(self, indices):
+            self.calls.append(list(indices))
+            return [{"value": torch.tensor(index)} for index in indices]
+
+    dataset = BatchDataset()
+
+    batches = list(act_harness._iter_logical_batches(
+        dataset,
+        tuple(range(8)),
+        logical_batch_size=2,
+        fetch_batches=4,
+    ))
+
+    assert dataset.calls == [list(range(8))]
+    assert [batch["value"].tolist() for batch in batches] == [
+        [0, 1], [2, 3], [4, 5], [6, 7],
+    ]
+
+
+def test_logical_batches_reject_partial_checkpoint_tail():
+    class BatchDataset:
+        def __getitems__(self, indices):
+            return [{"value": torch.tensor(index)} for index in indices]
+
+    with pytest.raises(ValueError, match="complete logical batches"):
+        list(act_harness._iter_logical_batches(
+            BatchDataset(),
+            tuple(range(9)),
+            logical_batch_size=2,
+            fetch_batches=4,
+        ))
 
 
 def test_backend_times_without_tracemalloc_and_measures_memory_separately():
@@ -103,6 +143,58 @@ def test_backend_times_without_tracemalloc_and_measures_memory_separately():
     assert states[-1] is True
     assert result["peak_memory_measurement"] == (
         "python-tracemalloc-separate-dataset-first-batch")
+
+
+def test_backend_coalesces_timed_loader_fetches():
+    config = BenchmarkConfig(
+        seed=11,
+        action_horizon=1,
+        batch_size=2,
+        optimizer_steps=1,
+        image_height=2,
+        image_width=2,
+        warmup_batches=1,
+        loader_batches=4,
+        fetch_batches=4,
+        rounds=3,
+    )
+
+    class BatchDataset(torch.utils.data.Dataset):
+        def __init__(self):
+            self.calls = []
+
+        def __len__(self):
+            return 16
+
+        def __getitem__(self, index):
+            return {
+                "sample_id": "episode-a#%d" % index,
+                "episode_id": "episode-a",
+                "step_idx": index,
+                "qpos": torch.zeros(14),
+                "action": torch.zeros((1, 14)),
+                "images": torch.zeros((3, 3, 2, 2)),
+                "is_pad": torch.zeros(1, dtype=torch.bool),
+            }
+
+        def __getitems__(self, indices):
+            self.calls.append(list(indices))
+            return [self[index] for index in indices]
+
+    dataset = BatchDataset()
+    plan = build_window_plan(len(dataset), len(dataset), config)
+
+    run_backend(
+        "test",
+        1,
+        lambda: (dataset, dataset),
+        plan,
+        config,
+        "sequence-sha256",
+        policy_factory=_policy_factory,
+    )
+
+    assert any(len(indices) == 8 for indices in dataset.calls)
 
 
 def _jpeg(value):
@@ -346,6 +438,19 @@ def test_tensor_parity_rejects_different_hdf5_bytes(
 def test_requires_at_least_three_alternating_rounds():
     with pytest.raises(ValueError, match="rounds must be at least 3"):
         BenchmarkConfig(rounds=2)
+
+
+def test_fetch_batches_must_be_positive():
+    assert BenchmarkConfig(fetch_batches=4).fetch_batches == 4
+    with pytest.raises(ValueError, match="fetch_batches must be a positive int"):
+        BenchmarkConfig(fetch_batches=0)
+
+
+def test_cli_documents_physical_fetch_batches(capsys):
+    with pytest.raises(SystemExit):
+        paired_act.main(["--help"])
+
+    assert "--fetch-batches" in capsys.readouterr().out
 
 
 def test_source_commit_falls_back_outside_git_checkout(tmp_path):

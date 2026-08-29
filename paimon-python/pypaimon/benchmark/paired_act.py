@@ -827,6 +827,9 @@ def main(argv=None):
         "--loader-batches", type=int, default=BenchmarkConfig.loader_batches,
         help="Batches used for DataLoader throughput measurement.")
     parser.add_argument(
+        "--fetch-batches", type=int, default=BenchmarkConfig.fetch_batches,
+        help="Logical batches coalesced into one physical dataset fetch.")
+    parser.add_argument(
         "--rounds", type=int, default=BenchmarkConfig.rounds,
         help="Alternating backend rounds; must be at least three.")
     args = parser.parse_args(argv)
@@ -841,6 +844,7 @@ def main(argv=None):
         weight_decay=args.weight_decay,
         warmup_batches=args.warmup_batches,
         loader_batches=args.loader_batches,
+        fetch_batches=args.fetch_batches,
         rounds=args.rounds,
     )
     report = run(

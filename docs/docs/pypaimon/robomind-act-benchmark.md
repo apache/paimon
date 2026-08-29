@@ -59,6 +59,14 @@ images once rather than once per action-horizon row. The adapter maps each
 generic window to the same tensor contract as the HDF5 adapter without
 materializing episodes in memory.
 
+The logical training batch remains unchanged, while `fetch_batches` controls
+how many consecutive logical batches are requested from the Dataset together.
+The default of four lets Paimon coalesce eight samples when the logical batch
+size is two, then yields the original four ordered batches. The transient
+buffer is discarded after that physical fetch; checkpoint recovery resumes
+from the next logical-batch cursor and reconstructs it. Larger values trade
+fewer Paimon reads for higher per-process memory.
+
 Each backend then uses the same CPU LeRobot ACT policy, initial seed, AdamW
 optimizer, batch size, window sequence, and optimizer step count. At least
 three rounds run in alternating order (`HDF5 → Paimon`, then
