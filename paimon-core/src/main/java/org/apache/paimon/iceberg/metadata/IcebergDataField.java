@@ -190,15 +190,15 @@ public class IcebergDataField {
                 // Paimon writes these as Parquet INT96, which Iceberg reads as microseconds
                 Preconditions.checkArgument(
                         timestampPrecision >= 3 && timestampPrecision <= 6,
-                        "Paimon Iceberg compatibility cannot publish a nanosecond-precision "
-                                + "timestamp; use a timestamp precision from 3 to 6.");
+                        "Paimon Iceberg compatibility only supports timestamp types with a "
+                                + "precision from 3 to 6.");
                 return "timestamp";
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 int timestampLtzPrecision = ((LocalZonedTimestampType) dataType).getPrecision();
                 Preconditions.checkArgument(
                         timestampLtzPrecision >= 3 && timestampLtzPrecision <= 6,
-                        "Paimon Iceberg compatibility cannot publish a nanosecond-precision "
-                                + "timestamp; use a timestamp precision from 3 to 6.");
+                        "Paimon Iceberg compatibility only supports timestamp types with a "
+                                + "precision from 3 to 6.");
                 return "timestamptz";
             case VARIANT:
                 return "variant";

@@ -231,14 +231,14 @@ class IcebergDataFieldTest {
                     new DataField(3, "timestamp_ns", new TimestampType(false, precision));
             assertThatThrownBy(() -> new IcebergDataField(nanosField))
                     .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("nanosecond-precision");
+                    .hasMessageContaining("precision from 3 to 6");
 
             DataField nanosLtzField =
                     new DataField(
                             4, "timestamptz_ns", new LocalZonedTimestampType(false, precision));
             assertThatThrownBy(() -> new IcebergDataField(nanosLtzField))
                     .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("nanosecond-precision");
+                    .hasMessageContaining("precision from 3 to 6");
         }
     }
 

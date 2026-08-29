@@ -2137,7 +2137,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
     private class SchemaCache {
 
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        SchemaManager schemaManager = table.schemaManager();
         Map<Long, IcebergSchema> schemas = new HashMap<>();
 
         private IcebergSchema get(long schemaId) {

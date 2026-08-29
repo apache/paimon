@@ -38,6 +38,7 @@ import org.apache.paimon.iceberg.manifest.IcebergManifestEntry;
 import org.apache.paimon.iceberg.manifest.IcebergManifestFile;
 import org.apache.paimon.iceberg.manifest.IcebergManifestFileMeta;
 import org.apache.paimon.iceberg.manifest.IcebergManifestList;
+import org.apache.paimon.iceberg.metadata.IcebergDataField;
 import org.apache.paimon.iceberg.metadata.IcebergMetadata;
 import org.apache.paimon.iceberg.metadata.IcebergRef;
 import org.apache.paimon.iceberg.metadata.IcebergSchema;
@@ -1762,6 +1763,47 @@ public class IcebergCompatibilityTest {
                 .hasMessageContaining("precision from 3 to 6");
         assertThat(table.snapshotManager().latestSnapshotId()).isEqualTo(1L);
         assertThat(fileIO.exists(new Path(tablePath, "metadata"))).isFalse();
+    }
+
+    @Test
+    public void testCommitOnBranchMirrorsTheBranchSchema() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
+        FileStoreTable table =
+                createPaimonTable(
+                        rowType, Collections.emptyList(), Collections.singletonList("k"), 1);
+
+        String commitUser = UUID.randomUUID().toString();
+        try (TableWriteImpl<?> write = table.newWrite(commitUser);
+                TableCommitImpl commit = table.newCommit(commitUser)) {
+            write.write(GenericRow.of(1, 10));
+            commit.commit(1, write.prepareCommit(false, 1));
+        }
+
+        table.branchManager().createBranch("b1");
+        new SchemaManager(table.fileIO(), table.location(), "b1")
+                .commitChanges(SchemaChange.addColumn("branch_only", DataTypes.INT()));
+
+        FileStoreTable branchTable = table.switchToBranch("b1");
+        try (TableWriteImpl<?> write = branchTable.newWrite(commitUser);
+                TableCommitImpl commit = branchTable.newCommit(commitUser)) {
+            write.write(GenericRow.of(2, 20, 200));
+            commit.commit(2, write.prepareCommit(false, 2));
+        }
+
+        IcebergMetadata metadata =
+                IcebergMetadata.fromPath(
+                        branchTable.fileIO(),
+                        new Path(
+                                branchTable.location(),
+                                "metadata/v"
+                                        + branchTable.snapshotManager().latestSnapshotId()
+                                        + ".metadata.json"));
+        assertThat(
+                        metadata.schemas().get(metadata.currentSchemaId()).fields().stream()
+                                .map(IcebergDataField::name))
+                .containsExactly("k", "v", "branch_only");
     }
 
     /*
