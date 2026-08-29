@@ -280,6 +280,9 @@ setup(
             'datasketches>=4,<5; python_version<"3.9"',
             'datasketches>=5,<6; python_version>="3.9"',
         ],
+        'datafusion': [
+            'datafusion>=54,<55; python_version>="3.10"',
+        ],
         'sql': [
             'pypaimon-rust>=0.3.0; python_version>="3.10"',
             'datafusion>=54,<55; python_version>="3.10"',

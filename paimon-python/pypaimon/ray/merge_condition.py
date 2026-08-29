@@ -18,6 +18,7 @@
 
 import logging
 import re
+import sys
 from typing import Mapping, Optional, Set
 
 import pyarrow as pa
@@ -32,14 +33,17 @@ logger = logging.getLogger(__name__)
 
 
 def _load_datafusion():
+    if sys.version_info[:2] < (3, 10):
+        raise ImportError(
+            "merge_into condition expressions require Python 3.10 or newer"
+        )
     try:
         import datafusion
         return datafusion
     except ImportError:
         raise ImportError(
-            "merge_into condition expressions require the PyPaimon SQL "
-            "extra, which provides DataFusion support. Install it with: "
-            "pip install pypaimon[sql]"
+            "merge_into condition expressions require DataFusion. "
+            "Install it with: pip install 'pypaimon[datafusion]'"
         )
 
 
