@@ -37,9 +37,8 @@ def _load_datafusion():
         return datafusion
     except ImportError:
         raise ImportError(
-            "merge_into condition expressions require the PyPaimon SQL "
-            "extra, which provides DataFusion support. Install it with: "
-            "pip install pypaimon[sql]"
+            "merge_into condition expressions require DataFusion. "
+            "Install it with: pip install pypaimon[datafusion]"
         )
 
 

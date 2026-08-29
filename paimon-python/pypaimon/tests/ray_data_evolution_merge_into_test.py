@@ -41,7 +41,7 @@ except ImportError:
     _HAS_DATAFUSION = False
 
 _SKIP_CONDITION = not _HAS_DATAFUSION
-_SKIP_REASON = "pypaimon[sql] is required for condition expressions"
+_SKIP_REASON = "pypaimon[datafusion] is required for condition expressions"
 
 _TEST_NUM_PARTITIONS = 2
 

@@ -42,10 +42,18 @@ except ImportError:
     _HAS_DATAFUSION = False
 
 _SKIP_CONDITION = not _HAS_DATAFUSION
-_SKIP_REASON = "pypaimon[sql] is required for condition expressions"
+_SKIP_REASON = "pypaimon[datafusion] is required for condition expressions"
 
 
 class TableMergeIntoTest(BatchModeMixin, DataEvolutionTestBase, unittest.TestCase):
+
+    def test_missing_datafusion_error_suggests_datafusion_extra(self):
+        from pypaimon.ray.merge_condition import _load_datafusion
+
+        with patch.dict("sys.modules", {"datafusion": None}):
+            with self.assertRaisesRegex(
+                    ImportError, r"pip install pypaimon\[datafusion\]"):
+                _load_datafusion()
 
     def _read_sorted(self, table):
         return self._read_all(table).sort_by("id").to_pydict()
