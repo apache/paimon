@@ -173,6 +173,7 @@ dataset = (
     .to_contiguous_window_dataset(
         window_size=16,
         columns=["state", "image"],
+        anchor_columns=["image"],
         group_key="episode_id",
         order_key="step_idx",
         tail="pad",
@@ -185,7 +186,9 @@ loader = DataLoader(dataset, batch_size=32, num_workers=4, shuffle=True)
 Each item contains the group and order keys, one list for each requested
 column, and a boolean `is_pad` tensor where `True` marks padding. Padding
 repeats the final real value by default; `pad_values` can override individual
-columns. Use `column_transforms` to convert column lists to tensors and
+columns. Columns named in `anchor_columns` contain only the first row's value,
+which is useful when an observation applies to a full action window. Use
+`column_transforms` to convert column lists to tensors and
 `adapter` to produce a model-specific sample mapping. Keep these callbacks
 picklable when using multiple DataLoader workers.
 

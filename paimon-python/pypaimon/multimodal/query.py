@@ -169,6 +169,7 @@ class ScanQuery:
             *,
             window_size,
             columns=None,
+            anchor_columns=None,
             group_key="episode_id",
             order_key="step_idx",
             stride=1,
@@ -180,8 +181,9 @@ class ScanQuery:
         """Build a snapshot-pinned, map-style Dataset of contiguous rows.
 
         The Dataset indexes only ``group_key``, ``order_key``, and Paimon row
-        IDs, then reads projected values on demand. It sorts rows within each
-        group and never creates a window across groups. See
+        IDs, then reads projected values on demand. Columns listed in
+        ``anchor_columns`` are read only for the first row of each window. It
+        sorts rows within each group and never creates a window across groups. See
         :class:`pypaimon.multimodal.window_dataset.ContiguousWindowDataset`
         for tail, padding, mask, transform, and adapter semantics.
         """
@@ -194,6 +196,7 @@ class ScanQuery:
             self,
             window_size=window_size,
             columns=columns,
+            anchor_columns=anchor_columns,
             group_key=group_key,
             order_key=order_key,
             stride=stride,

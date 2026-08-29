@@ -179,7 +179,7 @@ def validate_act_batch(batch, config):
     if torch.any(batch["images"] < 0) or torch.any(batch["images"] > 1):
         raise ValueError("images must be normalized to [0, 1].")
     if batch["is_pad"].any():
-        raise ValueError("M0 ACT windows must be complete and unpadded.")
+        raise ValueError("Paired ACT benchmark windows must be complete and unpadded.")
     for sample_id, episode_id, step_idx in zip(
             batch["sample_id"], batch["episode_id"],
             batch["step_idx"].tolist()):
@@ -209,7 +209,7 @@ def build_lerobot_batch(batch, config):
 
 
 def build_act_policy(config):
-    """Build the one reduced CPU LeRobot ACT configuration used by M0."""
+    """Build the reduced CPU LeRobot ACT configuration used by the benchmark."""
     try:
         import importlib.metadata
         from lerobot.configs.types import FeatureType, PolicyFeature

@@ -145,6 +145,19 @@ class ContiguousWindowDatasetTest(unittest.TestCase):
             sample["payload"],
         )
 
+    def test_anchor_columns_read_only_the_window_anchor(self):
+        table = self._table()
+        original = ScanQuery._fetch_bodies
+        with patch.object(ScanQuery, "_fetch_bodies", side_effect=original) as fetch:
+            dataset = self._dataset(table, anchor_columns=["payload"])
+
+            sample = dataset[0]
+
+        self.assertEqual([100, 101, 102], sample["value"])
+        self.assertEqual([b"episode-b-0"], sample["payload"])
+        self.assertEqual(1, fetch.call_count)
+        self.assertEqual(1, len(fetch.call_args.args[1]["payload"]))
+
     def test_plural_access_coalesces_overlapping_window_reads(self):
         dataset = self._dataset(self._table())
         expected = [dataset[0], dataset[1]]

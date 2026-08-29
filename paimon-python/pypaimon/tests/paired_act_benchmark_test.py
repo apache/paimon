@@ -28,6 +28,7 @@ import pypaimon.multimodal as pmm
 from pypaimon.benchmark.paired_act import (
     IMAGE_COLUMNS,
     BenchmarkConfig,
+    _git_head,
     _paimon_datasets,
     _shared_normalization,
     _snapshot_id,
@@ -292,6 +293,10 @@ def test_paimon_windows_are_lazy_and_snapshot_pinned(paired_input):
         assert isinstance(validation, ContiguousWindowDataset)
         sample_before_append = train[0]
         assert fetch.call_count == 1
+        assert {
+            name: len(fetch.call_args.args[1][name])
+            for name in IMAGE_COLUMNS
+        } == {name: 1 for name in IMAGE_COLUMNS}
 
     scalar, blobs = frames.scan().where(
         "episode_id = 'train-a' AND frame_index = 5"
@@ -341,3 +346,10 @@ def test_tensor_parity_rejects_different_hdf5_bytes(
 def test_requires_at_least_three_alternating_rounds():
     with pytest.raises(ValueError, match="rounds must be at least 3"):
         BenchmarkConfig(rounds=2)
+
+
+def test_source_commit_falls_back_outside_git_checkout(tmp_path):
+    with patch(
+            "pypaimon.benchmark.paired_act.subprocess.check_output",
+            side_effect=FileNotFoundError):
+        assert _git_head(tmp_path) == "UNKNOWN"

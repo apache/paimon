@@ -397,6 +397,7 @@ def _paimon_datasets(
         ).to_contiguous_window_dataset(
             window_size=config.action_horizon,
             columns=QPOS_COLUMNS + ACTION_COLUMNS + IMAGE_COLUMNS,
+            anchor_columns=IMAGE_COLUMNS,
             group_key="episode_id",
             order_key="frame_index",
             stride=1,
@@ -753,10 +754,14 @@ def _expected_order(rounds):
 
 
 def _git_head(repository):
-    return subprocess.check_output(
-        ["git", "-C", str(repository), "rev-parse", "HEAD"],
-        universal_newlines=True,
-    ).strip()
+    try:
+        return subprocess.check_output(
+            ["git", "-C", str(repository), "rev-parse", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            universal_newlines=True,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return "UNKNOWN"
 
 
 def _sanitized_command():
@@ -770,35 +775,60 @@ def _utc_now():
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input", required=True)
-    parser.add_argument("--warehouse", required=True)
-    parser.add_argument("--report", required=True)
-    parser.add_argument("--database", default=agilex.DEFAULT_DATABASE)
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
     parser.add_argument(
-        "--statistics-version", default=agilex.DEFAULT_STATISTICS_VERSION)
-    parser.add_argument("--train-episode-id")
-    parser.add_argument("--validation-episode-id")
-    parser.add_argument("--seed", type=int, default=BenchmarkConfig.seed)
+        "--input", required=True, help="RoboMIND AgileX HDF5 root directory.")
     parser.add_argument(
-        "--action-horizon", type=int, default=BenchmarkConfig.action_horizon)
+        "--warehouse", required=True, help="Existing Paimon warehouse path.")
     parser.add_argument(
-        "--batch-size", type=int, default=BenchmarkConfig.batch_size)
+        "--report", required=True, help="Destination JSON report path.")
     parser.add_argument(
-        "--optimizer-steps", type=int, default=BenchmarkConfig.optimizer_steps)
+        "--database", default=agilex.DEFAULT_DATABASE,
+        help="Paimon database containing the ingested dataset.")
     parser.add_argument(
-        "--image-height", type=int, default=BenchmarkConfig.image_height)
+        "--statistics-version", default=agilex.DEFAULT_STATISTICS_VERSION,
+        help="Canonical action statistics version to verify and use.")
     parser.add_argument(
-        "--image-width", type=int, default=BenchmarkConfig.image_width)
+        "--train-episode-id", help="Train episode; defaults to the first eligible episode.")
     parser.add_argument(
-        "--learning-rate", type=float, default=BenchmarkConfig.learning_rate)
+        "--validation-episode-id",
+        help="Validation episode; defaults to the first eligible episode.")
     parser.add_argument(
-        "--weight-decay", type=float, default=BenchmarkConfig.weight_decay)
+        "--seed", type=int, default=BenchmarkConfig.seed,
+        help="Shared random seed and window-plan seed.")
     parser.add_argument(
-        "--warmup-batches", type=int, default=BenchmarkConfig.warmup_batches)
+        "--action-horizon", type=int, default=BenchmarkConfig.action_horizon,
+        help="Number of contiguous action rows in each sample.")
     parser.add_argument(
-        "--loader-batches", type=int, default=BenchmarkConfig.loader_batches)
-    parser.add_argument("--rounds", type=int, default=BenchmarkConfig.rounds)
+        "--batch-size", type=int, default=BenchmarkConfig.batch_size,
+        help="Shared DataLoader batch size.")
+    parser.add_argument(
+        "--optimizer-steps", type=int, default=BenchmarkConfig.optimizer_steps,
+        help="Fixed optimizer steps per backend run.")
+    parser.add_argument(
+        "--image-height", type=int, default=BenchmarkConfig.image_height,
+        help="ACT input image height after resizing.")
+    parser.add_argument(
+        "--image-width", type=int, default=BenchmarkConfig.image_width,
+        help="ACT input image width after resizing.")
+    parser.add_argument(
+        "--learning-rate", type=float, default=BenchmarkConfig.learning_rate,
+        help="Shared AdamW learning rate.")
+    parser.add_argument(
+        "--weight-decay", type=float, default=BenchmarkConfig.weight_decay,
+        help="Shared AdamW weight decay.")
+    parser.add_argument(
+        "--warmup-batches", type=int, default=BenchmarkConfig.warmup_batches,
+        help="DataLoader batches consumed before timing.")
+    parser.add_argument(
+        "--loader-batches", type=int, default=BenchmarkConfig.loader_batches,
+        help="Batches used for DataLoader throughput measurement.")
+    parser.add_argument(
+        "--rounds", type=int, default=BenchmarkConfig.rounds,
+        help="Alternating backend rounds; must be at least three.")
     args = parser.parse_args(argv)
     config = BenchmarkConfig(
         seed=args.seed,

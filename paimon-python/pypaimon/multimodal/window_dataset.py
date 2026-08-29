@@ -44,8 +44,11 @@ class ContiguousWindowDataset(Dataset):
     * ``pad`` repeats final values and marks repeats in ``is_pad``;
     * ``error`` rejects the dataset.
 
-    ``column_transforms`` convert individual padded column lists and
-    ``adapter`` can adapt the complete mapping to a model-specific contract.
+    ``anchor_columns`` limits selected columns to the first row of each window,
+    which avoids loading repeated context such as observation images.
+    ``column_transforms`` convert individual column lists and ``adapter`` can
+    adapt the complete mapping to a model-specific contract.
+    ``blob_parallelism`` controls concurrent BLOB reads for each item or batch.
     """
 
     _TAIL_POLICIES = ("drop", "pad", "error")
@@ -56,6 +59,7 @@ class ContiguousWindowDataset(Dataset):
             *,
             window_size,
             columns=None,
+            anchor_columns=None,
             group_key="episode_id",
             order_key="step_idx",
             stride=1,
@@ -83,6 +87,11 @@ class ContiguousWindowDataset(Dataset):
             raise ValueError("group_key and order_key must not be is_pad.")
         self.columns = _columns(
             query, columns, self.group_key, self.order_key)
+        self.anchor_columns = _anchor_columns(anchor_columns, self.columns)
+        anchor_column_set = set(self.anchor_columns)
+        self._window_columns = [
+            name for name in self.columns if name not in anchor_column_set
+        ]
         self.column_transforms = _column_transforms(
             column_transforms, self.columns)
         self.pad_values = _pad_values(pad_values, self.columns)
@@ -96,10 +105,6 @@ class ContiguousWindowDataset(Dataset):
             raise ValueError(
                 "ContiguousWindowDataset requires row-tracking.enabled=true.")
 
-        self._blob_columns = [
-            field.name for field in query._table.fields
-            if field.name in self.columns and is_blob_type(field.type)
-        ]
         index, snapshot_id = _read_window_index(
             query, self.group_key, self.order_key)
         self.snapshot_id = snapshot_id
@@ -116,7 +121,12 @@ class ContiguousWindowDataset(Dataset):
 
     def __getitem__(self, index):
         anchor, row_ids = self._resolve_window(index)
-        return self._sample(anchor, self._read_rows(row_ids))
+        rows = self._read_window_rows(row_ids)
+        anchor_row = (
+            self._read_rows(row_ids[:1], self.anchor_columns)[0]
+            if self.anchor_columns else None
+        )
+        return self._sample(anchor, rows, anchor_row)
 
     def __getitems__(self, indices):
         windows = [self._resolve_window(index) for index in indices]
@@ -126,11 +136,22 @@ class ContiguousWindowDataset(Dataset):
             row_id for _, window_row_ids in windows
             for row_id in window_row_ids
         ))
-        rows_by_id = dict(zip(row_ids, self._read_rows(row_ids)))
+        rows_by_id = dict(zip(row_ids, self._read_window_rows(row_ids)))
+        anchor_row_ids = list(dict.fromkeys(
+            window_row_ids[0] for _, window_row_ids in windows
+        ))
+        anchor_rows_by_id = (
+            dict(zip(
+                anchor_row_ids,
+                self._read_rows(anchor_row_ids, self.anchor_columns),
+            ))
+            if self.anchor_columns else {}
+        )
         return [
             self._sample(
                 anchor,
                 [rows_by_id[row_id] for row_id in window_row_ids],
+                anchor_rows_by_id.get(window_row_ids[0]),
             )
             for anchor, window_row_ids in windows
         ]
@@ -147,7 +168,7 @@ class ContiguousWindowDataset(Dataset):
         row_ids = self._groups[group_index][2]
         return anchor, row_ids[start:start + valid_count]
 
-    def _sample(self, anchor, rows):
+    def _sample(self, anchor, rows, anchor_row=None):
         group_index, start, valid_count = anchor
         group_key, order_values, _ = self._groups[group_index]
         padding_count = self.window_size - valid_count
@@ -160,8 +181,11 @@ class ContiguousWindowDataset(Dataset):
             "is_pad": padding_mask,
         }
         for name in self.columns:
-            values = [row[name] for row in rows]
-            if padding_count:
+            if name in self.anchor_columns:
+                values = [anchor_row[name]]
+            else:
+                values = [row[name] for row in rows]
+            if padding_count and name not in self.anchor_columns:
                 pad_value = self.pad_values.get(name, values[-1])
                 values.extend(
                     copy.deepcopy(pad_value) for _ in range(padding_count))
@@ -234,7 +258,13 @@ class ContiguousWindowDataset(Dataset):
                 anchors.append((group_index, start, valid_count))
         return groups, anchors
 
-    def _read_rows(self, row_ids):
+    def _read_window_rows(self, row_ids):
+        if not self._window_columns:
+            return [{} for _ in row_ids]
+        return self._read_rows(row_ids, self._window_columns)
+
+    def _read_rows(self, row_ids, columns=None):
+        columns = self.columns if columns is None else columns
         query = ScanQuery(self._table)
         predicate_builder = (
             self._table.new_read_builder()
@@ -245,14 +275,18 @@ class ContiguousWindowDataset(Dataset):
         )
         query._predicate = predicate_builder.is_in(
             SpecialFields.ROW_ID.name, row_ids)
-        query._projection = list(self.columns)
+        query._projection = list(columns)
         query._include_row_id = True
 
-        if self._blob_columns:
+        blob_columns = [
+            field.name for field in self._table.fields
+            if field.name in columns and is_blob_type(field.type)
+        ]
+        if blob_columns:
             scalar, blobs = query.read_blobs(
-                self._blob_columns, parallelism=self.blob_parallelism)
+                blob_columns, parallelism=self.blob_parallelism)
             rows = scalar.to_pylist()
-            for name in self._blob_columns:
+            for name in blob_columns:
                 values = blobs[name]
                 if len(values) != len(rows):
                     raise RuntimeError(
@@ -277,9 +311,9 @@ class ContiguousWindowDataset(Dataset):
         return [by_row_id[row_id] for row_id in row_ids]
 
 
-def _read_window_index(query, group_by, order_by):
+def _read_window_index(query, group_key, order_key):
     index_query = copy.copy(query)
-    index_query._projection = [group_by, order_by]
+    index_query._projection = [group_key, order_key]
     index_query._include_row_id = True
     read_builder = index_query._configured_read_builder()
     plan = read_builder.new_scan().plan()
@@ -333,6 +367,29 @@ def _columns(query, columns, group_key, order_key):
             "columns must not include group_key, order_key, or is_pad: %s."
             % reserved)
     return columns
+
+
+def _anchor_columns(value, columns):
+    if value is None:
+        return []
+    if isinstance(value, str):
+        value = [value]
+    else:
+        try:
+            value = list(value)
+        except TypeError:
+            raise TypeError(
+                "anchor_columns must be a sequence of projected column names.")
+    if any(not isinstance(name, str) or not name for name in value):
+        raise TypeError(
+            "anchor_columns must contain only non-empty column names.")
+    if len(set(value)) != len(value):
+        raise ValueError("anchor_columns must not contain duplicates.")
+    invalid = [name for name in value if name not in columns]
+    if invalid:
+        raise ValueError(
+            "anchor_columns must be included in columns: %s." % invalid)
+    return value
 
 
 def _column_transforms(value, columns):
