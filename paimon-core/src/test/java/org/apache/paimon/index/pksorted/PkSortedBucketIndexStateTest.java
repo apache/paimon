@@ -61,7 +61,7 @@ class PkSortedBucketIndexStateTest {
     }
 
     @Test
-    void testRejectsPartialLevelPayload() {
+    void testAcceptsPayloadSubsetAndLeavesNewSourceUncovered() {
         DataFileMeta first = dataFile("data-a", 3, 2);
         DataFileMeta second = dataFile("data-b", 7, 2);
         IndexFileMeta partial = payload("partial", 2, first);
@@ -73,9 +73,89 @@ class PkSortedBucketIndexStateTest {
                         Arrays.asList(first, second),
                         Collections.singletonList(partial));
 
+        assertThat(state.groups()).hasSize(1);
+        assertThat(state.coveredSourceFiles()).containsExactly(sourceFile(first));
+        assertThat(state.uncoveredSourceFiles()).containsExactly(sourceFile(second));
+        assertThat(state.rejectedPayloads()).isEmpty();
+    }
+
+    @Test
+    void testRetainsRetiredSourcesAndCoversOnlyActiveIntersection() {
+        DataFileMeta retired = dataFile("data-a", 3, 2);
+        DataFileMeta active = dataFile("data-b", 7, 2);
+        DataFileMeta newlyActive = dataFile("data-c", 5, 2);
+        IndexFileMeta payload = payload("index", 2, retired, active);
+
+        PkSortedBucketIndexState state =
+                PkSortedBucketIndexState.fromActiveDataFiles(
+                        7,
+                        "btree",
+                        Arrays.asList(active, newlyActive),
+                        Collections.singletonList(payload));
+
+        assertThat(state.groups()).hasSize(1);
+        assertThat(state.groups().get(0).sourceFiles())
+                .containsExactly(sourceFile(retired), sourceFile(active));
+        assertThat(state.coveredSourceFiles()).containsExactly(sourceFile(active));
+        assertThat(state.uncoveredSourceFiles()).containsExactly(sourceFile(newlyActive));
+        assertThat(state.rejectedPayloads()).isEmpty();
+    }
+
+    @Test
+    void testRejectsPayloadWithoutActiveSource() {
+        DataFileMeta retired = dataFile("data-a", 3, 2);
+        DataFileMeta active = dataFile("data-b", 7, 2);
+        IndexFileMeta payload = payload("index", 2, retired);
+
+        PkSortedBucketIndexState state =
+                PkSortedBucketIndexState.fromActiveDataFiles(
+                        7,
+                        "btree",
+                        Collections.singletonList(active),
+                        Collections.singletonList(payload));
+
         assertThat(state.groups()).isEmpty();
-        assertThat(state.uncoveredSourceFiles()).hasSize(2);
-        assertThat(state.rejectedPayloads()).containsExactly(partial);
+        assertThat(state.coveredSourceFiles()).isEmpty();
+        assertThat(state.uncoveredSourceFiles()).containsExactly(sourceFile(active));
+        assertThat(state.rejectedPayloads()).containsExactly(payload);
+    }
+
+    @Test
+    void testRejectsMismatchedActiveSourceRowCount() {
+        DataFileMeta active = dataFile("data", 3, 2);
+        DataFileMeta stale = dataFile("data", 4, 2);
+        IndexFileMeta payload = payload("index", 2, stale);
+
+        PkSortedBucketIndexState state =
+                PkSortedBucketIndexState.fromActiveDataFiles(
+                        7,
+                        "btree",
+                        Collections.singletonList(active),
+                        Collections.singletonList(payload));
+
+        assertThat(state.groups()).isEmpty();
+        assertThat(state.uncoveredSourceFiles()).containsExactly(sourceFile(active));
+        assertThat(state.rejectedPayloads()).containsExactly(payload);
+    }
+
+    @Test
+    void testRejectsMisorderedPayloadSources() {
+        DataFileMeta first = dataFile("data-a", 3, 2);
+        DataFileMeta second = dataFile("data-b", 7, 2);
+        IndexFileMeta payload =
+                payload("index", 2, Arrays.asList(sourceFile(second), sourceFile(first)));
+
+        PkSortedBucketIndexState state =
+                PkSortedBucketIndexState.fromActiveDataFiles(
+                        7,
+                        "btree",
+                        Arrays.asList(first, second),
+                        Collections.singletonList(payload));
+
+        assertThat(state.groups()).isEmpty();
+        assertThat(state.uncoveredSourceFiles())
+                .containsExactly(sourceFile(first), sourceFile(second));
+        assertThat(state.rejectedPayloads()).containsExactly(payload);
     }
 
     @Test
@@ -159,6 +239,11 @@ class PkSortedBucketIndexStateTest {
                                         new PrimaryKeyIndexSourceFile(
                                                 file.fileName(), file.rowCount()))
                         .collect(java.util.stream.Collectors.toList());
+        return payload(name, level, sources);
+    }
+
+    private static IndexFileMeta payload(
+            String name, int level, List<PrimaryKeyIndexSourceFile> sources) {
         long rowCount = 0;
         for (PrimaryKeyIndexSourceFile source : sources) {
             rowCount += source.rowCount();
@@ -176,5 +261,9 @@ class PkSortedBucketIndexStateTest {
                         new byte[] {1},
                         new PrimaryKeyIndexSourceMeta(level, sources).serialize()),
                 null);
+    }
+
+    private static PrimaryKeyIndexSourceFile sourceFile(DataFileMeta file) {
+        return new PrimaryKeyIndexSourceFile(file.fileName(), file.rowCount());
     }
 }

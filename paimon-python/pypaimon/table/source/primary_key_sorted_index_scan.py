@@ -77,9 +77,12 @@ def plan(snapshot_id, data_splits, definitions, index_entries):
     groups_by_bucket = {}
     for bucket, data_files in data_files_by_bucket.items():
         payloads = payloads_by_bucket.get(bucket, [])
-        active_sources = {
-            PrimaryKeyIndexSourceFile(f.file_name, f.row_count) for f in data_files
-        }
+        active_sources_by_level = {}
+        for data_file in data_files:
+            if data_file.file_source == 1 and data_file.level > 0:
+                active_sources_by_level.setdefault(data_file.level, set()).add(
+                    PrimaryKeyIndexSourceFile(
+                        data_file.file_name, data_file.row_count))
         by_source = {}
         for definition in definitions:
             definition_payloads = [
@@ -92,8 +95,10 @@ def plan(snapshot_id, data_splits, definitions, index_entries):
                     definition.field_id, definition.index_type,
                     data_files, definition_payloads)
                 for group in state.groups:
+                    active_group_sources = active_sources_by_level.get(
+                        group.data_level, set())
                     for source in group.source_files:
-                        if source in active_sources:
+                        if source in active_group_sources:
                             by_source.setdefault(source.file_name, {})[definition.field_id] = group
             except Exception as exc:
                 LOG.warning("Failed to plan primary-key sorted index for field %s: %s",
