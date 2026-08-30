@@ -18,6 +18,7 @@
 """
 Module to read a Paimon table into PyTorch Dataset.
 """
+import os
 import queue
 import random
 import threading
@@ -38,6 +39,76 @@ def _share_epoch_with_torch_workers(value):
     if isinstance(value, torch.Tensor):
         return value.share_memory_()
     return torch.tensor(value, dtype=torch.long).share_memory_()
+
+
+def _validate_distributed_context(rank: int, world_size: int):
+    if isinstance(rank, bool) or not isinstance(rank, int):
+        raise ValueError("rank must be an int")
+    if isinstance(world_size, bool) or not isinstance(world_size, int):
+        raise ValueError("world_size must be an int")
+    if world_size <= 0:
+        raise ValueError("world_size must be greater than 0")
+    if rank < 0 or rank >= world_size:
+        raise ValueError("rank must satisfy 0 <= rank < world_size")
+    return rank, world_size
+
+
+def _resolve_distributed_context(
+    auto_detect_rank: bool,
+    sharding_rank: Optional[int] = None,
+    sharding_world_size: Optional[int] = None,
+):
+    if not isinstance(auto_detect_rank, bool):
+        raise ValueError("auto_detect_rank must be a bool")
+    if sharding_rank is not None or sharding_world_size is not None:
+        if auto_detect_rank:
+            raise ValueError(
+                "explicit sharding context cannot be combined with "
+                "auto_detect_rank=True"
+            )
+        if sharding_rank is None or sharding_world_size is None:
+            raise ValueError(
+                "sharding_rank and sharding_world_size must be set together"
+            )
+        return _validate_distributed_context(
+            sharding_rank, sharding_world_size
+        )
+    if not auto_detect_rank:
+        return 0, 1
+
+    distributed = getattr(torch, "distributed", None)
+    if (
+        distributed is not None
+        and distributed.is_available()
+        and distributed.is_initialized()
+    ):
+        rank = distributed.get_rank()
+        world_size = distributed.get_world_size()
+        return _validate_distributed_context(rank, world_size)
+
+    env_rank = os.environ.get("RANK")
+    env_world_size = os.environ.get("WORLD_SIZE")
+    if env_rank is not None or env_world_size is not None:
+        if env_rank is None or env_world_size is None:
+            raise ValueError(
+                "RANK and WORLD_SIZE environment variables must be set together"
+            )
+        try:
+            rank, world_size = int(env_rank), int(env_world_size)
+        except ValueError:
+            raise ValueError(
+                "RANK and WORLD_SIZE environment variables must be integers"
+            )
+        return _validate_distributed_context(rank, world_size)
+
+    return 0, 1
+
+
+def _balanced_slice(values: List[Any], shard_id: int, shard_count: int):
+    base_size, remainder = divmod(len(values), shard_count)
+    start = shard_id * base_size + min(shard_id, remainder)
+    size = base_size + (1 if shard_id < remainder else 0)
+    return values[start:start + size]
 
 
 class TorchDataset(Dataset):
@@ -92,10 +163,55 @@ class _BaseTorchIterDataset(IterableDataset):
     Shared helpers for streaming PyTorch datasets backed by Paimon splits.
     """
 
-    def __init__(self, table_read: TableRead, splits: List[Split]):
+    def __init__(
+        self,
+        table_read: TableRead,
+        splits: List[Split],
+        auto_detect_rank: bool = False,
+        sharding_rank: Optional[int] = None,
+        sharding_world_size: Optional[int] = None,
+    ):
         self.table_read = table_read
         self.splits = splits
         self.field_names = [field.name for field in table_read.read_type]
+        self.auto_detect_rank = auto_detect_rank
+        self.sharding_rank = sharding_rank
+        self.sharding_world_size = sharding_world_size
+        self.rank, self.world_size = _resolve_distributed_context(
+            auto_detect_rank,
+            sharding_rank,
+            sharding_world_size,
+        )
+        self._context_pid = os.getpid()
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        rank, world_size = _resolve_distributed_context(
+            self.auto_detect_rank,
+            self.sharding_rank,
+            self.sharding_world_size,
+        )
+        state["rank"] = rank
+        state["world_size"] = world_size
+        state["_context_pid"] = os.getpid()
+        return state
+
+    def _distributed_context(self):
+        rank, world_size = _resolve_distributed_context(
+            self.auto_detect_rank,
+            self.sharding_rank,
+            self.sharding_world_size,
+        )
+        current_pid = os.getpid()
+        if (
+            current_pid != self._context_pid
+            and world_size == 1
+            and self.world_size > 1
+        ):
+            return self.rank, self.world_size
+        self.rank, self.world_size = rank, world_size
+        self._context_pid = current_pid
+        return rank, world_size
 
     def _row_to_dict(self, offset_row) -> dict:
         row_dict = {}
@@ -136,30 +252,25 @@ class _BaseTorchIterDataset(IterableDataset):
         return True
 
     def _worker_splits(self, worker_info) -> List[Split]:
-        if worker_info is None:
-            return self.splits
+        rank, world_size = self._distributed_context()
+        worker_id = worker_info.id if worker_info is not None else 0
+        num_workers = worker_info.num_workers if worker_info is not None else 1
 
-        # DataLoader workers cannot share a limit budget that may truncate.
+        if self.table_read.limit == 0:
+            return []
         if (
             self.table_read.limit is not None
             and not self._limit_covers_all_splits()
         ):
-            return self.splits if worker_info.id == 0 else []
+            if world_size > 1:
+                raise ValueError(
+                    "limit is not supported with distributed Torch sharding"
+                )
+            # A binding limit cannot be shared safely.
+            return self.splits if worker_id == 0 else []
 
-        worker_id = worker_info.id
-        num_workers = worker_info.num_workers
-        total_splits = len(self.splits)
-        splits_per_worker = total_splits // num_workers
-        remainder = total_splits % num_workers
-
-        if worker_id < remainder:
-            start_idx = worker_id * (splits_per_worker + 1)
-            end_idx = start_idx + splits_per_worker + 1
-        else:
-            start_idx = worker_id * splits_per_worker + remainder
-            end_idx = start_idx + splits_per_worker
-
-        return self.splits[start_idx:end_idx]
+        rank_splits = _balanced_slice(self.splits, rank, world_size)
+        return _balanced_slice(rank_splits, worker_id, num_workers)
 
 
 class TorchIterDataset(_BaseTorchIterDataset):
@@ -179,7 +290,15 @@ class TorchIterDataset(_BaseTorchIterDataset):
     _PREFETCH_GET_TIMEOUT_SEC = 300.0
     _PREFETCH_JOIN_TIMEOUT_SEC = 5.0
 
-    def __init__(self, table_read: TableRead, splits: List[Split], prefetch_concurrency: int = 1):
+    def __init__(
+        self,
+        table_read: TableRead,
+        splits: List[Split],
+        prefetch_concurrency: int = 1,
+        auto_detect_rank: bool = False,
+        sharding_rank: Optional[int] = None,
+        sharding_world_size: Optional[int] = None,
+    ):
         """
         Initialize TorchIterDataset.
 
@@ -190,7 +309,13 @@ class TorchIterDataset(_BaseTorchIterDataset):
                 this worker (default 1). When > 1, splits are partitioned across
                 threads to increase read throughput.
         """
-        super().__init__(table_read, splits)
+        super().__init__(
+            table_read,
+            splits,
+            auto_detect_rank,
+            sharding_rank,
+            sharding_world_size,
+        )
         self.prefetch_concurrency = max(1, int(prefetch_concurrency))
 
     def __iter__(self):
@@ -393,8 +518,17 @@ class TorchBatchIterDataset(_BaseTorchIterDataset):
         batch_format: str,
         batch_size: Optional[int],
         to_tensor_fn: Optional[Callable[[pa.RecordBatch], Any]] = None,
+        auto_detect_rank: bool = False,
+        sharding_rank: Optional[int] = None,
+        sharding_world_size: Optional[int] = None,
     ):
-        super().__init__(table_read, splits)
+        super().__init__(
+            table_read,
+            splits,
+            auto_detect_rank,
+            sharding_rank,
+            sharding_world_size,
+        )
         self.batch_format = batch_format
         self.batch_size = batch_size
         self.to_tensor_fn = to_tensor_fn
@@ -457,8 +591,17 @@ class TorchShuffledIterDataset(_BaseTorchIterDataset):
         seed: int = 0,
         buffer_size: int = 1000,
         max_buffer_input_splits: int = 10,
+        auto_detect_rank: bool = False,
+        sharding_rank: Optional[int] = None,
+        sharding_world_size: Optional[int] = None,
     ):
-        super().__init__(table_read, splits)
+        super().__init__(
+            table_read,
+            splits,
+            auto_detect_rank,
+            sharding_rank,
+            sharding_world_size,
+        )
         self.seed = self._require_int(seed, "seed")
         self.buffer_size = self._require_positive_int(buffer_size, "buffer_size")
         self.max_buffer_input_splits = self._require_positive_int(
@@ -559,7 +702,11 @@ class TorchShuffledIterDataset(_BaseTorchIterDataset):
         rows: Iterator[dict],
         worker_id: int,
     ) -> Iterator[dict]:
-        rng = random.Random(self.seed + self.epoch * 1000003 + worker_id)
+        rank, world_size = self._distributed_context()
+        rng_seed = self.seed + self.epoch * 1000003 + worker_id
+        if world_size > 1:
+            rng_seed = "%d:%d" % (rng_seed, rank)
+        rng = random.Random(rng_seed)
         buffer = []
         for row in rows:
             if len(buffer) < self.buffer_size:

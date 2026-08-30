@@ -661,6 +661,9 @@ class TableRead:
         seed: int = 0,
         buffer_size: int = 1000,
         max_buffer_input_splits: int = 10,
+        auto_detect_rank: bool = False,
+        sharding_rank: Optional[int] = None,
+        sharding_world_size: Optional[int] = None,
     ) -> "torch.utils.data.Dataset":
         """Wrap Paimon table data in a PyTorch Dataset.
 
@@ -674,6 +677,9 @@ class TableRead:
             batch_size: Rows per batch; ``None`` preserves reader batches.
             to_tensor_fn: Optional RecordBatch converter for Torch batches.
             shuffle: Whether to shuffle rows; supported only in row format.
+            auto_detect_rank: Whether streaming reads shard by DDP rank.
+            sharding_rank: Explicit rank in the intended DDP process group.
+            sharding_world_size: Explicit size of that process group.
         """
         valid_batch_formats = {"row", "pyarrow", "torch"}
         if batch_format not in valid_batch_formats:
@@ -681,6 +687,12 @@ class TableRead:
                 "batch_format must be one of %s, got %r"
                 % (sorted(valid_batch_formats), batch_format)
             )
+        if (
+            auto_detect_rank
+            or sharding_rank is not None
+            or sharding_world_size is not None
+        ) and not streaming:
+            raise ValueError("distributed sharding requires streaming=True")
         if batch_size is not None and (
             isinstance(batch_size, bool)
             or not isinstance(batch_size, int)
@@ -725,6 +737,9 @@ class TableRead:
                 batch_format=batch_format,
                 batch_size=batch_size,
                 to_tensor_fn=to_tensor_fn,
+                auto_detect_rank=auto_detect_rank,
+                sharding_rank=sharding_rank,
+                sharding_world_size=sharding_world_size,
             )
 
         if shuffle:
@@ -739,12 +754,22 @@ class TableRead:
                 seed=seed,
                 buffer_size=buffer_size,
                 max_buffer_input_splits=max_buffer_input_splits,
+                auto_detect_rank=auto_detect_rank,
+                sharding_rank=sharding_rank,
+                sharding_world_size=sharding_world_size,
             )
             return dataset
 
         if streaming:
             from pypaimon.read.datasource.torch_dataset import TorchIterDataset
-            dataset = TorchIterDataset(self, splits, prefetch_concurrency)
+            dataset = TorchIterDataset(
+                self,
+                splits,
+                prefetch_concurrency,
+                auto_detect_rank=auto_detect_rank,
+                sharding_rank=sharding_rank,
+                sharding_world_size=sharding_world_size,
+            )
             return dataset
         else:
             from pypaimon.read.datasource.torch_dataset import TorchDataset

@@ -15,8 +15,13 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import json
+import multiprocessing
 import os
+import pickle
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -30,7 +35,393 @@ from torch.utils.data import DataLoader
 from pypaimon import CatalogFactory, Schema
 from pypaimon.multimodal.table import MultimodalTable
 
+from pypaimon.read.datasource.torch_dataset import (
+    TorchIterDataset,
+    TorchShuffledIterDataset,
+    _resolve_distributed_context,
+)
 from pypaimon.table.file_store_table import FileStoreTable
+
+
+def _collect_spawned_worker_splits(dataset, output):
+    os.environ.pop("RANK", None)
+    os.environ.pop("WORLD_SIZE", None)
+    output.put(dataset._worker_splits(None))
+
+
+class TorchDistributedShardingTest(unittest.TestCase):
+    @staticmethod
+    def _table_read(limit=None):
+        return SimpleNamespace(limit=limit, read_type=[])
+
+    @staticmethod
+    def _worker(worker_id, num_workers):
+        return SimpleNamespace(id=worker_id, num_workers=num_workers)
+
+    def _dataset(
+        self,
+        splits,
+        limit=None,
+        dataset_type=TorchIterDataset,
+        **kwargs
+    ):
+        return dataset_type(
+            self._table_read(limit),
+            splits,
+            auto_detect_rank=True,
+            **kwargs
+        )
+
+    def _assignments(self, split_count, world_size, num_workers):
+        splits = list(range(split_count))
+        assignments = {}
+        for rank in range(world_size):
+            dataset = self._dataset(splits)
+            for worker_id in range(num_workers):
+                with patch(
+                    "pypaimon.read.datasource.torch_dataset."
+                    "_resolve_distributed_context",
+                    return_value=(rank, world_size),
+                ):
+                    assignments[(rank, worker_id)] = dataset._worker_splits(
+                        self._worker(worker_id, num_workers)
+                    )
+        return assignments
+
+    def assertCompleteNonOverlapping(self, assignments, expected):
+        assigned = [
+            split for splits in assignments.values() for split in splits
+        ]
+        self.assertCountEqual(assigned, expected)
+        self.assertEqual(len(assigned), len(set(assigned)))
+
+    @parameterized.expand([
+        ("single", 7, 1, 1, [7]),
+        ("workers", 10, 1, 3, [4, 3, 3]),
+        ("ranks", 10, 3, 1, [4, 3, 3]),
+        ("rank_workers", 17, 3, 2, [3, 3, 3, 3, 3, 2]),
+        ("uneven", 11, 2, 2, [3, 3, 3, 2]),
+        ("sparse", 3, 2, 3, [1, 1, 0, 1, 0, 0]),
+    ])
+    def test_balanced_assignments(
+        self, _, split_count, world_size, num_workers, expected_sizes
+    ):
+        assignments = self._assignments(
+            split_count, world_size, num_workers
+        )
+        self.assertCompleteNonOverlapping(
+            assignments, list(range(split_count))
+        )
+        self.assertEqual(
+            [len(splits) for splits in assignments.values()], expected_sizes
+        )
+
+    def test_binding_limit_rejects_distributed_sharding(self):
+        splits = [SimpleNamespace(row_count=10) for _ in range(4)]
+        dataset = self._dataset(splits, limit=5)
+        with patch(
+            "pypaimon.read.datasource.torch_dataset."
+            "_resolve_distributed_context",
+            return_value=(0, 2),
+        ), self.assertRaisesRegex(ValueError, "limit is not supported"):
+            dataset._worker_splits(None)
+
+    def test_zero_limit_returns_no_splits(self):
+        dataset = self._dataset([SimpleNamespace(row_count=10)], limit=0)
+        with patch(
+            "pypaimon.read.datasource.torch_dataset."
+            "_resolve_distributed_context",
+            return_value=(1, 2),
+        ):
+            self.assertEqual(dataset._worker_splits(None), [])
+
+    def test_initialized_distributed_context_precedes_environment(self):
+        with patch.dict(
+            os.environ, {"RANK": "4", "WORLD_SIZE": "5"}, clear=True
+        ), patch.object(
+            torch.distributed, "is_available", return_value=True
+        ), patch.object(
+            torch.distributed, "is_initialized", return_value=True
+        ), patch.object(
+            torch.distributed, "get_rank", return_value=1
+        ), patch.object(
+            torch.distributed, "get_world_size", return_value=3
+        ):
+            context = _resolve_distributed_context(True)
+
+        self.assertEqual(context, (1, 3))
+
+    def test_explicit_context_ignores_global_process_group(self):
+        with patch.object(
+            torch.distributed, "is_available", return_value=True
+        ), patch.object(
+            torch.distributed, "is_initialized", return_value=True
+        ), patch.object(
+            torch.distributed, "get_rank", return_value=3
+        ), patch.object(
+            torch.distributed, "get_world_size", return_value=4
+        ):
+            dataset = TorchIterDataset(
+                self._table_read(),
+                list(range(8)),
+                sharding_rank=1,
+                sharding_world_size=2,
+            )
+            assigned = dataset._worker_splits(None)
+
+        self.assertEqual((dataset.rank, dataset.world_size), (1, 2))
+        self.assertEqual(assigned, [4, 5, 6, 7])
+
+    def test_context_is_resolved_after_dataset_construction(self):
+        dataset = TorchIterDataset(
+            self._table_read(), list(range(8)), auto_detect_rank=True
+        )
+        with patch.dict(
+            os.environ, {"RANK": "2", "WORLD_SIZE": "4"}, clear=True
+        ), patch.object(
+            torch.distributed, "is_available", return_value=True
+        ), patch.object(
+            torch.distributed, "is_initialized", return_value=False
+        ):
+            context = _resolve_distributed_context(True)
+            assigned = dataset._worker_splits(None)
+
+        self.assertEqual(context, (2, 4))
+        self.assertEqual(assigned, [4, 5])
+
+    def test_constructor_context_is_preserved_in_spawned_worker(self):
+        with patch(
+            "pypaimon.read.datasource.torch_dataset."
+            "_resolve_distributed_context",
+            return_value=(0, 1),
+        ):
+            dataset = TorchIterDataset(
+                self._table_read(), list(range(8)), auto_detect_rank=True
+            )
+
+        context = multiprocessing.get_context("spawn")
+        output = context.Queue()
+        process = context.Process(
+            target=_collect_spawned_worker_splits,
+            args=(dataset, output),
+        )
+        with patch(
+            "pypaimon.read.datasource.torch_dataset."
+            "_resolve_distributed_context",
+            return_value=(1, 2),
+        ):
+            process.start()
+        process.join(30)
+        if process.is_alive():
+            process.terminate()
+            process.join()
+        self.assertEqual(process.exitcode, 0)
+        self.assertEqual(output.get(timeout=5), [4, 5, 6, 7])
+        output.close()
+
+    def test_same_process_uses_latest_context(self):
+        with patch(
+            "pypaimon.read.datasource.torch_dataset."
+            "_resolve_distributed_context",
+            return_value=(1, 2),
+        ):
+            dataset = TorchIterDataset(
+                self._table_read(), list(range(8)), auto_detect_rank=True
+            )
+
+        with patch(
+            "pypaimon.read.datasource.torch_dataset."
+            "_resolve_distributed_context",
+            return_value=(0, 1),
+        ):
+            self.assertEqual(dataset._worker_splits(None), list(range(8)))
+
+    def test_auto_falls_back_to_single_process(self):
+        with patch.dict(os.environ, {}, clear=True), patch.object(
+            torch.distributed, "is_available", return_value=False
+        ):
+            context = _resolve_distributed_context(True)
+
+        self.assertEqual(context, (0, 1))
+
+    def test_disabled_preserves_worker_sharding(self):
+        splits = list(range(8))
+        with patch.dict(
+            os.environ, {"RANK": "1", "WORLD_SIZE": "2"}, clear=True
+        ), patch.object(
+            torch.distributed, "is_available", return_value=True
+        ), patch.object(
+            torch.distributed, "is_initialized", return_value=True
+        ):
+            dataset = TorchIterDataset(
+                self._table_read(), splits, auto_detect_rank=False
+            )
+            assigned = dataset._worker_splits(self._worker(1, 2))
+
+        self.assertEqual(assigned, list(range(4, 8)))
+
+    def test_shuffled_dataset_is_reproducible_and_rank_local(self):
+        splits = list(range(20))
+        datasets = [
+            self._dataset(
+                splits,
+                dataset_type=TorchShuffledIterDataset,
+                seed=17,
+                buffer_size=20,
+            )
+            for _ in range(2)
+        ]
+        local_splits = []
+        for rank, dataset in enumerate(datasets):
+            with patch(
+                "pypaimon.read.datasource.torch_dataset."
+                "_resolve_distributed_context",
+                return_value=(rank, 2),
+            ):
+                local_splits.append(dataset._worker_splits(None))
+        self.assertTrue(set(local_splits[0]).isdisjoint(local_splits[1]))
+        self.assertCountEqual(local_splits[0] + local_splits[1], splits)
+        restored = pickle.loads(pickle.dumps(datasets[1]))
+        self.assertTrue(restored.auto_detect_rank)
+
+        rows = [{"id": value} for value in range(20)]
+        with patch(
+            "pypaimon.read.datasource.torch_dataset."
+            "_resolve_distributed_context",
+            return_value=(0, 2),
+        ):
+            first = list(datasets[0]._iter_buffer_shuffled_rows(iter(rows), 0))
+            repeat = list(datasets[0]._iter_buffer_shuffled_rows(iter(rows), 0))
+            other_worker = list(
+                datasets[0]._iter_buffer_shuffled_rows(iter(rows), 1)
+            )
+        with patch(
+            "pypaimon.read.datasource.torch_dataset."
+            "_resolve_distributed_context",
+            return_value=(1, 2),
+        ):
+            other_rank = list(
+                datasets[1]._iter_buffer_shuffled_rows(iter(rows), 0)
+            )
+        self.assertEqual(first, repeat)
+        self.assertNotEqual(first, other_rank)
+        self.assertNotEqual(first, other_worker)
+
+        datasets[0].set_epoch(1)
+        with patch(
+            "pypaimon.read.datasource.torch_dataset."
+            "_resolve_distributed_context",
+            return_value=(0, 2),
+        ):
+            next_epoch = list(
+                datasets[0]._iter_buffer_shuffled_rows(iter(rows), 0)
+            )
+        self.assertNotEqual(first, next_epoch)
+
+    def test_invalid_distributed_context(self):
+        with self.assertRaisesRegex(ValueError, "auto_detect_rank"):
+            TorchIterDataset(
+                self._table_read(), [], auto_detect_rank="auto"
+            )
+        with self.assertRaisesRegex(ValueError, "must be set together"):
+            TorchIterDataset(
+                self._table_read(), [], sharding_rank=0
+            )
+        with self.assertRaisesRegex(ValueError, "cannot be combined"):
+            TorchIterDataset(
+                self._table_read(),
+                [],
+                auto_detect_rank=True,
+                sharding_rank=0,
+                sharding_world_size=1,
+            )
+
+        with patch.dict(os.environ, {"RANK": "one"}, clear=True), patch.object(
+            torch.distributed, "is_available", return_value=False
+        ), self.assertRaisesRegex(ValueError, "must be set together"):
+            _resolve_distributed_context(True)
+
+        with patch.dict(
+            os.environ, {"RANK": "one", "WORLD_SIZE": "2"}, clear=True
+        ), patch.object(
+            torch.distributed, "is_available", return_value=False
+        ), self.assertRaisesRegex(ValueError, "must be integers"):
+            _resolve_distributed_context(True)
+
+        for environment, message in [
+            ({"RANK": "0", "WORLD_SIZE": "0"}, "greater than 0"),
+            ({"RANK": "2", "WORLD_SIZE": "2"}, "0 <= rank"),
+        ]:
+            with self.subTest(environment=environment), patch.dict(
+                os.environ, environment, clear=True
+            ), patch.object(
+                torch.distributed, "is_available", return_value=False
+            ), self.assertRaisesRegex(ValueError, message):
+                _resolve_distributed_context(True)
+
+    @unittest.skipUnless(
+        torch.distributed.is_available(), "torch.distributed is unavailable"
+    )
+    def test_torchrun_rank_and_worker_sharding(self):
+        script = os.path.join(
+            os.path.dirname(__file__), "torch_distributed_sharding_worker.py"
+        )
+        python_root = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "..")
+        )
+        with tempfile.TemporaryDirectory() as output_dir:
+            env = os.environ.copy()
+            env["PYTHONPATH"] = os.pathsep.join(
+                filter(None, [python_root, env.get("PYTHONPATH")])
+            )
+            process = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "torch.distributed.run",
+                    "--standalone",
+                    "--nproc-per-node=2",
+                    script,
+                    output_dir,
+                ],
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=180,
+            )
+            self.assertEqual(
+                process.returncode,
+                0,
+                "torchrun failed:\n%s\n%s" % (
+                    process.stdout, process.stderr
+                ),
+            )
+            rows = []
+            for rank in range(2):
+                with open(
+                    os.path.join(output_dir, "rank-%d.json" % rank),
+                    encoding="utf-8",
+                ) as result_file:
+                    rows.extend(json.load(result_file))
+
+        split_ids = [row["split_id"] for row in rows]
+        self.assertCountEqual(split_ids, list(range(11)))
+        self.assertEqual(len(split_ids), len(set(split_ids)))
+        assignments = {}
+        for row in rows:
+            assignments.setdefault(
+                (row["rank"], row["worker"]), []
+            ).append(row["split_id"])
+        self.assertEqual(
+            {key: sorted(values) for key, values in assignments.items()},
+            {
+                (0, 0): [0, 1, 2],
+                (0, 1): [3, 4, 5],
+                (1, 0): [6, 7, 8],
+                (1, 1): [9, 10],
+            },
+        )
 
 
 class TorchReadTest(unittest.TestCase):
@@ -441,6 +832,14 @@ class TorchReadTest(unittest.TestCase):
             )
         with self.assertRaisesRegex(ValueError, 'requires streaming=True'):
             table_read.to_torch(splits, batch_format='pyarrow')
+        with self.assertRaisesRegex(ValueError, 'requires streaming=True'):
+            table_read.to_torch(splits, auto_detect_rank=True)
+        with self.assertRaisesRegex(ValueError, 'requires streaming=True'):
+            table_read.to_torch(
+                splits,
+                sharding_rank=0,
+                sharding_world_size=1,
+            )
         with self.assertRaisesRegex(ValueError, 'batch_size must be'):
             table_read.to_torch(
                 splits,
@@ -468,6 +867,66 @@ class TorchReadTest(unittest.TestCase):
                         batch_format='pyarrow',
                         prefetch_concurrency=invalid,
                     )
+
+    def test_torch_distributed_sharding_public_api(self):
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema, partition_keys=['user_id']
+        )
+        self.catalog.create_table(
+            'default.test_torch_distributed_api', schema, False
+        )
+        table = self.catalog.get_table(
+            'default.test_torch_distributed_api'
+        )
+        self._write_test_table(table)
+        read_builder = table.new_read_builder().with_projection(['user_id'])
+        splits = read_builder.new_scan().plan().splits()
+        table_read = read_builder.new_read()
+
+        with patch(
+            "pypaimon.read.datasource.torch_dataset."
+            "_resolve_distributed_context",
+            return_value=(1, 2),
+        ):
+            datasets = [
+                table_read.to_torch(
+                    splits,
+                    streaming=True,
+                    batch_format=batch_format,
+                    shuffle=batch_format == 'row' and shuffle,
+                    auto_detect_rank=True,
+                )
+                for batch_format, shuffle in [
+                    ('row', False),
+                    ('row', True),
+                    ('pyarrow', False),
+                ]
+            ]
+            expected = splits[(len(splits) + 1) // 2:]
+            for dataset in datasets:
+                self.assertTrue(dataset.auto_detect_rank)
+                self.assertEqual(dataset._worker_splits(None), expected)
+
+        pre_sharded = splits[::2]
+        with patch.dict(
+            os.environ, {"RANK": "1", "WORLD_SIZE": "2"}, clear=True
+        ):
+            dataset = table_read.to_torch(pre_sharded, streaming=True)
+            self.assertFalse(dataset.auto_detect_rank)
+            self.assertEqual(dataset._worker_splits(None), pre_sharded)
+
+        dataset = table_read.to_torch(
+            splits,
+            streaming=True,
+            sharding_rank=1,
+            sharding_world_size=2,
+        )
+        self.assertFalse(dataset.auto_detect_rank)
+        self.assertEqual(
+            dataset._worker_splits(None),
+            splits[(len(splits) + 1) // 2:],
+        )
+        self.assertIsNotNone(table_read.to_torch(splits))
 
     def test_blob_torch_read(self):
         """Test end-to-end blob functionality using blob descriptors."""
