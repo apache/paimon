@@ -30,6 +30,7 @@ import org.apache.paimon.memory.MemorySliceOutput;
 import org.apache.paimon.sst.BlockHandle;
 import org.apache.paimon.sst.BloomFilterHandle;
 import org.apache.paimon.sst.SstFileWriter;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
@@ -92,10 +93,15 @@ public class BTreeIndexWriter implements GlobalIndexSingleColumnWriter {
             throws IOException {
         this.fileName = indexFileWriter.newFileName(BTreeGlobalIndexerFactory.IDENTIFIER);
         this.out = indexFileWriter.newOutputStream(this.fileName);
-        this.keySerializer = keySerializer;
-        this.comparator = keySerializer.createComparator();
-        // todo: we may enable bf to accelerate equal and in predicate in the future
-        this.writer = new SstFileWriter(out, blockSize, null, compressionFactory);
+        try {
+            this.keySerializer = keySerializer;
+            this.comparator = keySerializer.createComparator();
+            // todo: we may enable bf to accelerate equal and in predicate in the future
+            this.writer = new SstFileWriter(out, blockSize, null, compressionFactory);
+        } catch (RuntimeException e) {
+            IOUtils.closeQuietly(out);
+            throw e;
+        }
     }
 
     @Override
@@ -165,6 +171,7 @@ public class BTreeIndexWriter implements GlobalIndexSingleColumnWriter {
 
             out.close();
         } catch (IOException e) {
+            IOUtils.closeQuietly(out);
             throw new RuntimeException("Error in closing BTree index writer", e);
         }
 
