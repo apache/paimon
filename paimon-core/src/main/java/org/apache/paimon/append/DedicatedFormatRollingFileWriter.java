@@ -113,7 +113,7 @@ public class DedicatedFormatRollingFileWriter
             vectorStoreWriterFactory;
     private final long targetFileSize;
     private final long targetFileRowNum;
-    private final int videoFrameFieldIndex;
+    private final int[] videoFrameFieldIndexes;
 
     // State management
     private final List<FileWriterAbortExecutor> closedWriters;
@@ -127,7 +127,7 @@ public class DedicatedFormatRollingFileWriter
             vectorStoreWriter;
     private long recordCount = 0;
     private long currentFileRecordCount = 0;
-    private @Nullable BlobDescriptor currentVideoGroup;
+    private @Nullable List<BlobDescriptor> currentVideoGroup;
     private boolean pendingGroupAwareRoll;
     private boolean closed = false;
 
@@ -156,7 +156,7 @@ public class DedicatedFormatRollingFileWriter
                 targetFileRowNum);
         this.targetFileSize = targetFileSize;
         this.targetFileRowNum = targetFileRowNum;
-        this.videoFrameFieldIndex = videoFrameFieldIndex(writeSchema, context);
+        this.videoFrameFieldIndexes = videoFrameFieldIndexes(writeSchema, context);
         this.results = new ArrayList<>();
         this.closedWriters = new ArrayList<>();
 
@@ -348,7 +348,7 @@ public class DedicatedFormatRollingFileWriter
     @Override
     public void write(InternalRow row) throws IOException {
         try {
-            BlobDescriptor nextVideoGroup = videoPayloadDescriptor(row);
+            List<BlobDescriptor> nextVideoGroup = videoPayloadDescriptors(row);
             if (pendingGroupAwareRoll && !Objects.equals(currentVideoGroup, nextVideoGroup)) {
                 closeCurrentWriter();
             }
@@ -493,20 +493,33 @@ public class DedicatedFormatRollingFileWriter
         pendingGroupAwareRoll = false;
     }
 
-    private static int videoFrameFieldIndex(
+    private static int[] videoFrameFieldIndexes(
             RowType writeSchema, @Nullable BlobFileContext context) {
-        if (context == null || context.videoFrameField() == null) {
-            return -1;
+        if (context == null || context.videoFrameFields().isEmpty()) {
+            return new int[0];
         }
-        String field = context.videoFrameField();
-        return writeSchema.containsField(field) ? writeSchema.getFieldIndex(field) : -1;
+        Set<String> configured = context.videoFrameFields();
+        return writeSchema.getFieldNames().stream()
+                .filter(configured::contains)
+                .mapToInt(writeSchema::getFieldIndex)
+                .toArray();
     }
 
-    private @Nullable BlobDescriptor videoPayloadDescriptor(InternalRow row) {
-        if (videoFrameFieldIndex < 0 || row.isNullAt(videoFrameFieldIndex)) {
+    private @Nullable List<BlobDescriptor> videoPayloadDescriptors(InternalRow row) {
+        if (videoFrameFieldIndexes.length == 0) {
             return null;
         }
-        return VideoFrameDescriptor.payloadDescriptor(row.getBlob(videoFrameFieldIndex));
+        List<BlobDescriptor> descriptors = new ArrayList<>(videoFrameFieldIndexes.length);
+        boolean hasVideo = false;
+        for (int index : videoFrameFieldIndexes) {
+            BlobDescriptor descriptor =
+                    row.isNullAt(index)
+                            ? null
+                            : VideoFrameDescriptor.payloadDescriptor(row.getBlob(index));
+            descriptors.add(descriptor);
+            hasVideo |= descriptor != null;
+        }
+        return hasVideo ? descriptors : null;
     }
 
     /** Closes the main writer and returns its metadata. */

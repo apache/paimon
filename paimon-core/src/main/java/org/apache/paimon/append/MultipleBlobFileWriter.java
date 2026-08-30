@@ -66,7 +66,7 @@ public class MultipleBlobFileWriter implements Closeable {
                 new RowType(fieldsInBlobFile(writeSchema, context.blobInlineFields()));
         this.blobWriters = new ArrayList<>();
         for (String blobFieldName : blobRowType.getFieldNames()) {
-            boolean video = blobFieldName.equals(context.videoFrameField());
+            boolean video = context.videoFrameFields().contains(blobFieldName);
             FileFormat blobFileFormat;
             if (video) {
                 if (context.blobConsumer() != null) {

@@ -197,10 +197,10 @@ docs.add([
 
 ## Video Frame Storage
 
-For a frame table, set `video-frame-field` on one scalar BLOB column. Paimon
-stores the frame ordinal in `VideoFrameDescriptor` and the compact `.video`
-index, so the normal data file does not need a `frame_index` or
-`frame_timestamp` column:
+For a frame table, set `video-frame-field` to one or more comma-separated
+scalar BLOB columns. Paimon stores frame ordinals in `VideoFrameDescriptor`
+and compact `.video` indexes, so the normal data file does not need a
+`frame_index` or `frame_timestamp` column:
 
 ```python
 import pyarrow as pa
@@ -257,10 +257,12 @@ video = pm.BlobDescriptor(
 frames.add_video(video, episode_43_rows)
 ```
 
-The writer deduplicates exact payload descriptor identity inside one `.video`
-file and delays a pending roll until the current video group ends. A later
-call, checkpoint, or earlier file roll can create another physical copy of the
-same source video. The normal `.blob` format is unchanged.
+The writer deduplicates exact payload descriptor identity inside each `.video`
+file. Payload boundaries may be nested across configured video columns, but
+every change must occur at an episode boundary. When a file target is reached
+within an episode, normal, BLOB, and vector rolling waits for the next payload
+boundary and closes the aligned file group together. A single large episode
+may therefore exceed the target. The normal `.blob` format is unchanged.
 
 ### Update frame rows and replace a video
 

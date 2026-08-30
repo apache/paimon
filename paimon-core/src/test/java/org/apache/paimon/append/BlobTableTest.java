@@ -1611,6 +1611,141 @@ public class BlobTableTest extends TableTestBase {
                 .isEqualTo(Arrays.asList(2L, 3L));
     }
 
+    @Test
+    public void testMultipleVideoFieldsRollAtAlignedEpisodeBoundaries() throws Exception {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("id", DataTypes.INT());
+        schemaBuilder.column("camera_a", DataTypes.BLOB());
+        schemaBuilder.column("camera_b", DataTypes.BLOB());
+        schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "1 GB");
+        schemaBuilder.option(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "1 GB");
+        schemaBuilder.option(CoreOptions.TARGET_FILE_ROW_NUM.key(), "2");
+        schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.VIDEO_FRAME_FIELD.key(), "camera_a,camera_b");
+        catalog.createTable(identifier(), schemaBuilder.build(), true);
+
+        byte[][] payloads = {
+            "episode-0-camera-a".getBytes(),
+            "episode-0-camera-b".getBytes(),
+            "episode-1-camera-a".getBytes(),
+            "episode-1-camera-b".getBytes()
+        };
+        String[] uris = new String[payloads.length];
+        for (int i = 0; i < payloads.length; i++) {
+            java.nio.file.Path source = tempPath.resolve("episode-source-" + i + ".mp4");
+            java.nio.file.Files.write(source, payloads[i]);
+            uris[i] = new Path(source.toUri()).toString();
+        }
+
+        UriReader sourceReader = UriReader.fromFile(LocalFileIO.create());
+        List<InternalRow> input = new ArrayList<>();
+        for (int row = 0; row < 5; row++) {
+            int episode = row < 3 ? 0 : 1;
+            int frame = row < 3 ? row : row - 3;
+            int cameraA = episode * 2;
+            int cameraB = cameraA + 1;
+            input.add(
+                    GenericRow.of(
+                            row,
+                            Blob.fromDescriptor(
+                                    sourceReader,
+                                    new VideoFrameDescriptor(
+                                            uris[cameraA], 0, payloads[cameraA].length, frame)),
+                            Blob.fromDescriptor(
+                                    sourceReader,
+                                    new VideoFrameDescriptor(
+                                            uris[cameraB], 0, payloads[cameraB].length, frame))));
+        }
+        writeRows(getTableDefault(), input);
+
+        List<DataFileMeta> files =
+                getTableDefault().store().newScan().plan().files().stream()
+                        .map(ManifestEntry::file)
+                        .collect(Collectors.toList());
+        List<DataFileMeta> normalFiles =
+                files.stream()
+                        .filter(file -> !file.fileName().endsWith(".video"))
+                        .collect(Collectors.toList());
+        assertThat(
+                        normalFiles.stream()
+                                .map(DataFileMeta::rowCount)
+                                .sorted()
+                                .collect(Collectors.toList()))
+                .isEqualTo(Arrays.asList(2L, 3L));
+        for (DataFileMeta normal : normalFiles) {
+            assertThat(
+                            files.stream()
+                                    .filter(file -> file.fileName().endsWith(".video"))
+                                    .filter(
+                                            file ->
+                                                    file.firstRowId().equals(normal.firstRowId())
+                                                            && file.rowCount() == normal.rowCount())
+                                    .map(file -> file.writeCols().get(0))
+                                    .sorted()
+                                    .collect(Collectors.toList()))
+                    .isEqualTo(Arrays.asList("camera_a", "camera_b"));
+        }
+    }
+
+    @Test
+    public void testMultipleVideoFieldsAllowNestedEpisodeBoundaries() throws Exception {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("id", DataTypes.INT());
+        schemaBuilder.column("camera_a", DataTypes.BLOB());
+        schemaBuilder.column("camera_b", DataTypes.BLOB());
+        schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "1 GB");
+        schemaBuilder.option(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "1 GB");
+        schemaBuilder.option(CoreOptions.TARGET_FILE_ROW_NUM.key(), "4");
+        schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.VIDEO_FRAME_FIELD.key(), "camera_a,camera_b");
+        catalog.createTable(identifier(), schemaBuilder.build(), true);
+
+        byte[] payload = "episode-video".getBytes();
+        String[] uris = new String[3];
+        for (int i = 0; i < uris.length; i++) {
+            java.nio.file.Path source = tempPath.resolve("unaligned-source-" + i + ".mp4");
+            java.nio.file.Files.write(source, payload);
+            uris[i] = new Path(source.toUri()).toString();
+        }
+        UriReader sourceReader = UriReader.fromFile(LocalFileIO.create());
+
+        List<InternalRow> rows = new ArrayList<>();
+        for (int row = 0; row < 4; row++) {
+            int cameraB = row < 2 ? 1 : 2;
+            rows.add(
+                    GenericRow.of(
+                            row,
+                            Blob.fromDescriptor(
+                                    sourceReader,
+                                    new VideoFrameDescriptor(uris[0], 0, payload.length, row)),
+                            Blob.fromDescriptor(
+                                    sourceReader,
+                                    new VideoFrameDescriptor(
+                                            uris[cameraB], 0, payload.length, row % 2))));
+        }
+        writeRows(getTableDefault(), rows);
+
+        List<DataFileMeta> files =
+                getTableDefault().store().newScan().plan().files().stream()
+                        .map(ManifestEntry::file)
+                        .collect(Collectors.toList());
+        assertThat(
+                        files.stream()
+                                .filter(file -> !file.fileName().endsWith(".video"))
+                                .map(DataFileMeta::rowCount)
+                                .collect(Collectors.toList()))
+                .isEqualTo(Collections.singletonList(4L));
+        assertThat(
+                        files.stream()
+                                .filter(file -> file.fileName().endsWith(".video"))
+                                .map(DataFileMeta::rowCount)
+                                .sorted()
+                                .collect(Collectors.toList()))
+                .isEqualTo(Arrays.asList(4L, 4L));
+    }
+
     private List<DataFileMeta> liveVideoFiles(FileStoreTable table) {
         return table.store().newScan().plan().files().stream()
                 .map(ManifestEntry::file)

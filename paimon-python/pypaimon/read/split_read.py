@@ -485,8 +485,8 @@ class SplitRead(ABC):
     def _read_blob_as_descriptor(self, field_names: List[str]) -> bool:
         if CoreOptions.blob_as_descriptor(self.table.options):
             return True
-        video_field = CoreOptions.video_frame_field(self.table.options)
-        if video_field in field_names:
+        video_fields = CoreOptions.video_frame_fields(self.table.options)
+        if video_fields.intersection(field_names):
             return True
         deferred_fields = getattr(self, '_deferred_blob_fields', set())
         return any(field_name in deferred_fields for field_name in field_names)

@@ -43,6 +43,11 @@ class DataEvolutionRowRollingTest(unittest.TestCase):
         ('id', pa.int32()),
         ('payload', pa.large_binary()),
     ])
+    multi_video_schema = pa.schema([
+        ('id', pa.int32()),
+        ('camera_a', pa.large_binary()),
+        ('camera_b', pa.large_binary()),
+    ])
     vector_schema = pa.schema([
         ('id', pa.int32()),
         ('embedding', pa.list_(pa.float32(), 3)),
@@ -274,7 +279,7 @@ class DataEvolutionRowRollingTest(unittest.TestCase):
             schema=self.blob_schema,
         )
         writer = object.__new__(DedicatedFormatWriter)
-        writer.video_frame_column = 'payload'
+        writer.video_frame_columns = ['payload']
         writer._video_group_policy = VideoGroupRollingPolicy()
         writer._roll_before_video_group = Mock()
         writer._write_batch = Mock()
@@ -288,6 +293,131 @@ class DataEvolutionRowRollingTest(unittest.TestCase):
             [call.args[0].num_rows for call in writer._write_batch.call_args_list],
         )
         writer._write_bounded_batches.assert_not_called()
+
+    def test_multiple_video_fields_roll_as_episode_aligned_groups(self):
+        paths = [
+            os.path.join(self.tempdir, f'episode-{episode}-{camera}.mp4')
+            for episode in range(2)
+            for camera in ('a', 'b')
+        ]
+        payloads = [f'episode-video-{index}'.encode() for index in range(4)]
+        for path, payload in zip(paths, payloads):
+            with open(path, 'wb') as output:
+                output.write(payload)
+        descriptors = [
+            BlobDescriptor(path, 0, len(payload))
+            for path, payload in zip(paths, payloads)
+        ]
+
+        table = self._create_with_schema(
+            self.multi_video_schema,
+            {
+                **self.de_options,
+                'target-file-row-num': '2',
+                'video-frame-field': 'camera_a,camera_b',
+                'blob-as-descriptor': 'true',
+            },
+        )
+        rows = pa.Table.from_pydict(
+            {
+                'id': list(range(5)),
+                'camera_a': [
+                    VideoFrameDescriptor(
+                        descriptors[0 if row < 3 else 2].uri,
+                        0,
+                        descriptors[0 if row < 3 else 2].length,
+                        row if row < 3 else row - 3,
+                    ).serialize()
+                    for row in range(5)
+                ],
+                'camera_b': [
+                    VideoFrameDescriptor(
+                        descriptors[1 if row < 3 else 3].uri,
+                        0,
+                        descriptors[1 if row < 3 else 3].length,
+                        row if row < 3 else row - 3,
+                    ).serialize()
+                    for row in range(5)
+                ],
+            },
+            schema=self.multi_video_schema,
+        )
+
+        files = self._write_files(table, rows)
+
+        normal_files = [
+            file for file in files if not file.file_name.endswith('.video')
+        ]
+        self.assertEqual([2, 3], sorted(file.row_count for file in normal_files))
+        for normal in normal_files:
+            sidecars = [
+                file for file in files
+                if file.file_name.endswith('.video')
+                and file.first_row_id == normal.first_row_id
+                and file.row_count == normal.row_count
+            ]
+            self.assertEqual(
+                ['camera_a', 'camera_b'],
+                sorted(file.write_cols[0] for file in sidecars),
+            )
+
+        result = table.new_read_builder().new_read().to_arrow(
+            table.new_read_builder().new_scan().plan().splits()).sort_by('id')
+        self.assertEqual(list(range(5)), result['id'].to_pylist())
+
+    def test_multiple_video_fields_allow_nested_episode_boundaries(self):
+        paths = [
+            os.path.join(self.tempdir, name)
+            for name in ('camera-a.mp4', 'camera-b-0.mp4', 'camera-b-1.mp4')
+        ]
+        for path in paths:
+            with open(path, 'wb') as output:
+                output.write(os.path.basename(path).encode())
+        camera_a, camera_b_0, camera_b_1 = [
+            BlobDescriptor(path, 0, os.path.getsize(path))
+            for path in paths
+        ]
+        table = self._create_with_schema(
+            self.multi_video_schema,
+            {
+                **self.de_options,
+                'target-file-row-num': '4',
+                'video-frame-field': 'camera_a,camera_b',
+                'blob-as-descriptor': 'true',
+            },
+        )
+        rows = pa.Table.from_pydict(
+            {
+                'id': list(range(4)),
+                'camera_a': [
+                    VideoFrameDescriptor(
+                        camera_a.uri, 0, camera_a.length, frame
+                    ).serialize()
+                    for frame in range(4)
+                ],
+                'camera_b': [
+                    VideoFrameDescriptor(
+                        descriptor.uri, 0, descriptor.length, frame % 2
+                    ).serialize()
+                    for frame, descriptor in enumerate(
+                        [camera_b_0, camera_b_0, camera_b_1, camera_b_1]
+                    )
+                ],
+            },
+            schema=self.multi_video_schema,
+        )
+
+        files = self._write_files(table, rows)
+
+        normal_files = [
+            file for file in files if not file.file_name.endswith('.video')
+        ]
+        video_files = [
+            file for file in files if file.file_name.endswith('.video')
+        ]
+        self.assertEqual([4], [file.row_count for file in normal_files])
+        self.assertEqual([4, 4], sorted(file.row_count for file in video_files))
+        self.assertEqual(list(range(4)), self._read_ids(table))
 
     def test_blob_consumer_descriptors_survive_abort_after_rolling(self):
         table = self._create_with_schema(

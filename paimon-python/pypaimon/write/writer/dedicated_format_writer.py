@@ -76,7 +76,7 @@ class DedicatedFormatWriter(DataWriter):
         self.blob_column_names = self._get_blob_columns_from_schema()
         self.blob_descriptor_fields = CoreOptions.blob_descriptor_fields(self.options)
         self.blob_view_fields = CoreOptions.blob_view_fields(self.options)
-        self.video_frame_column = CoreOptions.video_frame_field(self.options)
+        configured_video_fields = CoreOptions.video_frame_fields(self.options)
         self.blob_inline_fields = self.blob_descriptor_fields.union(self.blob_view_fields)
 
         unknown_descriptor_fields = self.blob_descriptor_fields.difference(
@@ -131,8 +131,10 @@ class DedicatedFormatWriter(DataWriter):
             self.normal_column_names = [
                 col for col in all_column_names if col not in dedicated_set
             ]
-        if self.video_frame_column not in self.blob_file_column_names:
-            self.video_frame_column = None
+        self.video_frame_columns = [
+            column for column in self.blob_file_column_names
+            if column in configured_video_fields
+        ]
         normal_name_set = set(self.normal_column_names)
         self.normal_columns = [
             field for field in self.table.table_schema.fields if field.name in normal_name_set
@@ -144,7 +146,7 @@ class DedicatedFormatWriter(DataWriter):
         self.closed = False
         self._video_group_policy = (
             VideoGroupRollingPolicy()
-            if self.video_frame_column is not None
+            if self.video_frame_columns
             else None
         )
 
@@ -169,7 +171,7 @@ class DedicatedFormatWriter(DataWriter):
                 blob_column=blob_column,
                 options=options,
                 blob_consumer=blob_consumer,
-                video=blob_column == self.video_frame_column,
+                video=blob_column in configured_video_fields,
             )
 
         # Initialize vector writer when vector.file.format is configured.
@@ -224,7 +226,7 @@ class DedicatedFormatWriter(DataWriter):
         # writer, or the unfinished flush would lose its chance to be retried.
         self._require_finished_flush()
         try:
-            if self.video_frame_column is not None:
+            if self.video_frame_columns:
                 self._write_video_batches(data)
                 return
 
@@ -275,9 +277,10 @@ class DedicatedFormatWriter(DataWriter):
             )
             require_columns(values_by_name, required_columns, "write_row")
 
-            if self.video_frame_column is not None:
-                next_group = video_payload_descriptor(
-                    values_by_name[self.video_frame_column]
+            if self.video_frame_columns:
+                next_group = self._video_group(
+                    values_by_name[column]
+                    for column in self.video_frame_columns
                 )
                 self._roll_before_video_group(next_group)
                 self._video_group_policy.record(next_group)
@@ -532,24 +535,35 @@ class DedicatedFormatWriter(DataWriter):
             offset += length
 
     def _video_group_runs(self, data: pa.RecordBatch):
-        column_index = data.schema.get_field_index(self.video_frame_column)
-        if column_index < 0:
-            raise KeyError(
-                f"Column '{self.video_frame_column}' was not found in the record batch."
-            )
+        column_indices = [
+            data.schema.get_field_index(column)
+            for column in self.video_frame_columns
+        ]
+        missing = [
+            column for column, index
+            in zip(self.video_frame_columns, column_indices)
+            if index < 0
+        ]
+        if missing:
+            raise KeyError(f"Video columns were not found in the record batch: {missing}")
         if data.num_rows == 0:
             return
 
-        column = data.column(column_index)
+        columns = [data.column(index) for index in column_indices]
         start = 0
-        current_group = video_payload_descriptor(column[0])
+        current_group = self._video_group(column[0] for column in columns)
         for index in range(1, data.num_rows):
-            next_group = video_payload_descriptor(column[index])
+            next_group = self._video_group(column[index] for column in columns)
             if next_group != current_group:
                 yield data.slice(start, index - start), current_group
                 start = index
                 current_group = next_group
         yield data.slice(start, data.num_rows - start), current_group
+
+    @staticmethod
+    def _video_group(values):
+        group = tuple(video_payload_descriptor(value) for value in values)
+        return group if any(value is not None for value in group) else None
 
     @property
     def pending_row_count(self) -> int:
