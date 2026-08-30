@@ -75,10 +75,10 @@ public class DataEvolutionSplitGeneratorTest {
         }
         files.add(video);
 
-        DataEvolutionSplitGenerator generator = new DataEvolutionSplitGenerator(200_000L, 1L, true);
+        DataEvolutionSplitGenerator generator = new DataEvolutionSplitGenerator(500L, 1L, true);
         List<SplitGenerator.SplitGroup> splits = generator.splitForBatch(files);
 
-        assertThat(splits).hasSize(1);
+        assertThat(splits).hasSize(2);
         assertThat(splits)
                 .allSatisfy(
                         split -> {

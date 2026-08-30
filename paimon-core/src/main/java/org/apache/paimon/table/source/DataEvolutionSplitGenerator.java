@@ -27,6 +27,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -56,15 +57,32 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
     @Override
     public List<SplitGroup> splitForBatch(List<DataFileMeta> input) {
         List<List<DataFileMeta>> ranges = groupByNormalFileRange(input, Function.identity());
-        Set<DataFileMeta> seen = Collections.newSetFromMap(new IdentityHashMap<>());
-        boolean hasSpanningSidecar =
-                ranges.stream()
-                        .flatMap(Collection::stream)
-                        .filter(DataEvolutionSplitGenerator::isSidecar)
-                        .anyMatch(file -> !seen.add(file));
+        Map<DataFileMeta, Integer> sidecarOccurrences = new IdentityHashMap<>();
+        for (List<DataFileMeta> range : ranges) {
+            Set<DataFileMeta> rangeSidecars =
+                    range.stream()
+                            .filter(DataEvolutionSplitGenerator::isSidecar)
+                            .collect(
+                                    Collectors.toCollection(
+                                            () ->
+                                                    Collections.newSetFromMap(
+                                                            new IdentityHashMap<>())));
+            rangeSidecars.forEach(
+                    file ->
+                            sidecarOccurrences.put(
+                                    file, sidecarOccurrences.getOrDefault(file, 0) + 1));
+        }
+        Set<DataFileMeta> sharedSidecars = Collections.newSetFromMap(new IdentityHashMap<>());
+        sidecarOccurrences.forEach(
+                (file, occurrences) -> {
+                    if (occurrences > 1) {
+                        sharedSidecars.add(file);
+                    }
+                });
+        boolean hasSpanningSidecar = !sharedSidecars.isEmpty();
         List<List<List<DataFileMeta>>> packed =
                 hasSpanningSidecar
-                        ? packWithUniqueSidecars(ranges)
+                        ? packWithUniqueSidecars(ranges, sharedSidecars)
                         : BinPacking.packForOrdered(ranges, this::rangeWeight, targetSplitSize);
         return packed.stream()
                 .map(
@@ -86,20 +104,21 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
                 .collect(Collectors.toList());
     }
 
-    private List<List<List<DataFileMeta>>> packWithUniqueSidecars(List<List<DataFileMeta>> ranges) {
+    private List<List<List<DataFileMeta>>> packWithUniqueSidecars(
+            List<List<DataFileMeta>> ranges, Set<DataFileMeta> sharedSidecars) {
         List<List<List<DataFileMeta>>> packed = new ArrayList<>();
         List<List<DataFileMeta>> current = new ArrayList<>();
         Set<DataFileMeta> seenSidecars = Collections.newSetFromMap(new IdentityHashMap<>());
         long currentWeight = 0;
 
         for (List<DataFileMeta> range : ranges) {
-            long weight = incrementalRangeWeight(range, seenSidecars);
+            long weight = incrementalRangeWeight(range, seenSidecars, sharedSidecars);
             if (!current.isEmpty() && currentWeight + weight > targetSplitSize) {
                 packed.add(current);
                 current = new ArrayList<>();
                 seenSidecars = Collections.newSetFromMap(new IdentityHashMap<>());
                 currentWeight = 0;
-                weight = incrementalRangeWeight(range, seenSidecars);
+                weight = incrementalRangeWeight(range, seenSidecars, sharedSidecars);
             }
             current.add(range);
             currentWeight += weight;
@@ -114,14 +133,18 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
         return packed;
     }
 
-    private long incrementalRangeWeight(List<DataFileMeta> files, Set<DataFileMeta> seenSidecars) {
+    private long incrementalRangeWeight(
+            List<DataFileMeta> files,
+            Set<DataFileMeta> seenSidecars,
+            Set<DataFileMeta> sharedSidecars) {
         Set<DataFileMeta> seenInRange = Collections.newSetFromMap(new IdentityHashMap<>());
         long size =
                 files.stream()
                         .filter(
                                 file ->
                                         !isSidecar(file)
-                                                || (!seenSidecars.contains(file)
+                                                || (!sharedSidecars.contains(file)
+                                                        && !seenSidecars.contains(file)
                                                         && seenInRange.add(file)))
                         .mapToLong(this::fileWeight)
                         .sum();

@@ -62,6 +62,7 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -873,6 +874,57 @@ public class BlobFileFormatTest {
         // assert
         assertThat(result).hasSize(1);
         assertThat(result.get(0)).isSameAs(BlobPlaceholder.INSTANCE);
+    }
+
+    @Test
+    public void testReadersShareCachedMetadata() throws IOException {
+        BlobFileFormat format =
+                new BlobFileFormat(false, BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
+        RowType rowType = RowType.of(DataTypes.BLOB());
+        try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
+            FormatWriter writer = format.createWriterFactory(rowType).create(out, null);
+            writer.addElement(GenericRow.of(new BlobData("first".getBytes())));
+            writer.addElement(GenericRow.of(new BlobData("second".getBytes())));
+            writer.close();
+        }
+
+        FormatReaderFactory readerFactory = format.createReaderFactory(null, rowType, null);
+        Map<Path, Object> metadataCache = new HashMap<>();
+        RoaringBitmap32 firstSelection = new RoaringBitmap32();
+        firstSelection.add(0);
+        FormatReaderContext firstContext =
+                new FormatReaderContext(
+                        fileIO,
+                        file,
+                        fileIO.getFileSize(file),
+                        firstSelection,
+                        null,
+                        metadataCache);
+        List<InternalRow> rows = new ArrayList<>();
+        try (FileRecordReader<InternalRow> reader = readerFactory.createReader(firstContext)) {
+            reader.forEachRemaining(rows::add);
+        }
+        Object cachedMetadata = metadataCache.get(file);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getBlob(0).toData()).isEqualTo("first".getBytes());
+
+        RoaringBitmap32 secondSelection = new RoaringBitmap32();
+        secondSelection.add(1);
+        FormatReaderContext secondContext =
+                new FormatReaderContext(
+                        fileIO,
+                        file,
+                        fileIO.getFileSize(file),
+                        secondSelection,
+                        null,
+                        metadataCache);
+        rows.clear();
+        try (FileRecordReader<InternalRow> reader = readerFactory.createReader(secondContext)) {
+            reader.forEachRemaining(rows::add);
+        }
+        assertThat(metadataCache.get(file)).isSameAs(cachedMetadata);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getBlob(0).toData()).isEqualTo("second".getBytes());
     }
 
     private void assertMalformedArrayPayload(

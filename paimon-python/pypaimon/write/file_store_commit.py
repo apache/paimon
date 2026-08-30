@@ -1054,6 +1054,7 @@ class FileStoreCommit:
             self, commit_messages: List[CommitMessage]):
         commit_entries = []
         entry_groups = {}
+        collect_groups = self.table.options.row_tracking_enabled()
         for group, msg in enumerate(commit_messages):
             partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
             total_buckets = (
@@ -1070,7 +1071,8 @@ class FileStoreCommit:
                     file=file,
                 )
                 commit_entries.append(entry)
-                entry_groups[entry.identifier()] = group
+                if collect_groups:
+                    entry_groups[entry.identifier()] = group
             for file in msg.deleted_files:
                 commit_entries.append(ManifestEntry(
                     kind=1,

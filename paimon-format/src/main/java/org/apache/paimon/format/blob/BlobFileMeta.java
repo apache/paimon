@@ -106,55 +106,71 @@ public class BlobFileMeta {
                             offset, indexStart));
         }
 
-        int[] returnedPositions = null;
-        if (selection != null) {
-            long selectionCardinality = selection.getCardinality();
-            if (selectionCardinality > blobLengths.length) {
-                throw new IOException(
-                        String.format(
-                                "Invalid blob selection: cardinality %s exceeds record count %s.",
-                                selectionCardinality, blobLengths.length));
-            }
-            int cardinality = (int) selectionCardinality;
-            returnedPositions = new int[cardinality];
-            long[] newLengths = new long[cardinality];
-            long[] newOffsets = new long[cardinality];
-            Iterator<Integer> iterator = selection.iterator();
-            for (int i = 0; i < cardinality; i++) {
-                Integer next = iterator.next();
-                if (next < 0 || next >= blobLengths.length) {
-                    throw new IOException(
-                            String.format(
-                                    "Invalid blob selection: position %s is outside record count %s.",
-                                    next, blobLengths.length));
-                }
-                newLengths[i] = blobLengths[next];
-                newOffsets[i] = blobOffsets[next];
-                returnedPositions[i] = next;
-            }
-            blobLengths = newLengths;
-            blobOffsets = newOffsets;
-        }
-
-        this.returnedPositions = returnedPositions;
         this.blobLengths = blobLengths;
         this.blobOffsets = blobOffsets;
+        this.returnedPositions = selectedPositions(selection, blobLengths.length);
+    }
+
+    private BlobFileMeta(
+            long[] blobLengths, long[] blobOffsets, @Nullable int[] returnedPositions) {
+        this.blobLengths = blobLengths;
+        this.blobOffsets = blobOffsets;
+        this.returnedPositions = returnedPositions;
+    }
+
+    public BlobFileMeta select(@Nullable RoaringBitmap32 selection) throws IOException {
+        return selection == null
+                ? this
+                : new BlobFileMeta(
+                        blobLengths, blobOffsets, selectedPositions(selection, blobLengths.length));
+    }
+
+    @Nullable
+    private static int[] selectedPositions(@Nullable RoaringBitmap32 selection, int recordCount)
+            throws IOException {
+        if (selection == null) {
+            return null;
+        }
+        long selectionCardinality = selection.getCardinality();
+        if (selectionCardinality > recordCount) {
+            throw new IOException(
+                    String.format(
+                            "Invalid blob selection: cardinality %s exceeds record count %s.",
+                            selectionCardinality, recordCount));
+        }
+        int[] positions = new int[(int) selectionCardinality];
+        Iterator<Integer> iterator = selection.iterator();
+        for (int i = 0; i < positions.length; i++) {
+            int position = iterator.next();
+            if (position < 0 || position >= recordCount) {
+                throw new IOException(
+                        String.format(
+                                "Invalid blob selection: position %s is outside record count %s.",
+                                position, recordCount));
+            }
+            positions[i] = position;
+        }
+        return positions;
+    }
+
+    private int logicalPosition(int returnedPosition) {
+        return returnedPositions == null ? returnedPosition : returnedPositions[returnedPosition];
     }
 
     public boolean isNull(int i) {
-        return blobLengths[i] == BlobFormatWriter.NULL_LENGTH;
+        return blobLengths[logicalPosition(i)] == BlobFormatWriter.NULL_LENGTH;
     }
 
     public boolean isPlaceHolder(int i) {
-        return blobLengths[i] == BlobFormatWriter.PLACE_HOLDER_LENGTH;
+        return blobLengths[logicalPosition(i)] == BlobFormatWriter.PLACE_HOLDER_LENGTH;
     }
 
     public long blobLength(int i) {
-        return blobLengths[i];
+        return blobLengths[logicalPosition(i)];
     }
 
     public long blobOffset(int i) {
-        return blobOffsets[i];
+        return blobOffsets[logicalPosition(i)];
     }
 
     public int returnedPosition(int i) {
@@ -162,6 +178,6 @@ public class BlobFileMeta {
     }
 
     public int recordNumber() {
-        return blobLengths.length;
+        return returnedPositions == null ? blobLengths.length : returnedPositions.length;
     }
 }

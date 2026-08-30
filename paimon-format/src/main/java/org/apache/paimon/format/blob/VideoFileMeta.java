@@ -137,36 +137,71 @@ public class VideoFileMeta {
             runEnds[i] = rows;
         }
 
-        int[] selectedPositions = null;
-        if (selection != null) {
-            long cardinality = selection.getCardinality();
-            if (cardinality > rows) {
-                throw new IOException(
-                        String.format(
-                                "Invalid video selection: cardinality %s exceeds row count %s.",
-                                cardinality, rows));
-            }
-            selectedPositions = new int[(int) cardinality];
-            Iterator<Integer> iterator = selection.iterator();
-            for (int i = 0; i < selectedPositions.length; i++) {
-                int position = iterator.next();
-                if (position < 0 || position >= rows) {
-                    throw new IOException(
-                            String.format(
-                                    "Invalid video selection: position %s is outside row count %s.",
-                                    position, rows));
-                }
-                selectedPositions[i] = position;
-            }
-        }
-
         this.physicalVideoLengths = physicalVideoLengths;
         this.physicalVideoOffsets = physicalVideoOffsets;
         this.runEnds = runEnds;
         this.runReferences = runReferences;
         this.runFirstFrames = runFirstFrames;
         this.rowCount = (int) rows;
+        this.selectedPositions = selectedPositions(selection, rowCount);
+    }
+
+    private VideoFileMeta(
+            long[] physicalVideoLengths,
+            long[] physicalVideoOffsets,
+            long[] runEnds,
+            long[] runReferences,
+            long[] runFirstFrames,
+            int rowCount,
+            @Nullable int[] selectedPositions) {
+        this.physicalVideoLengths = physicalVideoLengths;
+        this.physicalVideoOffsets = physicalVideoOffsets;
+        this.runEnds = runEnds;
+        this.runReferences = runReferences;
+        this.runFirstFrames = runFirstFrames;
+        this.rowCount = rowCount;
         this.selectedPositions = selectedPositions;
+    }
+
+    public VideoFileMeta select(@Nullable RoaringBitmap32 selection) throws IOException {
+        return selection == null
+                ? this
+                : new VideoFileMeta(
+                        physicalVideoLengths,
+                        physicalVideoOffsets,
+                        runEnds,
+                        runReferences,
+                        runFirstFrames,
+                        rowCount,
+                        selectedPositions(selection, rowCount));
+    }
+
+    @Nullable
+    private static int[] selectedPositions(@Nullable RoaringBitmap32 selection, int rowCount)
+            throws IOException {
+        if (selection == null) {
+            return null;
+        }
+        long cardinality = selection.getCardinality();
+        if (cardinality > rowCount) {
+            throw new IOException(
+                    String.format(
+                            "Invalid video selection: cardinality %s exceeds row count %s.",
+                            cardinality, rowCount));
+        }
+        int[] positions = new int[(int) cardinality];
+        Iterator<Integer> iterator = selection.iterator();
+        for (int i = 0; i < positions.length; i++) {
+            int position = iterator.next();
+            if (position < 0 || position >= rowCount) {
+                throw new IOException(
+                        String.format(
+                                "Invalid video selection: position %s is outside row count %s.",
+                                position, rowCount));
+            }
+            positions[i] = position;
+        }
+        return positions;
     }
 
     public boolean isNull(int returnedRow) {

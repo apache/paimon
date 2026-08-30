@@ -131,19 +131,34 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
     def _pack_with_unique_sidecars(
             self, groups: List[List[DataFileMeta]]
     ) -> List[List[List[DataFileMeta]]]:
+        sidecar_occurrences = defaultdict(int)
+        for group in groups:
+            for identity in {
+                id(file) for file in group if self._is_sidecar(file)
+            }:
+                sidecar_occurrences[identity] += 1
+        shared_sidecars = {
+            identity for identity, count in sidecar_occurrences.items()
+            if count > 1
+        }
+
         packed = []
         current = []
         current_weight = 0
         seen_sidecars = set()
 
         for group in groups:
-            weight = self._incremental_group_weight(group, seen_sidecars)
+            weight = self._incremental_group_weight(
+                group, seen_sidecars, shared_sidecars
+            )
             if current and current_weight + weight > self.target_split_size:
                 packed.append(current)
                 current = []
                 current_weight = 0
                 seen_sidecars = set()
-                weight = self._incremental_group_weight(group, seen_sidecars)
+                weight = self._incremental_group_weight(
+                    group, seen_sidecars, shared_sidecars
+                )
 
             current.append(group)
             current_weight += weight
@@ -156,13 +171,16 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
         return packed
 
     def _incremental_group_weight(
-            self, group: List[DataFileMeta], seen_sidecars: set
+            self, group: List[DataFileMeta], seen_sidecars: set,
+            shared_sidecars: set,
     ) -> int:
         seen_in_group = set()
         size = 0
         for file in group:
             if self._is_sidecar(file):
                 identity = id(file)
+                if identity in shared_sidecars:
+                    continue
                 if identity in seen_sidecars or identity in seen_in_group:
                     continue
                 seen_in_group.add(identity)

@@ -245,7 +245,7 @@ class VideoFormatTest(unittest.TestCase):
                     push_down_predicate=None,
                     blob_as_descriptor=True,
                     row_indices=row_indices,
-                    video_meta_cache=cache,
+                    blob_index_cache=cache,
                 ))
             self.assertEqual(1, new_input_stream.call_count)
 

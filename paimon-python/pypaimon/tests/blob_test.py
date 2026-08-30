@@ -1588,6 +1588,45 @@ class BlobEndToEndTest(unittest.TestCase):
                 finally:
                     reader.close()
 
+    def test_blob_readers_share_cached_index(self):
+        file_io = LocalFileIO(self.temp_dir, Options({}))
+        field = DataField(0, "blob_field", AtomicType("BLOB"))
+        path = Path(self.temp_dir) / "cached-index.blob"
+        from pypaimon.write.blob_format_writer import BlobFormatWriter
+        with open(path, "wb") as output:
+            writer = BlobFormatWriter(output)
+            for value in (b"zero", b"one", b"two"):
+                writer.add_element(GenericRow(
+                    [BlobData(value)], [field], RowKind.INSERT
+                ))
+            writer.close()
+
+        cache = {}
+        readers = []
+        with patch.object(
+            DeltaVarintCompressor,
+            "decompress",
+            wraps=DeltaVarintCompressor.decompress,
+        ) as decompress:
+            for row_indices in ([0, 2], [1]):
+                readers.append(FormatBlobReader(
+                    file_io=file_io,
+                    file_path=_to_url(path),
+                    read_fields=[field.name],
+                    full_fields=[field],
+                    push_down_predicate=None,
+                    blob_as_descriptor=True,
+                    row_indices=row_indices,
+                    blob_index_cache=cache,
+                ))
+            self.assertEqual(1, decompress.call_count)
+
+        try:
+            self.assertEqual([2, 1], [reader.record_count for reader in readers])
+        finally:
+            for reader in readers:
+                reader.close()
+
     def test_split_read_passes_blob_file_size(self):
         from pypaimon.read.split import DataSplit
         from pypaimon.read.split_read import (
@@ -1640,7 +1679,7 @@ class BlobEndToEndTest(unittest.TestCase):
                 ).arguments
                 self.assertEqual(123, arguments.get("file_size"))
                 self.assertIs(
-                    expected_cache, arguments.get("video_meta_cache")
+                    expected_cache, arguments.get("blob_index_cache")
                 )
 
             raw_read.file_reader_supplier(file, False, [field.name], False)
@@ -1650,11 +1689,11 @@ class BlobEndToEndTest(unittest.TestCase):
             evolution_read.file_reader_supplier(
                 file, False, [field.name], False
             )
-            assert_reader_arguments(evolution_read._video_meta_cache)
+            assert_reader_arguments(evolution_read._blob_index_cache)
 
             reader_cls.reset_mock()
             evolution_read._create_raw_blob_file_reader(file, [field.name])
-            assert_reader_arguments(evolution_read._video_meta_cache)
+            assert_reader_arguments(evolution_read._blob_index_cache)
 
     def test_blob_reader_row_indices_pushdown(self):
         file_io = LocalFileIO(self.temp_dir, Options({}))

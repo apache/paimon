@@ -43,6 +43,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -159,7 +160,16 @@ public class BlobFileFormat extends FileFormat {
             SeekableInputStream in = fileIO.newInputStream(filePath);
             BlobFileMeta fileMeta;
             try {
-                fileMeta = new BlobFileMeta(in, context.fileSize(), context.selection());
+                Map<Path, Object> metadataCache = context.metadataCache();
+                BlobFileMeta baseMeta =
+                        metadataCache == null ? null : (BlobFileMeta) metadataCache.get(filePath);
+                if (baseMeta == null) {
+                    baseMeta = new BlobFileMeta(in, context.fileSize(), null);
+                    if (metadataCache != null) {
+                        metadataCache.put(filePath, baseMeta);
+                    }
+                }
+                fileMeta = baseMeta.select(context.selection());
             } catch (Exception e) {
                 IOUtils.closeQuietly(in);
                 throw e;

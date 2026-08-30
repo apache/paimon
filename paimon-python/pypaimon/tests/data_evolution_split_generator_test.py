@@ -246,7 +246,7 @@ class SplitOrderTest(unittest.TestCase):
         entries = [
             self._entry(
                 f'normal-{row}.parquet', row, first_row_id=row,
-                row_count=1,
+                row_count=1, file_size=10,
             )
             for row in range(100)
         ]
@@ -255,14 +255,17 @@ class SplitOrderTest(unittest.TestCase):
             file_size=1_000_000))
 
         splits = DataEvolutionSplitGenerator(
-            self._Table(), target_split_size=2_000_000, open_file_cost=0
+            self._Table(), target_split_size=500, open_file_cost=0
         ).create_splits(entries)
 
-        self.assertEqual(1, len(splits))
-        self.assertEqual(101, len(splits[0].files))
-        self.assertEqual(1, sum(
-            file.file_name == 'camera.video' for file in splits[0].files))
-        self.assertEqual(100, splits[0].merged_row_count())
+        self.assertEqual(2, len(splits))
+        self.assertEqual(102, sum(len(split.files) for split in splits))
+        for split in splits:
+            self.assertEqual(1, sum(
+                file.file_name == 'camera.video' for file in split.files))
+        self.assertEqual(100, sum(
+            split.merged_row_count() for split in splits
+        ))
 
     def test_distinct_sidecars_remain_in_packing_weight(self):
         video_size = 64 * 1024 * 1024
