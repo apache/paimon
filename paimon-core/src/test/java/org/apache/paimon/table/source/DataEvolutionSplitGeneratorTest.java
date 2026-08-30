@@ -89,6 +89,23 @@ public class DataEvolutionSplitGeneratorTest {
     }
 
     @Test
+    public void testSpanningBlobDoesNotDisableRawConversionForUnrelatedSplit() {
+        DataFileMeta normal1 = newFile("file1.parquet", 0L, 1L, 10L);
+        DataFileMeta normal2 = newFile("file2.parquet", 1L, 1L, 10L);
+        DataFileMeta normal3 = newFile("file3.parquet", 2L, 1L, 10L);
+        DataFileMeta video = newFile("camera.video", 0L, 2L, 100L);
+
+        DataEvolutionSplitGenerator generator = new DataEvolutionSplitGenerator(10L, 1L, false);
+        List<SplitGenerator.SplitGroup> splits =
+                generator.splitForBatch(Arrays.asList(normal1, video, normal2, normal3));
+
+        assertThat(splits).hasSize(3);
+        assertThat(splits)
+                .extracting(split -> split.rawConvertible)
+                .containsExactly(false, false, true);
+    }
+
+    @Test
     public void testSpanningBlobDoesNotHideDistinctSidecarWeights() {
         long videoSize = 64L * 1024 * 1024;
         List<DataFileMeta> files = new ArrayList<>();

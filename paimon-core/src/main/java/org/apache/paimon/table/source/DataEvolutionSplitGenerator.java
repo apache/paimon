@@ -87,9 +87,7 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
         return packed.stream()
                 .map(
                         f -> {
-                            boolean rawConvertible =
-                                    !hasSpanningSidecar
-                                            && f.stream().allMatch(file -> file.size() == 1);
+                            boolean rawConvertible = f.stream().allMatch(file -> file.size() == 1);
                             Set<DataFileMeta> unique =
                                     Collections.newSetFromMap(new IdentityHashMap<>());
                             List<DataFileMeta> groupFiles =
