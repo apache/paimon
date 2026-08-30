@@ -29,17 +29,23 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -144,6 +150,68 @@ public class ResolvingFileIOTest {
         assertNotNull(hdfsFileIOAgain);
         assertEquals(localFileIO, localFileIOAgain);
         assertEquals(hdfsFileIO, hdfsFileIOAgain);
+    }
+
+    @Test
+    public void testCloseReleasesEveryResolvedFileIO() throws Exception {
+        List<FileIO> loaded = new ArrayList<>();
+        configureWithFreshDelegates(loaded, false);
+
+        FileIO first = resolvingFileIO.fileIO(new Path("oss://bucket-1/table"));
+        FileIO second = resolvingFileIO.fileIO(new Path("oss://bucket-2/table"));
+        assertNotEquals(first, second);
+
+        resolvingFileIO.close();
+
+        verify(first, times(1)).close();
+        verify(second, times(1)).close();
+    }
+
+    @Test
+    public void testCloseKeepsGoingWhenADelegateFails() throws Exception {
+        List<FileIO> loaded = new ArrayList<>();
+        configureWithFreshDelegates(loaded, true);
+
+        FileIO first = resolvingFileIO.fileIO(new Path("oss://bucket-1/table"));
+        FileIO second = resolvingFileIO.fileIO(new Path("oss://bucket-2/table"));
+
+        assertThrows(IOException.class, () -> resolvingFileIO.close());
+
+        verify(first, times(1)).close();
+        verify(second, times(1)).close();
+    }
+
+    @Test
+    public void testUseAfterCloseIsRejectedAndTheMapIsEmptied() throws Exception {
+        List<FileIO> loaded = new ArrayList<>();
+        configureWithFreshDelegates(loaded, false);
+
+        FileIO delegate = resolvingFileIO.fileIO(new Path("oss://bucket-1/table"));
+        resolvingFileIO.close();
+
+        resolvingFileIO.close();
+        verify(delegate, times(1)).close();
+
+        assertThrows(
+                IOException.class, () -> resolvingFileIO.fileIO(new Path("oss://bucket-1/table")));
+    }
+
+    private void configureWithFreshDelegates(List<FileIO> loaded, boolean failOnClose)
+            throws IOException {
+        FileIOLoader loader = mock(FileIOLoader.class);
+        when(loader.getScheme()).thenReturn("oss");
+        when(loader.load(any()))
+                .thenAnswer(
+                        ignored -> {
+                            FileIO delegate = mock(FileIO.class);
+                            when(delegate.exists(any())).thenReturn(true);
+                            if (failOnClose) {
+                                doThrow(new IOException("cannot close")).when(delegate).close();
+                            }
+                            loaded.add(delegate);
+                            return delegate;
+                        });
+        resolvingFileIO.configure(CatalogContext.create(new Options(), loader, null));
     }
 
     @Test

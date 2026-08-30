@@ -59,8 +59,9 @@ public abstract class BaseMultiPartUploadCommitter<T, C> implements TwoPhaseOutp
 
     @Override
     public void commit(FileIO fileIO) throws IOException {
-        try {
-            MultiPartUploadStore<T, C> multiPartUploadStore = multiPartUploadStore(fileIO);
+        try (RESTTokenFileIO.Lease lease = RESTTokenFileIO.lease(fileIO)) {
+            MultiPartUploadStore<T, C> multiPartUploadStore =
+                    multiPartUploadStore(lease.fileIO(), targetPath());
             multiPartUploadStore.completeMultipartUpload(
                     objectName, uploadId, uploadedParts, byteLength);
         } catch (Exception e) {
@@ -101,15 +102,10 @@ public abstract class BaseMultiPartUploadCommitter<T, C> implements TwoPhaseOutp
     public void clean(FileIO fileIO) throws IOException {}
 
     private void abortMultipartUpload(FileIO fileIO) throws IOException {
-        MultiPartUploadStore<T, C> multiPartUploadStore = multiPartUploadStore(fileIO);
-        multiPartUploadStore.abortMultipartUpload(objectName, uploadId);
-    }
-
-    private MultiPartUploadStore<T, C> multiPartUploadStore(FileIO fileIO) throws IOException {
-        if (fileIO instanceof RESTTokenFileIO) {
-            RESTTokenFileIO restTokenFileIO = (RESTTokenFileIO) fileIO;
-            fileIO = restTokenFileIO.fileIO();
+        try (RESTTokenFileIO.Lease lease = RESTTokenFileIO.lease(fileIO)) {
+            MultiPartUploadStore<T, C> multiPartUploadStore =
+                    multiPartUploadStore(lease.fileIO(), targetPath());
+            multiPartUploadStore.abortMultipartUpload(objectName, uploadId);
         }
-        return multiPartUploadStore(fileIO, targetPath());
     }
 }

@@ -37,6 +37,8 @@ public abstract class PluginFileIO implements FileIO, HadoopOptionsProvider {
 
     private transient volatile FileIO lazyFileIO;
 
+    private transient volatile boolean closed;
+
     @Override
     public void configure(CatalogContext context) {
         // Do not get Hadoop Configuration in CatalogOptions
@@ -108,14 +110,37 @@ public abstract class PluginFileIO implements FileIO, HadoopOptionsProvider {
     }
 
     private FileIO fileIO(Path path) throws IOException {
-        if (lazyFileIO == null) {
+        FileIO fileIO = lazyFileIO;
+        if (fileIO == null) {
             synchronized (this) {
-                if (lazyFileIO == null) {
-                    lazyFileIO = wrap(() -> createFileIO(path));
+                if (closed) {
+                    throw new IOException("This FileIO is closed.");
+                }
+                fileIO = lazyFileIO;
+                if (fileIO == null) {
+                    fileIO = wrap(() -> createFileIO(path));
+                    lazyFileIO = fileIO;
                 }
             }
         }
-        return lazyFileIO;
+        return fileIO;
+    }
+
+    @Override
+    public void close() throws IOException {
+        FileIO fileIO;
+        synchronized (this) {
+            closed = true;
+            fileIO = lazyFileIO;
+            lazyFileIO = null;
+        }
+        if (fileIO != null) {
+            wrap(
+                    () -> {
+                        fileIO.close();
+                        return null;
+                    });
+        }
     }
 
     protected abstract FileIO createFileIO(Path path);

@@ -26,7 +26,11 @@ import java.io.IOException;
 import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /** Tests for {@link PluginFileIO}. */
@@ -56,11 +60,55 @@ class PluginFileIOTest {
         assertThat(Thread.currentThread().getContextClassLoader()).isSameAs(original);
     }
 
+    @Test
+    void testCloseReleasesTheDelegateUnderThePluginClassLoader() throws IOException {
+        FileIO delegate = mock(FileIO.class);
+        ClassLoader pluginClassLoader = new ClassLoader() {};
+        TestPluginFileIO fileIO = new TestPluginFileIO(delegate, pluginClassLoader);
+        ClassLoader original = Thread.currentThread().getContextClassLoader();
+        doAnswer(
+                        ignored -> {
+                            assertThat(Thread.currentThread().getContextClassLoader())
+                                    .isSameAs(pluginClassLoader);
+                            return null;
+                        })
+                .when(delegate)
+                .close();
+
+        new TestPluginFileIO(delegate, pluginClassLoader).close();
+        verify(delegate, never()).close();
+
+        fileIO.exists(new Path("oss://bucket/table/file"));
+        fileIO.close();
+
+        verify(delegate).close();
+        assertThat(Thread.currentThread().getContextClassLoader()).isSameAs(original);
+
+        fileIO.close();
+        verify(delegate).close();
+    }
+
+    @Test
+    void testUseAfterCloseFailsWithIOExceptionRatherThanNpe() throws IOException {
+        FileIO delegate = mock(FileIO.class);
+        TestPluginFileIO fileIO = new TestPluginFileIO(delegate, new ClassLoader() {});
+        Path path = new Path("oss://bucket/table/file");
+
+        fileIO.exists(path);
+        fileIO.close();
+
+        assertThatThrownBy(() -> fileIO.exists(path))
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("closed");
+        assertThat(fileIO.createdCount).isEqualTo(1);
+    }
+
     private static class TestPluginFileIO extends PluginFileIO {
 
         private final FileIO delegate;
         private final ClassLoader classLoader;
         private Path createdFor;
+        private int createdCount;
 
         private TestPluginFileIO(FileIO delegate, ClassLoader classLoader) {
             this.delegate = delegate;
@@ -75,6 +123,7 @@ class PluginFileIOTest {
         @Override
         protected FileIO createFileIO(Path path) {
             createdFor = path;
+            createdCount++;
             return delegate;
         }
 
