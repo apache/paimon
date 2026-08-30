@@ -273,11 +273,15 @@ public class CoreOptionsTest {
     @Test
     public void testVideoFrameFieldIsRecognizedAsBlobField() {
         Options options = new Options();
-        options.set(CoreOptions.BLOB_FIELD, "image, video");
-        options.set(CoreOptions.VIDEO_FRAME_FIELD, "video");
+        options.set(CoreOptions.BLOB_FIELD, "image");
+        options.set(CoreOptions.VIDEO_FRAME_FIELD, "camera_a, camera_b");
 
-        assertThat(CoreOptions.blobField(options.toMap())).containsExactly("image", "video");
-        assertThat(new CoreOptions(options).videoFrameFields()).containsExactly("video");
+        assertThat(CoreOptions.blobField(options.toMap()))
+                .containsExactly("image", "camera_a", "camera_b");
+        assertThat(new CoreOptions(options).videoFrameFields())
+                .containsExactly("camera_a", "camera_b");
+        assertThatThrownBy(() -> new CoreOptions(options).videoFrameField())
+                .hasMessageContaining("use videoFrameFields()");
     }
 
     @Test

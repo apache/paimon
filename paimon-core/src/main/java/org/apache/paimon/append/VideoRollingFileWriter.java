@@ -46,9 +46,8 @@ class VideoRollingFileWriter<R> extends RollingFileWriterImpl<InternalRow, R> {
 
     VideoRollingFileWriter(
             Supplier<? extends SingleFileWriter<InternalRow, R>> writerFactory,
-            long targetFileSize,
-            long targetFileRowNum) {
-        super(writerFactory, targetFileSize, targetFileRowNum);
+            long targetFileSize) {
+        super(writerFactory, targetFileSize, Long.MAX_VALUE);
     }
 
     @Override
@@ -66,12 +65,8 @@ class VideoRollingFileWriter<R> extends RollingFileWriterImpl<InternalRow, R> {
     }
 
     @Override
-    protected void onRollingCondition(InternalRow row) throws IOException {
-        if (currentVideo == null) {
-            closeCurrentWriter();
-        } else {
-            pendingRoll = true;
-        }
+    protected void onRollingCondition(InternalRow row) {
+        pendingRoll = true;
     }
 
     @Override

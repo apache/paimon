@@ -607,32 +607,6 @@ public class DataEvolutionFileStoreScanTest {
     }
 
     @Test
-    public void testSpanningSidecarDoesNotExpandStatsRange() {
-        Schema schema = createSchema("f0");
-        TableSchema tableSchema = TableSchema.create(0L, schema);
-        schemas.put(0L, tableSchema);
-        SimpleStats stats =
-                createSimpleStats(
-                        GenericRow.of(0),
-                        GenericRow.of(9),
-                        createBinaryArray(new int[] {0}),
-                        new int[] {0});
-
-        EvolutionStats result =
-                DataEvolutionFileStoreScan.evolutionStats(
-                        tableSchema,
-                        scanTableSchema,
-                        Arrays.asList(
-                                createManifestEntry(0L, stats, "normal.parquet", 0L, 0L, 10L),
-                                createManifestEntry(0L, stats, "camera.video", 0L, 0L, 20L)),
-                        new EvolutionStatsCache());
-
-        assertThat(result.rowCount()).isEqualTo(10);
-        assertThat(result.minValues().getInt(0)).isEqualTo(0);
-        assertThat(result.maxValues().getInt(0)).isEqualTo(9);
-    }
-
-    @Test
     public void testInvalidProviderStatsAreUnknown() {
         Schema schema = createSchema("f0");
         TableSchema tableSchema = TableSchema.create(0L, schema);

@@ -197,22 +197,6 @@ class MultimodalTableTest(unittest.TestCase):
         self.assertTrue(descriptors[0].uri.endswith(".video"))
         self.assertEqual(2, len({d.payload_descriptor for d in descriptors}))
 
-    def test_add_video_requires_column_when_multiple_video_fields_configured(self):
-        table = self.conn.create_table(
-            "multi_video_frames",
-            schema=_schema({
-                "episode_id": pa.int64(),
-                "camera_a": pa.large_binary(),
-                "camera_b": pa.large_binary(),
-            }),
-            options=dict(_PARQUET_OPTIONS, **{
-                "video-frame-field": "camera_a,camera_b",
-            }),
-        )
-
-        with self.assertRaisesRegex(ValueError, "video_column is required"):
-            table.add_video(None, [])
-
     def test_normal_update_preserves_video_descriptors(self):
         from pypaimon.table.row.blob import Blob
 
@@ -982,44 +966,6 @@ class MultimodalTableTest(unittest.TestCase):
                 {"id": 3, "name": "Carol", "age": 40},
             ],
             users.scan().to_list(),
-        )
-
-    def test_overwrite_keeps_blob_commit_message_range(self):
-        obs = self.conn.create_table(
-            "overwrite_blob_groups",
-            schema=_schema({
-                "id": pa.int32(),
-                "image": pa.large_binary(),
-            }),
-            options=_PARQUET_OPTIONS,
-        )
-        obs.add([{"id": 0, "image": b"old-image"}])
-        builder = obs.raw_table.new_batch_write_builder().overwrite()
-        messages = []
-
-        normal_write = builder.new_write().with_write_type(["id"])
-        blob_write = builder.new_write()
-        commit = builder.new_commit()
-        try:
-            normal_write.write_arrow(pa.table({
-                "id": pa.array([1], type=pa.int32()),
-            }))
-            messages.extend(normal_write.prepare_commit())
-            blob_write.write_arrow(pa.table({
-                "id": pa.array([2], type=pa.int32()),
-                "image": pa.array([b"image-2"], type=pa.large_binary()),
-            }))
-            messages.extend(blob_write.prepare_commit())
-            commit.commit(messages)
-        finally:
-            normal_write.close()
-            blob_write.close()
-            commit.close()
-
-        scalar, blobs = obs.scan().read_blobs("image")
-        self.assertEqual(
-            {1: None, 2: b"image-2"},
-            dict(zip(scalar["id"].to_pylist(), blobs["image"])),
         )
 
     def test_empty_overwrite_clears_unpartitioned_table(self):

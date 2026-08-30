@@ -406,8 +406,10 @@ class CoreOptions:
         .string_type()
         .no_default_value()
         .with_description(
-            "Scalar BLOB fields whose logical values are frames in encoded "
-            "videos packed into '.video' files."
+            "Comma-separated scalar BLOB fields whose logical values are "
+            "frames in encoded videos packed into '.video' files. Payload "
+            "boundaries may be nested across fields, but every change must "
+            "occur at a logical episode boundary."
         )
     )
 
@@ -1246,6 +1248,15 @@ class CoreOptions:
     def blob_field(self, default=None):
         value = self.options.get(CoreOptions.BLOB_FIELD, default)
         return CoreOptions._parse_field_set(value)
+
+    def video_frame_field(self, default=None) -> Optional[str]:
+        fields = self.video_frame_fields(default)
+        if len(fields) > 1:
+            raise ValueError(
+                "'video-frame-field' configures multiple fields "
+                f"{sorted(fields)}; use video_frame_fields()."
+            )
+        return next(iter(fields)) if fields else None
 
     def video_frame_fields(self, default=None):
         value = self.options.get(CoreOptions.VIDEO_FRAME_FIELD, default)

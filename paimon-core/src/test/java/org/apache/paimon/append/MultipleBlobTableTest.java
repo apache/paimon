@@ -32,9 +32,6 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.TableTestBase;
-import org.apache.paimon.table.sink.BatchTableCommit;
-import org.apache.paimon.table.sink.BatchTableWrite;
-import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -96,41 +93,6 @@ public class MultipleBlobTableTest extends TableTestBase {
                 });
 
         assertThat(integer.get()).isEqualTo(1000);
-    }
-
-    @Test
-    public void testOverwriteKeepsBlobCommitMessageRange() throws Exception {
-        createTableDefault();
-        commitDefault(writeDataDefault(1, 1));
-        FileStoreTable table = getTableDefault();
-        BatchWriteBuilder builder = table.newBatchWriteBuilder().withOverwrite();
-        List<CommitMessage> messages = new ArrayList<>();
-
-        RowType normalType = schemaDefault().rowType().project(Arrays.asList("f0", "f1"));
-        try (BatchTableWrite write = builder.newWrite().withWriteType(normalType)) {
-            write.write(GenericRow.of(1, BinaryString.fromString("normal-only")));
-            messages.addAll(write.prepareCommit());
-        }
-        try (BatchTableWrite write = builder.newWrite()) {
-            write.write(
-                    GenericRow.of(
-                            2,
-                            BinaryString.fromString("with-blobs"),
-                            new BlobData(blobBytes1),
-                            new BlobData(blobBytes2)));
-            messages.addAll(write.prepareCommit());
-        }
-        try (BatchTableCommit commit = builder.newCommit()) {
-            commit.commit(messages);
-        }
-
-        List<InternalRow> rows = read(table);
-        rows.sort((a, b) -> Integer.compare(a.getInt(0), b.getInt(0)));
-        assertThat(rows.size()).isEqualTo(2);
-        assertThat(rows.get(0).isNullAt(2)).isTrue();
-        assertThat(rows.get(0).isNullAt(3)).isTrue();
-        assertThat(rows.get(1).getBlob(2).toData()).isEqualTo(blobBytes1);
-        assertThat(rows.get(1).getBlob(3).toData()).isEqualTo(blobBytes2);
     }
 
     @Test

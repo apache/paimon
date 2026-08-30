@@ -589,11 +589,7 @@ class CompositeFlushResumeTest(unittest.TestCase):
             self._committed_files_to_delete_on_abort = []
             self.file_io = _RecordingFileIO()
             self.written = []
-            first_blob = next(iter(blob_writers.values()), None)
-            self.total_record_count = first_blob._row_count if first_blob else 0
-            self._blob_prepared_record_counts = {
-                column: 0 for column in self.blob_file_column_names
-            }
+            self._video_group_policy = None
 
         def _write_normal_data_to_file(self, data: pa.Table):
             self.written.append(data)
@@ -684,7 +680,7 @@ class CompositeFlushResumeTest(unittest.TestCase):
         self.assertIsNone(writer._pending_normal_meta)
         self.assertTrue(vector.aborted)
 
-    def test_dedicated_writer_failed_blob_phase_resumes_without_rewrite(self):
+    def test_dedicated_writer_failed_blob_phase_publishes_nothing(self):
         blob = _StubSidecarWriter(3, 'blob-0', fail_times=1)
         writer = self._DedicatedHarness({'payload': blob})
         writer._normal_buffer.append(_table(0, 3))
@@ -692,7 +688,8 @@ class CompositeFlushResumeTest(unittest.TestCase):
         with self.assertRaises(IOError):
             writer._close_current_writers()
         self.assertEqual([t.num_rows for t in writer.written], [3])
-        self.assertEqual([m.file_name for m in writer.committed_files], ['data-1'])
+        self.assertEqual(writer.committed_files, [])
+        # Already tracked for abort, since no committed list holds it yet.
         self.assertEqual(
             [m.file_name for m in writer._committed_files_to_delete_on_abort],
             ['data-1'])
@@ -704,17 +701,17 @@ class CompositeFlushResumeTest(unittest.TestCase):
         self.assertEqual(blob.committed_files, [])
         self.assertIsNone(writer._pending_normal_meta)
 
-    def test_dedicated_writer_keeps_normal_vector_ranges_before_blobs(self):
+    def test_dedicated_writer_keeps_the_documented_meta_order(self):
         blob = _StubSidecarWriter(3, 'blob-0')
         vector = _StubSidecarWriter(3, 'vector-0')
         writer = self._DedicatedHarness({'payload': blob}, vector)
         writer._normal_buffer.append(_table(0, 3))
         writer._close_current_writers()
         self.assertEqual([m.file_name for m in writer.committed_files],
-                         ['data-1', 'vector-0', 'blob-0'])
+                         ['data-1', 'blob-0', 'vector-0'])
         self.assertEqual(
             [m.file_name for m in writer._committed_files_to_delete_on_abort],
-            ['data-1', 'vector-0', 'blob-0'])
+            ['data-1', 'blob-0', 'vector-0'])
 
     def test_dedicated_writer_respects_the_blob_delete_policy(self):
         # Externally managed blob files are not the writer's to delete, so they

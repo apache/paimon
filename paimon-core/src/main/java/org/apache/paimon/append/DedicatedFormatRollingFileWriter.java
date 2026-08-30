@@ -18,7 +18,9 @@
 
 package org.apache.paimon.append;
 
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.VideoFrameDescriptor;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
@@ -50,6 +52,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -73,8 +76,9 @@ import static org.apache.paimon.types.VectorType.fieldsInVectorFile;
  *       lance)
  * </ul>
  *
- * <p>Normal and vector files roll together. Blob files roll independently so an encoded video
- * payload is never duplicated just to match a normal-file boundary.
+ * <p>File rolling is triggered based on the target file size for each type. When rolling occurs,
+ * all active writers are closed together to maintain consistency. One normal data file may
+ * correspond to multiple blob/vector files.
  *
  * <pre>
  * Example file structure:
@@ -109,7 +113,7 @@ public class DedicatedFormatRollingFileWriter
             vectorStoreWriterFactory;
     private final long targetFileSize;
     private final long targetFileRowNum;
-    private final Set<String> blobFileFields;
+    private final int[] videoFrameFieldIndexes;
 
     // State management
     private final List<FileWriterAbortExecutor> closedWriters;
@@ -123,6 +127,8 @@ public class DedicatedFormatRollingFileWriter
             vectorStoreWriter;
     private long recordCount = 0;
     private long currentFileRecordCount = 0;
+    private @Nullable List<BlobDescriptor> currentVideoGroup;
+    private boolean pendingGroupAwareRoll;
     private boolean closed = false;
 
     public DedicatedFormatRollingFileWriter(
@@ -150,6 +156,7 @@ public class DedicatedFormatRollingFileWriter
                 targetFileRowNum);
         this.targetFileSize = targetFileSize;
         this.targetFileRowNum = targetFileRowNum;
+        this.videoFrameFieldIndexes = videoFrameFieldIndexes(writeSchema, context);
         this.results = new ArrayList<>();
         this.closedWriters = new ArrayList<>();
 
@@ -162,10 +169,8 @@ public class DedicatedFormatRollingFileWriter
         Set<String> fieldsInDedicatedFile =
                 fieldNamesInVectorFile(writeSchema, vectorFileFormat != null);
         if (context != null) {
-            this.blobFileFields = fieldNamesInBlobFile(writeSchema, context.blobInlineFields());
-            fieldsInDedicatedFile.addAll(blobFileFields);
-        } else {
-            this.blobFileFields = Collections.emptySet();
+            fieldsInDedicatedFile.addAll(
+                    fieldNamesInBlobFile(writeSchema, context.blobInlineFields()));
         }
         List<DataField> fieldsInNormalFile = new ArrayList<>();
         for (DataField field : writeSchema.getFields()) {
@@ -207,7 +212,6 @@ public class DedicatedFormatRollingFileWriter
                                     asyncFileWrite,
                                     statsDenseStore,
                                     blobTargetFileSize,
-                                    targetFileRowNum,
                                     context);
         } else {
             this.blobWriterFactory = null;
@@ -344,6 +348,10 @@ public class DedicatedFormatRollingFileWriter
     @Override
     public void write(InternalRow row) throws IOException {
         try {
+            List<BlobDescriptor> nextVideoGroup = videoPayloadDescriptors(row);
+            if (pendingGroupAwareRoll && !Objects.equals(currentVideoGroup, nextVideoGroup)) {
+                closeCurrentWriter();
+            }
             if (writerFactory != null && currentWriter == null) {
                 currentWriter = writerFactory.get();
             }
@@ -364,9 +372,14 @@ public class DedicatedFormatRollingFileWriter
             }
             recordCount++;
             currentFileRecordCount++;
+            currentVideoGroup = nextVideoGroup;
 
             if (rollingFile()) {
-                closeNormalAndVectorWriters();
+                if (nextVideoGroup == null) {
+                    closeCurrentWriter();
+                } else {
+                    pendingGroupAwareRoll = true;
+                }
             }
         } catch (Throwable e) {
             handleWriteException(e);
@@ -429,8 +442,8 @@ public class DedicatedFormatRollingFileWriter
     }
 
     /**
-     * Checks if the current normal/vector range should be rolled. Blob writers manage their own
-     * rolling.
+     * Checks if the current file should be rolled. The row cap applies even when there is no main
+     * writer (all fields dedicated), so blob/vector writers roll together.
      */
     private boolean rollingFile() throws IOException {
         if (currentFileRecordCount >= targetFileRowNum) {
@@ -444,7 +457,8 @@ public class DedicatedFormatRollingFileWriter
     }
 
     /**
-     * Closes the current writers and processes their results.
+     * Closes the current writer and processes the results. Validates consistency between main and
+     * blob files.
      *
      * @throws IOException if closing fails
      */
@@ -453,30 +467,59 @@ public class DedicatedFormatRollingFileWriter
             return;
         }
 
+        // Close main writer and get metadata
         DataFileMeta mainDataFileMeta = currentWriter == null ? null : closeMainWriter();
+
+        // Close blob writer and process blob metadata
         List<DataFileMeta> blobMetas = closeBlobWriter();
+
+        // Close vector-store writer and process vector-store metadata
         List<DataFileMeta> vectorStoreMetas = closeVectorStoreWriter();
+
         if (mainDataFileMeta != null) {
-            validateFileConsistency(mainDataFileMeta, Collections.emptyList(), vectorStoreMetas);
+            // Validate consistency between main and blob files
+            validateFileConsistency(mainDataFileMeta, blobMetas, vectorStoreMetas);
             results.add(mainDataFileMeta);
         }
-        validateBlobConsistency(blobMetas);
+
+        // Add results to the results list
         results.addAll(blobMetas);
         results.addAll(vectorStoreMetas);
+
+        // Reset current writer
         currentWriter = null;
         currentFileRecordCount = 0;
+        currentVideoGroup = null;
+        pendingGroupAwareRoll = false;
     }
 
-    private void closeNormalAndVectorWriters() throws IOException {
-        DataFileMeta mainDataFileMeta = currentWriter == null ? null : closeMainWriter();
-        List<DataFileMeta> vectorStoreMetas = closeVectorStoreWriter();
-        if (mainDataFileMeta != null) {
-            validateFileConsistency(mainDataFileMeta, Collections.emptyList(), vectorStoreMetas);
-            results.add(mainDataFileMeta);
+    private static int[] videoFrameFieldIndexes(
+            RowType writeSchema, @Nullable BlobFileContext context) {
+        if (context == null || context.videoFrameFields().isEmpty()) {
+            return new int[0];
         }
-        results.addAll(vectorStoreMetas);
-        currentWriter = null;
-        currentFileRecordCount = 0;
+        Set<String> configured = context.videoFrameFields();
+        return writeSchema.getFieldNames().stream()
+                .filter(configured::contains)
+                .mapToInt(writeSchema::getFieldIndex)
+                .toArray();
+    }
+
+    private @Nullable List<BlobDescriptor> videoPayloadDescriptors(InternalRow row) {
+        if (videoFrameFieldIndexes.length == 0) {
+            return null;
+        }
+        List<BlobDescriptor> descriptors = new ArrayList<>(videoFrameFieldIndexes.length);
+        boolean hasVideo = false;
+        for (int index : videoFrameFieldIndexes) {
+            BlobDescriptor descriptor =
+                    row.isNullAt(index)
+                            ? null
+                            : VideoFrameDescriptor.payloadDescriptor(row.getBlob(index));
+            descriptors.add(descriptor);
+            hasVideo |= descriptor != null;
+        }
+        return hasVideo ? descriptors : null;
     }
 
     /** Closes the main writer and returns its metadata. */
@@ -541,22 +584,6 @@ public class DedicatedFormatRollingFileWriter
                             "This is a bug: The row count of main file and vector-store files does not match. "
                                     + "Main file: %s (row count: %d), vector-store files: %s (total row count: %d)",
                             mainDataFileMeta, mainRowCount, vectorStoreMetas, vectorStoreRowCount));
-        }
-    }
-
-    private void validateBlobConsistency(List<DataFileMeta> blobMetas) {
-        Map<String, Long> blobRowCounts = new HashMap<>();
-        for (DataFileMeta file : blobMetas) {
-            blobRowCounts.merge(file.writeCols().get(0), file.rowCount(), Long::sum);
-        }
-        for (String field : blobFileFields) {
-            long rowCount = blobRowCounts.getOrDefault(field, 0L);
-            if (rowCount != recordCount) {
-                throw new IllegalStateException(
-                        String.format(
-                                "This is a bug: blob field %s contains %d rows, expected %d.",
-                                field, rowCount, recordCount));
-            }
         }
     }
 

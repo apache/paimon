@@ -2695,11 +2695,14 @@ public class CoreOptions implements Serializable {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Specifies scalar BLOB fields whose logical rows are video frames. "
+                            "Specifies comma-separated scalar BLOB fields whose logical rows are "
+                                    + "video frames. "
                                     + "Complete encoded videos and embedded frame-run indexes are "
-                                    + "packed into '.video' files. The first version supports "
-                                    + "append-only data-evolution tables and exact "
-                                    + "VideoFrameDescriptor input.");
+                                    + "packed into '.video' files. Payload boundaries may be "
+                                    + "nested across fields, but every change must occur at a "
+                                    + "logical episode boundary. The "
+                                    + "first version supports append-only data-evolution tables "
+                                    + "and exact VideoFrameDescriptor input.");
 
     @Immutable
     public static final ConfigOption<String> BLOB_DESCRIPTOR_FIELD =
@@ -3601,6 +3604,22 @@ public class CoreOptions implements Serializable {
     /** Resolve scalar BLOB fields stored as frame runs in video pack files. */
     public Set<String> videoFrameFields() {
         return parseCommaSeparatedSet(VIDEO_FRAME_FIELD);
+    }
+
+    /**
+     * Resolve the sole scalar BLOB field stored as frame runs in video pack files.
+     *
+     * @deprecated Use {@link #videoFrameFields()}.
+     */
+    @Deprecated
+    public Optional<String> videoFrameField() {
+        Set<String> fields = videoFrameFields();
+        checkArgument(
+                fields.size() <= 1,
+                "'%s' configures multiple fields %s; use videoFrameFields().",
+                VIDEO_FRAME_FIELD.key(),
+                fields);
+        return fields.stream().findFirst();
     }
 
     /**

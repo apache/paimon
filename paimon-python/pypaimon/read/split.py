@@ -198,14 +198,9 @@ class DataSplit(Split):
         if not self._files:
             return 0
         
-        file_ranges = [
-            file.row_id_range()
-            for file in self._files
-            if (not DataFileMeta.is_blob_file(file.file_name)
-                and not DataFileMeta.is_vector_file(file.file_name))
-        ]
-        if not file_ranges:
-            file_ranges = [file.row_id_range() for file in self._files]
+        file_ranges = []
+        for file in self._files:
+            file_ranges.append(file.row_id_range())
         
         if not file_ranges:
             return 0

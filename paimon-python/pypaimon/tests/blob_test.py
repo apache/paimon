@@ -1588,57 +1588,6 @@ class BlobEndToEndTest(unittest.TestCase):
                 finally:
                     reader.close()
 
-    def test_blob_readers_share_cached_index(self):
-        file_io = LocalFileIO(self.temp_dir, Options({}))
-        field = DataField(0, "blob_field", AtomicType("BLOB"))
-        path = Path(self.temp_dir) / "cached-index.blob"
-        from pypaimon.write.blob_format_writer import BlobFormatWriter
-        with open(path, "wb") as output:
-            writer = BlobFormatWriter(output)
-            for value in (b"zero", b"one", b"two"):
-                writer.add_element(GenericRow(
-                    [BlobData(value)], [field], RowKind.INSERT
-                ))
-            writer.close()
-
-        cache = {}
-        readers = []
-        input_stream_patch = patch.object(
-            file_io, "new_input_stream", wraps=file_io.new_input_stream
-        )
-        decompress_patch = patch.object(
-            DeltaVarintCompressor,
-            "decompress",
-            wraps=DeltaVarintCompressor.decompress,
-        )
-        with input_stream_patch as new_input_stream, decompress_patch as decompress:
-            for row_indices, blob_as_descriptor, parallelism in (
-                ([0, 2], True, 1),
-                ([1], True, 1),
-                ([0], False, 2),
-            ):
-                readers.append(FormatBlobReader(
-                    file_io=file_io,
-                    file_path=_to_url(path),
-                    read_fields=[field.name],
-                    full_fields=[field],
-                    push_down_predicate=None,
-                    blob_as_descriptor=blob_as_descriptor,
-                    row_indices=row_indices,
-                    blob_parallelism=parallelism,
-                    blob_index_cache=cache,
-                ))
-            self.assertEqual(1, decompress.call_count)
-            self.assertEqual(1, new_input_stream.call_count)
-
-        try:
-            self.assertEqual(
-                [2, 1, 1], [reader.record_count for reader in readers]
-            )
-        finally:
-            for reader in readers:
-                reader.close()
-
     def test_split_read_passes_blob_file_size(self):
         from pypaimon.read.split import DataSplit
         from pypaimon.read.split_read import (
@@ -1684,28 +1633,19 @@ class BlobEndToEndTest(unittest.TestCase):
             table, None, [field], split, False)
 
         with patch("pypaimon.read.split_read.FormatBlobReader") as reader_cls:
-            def assert_reader_arguments(expected_cache=None):
+            def assert_file_size():
                 args, kwargs = reader_cls.call_args
                 arguments = inspect.signature(FormatBlobReader).bind_partial(
                     *args, **kwargs
                 ).arguments
                 self.assertEqual(123, arguments.get("file_size"))
-                self.assertIs(
-                    expected_cache, arguments.get("blob_index_cache")
-                )
 
             raw_read.file_reader_supplier(file, False, [field.name], False)
-            assert_reader_arguments()
-
-            reader_cls.reset_mock()
-            evolution_read.file_reader_supplier(
-                file, False, [field.name], False
-            )
-            assert_reader_arguments(evolution_read._blob_index_cache)
+            assert_file_size()
 
             reader_cls.reset_mock()
             evolution_read._create_raw_blob_file_reader(file, [field.name])
-            assert_reader_arguments(evolution_read._blob_index_cache)
+            assert_file_size()
 
     def test_blob_reader_row_indices_pushdown(self):
         file_io = LocalFileIO(self.temp_dir, Options({}))

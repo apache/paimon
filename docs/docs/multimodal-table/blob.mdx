@@ -49,10 +49,13 @@ When you define a table with a Blob column, Paimon automatically separates the s
 1. **Normal Data Files** (e.g., `.parquet`, `.orc`): Store regular columns (INT, STRING, etc.)
 2. **Blob Data Files** (`.blob`): Store the actual blob data
 
-For append-only video-frame workloads, one scalar BLOB field can instead use the independent
+For append-only video-frame workloads, one or more scalar BLOB fields can instead use the
 **video pack format** (`.video`). A video pack concatenates several complete encoded videos and
 embeds a compact frame-run index. The frame ordinal lives in `VideoFrameDescriptor`; it does not
-need a `frame_index` or `frame_timestamp` column in the normal data file.
+need a `frame_index` or `frame_timestamp` column in the normal data file. When multiple video
+fields are configured, their physical boundaries may be nested, but every payload change must
+occur at a logical episode boundary so the normal and dedicated files remain one aligned file
+group.
 
 For example, given a table with schema `(id INT, name STRING, picture BLOB)`:
 
@@ -114,7 +117,7 @@ Flink, Spark, and Python.
       <td>No</td>
       <td style={{wordWrap: "break-word"}}>-</td>
       <td>String</td>
-      <td>Names scalar BLOB fields whose logical values are frames in complete encoded videos packed into <code>.video</code> files. Multiple fields are comma-separated. This first version supports append-only tables and exact <code>VideoFrameDescriptor</code>-backed input only.</td>
+      <td>Names one or more comma-separated scalar BLOB fields whose logical values are frames in complete encoded videos packed into <code>.video</code> files. Configured fields must share logical episode boundaries. This version supports append-only tables and exact <code>VideoFrameDescriptor</code>-backed input only.</td>
     </tr>
     <tr>
       <td><h5>blob-as-descriptor</h5></td>
@@ -282,18 +285,19 @@ schema = Schema.from_pyarrow_schema(
 ## Video Frame Storage
 
 Use `video-frame-field` when the logical table has one row per frame while the physical storage
-and decoding unit is a complete encoded video. The option also marks a SQL `BYTES` or `BINARY`
-column as a BLOB column. It selects an independent `.video` format; the ordinary `.blob` version
-and layout are not changed.
+and decoding unit is a complete encoded video. The comma-separated option also marks each named
+SQL `BYTES` or `BINARY` column as a BLOB column. It selects the dedicated `.video` format; the
+ordinary `.blob` version and layout are not changed.
 
 ```sql
 CREATE TABLE video_frames (
     episode_id BIGINT,
-    video BYTES
+    camera_front BYTES,
+    camera_wrist BYTES
 ) WITH (
     'row-tracking.enabled' = 'true',
     'data-evolution.enabled' = 'true',
-    'video-frame-field' = 'video'
+    'video-frame-field' = 'camera_front,camera_wrist'
 );
 ```
 
@@ -306,10 +310,14 @@ entry per row. NULL and data-evolution placeholders use negative run references.
 
 Physical reuse uses exact payload descriptor identity (URI, offset, and length), not a content
 hash. It is local to each `.video` file: every pack is self-contained and never points at payloads
-owned by another Paimon data file. Each configured field rolls independently. A pack can contain
-multiple MP4 payloads. After a size or row target is reached, rolling waits for the current physical
-video group to end, making the target soft for large videos. A later commit or an earlier roll can
-store another physical copy of the same source video.
+owned by another Paimon data file. A pack can contain multiple MP4 payloads. After a size or row
+target is reached, rolling waits for the current physical video group to end, making the target
+soft for large videos. A later commit or an earlier roll can store another physical copy of the
+same source video. For multi-camera tables, payload boundaries may be nested across fields as long
+as every transition is an episode boundary. Once a target is reached within an episode, normal,
+BLOB, and vector rolling is deferred until the next payload boundary and all active writers close
+together. The resulting file group remains row-aligned and a single large episode may exceed the
+configured target.
 
 Compaction byte-copies the complete encoded-video ranges into a new self-contained `.video` pack
 and rebuilds the embedded indexes; it does not decode or re-encode frames. The aligned normal data
@@ -319,7 +327,8 @@ frame mapping in the `.video` descriptor/index path.
 Current restrictions:
 
 - Append-only tables only; primary-key tables continue to use managed BLOB storage.
-- The field must be a scalar `BLOB`; `ARRAY<BLOB>` and `MAP<K, BLOB>` continue to use `.blob`.
+- Every configured field must be a scalar `BLOB`; `ARRAY<BLOB>` and `MAP<K, BLOB>` continue to use
+  `.blob`.
 - Non-null writes must be exact descriptor-backed `BlobRef` values containing a
   `VideoFrameDescriptor`. Inline bytes and ordinary `BlobDescriptor` values are rejected.
 - Version 1 addresses frames by zero-based presentation-order ordinal with stride one. It does not

@@ -26,8 +26,6 @@ import org.apache.paimon.utils.RoaringBitmap32;
 
 import javax.annotation.Nullable;
 
-import java.util.Map;
-
 /** the context for creating RecordReader {@link RecordReader}. */
 public class FormatReaderContext implements FormatReaderFactory.Context {
 
@@ -36,7 +34,6 @@ public class FormatReaderContext implements FormatReaderFactory.Context {
     private final long fileSize;
     @Nullable private final RoaringBitmap32 selection;
     @Nullable private final ReadBatchSizer readBatchSizer;
-    @Nullable private final Map<Path, Object> metadataCache;
 
     public FormatReaderContext(
             FileIO fileIO,
@@ -44,22 +41,11 @@ public class FormatReaderContext implements FormatReaderFactory.Context {
             long fileSize,
             @Nullable RoaringBitmap32 selection,
             @Nullable ReadBatchSizer readBatchSizer) {
-        this(fileIO, file, fileSize, selection, readBatchSizer, null);
-    }
-
-    public FormatReaderContext(
-            FileIO fileIO,
-            Path file,
-            long fileSize,
-            @Nullable RoaringBitmap32 selection,
-            @Nullable ReadBatchSizer readBatchSizer,
-            @Nullable Map<Path, Object> metadataCache) {
         this.fileIO = fileIO;
         this.file = file;
         this.fileSize = fileSize;
         this.selection = selection;
         this.readBatchSizer = readBatchSizer;
-        this.metadataCache = metadataCache;
     }
 
     @Override
@@ -87,11 +73,5 @@ public class FormatReaderContext implements FormatReaderFactory.Context {
     @Override
     public ReadBatchSizer readBatchSizer() {
         return readBatchSizer;
-    }
-
-    @Nullable
-    @Override
-    public Map<Path, Object> metadataCache() {
-        return metadataCache;
     }
 }

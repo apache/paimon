@@ -61,7 +61,6 @@ public class MultipleBlobFileWriter implements Closeable {
             boolean asyncFileWrite,
             boolean statsDenseStore,
             long targetFileSize,
-            long targetFileRowNum,
             BlobFileContext context) {
         RowType blobRowType =
                 new RowType(fieldsInBlobFile(writeSchema, context.blobInlineFields()));
@@ -115,10 +114,9 @@ public class MultipleBlobFileWriter implements Closeable {
                                     null);
             RollingFileWriterImpl<InternalRow, DataFileMeta> rollingWriter =
                     video
-                            ? new VideoRollingFileWriter<>(
-                                    writerFactory, targetFileSize, targetFileRowNum)
+                            ? new VideoRollingFileWriter<>(writerFactory, targetFileSize)
                             : new RollingFileWriterImpl<>(
-                                    writerFactory, targetFileSize, targetFileRowNum);
+                                    writerFactory, targetFileSize, Long.MAX_VALUE);
             blobWriters.add(
                     new BlobProjectedFileWriter(
                             rollingWriter,

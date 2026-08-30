@@ -51,9 +51,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 import static org.apache.paimon.utils.StreamUtils.intToLittleEndian;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -181,47 +179,6 @@ public class VideoFileFormatTest {
             assertThat(iterator.returnedPosition()).isEqualTo(3L);
             assertThat(iterator.next()).isNull();
         }
-    }
-
-    @Test
-    public void testReadersShareCachedMetadata() throws IOException {
-        byte[] bytes = "first-mp4".getBytes();
-        write(sourceFrame("first.mp4", bytes, 0), sourceFrame("first.mp4", bytes, 1));
-
-        VideoFileFormat format = new VideoFileFormat(BlobFormatWriter.DEFAULT_COPY_BUFFER_SIZE);
-        FormatReaderFactory readerFactory = format.createReaderFactory(null, rowType, null);
-        Map<Path, Object> metadataCache = new HashMap<>();
-        RoaringBitmap32 firstSelection = new RoaringBitmap32();
-        firstSelection.add(0);
-        FormatReaderContext firstContext =
-                new FormatReaderContext(
-                        fileIO,
-                        file,
-                        fileIO.getFileSize(file),
-                        firstSelection,
-                        null,
-                        metadataCache);
-        try (FileRecordReader<InternalRow> reader = readerFactory.createReader(firstContext)) {
-            FileRecordIterator<InternalRow> iterator = reader.readBatch();
-            assertThat(descriptor(iterator.next()).frameIndex()).isZero();
-        }
-        Object cachedMetadata = metadataCache.get(file);
-
-        RoaringBitmap32 secondSelection = new RoaringBitmap32();
-        secondSelection.add(1);
-        FormatReaderContext secondContext =
-                new FormatReaderContext(
-                        fileIO,
-                        file,
-                        fileIO.getFileSize(file),
-                        secondSelection,
-                        null,
-                        metadataCache);
-        try (FileRecordReader<InternalRow> reader = readerFactory.createReader(secondContext)) {
-            FileRecordIterator<InternalRow> iterator = reader.readBatch();
-            assertThat(descriptor(iterator.next()).frameIndex()).isOne();
-        }
-        assertThat(metadataCache.get(file)).isSameAs(cachedMetadata);
     }
 
     @Test

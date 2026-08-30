@@ -73,6 +73,10 @@ class DataEvolutionGroupStatsFilter:
             return True
 
     def _group_stats(self, files):
+        group_start = min(file.non_null_row_id_range().from_ for file in files)
+        group_end = max(file.non_null_row_id_range().to for file in files)
+        row_count = group_end - group_start + 1
+
         normal_files = []
         special_field_ids = set()
         for file in files:
@@ -82,13 +86,6 @@ class DataEvolutionGroupStatsFilter:
                 special_field_ids.update(layout.data_fields)
             else:
                 normal_files.append((file, layout))
-        range_files = [file for file, unused_layout in normal_files] or files
-        group_start = min(
-            file.non_null_row_id_range().from_ for file in range_files)
-        group_end = max(
-            file.non_null_row_id_range().to for file in range_files)
-        row_count = group_end - group_start + 1
-
         providers = {}
         for file, layout in normal_files:
             for field_id in layout.data_fields:
