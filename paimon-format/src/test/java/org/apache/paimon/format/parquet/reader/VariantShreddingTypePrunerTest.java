@@ -355,6 +355,36 @@ public class VariantShreddingTypePrunerTest {
         assertThat(physicalElement.getFieldNames()).containsExactly("value");
     }
 
+    @Test
+    public void testMixedArrayAndObjectProjectionRetainsValue() {
+        RowType variantRowType =
+                VariantMetadataUtils.VariantRowTypeBuilder.builder()
+                        .field(DataTypes.INT(), "$[0].x")
+                        .field(DataTypes.INT(), "$.y")
+                        .build();
+
+        GroupType parquetType =
+                createParquetVariantType(
+                        PaimonShreddingUtils.variantShreddingSchema(
+                                DataTypes.ARRAY(
+                                        DataTypes.ROW(
+                                                DataTypes.FIELD(0, "x", DataTypes.INT()),
+                                                DataTypes.FIELD(1, "z", DataTypes.INT())))));
+        Type clipped = VariantShreddingTypePruner.clip(variantRowType, parquetType);
+        RowType physicalV = toRowType(clipped);
+
+        // The parent value fallback must be kept because the object projection $.y cannot be
+        // satisfied from the list-typed typed_value columns.
+        assertThat(physicalV.getFieldNames()).contains("value");
+        assertThat(physicalV.getFieldNames()).contains("typed_value");
+
+        ArrayType physicalList =
+                (ArrayType) physicalV.getTypeAt(physicalV.getFieldIndex("typed_value"));
+        RowType physicalElement = (RowType) physicalList.getElementType();
+        RowType physicalElementTypedValue = getRowType(physicalElement, "typed_value");
+        assertThat(physicalElementTypedValue.getFieldNames()).containsExactly("x");
+    }
+
     private static RowType primitiveArrayShreddingSchema() {
         return PaimonShreddingUtils.variantShreddingSchema(
                 DataTypes.ROW(DataTypes.FIELD(0, "arr", DataTypes.ARRAY(DataTypes.INT()))));

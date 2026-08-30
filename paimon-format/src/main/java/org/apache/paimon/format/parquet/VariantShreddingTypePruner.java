@@ -189,6 +189,14 @@ public class VariantShreddingTypePruner {
             return group;
         }
 
+        // If there are also object projections on this Variant (e.g. querying both $[0].x and
+        // $.y), the typed list columns cannot satisfy the object paths. We must keep the parent
+        // value fallback so that object-shaped rows can still be read correctly.
+        if (!node.children.isEmpty()) {
+            checkArgument(group.containsField(PaimonShreddingUtils.VARIANT_VALUE_FIELD_NAME));
+            newFields.add(group.getType(PaimonShreddingUtils.VARIANT_VALUE_FIELD_NAME));
+        }
+
         Type elementType = parquetListElementType(listGroup);
         Type clippedElement = clipShreddingRow(elementType.asGroupType(), node.arrayElement);
         GroupType repeated = listGroup.getType(0).asGroupType();
