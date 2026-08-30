@@ -117,15 +117,19 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase with AdaptiveSpar
       }
 
       val compact = Future {
-        for (_ <- 1 to 10) {
-          while (!canBeCompacted) {
+        var hasCompacted = false
+        while (!mergeInto.isCompleted || canBeCompacted) {
+          if (canBeCompacted) {
+            sql("CALL sys.compact(table => 't')")
+            val snapshot = t.latestSnapshot().get()
+            assert(snapshot.totalRecordCount > 0)
+            assert(snapshot.totalRecordCount < 12)
+            hasCompacted = true
+          } else {
             Thread.sleep(1)
           }
-          sql("CALL sys.compact(table => 't')")
-          val snapshot = t.latestSnapshot().get()
-          assert(snapshot.totalRecordCount > 0)
-          assert(snapshot.totalRecordCount < 12)
         }
+        assert(hasCompacted)
       }
 
       Await.result(mergeInto, 60.seconds)
