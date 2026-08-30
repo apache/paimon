@@ -21,6 +21,8 @@ from pypaimon.common.options.options import Options
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.index.index_file_handler import IndexFileHandler
 from pypaimon.index.pk.primary_key_index_source_meta import PrimaryKeyIndexSourceMeta
+from pypaimon.index.pk.primary_key_index_source_policy import (
+    should_read as _should_read_source)
 from pypaimon.read.query_auth_split import QueryAuthSplit
 from pypaimon.read.split import DataSplit
 from pypaimon.globalindex.indexed_split import IndexedSplit
@@ -185,11 +187,6 @@ def _bucket_splits(source_splits, entries):
             split, tuple(current), tuple(name for name in active if name not in covered),
             dict(ranges_by_bucket.get(key, {}))))
     return result
-
-
-def _should_read_source(data_file):
-    # FileSource.COMPACT = 1. Match Java PrimaryKeyIndexSourcePolicy.
-    return data_file.file_source == 1 and data_file.level > 0
 
 
 def _residual_row_ranges(table, predicate, split, candidate_ranges):
