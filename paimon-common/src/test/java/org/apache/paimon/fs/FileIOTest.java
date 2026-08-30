@@ -37,7 +37,9 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
@@ -45,6 +47,12 @@ import java.util.concurrent.locks.ReentrantLock;
 import static org.apache.paimon.utils.Preconditions.checkState;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /** Test static methods and methods with default implementations of {@link FileIO}. */
 public class FileIOTest {
@@ -72,6 +80,54 @@ public class FileIOTest {
                         new Path("require-options://" + tempDir.toString()),
                         CatalogContext.create(options));
         assertThat(fileIO).isInstanceOf(RequireOptionsFileIOLoader.MyFileIO.class);
+    }
+
+    @Test
+    public void testCheckedFileIOIsHandedBackInsteadOfReloaded() throws IOException {
+        FileIO singleton = mock(FileIO.class);
+        when(singleton.exists(any())).thenReturn(true);
+
+        FileIO fileIO =
+                FileIO.get(
+                        new Path("singleton://bucket/table"),
+                        CatalogContext.create(
+                                new Options(), new SingletonFileIOLoader(singleton, false), null));
+
+        assertThat(fileIO).isSameAs(singleton);
+        verify(singleton, never()).close();
+        verify(singleton, times(1)).configure(any());
+    }
+
+    @Test
+    public void testCheckedFileIOIsReleasedWhenItsLoaderIsRejected() throws IOException {
+        FileIO singleton = mock(FileIO.class);
+        when(singleton.exists(any())).thenReturn(true);
+
+        FileIO fileIO =
+                FileIO.get(
+                        new Path(tempDir.toUri().toString()),
+                        CatalogContext.create(
+                                new Options(), new SingletonFileIOLoader(singleton, true), null));
+
+        assertThat(fileIO).isNotSameAs(singleton);
+        verify(singleton, times(1)).close();
+    }
+
+    @Test
+    public void testCheckedFileIOIsReleasedWhenSelectionBlowsUp() throws IOException {
+        FileIO singleton = mock(FileIO.class);
+        when(singleton.exists(any())).thenReturn(true);
+        SingletonFileIOLoader loader = new SingletonFileIOLoader(singleton, false);
+        loader.failRequiredOptions = true;
+
+        assertThatThrownBy(
+                        () ->
+                                FileIO.get(
+                                        new Path("singleton://bucket/table"),
+                                        CatalogContext.create(new Options(), loader, null)))
+                .isInstanceOf(IllegalStateException.class);
+
+        verify(singleton, times(1)).close();
     }
 
     @Test
@@ -339,6 +395,42 @@ public class FileIOTest {
             }
 
             return new File(localPath);
+        }
+    }
+
+    /** A {@link FileIOLoader} that hands out the same instance every time, as it is free to do. */
+    private static class SingletonFileIOLoader implements FileIOLoader {
+
+        private static final long serialVersionUID = 1L;
+
+        private final FileIO fileIO;
+        private final boolean requireMissingOption;
+
+        private boolean failRequiredOptions;
+
+        private SingletonFileIOLoader(FileIO fileIO, boolean requireMissingOption) {
+            this.fileIO = fileIO;
+            this.requireMissingOption = requireMissingOption;
+        }
+
+        @Override
+        public String getScheme() {
+            return "singleton";
+        }
+
+        @Override
+        public List<String[]> requiredOptions() {
+            if (failRequiredOptions) {
+                throw new IllegalStateException("this loader cannot tell");
+            }
+            return requireMissingOption
+                    ? Collections.singletonList(new String[] {"missing-option"})
+                    : Collections.emptyList();
+        }
+
+        @Override
+        public FileIO load(Path path) {
+            return fileIO;
         }
     }
 }
