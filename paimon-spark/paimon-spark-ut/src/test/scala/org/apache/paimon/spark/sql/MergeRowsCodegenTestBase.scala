@@ -95,14 +95,12 @@ abstract class MergeRowsCodegenTestBase extends PaimonSparkTestBase {
 
           assert(mergeRowsIsCodegen == expectedCodegen, executedPlan)
           checkAnswer(result, Seq(Row(1, 10), Row(20, 20), Row(3, -1), Row(3, -2)))
-      }
+        }
     }
   }
 
   test("Paimon merge query uses codegen") {
-    withSparkSQLConf(
-      paimonCodegenKey -> "true",
-      "spark.sql.codegen.wholeStage" -> "true") {
+    withSparkSQLConf(paimonCodegenKey -> "true", "spark.sql.codegen.wholeStage" -> "true") {
       withTable("target") {
         sql("""
               |CREATE TABLE target (id INT, v INT)
@@ -112,10 +110,7 @@ abstract class MergeRowsCodegenTestBase extends PaimonSparkTestBase {
 
         val mergeCodegenExecuted = new AtomicBoolean(false)
         val listener = new QueryExecutionListener {
-          override def onSuccess(
-              funcName: String,
-              qe: QueryExecution,
-              durationNs: Long): Unit = {
+          override def onSuccess(funcName: String, qe: QueryExecution, durationNs: Long): Unit = {
             if (containsMergeRowsCodegen(qe.executedPlan)) {
               mergeCodegenExecuted.set(true)
             }
