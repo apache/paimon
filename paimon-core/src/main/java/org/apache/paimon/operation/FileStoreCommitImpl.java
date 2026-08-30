@@ -566,6 +566,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         tryOverwritePartition(
                                 partitionFilter,
                                 changes.appendTableFiles,
+                                changes.appendTableFileGroups,
                                 changes.appendIndexFiles,
                                 committable.identifier(),
                                 committable.watermark(),
@@ -689,13 +690,25 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         tryOverwritePartition(
-                partitionFilter, emptyList(), emptyList(), commitIdentifier, null, new HashMap<>());
+                partitionFilter,
+                emptyList(),
+                Collections.emptyMap(),
+                emptyList(),
+                commitIdentifier,
+                null,
+                new HashMap<>());
     }
 
     @Override
     public void truncateTable(long commitIdentifier) {
         tryOverwritePartition(
-                null, emptyList(), emptyList(), commitIdentifier, null, new HashMap<>());
+                null,
+                emptyList(),
+                Collections.emptyMap(),
+                emptyList(),
+                commitIdentifier,
+                null,
+                new HashMap<>());
     }
 
     @Override
@@ -938,13 +951,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private int tryOverwritePartition(
             @Nullable PartitionPredicate partitionFilter,
             List<ManifestEntry> changes,
+            Map<FileEntry.Identifier, Integer> changeGroups,
             List<IndexManifestEntry> indexFiles,
             long identifier,
             @Nullable Long watermark,
             Map<String, String> properties) {
         return tryCommit(
                 scanner.overwriteChangesProvider(
-                        options.bucket(), changes, indexFiles, partitionFilter),
+                        options.bucket(), changes, changeGroups, indexFiles, partitionFilter),
                 identifier,
                 watermark,
                 properties,

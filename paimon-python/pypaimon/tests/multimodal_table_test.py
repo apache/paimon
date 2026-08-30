@@ -984,6 +984,44 @@ class MultimodalTableTest(unittest.TestCase):
             users.scan().to_list(),
         )
 
+    def test_overwrite_keeps_blob_commit_message_range(self):
+        obs = self.conn.create_table(
+            "overwrite_blob_groups",
+            schema=_schema({
+                "id": pa.int32(),
+                "image": pa.large_binary(),
+            }),
+            options=_PARQUET_OPTIONS,
+        )
+        obs.add([{"id": 0, "image": b"old-image"}])
+        builder = obs.raw_table.new_batch_write_builder().overwrite()
+        messages = []
+
+        normal_write = builder.new_write().with_write_type(["id"])
+        blob_write = builder.new_write()
+        commit = builder.new_commit()
+        try:
+            normal_write.write_arrow(pa.table({
+                "id": pa.array([1], type=pa.int32()),
+            }))
+            messages.extend(normal_write.prepare_commit())
+            blob_write.write_arrow(pa.table({
+                "id": pa.array([2], type=pa.int32()),
+                "image": pa.array([b"image-2"], type=pa.large_binary()),
+            }))
+            messages.extend(blob_write.prepare_commit())
+            commit.commit(messages)
+        finally:
+            normal_write.close()
+            blob_write.close()
+            commit.close()
+
+        scalar, blobs = obs.scan().read_blobs("image")
+        self.assertEqual(
+            {1: None, 2: b"image-2"},
+            dict(zip(scalar["id"].to_pylist(), blobs["image"])),
+        )
+
     def test_empty_overwrite_clears_unpartitioned_table(self):
         users = self.conn.create_table(
             "users",

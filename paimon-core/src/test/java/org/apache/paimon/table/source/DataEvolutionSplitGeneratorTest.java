@@ -23,6 +23,7 @@ import org.apache.paimon.manifest.FileSource;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
@@ -63,6 +64,28 @@ public class DataEvolutionSplitGeneratorTest {
 
         assertThat(splits).hasSize(2);
         assertThat(splits).allSatisfy(split -> assertThat(split.files).contains(video));
+    }
+
+    @Test
+    public void testSpanningBlobKeepsSplitPacking() {
+        DataFileMeta video = newFile("camera.video", 0L, 100L, 100_000L);
+        List<DataFileMeta> files = new ArrayList<>();
+        for (int i = 0; i < 100; i++) {
+            files.add(newFile("file-" + i + ".parquet", i, 1L, 10L));
+        }
+        files.add(video);
+
+        DataEvolutionSplitGenerator generator = new DataEvolutionSplitGenerator(500L, 1L, true);
+        List<SplitGenerator.SplitGroup> splits = generator.splitForBatch(files);
+
+        assertThat(splits).hasSize(2);
+        assertThat(splits)
+                .allSatisfy(
+                        split -> {
+                            assertThat(split.files.stream().filter(file -> file == video))
+                                    .hasSize(1);
+                            assertThat(split.rawConvertible).isFalse();
+                        });
     }
 
     @Test

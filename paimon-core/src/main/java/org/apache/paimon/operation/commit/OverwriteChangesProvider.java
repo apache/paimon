@@ -21,6 +21,7 @@ package org.apache.paimon.operation.commit;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestFile;
@@ -40,6 +41,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.function.Supplier;
 
@@ -60,6 +62,7 @@ public class OverwriteChangesProvider implements CommitChangesProvider {
     private final boolean dropStats;
     private final int numBucket;
     private final List<ManifestEntry> newChanges;
+    private final Map<FileEntry.Identifier, Integer> newChangeGroups;
     private final List<IndexManifestEntry> newIndexFiles;
     @Nullable private final PartitionPredicate partitionFilter;
 
@@ -78,6 +81,7 @@ public class OverwriteChangesProvider implements CommitChangesProvider {
             boolean dropStats,
             int numBucket,
             List<ManifestEntry> newChanges,
+            Map<FileEntry.Identifier, Integer> newChangeGroups,
             List<IndexManifestEntry> newIndexFiles,
             @Nullable PartitionPredicate partitionFilter) {
         this.scanSupplier = scanSupplier;
@@ -86,6 +90,7 @@ public class OverwriteChangesProvider implements CommitChangesProvider {
         this.dropStats = dropStats;
         this.numBucket = numBucket;
         this.newChanges = newChanges;
+        this.newChangeGroups = newChangeGroups;
         this.newIndexFiles = newIndexFiles;
         this.partitionFilter = partitionFilter;
     }
@@ -93,7 +98,8 @@ public class OverwriteChangesProvider implements CommitChangesProvider {
     @Override
     public CommitChanges provide(@Nullable Snapshot latestSnapshot) {
         if (latestSnapshot == null) {
-            return new CommitChanges(newChanges, Collections.emptyList(), newIndexFiles);
+            return new CommitChanges(
+                    newChanges, Collections.emptyList(), newIndexFiles, newChangeGroups);
         }
 
         if (cachedSnapshot == null) {
@@ -225,6 +231,9 @@ public class OverwriteChangesProvider implements CommitChangesProvider {
         indexChangesWithOverwrite.addAll(newIndexFiles);
 
         return new CommitChanges(
-                changesWithOverwrite, Collections.emptyList(), indexChangesWithOverwrite);
+                changesWithOverwrite,
+                Collections.emptyList(),
+                indexChangesWithOverwrite,
+                newChangeGroups);
     }
 }

@@ -30,6 +30,7 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.DataEvolutionUtils.groupByNormalFileRange;
 
 /** Append data evolution table split generator, which implementation of {@link SplitGenerator}. */
@@ -57,37 +58,50 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
         Set<DataFileMeta> seen = Collections.newSetFromMap(new IdentityHashMap<>());
         boolean hasSpanningSidecar =
                 ranges.stream().flatMap(Collection::stream).anyMatch(file -> !seen.add(file));
-        if (hasSpanningSidecar) {
-            return ranges.stream()
-                    .map(SplitGroup::nonRawConvertibleGroup)
-                    .collect(Collectors.toList());
-        }
         Function<List<DataFileMeta>, Long> weightFunc =
-                file ->
-                        Math.max(
-                                file.stream()
-                                        .mapToLong(
-                                                meta ->
-                                                        BlobFileFormat.isBlobFile(meta.fileName())
-                                                                ? countBlobSize
-                                                                        ? meta.fileSize()
-                                                                        : openFileCost
-                                                                : meta.fileSize())
-                                        .sum(),
-                                openFileCost);
+                files -> rangeWeight(files, hasSpanningSidecar);
         return BinPacking.packForOrdered(ranges, weightFunc, targetSplitSize).stream()
                 .map(
                         f -> {
-                            boolean rawConvertible = f.stream().allMatch(file -> file.size() == 1);
+                            boolean rawConvertible =
+                                    !hasSpanningSidecar
+                                            && f.stream().allMatch(file -> file.size() == 1);
+                            Set<DataFileMeta> unique =
+                                    Collections.newSetFromMap(new IdentityHashMap<>());
                             List<DataFileMeta> groupFiles =
                                     f.stream()
                                             .flatMap(Collection::stream)
+                                            .filter(unique::add)
                                             .collect(Collectors.toList());
                             return rawConvertible
                                     ? SplitGroup.rawConvertibleGroup(groupFiles)
                                     : SplitGroup.nonRawConvertibleGroup(groupFiles);
                         })
                 .collect(Collectors.toList());
+    }
+
+    private long rangeWeight(List<DataFileMeta> files, boolean hasSpanningSidecar) {
+        if (hasSpanningSidecar) {
+            List<DataFileMeta> normalFiles =
+                    files.stream().filter(file -> !isSidecar(file)).collect(Collectors.toList());
+            if (!normalFiles.isEmpty()) {
+                return Math.max(
+                        normalFiles.stream().mapToLong(DataFileMeta::fileSize).sum(), openFileCost);
+            }
+        }
+        return Math.max(
+                files.stream()
+                        .mapToLong(
+                                file ->
+                                        BlobFileFormat.isBlobFile(file.fileName())
+                                                ? countBlobSize ? file.fileSize() : openFileCost
+                                                : file.fileSize())
+                        .sum(),
+                openFileCost);
+    }
+
+    private static boolean isSidecar(DataFileMeta file) {
+        return BlobFileFormat.isBlobFile(file.fileName()) || isVectorStoreFile(file.fileName());
     }
 
     @Override

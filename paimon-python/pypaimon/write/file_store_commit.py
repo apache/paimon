@@ -368,6 +368,9 @@ class FileStoreCommit:
         )
 
         if not skip_overwrite:
+            _, row_tracking_groups = (
+                self._collect_manifest_entries_with_groups(commit_messages)
+            )
             index_deletes = self._overwrite_hash_index_deletes(
                 partition_filter, index_deletes
             )
@@ -382,6 +385,7 @@ class FileStoreCommit:
                 index_deletes=index_deletes,
                 index_adds=index_adds,
                 hash_index_base_snapshot=hash_index_base_snapshot,
+                row_tracking_groups=row_tracking_groups,
             )
 
     @staticmethod

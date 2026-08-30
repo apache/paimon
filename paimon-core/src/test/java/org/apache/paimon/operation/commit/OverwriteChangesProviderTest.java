@@ -268,6 +268,7 @@ public class OverwriteChangesProviderTest {
                 store.options().manifestDeleteFileDropStats(),
                 store.options().bucket(),
                 newChanges,
+                Collections.emptyMap(),
                 Collections.emptyList(),
                 partitionFilter);
     }
