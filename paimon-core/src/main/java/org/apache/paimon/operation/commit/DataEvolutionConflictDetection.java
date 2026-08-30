@@ -406,6 +406,9 @@ public class DataEvolutionConflictDetection extends ConflictDetection {
                 rowIdCheckFromSnapshot);
         for (long i = rowIdCheckFromSnapshot + 1; i <= latestSnapshot.id(); i++) {
             Snapshot snapshot = snapshotManager.snapshot(i);
+            if (snapshot == null) {
+                continue;
+            }
             if (snapshot.commitKind() == CommitKind.COMPACT) {
                 continue;
             }
