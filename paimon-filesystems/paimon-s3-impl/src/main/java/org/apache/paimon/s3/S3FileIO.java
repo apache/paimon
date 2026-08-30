@@ -21,6 +21,7 @@ package org.apache.paimon.s3;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.StorageType;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.options.Options;
 
@@ -33,8 +34,10 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
+import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 /** S3 {@link FileIO}. */
@@ -83,6 +86,37 @@ public class S3FileIO extends HadoopCompliantFileIO {
         }
         return new S3TwoPhaseOutputStream(
                 new S3MultiPartUpload(fs, fs.getConf()), hadoopPath, path);
+    }
+
+    @Override
+    public Optional<Path> archive(Path path, StorageType type) throws IOException {
+        org.apache.hadoop.fs.Path hadoopPath = path(path);
+        S3ArchiveOperations.changeStorageClass(
+                (S3AFileSystem) getFileSystem(hadoopPath),
+                hadoopPath,
+                S3ArchiveOperations.archiveStorageClass(type),
+                "archive");
+        return Optional.empty();
+    }
+
+    @Override
+    public void restoreArchive(Path path, Duration duration) throws IOException {
+        org.apache.hadoop.fs.Path hadoopPath = path(path);
+        S3ArchiveOperations.restoreArchive(
+                (S3AFileSystem) getFileSystem(hadoopPath),
+                hadoopPath,
+                S3ArchiveOperations.restoreDays(duration));
+    }
+
+    @Override
+    public Optional<Path> unarchive(Path path, StorageType type) throws IOException {
+        org.apache.hadoop.fs.Path hadoopPath = path(path);
+        S3ArchiveOperations.changeStorageClass(
+                (S3AFileSystem) getFileSystem(hadoopPath),
+                hadoopPath,
+                S3ArchiveOperations.unarchiveStorageClass(type),
+                "unarchive");
+        return Optional.empty();
     }
 
     // add additional config entries from the IO config to the Hadoop config
