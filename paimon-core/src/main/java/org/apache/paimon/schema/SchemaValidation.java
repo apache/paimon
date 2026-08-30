@@ -53,6 +53,7 @@ import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.TimeType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VariantType;
 import org.apache.paimon.types.VectorType;
@@ -123,6 +124,9 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Validation utilities for {@link TableSchema}. */
 public class SchemaValidation {
+
+    /** The ceiling {@code IcebergDataField} converts. */
+    private static final int MAX_ICEBERG_TIME_PRECISION = 3;
 
     /** The precisions {@code IcebergDataField} maps to the Iceberg timestamp types. */
     private static final int MIN_ICEBERG_TIMESTAMP_PRECISION = 3;
@@ -245,6 +249,7 @@ public class SchemaValidation {
         RowType tableRowType = new RowType(schema.fields());
         validateGeospatialTypes(schema, options, tableRowType);
         validateIcebergTimestampPrecisions(tableRowType, options);
+        validateIcebergTimePrecisions(tableRowType, options);
         validateBlobFields(tableRowType, options);
         Set<String> blobDescriptorFields = validateBlobDescriptorFields(tableRowType, options);
         Set<String> blobViewFields =
@@ -581,6 +586,31 @@ public class SchemaValidation {
                 IcebergOptions.METADATA_ICEBERG_STORAGE.key());
     }
 
+    /**
+     * Refuses the time precisions the mirror cannot publish: it writes whole milliseconds into
+     * Iceberg's microsecond time values, and the conversion enforcing that would only fail once the
+     * snapshot is durable.
+     */
+    public static void validateIcebergTimePrecisions(DataType dataType, CoreOptions options) {
+        if (options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                == IcebergOptions.StorageType.DISABLED) {
+            return;
+        }
+        checkArgument(
+                !containsType(dataType, SchemaValidation::isUnpublishableTime),
+                "Time columns must have a precision of %s or less when Iceberg metadata is "
+                        + "enabled, the only precisions Iceberg compatibility can publish. Use a "
+                        + "precision of %s or less, or disable '%s'.",
+                MAX_ICEBERG_TIME_PRECISION,
+                MAX_ICEBERG_TIME_PRECISION,
+                IcebergOptions.METADATA_ICEBERG_STORAGE.key());
+    }
+
+    private static boolean isUnpublishableTime(DataType dataType) {
+        return dataType instanceof TimeType
+                && ((TimeType) dataType).getPrecision() > MAX_ICEBERG_TIME_PRECISION;
+    }
+
     private static boolean isUnpublishableTimestamp(DataType dataType) {
         if (dataType instanceof TimestampType) {
             return isUnpublishablePrecision(((TimestampType) dataType).getPrecision());
@@ -607,6 +637,7 @@ public class SchemaValidation {
         for (TableSchema schema : history.get()) {
             validateIcebergGeospatialTypes(schema.logicalRowType(), options);
             validateIcebergTimestampPrecisions(schema.logicalRowType(), options);
+            validateIcebergTimePrecisions(schema.logicalRowType(), options);
         }
     }
 
