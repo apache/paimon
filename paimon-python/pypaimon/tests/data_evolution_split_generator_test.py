@@ -24,6 +24,7 @@ from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.read.scanner.data_evolution_split_generator import DataEvolutionSplitGenerator
 from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.table.source.deletion_file import DeletionFile
 from pypaimon.utils.range import Range
 
 
@@ -254,7 +255,7 @@ class SplitOrderTest(unittest.TestCase):
             file_size=1_000_000))
 
         splits = DataEvolutionSplitGenerator(
-            self._Table(), target_split_size=10_000, open_file_cost=0
+            self._Table(), target_split_size=2_000_000, open_file_cost=0
         ).create_splits(entries)
 
         self.assertEqual(1, len(splits))
@@ -262,6 +263,71 @@ class SplitOrderTest(unittest.TestCase):
         self.assertEqual(1, sum(
             file.file_name == 'camera.video' for file in splits[0].files))
         self.assertEqual(100, splits[0].merged_row_count())
+
+    def test_distinct_sidecars_remain_in_packing_weight(self):
+        video_size = 64 * 1024 * 1024
+        entries = []
+        for row in range(10):
+            entries.extend([
+                self._entry(
+                    f'normal-{row}.parquet', row * 2,
+                    first_row_id=row, row_count=1,
+                ),
+                self._entry(
+                    f'camera-{row}.video', row * 2 + 1,
+                    first_row_id=row, row_count=1,
+                    file_size=video_size,
+                ),
+            ])
+
+        splits = DataEvolutionSplitGenerator(
+            self._Table(), target_split_size=130 * 1024 * 1024,
+            open_file_cost=0,
+        ).create_splits(entries)
+
+        self.assertEqual(5, len(splits))
+        for split in splits:
+            videos = [
+                file for file in split.files
+                if file.file_name.endswith('.video')
+            ]
+            self.assertEqual(2, len(videos))
+            self.assertLessEqual(
+                sum(file.file_size for file in videos),
+                130 * 1024 * 1024,
+            )
+
+    def test_spanning_sidecar_preserves_deletion_aware_row_count(self):
+        entries = [
+            self._entry(
+                'normal-0.parquet', 0, first_row_id=0, row_count=1,
+            ),
+            self._entry(
+                'normal-1.parquet', 1, first_row_id=1, row_count=1,
+            ),
+            self._entry(
+                'camera.video', 2, first_row_id=0, row_count=2,
+            ),
+        ]
+
+        for cardinality, expected in ((1, 1), (None, None)):
+            with self.subTest(cardinality=cardinality):
+                deletion_files = {
+                    ((), 0): {
+                        'normal-0.parquet': DeletionFile(
+                            'dv', 0, 1, cardinality
+                        )
+                    }
+                }
+                splits = DataEvolutionSplitGenerator(
+                    self._Table(), target_split_size=1024,
+                    open_file_cost=0,
+                    deletion_files_map=deletion_files,
+                ).create_splits(entries)
+
+                self.assertEqual(1, len(splits))
+                self.assertIsInstance(splits[0], IndexedSplit)
+                self.assertEqual(expected, splits[0].merged_row_count())
 
     def test_filtered_anchor_keeps_spanning_sidecar_range_bounded(self):
         entries = [

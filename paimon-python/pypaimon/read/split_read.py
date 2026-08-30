@@ -344,7 +344,9 @@ class SplitRead(ABC):
                                              batch_size=batch_size,
                                              row_indices=row_indices,
                                              blob_parallelism=blob_parallelism,
-                                             file_size=file.file_size)
+                                             file_size=file.file_size,
+                                             video_meta_cache=getattr(
+                                                 self, '_video_meta_cache', None))
         elif file_format == CoreOptions.FILE_FORMAT_LANCE:
             if has_nested:
                 raise NotImplementedError(
@@ -1093,6 +1095,7 @@ class DataEvolutionSplitRead(SplitRead):
             nested_name_paths=nested_name_paths,
             limit=limit,
         )
+        self._video_meta_cache = {}
         self.outer_extract_name_paths = outer_extract_name_paths
         self.outer_flat_read_type = outer_flat_read_type
         self._post_merge_filter = post_merge_filter
@@ -1459,6 +1462,7 @@ class DataEvolutionSplitRead(SplitRead):
             row_indices=row_indices,
             blob_parallelism=blob_parallelism,
             file_size=file.file_size,
+            video_meta_cache=self._video_meta_cache,
         )
 
     def _split_field_bunches(self, need_merge_files: List[DataFileMeta]) -> List[FieldBunch]:

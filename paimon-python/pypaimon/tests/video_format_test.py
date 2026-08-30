@@ -19,6 +19,7 @@ import struct
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 from pypaimon.common.options import Options
@@ -214,6 +215,52 @@ class VideoFormatTest(unittest.TestCase):
             )
         finally:
             reader.close()
+
+    def test_readers_share_cached_video_index(self):
+        target = (self.root / "cached-index.video").as_uri()
+        writer = VideoFormatWriter(self.file_io.new_output_stream(target))
+        for frame_index in range(4):
+            writer.add_element(
+                GenericRow(
+                    [self._source_frame("cached-index.mp4", b"video", frame_index)],
+                    [self.field],
+                    RowKind.INSERT,
+                )
+            )
+        writer.close()
+
+        cache = {}
+        readers = []
+        with patch.object(
+            self.file_io,
+            "new_input_stream",
+            wraps=self.file_io.new_input_stream,
+        ) as new_input_stream:
+            for row_indices in ([0, 2], [1, 3]):
+                readers.append(FormatBlobReader(
+                    file_io=self.file_io,
+                    file_path=target,
+                    read_fields=["video"],
+                    full_fields=[self.field],
+                    push_down_predicate=None,
+                    blob_as_descriptor=True,
+                    row_indices=row_indices,
+                    video_meta_cache=cache,
+                ))
+            self.assertEqual(1, new_input_stream.call_count)
+
+        try:
+            actual = []
+            for reader in readers:
+                values = reader.read_arrow_batch().column(0).to_pylist()
+                actual.append([
+                    VideoFrameDescriptor.deserialize(value).frame_index
+                    for value in values
+                ])
+            self.assertEqual([[0, 2], [1, 3]], actual)
+        finally:
+            for reader in readers:
+                reader.close()
 
     def test_rejects_non_video_frame_input(self):
         target = (self.root / "reject.video").as_uri()

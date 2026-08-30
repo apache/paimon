@@ -94,11 +94,7 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                     for group in split_by_row_id
                 ]
 
-            packed_files = self._pack_for_ordered(
-                split_by_row_id,
-                self._normal_group_weight,
-                self.target_split_size,
-            )
+            packed_files = self._pack_with_unique_sidecars(split_by_row_id)
 
             # Flatten the packed files and build splits
             flatten_packed_files: List[List[DataFileMeta]] = [
@@ -111,7 +107,11 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
             )
             if has_spanning_sidecar and slice_row_ranges is None and self.row_ranges is None:
                 new_splits = [
-                    IndexedSplit(split, self._normal_ranges(pack))
+                    IndexedSplit(
+                        split,
+                        self._normal_ranges(pack),
+                        exact_merged_row_count=split.merged_row_count(),
+                    )
                     for split, pack in zip(new_splits, packed_files)
                 ]
             splits += new_splits
@@ -128,14 +128,51 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
 
         return splits
 
-    def _normal_group_weight(self, group: List[DataFileMeta]) -> int:
-        normal_files = [
-            file for file in group
-            if (not DataFileMeta.is_blob_file(file.file_name)
-                and not DataFileMeta.is_vector_file(file.file_name))
-        ]
-        files = normal_files or group
-        return max(sum(file.file_size for file in files), self.open_file_cost)
+    def _pack_with_unique_sidecars(
+            self, groups: List[List[DataFileMeta]]
+    ) -> List[List[List[DataFileMeta]]]:
+        packed = []
+        current = []
+        current_weight = 0
+        seen_sidecars = set()
+
+        for group in groups:
+            weight = self._incremental_group_weight(group, seen_sidecars)
+            if current and current_weight + weight > self.target_split_size:
+                packed.append(current)
+                current = []
+                current_weight = 0
+                seen_sidecars = set()
+                weight = self._incremental_group_weight(group, seen_sidecars)
+
+            current.append(group)
+            current_weight += weight
+            seen_sidecars.update(
+                id(file) for file in group if self._is_sidecar(file)
+            )
+
+        if current:
+            packed.append(current)
+        return packed
+
+    def _incremental_group_weight(
+            self, group: List[DataFileMeta], seen_sidecars: set
+    ) -> int:
+        seen_in_group = set()
+        size = 0
+        for file in group:
+            if self._is_sidecar(file):
+                identity = id(file)
+                if identity in seen_sidecars or identity in seen_in_group:
+                    continue
+                seen_in_group.add(identity)
+            size += file.file_size
+        return max(size, self.open_file_cost)
+
+    @staticmethod
+    def _is_sidecar(file: DataFileMeta) -> bool:
+        return (DataFileMeta.is_blob_file(file.file_name)
+                or DataFileMeta.is_vector_file(file.file_name))
 
     @staticmethod
     def _has_spanning_sidecar(groups: List[List[DataFileMeta]]) -> bool:

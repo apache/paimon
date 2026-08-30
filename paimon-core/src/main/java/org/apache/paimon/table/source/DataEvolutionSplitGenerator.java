@@ -22,6 +22,7 @@ import org.apache.paimon.format.blob.BlobFileFormat;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.utils.BinPacking;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.IdentityHashMap;
@@ -57,10 +58,15 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
         List<List<DataFileMeta>> ranges = groupByNormalFileRange(input, Function.identity());
         Set<DataFileMeta> seen = Collections.newSetFromMap(new IdentityHashMap<>());
         boolean hasSpanningSidecar =
-                ranges.stream().flatMap(Collection::stream).anyMatch(file -> !seen.add(file));
-        Function<List<DataFileMeta>, Long> weightFunc =
-                files -> rangeWeight(files, hasSpanningSidecar);
-        return BinPacking.packForOrdered(ranges, weightFunc, targetSplitSize).stream()
+                ranges.stream()
+                        .flatMap(Collection::stream)
+                        .filter(DataEvolutionSplitGenerator::isSidecar)
+                        .anyMatch(file -> !seen.add(file));
+        List<List<List<DataFileMeta>>> packed =
+                hasSpanningSidecar
+                        ? packWithUniqueSidecars(ranges)
+                        : BinPacking.packForOrdered(ranges, this::rangeWeight, targetSplitSize);
+        return packed.stream()
                 .map(
                         f -> {
                             boolean rawConvertible =
@@ -80,24 +86,56 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
                 .collect(Collectors.toList());
     }
 
-    private long rangeWeight(List<DataFileMeta> files, boolean hasSpanningSidecar) {
-        if (hasSpanningSidecar) {
-            List<DataFileMeta> normalFiles =
-                    files.stream().filter(file -> !isSidecar(file)).collect(Collectors.toList());
-            if (!normalFiles.isEmpty()) {
-                return Math.max(
-                        normalFiles.stream().mapToLong(DataFileMeta::fileSize).sum(), openFileCost);
+    private List<List<List<DataFileMeta>>> packWithUniqueSidecars(List<List<DataFileMeta>> ranges) {
+        List<List<List<DataFileMeta>>> packed = new ArrayList<>();
+        List<List<DataFileMeta>> current = new ArrayList<>();
+        Set<DataFileMeta> seenSidecars = Collections.newSetFromMap(new IdentityHashMap<>());
+        long currentWeight = 0;
+
+        for (List<DataFileMeta> range : ranges) {
+            long weight = incrementalRangeWeight(range, seenSidecars);
+            if (!current.isEmpty() && currentWeight + weight > targetSplitSize) {
+                packed.add(current);
+                current = new ArrayList<>();
+                seenSidecars = Collections.newSetFromMap(new IdentityHashMap<>());
+                currentWeight = 0;
+                weight = incrementalRangeWeight(range, seenSidecars);
             }
+            current.add(range);
+            currentWeight += weight;
+            range.stream()
+                    .filter(DataEvolutionSplitGenerator::isSidecar)
+                    .forEach(seenSidecars::add);
         }
-        return Math.max(
+
+        if (!current.isEmpty()) {
+            packed.add(current);
+        }
+        return packed;
+    }
+
+    private long incrementalRangeWeight(List<DataFileMeta> files, Set<DataFileMeta> seenSidecars) {
+        Set<DataFileMeta> seenInRange = Collections.newSetFromMap(new IdentityHashMap<>());
+        long size =
                 files.stream()
-                        .mapToLong(
+                        .filter(
                                 file ->
-                                        BlobFileFormat.isBlobFile(file.fileName())
-                                                ? countBlobSize ? file.fileSize() : openFileCost
-                                                : file.fileSize())
-                        .sum(),
-                openFileCost);
+                                        !isSidecar(file)
+                                                || (!seenSidecars.contains(file)
+                                                        && seenInRange.add(file)))
+                        .mapToLong(this::fileWeight)
+                        .sum();
+        return Math.max(size, openFileCost);
+    }
+
+    private long rangeWeight(List<DataFileMeta> files) {
+        return Math.max(files.stream().mapToLong(this::fileWeight).sum(), openFileCost);
+    }
+
+    private long fileWeight(DataFileMeta file) {
+        return BlobFileFormat.isBlobFile(file.fileName())
+                ? countBlobSize ? file.fileSize() : openFileCost
+                : file.fileSize();
     }
 
     private static boolean isSidecar(DataFileMeta file) {

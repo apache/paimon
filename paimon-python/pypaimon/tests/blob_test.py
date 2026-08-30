@@ -1633,19 +1633,28 @@ class BlobEndToEndTest(unittest.TestCase):
             table, None, [field], split, False)
 
         with patch("pypaimon.read.split_read.FormatBlobReader") as reader_cls:
-            def assert_file_size():
+            def assert_reader_arguments(expected_cache=None):
                 args, kwargs = reader_cls.call_args
                 arguments = inspect.signature(FormatBlobReader).bind_partial(
                     *args, **kwargs
                 ).arguments
                 self.assertEqual(123, arguments.get("file_size"))
+                self.assertIs(
+                    expected_cache, arguments.get("video_meta_cache")
+                )
 
             raw_read.file_reader_supplier(file, False, [field.name], False)
-            assert_file_size()
+            assert_reader_arguments()
+
+            reader_cls.reset_mock()
+            evolution_read.file_reader_supplier(
+                file, False, [field.name], False
+            )
+            assert_reader_arguments(evolution_read._video_meta_cache)
 
             reader_cls.reset_mock()
             evolution_read._create_raw_blob_file_reader(file, [field.name])
-            assert_file_size()
+            assert_reader_arguments(evolution_read._video_meta_cache)
 
     def test_blob_reader_row_indices_pushdown(self):
         file_io = LocalFileIO(self.temp_dir, Options({}))

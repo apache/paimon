@@ -75,16 +75,47 @@ public class DataEvolutionSplitGeneratorTest {
         }
         files.add(video);
 
-        DataEvolutionSplitGenerator generator = new DataEvolutionSplitGenerator(500L, 1L, true);
+        DataEvolutionSplitGenerator generator = new DataEvolutionSplitGenerator(200_000L, 1L, true);
         List<SplitGenerator.SplitGroup> splits = generator.splitForBatch(files);
 
-        assertThat(splits).hasSize(2);
+        assertThat(splits).hasSize(1);
         assertThat(splits)
                 .allSatisfy(
                         split -> {
                             assertThat(split.files.stream().filter(file -> file == video))
                                     .hasSize(1);
                             assertThat(split.rawConvertible).isFalse();
+                        });
+    }
+
+    @Test
+    public void testSpanningBlobDoesNotHideDistinctSidecarWeights() {
+        long videoSize = 64L * 1024 * 1024;
+        List<DataFileMeta> files = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            files.add(newFile("file-" + i + ".parquet", i, 1L, 1L));
+            files.add(newFile("camera-" + i + ".video", i, 1L, videoSize));
+        }
+        DataFileMeta spanning = newFile("spanning.video", 0L, 10L, 1L);
+        files.add(spanning);
+
+        DataEvolutionSplitGenerator generator =
+                new DataEvolutionSplitGenerator(130L * 1024 * 1024, 1L, true);
+        List<SplitGenerator.SplitGroup> splits = generator.splitForBatch(files);
+
+        assertThat(splits).hasSize(5);
+        assertThat(splits)
+                .allSatisfy(
+                        split -> {
+                            assertThat(
+                                            split.files.stream()
+                                                    .filter(
+                                                            file ->
+                                                                    file.fileName()
+                                                                            .startsWith("camera-")))
+                                    .hasSize(2);
+                            assertThat(split.files.stream().filter(file -> file == spanning))
+                                    .hasSize(1);
                         });
     }
 
