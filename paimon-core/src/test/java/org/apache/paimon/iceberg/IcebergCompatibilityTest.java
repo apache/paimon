@@ -1766,13 +1766,20 @@ public class IcebergCompatibilityTest {
     }
 
     @Test
-    public void testCommitOnBranchMirrorsTheBranchSchema() throws Exception {
+    public void testCommitOnBranchUsesSeparateMetadata() throws Exception {
+        RecordingIcebergMetadataCommitter.COMMITS.clear();
         RowType rowType =
                 RowType.of(
                         new DataType[] {DataTypes.INT(), DataTypes.INT()}, new String[] {"k", "v"});
         FileStoreTable table =
                 createPaimonTable(
-                        rowType, Collections.emptyList(), Collections.singletonList("k"), 1);
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        1,
+                        Collections.singletonMap(
+                                IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                                IcebergOptions.StorageType.HADOOP_CATALOG.toString()));
 
         String commitUser = UUID.randomUUID().toString();
         try (TableWriteImpl<?> write = table.newWrite(commitUser);
@@ -1785,7 +1792,22 @@ public class IcebergCompatibilityTest {
         new SchemaManager(table.fileIO(), table.location(), "b1")
                 .commitChanges(SchemaChange.addColumn("branch_only", DataTypes.INT()));
 
+        try (TableWriteImpl<?> write = table.newWrite(commitUser);
+                TableCommitImpl commit = table.newCommit(commitUser)) {
+            write.write(GenericRow.of(3, 30));
+            commit.commit(2, write.prepareCommit(false, 2));
+        }
+
+        Path mainMetadataPath =
+                new Path(IcebergCommitCallback.catalogTableMetadataPath(table), "v1.metadata.json");
+        String mainMetadata = table.fileIO().readFileUtf8(mainMetadataPath);
+        Path mainVersionHint =
+                new Path(
+                        IcebergCommitCallback.catalogTableMetadataPath(table), "version-hint.text");
+        String versionHint = table.fileIO().readFileUtf8(mainVersionHint);
+
         FileStoreTable branchTable = table.switchToBranch("b1");
+        RecordingIcebergMetadataCommitter.COMMITS.clear();
         try (TableWriteImpl<?> write = branchTable.newWrite(commitUser);
                 TableCommitImpl commit = branchTable.newCommit(commitUser)) {
             write.write(GenericRow.of(2, 20, 200));
@@ -1796,14 +1818,27 @@ public class IcebergCompatibilityTest {
                 IcebergMetadata.fromPath(
                         branchTable.fileIO(),
                         new Path(
-                                branchTable.location(),
-                                "metadata/v"
-                                        + branchTable.snapshotManager().latestSnapshotId()
-                                        + ".metadata.json"));
+                                IcebergCommitCallback.catalogTableMetadataPath(branchTable),
+                                "v1.metadata.json"));
         assertThat(
                         metadata.schemas().get(metadata.currentSchemaId()).fields().stream()
                                 .map(IcebergDataField::name))
                 .containsExactly("k", "v", "branch_only");
+        assertThat(table.fileIO().readFileUtf8(mainMetadataPath)).isEqualTo(mainMetadata);
+        assertThat(table.fileIO().readFileUtf8(mainVersionHint)).isEqualTo(versionHint);
+        IcebergMetadata mainMetadataAfterBranchCommit =
+                IcebergMetadata.fromPath(
+                        table.fileIO(),
+                        new Path(
+                                IcebergCommitCallback.catalogTableMetadataPath(table),
+                                "v2.metadata.json"));
+        assertThat(
+                        mainMetadataAfterBranchCommit.schemas()
+                                .get(mainMetadataAfterBranchCommit.currentSchemaId()).fields()
+                                .stream()
+                                .map(IcebergDataField::name))
+                .containsExactly("k", "v");
+        assertThat(RecordingIcebergMetadataCommitter.COMMITS).isEmpty();
     }
 
     /*
@@ -2826,8 +2861,11 @@ public class IcebergCompatibilityTest {
 
         Options options = new Options(customOptions);
         options.set(CoreOptions.BUCKET, numBuckets);
-        options.set(
-                IcebergOptions.METADATA_ICEBERG_STORAGE, IcebergOptions.StorageType.TABLE_LOCATION);
+        if (!options.contains(IcebergOptions.METADATA_ICEBERG_STORAGE)) {
+            options.set(
+                    IcebergOptions.METADATA_ICEBERG_STORAGE,
+                    IcebergOptions.StorageType.TABLE_LOCATION);
+        }
         options.set(CoreOptions.FILE_FORMAT, "avro");
         options.set(CoreOptions.TARGET_FILE_SIZE, MemorySize.ofKibiBytes(32));
         options.set(IcebergOptions.COMPACT_MIN_FILE_NUM, 4);

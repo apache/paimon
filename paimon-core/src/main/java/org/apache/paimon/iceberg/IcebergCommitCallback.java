@@ -70,6 +70,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.ManifestReadThreadPool;
@@ -161,28 +162,31 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                 table.coreOptions().toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE);
         this.pathFactory = new IcebergPathFactory(catalogTableMetadataPath(table));
 
-        IcebergMetadataCommitterFactory metadataCommitterFactory;
-        try {
-            metadataCommitterFactory =
-                    FactoryUtil.discoverFactory(
-                            IcebergCommitCallback.class.getClassLoader(),
-                            IcebergMetadataCommitterFactory.class,
-                            storageType.committerFactoryIdentifier());
-        } catch (FactoryException e) {
-            metadataCommitterFactory = null;
-            // storage types without a committer have no factory by design, so a miss is expected
-            if (storageType.requiresMetadataCommitter()) {
-                LOG.warn(
-                        "No IcebergMetadataCommitterFactory for '{}={}' found on the classpath, so "
-                                + "table {} will not be synced to the external catalog (commits and "
-                                + "metadata files are unaffected). Check that the module providing it "
-                                + "is deployed and that its META-INF/services/{} entry survived "
-                                + "shading. Cause: {}",
-                        IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
-                        storageType,
-                        table.fullName(),
-                        Factory.class.getName(),
-                        e.getMessage());
+        IcebergMetadataCommitterFactory metadataCommitterFactory = null;
+        if (BranchManager.isMainBranch(
+                BranchManager.normalizeBranch(table.coreOptions().branch()))) {
+            try {
+                metadataCommitterFactory =
+                        FactoryUtil.discoverFactory(
+                                IcebergCommitCallback.class.getClassLoader(),
+                                IcebergMetadataCommitterFactory.class,
+                                storageType.committerFactoryIdentifier());
+            } catch (FactoryException e) {
+                // storage types without a committer have no factory by design, so a miss is
+                // expected
+                if (storageType.requiresMetadataCommitter()) {
+                    LOG.warn(
+                            "No IcebergMetadataCommitterFactory for '{}={}' found on the classpath, so "
+                                    + "table {} will not be synced to the external catalog (commits and "
+                                    + "metadata files are unaffected). Check that the module providing it "
+                                    + "is deployed and that its META-INF/services/{} entry survived "
+                                    + "shading. Cause: {}",
+                            IcebergOptions.METADATA_ICEBERG_STORAGE.key(),
+                            storageType,
+                            table.fullName(),
+                            Factory.class.getName(),
+                            e.getMessage());
+                }
             }
         }
         this.metadataCommitter =
@@ -206,7 +210,12 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
 
     public static Path catalogTableMetadataPath(FileStoreTable table) {
         Path icebergDBPath = catalogDatabasePath(table);
-        return new Path(icebergDBPath, String.format("%s/metadata", table.location().getName()));
+        Path icebergTablePath = new Path(icebergDBPath, table.location().getName());
+        return new Path(
+                BranchManager.branchPath(
+                        icebergTablePath,
+                        BranchManager.normalizeBranch(table.coreOptions().branch())),
+                "metadata");
     }
 
     public static Path catalogDatabasePath(FileStoreTable table) {
