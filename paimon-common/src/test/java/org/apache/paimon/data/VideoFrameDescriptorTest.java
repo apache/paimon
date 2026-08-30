@@ -18,8 +18,11 @@
 
 package org.apache.paimon.data;
 
+import org.apache.paimon.utils.IOUtils;
+
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -47,6 +50,26 @@ public class VideoFrameDescriptorTest {
     }
 
     @Test
+    public void testCrossLanguageWireFixture() throws Exception {
+        VideoFrameDescriptor expected = new VideoFrameDescriptor("s3://bucket/视频.mp4", 7, 99, 42);
+        byte[] fixture =
+                fromHex(
+                        new String(
+                                        IOUtils.readFully(
+                                                VideoFrameDescriptorTest.class
+                                                        .getClassLoader()
+                                                        .getResourceAsStream(
+                                                                "org/apache/paimon/data/video-frame-descriptor-v1.hex"),
+                                                true),
+                                        StandardCharsets.UTF_8)
+                                .trim());
+
+        assertThat(expected.serialize()).isEqualTo(fixture);
+        assertThat(BlobDescriptor.deserialize(fixture)).isEqualTo(expected);
+        assertThat(BlobDescriptor.isSerializedDescriptor(fixture)).isTrue();
+    }
+
+    @Test
     public void testBlobFromBytesPreservesFrameDescriptor() {
         VideoFrameDescriptor expected = new VideoFrameDescriptor("file:/video.mp4", 0, 9, 7);
         Blob blob = Blob.fromBytes(expected.serialize(), null, null);
@@ -66,5 +89,18 @@ public class VideoFrameDescriptorTest {
         assertThatThrownBy(() -> new VideoFrameDescriptor("file:/video.mp4", 0, 9, -1))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("non-negative");
+    }
+
+    private static byte[] fromHex(String hex) {
+        hex = hex.replaceAll("(?m)^#.*$", "").replaceAll("\\s", "");
+        byte[] bytes = new byte[hex.length() / 2];
+        for (int i = 0; i < bytes.length; i++) {
+            int offset = i * 2;
+            bytes[i] =
+                    (byte)
+                            ((Character.digit(hex.charAt(offset), 16) << 4)
+                                    + Character.digit(hex.charAt(offset + 1), 16));
+        }
+        return bytes;
     }
 }

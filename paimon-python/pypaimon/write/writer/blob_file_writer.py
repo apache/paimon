@@ -27,8 +27,7 @@ from pypaimon.table.row.blob import (
     Blob,
     BlobConsumer,
     BlobData,
-    BlobDescriptor,
-    VideoFrameDescriptor,
+    BlobDescriptorSerde,
 )
 from pypaimon.schema.data_types import (
     DataField,
@@ -121,16 +120,11 @@ class BlobFileWriter:
             return col_data
 
         if isinstance(col_data, bytes):
-            if VideoFrameDescriptor.is_video_frame_descriptor(col_data):
-                descriptor = VideoFrameDescriptor.deserialize(col_data)
+            if BlobDescriptorSerde.is_descriptor(col_data):
+                descriptor = BlobDescriptorSerde.deserialize(col_data)
                 uri_reader = self.file_io.uri_reader_factory.create(descriptor.uri)
                 return Blob.from_descriptor(uri_reader, descriptor)
-            elif BlobDescriptor.is_blob_descriptor(col_data):
-                descriptor = BlobDescriptor.deserialize(col_data)
-                uri_reader = self.file_io.uri_reader_factory.create(descriptor.uri)
-                return Blob.from_descriptor(uri_reader, descriptor)
-            else:
-                return BlobData(col_data)
+            return BlobData(col_data)
 
         raise ValueError(
             "Blob field value must be bytes/blob or serialized BlobDescriptor bytes, "
@@ -187,9 +181,9 @@ class BlobFileWriter:
 
     @staticmethod
     def _deserialize_descriptor_or_none(raw: bytes):
-        if not BlobDescriptor.is_blob_descriptor(raw):
+        if not BlobDescriptorSerde.is_descriptor(raw):
             return None
-        return BlobDescriptor.deserialize(raw)
+        return BlobDescriptorSerde.deserialize(raw)
 
     def reach_target_size(self, target_size: int) -> bool:
         return self.writer.reach_target_size(target_size)

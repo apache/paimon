@@ -65,13 +65,12 @@ class BlobDescriptor:
 
     @classmethod
     def deserialize(cls, data: bytes) -> 'BlobDescriptor':
-        video_type = globals().get('VideoFrameDescriptor')
-        if (
-            cls is BlobDescriptor
-            and video_type is not None
-            and video_type.is_video_frame_descriptor(data)
-        ):
-            return video_type.deserialize(data)
+        if cls is BlobDescriptor:
+            return BlobDescriptorSerde.deserialize(data)
+        return cls._deserialize(data)
+
+    @classmethod
+    def _deserialize(cls, data: bytes) -> 'BlobDescriptor':
         if len(data) < 5:
             raise ValueError("Invalid BlobDescriptor data: too short")
 
@@ -279,6 +278,23 @@ class VideoFrameDescriptor(BlobDescriptor):
             "VideoFrameDescriptor(payload=%s, frame_index=%s)"
             % (self.payload_descriptor, self.frame_index)
         )
+
+
+class BlobDescriptorSerde:
+    """Single dispatch point for persisted BlobDescriptor wire types."""
+
+    @staticmethod
+    def is_descriptor(data: bytes) -> bool:
+        return (
+            VideoFrameDescriptor.is_video_frame_descriptor(data)
+            or BlobDescriptor.is_blob_descriptor(data)
+        )
+
+    @staticmethod
+    def deserialize(data: bytes) -> BlobDescriptor:
+        if VideoFrameDescriptor.is_video_frame_descriptor(data):
+            return VideoFrameDescriptor.deserialize(data)
+        return BlobDescriptor._deserialize(data)
 
 
 class BlobViewStruct:
@@ -519,18 +535,13 @@ class Blob(ABC):
         data = bytes(data)
         if BlobViewStruct.is_blob_view_struct(data):
             return Blob.from_view(BlobViewStruct.deserialize(data))
-        is_video_frame = VideoFrameDescriptor.is_video_frame_descriptor(data)
-        is_descriptor = is_video_frame or BlobDescriptor.is_blob_descriptor(data)
+        is_descriptor = BlobDescriptorSerde.is_descriptor(data)
         if not allow_blob_data and not is_descriptor:
             raise ValueError(
                 "Expected BlobDescriptor bytes, got raw bytes (allow_blob_data=False)"
             )
         if is_descriptor:
-            descriptor = (
-                VideoFrameDescriptor.deserialize(data)
-                if is_video_frame
-                else BlobDescriptor.deserialize(data)
-            )
+            descriptor = BlobDescriptorSerde.deserialize(data)
             if uri_reader_factory is None:
                 if file_io is None:
                     raise ValueError("file_io is required to resolve BlobDescriptor bytes")
@@ -644,6 +655,26 @@ class BlobRef(Blob):
 
     def __hash__(self) -> int:
         return hash(self._descriptor)
+
+
+def video_payload_descriptor(value) -> Optional[BlobDescriptor]:
+    """Return the physical payload identity represented by a video frame value."""
+    if hasattr(value, 'as_py'):
+        value = value.as_py()
+    if value is None or value is Blob.PLACE_HOLDER:
+        return None
+    if type(value) is BlobRef:
+        descriptor = value.to_descriptor()
+        return (
+            descriptor.payload_descriptor
+            if isinstance(descriptor, VideoFrameDescriptor)
+            else None
+        )
+    if isinstance(value, (bytes, bytearray)):
+        raw = bytes(value)
+        if VideoFrameDescriptor.is_video_frame_descriptor(raw):
+            return VideoFrameDescriptor.deserialize(raw).payload_descriptor
+    return None
 
 
 BlobConsumer = Callable[[str, Optional[BlobDescriptor]], bool]

@@ -1684,13 +1684,9 @@ public class SchemaValidation {
             CoreOptions options,
             Set<String> blobDescriptorFields,
             Set<String> blobViewFields) {
-        Set<String> configured = options.videoFrameField();
-        checkArgument(
-                configured.size() <= 1,
-                "'%s' currently supports exactly one field, but found %s.",
-                CoreOptions.VIDEO_FRAME_FIELD.key(),
-                configured);
-        for (String field : configured) {
+        Optional<String> configured = options.videoFrameField();
+        if (configured.isPresent()) {
+            String field = configured.get();
             checkArgument(
                     rowType.containsField(field)
                             && rowType.getTypeAt(rowType.getFieldIndex(field)).getTypeRoot()
@@ -1712,7 +1708,7 @@ public class SchemaValidation {
                     CoreOptions.BLOB_VIEW_FIELD.key());
         }
         checkArgument(
-                configured.isEmpty() || schema.primaryKeys().isEmpty(),
+                !configured.isPresent() || schema.primaryKeys().isEmpty(),
                 "'%s' only supports append-only tables.",
                 CoreOptions.VIDEO_FRAME_FIELD.key());
     }

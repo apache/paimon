@@ -270,7 +270,7 @@ def _unknown_blob_descriptor_columns(batch, scalar_cols):
 
 def _looks_like_blob_descriptor(column):
     import pyarrow as pa
-    from pypaimon.table.row.blob import BlobDescriptor
+    from pypaimon.table.row.blob import BlobDescriptorSerde
 
     if not (pa.types.is_binary(column.type) or pa.types.is_large_binary(column.type)):
         return False
@@ -278,7 +278,7 @@ def _looks_like_blob_descriptor(column):
     for chunk in chunks:
         for value in chunk:
             if value.is_valid:
-                return BlobDescriptor.is_blob_descriptor(value.as_py())
+                return BlobDescriptorSerde.is_descriptor(value.as_py())
     return False
 
 

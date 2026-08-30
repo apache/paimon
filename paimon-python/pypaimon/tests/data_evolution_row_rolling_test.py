@@ -20,12 +20,15 @@ import shutil
 import tempfile
 import unittest
 import uuid
+from unittest.mock import Mock
 
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.uri_reader import FileUriReader
 from pypaimon.table.row.blob import Blob, BlobDescriptor, VideoFrameDescriptor
+from pypaimon.write.writer.dedicated_format_writer import DedicatedFormatWriter
+from pypaimon.write.writer.video_group import VideoGroupRollingPolicy
 
 
 class DataEvolutionRowRollingTest(unittest.TestCase):
@@ -249,6 +252,42 @@ class DataEvolutionRowRollingTest(unittest.TestCase):
         self.assertEqual([2, 3], video_rows)
         self.assertEqual([2, 3], normal_rows)
         self.assertEqual(list(range(5)), self._read_ids(table))
+
+    def test_video_batches_are_preserved_at_payload_boundaries(self):
+        first = BlobDescriptor("file:/first.mp4", 0, 11)
+        second = BlobDescriptor("file:/second.mp4", 0, 12)
+        data = pa.Table.from_pydict(
+            {
+                'id': list(range(5)),
+                'payload': [
+                    VideoFrameDescriptor(
+                        first.uri, first.offset, first.length, frame
+                    ).serialize()
+                    for frame in range(3)
+                ] + [
+                    VideoFrameDescriptor(
+                        second.uri, second.offset, second.length, frame
+                    ).serialize()
+                    for frame in range(2)
+                ],
+            },
+            schema=self.blob_schema,
+        )
+        writer = object.__new__(DedicatedFormatWriter)
+        writer.video_frame_column = 'payload'
+        writer._video_group_policy = VideoGroupRollingPolicy()
+        writer._roll_before_video_group = Mock()
+        writer._write_batch = Mock()
+        writer._write_bounded_batches = Mock()
+
+        writer._write_video_batches(data.to_batches()[0])
+
+        self.assertEqual(2, writer._write_batch.call_count)
+        self.assertEqual(
+            [3, 2],
+            [call.args[0].num_rows for call in writer._write_batch.call_args_list],
+        )
+        writer._write_bounded_batches.assert_not_called()
 
     def test_blob_consumer_descriptors_survive_abort_after_rolling(self):
         table = self._create_with_schema(
