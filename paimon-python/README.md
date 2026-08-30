@@ -44,11 +44,11 @@ pip install 'pypaimon[lerobot]'
 import pypaimon.multimodal as pmm
 
 connection = pmm.connect(options={"warehouse": "/tmp/warehouse"})
-result = connection.load_from_lerobot(
+snapshot_id = connection.load_from_lerobot(
     "robot_data",
     "/data/lerobot_dataset",
 )
-print(result.row_count, result.snapshot_id)
+print(snapshot_id)
 ```
 
 The schema comes from `meta/info.json`. Each frame becomes one row; media uses

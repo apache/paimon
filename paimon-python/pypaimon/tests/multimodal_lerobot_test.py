@@ -276,13 +276,10 @@ class LeRobotImportTest(unittest.TestCase):
         dataset.finalize()
 
     def test_import_infers_schema_preserves_episodes_and_appends(self):
-        result = self.connection.load_from_lerobot(
+        snapshot_id = self.connection.load_from_lerobot(
             "robot_data", self.image_source, batch_size=2)
 
-        self.assertEqual(2, result.episode_count)
-        self.assertEqual(3, result.batch_count)
-        self.assertEqual(5, result.row_count)
-        self.assertEqual(1, result.snapshot_id)
+        self.assertEqual(1, snapshot_id)
 
         table = self.connection.get_table("robot_data")
         schema = table.raw_table.fields
@@ -320,7 +317,7 @@ class LeRobotImportTest(unittest.TestCase):
         self.assertAlmostEqual(0.2, rows[4]["timestamp"], places=6)
         self.assertEqual(1.0, rows[4]["reward"])
         self.assertEqual(
-            result.snapshot_id,
+            snapshot_id,
             table.raw_table.snapshot_manager().get_latest_snapshot().id,
         )
 
@@ -340,16 +337,15 @@ class LeRobotImportTest(unittest.TestCase):
             [imported[index] for index in range(5)],
         )
 
-        appended = self.connection.load_from_lerobot(
+        appended_snapshot_id = self.connection.load_from_lerobot(
             "robot_data", self.image_source, batch_size=4)
-        self.assertEqual(2, appended.snapshot_id)
+        self.assertEqual(2, appended_snapshot_id)
         self.assertEqual(10, table.scan().to_arrow().num_rows)
 
     def test_video_frames_are_independent_blob_payloads(self):
-        result = self.connection.load_from_lerobot(
+        snapshot_id = self.connection.load_from_lerobot(
             "video_data", self.video_source, batch_size=2)
-        self.assertEqual(3, result.row_count)
-        self.assertEqual(2, result.batch_count)
+        self.assertEqual(1, snapshot_id)
 
         table = self.connection.get_table("video_data")
         scalar, blobs = table.scan().select([
@@ -369,14 +365,13 @@ class LeRobotImportTest(unittest.TestCase):
         with patch(
                 "pypaimon.multimodal.lerobot._Hdf5SourceFileIO",
                 return_value=source_file_io):
-            result = self.connection.load_from_lerobot(
+            snapshot_id = self.connection.load_from_lerobot(
                 "oss_images",
                 source,
                 batch_size=2,
             )
 
-        self.assertEqual(2, result.episode_count)
-        self.assertEqual(5, result.row_count)
+        self.assertEqual(1, snapshot_id)
         table = self.connection.get_table("oss_images")
         rows = table.scan().select([
             "episode_index", "frame_index", "index", "task"
@@ -412,14 +407,13 @@ class LeRobotImportTest(unittest.TestCase):
         with patch(
                 "pypaimon.multimodal.lerobot._Hdf5SourceFileIO",
                 return_value=source_file_io) as source_file_io_class:
-            result = self.connection.load_from_lerobot(
+            snapshot_id = self.connection.load_from_lerobot(
                 "oss_video",
                 source,
                 source_options=source_options,
             )
 
-        self.assertEqual(3, result.row_count)
-        self.assertEqual(1, result.snapshot_id)
+        self.assertEqual(1, snapshot_id)
         self.assertEqual(1, source_file_io.close_count)
         self.assertEqual(
             source_options,

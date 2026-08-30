@@ -329,17 +329,19 @@ pip install 'pypaimon[lerobot]'
 ```
 
 ```python
-result = conn.load_from_lerobot(
+snapshot_id = conn.load_from_lerobot(
     "robot_data",
     "/data/lerobot_dataset",
 )
-print(result.episode_count, result.row_count, result.snapshot_id)
+print(snapshot_id)
 ```
+
+The return value is `None` when the source has no frames.
 
 For FileIO URIs, pass credentials through `source_options`:
 
 ```python
-result = conn.load_from_lerobot(
+snapshot_id = conn.load_from_lerobot(
     "robot_data",
     "oss://source-bucket/lerobot_dataset",
     source_options={

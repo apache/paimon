@@ -125,7 +125,7 @@ class MultimodalConnection:
             batch_size: int = 1024,
             options=None,
             source_options=None):
-        """Import one LeRobot Dataset v3 in a single append commit."""
+        """Import LeRobot Dataset v3 and return the committed snapshot ID."""
         from pypaimon.multimodal.lerobot import load_from_lerobot
         return load_from_lerobot(
             self,

@@ -71,16 +71,6 @@ _MEDIA_DTYPES = ("image", "video")
 
 
 @dataclass(frozen=True)
-class LeRobotLoadResult:
-    """Counts and snapshot for one ``load_from_lerobot`` call."""
-
-    episode_count: int
-    batch_count: int
-    row_count: int
-    snapshot_id: Optional[int]
-
-
-@dataclass(frozen=True)
 class _LeRobotSource:
     path: str
     root: Optional[Path]
@@ -103,7 +93,7 @@ def load_from_lerobot(
         batch_size: int = 1024,
         options: Optional[Mapping[str, object]] = None,
         source_options: Optional[Mapping[str, object]] = None):
-    """Import one LeRobot Dataset v3 and commit all frames once.
+    """Import LeRobot Dataset v3 and return the committed snapshot ID.
 
     A missing target table is created from LeRobot metadata. An existing table
     receives the same strict schema validation and append semantics as
@@ -142,15 +132,9 @@ def load_from_lerobot(
                 0,
             )
 
-            episode_count = int(info.get("total_episodes", 0))
             row_count = int(info.get("total_frames", len(dataset)))
             if row_count == 0:
-                return LeRobotLoadResult(
-                    episode_count=episode_count,
-                    batch_count=0,
-                    row_count=0,
-                    snapshot_id=None,
-                )
+                return None
             return _write_dataset(
                 table,
                 dataset,
@@ -695,12 +679,7 @@ def _write_dataset(
         if snapshot_recorder.snapshot_id is None:
             raise RuntimeError(
                 "LeRobot append committed without reporting a snapshot id.")
-        return LeRobotLoadResult(
-            episode_count=int(info.get("total_episodes", 0)),
-            batch_count=batch_count,
-            row_count=row_count,
-            snapshot_id=snapshot_recorder.snapshot_id,
-        )
+        return snapshot_recorder.snapshot_id
     except BaseException:
         if table_write is not None and not commit_started:
             table_write.abort()
