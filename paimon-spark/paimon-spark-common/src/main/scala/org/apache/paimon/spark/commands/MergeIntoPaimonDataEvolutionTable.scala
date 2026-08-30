@@ -285,7 +285,7 @@ case class MergeIntoPaimonDataEvolutionTable(
         else Nil
 
       if (readSnapshot != null) {
-        writer.rowIdCheckConflict(readSnapshot.id())
+        writer.rowIdCheckConflict(readSnapshot.id(), readSnapshot.uuid())
       }
       DataEvolutionRowIdConflictCommitter.commit(
         sparkSession,

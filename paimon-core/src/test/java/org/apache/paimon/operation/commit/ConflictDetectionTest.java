@@ -1661,16 +1661,16 @@ class ConflictDetectionTest {
         RowIdConflictChecker checker = mock(RowIdConflictChecker.class);
         when(checker.isEmpty()).thenReturn(false);
 
-        assertThat(
-                        detection.checkConflicts(
-                                latestSnapshot,
-                                Collections.emptyList(),
-                                Collections.emptyList(),
-                                Collections.emptyList(),
-                                checker,
-                                Snapshot.CommitKind.APPEND))
-                .isPresent()
-                .get()
+        Optional<RuntimeException> conflict =
+                detection.checkConflicts(
+                        latestSnapshot,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        checker,
+                        Snapshot.CommitKind.APPEND);
+        assertThat(conflict).isPresent();
+        assertThat(conflict.get())
                 .hasMessageContaining(
                         ErrorMessages.DATA_EVOLUTION_SNAPSHOT_LINEAGE_CONFLICT_MESSAGE);
     }

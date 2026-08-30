@@ -457,7 +457,13 @@ case class PaimonSparkWriter(
   }
 
   def rowIdCheckConflict(rowIdCheckFromSnapshot: Long): Unit = {
-    writeBuilder.asInstanceOf[BatchWriteBuilderImpl].rowIdCheckConflict(rowIdCheckFromSnapshot)
+    rowIdCheckConflict(rowIdCheckFromSnapshot, null)
+  }
+
+  def rowIdCheckConflict(rowIdCheckFromSnapshot: Long, baseSnapshotUuid: String): Unit = {
+    writeBuilder
+      .asInstanceOf[BatchWriteBuilderImpl]
+      .rowIdCheckConflict(rowIdCheckFromSnapshot, baseSnapshotUuid)
   }
 
   def commit(commitMessages: Seq[CommitMessage]): Unit = {
