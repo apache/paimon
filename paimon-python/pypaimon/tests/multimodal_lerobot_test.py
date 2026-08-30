@@ -25,7 +25,6 @@ from unittest.mock import patch
 
 import numpy as np
 import pyarrow as pa
-import pyarrow.compute as pc
 import pyarrow.fs as pafs
 
 import pypaimon.multimodal as pmm
@@ -64,25 +63,23 @@ class LeRobotValidationTest(unittest.TestCase):
                 "image": {"dtype": "image", "shape": [8, 10, 3]},
             }
         }
-        schema, names = _schema_from_info(
-            info, {"scalar": "renamed"}, include_task=True)
+        schema = _schema_from_info(info, include_task=True)
 
         self.assertEqual(
-            ["renamed", "vector", "tensor", "image", "task"],
+            ["scalar", "vector", "tensor", "image", "task"],
             schema.names,
         )
-        self.assertEqual(pa.int32(), schema.field("renamed").type)
+        self.assertEqual(pa.int32(), schema.field("scalar").type)
         self.assertEqual(pa.list_(pa.float32(), 3), schema.field("vector").type)
         self.assertEqual(
             pa.list_(pa.list_(pa.float64(), 3)),
             schema.field("tensor").type,
         )
         self.assertEqual(pa.large_binary(), schema.field("image").type)
-        self.assertEqual("renamed", names["scalar"])
 
         info["features"]["scalar"]["dtype"] = "uint64"
         with self.assertRaisesRegex(ValueError, "no lossless Paimon integer"):
-            _schema_from_info(info, None, include_task=False)
+            _schema_from_info(info, include_task=False)
 
         info["features"] = {
             "depth": {
@@ -92,7 +89,7 @@ class LeRobotValidationTest(unittest.TestCase):
             }
         }
         with self.assertRaisesRegex(ValueError, "depth-video"):
-            _schema_from_info(info, None, include_task=False)
+            _schema_from_info(info, include_task=False)
 
     def test_local_v2_is_rejected_before_opening(self):
         temp_dir = Path(tempfile.mkdtemp(prefix="pypaimon_lerobot_v2_"))
@@ -452,8 +449,7 @@ class LeRobotImportTest(unittest.TestCase):
 
     def test_existing_incompatible_schema_fails_without_snapshot(self):
         info = json.loads((self.image_source / "meta" / "info.json").read_text())
-        schema, unused_names = _schema_from_info(
-            info, None, include_task=True)
+        schema = _schema_from_info(info, include_task=True)
         fields = [
             pa.field(field.name, pa.string(), nullable=False)
             if field.name == "action" else field
@@ -473,38 +469,6 @@ class LeRobotImportTest(unittest.TestCase):
                 "incompatible", self.image_source)
         self.assertIsNone(
             table.raw_table.snapshot_manager().get_latest_snapshot())
-
-    def test_feature_mapping_and_transform_preserve_order(self):
-        boundaries = []
-
-        def transform(batch):
-            episodes = batch.column("episode_index").to_pylist()
-            frames = batch.column("frame_index").to_pylist()
-            self.assertEqual(1, len(set(episodes)))
-            boundaries.append((episodes[0], frames))
-            columns = [
-                pc.add(batch.column(name), 1)
-                if name == "reward" else batch.column(name)
-                for name in batch.column_names
-            ]
-            return pa.Table.from_arrays(columns, schema=batch.schema)
-
-        result = self.connection.load_from_lerobot(
-            "mapped",
-            self.image_source,
-            feature_mapping={"observation.state": "state"},
-            transform=transform,
-            batch_size=3,
-        )
-        self.assertEqual(5, result.row_count)
-        self.assertEqual([(0, [0, 1]), (1, [0, 1, 2])], boundaries)
-        table = self.connection.get_table("mapped")
-        self.assertIn("state", [field.name for field in table.raw_table.fields])
-        rewards = table.scan().select([
-            "index", "reward"
-        ]).to_arrow().sort_by("index").column("reward").to_pylist()
-        self.assertEqual([1.0, 2.0, 1.0, 1.0, 2.0], rewards)
-
 
 if __name__ == "__main__":
     unittest.main()

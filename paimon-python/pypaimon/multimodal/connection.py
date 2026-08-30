@@ -122,8 +122,6 @@ class MultimodalConnection:
             table_name: str,
             source,
             *,
-            transform=None,
-            feature_mapping=None,
             batch_size: int = 1024,
             options=None,
             source_options=None):
@@ -133,8 +131,6 @@ class MultimodalConnection:
             self,
             table_name,
             source,
-            transform=transform,
-            feature_mapping=feature_mapping,
             batch_size=batch_size,
             options=options,
             source_options=source_options,

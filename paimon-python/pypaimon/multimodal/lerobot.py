@@ -25,7 +25,7 @@ from bisect import bisect_right
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Mapping, Optional
+from typing import Mapping, Optional
 
 import pyarrow as pa
 import pyarrow.fs as pafs
@@ -100,8 +100,6 @@ def load_from_lerobot(
         table_name: str,
         source,
         *,
-        transform: Optional[Callable] = None,
-        feature_mapping: Optional[Mapping[str, str]] = None,
         batch_size: int = 1024,
         options: Optional[Mapping[str, object]] = None,
         source_options: Optional[Mapping[str, object]] = None):
@@ -116,8 +114,6 @@ def load_from_lerobot(
         raise RuntimeError(
             "load_from_lerobot requires Python 3.10 or newer; install and "
             "run 'pypaimon[lerobot]' on a supported Python version.")
-    if transform is not None and not callable(transform):
-        raise ValueError("transform must be callable or None.")
     if isinstance(batch_size, bool) or not isinstance(batch_size, int) \
             or batch_size <= 0:
         raise ValueError("batch_size must be a positive integer.")
@@ -134,9 +130,8 @@ def load_from_lerobot(
             info = dict(dataset.meta.info)
             _require_v3(info, resolved_source.path)
 
-            source_schema, mapped_names = _schema_from_info(
-                info, feature_mapping,
-                include_task=_has_tasks(dataset, info))
+            source_schema = _schema_from_info(
+                info, include_task=_has_tasks(dataset, info))
             table = _get_or_create_table(
                 connection, table_name, source_schema, options)
             target_schema = _target_schema(table.raw_table)
@@ -162,8 +157,6 @@ def load_from_lerobot(
                 info,
                 resolved_source,
                 source_schema,
-                mapped_names,
-                transform,
                 batch_size,
             )
         finally:
@@ -558,69 +551,36 @@ def _has_tasks(dataset, info):
         and getattr(dataset.meta, "tasks", None) is not None
 
 
-def _schema_from_info(info, feature_mapping, include_task):
+def _schema_from_info(info, include_task):
     features = info.get("features")
     if not isinstance(features, dict) or not features:
         raise ValueError("LeRobot metadata features must be a non-empty object.")
-    source_names = list(features)
-    if include_task:
-        source_names.append("task")
-    mapping = _validated_feature_mapping(feature_mapping, source_names)
 
     fields = []
-    mapped_names = {}
-    for source_name, feature in features.items():
-        target_name = mapping.get(source_name, source_name)
-        mapped_names[source_name] = target_name
-        fields.append(_feature_field(target_name, source_name, feature))
+    for name, feature in features.items():
+        fields.append(_feature_field(name, feature))
     if include_task:
-        target_name = mapping.get("task", "task")
-        mapped_names["task"] = target_name
         fields.append(pa.field(
-            target_name,
+            "task",
             pa.string(),
             nullable=False,
             metadata={b"description": b"LeRobot task"},
         ))
-    return pa.schema(fields), mapped_names
+    return pa.schema(fields)
 
 
-def _validated_feature_mapping(feature_mapping, source_names):
-    if feature_mapping is None:
-        return {}
-    if not isinstance(feature_mapping, Mapping):
-        raise ValueError("feature_mapping must be a mapping or None.")
-    mapping = dict(feature_mapping)
-    unknown = sorted(set(mapping).difference(source_names))
-    if unknown:
-        raise ValueError("feature_mapping contains unknown features: %s" % unknown)
-    targets = []
-    for source_name in source_names:
-        target = mapping.get(source_name, source_name)
-        if not isinstance(target, str) or not target:
-            raise ValueError(
-                "feature_mapping target for %s must be a non-empty string."
-                % source_name)
-        targets.append(target)
-    duplicates = sorted({name for name in targets if targets.count(name) > 1})
-    if duplicates:
-        raise ValueError(
-            "feature_mapping produces duplicate columns: %s" % duplicates)
-    return mapping
-
-
-def _feature_field(target_name, source_name, feature):
+def _feature_field(name, feature):
     if not isinstance(feature, dict):
         raise ValueError(
-            "LeRobot feature %s metadata must be an object." % source_name)
+            "LeRobot feature %s metadata must be an object." % name)
     dtype = str(feature.get("dtype", ""))
-    shape = _feature_shape(feature, source_name)
+    shape = _feature_shape(feature, name)
     if dtype in _MEDIA_DTYPES:
         if dtype == "video" and _is_depth_video(feature):
             raise ValueError(
                 "LeRobot depth-video feature %s is not supported; its "
                 "decoded values cannot be losslessly stored as PNG frames."
-                % source_name)
+                % name)
         arrow_type = pa.large_binary()
     else:
         scalar_type = _SCALAR_DTYPES.get(dtype)
@@ -629,14 +589,14 @@ def _feature_field(target_name, source_name, feature):
                 if dtype == "uint64" else ""
             raise ValueError(
                 "Unsupported LeRobot dtype %r for feature %s%s."
-                % (dtype, source_name, suffix))
+                % (dtype, name, suffix))
         if pa.types.is_string(scalar_type) and shape not in ((), (1,)):
             raise ValueError(
-                "LeRobot string feature %s must be scalar." % source_name)
+                "LeRobot string feature %s must be scalar." % name)
         arrow_type = _tensor_type(scalar_type, shape)
     description = "LeRobot dtype=%s, shape=%s" % (dtype, list(shape))
     return pa.field(
-        target_name,
+        name,
         arrow_type,
         nullable=False,
         metadata={b"description": description.encode("utf-8")},
@@ -697,8 +657,6 @@ def _write_dataset(
         info,
         source,
         source_schema,
-        mapped_names,
-        transform,
         batch_size):
     target_schema = _target_schema(table.raw_table)
     write_builder = table.raw_table.new_batch_write_builder()
@@ -715,12 +673,7 @@ def _write_dataset(
         table_commit.add_commit_callback(snapshot_recorder)
         for begin, end in _episode_batches(dataset, info, batch_size):
             batch = _read_batch(
-                dataset, info, begin, end, source_schema, mapped_names)
-            if transform is not None:
-                transformed = transform(batch)
-                transformed = _as_arrow_table(transformed)
-                _validate_transform_order(batch, transformed, mapped_names)
-                batch = transformed
+                dataset, info, begin, end, source_schema)
             batch = _strict_lerobot_table(
                 batch,
                 target_schema,
@@ -789,7 +742,7 @@ def _episode_batches(dataset, info, batch_size):
             % (expected_begin, total_frames))
 
 
-def _read_batch(dataset, info, begin, end, schema, mapped_names):
+def _read_batch(dataset, info, begin, end, schema):
     read_batch = getattr(dataset, "read_batch", None)
     if callable(read_batch):
         raw = read_batch(begin, end)
@@ -819,17 +772,16 @@ def _read_batch(dataset, info, begin, end, schema, mapped_names):
 
     arrays = []
     fields = []
-    for source_name, feature in features.items():
-        target_name = mapped_names[source_name]
-        field = schema.field(target_name)
+    for name, feature in features.items():
+        field = schema.field(name)
         dtype = feature["dtype"]
         if dtype == "video":
-            values = video_values[source_name]
+            values = video_values[name]
         else:
-            if source_name not in raw.column_names:
+            if name not in raw.column_names:
                 raise ValueError(
-                    "LeRobot data is missing metadata feature %s." % source_name)
-            values = raw.column(source_name).to_pylist()
+                    "LeRobot data is missing metadata feature %s." % name)
+            values = raw.column(name).to_pylist()
             if dtype == "image":
                 image_reader = getattr(dataset, "image_bytes", None)
                 if callable(image_reader):
@@ -838,18 +790,18 @@ def _read_batch(dataset, info, begin, end, schema, mapped_names):
                     values = [_image_bytes(value, dataset.root)
                               for value in values]
             else:
-                values = [_normalize_value(value, feature, source_name)
+                values = [_normalize_value(value, feature, name)
                           for value in values]
         arrays.append(pa.array(values, type=field.type))
         fields.append(field)
 
-    if "task" in mapped_names:
+    if "task" in schema.names:
         task_indices = raw.column("task_index").to_pylist()
         arrays.append(pa.array(
             [_task_name(dataset.meta.tasks, value) for value in task_indices],
             type=pa.string(),
         ))
-        fields.append(schema.field(mapped_names["task"]))
+        fields.append(schema.field("task"))
     return pa.Table.from_arrays(arrays, schema=pa.schema(fields))
 
 
@@ -950,24 +902,3 @@ def _task_name(tasks, task_index):
     if isinstance(task, dict):
         return str(task.get("task", task.get("name")))
     return str(task)
-
-
-def _as_arrow_table(value):
-    if isinstance(value, pa.RecordBatch):
-        return pa.Table.from_batches([value])
-    if isinstance(value, pa.Table):
-        return value
-    raise ValueError("LeRobot transform must return one Arrow table or batch.")
-
-
-def _validate_transform_order(before, after, mapped_names):
-    if before.num_rows != after.num_rows:
-        raise ValueError(
-            "LeRobot transform must preserve the number of frames in each batch.")
-    for source_name in ("episode_index", "frame_index", "index"):
-        target_name = mapped_names.get(source_name)
-        if target_name is None or target_name not in after.column_names:
-            continue
-        if not before.column(target_name).equals(after.column(target_name)):
-            raise ValueError(
-                "LeRobot transform must preserve %s order." % source_name)

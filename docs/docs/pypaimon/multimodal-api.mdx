@@ -356,9 +356,8 @@ validation and append semantics. Scalars map to scalar types, vectors to
 keep their compressed bytes; video frames are stored as PNG BLOBs while only
 active MP4 chunks are cached locally during import.
 
-`feature_mapping` renames columns; `transform` maps Arrow batches without
-changing frame order. Only v3 is supported; `uint64`, depth video, and language
-event structures are rejected.
+Only v3 is supported; `uint64`, depth video, and language event structures are
+rejected.
 
 ## Overwrite
 
