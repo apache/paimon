@@ -437,6 +437,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
                     getOffsetAndLengthForSplit(splitStart, splitLength, orcReader.getStripes());
 
             // create ORC row reader configuration
+            boolean forcePositionalEvolution = OrcConf.FORCE_POSITIONAL_EVOLUTION.getBoolean(conf);
             org.apache.orc.Reader.Options options =
                     new org.apache.orc.Reader.Options()
                             .schema(schema)
@@ -444,12 +445,13 @@ public class OrcReaderFactory implements FormatReaderFactory {
                             .useZeroCopy(OrcConf.USE_ZEROCOPY.getBoolean(conf))
                             .skipCorruptRecords(OrcConf.SKIP_CORRUPT_DATA.getBoolean(conf))
                             .tolerateMissingSchema(OrcConf.TOLERATE_MISSING_SCHEMA.getBoolean(conf))
-                            .forcePositionalEvolution(
-                                    OrcConf.FORCE_POSITIONAL_EVOLUTION.getBoolean(conf))
-                            .positionalEvolutionLevel(
-                                    OrcConf.FORCE_POSITIONAL_EVOLUTION_LEVEL.getInt(conf))
+                            .forcePositionalEvolution(forcePositionalEvolution)
                             .isSchemaEvolutionCaseAware(
                                     OrcConf.IS_SCHEMA_EVOLUTION_CASE_SENSITIVE.getBoolean(conf));
+            if (forcePositionalEvolution) {
+                options.positionalEvolutionLevel(
+                        OrcConf.FORCE_POSITIONAL_EVOLUTION_LEVEL.getInt(conf));
+            }
             if (!conjunctPredicates.isEmpty() && !deletionVectorsEnabled && selection == null) {
                 // row group filter push down will make row number change incorrect
                 // so deletion vectors mode and bitmap index cannot work with row group push down

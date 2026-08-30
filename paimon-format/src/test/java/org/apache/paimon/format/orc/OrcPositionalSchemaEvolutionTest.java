@@ -50,11 +50,20 @@ class OrcPositionalSchemaEvolutionTest {
 
     @Test
     void testPositionalSchemaEvolution() throws Exception {
-        Path path = writeOrcFile();
-        RowType readType = RowType.builder().field("id", DataTypes.INT()).build();
         Configuration conf = new Configuration(false);
         OrcConf.FORCE_POSITIONAL_EVOLUTION.setBoolean(conf, true);
 
+        assertThat(readOrcFile(conf)).containsExactly(42);
+    }
+
+    @Test
+    void testPositionalSchemaEvolutionDisabledByDefault() throws Exception {
+        assertThat(readOrcFile(new Configuration(false))).containsExactly((Integer) null);
+    }
+
+    private List<Integer> readOrcFile(Configuration conf) throws Exception {
+        Path path = writeOrcFile();
+        RowType readType = RowType.builder().field("id", DataTypes.INT()).build();
         OrcReaderFactory factory =
                 new OrcReaderFactory(conf, readType, Collections.emptyList(), 1024, false, false);
         LocalFileIO fileIO = new LocalFileIO();
@@ -66,7 +75,7 @@ class OrcPositionalSchemaEvolutionTest {
             reader.forEachRemaining(row -> values.add(row.isNullAt(0) ? null : row.getInt(0)));
         }
 
-        assertThat(values).containsExactly(42);
+        return values;
     }
 
     private Path writeOrcFile() throws Exception {
