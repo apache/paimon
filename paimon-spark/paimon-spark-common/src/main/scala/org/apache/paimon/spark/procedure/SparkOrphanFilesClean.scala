@@ -70,16 +70,9 @@ case class SparkOrphanFilesClean(
       .parallelize(branches.asScala.toSeq, maxBranchParallelism)
       .mapPartitions(_.flatMap {
         branch =>
-          val liveSnapshotIds =
-            specifiedTable
-              .switchToBranch(branch)
-              .snapshotManager()
-              .safelyGetAllSnapshots()
-              .asScala
-              .map(_.id())
-              .toSet
-          safelyGetAllSnapshots(branch).asScala.map(
-            snapshot => (branch, snapshot.toJson, liveSnapshotIds.contains(snapshot.id())))
+          val liveSnapshots = safelyGetLiveSnapshots(branch)
+          snapshotsIncludingTagsAndChangelogs(branch, liveSnapshots).asScala.map(
+            snapshot => (branch, snapshot.toJson, liveSnapshots.contains(snapshot)))
       })
       .repartition(parallelism)
       .flatMap {

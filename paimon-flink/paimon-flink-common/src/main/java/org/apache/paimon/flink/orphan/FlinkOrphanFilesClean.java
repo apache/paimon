@@ -67,7 +67,6 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
-import java.util.stream.Collectors;
 
 import static org.apache.flink.api.common.typeinfo.BasicTypeInfo.STRING_TYPE_INFO;
 import static org.apache.flink.util.Preconditions.checkState;
@@ -165,18 +164,16 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                                     ctx,
                                             Collector<Tuple3<String, String, Boolean>> out)
                                             throws Exception {
-                                        Set<Long> liveSnapshotIds =
-                                                table.switchToBranch(branch).snapshotManager()
-                                                        .safelyGetAllSnapshots().stream()
-                                                        .map(Snapshot::id)
-                                                        .collect(Collectors.toSet());
-                                        for (Snapshot snapshot : safelyGetAllSnapshots(branch)) {
+                                        Set<Snapshot> liveSnapshots =
+                                                safelyGetLiveSnapshots(branch);
+                                        for (Snapshot snapshot :
+                                                snapshotsIncludingTagsAndChangelogs(
+                                                        branch, liveSnapshots)) {
                                             out.collect(
                                                     new Tuple3<>(
                                                             branch,
                                                             snapshot.toJson(),
-                                                            liveSnapshotIds.contains(
-                                                                    snapshot.id())));
+                                                            liveSnapshots.contains(snapshot)));
                                         }
                                     }
                                 })

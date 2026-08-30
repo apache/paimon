@@ -38,7 +38,6 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.SupplierWithIOException;
-import org.apache.paimon.utils.TagManager;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -244,15 +243,18 @@ public abstract class OrphanFilesClean implements Serializable {
         return path.getName().endsWith(ManagedBlobReferenceFile.MANAGED_BLOB_SUFFIX);
     }
 
-    protected Set<Snapshot> safelyGetAllSnapshots(String branch) throws IOException {
+    protected Set<Snapshot> safelyGetLiveSnapshots(String branch) throws IOException {
         FileStoreTable branchTable = table.switchToBranch(branch);
-        SnapshotManager snapshotManager = branchTable.snapshotManager();
-        ChangelogManager changelogManager = branchTable.changelogManager();
-        TagManager tagManager = branchTable.tagManager();
-        Set<Snapshot> readSnapshots = new HashSet<>(snapshotManager.safelyGetAllSnapshots());
-        readSnapshots.addAll(tagManager.taggedSnapshots());
-        readSnapshots.addAll(changelogManager.safelyGetAllChangelogs());
-        return readSnapshots;
+        return new HashSet<>(branchTable.snapshotManager().safelyGetAllSnapshots());
+    }
+
+    protected Set<Snapshot> snapshotsIncludingTagsAndChangelogs(
+            String branch, Set<Snapshot> liveSnapshots) throws IOException {
+        FileStoreTable branchTable = table.switchToBranch(branch);
+        Set<Snapshot> snapshots = new HashSet<>(liveSnapshots);
+        snapshots.addAll(branchTable.tagManager().taggedSnapshots());
+        snapshots.addAll(branchTable.changelogManager().safelyGetAllChangelogs());
+        return snapshots;
     }
 
     protected void collectWithoutDataFile(

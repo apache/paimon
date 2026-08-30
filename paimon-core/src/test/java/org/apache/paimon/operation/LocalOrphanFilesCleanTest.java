@@ -83,6 +83,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.BranchManager.branchPath;
 import static org.apache.paimon.utils.FileStorePathFactory.BUCKET_PATH_PREFIX;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -779,6 +780,49 @@ public class LocalOrphanFilesCleanTest {
         LocalOrphanFilesClean orphanFilesClean =
                 new LocalOrphanFilesClean(
                         table, System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(2));
+        CleanOrphanFilesResult result = orphanFilesClean.clean();
+
+        assertThat(result.getDeletedFileCount()).isEqualTo(0);
+        for (Path dataFile : dataFilesBefore) {
+            assertThat(fileIO.exists(dataFile)).isTrue();
+        }
+    }
+
+    @Test
+    void testReuseCapturedLiveSnapshots() throws Exception {
+        commit(Collections.singletonList(new TestPojo(1, 0, "a", "v1")));
+        Snapshot mainSnapshot = table.snapshotManager().latestSnapshot();
+
+        String branchName = "branch1";
+        table.createBranch(branchName);
+        FileStoreTable branchTable = table.switchToBranch(branchName);
+        String branchCommitUser = UUID.randomUUID().toString();
+        try (TableWriteImpl<?> branchWrite = branchTable.newWrite(branchCommitUser);
+                TableCommitImpl branchCommit = branchTable.newCommit(branchCommitUser)) {
+            branchWrite.write(new TestPojo(2, 0, "b", "v2").toRow(RowKind.INSERT));
+            branchCommit.commit(0, branchWrite.prepareCommit(true, 0));
+        }
+
+        List<Path> dataFilesBefore = new ArrayList<>();
+        collectDataFiles(tablePath, dataFilesBefore);
+        assertThat(dataFilesBefore).isNotEmpty();
+
+        LocalOrphanFilesClean orphanFilesClean =
+                new LocalOrphanFilesClean(
+                        table, System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(2)) {
+                    @Override
+                    protected Set<Snapshot> snapshotsIncludingTagsAndChangelogs(
+                            String branch, Set<Snapshot> liveSnapshots) throws IOException {
+                        if (DEFAULT_MAIN_BRANCH.equals(branch)) {
+                            fileIO.deleteQuietly(
+                                    table.snapshotManager().snapshotPath(mainSnapshot.id()));
+                            fileIO.deleteQuietly(
+                                    new Path(manifestDir, mainSnapshot.baseManifestList()));
+                        }
+                        return super.snapshotsIncludingTagsAndChangelogs(branch, liveSnapshots);
+                    }
+                };
+
         CleanOrphanFilesResult result = orphanFilesClean.clean();
 
         assertThat(result.getDeletedFileCount()).isEqualTo(0);

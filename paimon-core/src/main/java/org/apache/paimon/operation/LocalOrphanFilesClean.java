@@ -179,9 +179,8 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
             Consumer<String> liveManifestConsumer,
             AtomicBoolean missingManifest)
             throws IOException {
-        Set<Snapshot> liveSnapshots =
-                new HashSet<>(
-                        table.switchToBranch(branch).snapshotManager().safelyGetAllSnapshots());
+        Set<Snapshot> liveSnapshots = safelyGetLiveSnapshots(branch);
+        Set<Snapshot> snapshots = snapshotsIncludingTagsAndChangelogs(branch, liveSnapshots);
         randomlyOnlyExecute(
                 executor,
                 snapshot -> {
@@ -204,7 +203,7 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
                         throw new RuntimeException(e);
                     }
                 },
-                safelyGetAllSnapshots(branch));
+                snapshots);
     }
 
     private Set<String> getUsedFiles(String branch, AtomicBoolean missingManifest) {
