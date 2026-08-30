@@ -476,7 +476,8 @@ class SchemaValidationTest {
         assertThatCode(() -> validateTableSchema(schema)).doesNotThrowAnyException();
 
         options.put(CoreOptions.VIDEO_FRAME_FIELD.key(), "video,other_video");
-        assertThatCode(() -> validateTableSchema(schema)).doesNotThrowAnyException();
+        assertThatThrownBy(() -> validateTableSchema(schema))
+                .hasMessageContaining("currently supports exactly one field");
 
         options.put(CoreOptions.VIDEO_FRAME_FIELD.key(), "video");
         options.put(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "video");

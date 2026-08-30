@@ -2695,7 +2695,7 @@ public class CoreOptions implements Serializable {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Specifies scalar BLOB fields whose logical rows are video frames. "
+                            "Specifies one scalar BLOB field whose logical rows are video frames. "
                                     + "Complete encoded videos and embedded frame-run indexes are "
                                     + "packed into '.video' files. The first version supports "
                                     + "append-only data-evolution tables and exact "
@@ -3598,9 +3598,15 @@ public class CoreOptions implements Serializable {
         return parseCommaSeparatedSet(BLOB_DESCRIPTOR_FIELD);
     }
 
-    /** Resolve scalar BLOB fields stored as frame runs in video pack files. */
-    public Set<String> videoFrameFields() {
-        return parseCommaSeparatedSet(VIDEO_FRAME_FIELD);
+    /** Resolve the scalar BLOB field stored as frame runs in video pack files. */
+    public Optional<String> videoFrameField() {
+        Set<String> fields = parseCommaSeparatedSet(VIDEO_FRAME_FIELD);
+        checkArgument(
+                fields.size() <= 1,
+                "'%s' currently supports exactly one field, but found %s.",
+                VIDEO_FRAME_FIELD.key(),
+                fields);
+        return fields.stream().findFirst();
     }
 
     /**

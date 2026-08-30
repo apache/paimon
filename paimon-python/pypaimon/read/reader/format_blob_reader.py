@@ -16,8 +16,7 @@
 # under the License.
 
 import struct
-from copy import copy
-from typing import List, Optional, Any, Iterator, BinaryIO, Sequence
+from typing import List, Optional, Any, Iterator, BinaryIO
 
 import pyarrow as pa
 import pyarrow.dataset as ds
@@ -51,8 +50,7 @@ class FormatBlobReader(RecordBatchReader):
     def __init__(self, file_io: FileIO, file_path: str, read_fields: List[str],
                  full_fields: List[DataField], push_down_predicate: Any, blob_as_descriptor: bool,
                  batch_size: int = 1024, row_indices: Optional[Any] = None,
-                 blob_parallelism: int = 1, file_size: Optional[int] = None,
-                 blob_index_cache: Optional[dict] = None):
+                 blob_parallelism: int = 1, file_size: Optional[int] = None):
         self._file_io = file_io
         self._file_path = file_path
         self._push_down_predicate = push_down_predicate
@@ -64,8 +62,8 @@ class FormatBlobReader(RecordBatchReader):
 
         # Initialize the low-level blob format reader
         self.file_path = file_path
-        self.blob_lengths: Sequence[int] = []
-        self.blob_offsets: Sequence[int] = []
+        self.blob_lengths: List[int] = []
+        self.blob_offsets: List[int] = []
         self.returned = False
         self._input_stream = None
         self._blob_iterator = None
@@ -76,29 +74,11 @@ class FormatBlobReader(RecordBatchReader):
                 if file_size is not None and file_size > 0
                 else file_io.get_file_size(file_path)
             )
-            cached_index = (
-                blob_index_cache.get(file_path)
-                if blob_index_cache is not None
-                else None
-            )
-            if cached_index is None:
-                self._input_stream = file_io.new_input_stream(file_path)
-                self._read_index()
-                if blob_index_cache is not None:
-                    if self._is_video:
-                        blob_index_cache[file_path] = copy(self._video_meta)
-                    else:
-                        cached_index = (
-                            tuple(self.blob_lengths), tuple(self.blob_offsets)
-                        )
-                        blob_index_cache[file_path] = cached_index
-                        self.blob_lengths, self.blob_offsets = cached_index
-            elif self._is_video:
-                self._video_meta = copy(cached_index)
-            else:
-                self.blob_lengths, self.blob_offsets = cached_index
+            self._input_stream = file_io.new_input_stream(file_path)
+            self._read_index()
             self._apply_row_indices(row_indices)
 
+            # Set up fields and schema before deciding whether the stream can be dropped.
             if len(read_fields) > 1:
                 raise RuntimeError("Blob reader only supports one field.")
             self._fields = read_fields
@@ -114,27 +94,22 @@ class FormatBlobReader(RecordBatchReader):
                 )
             self._is_array_blob = is_array_blob_type(self._data_field.type)
             self._is_map_blob = is_map_blob_type(self._data_field.type)
-            self._schema = PyarrowFieldParser.from_paimon_schema(
-                projected_data_fields
-            )
-            requires_input_stream = (
-                not self._is_video
-                and (
-                    self._is_array_blob
-                    or self._is_map_blob
-                    or (
-                        not self._blob_as_descriptor
-                        and self._blob_parallelism <= 1
-                    )
-                )
-            )
+            self._schema = PyarrowFieldParser.from_paimon_schema(projected_data_fields)
 
-            if requires_input_stream and self._input_stream is None:
-                self._input_stream = file_io.new_input_stream(file_path)
-            elif not requires_input_stream:
-                if self._input_stream is not None:
-                    self._input_stream.close()
-                    self._input_stream = None
+            # Drop the shared stream: descriptor/concurrent reads yield BlobRefs
+            # that each open their own stream (one stream isn't thread-safe).
+            # Nested Blob formats need the stream to read their keys and indexes.
+            if (
+                not self._is_array_blob
+                and not self._is_map_blob
+                and (
+                    self._is_video
+                    or self._blob_as_descriptor
+                    or self._blob_parallelism > 1
+                )
+            ):
+                self._input_stream.close()
+                self._input_stream = None
         except Exception:
             self.close()
             raise
@@ -456,8 +431,8 @@ class BlobRecordIterator:
     NULL_LENGTH = -1
     PLACE_HOLDER_LENGTH = -2
 
-    def __init__(self, file_io: FileIO, file_path: str, blob_lengths: Sequence[int],
-                 blob_offsets: Sequence[int], field,
+    def __init__(self, file_io: FileIO, file_path: str, blob_lengths: List[int],
+                 blob_offsets: List[int], field,
                  input_stream: Optional[BinaryIO] = None,
                  blob_as_descriptor: bool = False):
         self.file_io = file_io

@@ -18,13 +18,10 @@
 
 package org.apache.paimon.operation.commit;
 
-import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 
-import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 
 /** Commit changes. */
 public class CommitChanges {
@@ -32,23 +29,13 @@ public class CommitChanges {
     public final List<ManifestEntry> tableFiles;
     public final List<ManifestEntry> changelogFiles;
     public final List<IndexManifestEntry> indexFiles;
-    public final Map<FileEntry.Identifier, Integer> tableFileGroups;
 
     public CommitChanges(
             List<ManifestEntry> tableFiles,
             List<ManifestEntry> changelogFiles,
             List<IndexManifestEntry> indexFiles) {
-        this(tableFiles, changelogFiles, indexFiles, Collections.emptyMap());
-    }
-
-    public CommitChanges(
-            List<ManifestEntry> tableFiles,
-            List<ManifestEntry> changelogFiles,
-            List<IndexManifestEntry> indexFiles,
-            Map<FileEntry.Identifier, Integer> tableFileGroups) {
         this.tableFiles = tableFiles;
         this.changelogFiles = changelogFiles;
         this.indexFiles = indexFiles;
-        this.tableFileGroups = tableFileGroups;
     }
 }

@@ -197,7 +197,7 @@ docs.add([
 
 ## Video Frame Storage
 
-For a frame table, set `video-frame-field` on one or more scalar BLOB columns. Paimon
+For a frame table, set `video-frame-field` on one scalar BLOB column. Paimon
 stores the frame ordinal in `VideoFrameDescriptor` and the compact `.video`
 index, so the normal data file does not need a `frame_index` or
 `frame_timestamp` column:

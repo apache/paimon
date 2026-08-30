@@ -277,7 +277,7 @@ public class CoreOptionsTest {
         options.set(CoreOptions.VIDEO_FRAME_FIELD, "video");
 
         assertThat(CoreOptions.blobField(options.toMap())).containsExactly("image", "video");
-        assertThat(new CoreOptions(options).videoFrameFields()).containsExactly("video");
+        assertThat(new CoreOptions(options).videoFrameField()).contains("video");
     }
 
     @Test

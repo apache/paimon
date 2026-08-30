@@ -21,7 +21,6 @@ package org.apache.paimon.operation.commit;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -180,7 +179,6 @@ public class CommitScanner {
     public CommitChangesProvider overwriteChangesProvider(
             int numBucket,
             List<ManifestEntry> changes,
-            Map<FileEntry.Identifier, Integer> changeGroups,
             List<IndexManifestEntry> indexFiles,
             @Nullable PartitionPredicate partitionFilter) {
         return new OverwriteChangesProvider(
@@ -190,7 +188,6 @@ public class CommitScanner {
                 dropStats,
                 numBucket,
                 changes,
-                changeGroups,
                 indexFiles,
                 partitionFilter);
     }

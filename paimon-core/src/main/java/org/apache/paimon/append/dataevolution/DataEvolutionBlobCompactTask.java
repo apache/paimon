@@ -130,7 +130,7 @@ public class DataEvolutionBlobCompactTask extends DataEvolutionCompactTask {
             RowType blobWriteType,
             String blobFieldName,
             DataFilePathFactory pathFactory) {
-        boolean video = options.videoFrameFields().contains(blobFieldName);
+        boolean video = options.videoFrameField().map(blobFieldName::equals).orElse(false);
         FileFormat blobFileFormat =
                 video
                         ? new VideoFileFormat(options.blobCopyBufferSize())
