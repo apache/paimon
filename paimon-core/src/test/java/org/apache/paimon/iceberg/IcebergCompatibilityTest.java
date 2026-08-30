@@ -38,7 +38,6 @@ import org.apache.paimon.iceberg.manifest.IcebergManifestEntry;
 import org.apache.paimon.iceberg.manifest.IcebergManifestFile;
 import org.apache.paimon.iceberg.manifest.IcebergManifestFileMeta;
 import org.apache.paimon.iceberg.manifest.IcebergManifestList;
-import org.apache.paimon.iceberg.metadata.IcebergDataField;
 import org.apache.paimon.iceberg.metadata.IcebergMetadata;
 import org.apache.paimon.iceberg.metadata.IcebergRef;
 import org.apache.paimon.iceberg.metadata.IcebergSchema;
@@ -1766,7 +1765,7 @@ public class IcebergCompatibilityTest {
     }
 
     @Test
-    public void testCommitOnBranchUsesSeparateMetadata() throws Exception {
+    public void testCommitAndTagOnBranchDoNotModifyMainMetadata() throws Exception {
         RecordingIcebergMetadataCommitter.COMMITS.clear();
         RowType rowType =
                 RowType.of(
@@ -1798,9 +1797,11 @@ public class IcebergCompatibilityTest {
             commit.commit(2, write.prepareCommit(false, 2));
         }
 
-        Path mainMetadataPath =
-                new Path(IcebergCommitCallback.catalogTableMetadataPath(table), "v1.metadata.json");
-        String mainMetadata = table.fileIO().readFileUtf8(mainMetadataPath);
+        Path metadataDirectory = IcebergCommitCallback.catalogTableMetadataPath(table);
+        Path mainMetadataPathV1 = new Path(metadataDirectory, "v1.metadata.json");
+        String mainMetadataV1 = table.fileIO().readFileUtf8(mainMetadataPathV1);
+        Path mainMetadataPathV2 = new Path(metadataDirectory, "v2.metadata.json");
+        String mainMetadataV2 = table.fileIO().readFileUtf8(mainMetadataPathV2);
         Path mainVersionHint =
                 new Path(
                         IcebergCommitCallback.catalogTableMetadataPath(table), "version-hint.text");
@@ -1813,31 +1814,11 @@ public class IcebergCompatibilityTest {
             write.write(GenericRow.of(2, 20, 200));
             commit.commit(2, write.prepareCommit(false, 2));
         }
+        branchTable.createTag("branch-tag");
 
-        IcebergMetadata metadata =
-                IcebergMetadata.fromPath(
-                        branchTable.fileIO(),
-                        new Path(
-                                IcebergCommitCallback.catalogTableMetadataPath(branchTable),
-                                "v1.metadata.json"));
-        assertThat(
-                        metadata.schemas().get(metadata.currentSchemaId()).fields().stream()
-                                .map(IcebergDataField::name))
-                .containsExactly("k", "v", "branch_only");
-        assertThat(table.fileIO().readFileUtf8(mainMetadataPath)).isEqualTo(mainMetadata);
+        assertThat(table.fileIO().readFileUtf8(mainMetadataPathV1)).isEqualTo(mainMetadataV1);
+        assertThat(table.fileIO().readFileUtf8(mainMetadataPathV2)).isEqualTo(mainMetadataV2);
         assertThat(table.fileIO().readFileUtf8(mainVersionHint)).isEqualTo(versionHint);
-        IcebergMetadata mainMetadataAfterBranchCommit =
-                IcebergMetadata.fromPath(
-                        table.fileIO(),
-                        new Path(
-                                IcebergCommitCallback.catalogTableMetadataPath(table),
-                                "v2.metadata.json"));
-        assertThat(
-                        mainMetadataAfterBranchCommit.schemas()
-                                .get(mainMetadataAfterBranchCommit.currentSchemaId()).fields()
-                                .stream()
-                                .map(IcebergDataField::name))
-                .containsExactly("k", "v");
         assertThat(RecordingIcebergMetadataCommitter.COMMITS).isEmpty();
     }
 

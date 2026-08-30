@@ -70,6 +70,7 @@ import org.apache.paimon.tag.SuccessFileTagCallback;
 import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.tag.TagPreview;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.ChainTableUtils;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -398,8 +399,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         if (options.isChainTable()) {
             callbacks.add(new ChainTableCommitPreCallback(table));
         }
-        if (options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
-                != IcebergOptions.StorageType.DISABLED) {
+        if (icebergCompatibilityEnabled(table)) {
             callbacks.add(new IcebergPreCommitValidation(table));
         }
         return callbacks;
@@ -433,8 +433,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
             }
         }
 
-        if (options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
-                != IcebergOptions.StorageType.DISABLED) {
+        if (icebergCompatibilityEnabled(table)) {
             callbacks.add(new IcebergCommitCallback(table, commitUser));
         }
 
@@ -597,11 +596,17 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         if (options.tagCreateSuccessFile()) {
             callbacks.add(new SuccessFileTagCallback(fileIO, newTagManager().tagDirectory()));
         }
-        if (options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
-                != IcebergOptions.StorageType.DISABLED) {
+        if (icebergCompatibilityEnabled(table)) {
             callbacks.add(new IcebergCommitCallback(table, ""));
         }
         return callbacks;
+    }
+
+    private boolean icebergCompatibilityEnabled(FileStoreTable table) {
+        return options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
+                        != IcebergOptions.StorageType.DISABLED
+                && BranchManager.isMainBranch(
+                        BranchManager.normalizeBranch(table.coreOptions().branch()));
     }
 
     @Override
