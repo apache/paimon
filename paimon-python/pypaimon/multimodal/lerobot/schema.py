@@ -63,6 +63,39 @@ def _schema_from_info(info, include_task):
     return pa.schema(fields)
 
 
+def _validate_lerobot_schema(source_schema, target_schema, source):
+    """Require an existing table to preserve the LeRobot feature contract."""
+    for source_field in source_schema:
+        target_index = target_schema.get_field_index(source_field.name)
+        if target_index < 0:
+            # The shared schema validator reports missing columns consistently.
+            continue
+        target_field = target_schema.field(target_index)
+        if source_field.type != target_field.type:
+            raise ValueError(
+                "LeRobot feature %s from %s cannot be converted to the "
+                "table schema: expected %s, found %s."
+                % (source_field.name, source, source_field.type,
+                   target_field.type))
+
+        source_description = _description(source_field)
+        if not source_description.startswith("LeRobot dtype="):
+            continue
+        target_description = _description(target_field)
+        if target_description != source_description:
+            raise ValueError(
+                "LeRobot feature %s from %s cannot be converted to the "
+                "table schema: expected %s, found %s."
+                % (source_field.name, source, source_description,
+                   target_description or "no LeRobot feature metadata"))
+
+
+def _description(field):
+    if not field.metadata:
+        return ""
+    return field.metadata.get(b"description", b"").decode("utf-8")
+
+
 def _feature_field(name, feature):
     if not isinstance(feature, dict):
         raise ValueError(

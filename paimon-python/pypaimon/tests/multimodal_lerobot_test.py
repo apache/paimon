@@ -35,7 +35,10 @@ from pypaimon.multimodal.lerobot.loader import (
     _image_bytes,
     _task_name,
 )
-from pypaimon.multimodal.lerobot.schema import _schema_from_info
+from pypaimon.multimodal.lerobot.schema import (
+    _schema_from_info,
+    _validate_lerobot_schema,
+)
 from pypaimon.multimodal.lerobot.source import (
     _LeRobotSource,
     _import_lerobot_dataset,
@@ -216,6 +219,56 @@ class LeRobotValidationTest(unittest.TestCase):
         }
         with self.assertRaisesRegex(ValueError, "video feature camera.*not supported"):
             _schema_from_info(info, include_task=False)
+
+    def test_existing_schema_preserves_lerobot_feature_contract(self):
+        source = _schema_from_info({
+            "features": {
+                "scalar": {"dtype": "float32", "shape": [1]},
+                "vector": {"dtype": "float32", "shape": [3]},
+                "tensor": {"dtype": "float32", "shape": [2, 3]},
+                "image": {"dtype": "image", "shape": [8, 10, 3]},
+            }
+        }, include_task=False)
+
+        replacements = {
+            "shape": pa.field(
+                "tensor",
+                source.field("tensor").type,
+                nullable=False,
+                metadata={
+                    b"description": b"LeRobot dtype=float32, shape=[5, 3]",
+                },
+            ),
+            "dtype": pa.field(
+                "scalar",
+                pa.float64(),
+                nullable=False,
+                metadata={
+                    b"description": b"LeRobot dtype=float64, shape=[1]",
+                },
+            ),
+            "array": pa.field(
+                "vector",
+                pa.list_(pa.float32()),
+                nullable=False,
+                metadata=source.field("vector").metadata,
+            ),
+            "bytes": pa.field(
+                "image",
+                pa.binary(),
+                nullable=False,
+                metadata=source.field("image").metadata,
+            ),
+        }
+        for name, replacement in replacements.items():
+            with self.subTest(name=name):
+                target = pa.schema([
+                    replacement if field.name == replacement.name else field
+                    for field in source
+                ])
+                with self.assertRaisesRegex(
+                        ValueError, "cannot be converted"):
+                    _validate_lerobot_schema(source, target, "dataset")
 
     def test_local_v2_is_rejected_before_opening(self):
         temp_dir = Path(tempfile.mkdtemp(prefix="pypaimon_lerobot_v2_"))
@@ -490,25 +543,58 @@ class LeRobotImportTest(unittest.TestCase):
     def test_existing_incompatible_schema_fails_without_snapshot(self):
         info = json.loads((self.image_source / "meta" / "info.json").read_text())
         schema = _schema_from_info(info, include_task=True)
-        fields = [
-            pa.field(field.name, pa.string(), nullable=False)
-            if field.name == "action" else field
-            for field in schema
-        ]
-        table = self.connection.create_table(
-            "incompatible",
-            schema=pa.schema(fields),
-            options={
-                "file.format": "parquet",
-                "vector.file.format": "parquet",
-            },
-        )
+        incompatible_fields = {
+            "shape": pa.field(
+                "observation.matrix",
+                schema.field("observation.matrix").type,
+                nullable=False,
+                metadata={
+                    b"description": b"LeRobot dtype=float32, shape=[5, 2]",
+                },
+            ),
+            "dtype": pa.field(
+                "action",
+                pa.list_(pa.float64(), 2),
+                nullable=False,
+                metadata={
+                    b"description": b"LeRobot dtype=float64, shape=[2]",
+                },
+            ),
+            "array": pa.field(
+                "action",
+                pa.list_(pa.float32()),
+                nullable=False,
+                metadata=schema.field("action").metadata,
+            ),
+            "bytes": pa.field(
+                "observation.image",
+                pa.binary(),
+                nullable=False,
+                metadata=schema.field("observation.image").metadata,
+            ),
+        }
+        for name, replacement in incompatible_fields.items():
+            with self.subTest(name=name):
+                table_name = "incompatible_%s" % name
+                table = self.connection.create_table(
+                    table_name,
+                    schema=pa.schema([
+                        replacement if field.name == replacement.name
+                        else field
+                        for field in schema
+                    ]),
+                    options={
+                        "file.format": "parquet",
+                        "vector.file.format": "parquet",
+                    },
+                )
 
-        with self.assertRaisesRegex(ValueError, "cannot be converted"):
-            self.connection.load_from_lerobot(
-                "incompatible", self.image_source)
-        self.assertIsNone(
-            table.raw_table.snapshot_manager().get_latest_snapshot())
+                with self.assertRaisesRegex(
+                        ValueError, "cannot be converted"):
+                    self.connection.load_from_lerobot(
+                        table_name, self.image_source)
+                self.assertIsNone(
+                    table.raw_table.snapshot_manager().get_latest_snapshot())
 
 if __name__ == "__main__":
     unittest.main()

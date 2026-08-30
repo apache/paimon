@@ -32,6 +32,7 @@ from pypaimon.multimodal.lerobot.loader import (
 from pypaimon.multimodal.lerobot.schema import (
     _require_v3,
     _schema_from_info,
+    _validate_lerobot_schema,
 )
 from pypaimon.multimodal.lerobot.source import (
     _has_tasks,
@@ -93,6 +94,8 @@ def load_from_lerobot(
             table = _get_or_create_table(
                 connection, table_name, source_schema, options)
             target_schema = _target_schema(table.raw_table)
+            _validate_lerobot_schema(
+                source_schema, target_schema, resolved_source.path)
             _strict_lerobot_table(
                 pa.Table.from_batches([], schema=source_schema),
                 target_schema,
