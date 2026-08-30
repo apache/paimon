@@ -376,7 +376,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 CommitChangesProvider.provider(
                                         changes.appendTableFiles,
                                         changes.appendChangelog,
-                                        changes.appendIndexFiles),
+                                        changes.appendIndexFiles,
+                                        changes.appendTableFileGroups),
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
@@ -847,6 +848,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             changes.tableFiles,
                             changes.changelogFiles,
                             changes.indexFiles,
+                            changes.tableFileGroups,
                             identifier,
                             watermark,
                             properties,
@@ -968,6 +970,36 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             List<ManifestEntry> deltaFiles,
             List<ManifestEntry> changelogFiles,
             List<IndexManifestEntry> indexFiles,
+            long identifier,
+            @Nullable Long watermark,
+            Map<String, String> properties,
+            CommitKind commitKind,
+            boolean allowRollback,
+            @Nullable Snapshot latestSnapshot,
+            boolean detectConflicts,
+            @Nullable String newStatsFileName) {
+        return tryCommitOnce(
+                retryResult,
+                deltaFiles,
+                changelogFiles,
+                indexFiles,
+                Collections.emptyMap(),
+                identifier,
+                watermark,
+                properties,
+                commitKind,
+                allowRollback,
+                latestSnapshot,
+                detectConflicts,
+                newStatsFileName);
+    }
+
+    private CommitResult tryCommitOnce(
+            @Nullable RetryCommitResult retryResult,
+            List<ManifestEntry> deltaFiles,
+            List<ManifestEntry> changelogFiles,
+            List<IndexManifestEntry> indexFiles,
+            Map<FileEntry.Identifier, Integer> rowTrackingGroups,
             long identifier,
             @Nullable Long watermark,
             Map<String, String> properties,
@@ -1159,7 +1191,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                     .collect(Collectors.toList());
                 }
                 RowTrackingAssigned assigned =
-                        assignRowTracking(newSnapshotId, firstRowIdStart, deltaFiles);
+                        assignRowTracking(
+                                newSnapshotId, firstRowIdStart, deltaFiles, rowTrackingGroups);
                 nextRowIdStart = assigned.nextRowIdStart;
                 deltaFiles = assigned.assignedEntries;
             }

@@ -19,12 +19,14 @@
 package org.apache.paimon.operation.commit;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 
 import javax.annotation.Nullable;
 
 import java.util.List;
+import java.util.Map;
 
 /** Provider to provide {@link CommitChanges}. */
 @FunctionalInterface
@@ -37,5 +39,13 @@ public interface CommitChangesProvider {
             List<ManifestEntry> changelogFiles,
             List<IndexManifestEntry> indexFiles) {
         return s -> new CommitChanges(tableFiles, changelogFiles, indexFiles);
+    }
+
+    static CommitChangesProvider provider(
+            List<ManifestEntry> tableFiles,
+            List<ManifestEntry> changelogFiles,
+            List<IndexManifestEntry> indexFiles,
+            Map<FileEntry.Identifier, Integer> tableFileGroups) {
+        return s -> new CommitChanges(tableFiles, changelogFiles, indexFiles, tableFileGroups);
     }
 }

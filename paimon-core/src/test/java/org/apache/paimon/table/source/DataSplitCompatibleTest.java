@@ -94,6 +94,16 @@ public class DataSplitCompatibleTest {
     }
 
     @Test
+    public void testSpanningSidecarDoesNotInflateMergedRowCount() {
+        DataFileMeta normal = newDataFile("normal.parquet", 2).assignFirstRowId(0);
+        DataFileMeta video = newDataFile("camera.video", 4).assignFirstRowId(0);
+
+        DataSplit split = newDataSplit(false, Arrays.asList(normal, video), null);
+
+        assertThat(split.mergedRowCount()).hasValue(2L);
+    }
+
+    @Test
     public void testDeletionFilesSerialize() throws Exception {
         List<DataFileMeta> dataFiles =
                 Collections.singletonList(
@@ -877,13 +887,25 @@ public class DataSplitCompatibleTest {
     }
 
     private DataFileMeta newDataFile(long rowCount) {
-        return newDataFile(rowCount, null, null);
+        return newDataFile("my_data_file.parquet", rowCount);
+    }
+
+    private DataFileMeta newDataFile(String fileName, long rowCount) {
+        return newDataFile(fileName, rowCount, null, null);
     }
 
     private DataFileMeta newDataFile(
             long rowCount, SimpleStats rowStats, @Nullable List<String> valueStatsCols) {
+        return newDataFile("my_data_file.parquet", rowCount, rowStats, valueStatsCols);
+    }
+
+    private DataFileMeta newDataFile(
+            String fileName,
+            long rowCount,
+            SimpleStats rowStats,
+            @Nullable List<String> valueStatsCols) {
         return DataFileMeta.forAppend(
-                "my_data_file.parquet",
+                fileName,
                 1024 * 1024,
                 rowCount,
                 rowStats,

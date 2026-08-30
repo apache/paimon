@@ -18,13 +18,16 @@
 
 package org.apache.paimon.operation.commit;
 
+import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.table.SpecialFields;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -38,13 +41,22 @@ public class RowTrackingCommitUtils {
 
     public static RowTrackingAssigned assignRowTracking(
             long newSnapshotId, long firstRowIdStart, List<ManifestEntry> deltaFiles) {
+        return assignRowTracking(
+                newSnapshotId, firstRowIdStart, deltaFiles, Collections.emptyMap());
+    }
+
+    public static RowTrackingAssigned assignRowTracking(
+            long newSnapshotId,
+            long firstRowIdStart,
+            List<ManifestEntry> deltaFiles,
+            Map<FileEntry.Identifier, Integer> fileGroups) {
         // assigned snapshot id to delta files
         List<ManifestEntry> snapshotAssigned = new ArrayList<>();
         assignSnapshotId(newSnapshotId, deltaFiles, snapshotAssigned);
         // assign row id for new files
         List<ManifestEntry> rowIdAssigned = new ArrayList<>();
         long nextRowIdStart =
-                assignRowTrackingMeta(firstRowIdStart, snapshotAssigned, rowIdAssigned);
+                assignRowTrackingMeta(firstRowIdStart, snapshotAssigned, fileGroups, rowIdAssigned);
         return new RowTrackingAssigned(nextRowIdStart, rowIdAssigned);
     }
 
@@ -73,21 +85,43 @@ public class RowTrackingCommitUtils {
     private static long assignRowTrackingMeta(
             long firstRowIdStart,
             List<ManifestEntry> deltaFiles,
+            Map<FileEntry.Identifier, Integer> fileGroups,
             List<ManifestEntry> rowIdAssigned) {
         if (deltaFiles.isEmpty()) {
             return firstRowIdStart;
         }
-        // Normal files own the appended row range. Assign them first so independently rolling
-        // Blob files may span any number of normal files without depending on metadata order.
+
+        Object defaultGroup = new Object();
+        Map<Object, List<ManifestEntry>> groupedFiles = new LinkedHashMap<>();
+        for (ManifestEntry entry : deltaFiles) {
+            Object group = fileGroups.isEmpty() ? defaultGroup : fileGroups.get(entry.identifier());
+            // Entries not produced by an original CommitMessage do not share an implicit range.
+            if (group == null) {
+                group = entry;
+            }
+            groupedFiles.computeIfAbsent(group, ignored -> new ArrayList<>()).add(entry);
+        }
+
+        Map<ManifestEntry, ManifestEntry> assigned = new IdentityHashMap<>();
+        long start = firstRowIdStart;
+        for (List<ManifestEntry> group : groupedFiles.values()) {
+            start = assignRowTrackingGroup(start, group, assigned);
+        }
+
+        for (ManifestEntry entry : deltaFiles) {
+            rowIdAssigned.add(assigned.get(entry));
+        }
+        return start;
+    }
+
+    private static long assignRowTrackingGroup(
+            long firstRowIdStart,
+            List<ManifestEntry> deltaFiles,
+            Map<ManifestEntry, ManifestEntry> assigned) {
         long start = firstRowIdStart;
         Map<ManifestEntry, Long> normalStarts = new IdentityHashMap<>();
         for (ManifestEntry entry : deltaFiles) {
-            List<String> writeCols = entry.file().writeCols();
-            boolean containsRowId =
-                    writeCols != null && writeCols.contains(SpecialFields.ROW_ID.name());
-            if (entry.file().fileSource().orElse(null) == FileSource.APPEND
-                    && entry.file().firstRowId() == null
-                    && !containsRowId
+            if (isUnassignedAppend(entry)
                     && !isBlobFile(entry.file().fileName())
                     && !isVectorStoreFile(entry.file().fileName())) {
                 normalStarts.put(entry, start);
@@ -118,7 +152,7 @@ public class RowTrackingCommitUtils {
                                         "This is a bug, blobStart %d should be less than start %d when assigning a blob entry file.",
                                         blobStart, start));
                     }
-                    rowIdAssigned.add(entry.assignFirstRowId(blobStart));
+                    assigned.put(entry, entry.assignFirstRowId(blobStart));
                     blobStarts.put(blobFieldName, blobStart + rowCount);
                 } else if (isVectorStoreFile(entry.file().fileName())) {
                     if (vectorStoreStart >= start) {
@@ -127,17 +161,26 @@ public class RowTrackingCommitUtils {
                                         "This is a bug, vectorStoreStart %d should be less than start %d when assigning a vector-store entry file.",
                                         vectorStoreStart, start));
                     }
-                    rowIdAssigned.add(entry.assignFirstRowId(vectorStoreStart));
+                    assigned.put(entry, entry.assignFirstRowId(vectorStoreStart));
                     vectorStoreStart += rowCount;
                 } else {
-                    rowIdAssigned.add(entry.assignFirstRowId(normalStarts.get(entry)));
+                    assigned.put(entry, entry.assignFirstRowId(normalStarts.get(entry)));
                 }
             } else {
                 // for compact file, do not assign first row id.
-                rowIdAssigned.add(entry);
+                assigned.put(entry, entry);
             }
         }
         return start;
+    }
+
+    private static boolean isUnassignedAppend(ManifestEntry entry) {
+        List<String> writeCols = entry.file().writeCols();
+        boolean containsRowId =
+                writeCols != null && writeCols.contains(SpecialFields.ROW_ID.name());
+        return entry.file().fileSource().orElse(null) == FileSource.APPEND
+                && entry.file().firstRowId() == null
+                && !containsRowId;
     }
 
     /** Assigned results. */

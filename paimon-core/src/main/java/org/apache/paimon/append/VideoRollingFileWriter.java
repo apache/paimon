@@ -66,8 +66,12 @@ class VideoRollingFileWriter<R> extends RollingFileWriterImpl<InternalRow, R> {
     }
 
     @Override
-    protected void onRollingCondition(InternalRow row) {
-        pendingRoll = true;
+    protected void onRollingCondition(InternalRow row) throws IOException {
+        if (currentVideo == null) {
+            closeCurrentWriter();
+        } else {
+            pendingRoll = true;
+        }
     }
 
     @Override

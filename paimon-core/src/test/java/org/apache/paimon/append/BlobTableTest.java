@@ -1612,6 +1612,36 @@ public class BlobTableTest extends TableTestBase {
     }
 
     @Test
+    public void testNullVideoRowsRespectRowRollingLimit() throws Exception {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("id", DataTypes.INT());
+        schemaBuilder.column("video", DataTypes.BLOB());
+        schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "1 GB");
+        schemaBuilder.option(CoreOptions.BLOB_TARGET_FILE_SIZE.key(), "1 GB");
+        schemaBuilder.option(CoreOptions.TARGET_FILE_ROW_NUM.key(), "2");
+        schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.VIDEO_FRAME_FIELD.key(), "video");
+        catalog.createTable(identifier(), schemaBuilder.build(), true);
+
+        writeRows(
+                getTableDefault(),
+                Arrays.asList(
+                        GenericRow.of(0, null),
+                        GenericRow.of(1, null),
+                        GenericRow.of(2, null),
+                        GenericRow.of(3, null),
+                        GenericRow.of(4, null)));
+
+        assertThat(
+                        liveVideoFiles(getTableDefault()).stream()
+                                .map(DataFileMeta::rowCount)
+                                .sorted()
+                                .collect(Collectors.toList()))
+                .isEqualTo(Arrays.asList(1L, 2L, 2L));
+    }
+
+    @Test
     public void testMultipleVideoFieldsRollIndependentlyAcrossNormalFiles() throws Exception {
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("id", DataTypes.INT());

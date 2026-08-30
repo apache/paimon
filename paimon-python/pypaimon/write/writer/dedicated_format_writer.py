@@ -138,7 +138,9 @@ class DedicatedFormatWriter(DataWriter):
         # State management for blob writer
         self.record_count = 0
         self.total_record_count = 0
-        self._blob_writers_closed = False
+        self._blob_prepared_record_counts = {
+            column: 0 for column in self.blob_file_column_names
+        }
         self.closed = False
 
         # Normal columns are buffered separately from the blob and vector
@@ -519,8 +521,6 @@ class DedicatedFormatWriter(DataWriter):
     def _close_current_writers(self):
         """Close normal/vector writers, then finalize independently rolling blobs."""
         self._close_normal_and_vector_writers()
-        if self._blob_writers_closed:
-            return
 
         blob_metas = []
         deletable_blob_metas = []
@@ -528,10 +528,14 @@ class DedicatedFormatWriter(DataWriter):
             blob_writer = self.blob_writers[blob_column]
             writer_metas = blob_writer.prepare_commit()
             blob_row_count = sum(meta.row_count for meta in writer_metas)
-            if blob_row_count != self.total_record_count:
+            expected_row_count = (
+                self.total_record_count
+                - self._blob_prepared_record_counts[blob_column]
+            )
+            if blob_row_count != expected_row_count:
                 raise RuntimeError(
                     f"This is a bug: blob field {blob_column} contains "
-                    f"{blob_row_count} rows, expected {self.total_record_count}."
+                    f"{blob_row_count} rows, expected {expected_row_count}."
                 )
             blob_metas.extend(writer_metas)
             if blob_writer.delete_file_upon_abort():
@@ -541,7 +545,7 @@ class DedicatedFormatWriter(DataWriter):
         self._committed_files_to_delete_on_abort.extend(deletable_blob_metas)
         for blob_column in self.blob_file_column_names:
             self.blob_writers[blob_column].committed_files.clear()
-        self._blob_writers_closed = True
+            self._blob_prepared_record_counts[blob_column] = self.total_record_count
 
         if blob_metas:
             logger.info("Closed %d blob files", len(blob_metas))

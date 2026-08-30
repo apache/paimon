@@ -29,7 +29,9 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
@@ -40,15 +42,18 @@ public class ManifestEntryChanges {
     private final int defaultNumBucket;
 
     public List<ManifestEntry> appendTableFiles;
+    public Map<FileEntry.Identifier, Integer> appendTableFileGroups;
     public List<ManifestEntry> appendChangelog;
     public List<IndexManifestEntry> appendIndexFiles;
     public List<ManifestEntry> compactTableFiles;
     public List<ManifestEntry> compactChangelog;
     public List<IndexManifestEntry> compactIndexFiles;
+    private int nextAppendTableFileGroup;
 
     public ManifestEntryChanges(int defaultNumBucket) {
         this.defaultNumBucket = defaultNumBucket;
         this.appendTableFiles = new ArrayList<>();
+        this.appendTableFileGroups = new LinkedHashMap<>();
         this.appendChangelog = new ArrayList<>();
         this.appendIndexFiles = new ArrayList<>();
         this.compactTableFiles = new ArrayList<>();
@@ -58,10 +63,16 @@ public class ManifestEntryChanges {
 
     public void collect(CommitMessage message) {
         CommitMessageImpl commitMessage = (CommitMessageImpl) message;
+        int appendTableFileGroup = nextAppendTableFileGroup++;
         commitMessage
                 .newFilesIncrement()
                 .newFiles()
-                .forEach(m -> appendTableFiles.add(makeEntry(FileKind.ADD, commitMessage, m)));
+                .forEach(
+                        m -> {
+                            ManifestEntry entry = makeEntry(FileKind.ADD, commitMessage, m);
+                            appendTableFiles.add(entry);
+                            appendTableFileGroups.put(entry.identifier(), appendTableFileGroup);
+                        });
         commitMessage
                 .newFilesIncrement()
                 .deletedFiles()

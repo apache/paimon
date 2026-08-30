@@ -78,30 +78,31 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                     if self.group_stats_filter.may_match(group)
                 ]
 
-            file_ids = [id(file) for group in split_by_row_id for file in group]
-            has_spanning_sidecar = len(file_ids) != len(set(file_ids))
+            has_spanning_sidecar = self._has_spanning_sidecar(split_by_row_id)
             if self.group_stats_filter is not None:
+                copies = {}
+
+                def without_stats(file):
+                    copy = copies.get(id(file))
+                    if copy is None:
+                        copy = file.copy_without_stats()
+                        copies[id(file)] = copy
+                    return copy
+
                 split_by_row_id = [
-                    [file.copy_without_stats() for file in group]
+                    [without_stats(file) for file in group]
                     for group in split_by_row_id
                 ]
 
-            if has_spanning_sidecar:
-                # A spanning sidecar is shared by metadata. Keep each anchor
-                # range separate so it is not added twice to one DataSplit.
-                packed_files = [[group] for group in split_by_row_id]
-            else:
-                packed_files = self._pack_for_ordered(
-                    split_by_row_id,
-                    lambda group: max(
-                        sum(file.file_size for file in group), self.open_file_cost
-                    ),
-                    self.target_split_size,
-                )
+            packed_files = self._pack_for_ordered(
+                split_by_row_id,
+                self._normal_group_weight,
+                self.target_split_size,
+            )
 
             # Flatten the packed files and build splits
             flatten_packed_files: List[List[DataFileMeta]] = [
-                [file for sub_pack in pack for file in sub_pack]
+                self._unique_files(pack)
                 for pack in packed_files
             ]
 
@@ -110,8 +111,8 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
             )
             if has_spanning_sidecar and slice_row_ranges is None and self.row_ranges is None:
                 new_splits = [
-                    IndexedSplit(split, [self._normal_range(split)])
-                    for split in new_splits
+                    IndexedSplit(split, self._normal_ranges(pack))
+                    for split, pack in zip(new_splits, packed_files)
                 ]
             splits += new_splits
 
@@ -127,11 +128,42 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
 
         return splits
 
+    def _normal_group_weight(self, group: List[DataFileMeta]) -> int:
+        normal_files = [
+            file for file in group
+            if (not DataFileMeta.is_blob_file(file.file_name)
+                and not DataFileMeta.is_vector_file(file.file_name))
+        ]
+        files = normal_files or group
+        return max(sum(file.file_size for file in files), self.open_file_cost)
+
     @staticmethod
-    def _normal_range(split: DataSplit) -> Range:
+    def _has_spanning_sidecar(groups: List[List[DataFileMeta]]) -> bool:
+        for group in groups:
+            normal_ranges = [
+                file.row_id_range()
+                for file in group
+                if (not DataFileMeta.is_blob_file(file.file_name)
+                    and not DataFileMeta.is_vector_file(file.file_name))
+            ]
+            if not normal_ranges:
+                continue
+            start = min(row_range.from_ for row_range in normal_ranges)
+            end = max(row_range.to for row_range in normal_ranges)
+            for file in group:
+                if (DataFileMeta.is_blob_file(file.file_name)
+                        or DataFileMeta.is_vector_file(file.file_name)):
+                    row_range = file.row_id_range()
+                    if row_range.from_ < start or row_range.to > end:
+                        return True
+        return False
+
+    @staticmethod
+    def _normal_ranges(pack: List[List[DataFileMeta]]) -> List[Range]:
         normal_ranges = [
             file.row_id_range()
-            for file in split.files
+            for group in pack
+            for file in group
             if (not DataFileMeta.is_blob_file(file.file_name)
                 and not DataFileMeta.is_vector_file(file.file_name))
         ]
@@ -139,10 +171,18 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
             raise ValueError(
                 "Expected at least one normal-file row range."
             )
-        return Range(
-            min(row_range.from_ for row_range in normal_ranges),
-            max(row_range.to for row_range in normal_ranges),
-        )
+        return Range.merge_sorted_as_possible(normal_ranges)
+
+    @staticmethod
+    def _unique_files(pack: List[List[DataFileMeta]]) -> List[DataFileMeta]:
+        seen = set()
+        result = []
+        for group in pack:
+            for file in group:
+                if id(file) not in seen:
+                    seen.add(id(file))
+                    result.append(file)
+        return result
 
     def _build_split_from_pack_for_data_evolution(
         self,

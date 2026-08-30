@@ -18,6 +18,7 @@
 import random
 import unittest
 
+from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.simple_stats import SimpleStats
@@ -142,13 +143,15 @@ class SplitOrderTest(unittest.TestCase):
     _Table.options = _Options()
 
     @staticmethod
-    def _entry(name, sequence, first_row_id=0, external_path=None):
+    def _entry(
+            name, sequence, first_row_id=0, external_path=None,
+            row_count=10, file_size=1):
         empty_row = GenericRow([], [])
         empty_stats = SimpleStats(empty_row, empty_row, [])
         file = DataFileMeta.create(
             file_name=name,
-            file_size=1,
-            row_count=10,
+            file_size=file_size,
+            row_count=row_count,
             min_key=empty_row,
             max_key=empty_row,
             key_stats=empty_stats,
@@ -237,6 +240,54 @@ class SplitOrderTest(unittest.TestCase):
                     [file.external_path for split in splits
                      for file in split.files],
                 )
+
+    def test_spanning_sidecar_keeps_anchor_ranges_packable(self):
+        entries = [
+            self._entry(
+                f'normal-{row}.parquet', row, first_row_id=row,
+                row_count=1,
+            )
+            for row in range(100)
+        ]
+        entries.append(self._entry(
+            'camera.video', 100, first_row_id=0, row_count=100,
+            file_size=1_000_000))
+
+        splits = DataEvolutionSplitGenerator(
+            self._Table(), target_split_size=10_000, open_file_cost=0
+        ).create_splits(entries)
+
+        self.assertEqual(1, len(splits))
+        self.assertEqual(101, len(splits[0].files))
+        self.assertEqual(1, sum(
+            file.file_name == 'camera.video' for file in splits[0].files))
+        self.assertEqual(100, splits[0].merged_row_count())
+
+    def test_filtered_anchor_keeps_spanning_sidecar_range_bounded(self):
+        entries = [
+            self._entry(
+                f'normal-{row}.parquet', row, first_row_id=row,
+                row_count=1,
+            )
+            for row in range(3)
+        ]
+        entries.append(self._entry(
+            'camera.video', 3, first_row_id=0, row_count=3))
+
+        class OnlyMiddleGroup:
+            @staticmethod
+            def may_match(group):
+                return any(
+                    file.file_name == 'normal-1.parquet' for file in group)
+
+        splits = DataEvolutionSplitGenerator(
+            self._Table(), target_split_size=10_000, open_file_cost=0,
+            group_stats_filter=OnlyMiddleGroup(),
+        ).create_splits(entries)
+
+        self.assertEqual(1, len(splits))
+        self.assertIsInstance(splits[0], IndexedSplit)
+        self.assertEqual([Range(1, 1)], splits[0].row_ranges())
 
 
 if __name__ == "__main__":

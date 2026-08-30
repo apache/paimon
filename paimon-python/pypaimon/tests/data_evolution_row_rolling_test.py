@@ -201,6 +201,50 @@ class DataEvolutionRowRollingTest(unittest.TestCase):
         self.assertEqual([1, 3, 3], blob_rows)
         self.assertEqual(list(range(7)), self._read_ids(table))
 
+    def test_blob_writer_is_reused_across_prepare_commit_rounds(self):
+        table = self._create_with_schema(
+            self.blob_schema,
+            {**self.de_options, 'target-file-row-num': '2'})
+        write_builder = table.new_stream_write_builder()
+        writer = write_builder.new_write()
+        commit = write_builder.new_commit()
+        messages = []
+
+        for commit_identifier, start in enumerate(range(0, 6, 2)):
+            rows = pa.Table.from_pydict(
+                {
+                    'id': [start, start + 1],
+                    'payload': [
+                        f'blob-{start}'.encode(),
+                        f'blob-{start + 1}'.encode(),
+                    ],
+                },
+                schema=self.blob_schema,
+            )
+            writer.write_arrow(rows)
+            messages = writer.prepare_commit(commit_identifier)
+            sidecars = [
+                file
+                for message in messages
+                for file in message.new_files
+                if file.file_name.endswith('.blob')
+            ]
+            self.assertEqual(
+                start + 2, sum(file.row_count for file in sidecars))
+
+        commit.commit(messages, commit_identifier)
+
+        writer.close()
+        commit.close()
+        read_builder = table.new_read_builder()
+        result = read_builder.new_read().to_arrow(
+            read_builder.new_scan().plan().splits()).sort_by('id')
+        self.assertEqual(list(range(6)), result['id'].to_pylist())
+        self.assertEqual(
+            [f'blob-{row}'.encode() for row in range(6)],
+            result['payload'].to_pylist(),
+        )
+
     def test_video_writer_rolls_between_payload_groups(self):
         first = os.path.join(self.tempdir, 'first.mp4')
         second = os.path.join(self.tempdir, 'second.mp4')
